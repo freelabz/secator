@@ -322,6 +322,7 @@ class CommandRunner:
 
 		# Output and results
 		self.output = ''
+		self.return_code = 0
 		killed = False
 		self.results = []
 
@@ -343,6 +344,7 @@ class CommandRunner:
 		except FileNotFoundError:
 			base_cmd = self.cmd.split(' ')[0]
 			logger.error(f'{base_cmd} not found. Check if it is installed.')
+			self.return_code = 1
 			return
 
 		# Process the output

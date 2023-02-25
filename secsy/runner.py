@@ -43,29 +43,32 @@ class Scan:
 			dict: Item yielded from individual workflow tasks.
 		"""
 		# Add target to results
-		results = [
-			{'name': self.scan.name, '_source': 'scan', '_type': 'target'}
+		self.results = results + [
+			{'name': name, '_source': 'scan', '_type': 'target'}
 			for name in self.targets
-		] + results
+		]
+		self.results = results
 
 		# Run workflows
 		for name, conf in self.scan.workflows.items():
 
 			# Extract opts and and expand target from previous workflows results
-			targets, run_opts = merge_extracted_values(results, self.run_opts)
-			targets = targets or self.targets
+			targets, run_opts = merge_extracted_values(self.results, self.run_opts)
+			self.targets = targets or self.targets
 
 			# Run workflow
 			wresults = run_workflow(
 				name,
-				targets,
+				self.targets,
 				sync=sync,
-				results=results,
+				results=self.results,
 				log_results=False,
 				**run_opts)
-			results.extend(wresults)
-		log_results(results, output_types=OUTPUT_TYPES)
-		return results
+			self.results.extend(wresults)
+
+		console.print('SCAN RESULTS', style='bold magenta')
+		log_results(self.results, output_types=OUTPUT_TYPES)
+		return self.results
 
 
 class Workflow:
@@ -123,8 +126,8 @@ class Workflow:
 		self.log_start()
 
 		# Add target to results
-		results = results + [
-			{'name': self.workflow.name, '_source': 'workflow', '_type': 'target'}
+		self.results = results + [
+			{'name': name, '_source': 'workflow', '_type': 'target'}
 			for name in self.targets
 		]
 
@@ -132,21 +135,38 @@ class Workflow:
 		workflow = self.build_celery_workflow(results=results)
 
 		# Run Celery workflow and get results
-		with console.status(f'[bold yellow]Running workflow [bold magenta]{self.workflow.name} ...'):
-			if sync:
+		if sync:
+			with console.status(f'[bold yellow]Running workflow [bold magenta]{self.workflow.name} ...'):
 				result = workflow.apply()
-			else:
-				result = workflow()
-				console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
-				self.process_live_tasks(result)
-			self.results = result.get()
-			self.results = self.filter_results()
+		else:
+			result = workflow()
+			console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
+			self.process_live_tasks(result)
+		self.results = result.get()
+		self.results = self.filter_results()
 		self.done = True
 		self.log_workflow()
 		return self.results
 
 	def process_live_tasks(self, result):
-		with Progress(refresh_per_second=1) as progress:
+		from rich.progress import (
+			Progress,
+			SpinnerColumn,
+			TextColumn,
+			TimeElapsedColumn,
+		)
+		tasks_progress = Progress(
+			SpinnerColumn('dots'),
+			TextColumn('[bold magenta]{task.fields[name]:<10}[/] {task.fields[state]:<10}'),
+			TimeElapsedColumn(),
+			refresh_per_second=1
+		)
+		state_colors = {
+			'PROGRESS': 'bold yellow',
+			'SUCCESS': 'bold green',
+			'FAILURE': 'bold red'
+		}
+		with tasks_progress as progress:
 
 			# Make progress tasks
 			tasks_progress = {}
@@ -159,18 +179,15 @@ class Workflow:
 					info = get_task_info(task_id)
 					if not info:
 						continue
+					state = info['state']
+					name = info['name']
+					state_str = f'[{state_colors[state]}]{state}[/]'
 					if task_id not in tasks_progress:
-						id = progress.add_task(f'[green]{info["name"]}', total=100)
+						id = progress.add_task('', name=name, state=state_str)
 						tasks_progress[task_id] = id
 					else:
-						state = info['state']
 						progress_id = tasks_progress[task_id]
-						advance = {
-							'SUCCESS': 100,
-							'FAILED': 100,
-							'PROGRESS': 5
-						}
-						progress.update(progress_id, advance=advance[state])
+						progress.update(progress_id, name=name, state=state_str)
 
 				# Update all tasks to 100 % if workflow has finished running
 				res = AsyncResult(result.id)
@@ -286,13 +303,23 @@ class Workflow:
 		# Print workflow options
 		if not self.done:
 			opts = merge_opts(self.run_opts, self.workflow.options)
-			items = [f'[italic magenta]{k}[/]: {v}' for k, v in opts.items() if v is not None]
-			description = self.workflow.description
+			items = [
+				f'[italic magenta]{k}[/]: {v}'
+				for k, v in opts.items() if v is not None
+			]
 			if items:
-				console.print(f'Options:', style='bold gold3')
+				console.print('Options:', style='bold gold3')
 				for item in items:
 					console.print(f' • {item}')
 				console.print()
+
+			if self.targets:
+				console.print('Targets: ', style='bold gold3')
+				for target in self.targets:
+					console.print(f' • {target}')
+				console.print()
+
+			description = self.workflow.description
 			if description:
 				console.print(f'[bold gold3]Description:[/] \n{description}')
 				console.print()
