@@ -1,0 +1,25 @@
+{
+    "type": "response",
+    "url": "https://example.com/webman/entry/dist/dsm.entry.bundle.js",
+    "original_url": "https://example.com/webman/entry/dist/dsm.entry.bundle.js",
+    "path": "/webman/entry/dist/dsm.entry.bundle.js",
+    "wildcard": false,
+    "status": 200,
+    "method": "GET",
+    "content_length": 1658,
+    "line_count": 1,
+    "word_count": 25,
+    "headers": {
+        "accept-ranges": "bytes",
+        "date": "Thu, 23 Feb 2023 13:29:05 GMT",
+        "last-modified": "Thu, 25 Aug 2022 09:50:11 GMT",
+        "server": "nginx",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=20",
+        "content-length": "1658",
+        "etag": "\"630745d3-67a\"",
+        "vary": "Accept-Encoding",
+        "content-type": "application/javascript"
+    },
+    "extension": ""
+}

@@ -1,0 +1,15 @@
+{
+    "info": {
+        "args": "/home/vagrant/.virtualenvs/secsy/bin/dirsearch -o test.json --format json -u example.com",
+        "time": "Thu Feb 23 13:59:39 2023"
+    },
+    "results": [
+        {
+            "content-length": 11939,
+            "content-type": "text/html",
+            "redirect": "",
+            "status": 403,
+            "url": "https://example.com/%2e%2e;/test"
+        }
+    ]
+}

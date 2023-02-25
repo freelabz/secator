@@ -1,0 +1,111 @@
+{
+    "nmaprun": {
+      "@scanner": "nmap",
+      "@args": "nmap -sV -Pn -p 443,22 --script vulscan --scan-delay 1 --max-rate 100 --max-rtt-timeout 10 --max-retries 1 -oX /tmp/nmap_2023_01_20-12_00_58_PM.xml example.synology.me",
+      "@start": "1674216058",
+      "@startstr": "Fri Jan 20 12:00:58 2023",
+      "@version": "7.80",
+      "@xmloutputversion": "1.04",
+      "scaninfo": {
+        "@type": "syn",
+        "@protocol": "tcp",
+        "@numservices": "2",
+        "@services": "22,443"
+      },
+      "verbose": {
+        "@level": "0"
+      },
+      "debugging": {
+        "@level": "0"
+      },
+      "host": {
+        "@starttime": "1674216060",
+        "@endtime": "1674216078",
+        "status": {
+          "@state": "up",
+          "@reason": "user-set",
+          "@reason_ttl": "0"
+        },
+        "address": {
+          "@addr": "82.66.127.114",
+          "@addrtype": "ipv4"
+        },
+        "hostnames": {
+          "hostname": [
+            {
+              "@name": "example.synology.me",
+              "@type": "user"
+            },
+            {
+              "@name": "ax213-1_migr-82-66-127-114.fbx.proxad.net",
+              "@type": "PTR"
+            }
+          ]
+        },
+        "ports": {
+          "port": [
+            {
+              "@protocol": "tcp",
+              "@portid": "22",
+              "state": {
+                "@state": "closed",
+                "@reason": "reset",
+                "@reason_ttl": "63"
+              },
+              "service": {
+                "@name": "ssh",
+                "@method": "table",
+                "@conf": "3"
+              }
+            },
+            {
+              "@protocol": "tcp",
+              "@portid": "443",
+              "state": {
+                "@state": "open",
+                "@reason": "syn-ack",
+                "@reason_ttl": "62"
+              },
+              "service": {
+                "@name": "http",
+                "@product": "nginx",
+                "@tunnel": "ssl",
+                "@method": "probed",
+                "@conf": "10",
+                "cpe": "cpe:/a:igor_sysoev:nginx"
+              },
+              "script": [
+                {
+                  "@id": "http-trane-info",
+                  "@output": "Problem with XML parsing of /evox/about"
+                },
+                {
+                  "@id": "vulscan",
+                  "@output": "VulDB - https://vuldb.com:\n[176405] Nginx up to 1.13.5 Autoindex Module integer overflow\n[176114] Nginx Controller up to 3.6.x Agent Configuration File agent.conf permission\n[176113] Nginx Controller up to 3.9.x NAAS API Key Generation random values\n[176112] Nginx Controller up to 2.8.x/3.14.x systemd.txt insertion of sensitive information into sent data\n[176111] Nginx Controller up to 3.3.x Intra-Cluster Communication cleartext transmission\n[176110] Nginx Open Source/Plus/Ingress Controller Resolver off-by-one\n[171030] ExpressVPN Router 1 Nginx Webserver integer overflow\n[160163] Cloud Foundry Routing Nginx denial of service\n[159138] Kubernetes up to 0.27.x ingress-nginx privilege escalation\n[157631] Nginx Controller up to 1.0.1/2.8.x/3.4.x Kubernetes Package Download HTTP weak encryption\n[157630] Nginx Controller up to 1.0.1/2.8.x/3.4.x NATS Messaging System weak authentication\n[157629] Nginx Controller up to 1.0.1/2.8.x/3.4.x User Interface weak authentication\n[157572] Nginx Controller up to 3.4.0 API Endpoint Reflected cross site scripting\n[157571] Nginx Controller up to 1.0.1/2.9.0/3.4.0 User Interface cross site request forgery\n[155282] nginx up to 1.18.0 privilege escalation\n[154857] Nginx Controller up to 3.3.0 Web Server Logout weak authentication\n[154326] Nginx Controller up to 3.2.x Agent Installer Script install.sh privilege escalation\n[154324] Nginx Controller up to 3.2.x Postgres Database Server information disclosure\n[154323] Nginx Controller up to 3.1.x TLS weak authentication\n[152728] strong-nginx-controller up to 1.0.2 _nginxCmd privilege escalation\n[152416] Nginx Controller up to 3.1.x Controller API privilege escalation\n[148519] nginx up to 1.17.6 Error Page privilege escalation\n[145942] nginx 0.8.40 HTTP Proxy Module privilege escalation\n[144114] Xiaomi Mi WiFi R3G up to 2.28.22 Nginx Alias account directory traversal\n[133852] Sangfor Sundray WLAN Controller up to 3.7.4.2 Cookie Header nginx_webconsole.php privilege escalation\n[132132] SoftNAS Cloud 4.2.0/4.2.1 Nginx privilege escalation\n[131858] Puppet Discovery up to 1.3.x Nginx Container weak authentication\n[130644] Nginx Unit up to 1.7.0 Router Process memory corruption\n[127759] VeryNginx 0.3.3 Web Application Firewall 7PK Security Features\n[126525] nginx up to 1.14.0/1.15.5 ngx_http_mp4_module information disclosure\n[126524] nginx up to 1.14.0/1.15.5 HTTP2 denial of service\n[126523] nginx up to 1.14.0/1.15.5 HTTP2 denial of service\n[103517] nginx up to 1.13.2 Range Filter memory corruption\n[89849] nginx RFC 3875 Namespace Conflict privilege escalation\n[87719] nginx up to 1.11.0 ngx_files.c ngx_chain_to_iovec denial of service\n[80760] nginx 0.6.18/1.9.9 DNS CNAME Record denial of service\n[80759] nginx 0.6.18/1.9.9 DNS CNAME Record memory corruption\n[80758] nginx 0.6.18/1.9.9 DNS UDP Packet denial of service\n[65364] nginx up to 1.1.13 Default Configuration privilege escalation\n[61434] nginx 1.2.0/1.3.0 on Windows Access Restriction privilege escalation\n[59645] nginx up to 0.8.9 memory corruption\n[53592] nginx 0.8.36 privilege escalation\n[53590] nginx up to 0.8.9 information disclosure\n[51533] nginx 0.7.64 Terminal privilege escalation\n[50905] nginx up to 0.8.9 directory traversal\n[50903] nginx up to 0.8.10 memory corruption\n[50043] nginx up to 0.8.10 memory corruption\n[67677] nginx up to 1.7.3 SSL privilege escalation\n[67296] nginx up to 1.7.3 SMTP Proxy ngx_mail_smtp_starttls privilege escalation\n[12824] nginx 1.5.10 on 32-bit SPDY memory corruption\n[12822] nginx up to 1.5.11 SPDY memory corruption\n[11237] nginx up to 1.5.6 URI String privilege escalation\n[8671] nginx up to 1.4 proxy_pass privilege escalation\n[8618] nginx 1.3.9/1.4.0 http/ngx_http_parse.c ngx_http_parse_chunked Numeric Error\n[7247] nginx 1.2.6 Proxy Function weak authentication\n[5293] nginx up to 1.1.18 ngx_http_mp4_module memory corruption\n[4843] nginx up to 1.0.13/1.1.16 HTTP Header Response Parser ngx_http_parse.c denial of service\n\nMITRE CVE - https://cve.mitre.org:\n[CVE-2013-2070] http/modules/ngx_http_proxy_module.c in nginx 1.1.4 through 1.2.8 and 1.3.0 through 1.4.0, when proxy_pass is used with untrusted HTTP servers, allows remote attackers to cause a denial of service (crash) and obtain sensitive information from worker process memory via a crafted proxy response, a similar vulnerability to CVE-2013-2028.\n[CVE-2013-2028] The ngx_http_parse_chunked function in http/ngx_http_parse.c in nginx 1.3.9 through 1.4.0 allows remote attackers to cause a denial of service (crash) and execute arbitrary code via a chunked Transfer-Encoding request with a large chunk size, which triggers an integer signedness error and a stack-based buffer overflow.\n[CVE-2012-3380] Directory traversal vulnerability in naxsi-ui/nx_extract.py in the Naxsi module before 0.46-1 for Nginx allows local users to read arbitrary files via unspecified vectors.\n[CVE-2012-2089] Buffer overflow in ngx_http_mp4_module.c in the ngx_http_mp4_module module in nginx 1.0.7 through 1.0.14 and 1.1.3 through 1.1.18, when the mp4 directive is used, allows remote attackers to cause a denial of service (memory overwrite) or possibly execute arbitrary code via a crafted MP4 file.\n[CVE-2012-1180] Use-after-free vulnerability in nginx before 1.0.14 and 1.1.x before 1.1.17 allows remote HTTP servers to obtain sensitive information from process memory via a crafted backend response, in conjunction with a client request.\n[CVE-2011-4963] nginx/Windows 1.3.x before 1.3.1 and 1.2.x before 1.2.1 allows remote attackers to bypass intended access restrictions and access restricted files via (1) a trailing . (dot) or (2) certain \"$index_allocation\" sequences in a request.\n[CVE-2011-4315] Heap-based buffer overflow in compression-pointer processing in core/ngx_resolver.c in nginx before 1.0.10 allows remote resolvers to cause a denial of service (daemon crash) or possibly have unspecified other impact via a long response.\n[CVE-2010-2266] nginx 0.8.36 allows remote attackers to cause a denial of service (crash) via certain encoded directory traversal sequences that trigger memory corruption, as demonstrated using the \"%c0.%c0.\" sequence.\n[CVE-2010-2263] nginx 0.8 before 0.8.40 and 0.7 before 0.7.66, when running on Windows, allows remote attackers to obtain source code or unparsed content of arbitrary files under the web document root by appending ::$DATA to the URI.\n[CVE-2009-4487] nginx 0.7.64 writes data to a log file without sanitizing non-printable characters, which might allow remote attackers to modify a window's title, or possibly execute arbitrary commands or overwrite files, via an HTTP request containing an escape sequence for a terminal emulator.\n[CVE-2009-3898] Directory traversal vulnerability in src/http/modules/ngx_http_dav_module.c in nginx (aka Engine X) before 0.7.63, and 0.8.x before 0.8.17, allows remote authenticated users to create or overwrite arbitrary files via a .. (dot dot) in the Destination HTTP header for the WebDAV (1) COPY or (2) MOVE method.\n[CVE-2009-3896] src/http/ngx_http_parse.c in nginx (aka Engine X) 0.1.0 through 0.4.14, 0.5.x before 0.5.38, 0.6.x before 0.6.39, 0.7.x before 0.7.62, and 0.8.x before 0.8.14 allows remote attackers to cause a denial of service (NULL pointer dereference and worker process crash) via a long URI.\n[CVE-2009-2629] Buffer underflow in src/http/ngx_http_parse.c in nginx 0.1.0 through 0.5.37, 0.6.x before 0.6.39, 0.7.x before 0.7.62, and 0.8.x before 0.8.15 allows remote attackers to execute arbitrary code via crafted HTTP requests.\n\nSecurityFocus - https://www.securityfocus.com/bid/:\n[99534] Nginx CVE-2017-7529 Remote Integer Overflow Vulnerability\n[93903] Nginx CVE-2016-1247 Remote Privilege Escalation Vulnerability\n[91819] Nginx CVE-2016-1000105 Security Bypass Vulnerability\n[90967] nginx CVE-2016-4450 Denial of Service Vulnerability\n[82230] nginx Multiple Denial of Service Vulnerabilities\n[78928] Nginx CVE-2010-2266 Denial-Of-Service Vulnerability\n[70025] nginx CVE-2014-3616 SSL Session Fixation Vulnerability\n[69111] nginx SMTP Proxy Remote Command Injection Vulnerability\n[67507] nginx SPDY Implementation CVE-2014-0088 Arbitrary Code Execution Vulnerability\n[66537] nginx SPDY Implementation Heap Based Buffer Overflow Vulnerability\n[63814] nginx CVE-2013-4547 URI Processing Security Bypass Vulnerability\n[59824] Nginx CVE-2013-2070 Remote Security Vulnerability\n[59699] nginx 'ngx_http_parse.c' Stack Buffer Overflow Vulnerability\n[59496] nginx 'ngx_http_close_connection()' Remote Integer Overflow Vulnerability\n[59323] nginx NULL-Byte Arbitrary Code Execution Vulnerability\n[58105] Nginx 'access.log' Insecure File Permissions Vulnerability\n[57139] nginx CVE-2011-4968 Man in The Middle Vulnerability\n[55920] nginx CVE-2011-4963 Security Bypass Vulnerability\n[54331] Nginx Naxsi Module 'nx_extract.py' Script Remote File Disclosure Vulnerability\n[52999] nginx 'ngx_http_mp4_module.c' Buffer Overflow Vulnerability\n[52578] nginx 'ngx_cpystrn()' Information Disclosure Vulnerability\n[50710] nginx DNS Resolver Remote Heap Buffer Overflow Vulnerability\n[40760] nginx Remote Source Code Disclosure and Denial of Service Vulnerabilities\n[40434] nginx Space String Remote Source Code Disclosure Vulnerability\n[40420] nginx Directory Traversal Vulnerability\n[37711] nginx Terminal Escape Sequence in Logs Command Injection Vulnerability\n[36839] nginx 'ngx_http_process_request_headers()' Remote Buffer Overflow Vulnerability\n[36490] nginx WebDAV Multiple Directory Traversal Vulnerabilities\n[36438] nginx Proxy DNS Cache Domain Spoofing Vulnerability\n[36384] nginx HTTP Request Remote Buffer Overflow Vulnerability\n\nIBM X-Force - https://exchange.xforce.ibmcloud.com:\n[84623] Phusion Passenger gem for Ruby with nginx configuration insecure permissions\n[84172] nginx denial of service\n[84048] nginx buffer overflow\n[83923] nginx ngx_http_close_connection() integer overflow\n[83688] nginx null byte code execution\n[83103] Naxsi module for Nginx naxsi_unescape_uri() function security bypass\n[82319] nginx access.log information disclosure\n[80952] nginx SSL spoofing\n[77244] nginx and Microsoft Windows request security bypass\n[76778] Naxsi module for Nginx nx_extract.py directory traversal\n[74831] nginx ngx_http_mp4_module.c buffer overflow\n[74191] nginx ngx_cpystrn() information disclosure\n[74045] nginx header response information disclosure\n[71355] nginx ngx_resolver_copy() buffer overflow\n[59370] nginx characters denial of service\n[59369] nginx DATA source code disclosure\n[59047] nginx space source code disclosure\n[58966] nginx unspecified directory traversal\n[54025] nginx ngx_http_parse.c denial of service\n[53431] nginx WebDAV component directory traversal\n[53328] Nginx CRC-32 cached domain name spoofing\n[53250] Nginx ngx_http_parse_complex_uri() function code execution\n\nExploit-DB - https://www.exploit-db.com:\n[26737] nginx 1.3.9/1.4.0 x86 Brute Force Remote Exploit\n[25775] Nginx HTTP Server 1.3.9-1.4.0 Chuncked Encoding Stack Buffer Overflow\n[25499] nginx 1.3.9-1.4.0 DoS PoC\n[24967] nginx 0.6.x Arbitrary Code Execution NullByte Injection\n[14830] nginx 0.6.38 - Heap Corruption Exploit\n[13822] Nginx <= 0.7.65 / 0.8.39 (dev) Source Disclosure / Download Vulnerability\n[13818] Nginx 0.8.36 Source Disclosure and DoS Vulnerabilities\n[12804] nginx [engine x] http server <= 0.6.36 Path Draversal\n[9901] nginx 0.7.0-0.7.61, 0.6.0-0.6.38, 0.5.0-0.5.37, 0.4.0-0.4.14 PoC\n[9829] nginx 0.7.61 WebDAV directory traversal\n\nOpenVAS (Nessus) - http://www.openvas.org:\n[864418] Fedora Update for nginx FEDORA-2012-3846\n[864310] Fedora Update for nginx FEDORA-2012-6238\n[864209] Fedora Update for nginx FEDORA-2012-6411\n[864204] Fedora Update for nginx FEDORA-2012-6371\n[864121] Fedora Update for nginx FEDORA-2012-4006\n[864115] Fedora Update for nginx FEDORA-2012-3991\n[864065] Fedora Update for nginx FEDORA-2011-16075\n[863654] Fedora Update for nginx FEDORA-2011-16110\n[861232] Fedora Update for nginx FEDORA-2007-1158\n[850180] SuSE Update for nginx openSUSE-SU-2012:0237-1 (nginx)\n[831680] Mandriva Update for nginx MDVSA-2012:043 (nginx)\n[802045] 64-bit Debian Linux Rootkit with nginx Doing iFrame Injection\n[801636] nginx HTTP Request Remote Buffer Overflow Vulnerability\n[103470] nginx 'ngx_http_mp4_module.c' Buffer Overflow Vulnerability\n[103469] nginx 'ngx_cpystrn()' Information Disclosure Vulnerability\n[103344] nginx DNS Resolver Remote Heap Buffer Overflow Vulnerability\n[100676] nginx Remote Source Code Disclosure and Denial of Service Vulnerabilities\n[100659] nginx Directory Traversal Vulnerability\n[100658] nginx Space String Remote Source Code Disclosure Vulnerability\n[100441] nginx Terminal Escape Sequence in Logs Command Injection Vulnerability\n[100321] nginx 'ngx_http_process_request_headers()' Remote Buffer Overflow Vulnerability\n[100277] nginx Proxy DNS Cache Domain Spoofing Vulnerability\n[100276] nginx HTTP Request Remote Buffer Overflow Vulnerability\n[100275] nginx WebDAV Multiple Directory Traversal Vulnerabilities\n[71574] Gentoo Security Advisory GLSA 201206-07 (nginx)\n[71308] Gentoo Security Advisory GLSA 201203-22 (nginx)\n[71297] FreeBSD Ports: nginx\n[71276] FreeBSD Ports: nginx\n[71239] Debian Security Advisory DSA 2434-1 (nginx)\n[66451] Fedora Core 11 FEDORA-2009-12782 (nginx)\n[66450] Fedora Core 10 FEDORA-2009-12775 (nginx)\n[66449] Fedora Core 12 FEDORA-2009-12750 (nginx)\n[64924] Gentoo Security Advisory GLSA 200909-18 (nginx)\n[64912] Fedora Core 10 FEDORA-2009-9652 (nginx)\n[64911] Fedora Core 11 FEDORA-2009-9630 (nginx)\n[64894] FreeBSD Ports: nginx\n[64869] Debian Security Advisory DSA 1884-1 (nginx)\n\nSecurityTracker - https://www.securitytracker.com:\n[1028544] nginx Bug Lets Remote Users Deny Service or Obtain Potentially Sensitive Information\n[1028519] nginx Stack Overflow Lets Remote Users Execute Arbitrary Code\n[1026924] nginx Buffer Overflow in ngx_http_mp4_module Lets Remote Users Execute Arbitrary Code\n[1026827] nginx HTTP Response Processing Lets Remote Users Obtain Portions of Memory Contents\n\nOSVDB - http://www.osvdb.org:\n[94864] cPnginx Plugin for cPanel nginx Configuration Manipulation Arbitrary File Access\n[93282] nginx proxy_pass Crafted Upstream Proxied Server Response Handling Worker Process Memory Disclosure\n[93037] nginx /http/ngx_http_parse.c Worker Process Crafted Request Handling Remote Overflow\n[92796] nginx ngx_http_close_connection Function Crafted r-&gt\n[92634] nginx ngx_http_request.h zero_in_uri URL Null Byte Handling Remote Code Execution\n[90518] nginx Log Directory Permission Weakness Local Information Disclosure\n[88910] nginx Proxy Functionality SSL Certificate Validation MitM Spoofing Weakness\n[84339] nginx/Windows Multiple Request Sequence Parsing Arbitrary File Access\n[83617] Naxsi Module for Nginx naxsi-ui/ nx_extract.py Traversal Arbitrary File Access\n[81339] nginx ngx_http_mp4_module Module Atom MP4 File Handling Remote Overflow\n[80124] nginx HTTP Header Response Parsing Freed Memory Information Disclosure\n[77184] nginx ngx_resolver.c ngx_resolver_copy() Function DNS Response Parsing Remote Overflow\n[65531] nginx on Windows URI ::$DATA Append Arbitrary File Access\n[65530] nginx Encoded Traversal Sequence Memory Corruption Remote DoS\n[65294] nginx on Windows Encoded Space Request Remote Source Disclosure\n[63136] nginx on Windows 8.3 Filename Alias Request Access Rules / Authentication Bypass\n[62617] nginx Internal DNS Cache Poisoning Weakness\n[61779] nginx HTTP Request Escape Sequence Terminal Command Injection\n[59278] nginx src/http/ngx_http_parse.c ngx_http_process_request_headers() Function URL Handling NULL Dereference DoS\n[58328] nginx WebDAV Multiple Method Traversal Arbitrary File Write\n[58128] nginx ngx_http_parse_complex_uri() Function Underflow\n[44447] nginx (engine x) msie_refresh Directive Unspecified XSS\n[44446] nginx (engine x) ssl_verify_client Directive HTTP/0.9 Protocol Bypass\n[44445] nginx (engine x) ngx_http_realip_module satisfy_any Directive Unspecified Access Bypass\n[44444] nginx (engine x) X-Accel-Redirect Header Unspecified Traversal\n[44443] nginx (engine x) rtsig Method Signal Queue Overflow\n[44442] nginx (engine x) Worker Process Millisecond Timers Unspecified Overflow\n\n"
+                }
+              ]
+            }
+          ]
+        },
+        "times": {
+          "@srtt": "411",
+          "@rttvar": "3778",
+          "@to": "1000000"
+        }
+      },
+      "runstats": {
+        "finished": {
+          "@time": "1674216078",
+          "@timestr": "Fri Jan 20 12:01:18 2023",
+          "@elapsed": "19.37",
+          "@summary": "Nmap done at Fri Jan 20 12:01:18 2023; 1 IP address (1 host up) scanned in 19.37 seconds",
+          "@exit": "success"
+        },
+        "hosts": {
+          "@up": "1",
+          "@down": "0",
+          "@total": "1"
+        }
+      }
+    }
+  }

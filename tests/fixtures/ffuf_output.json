@@ -1,0 +1,16 @@
+{
+    "input": {
+      "FUZZ": "Lmh0YWNjZXNzLWxvY2Fs"
+    },
+    "position": 561,
+    "status": 200,
+    "length": 4516,
+    "words": 1066,
+    "lines": 100,
+    "content-type": "text/html; charset=utf-8",
+    "redirectlocation": "",
+    "url": "https://example.synology.me/.htaccess-local",
+    "duration": 57779116,
+    "resultfile": "",
+    "host": "example.synology.me"
+}

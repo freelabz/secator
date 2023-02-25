@@ -1,0 +1,8 @@
+{
+    "input": "https://example.com",
+    "source": "body",
+    "type": "url",
+    "output": "https://example.com/webman/resources/images/2x/default_login_background/",
+    "status": 200,
+    "length": 140
+}

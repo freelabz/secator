@@ -1,0 +1,35 @@
+{
+    "template": "misconfiguration/http-missing-security-headers.yaml",
+    "template-url": "https://github.com/projectdiscovery/nuclei-templates/blob/master/misconfiguration/http-missing-security-headers.yaml",
+    "template-id": "http-missing-security-headers",
+    "template-path": "/home/vagrant/nuclei-templates/misconfiguration/http-missing-security-headers.yaml",
+    "info": {
+        "name": "HTTP Missing Security Headers",
+        "author": [
+            "socketz",
+            "geeknik",
+            "g4l1t0",
+            "convisoappsec",
+            "kurohost",
+            "dawid-czarnecki",
+            "forgedhallpass"
+        ],
+        "tags": [
+            "misconfig",
+            "headers",
+            "generic"
+        ],
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n",
+        "reference": null,
+        "severity": "info"
+    },
+    "matcher-name": "access-control-expose-headers",
+    "type": "http",
+    "host": "https://example.synology.me",
+    "matched-at": "https://example.synology.me",
+    "ip": "80.32.101.118",
+    "timestamp": "2023-02-06T13:21:26.131262797Z",
+    "curl-command": "curl -X 'GET' -d '' -H 'Accept: */*' -H 'Accept-Language: en' -H 'User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux i686 on x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2820.59 Safari/537.36' 'https://example.synology.me'",
+    "matcher-status": true,
+    "matched-line": null
+}
