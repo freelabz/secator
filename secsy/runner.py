@@ -14,16 +14,51 @@ from secsy.utils import deduplicate, get_command_cls, merge_opts, pluralize
 
 logger = logging.getLogger(__name__)
 
-# TODO: Secsy Runner class
-# class Runner:
-# 	results_backend = None
-# 	task_broker = None
 
-# 	def __init__(self, **opts):
-# 		self.results_backend = opts.pop('results_backend', None)
-# 		self.task_broker = opts.pop('task_broker', None)
+class Runner:
 
-# TODO: Add commonalities between CommandRunner by subclassing it here instead
+	# TODO: Add results backend
+	# results_backend = None
+
+	# def __init__(self, **opts):
+	# 	self.results_backend = opts.pop('results_backend', None)
+
+	def log_results(self, results, output_types):
+		"""Log results.
+
+		Args:
+			results (list): List of results.
+			output_types (list): List of result types to add to report.
+		"""
+		from rich.console import Console
+		from rich.markdown import Markdown
+		from datetime import datetime
+		from secsy.definitions import REPORTS_FOLDER
+		import os
+		if not results:
+			return
+		render = Console(record=True)
+		render.print()
+		title = f'{self.__class__.__name__} {self.name} results'
+		h1 = Markdown(f'# {title}')
+		render.print(h1, style='bold magenta', width=50)
+		render.print()
+		for output_type in output_types:
+			sort_by, output_fields = get_table_fields(output_type)
+			items = [item for item in results if item['_type'] == output_type]
+			if items:
+				_table = build_table(items, output_fields, sort_by)
+				_type = pluralize(items[0]['_type'])
+				render.print(_type.upper(), style='bold gold3', justify='left')
+				render.print(_table)
+				render.print()
+
+		timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+		html_title = title.replace(' ', '_').lower()
+		os.makedirs(REPORTS_FOLDER, exist_ok=True)
+		html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'
+		render.save_html(html_path)
+		console.log(f'Saved HTML report to {html_path}')
 
 
 class Scan:
@@ -66,8 +101,7 @@ class Scan:
 				**run_opts)
 			self.results.extend(wresults)
 
-		console.print('SCAN RESULTS', style='bold magenta')
-		log_results(self.results, output_types=OUTPUT_TYPES)
+		log_results(f'Scan {self.scan.name} results', self.results, output_types=OUTPUT_TYPES)
 		return self.results
 
 
@@ -112,13 +146,14 @@ class Workflow:
 			fmt_opts = {
 				'print_timestamp': True,
 				'print_cmd': True,
-				'print_item_count': True
+				'print_item_count': True,
 			}
 		else:
 			fmt_opts = {
 				'print_timestamp': False,
 				'print_cmd': True,
-				'print_item_count': True
+				'print_item_count': True,
+				'print_task_name_prefix': True
 			}
 		self.workflow.options.update(fmt_opts)
 
@@ -187,7 +222,8 @@ class Workflow:
 						tasks_progress[task_id] = id
 					else:
 						progress_id = tasks_progress[task_id]
-						progress.update(progress_id, name=name, state=state_str)
+						if state in ['SUCCESS', 'FAILURE']:
+							progress.update(progress_id, name=name, state=state_str, advance=100)
 
 				# Update all tasks to 100 % if workflow has finished running
 				res = AsyncResult(result.id)
@@ -303,30 +339,36 @@ class Workflow:
 		# Print workflow options
 		if not self.done:
 			opts = merge_opts(self.run_opts, self.workflow.options)
+			console.print()
+			console.print(f'[bold gold3]Workflow:[/]    {self.workflow.name}')
+
+			# Description
+			description = self.workflow.description
+			if description:
+				console.print(f'[bold gold3]Description:[/] {description}')
+
+			# Targets
+			if self.targets:
+				console.print('Targets: ', style='bold gold3')
+				for target in self.targets:
+					console.print(f' • {target}')
+
+			# Options
 			items = [
-				f'[italic magenta]{k}[/]: {v}'
+				f'[italic]{k}[/]: {v}'
 				for k, v in opts.items() if v is not None
 			]
 			if items:
 				console.print('Options:', style='bold gold3')
 				for item in items:
 					console.print(f' • {item}')
-				console.print()
-
-			if self.targets:
-				console.print('Targets: ', style='bold gold3')
-				for target in self.targets:
-					console.print(f' • {target}')
-				console.print()
-
-			description = self.workflow.description
-			if description:
-				console.print(f'[bold gold3]Description:[/] \n{description}')
-				console.print()
+			
+			console.print()
 
 		# Print workflow results
 		if self.log_results:
 			log_results(
+				f'Workflow {self.workflow.name} results',
 				self.results,
 				output_types=OUTPUT_TYPES
 			)
@@ -394,25 +436,6 @@ def collect_results(result):
 		if isinstance(result, list):
 			out.extend(result)
 	return out
-
-
-def log_results(results, output_types):
-	"""Log results.
-
-	Args:
-		results (list): List of results.
-		output_types (list): List of result types to add to report.
-	"""
-	console.print()
-	for output_type in output_types:
-		sort_by, output_fields = get_table_fields(output_type)
-		items = [item for item in results if item['_type'] == output_type]
-		if items:
-			_table = build_table(items, output_fields, sort_by)
-			_type = pluralize(items[0]['_type'])
-			console.print(_type.capitalize() + ':', style='bold gold3')
-			console.print(_table)
-			console.print()
 
 
 def get_table_fields(output_type):

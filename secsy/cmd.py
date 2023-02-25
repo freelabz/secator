@@ -152,6 +152,9 @@ class CommandRunner:
 		# Print cmd name
 		self._print_cmd = self.cmd_opts.pop('print_cmd', False)
 
+		# Print task name before line output (useful for multiprocessed envs)
+		self._print_task_name_prefix = self.cmd_opts.pop('print_task_name_prefix', False)
+
 		# Print cmd prefix before each line (used in async mode)
 		self._print_cmd_prefix = self.cmd_opts.pop('print_cmd_prefix', False)
 
@@ -315,7 +318,7 @@ class CommandRunner:
 
 		# Log cmd
 		if self._print_cmd:
-			self._print(self.cmd, color='bold cyan')
+			self._print(self.cmd, color='bold cyan', prefix=False)
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -553,7 +556,7 @@ class CommandRunner:
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.__class__.__name__)
+			command_name=self.name)
 		if opts_str:
 			self.cmd += f' {opts_str}'
 
@@ -564,7 +567,7 @@ class CommandRunner:
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.__class__.__name__)
+			command_name=self.name)
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
 
@@ -645,7 +648,7 @@ class CommandRunner:
 				new_item[key] = None
 
 		# Add source to item
-		new_item['_source'] = self.__class__.__name__
+		new_item['_source'] = self.name
 
 		# Add output type to item if any
 		if self.output_type:
@@ -653,12 +656,13 @@ class CommandRunner:
 
 		return new_item
 
-	def _print(self, data, color=None):
+	def _print(self, data, color=None, prefix=True):
 		"""Print function.
 
 		Args:
 			data (str or dict): Input data.
 			color (str, Optional): Termcolor color.
+			prefix (bool, Optional): Add task name prefix before output.
 		"""
 		# Print a rich table
 		if self._table_output and isinstance(data, list) and isinstance(data[0], dict):
@@ -682,6 +686,10 @@ class CommandRunner:
 
 		# Print a line item
 		elif isinstance(data, str):
+
+			add_prefix = prefix and self._print_task_name_prefix
+			if add_prefix:
+				data = f'({self.name}) {data}'
 
 			# If raw mode (--raw), we might want to parse results with e.g 
 			# pipe redirections, so we need a pure line with no logging info
