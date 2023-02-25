@@ -157,6 +157,8 @@ class CommandRunner:
 
 		# Determine if JSON output or not
 		self._json_output = self.output_return_type == dict
+		if self._print_timestamp and not _json:
+			self._json_output = False
 
 		# Output formatting
 		self.color = self.cmd_opts.pop('color', False)

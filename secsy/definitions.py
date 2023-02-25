@@ -4,9 +4,12 @@ import os
 
 TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
 RECORD = bool(os.environ.get('RECORD', '0'))
-CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
-CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
-# CELERY_RESULT_BACKEND = os.environ.get('SECSY_RESULT_BACKEND', f'file://{TEMP_FOLDER}/celery/results')
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{TEMP_FOLDER}/celery/results')
+# Redis config
+# CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
+# CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
+
 OUTPUT_TYPES = ['target', 'subdomain', 'port', 'url', 'vulnerability']
 
 ALL = 'all'
