@@ -1,0 +1,5 @@
+setg RHOST {host}
+setg RHOSTS {host}
+use auxiliary/scanner/ftp/anonymous
+run
+exit

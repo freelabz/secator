@@ -1,0 +1,12 @@
+name: default
+description: Default scan (domain_scan, host_scan, url_finder)
+profile: default
+workflows:
+  domain_recon:
+  host_recon:
+    input_:
+    - target.name
+    - subdomain.host
+  url_finder:
+    input_:
+    - url.url

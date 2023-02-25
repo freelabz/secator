@@ -1,0 +1,14 @@
+name: domain_recon
+description: Run domain recon (OSInt, subdomains + takeovers)
+tasks:
+  # osint:
+  subfinder:
+  nuclei:
+    input_:
+    - target.name
+    - subdomain.host
+    templates: takeovers/
+  httpx:
+    input_:
+      - target.name
+      - subdomain.host

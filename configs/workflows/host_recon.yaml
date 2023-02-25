@@ -1,0 +1,23 @@
+name: host_recon
+description: Run host recon (open ports, http, vulns).
+tasks:
+  _group:
+    nuclei:
+      tags: [network, ssl]
+    _chain:
+      naabu:
+      nmap:
+        ports_: port.port
+      httpx:
+        match_codes: False
+        input_:
+          - target.name
+          - type: port
+            field: '{host}:{port}'
+      nuclei:
+        input_: url.url
+        # exclude_tags: [network, ssl]
+        tags: [cve, panel, wordpress, exposure, edb, wp-plugin, lfi, xss]
+results:
+  - type: vulnerability
+    condition: item['confidence'] == 'high'

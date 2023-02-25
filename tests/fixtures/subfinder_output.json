@@ -1,0 +1,8 @@
+{
+    "host": "git.example.synology.me",
+    "input": "example.synology.me",
+    "sources": [
+        "alienvault",
+        "crtsh"
+    ]
+}

