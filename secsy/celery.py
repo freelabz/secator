@@ -7,7 +7,6 @@ import celery
 from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
-from celery_dyrygent.tasks import register_workflow_processor
 
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND,
                                TEMP_FOLDER)
@@ -37,7 +36,6 @@ app.conf.update({
 	'result_backend': CELERY_RESULT_BACKEND,
 	'result_extended': True
 })
-workflow_processor = register_workflow_processor(app)
 
 
 @signals.celeryd_init.connect
