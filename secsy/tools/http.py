@@ -106,6 +106,7 @@ class dirsearch(HTTPCommand):
 		CONTENT_TYPE: 'content-type',
 		STATUS_CODE: 'status'
 	}
+	install_cmd = 'pip3 install dirsearch'
 
 	def __iter__(self):
 		prev = self._print_item_count

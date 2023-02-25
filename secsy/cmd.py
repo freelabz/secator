@@ -272,7 +272,7 @@ class CommandRunner:
 	def install(cls):
 		"""Install command by running the content of cls.install_cmd."""
 		if not cls.install_cmd:
-			logger.warning(f'Installation of "{cls.name}" is not supported yet. Please install it manually.')
+			logger.warning(f'Installation of "{cls.__name__}" is not supported yet. Please install it manually.')
 			return
 		return cls.run_command(cls.install_cmd, print_timestamp=True)
 
