@@ -144,7 +144,7 @@ class feroxbuster(HTTPCommand):
 	"""Simple, fast, recursive content discovery tool written in Rust"""
 	cmd = 'feroxbuster'
 	input_flag = '--url'
-	file_flag = None
+	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
 	opts = {
@@ -184,11 +184,11 @@ class feroxbuster(HTTPCommand):
 			self.output_path = f'{TEMP_FOLDER}/feroxbuster_{timestr}.json'
 		Path(self.output_path).touch()
 		self.cmd += f' --output {self.output_path}'
-		if os.path.exists(self.input):
-			self.cmd += ' --stdin'
 
 	@staticmethod
 	def on_start(self):
+		if self.input_path:
+			self.cmd += ' --stdin'
 		self.cmd += f' & tail --pid $! -f {shlex.quote(self.output_path)}'
 		self.shell = True
 
@@ -201,6 +201,8 @@ class ffuf(HTTPCommand):
 	"""Fast web fuzzer written in Go."""
 	cmd = 'ffuf -noninteractive -recursion'
 	input_flag = '-u'
+	input_chunk_size = 1
+	file_flag = None
 	json_flag = '-json'
 	opts = {
 		AUTO_CALIBRATION: {'is_flag': True, 'default': True, 'help': 'Filter out HTTP responses based on status codes, content length, etc.'},

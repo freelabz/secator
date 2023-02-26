@@ -56,7 +56,7 @@ def utils():
 def worker():
 	"""Run a Celery worker."""
 	CommandRunner.run_command(
-		'celery -A secsy.celery.app worker',
+		'celery -A secsy.celery.app worker -n runner',
 		print_timestamp=True
 	)
 
@@ -69,7 +69,6 @@ register_scans(scan)
 # UTILS #
 #-------#
 
-
 @utils.command()
 @click.argument('cmds', required=False)
 def install(cmds):
@@ -81,6 +80,13 @@ def install(cmds):
 		cmds = ALL_CMDS
 	for cls in cmds:
 		cls.install()
+
+@utils.command()
+@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
+def get_proxy(timeout):
+	from fp.fp import FreeProxy
+	url = FreeProxy(timeout=timeout, anonym=True).get()
+	print(url)
 
 
 #------#
@@ -132,19 +138,3 @@ def lint():
 		**DEFAULT_CMD_OPTS
 	)
 	sys.exit(result.return_code)
-
-
-# @cli.command('scan')
-# @click.argument('scan_name')
-# @click.argument('host')
-# @click.option('-table', is_flag=True, default=False, help='Table mode')
-# @click.option('-verbose', '-v', is_flag=True, default=False, help='Verbose mode')
-# def scan_run(scan_name, host, table, verbose):
-# 	"""Run a scan."""
-# 	opts = {
-# 		'table': table,
-# 		'quiet': not verbose,
-# 		# 'print_timestamp': True,
-# 		'json': True
-# 	}
-# 	list(run_scan(scan_name, host, **opts))
