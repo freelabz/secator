@@ -5,6 +5,8 @@ import os
 TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
 REPORTS_FOLDER = os.environ.get('REPORTS_FOLDER', '/tmp/reports')
 RECORD = bool(os.environ.get('RECORD', '0'))
+DEFAULT_CHUNK_SIZE = 1000
+
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{TEMP_FOLDER}/celery/results')
 
@@ -14,6 +16,7 @@ ALL = 'all'
 AUTO_CALIBRATION = 'auto_calibration'
 HEADER = 'header'
 DELAY = 'delay'
+DOMAIN = 'domain'
 FOLLOW_REDIRECT = 'follow_redirect'
 METHOD = 'method'
 MATCH_CODES = 'match_codes'

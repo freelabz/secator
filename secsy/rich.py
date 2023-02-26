@@ -20,6 +20,8 @@ def criticity_to_color(value):
 		value = f'[bold dark_orange]{value.upper()}[/]'
 	elif value == 'low':
 		value = f'[bold yellow1]{value.upper()}[/]'
+	elif value == 'info':
+		value = f'[bold green]{value.upper()}[/]'
 	return value
 
 formatters = {

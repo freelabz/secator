@@ -36,9 +36,11 @@ def setup_logging(level):
 	return logger
 
 
-def maybe_read_file(input, splitlines=True):
-	"""If input is a path, return the file lines. Otherwise, return the original
-	input.
+def expand_input(input, splitlines=True):
+	"""Expand user-provided input on the CLI:
+	- If input is a path, read the file and return the lines. 
+	- If it's a comma-separated list, return the list.
+	- Otherwise, return the original input.
 
 	Args:
 		input (str): Input.
@@ -53,6 +55,8 @@ def maybe_read_file(input, splitlines=True):
 			if splitlines:
 				data = data.splitlines()
 		return data
+	elif ',' in input:
+		input = input.split(',')
 	return input
 
 

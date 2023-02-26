@@ -141,15 +141,15 @@ class subfinder(ReconCommand):
 	opt_value_map = {
 		PROXY: lambda x: x.lstrip('http://').lstrip('https://') if x else None
 	}
-	output_schema = [HOST, SOURCES]
+	output_map = {
+		DOMAIN: 'input'
+	}
+	output_schema = [HOST, DOMAIN, SOURCES]
 	output_field = HOST
 	output_type = SUBDOMAIN
 	output_field = HOST
 	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
 
 	@staticmethod
-	def validate_input(self, input):
-		"""Invalid domain localhost / 127.0.01 (gives false positives)."""
-		if isinstance(input, list):
-			return all(name not in ['localhost', '127.0.0.1'] for name in input)
-		return input not in ['localhost', '127.0.0.1']
+	def validate_item(self, item):
+		return item['input'] != 'localhost'

@@ -79,6 +79,12 @@ class CommandRunner:
 	# Input field (mostly for tests and CLI)
 	input_type = None
 
+	# Input path (if a file is constructed)
+	input_path = None
+
+	# Input chunk size
+	input_chunk_size = DEFAULT_CHUNK_SIZE
+
 	# Flag to take a file as input
 	file_flag = None
 
@@ -244,25 +250,24 @@ class CommandRunner:
 	#-------#
 	# Hooks #
 	#-------#
-	def run_hooks(self, hook_type, **kwargs):
-		result = next((val for val in kwargs.values() if val is not None), None)
+	def run_hooks(self, hook_type, *args):
 		logger.debug(f'Running hooks of type {hook_type}')
 		logger.debug(self._hooks[hook_type])
+		result = None
 		for hook in self._hooks[hook_type]:
-			result = hook(self, **kwargs)
+			result = hook(self, *args)
+		if not result and len(args) > 0:
+			return args[0]
 		return result
 
 	#------------#
 	# Validators #
 	#------------#
-	def run_validators(self, validator_type, input=None):
+	def run_validators(self, validator_type, *args):
 		logger.debug(f'Running validators of type {validator_type}')
 		logger.debug(self._validators[validator_type])
-		type_map = {
-			'input': self.input,
-		}
 		for validator in self._validators[validator_type]:
-			if not validator(self, input or self.input):
+			if not validator(self, *args):
 				if validator_type == 'input':
 					self._print(validator.__doc__, color='bold red')
 				return False
@@ -329,8 +334,8 @@ class CommandRunner:
 		killed = False
 		self.results = []
 
-		# Abort if inputs not validated
-		if not self.run_validators('input'):
+		# Abort if inputs were not validated
+		if not self.run_validators('input', self.input):
 			self._print('Input validation failed. Skipping.', color='bold red')
 			self.run_hooks('on_end')
 			return
@@ -365,7 +370,7 @@ class CommandRunner:
 					line = re.sub(ansi_regex, '', line.strip())
 
 				# Run on_line hooks
-				line = self.run_hooks('on_line', line=line)
+				line = self.run_hooks('on_line', line)
 
 				# Run item_loader to try parsing as dict
 				if callable(self.item_loader):
@@ -406,8 +411,10 @@ class CommandRunner:
 		self.return_code = process.returncode
 		self.output = self.output.strip()
 		if self.return_code != 0 and not killed:
-			cmd_name = self.cmd.split(' ')[0]
-			logger.error(f'Command {cmd_name} failed with return code {self.return_code}. Output: {self.output}')
+			error = f'Command failed with return code {self.return_code}.'
+			if self.output:
+				error += f'Output: {self.output}'
+			self._print(error, color='bold red')
 
 		# Callback after running cmd
 		self.run_hooks('on_end')
@@ -441,7 +448,7 @@ class CommandRunner:
 			return None
 
 		# Run item hooks
-		item = self.run_hooks('on_item', item=item)
+		item = self.run_hooks('on_item', item)
 		if not item:
 			return None
 
@@ -450,7 +457,7 @@ class CommandRunner:
 			item = self._convert_item_schema(item)
 
 			# Run item convert hooks
-			item = self.run_hooks('on_item_converted', item=item)
+			item = self.run_hooks('on_item_converted', item)
 
 		# Add item to result
 		self.results.append(item)
@@ -592,16 +599,18 @@ class CommandRunner:
 		if isinstance(input, list):
 			timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
 			cmd_name = cmd.split(' ')[0].split('/')[-1]
-			fname = f'{TEMP_FOLDER}/{cmd_name}_{timestr}.txt'
+			fpath = f'{TEMP_FOLDER}/{cmd_name}_{timestr}.txt'
 
 			# Write the input to a file
-			with open(fname, 'w') as f:
+			with open(fpath, 'w') as f:
 				f.write('\n'.join(input))
 
 			if self.file_flag == OPT_PIPE_INPUT:
-				cmd = f'cat {fname} | {cmd}'
+				cmd = f'cat {fpath} | {cmd}'
 			else:
-				cmd += f' {self.file_flag} {fname}'
+				cmd += f' {self.file_flag} {fpath}'
+			
+			self.input_path = fpath
 
 		# If input is a string but the tool does not support an input flag, use
 		# echo-piped input.
@@ -619,6 +628,7 @@ class CommandRunner:
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
+		self.input = input
 
 	def _convert_item_schema(self, item):
 		"""Convert dict item to a new structure using the class output schema.

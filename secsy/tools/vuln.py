@@ -46,8 +46,8 @@ VULN_OUTPUT = [
 class VulnCommand(CommandRunner):
 	meta_opts = VULN_META_OPTS
 	output_schema = VULN_OUTPUT
-	output_table_fields = [VULN_MATCHED_AT, VULN_SEVERITY, VULN_CONFIDENCE, VULN_NAME, VULN_ID, VULN_CVSS_SCORE, VULN_TAGS, VULN_REFERENCES, VULN_EXTRACTED_RESULTS]
-	output_table_sort_fields = ('_confidence', '_severity')
+	output_table_fields = [VULN_MATCHED_AT, VULN_SEVERITY, VULN_CONFIDENCE, VULN_NAME, VULN_ID, VULN_CVSS_SCORE, VULN_TAGS, VULN_EXTRACTED_RESULTS]
+	output_table_sort_fields = ('_confidence', '_severity', 'cvss_score')
 	output_type = VULN
 	input_type = HOST
 
@@ -466,7 +466,7 @@ class nuclei(VulnCommand):
 	"""Fast and customisable vulnerability scanner based on simple YAML based
 	DSL.
 	"""
-	cmd = 'nuclei -silent'
+	cmd = 'nuclei -silent -nc'
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-json'

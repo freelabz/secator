@@ -8,7 +8,7 @@ from secsy.definitions import *
 from secsy.runner import run_scan, run_workflow
 from secsy.utils import (find_external_commands, find_internal_commands,
                          get_command_category, get_command_cls,
-                         maybe_read_file)
+                         expand_input)
 
 DEFAULT_CLI_OPTIONS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
@@ -114,7 +114,7 @@ def register_command(cls, cli_endpoint):
 	def func(**opts):
 		opts.update(default_opts)
 		input = opts.pop(input_type)
-		input = maybe_read_file(input)
+		input = expand_input(input)
 		cls(input, **opts).run()
 
 	cls_category = get_command_category(cls)
@@ -181,8 +181,8 @@ def register_workflow(cli_endpoint, config):
 		}
 		opts.update(default_opts)
 		input = opts.pop('target')
-		input = maybe_read_file(input)
-		list(run_workflow(workflow_name, input, sync=not worker, **opts))
+		input = expand_input(input)
+		run_workflow(workflow_name, input, sync=not worker, **opts)
 
 	settings = {'ignore_unknown_options': True}
 	cli_endpoint.command(
@@ -216,8 +216,8 @@ def register_scan(cli_endpoint, scan):
 		opts['print_timestamp'] = True
 		opts['json'] = True
 		input = opts.pop('target')
-		input = maybe_read_file(input)
-		list(run_scan(scan.name, input, sync=not worker, **opts))
+		input = expand_input(input)
+		run_scan(scan.name, input, sync=not worker, **opts)
 
 	settings = {'ignore_unknown_options': True}
 	cli_endpoint.command(

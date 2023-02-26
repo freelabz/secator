@@ -9,7 +9,7 @@ from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND,
-                               TEMP_FOLDER)
+                               TEMP_FOLDER, DEFAULT_CHUNK_SIZE)
 from secsy.rich import console
 from secsy.rich import handler as rich_handler
 from secsy.runner import merge_extracted_values
@@ -40,50 +40,84 @@ app.conf.update({
 
 @signals.celeryd_init.connect
 def setup_log_format(sender, conf, **kwargs):
-    conf.worker_log_format = '[%(processName)s] %(message)s'
-    # conf.worker_task_log_format = '[%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s'
+    conf.worker_log_format = ''
+    conf.worker_task_log_format = '[%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s'
 
 
 #--------------#
 # Celery tasks #
 #--------------#
 
-def break_task(task_cls, task_opts, targets, results=[]):
+def chunker(seq, size):
+    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
+
+def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 	"""Break a task into multiple of the same type."""
+	chunks = targets
+	if chunk_size > 1:
+		chunks = list(chunker(targets, chunk_size))
+
+	# Build signatures
+	sigs = []
+	for ix, chunk in enumerate(chunks):
+		if len(chunks) > 0: # add chunk to task opts for tracking chunks exec
+			task_opts['chunk'] = ix
+			task_opts['chunk_count'] = len(chunks)
+		sig = task_cls.s(chunk, **task_opts)
+		sigs.append(sig)
+
+	# Build Celery workflow
 	workflow = chain(
 		forward_results.s(results),
 		chord(
-			(task_cls.s(input, **task_opts) for input in targets),
+			tuple(sigs),
 			forward_results.s()
 		)
 	)
+
 	return workflow
 
 
 @app.task(bind=True)
-def run_command(self, results, name, target, opts={}):
-	# console.print_item(json.dumps(results))
+def run_command(self, results, name, targets, opts={}):
+	# Get chunk if any
+	chunk = opts.get('chunk')
+	sync = opts.get('sync', True)
 
 	# Flaten + dedupe results
 	results = flatten(results)
 	results = deduplicate(results, key='_uuid')
 
 	# Get expanded targets
-	_targets, opts = merge_extracted_values(results, opts)
-	if not _targets:
-		_targets = target
+	if not chunk:
+		_targets, opts = merge_extracted_values(results, opts)
+		if _targets:
+			targets = _targets
 
-	# Get task
+	# Get task class
 	task = [task for task in COMMANDS if task.__name__ == name]
 	if not task:
 		console.log(f'Task {name} not found. Aborting.', style='bold red')
 		return
 	task = task[0]
 
-	# If task doesn't support multiple targets, split into multiple tasks
-	if task.file_flag is None and isinstance(_targets, list):
-		workflow = break_task(task, opts, _targets, results=results)
-		sync = opts['sync']
+	# If task doesn't support multiple targets, or if the number of targets is 
+	# too big, split into multiple tasks
+	multiple_targets = isinstance(targets, list)
+	single_target_only = multiple_targets and task.file_flag is None
+	break_size_threshold = multiple_targets and len(targets) > task.input_chunk_size
+
+	if single_target_only or break_size_threshold:
+		chunk_size = 1 if single_target_only else task.input_chunk_size
+		console.log(f'Breaking targets into chunks of size {chunk_size}')
+		workflow = break_task(
+			task,
+			opts,
+			targets,
+			results=results,
+			chunk_size=chunk_size)
+		sync = opts.get('sync', True)
 		with allow_join_result():
 			return workflow.apply().get() if sync else workflow().get()
 
@@ -94,7 +128,7 @@ def run_command(self, results, name, target, opts={}):
 		state='PROGRESS',
 		meta={'name': name, 'results': [], 'count': count}
 	)
-	for item in task(_targets, **opts):
+	for item in task(targets, **opts):
 		result_uuid = str(uuid.uuid4())
 		item['_uuid'] = result_uuid
 		task_results.append(item)
