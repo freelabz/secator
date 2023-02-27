@@ -169,14 +169,15 @@ def register_workflow(cli_endpoint, config):
 
 	@click.argument('target')
 	@click.option('--worker', is_flag=True, help='[italic]global     [/]Run tasks in a distributed way inside worker (FASTER).')
+	@click.option('--verbose', is_flag=True, help='[italic]global     [/]Verbose mode, show full command output.')
 	@decorate_command_options(options)
-	def func(worker=False, **opts):
+	def func(worker, verbose, **opts):
 		default_opts = {
 			'print_cmd': True,
-			'print_item': False,
-			'print_item_count': True,
-			'print_line': False,
 			'print_timestamp': True,
+			'print_item_count': True,
+			'print_item': verbose,
+			'print_line': verbose,
 			'json': True
 		}
 		opts.update(default_opts)
@@ -211,10 +212,18 @@ def register_scan(cli_endpoint, scan):
 
 	@click.argument('target')
 	@click.option('--worker', is_flag=True, help='[italic]global     [/]Run tasks in a distributed way inside worker (FASTER).')
+	@click.option('--verbose', is_flag=True, help='[italic]global     [/]Verbose mode, show full command output.')
 	@decorate_command_options(options)
-	def func(worker, **opts):
-		opts['print_timestamp'] = True
-		opts['json'] = True
+	def func(worker, verbose, **opts):
+		default_opts = {
+			'print_cmd': True,
+			'print_timestamp': True,
+			'print_item_count': True,
+			'print_item': verbose,
+			'print_line': verbose,
+			'json': True
+		}
+		opts.update(default_opts)
 		input = opts.pop('target')
 		input = expand_input(input)
 		run_scan(scan.name, input, sync=not worker, **opts)

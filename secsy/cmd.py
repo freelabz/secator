@@ -7,6 +7,7 @@ import subprocess
 from datetime import datetime
 from time import sleep
 
+from fp.fp import FreeProxy
 from rich.markup import escape
 
 from secsy.definitions import *
@@ -111,7 +112,6 @@ class CommandRunner:
 	_json_output = False
 	_print_item = True
 	_print_item_count = True
-	_print_cmd_prefix = False
 	_stop_on_first_match = False
 
 	# Hooks, validators, formatter
@@ -159,9 +159,6 @@ class CommandRunner:
 		self._print_cmd = self.cmd_opts.pop('print_cmd', False)
 
 		# Print task name before line output (useful for multiprocessed envs)
-		self._print_task_name_prefix = self.cmd_opts.pop('print_task_name_prefix', False)
-
-		# Print cmd prefix before each line (used in async mode)
 		self._print_cmd_prefix = self.cmd_opts.pop('print_cmd_prefix', False)
 
 		# Determine if JSON output or not
@@ -202,6 +199,15 @@ class CommandRunner:
 
 		# Current working directory for cmd
 		self.cwd = self.cmd_opts.pop('cwd', None)
+
+		# Proxy config (global)
+		self.proxy = self.cmd_opts.pop('proxy', False)
+		self._configure_proxy()
+
+		# Chunks
+		self.chunk = self.cmd_opts.pop('chunk', None)
+		self.chunk_count = self.cmd_opts.pop('chunk_count', None)
+		self._set_prefix()
 
 		# Callback before building the command line
 		self.run_hooks('on_init')
@@ -323,7 +329,7 @@ class CommandRunner:
 
 		# Log cmd
 		if self._print_cmd:
-			self._print(self.cmd, color='bold cyan', prefix=False)
+			self._print(self.cmd, color='bold cyan')
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -350,9 +356,11 @@ class CommandRunner:
 				shell=self.shell,
 				cwd=self.cwd)
 		except FileNotFoundError:
-			base_cmd = self.cmd.split(' ')[0]
-			logger.error(f'{base_cmd} not found. Check if it is installed.')
+			error = f'{self.name} not found. Install it with `secsy utils install {self.name}`.'
+			self.error = error
 			self.return_code = 1
+			if error:
+				self._print(error, color='bold red')
 			return
 
 		# Process the output
@@ -414,10 +422,33 @@ class CommandRunner:
 			error = f'Command failed with return code {self.return_code}.'
 			if self.output:
 				error += f'Output: {self.output}'
+			self.error = error
 			self._print(error, color='bold red')
+			return
 
 		# Callback after running cmd
 		self.run_hooks('on_end')
+
+	def _configure_proxy(self):	
+		"""Configure proxy. Start with global settings like 'proxychains' or 
+		'random', or fallback to tool-specific proxy settings.
+
+		TODO: Move this to a subclass of CommandRunner, or to a configurable 
+		attribute to pass to derived classes as it's not related to core 
+		functionality.
+		"""
+		proxy_opt = self.opt_key_map.get('proxy', False)
+		support_proxychains = getattr(self, 'proxychains', True)
+		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
+		if self.proxy == 'proxychains':
+			if not support_proxychains:
+				return
+			self.cmd = f'proxychains {self.cmd}'
+		elif self.proxy and support_proxy:
+			if self.proxy == 'random':
+				self.cmd_opts['proxy'] = FreeProxy(timeout=0.1, anonym=True).get()
+			else: # tool-specific proxy settings
+				self.cmd_opts['proxy'] = self.proxy
 
 	def _process_results(self):
 		# TODO: this is uniquely for logging timestamp to show up properly !!!
@@ -552,6 +583,7 @@ class CommandRunner:
 
 	def _build_cmd(self):
 		"""Build command string."""
+
 		# Add JSON flag to cmd
 		if self._json_output and self.json_flag:
 			self.cmd += f' {self.json_flag}'
@@ -577,6 +609,7 @@ class CommandRunner:
 			command_name=self.name)
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
+
 
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function 
@@ -666,7 +699,7 @@ class CommandRunner:
 
 		return new_item
 
-	def _print(self, data, color=None, prefix=True):
+	def _print(self, data, color=None):
 		"""Print function.
 
 		Args:
@@ -685,6 +718,11 @@ class CommandRunner:
 
 		# Print a JSON item
 		elif isinstance(data, dict):
+			# JSON dumps data so that it's consumable by other tools
+			data = json.dumps(data)
+
+			# Add prefix to output
+			data = f'{self.prefix} {data}' if self.prefix else data
 
 			# We might want to parse results with e.g 'jq' so we need pure JSON
 			# line with no logging info, unless --color is passed in print_timestamp
@@ -694,16 +732,15 @@ class CommandRunner:
 			else:
 				print(json.dumps(data))
 
-		# Print a line item
+		# Print a line
 		elif isinstance(data, str):
 
-			add_prefix = prefix and self._print_task_name_prefix
-			if add_prefix:
-				data = f'({self.name}) {data}'
+			# Add prefix to output
+			data = f'{self.prefix} {data}' if self.prefix else data
 
 			# If raw mode (--raw), we might want to parse results with e.g 
 			# pipe redirections, so we need a pure line with no logging info
-			if self._raw_output:
+			if self._raw_output or self._orig_output:
 				print(data)
 			else:
 				if color:
@@ -712,3 +749,10 @@ class CommandRunner:
 					console.log(data)
 				else:
 					console.print(data)
+
+	def _set_prefix(self):
+		self.prefix = ''
+		if self._print_cmd_prefix:
+			self.prefix = f'[bold gold3]({self.name})[/]'
+		if self.chunk and self.chunk_count:
+			self.prefix += f' [{self.chunk}/{self.chunk_count}]'

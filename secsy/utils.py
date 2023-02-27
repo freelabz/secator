@@ -316,3 +316,7 @@ def pluralize(word):
 		return word.rstrip('y') + 'ies'
 	else:
 		return f'{word}s'
+
+
+class TaskError(ValueError):
+	pass

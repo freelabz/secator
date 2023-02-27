@@ -13,14 +13,17 @@ v0.0.1
     - [x] Result backend and task broker for Celery integration, add new class `Runner` which takes run configuration options (`cloud`, `celery`, `local (default)`)
 - [x] Rework logging vs prints
 - [x] Options '_' to '-' conversion
+- [x] Check if IP is local before running some passive tools (e.g subfinder) as they output false positives
 
 **TODO:**
 - [ ] Pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
     - [ ] Pydantic + potential db schemas base ?
     - [ ] Used to format results as well
-- Replace `console.log` by `logger.info` with rich logging handler (add Logging Handler and setup function) + Celery worker
-- [ ] Check if IP is local before running some passive tools (e.g gau) as they output false positives
-- [ ] Add HTML reports
+- [ ] Reporting
+    - [ ] HTML reporting not based on Rich's export_html
+    - [ ] Save JSON report
+    - [ ] Output live JSON items for workflows / scans (need to query Celery tasks for results dynamically)
+- [ ] Replace `console.log` by `logger.info` with rich logging handler (add Logging Handler and setup function) + Celery worker
 - [ ] Autodiscover external tools
 - [ ] Use --<tool>.<option_name> in the CLI (instead of `_`) to override option names.
 - [ ] Improve multiple targets support + add tests for it
@@ -31,6 +34,7 @@ v0.0.1
     - [ ] Install `katoolin3` from my GitHub and all Kali packages --> installs all Kali Linux tools
 - [ ] Work on better proxy support, maybe using `proxychains`
 - [ ] Add external pluggable configs/ folder.
+- [ ] Allow stdin input for all Secsy commands.
 
 
 - **Integrations:**
