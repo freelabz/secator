@@ -139,7 +139,7 @@ class subfinder(ReconCommand):
 		THREADS: 't'
 	}
 	opt_value_map = {
-		PROXY: lambda x: x.lstrip('http://').lstrip('https://') if x else None
+		PROXY: lambda x: x.replace('http://', '').replace('https://', '') if x else None
 	}
 	output_map = {
 		DOMAIN: 'input'
@@ -149,6 +149,7 @@ class subfinder(ReconCommand):
 	output_type = SUBDOMAIN
 	output_field = HOST
 	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
+	proxychains = False
 
 	@staticmethod
 	def validate_item(self, item):

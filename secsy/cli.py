@@ -53,10 +53,15 @@ def utils():
 
 
 @cli.command()
-def worker():
+@click.option('-c', '--concurrency', type=int, help='Number of child processes processing the queue.')
+def worker(concurrency):
 	"""Run a Celery worker."""
+	cmd = 'celery -A secsy.celery.app worker -n runner'
+	if concurrency:
+		cmd += f' -c {concurrency}'
 	CommandRunner.run_command(
-		'celery -A secsy.celery.app worker -n runner',
+		cmd,
+		print_cmd=True,
 		print_timestamp=True
 	)
 

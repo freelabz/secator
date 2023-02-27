@@ -6,6 +6,7 @@ from time import sleep
 import celery
 from celery import chain, chord, signals
 from celery.app import trace
+from celery.exceptions import Ignore
 from celery.result import AsyncResult, allow_join_result
 
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND,
@@ -14,7 +15,7 @@ from secsy.rich import console
 from secsy.rich import handler as rich_handler
 from secsy.runner import merge_extracted_values
 from secsy.utils import (deduplicate, find_external_commands,
-                         find_internal_commands, flatten)
+                         find_internal_commands, flatten, TaskError)
 
 logger = logging.getLogger(__name__)
 
@@ -25,23 +26,26 @@ COMMANDS = find_internal_commands() + find_external_commands()
 
 app = celery.Celery(__name__)
 app.conf.update({
-	# Configuration du broker
+	# Broker config
 	'broker_url': CELERY_BROKER_URL,
 	'broker_transport_options': {
 		'data_folder_in': f'{TEMP_FOLDER}/in',
 		'data_folder_out': f'{TEMP_FOLDER}/out',
 	},
 
-	# Configuration du result backend
+	# Backend config
 	'result_backend': CELERY_RESULT_BACKEND,
-	'result_extended': True
+	'result_extended': True,
+
+	# Celery config
+	'task_eager_propagates': False
 })
 
 
 @signals.celeryd_init.connect
 def setup_log_format(sender, conf, **kwargs):
     conf.worker_log_format = ''
-    conf.worker_task_log_format = '[%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s'
+    # conf.worker_task_log_format = '[%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s'
 
 
 #--------------#
@@ -62,8 +66,9 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 	sigs = []
 	for ix, chunk in enumerate(chunks):
 		if len(chunks) > 0: # add chunk to task opts for tracking chunks exec
-			task_opts['chunk'] = ix
+			task_opts['chunk'] = ix + 1
 			task_opts['chunk_count'] = len(chunks)
+		task_opts['track'] = True
 		sig = task_cls.s(chunk, **task_opts)
 		sigs.append(sig)
 
@@ -75,17 +80,32 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 			forward_results.s()
 		)
 	)
-
 	return workflow
 
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
-	# Get chunk if any
 	chunk = opts.get('chunk')
+	chunk_count = opts.get('chunk_count')
 	sync = opts.get('sync', True)
+	display_name = name
+	display_name += f' [{chunk}/{chunk_count}]' if chunk else ''
 
-	# Flaten + dedupe results
+	# Update task state in backend
+	count = 0
+	track = False if chunk else True
+	state = {
+		'state': 'RUNNING',
+		'meta': {
+			'name': display_name,
+			'results': [],
+			'count': count,
+			'track': track
+		}
+	}
+	self.update_state(**state)
+
+	# Flatten + dedupe results
 	results = flatten(results)
 	results = deduplicate(results, key='_uuid')
 
@@ -96,55 +116,69 @@ def run_command(self, results, name, targets, opts={}):
 			targets = _targets
 
 	# Get task class
-	task = [task for task in COMMANDS if task.__name__ == name]
-	if not task:
+	task_cls = [task for task in COMMANDS if task.__name__ == name]
+	if not task_cls:
 		console.log(f'Task {name} not found. Aborting.', style='bold red')
 		return
-	task = task[0]
+	task_cls = task_cls[0]
 
 	# If task doesn't support multiple targets, or if the number of targets is 
 	# too big, split into multiple tasks
 	multiple_targets = isinstance(targets, list)
-	single_target_only = multiple_targets and task.file_flag is None
-	break_size_threshold = multiple_targets and len(targets) > task.input_chunk_size
-
+	single_target_only = multiple_targets and task_cls.file_flag is None
+	break_size_threshold = multiple_targets and len(targets) > task_cls.input_chunk_size
 	if single_target_only or break_size_threshold:
-		chunk_size = 1 if single_target_only else task.input_chunk_size
-		console.log(f'Breaking targets into chunks of size {chunk_size}')
+		chunk_size = 1 if single_target_only else task_cls.input_chunk_size
 		workflow = break_task(
-			task,
+			task_cls,
 			opts,
 			targets,
 			results=results,
 			chunk_size=chunk_size)
-		sync = opts.get('sync', True)
 		with allow_join_result():
-			return workflow.apply().get() if sync else workflow().get()
+			result = workflow.apply() if sync else workflow()
+			task_results = result.get(propagate=False)
+			results.extend(task_results)
+			state['state'] = 'SUCCESS'
+			state['meta']['results'] = results
+			state['meta']['count'] = len(results)
+			self.update_state(**state)
+			return results
 
 	# Run task
+	task = task_cls(targets, **opts)
 	task_results = []
-	count = 0
-	self.update_state(
-		state='PROGRESS',
-		meta={'name': name, 'results': [], 'count': count}
-	)
-	for item in task(targets, **opts):
+	for item in task:
 		result_uuid = str(uuid.uuid4())
 		item['_uuid'] = result_uuid
 		task_results.append(item)
 		results.append(item)
 		count += 1
-		self.update_state(
-			state='PROGRESS',
-			meta={'name': name, 'results': results, 'count': count}
-		)
-	return results
+		state['meta']['results'] = task_results
+		state['meta']['count'] = len(task_results)
+		self.update_state(**state)
+
+	# Update task state based on task return code
+	task_state = 'SUCCESS' if task.return_code == 0 else 'FAILURE'
+	state['state'] = task_state
+	if task_state == 'FAILURE':
+		exc = TaskError(task.error)
+		state['meta']['exc_type'] = type(exc).__name__
+		state['meta']['exc_message'] = task.error
+		self.update_state(**state)
+		sleep(1)
+		return results
+
+	# Task is success
+	self.update_state(**state)
+
+	# If running in chunk mode, only return chunk result, not all results
+	return task_results if chunk else results
 
 
 @app.task
-def forward_results(*args, **kwargs):
-	# Flatten + dedupe results
-	results = flatten(args[0])
+def forward_results(results):
+	results = flatten(results)
 	results = deduplicate(results, key='_uuid')
 	return results
 

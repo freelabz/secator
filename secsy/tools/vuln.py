@@ -52,10 +52,6 @@ class VulnCommand(CommandRunner):
 	input_type = HOST
 
 	@staticmethod
-	def on_table(items):
-		return sort_vulns_by_severity(items)
-
-	@staticmethod
 	def on_item_converted(self, item):
 		severity_map = {
 			'critical': 0,
@@ -112,7 +108,7 @@ class dalfox(VulnCommand):
 class nmap(VulnCommand):
 	"""Network Mapper is a free and open source utility for network discovery
 	and security auditing."""
-	cmd = f'nmap -sV -Pn'
+	cmd = f'nmap -sT -sV -Pn'
 	input_flag = None
 	file_flag = '-iL'
 	opt_prefix = '--'
@@ -254,7 +250,7 @@ class nmapData(dict):
 			if hostnames:
 				hostname = hostnames[0]['@name']
 		else:
-			hostname = host_cfg.get('address')['@addr']
+			hostname = host_cfg.get('address', {}).get('@addr', None)
 		return hostname
 
 	def _get_extracted_results(self, port_cfg):
@@ -435,7 +431,7 @@ class nmapData(dict):
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
-		cvss = cve_info.get('cvss')
+		cvss = cve_info.get('cvss', -1)
 		# exploit_ids = cve_info.get('refmap', {}).get('exploit-db', [])
 		# osvdb_ids = cve_info.get('refmap', {}).get('osvdb', [])
 
@@ -505,7 +501,7 @@ class nuclei(VulnCommand):
 	"""Fast and customisable vulnerability scanner based on simple YAML based
 	DSL.
 	"""
-	cmd = 'nuclei -silent -nc'
+	cmd = 'nuclei -silent'
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-json'
@@ -556,79 +552,3 @@ class nuclei(VulnCommand):
 		if len(cve_ids) > 0:
 			return cve_ids[0]
 		return None
-
-
-def sort_vulns_by_severity(vulns):
-	data = []
-	severity_map = {
-		'critical': 0,
-		'high': 1,
-		'medium': 2,
-		'low': 3,
-		'info': 4,
-		None: 5
-	}
-	for vuln in vulns:
-		item = vuln.copy() # do not modify original results
-		refs = item.get(VULN_REFERENCES) or []
-		if isinstance(refs, list) and len(refs) > 0:
-			item[VULN_REFERENCES] = refs[0]
-		item['severity_nb'] = severity_map[item[VULN_SEVERITY]]
-		item['confidence_nb'] = severity_map[item[VULN_CONFIDENCE]]
-		data.append(item)
-	return sorted(data, key=lambda x: (x['confidence_nb'], x['severity_nb']))
-
-
-def extract_field(vulns, callable, default=None):
-	items = [callable(v) for v in vulns]
-	return next((item for item in items if item), default)
-
-
-def print_vulns(vulns):
-	"""Group list of vulnerability objects by 'matched_at' and print a nice 
-	output.
-
-	Args:
-		list: List of dict.
-
-	"""
-	vulns = sorted(vulns, key=lambda x: x['matched_at'])
-	for matched_at, vulns in groupby(vulns, lambda x: x['matched_at']):
-		vulns = sort_vulns_by_severity(list(vulns))
-		pextract = lambda x: x.get('extracted_results', {}).get('product')
-		vextract = lambda x: x.get('extracted_results', {}).get('version')
-		cextract = lambda x: x.get('extracted_results', {}).get('cpe')
-		product = extract_field(vulns, pextract, default='?')
-		version = extract_field(vulns, vextract, default='?')
-		cpes = extract_field(vulns, cextract, default=[])
-		cpes = ', '.join(cpes)
-		msg = colored(f'\n • {matched_at}', 'magenta')
-		msg += colored(f' [{product}/{version}]', 'cyan')
-		if cpes:
-			msg += colored(f' [{cpes}]', 'cyan')
-		print(msg)
-		# fields = VulnCommand.output_table_fields.copy()
-		# fields.remove('matched_at')
-		# print(fmt_table(vulns, output_table_fields=VulnCommand.output_table_fields))
-		for vuln in vulns:
-			name = vuln['name']
-			confidence = vuln[VULN_CONFIDENCE]
-			source = vuln['_source']
-			severity = vuln.get(VULN_SEVERITY) or 'info'
-			cvss_score = vuln.get('cvss_score') or '?'
-			references = vuln.get(VULN_REFERENCES) or []
-			severity_colors = {
-				'critical': 'light_red',
-				'high': 'red',
-				'medium': 'light_yellow',
-				'low': 'yellow',
-				'info': 'green'
-			}
-			color = severity_colors[severity]
-			color = 'light_grey' if confidence == 'low' else color
-			vuln_str = f'{severity: <9} | {name: <45} | score: {cvss_score: <4} | confidence: {confidence: <4} | source: {source: <10}'
-			if isinstance(references, list) and len(references) > 0:
-					references = references[0]
-			if references:
-				vuln_str += f' | {references}'
-			cprint(f'  {vuln_str}', color)	

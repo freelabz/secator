@@ -326,7 +326,7 @@ class gospider(HTTPCommand):
 			http_statuses = match_codess.split(',')
 			if not str(item['status']) in http_statuses:
 				return False
-			
+
 		if item['status'] == 0:
 			return False
 

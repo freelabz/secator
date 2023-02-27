@@ -158,10 +158,11 @@ class Workflow(Runner):
 			fmt_opts = {
 				'print_timestamp': False,
 				'print_cmd': True,
+				'print_cmd_prefix': True,
 				'print_item_count': True,
-				'print_task_name_prefix': True
 			}
 		fmt_opts['sync'] = sync
+		fmt_opts['track'] = True
 		self.config.options.update(fmt_opts)
 
 		# Log workflow start
@@ -184,7 +185,7 @@ class Workflow(Runner):
 			result = workflow()
 			console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
 			self.process_live_tasks(result)
-		self.results = result.get()
+		self.results = result.get(propagate=False)
 		self.results = self.filter_results()
 		self.done = True
 		self.log_workflow()
@@ -193,15 +194,19 @@ class Workflow(Runner):
 	def process_live_tasks(self, result):
 		tasks_progress = Progress(
 			SpinnerColumn('dots'),
-			TextColumn('[bold magenta]{task.fields[name]:<10}[/] {task.fields[state]:<10}'),
+			TextColumn('[bold gold3]{task.fields[name]}[/]'),
+			TextColumn('{task.fields[state]:<20}'),
+			# TextColumn('[bold red]{task.fields[error]}[/]'),
+			TextColumn('[bold magenta]{task.fields[celery_task_id]:<30}[/]'),
 			TimeElapsedColumn(),
 			refresh_per_second=1
 		)
 		state_colors = {
-			'PROGRESS': 'bold yellow',
+			'RUNNING': 'bold yellow',
 			'SUCCESS': 'bold green',
 			'FAILURE': 'bold red'
 		}
+		errors = []
 		with tasks_progress as progress:
 
 			# Make progress tasks
@@ -213,18 +218,24 @@ class Workflow(Runner):
 				get_task_ids(result, ids=task_ids)
 				for task_id in task_ids:
 					info = get_task_info(task_id)
-					if not info:
+					if not info or not info['track']:
 						continue
 					state = info['state']
-					name = info['name']
 					state_str = f'[{state_colors[state]}]{state}[/]'
+					info['state'] = state_str
 					if task_id not in tasks_progress:
-						id = progress.add_task('', name=name, state=state_str)
+						id = progress.add_task('', **info)
 						tasks_progress[task_id] = id
 					else:
 						progress_id = tasks_progress[task_id]
 						if state in ['SUCCESS', 'FAILURE']:
-							progress.update(progress_id, name=name, state=state_str, advance=100)
+							progress.update(progress_id, advance=100, **info)
+
+					# Add error
+					if state == 'FAILURE':
+						error_str = f'[bold gold3]{info["name"]}[/]: [bold red]{info["error"]}[/]'
+						if error_str not in errors:
+							errors.append(error_str)
 
 				# Update all tasks to 100 % if workflow has finished running
 				res = AsyncResult(result.id)
@@ -235,6 +246,12 @@ class Workflow(Runner):
 
 				# Sleep between updates
 				sleep(1)
+			
+		if errors:
+			console.print()
+			console.log('Errors:', style='bold red')
+			for error in errors:
+				console.print('  ' + error)
 
 	def filter_results(self):
 		extractors = self.config.results
@@ -272,7 +289,7 @@ class Workflow(Runner):
 			self.targets,
 			self.config.options,
 			self.run_opts)
-		sigs = [forward_results.si(results)] + sigs
+		sigs = [forward_results.si(results)] + sigs + [forward_results.s()]
 		workflow = chain(*sigs)
 		return workflow
 
@@ -369,6 +386,7 @@ class Workflow(Runner):
 		# Print workflow results
 		if self.show_results:
 			self.log_results()
+
 		if self.done:
 			self.end_time = datetime.fromtimestamp(time())
 			delta = self.end_time - self.start_time
@@ -455,8 +473,11 @@ def get_table_fields(output_type):
 		'subdomain': subfinder
 	}
 	if output_type in output_map:
-		sort_by = output_map[output_type].output_table_sort_fields
-		output_fields = output_map[output_type].output_table_fields
+		task_cls = output_map[output_type]
+		sort_by = task_cls.output_table_sort_fields
+		if not sort_by:
+			sort_by = (task_cls.output_field,)
+		output_fields = task_cls.output_table_fields
 	return sort_by, output_fields
 
 
@@ -476,7 +497,7 @@ def merge_extracted_values(results, opts):
 		key = key.rstrip('_')
 		values = extract_from_results(results, val)
 		if key == 'input':
-			targets = values
+			targets = deduplicate(values)
 		else:
 			opts[key] = deduplicate(values)
 	return targets, opts
@@ -555,17 +576,24 @@ def get_task_ids(result, ids=[]):
 
 def get_task_info(task_id):
 	res = AsyncResult(task_id)
-	res_name = None
-	res_state = res.state
-	res_results = None
+	data = {}
 	if res.args and len(res.args) > 1:
-		res_name = res.args[1]
-		res_results = res.info
-	if res_name:
-		data = {
-			'name': res_name,
-			'state': res.state,
-			# 'results': res_results
-		}
-		return data
-	return None
+		task_name = res.args[1]
+		data['celery_task_id'] = task_id
+		data['name'] = task_name
+		data['state'] = res.state
+		data['error'] = ''
+		data['track'] = False
+		data['results'] = []
+		data['done'] = 0
+		if res.info: # only available in RUNNING, SUCCESS, FAILURE states
+			if isinstance(res.info, BaseException):
+				data['track'] = True
+				data['error'] = str(res.info)
+			else:
+				data['track'] = res.info.get('track', False)
+				data['results'] = res.info.get('results', [])
+				data['done'] = res.info.get('done', 0)
+	# import json
+	# console.print_json(json.dumps(data))
+	return data
