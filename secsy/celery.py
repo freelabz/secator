@@ -166,7 +166,6 @@ def run_command(self, results, name, targets, opts={}):
 		state['meta']['exc_type'] = type(exc).__name__
 		state['meta']['exc_message'] = task.error
 		self.update_state(**state)
-		sleep(1)
 		return results
 
 	# Task is success
