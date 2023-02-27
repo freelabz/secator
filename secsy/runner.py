@@ -196,9 +196,9 @@ class Workflow(Runner):
 			SpinnerColumn('dots'),
 			TextColumn('[bold gold3]{task.fields[name]}[/]'),
 			TextColumn('{task.fields[state]:<20}'),
-			# TextColumn('[bold red]{task.fields[error]}[/]'),
-			TextColumn('[bold magenta]{task.fields[celery_task_id]:<30}[/]'),
 			TimeElapsedColumn(),
+			TextColumn('{task.fields[count]}'),
+			TextColumn('\[[bold magenta]{task.fields[celery_task_id]:<30}[/]]'),
 			refresh_per_second=1
 		)
 		state_colors = {
@@ -585,7 +585,7 @@ def get_task_info(task_id):
 		data['error'] = ''
 		data['track'] = False
 		data['results'] = []
-		data['done'] = 0
+		data['count'] = 0
 		if res.info and not isinstance(res.info, list): # only available in RUNNING, SUCCESS, FAILURE states
 			if isinstance(res.info, BaseException):
 				data['track'] = True
@@ -593,7 +593,7 @@ def get_task_info(task_id):
 			else:
 				data['track'] = res.info.get('track', False)
 				data['results'] = res.info.get('results', [])
-				data['done'] = res.info.get('done', 0)
+				data['count'] = res.info.get('count', 0)
 	# import json
 	# console.print_json(json.dumps(data))
 	return data
