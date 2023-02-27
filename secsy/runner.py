@@ -204,7 +204,8 @@ class Workflow(Runner):
 		state_colors = {
 			'RUNNING': 'bold yellow',
 			'SUCCESS': 'bold green',
-			'FAILURE': 'bold red'
+			'FAILURE': 'bold red',
+			'REVOKED': 'bold magenta'
 		}
 		errors = []
 		with tasks_progress as progress:
