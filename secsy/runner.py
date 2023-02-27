@@ -586,7 +586,7 @@ def get_task_info(task_id):
 		data['track'] = False
 		data['results'] = []
 		data['done'] = 0
-		if res.info: # only available in RUNNING, SUCCESS, FAILURE states
+		if res.info and not isinstance(res.info, list): # only available in RUNNING, SUCCESS, FAILURE states
 			if isinstance(res.info, BaseException):
 				data['track'] = True
 				data['error'] = str(res.info)
