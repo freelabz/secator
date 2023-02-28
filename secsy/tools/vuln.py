@@ -110,6 +110,7 @@ class nmap(VulnCommand):
 	and security auditing."""
 	cmd = f'nmap -sT -sV -Pn'
 	input_flag = None
+	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
 	opts = {
