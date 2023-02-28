@@ -97,7 +97,7 @@ meta_opts = {
 
     # Individual tools options
     'gf_pattern': 'xss',
-    'nmap_xml_path': load_fixture('nmap_output', path=True, ext='.xml'), # nmap XML fixture
+    'nmap_output_path': load_fixture('nmap_output', path=True, ext='.xml'), # nmap XML fixture
     'msfconsole_resource_script': load_fixture('msfconsole_input', path=True),
     'dirsearch_output_path': load_fixture('dirsearch_output', path=True),
     'maigret_output_path': load_fixture('maigret_output', path=True)
