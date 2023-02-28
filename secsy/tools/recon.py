@@ -26,6 +26,34 @@ class ReconCommand(CommandRunner):
 	input_type = HOST
 
 
+class fping(ReconCommand):
+	cmd = 'fping -a'
+	file_flag = '-f'
+	input_flag = None
+	install_cmd = 'apt install fping'
+	ignore_return_code = True
+	opt_prefix = '--'
+	opt_key_map = {
+		DELAY: 'period',
+		PROXY: 'proxy',
+		RATE_LIMIT: OPT_NOT_SUPPORTED,
+		RETRIES: 'retry',
+		TIMEOUT: 'timeout',
+		THREADS: OPT_NOT_SUPPORTED
+	}
+	opt_value_map = {
+		DELAY: lambda x: x * 1000,  # convert s to ms
+		TIMEOUT: lambda x: x * 1000 # convert s to ms
+	}
+	input_type = IP
+	output_schema = [IP, 'alive']
+	output_type = IP
+
+	def item_loader(self, line):
+		if validators.ipv4(line) or validators.ipv6(line):
+			return {'ip': line, 'alive': True}
+		return None
+
 class maigret(ReconCommand):
 	"""Collects a dossier on a person by username."""
 	cmd = 'maigret'
@@ -93,7 +121,7 @@ class mapcidr(ReconCommand):
 	file_flag = '-cl'
 	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest'
 	input_type = CIDR_RANGE
-	output_schema = [IP]
+	output_schema = [IP, 'alive']
 	output_type = IP
 	opt_key_map = {
 		THREADS: OPT_NOT_SUPPORTED,
@@ -106,7 +134,7 @@ class mapcidr(ReconCommand):
 
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):
-			return {'ip': line}
+			return {'ip': line, 'alive': False}
 		return None
 
 

@@ -2,6 +2,7 @@ from collections import OrderedDict
 
 import rich_click as click
 from rich_click.rich_group import RichGroup
+import sys
 
 from secsy.config import ConfigLoader
 from secsy.definitions import *
@@ -109,7 +110,7 @@ def register_command(cls, cli_endpoint):
 		'print_line': True,
 		'print_timestamp': True,
 	}
-	@click.argument(input_type)
+	@click.argument(input_type, required=False)
 	@decorate_command_options(options)
 	def func(**opts):
 		opts.update(default_opts)
@@ -122,7 +123,7 @@ def register_command(cls, cli_endpoint):
 	cli_endpoint.command(
 		name=cls.__name__,
 		context_settings=settings,
-		no_args_is_help=True,
+		# no_args_is_help=True, # TODO: incompatible with stdin output
 		short_help=f'{cls_category:<10}{cls.__doc__}')(func)
 
 

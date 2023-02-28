@@ -1,0 +1,9 @@
+name: network_recon
+description: Run network recon (with a CIDR input).
+tasks:
+  mapcidr:
+  fping:
+    input_: ip.ip
+results:
+  - type: ip
+    condition: item['alive'] is True

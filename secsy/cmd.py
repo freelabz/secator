@@ -105,6 +105,9 @@ class CommandRunner:
 	# Serializer
 	item_loader = JSONSerializer()
 
+	# Ignore return code
+	ignore_return_code = False
+
 	# Command output formatting options
 	_raw_output = False
 	_orig_output = False
@@ -381,10 +384,12 @@ class CommandRunner:
 				line = self.run_hooks('on_line', line)
 
 				# Run item_loader to try parsing as dict
-				if callable(self.item_loader):
-					item = self.item_loader(line)
-				else:
-					item = self.item_loader.run(line)
+				item = None
+				if self._json_output:
+					if callable(self.item_loader):
+						item = self.item_loader(line)
+					else:
+						item = self.item_loader.run(line)
 
 				# Process dict item or line
 				if item:
@@ -392,7 +397,7 @@ class CommandRunner:
 					if not item:
 						continue
 					yield item
-				else:
+				elif line:
 					if self._print_line and not (self.quiet and self._json_output):
 						self._print(line)
 					if not self.output_return_type is dict:
@@ -416,7 +421,7 @@ class CommandRunner:
 		# Retrieve the return code and output
 		process.wait()
 		process.stdout.close()
-		self.return_code = process.returncode
+		self.return_code = process.returncode if not self.ignore_return_code else 0
 		self.output = self.output.strip()
 		if self.return_code != 0 and not killed:
 			error = f'Command failed with return code {self.return_code}.'
@@ -458,7 +463,8 @@ class CommandRunner:
 		# Log results count
 		if self._print_item_count and self._json_output and not self._raw_output:
 			count = len(self.results)
-			item_name = pluralize(self.output_type) if count > 1 else self.output_type
+			name = self.output_type or 'item'
+			item_name = pluralize(name) if count > 1 else name
 			if count > 0:
 				self._print(f':pill: Found {count} {item_name} !', color='bold green')
 			else:

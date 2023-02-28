@@ -1,0 +1,11 @@
+name: internal
+description: Internal scan (network level)
+profile: default
+workflows:
+  network_recon:
+  host_recon:
+    input_:
+    - ip.ip
+  url_finder:
+    input_:
+    - url.url
