@@ -16,6 +16,7 @@ v0.0.1
 - [x] Check if IP is local before running some passive tools (e.g subfinder) as they output false positives
 
 **TODO:**
+- [ ] Add `mapcidr` and `arp-scan` to find interesting local IPs
 - [ ] Pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
     - [ ] Pydantic + potential db schemas base ?
     - [ ] Used to format results as well

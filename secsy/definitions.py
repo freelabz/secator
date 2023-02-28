@@ -15,6 +15,7 @@ OUTPUT_TYPES = ['target', 'subdomain', 'port', 'url', 'vulnerability']
 ALL = 'all'
 AUTO_CALIBRATION = 'auto_calibration'
 HEADER = 'header'
+CIDR_RANGE = 'cidr_range'
 DELAY = 'delay'
 DOMAIN = 'domain'
 FOLLOW_REDIRECT = 'follow_redirect'
