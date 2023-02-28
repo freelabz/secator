@@ -4,12 +4,15 @@ import itertools
 import logging
 import mimetypes
 import os
+import select
+import sys
 import warnings
 from importlib import import_module
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse
+from secsy.definitions import DEFAULT_STDIN_TIMEOUT
 
 import tabulate
 from furl import furl
@@ -36,7 +39,7 @@ def setup_logging(level):
 	return logger
 
 
-def expand_input(input, splitlines=True):
+def expand_input(input):
 	"""Expand user-provided input on the CLI:
 	- If input is a path, read the file and return the lines. 
 	- If it's a comma-separated list, return the list.
@@ -44,18 +47,23 @@ def expand_input(input, splitlines=True):
 
 	Args:
 		input (str): Input.
-		splitlines (bool, Optional): Split lines and return list.
 
 	Returns:
 		str: Input.
 	"""
-	if os.path.exists(input):
-		with open(input, 'r') as f:
-			data = f.read()
-			if splitlines:
-				data = data.splitlines()
+	if input is None:
+		rlist, _, _ = select.select([sys.stdin], [], [], DEFAULT_STDIN_TIMEOUT)
+		if rlist:
+			data = sys.stdin.read().splitlines()
+		else:
+			print('No input detected from stdin. Aborting.')
+			sys.exit(0)
 		return data
-	elif ',' in input:
+	elif os.path.exists(input):
+		with open(input, 'r') as f:
+			data = f.read().splitlines()
+		return data
+	elif isinstance(input, str):
 		input = input.split(',')
 	return input
 

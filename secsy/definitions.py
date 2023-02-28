@@ -6,11 +6,12 @@ TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
 REPORTS_FOLDER = os.environ.get('REPORTS_FOLDER', '/tmp/reports')
 RECORD = bool(os.environ.get('RECORD', '0'))
 DEFAULT_CHUNK_SIZE = 100
+DEFAULT_STDIN_TIMEOUT = 5
 
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{TEMP_FOLDER}/celery/results')
 
-OUTPUT_TYPES = ['target', 'subdomain', 'port', 'url', 'vulnerability']
+OUTPUT_TYPES = ['target', 'subdomain', 'port', 'ip', 'url', 'vulnerability']
 
 ALL = 'all'
 AUTO_CALIBRATION = 'auto_calibration'
