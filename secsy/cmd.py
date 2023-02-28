@@ -728,9 +728,9 @@ class CommandRunner:
 			# line with no logging info, unless --color is passed in print_timestamp
 			# which clarifies the user intent to use it for visualizing results.
 			if self.color and self._print_item:
-				console.print_json(json.dumps(data))
+				console.print_json(data)
 			else:
-				print(json.dumps(data))
+				print(data)
 
 		# Print a line
 		elif isinstance(data, str):
