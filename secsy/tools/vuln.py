@@ -116,7 +116,7 @@ class nmap(VulnCommand):
 	opts = {
 		PORTS: {'type': str, 'help': 'Ports to scan'},
 		SCRIPT: {'type': str, 'default': 'vulscan/,vulners', 'help': 'nmap NSE script'},
-		'xml_path': {'type': str, 'default': None, 'help': 'Path to nmap XML file'}
+		'output_path': {'type': str, 'default': None, 'help': 'Path to nmap XML file'}
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
@@ -177,7 +177,7 @@ class nmap(VulnCommand):
 
 	@staticmethod
 	def on_init(self):
-		output_path = self.get_opt_value('xml_path')
+		output_path = self.get_opt_value('output_path')
 		if not output_path:
 			timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
 			output_path = f'{TEMP_FOLDER}/nmap_{timestr}.xml'
