@@ -115,11 +115,11 @@ class TestCommand(unittest.TestCase):
         input = INPUTS[cls.input_type]
         command = cls(input, **opts)
         items = command.run()
+        if expected_return_code:
+            self.assertEqual(command.return_code, expected_return_code)
         if not items:
             warnings.warn(
                 f'No results from {cls.__name__} ! Skipping item check.')
-        if expected_return_code:
-            self.assertEqual(command.return_code, expected_return_code)
         for item in items:
             if expected_output_type:
                 self.assertEqual(type(item), expected_output_type)
