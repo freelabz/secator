@@ -51,7 +51,7 @@ def expand_input(input):
 	Returns:
 		str: Input.
 	"""
-	if input is None:
+	if input is None: # read from stdin
 		rlist, _, _ = select.select([sys.stdin], [], [], DEFAULT_STDIN_TIMEOUT)
 		if rlist:
 			data = sys.stdin.read().splitlines()
@@ -65,6 +65,11 @@ def expand_input(input):
 		return data
 	elif isinstance(input, str):
 		input = input.split(',')
+
+	# If the list is only one item, return it instead of the list
+	# Usefull for commands that can take only one input at a time.
+	if isinstance(input, list) and len(input) == 1:
+		return input[0]
 	return input
 
 
@@ -195,7 +200,7 @@ def setup_logger(level='info', format='%(message)s'):
 
 
 def find_internal_tasks():
-	"""Find internal secsy commands."""
+	"""Find internal secsy tasks."""
 	from secsy.cmd import CommandRunner
 	package_dir = Path(__file__).resolve().parent / 'tasks'
 	task_classes = []
@@ -218,7 +223,7 @@ def find_internal_tasks():
 
 
 def find_external_tasks():
-	"""Find external secsy commands."""
+	"""Find external secsy tasks."""
 	if not os.path.exists('config.secsy'):
 		return []
 	with open('config.secsy', 'r') as f:

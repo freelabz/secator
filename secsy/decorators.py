@@ -48,14 +48,16 @@ def get_command_options(*tasks):
 	for cls in tasks:
 		opts = OrderedDict(DEFAULT_CLI_OPTIONS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
-			if (opt not in cls.opt_key_map and opt not in cls.opts and opt not in DEFAULT_CLI_OPTIONS) or (cls.opt_key_map.get(opt) == OPT_NOT_SUPPORTED):
+			if opt not in cls.opt_key_map and opt not in cls.opts and opt not in DEFAULT_CLI_OPTIONS:
+				continue
+			if cls.opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
 				continue
 			prefix = None
-			if (opt in cls.opts):
+			if opt in cls.opts:
 				prefix = cls.__name__
-			elif (opt in cls.meta_opts):
+			elif opt in cls.meta_opts:
 				prefix = 'meta'
-			elif (opt in DEFAULT_CLI_OPTIONS):
+			elif opt in DEFAULT_CLI_OPTIONS:
 				prefix = 'global'
 			opt = opt.replace('_', '-')
 			if opt in opt_cache:

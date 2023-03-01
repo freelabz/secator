@@ -43,12 +43,15 @@ class ffuf(HTTPCommand):
 	install_cmd = 'go install -v github.com/ffuf/ffuf@latest'
 
 	@staticmethod
-	def on_init(self):
-		# Remove query params for URL fuzzing
-		self.input = urlunparse(urlparse(self.input)._replace(query="")).rstrip('/')
+	def validate_input(self, input):
+		"""No list input supported for this command. Pass a single input instead."""
+		if isinstance(input, list):
+			return False
 
-		# Add /FUZZ keyword
+		# Remove query path and add /FUZZ keyword
+		self.input = urlunparse(urlparse(self.input)._replace(query="")).rstrip('/')
 		self.input = f'{self.input}/FUZZ'
+		return True
 
 	@staticmethod
 	def on_item_convert(self, item):

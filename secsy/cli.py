@@ -26,7 +26,7 @@ setup_logging(level)
 @click.group(cls=OrderedGroup)
 def cli():
 	"""Secsy CLI."""
-	print(ASCII)
+	print(ASCII, file=sys.stderr)
 	pass
 
 
@@ -63,6 +63,7 @@ def worker(concurrency):
 		cmd += f' -c {concurrency}'
 	CommandRunner.run_command(
 		cmd,
+		no_capture=True,
 		print_cmd=True,
 		print_timestamp=True
 	)
