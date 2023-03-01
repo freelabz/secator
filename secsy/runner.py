@@ -28,6 +28,7 @@ class Runner:
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
+		self.start_time = datetime.fromtimestamp(time())
 
 	def log_results(self):
 		"""Log results.
@@ -40,7 +41,7 @@ class Runner:
 			return
 		render = Console(record=True)
 		render.print()
-		title = f'{self.__class__.__name__} {self.config.name} results'
+		title = f'{self.__class__.__name__} "{self.config.name}" results'
 		h1 = Markdown(f'# {title}')
 		render.print(h1, style='bold magenta', width=50)
 		render.print()
@@ -61,6 +62,13 @@ class Runner:
 		html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'
 		render.save_html(html_path)
 		console.log(f'Saved HTML report to {html_path}')
+
+		# Log execution results
+		self.end_time = datetime.fromtimestamp(time())
+		delta = self.end_time - self.start_time
+		delta_str = humanize.naturaldelta(delta)
+		console.print(f':tada: [bold green]Workflow[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{delta_str}[/].')
+		console.print()
 
 
 class Scan(Runner):
@@ -104,7 +112,6 @@ class Scan(Runner):
 				targets,
 				sync=sync,
 				results=self.results,
-				show_results=False,
 				**run_opts)
 			self.results.extend(wresults)
 
