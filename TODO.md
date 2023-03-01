@@ -14,9 +14,15 @@ v0.0.1
 - [x] Rework logging vs prints
 - [x] Options '_' to '-' conversion
 - [x] Check if IP is local before running some passive tools (e.g subfinder) as they output false positives
+- [x] Add `mapcidr`
+- [x] Add `fping`
 
 **TODO:**
-- [ ] Add `mapcidr` and `arp-scan` to find interesting local IPs
+- [ ] Add `arp-scan`
+- [ ] Add techniques for IDS evasion (cf https://book.hacktricks.xyz/generic-methodologies-and-resources/pentesting-network/ids-evasion)
+- [ ] Make Celery tasks for:
+    - [ ] Results filtering
+    - [ ] Results deduplication / merging
 - [ ] Pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
     - [ ] Pydantic + potential db schemas base ?
     - [ ] Used to format results as well

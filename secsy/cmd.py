@@ -210,7 +210,7 @@ class CommandRunner:
 		# Chunks
 		self.chunk = self.cmd_opts.pop('chunk', None)
 		self.chunk_count = self.cmd_opts.pop('chunk_count', None)
-		self._set_prefix()
+		self._set_print_prefix()
 
 		# Callback before building the command line
 		self.run_hooks('on_init')
@@ -731,8 +731,8 @@ class CommandRunner:
 			data = f'{self.prefix} {data}' if self.prefix else data
 
 			# We might want to parse results with e.g 'jq' so we need pure JSON
-			# line with no logging info, unless --color is passed in print_timestamp
-			# which clarifies the user intent to use it for visualizing results.
+			# line with no logging info, unless --color is passed which 
+			# clarifies the user intent to use it for visualizing results.
 			if self.color and self._print_item:
 				console.print_json(data)
 			else:
@@ -756,7 +756,7 @@ class CommandRunner:
 				else:
 					console.print(data)
 
-	def _set_prefix(self):
+	def _set_print_prefix(self):
 		self.prefix = ''
 		if self._print_cmd_prefix:
 			self.prefix = f'[bold gold3]({self.name})[/]'

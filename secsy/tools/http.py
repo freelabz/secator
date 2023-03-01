@@ -309,6 +309,7 @@ class gospider(HTTPCommand):
 		CONTENT_LENGTH: 'length',
 	}
 	install_cmd = 'go install -v github.com/jaeles-project/gospider@latest'
+	ignore_return_code = True
 
 	@staticmethod
 	def validate_item(self, item):
