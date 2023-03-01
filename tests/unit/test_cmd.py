@@ -3,18 +3,14 @@ import logging
 import os
 import unittest
 import unittest.mock
-import validators
 import warnings
-import yaml
-
-from fp.fp import FreeProxy
 
 from secsy.cmd import CommandRunner
 from secsy.definitions import *
 from secsy.rich import console
-from secsy.utils import setup_logging, discover_internal_tasks
 from secsy.tasks import httpx
-from secsy.tasks._categories import HTTPCommand, ReconCommand, VulnCommand
+from secsy.utils import setup_logging, load_fixture
+from secsy.utils_test import mock_subprocess_popen, FIXTURES, INPUTS, META_OPTS, OUTPUT_VALIDATORS
 
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
@@ -22,87 +18,6 @@ USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 level = logging.DEBUG if DEBUG else logging.ERROR
 setup_logging(level)
-
-
-def mock_subprocess_popen(output_list):
-    mock_process = unittest.mock.MagicMock()
-    mock_process.wait.return_value = 0
-    mock_process.stdout.readline.side_effect = output_list
-    mock_process.returncode = 0
-    def mock_popen(*args, **kwargs):
-        return mock_process
-    return unittest.mock.patch('subprocess.Popen', mock_popen)
-
-
-def load_fixture(name, ext=None, only_path=False):
-    fixture_path = f'{FIXTURES_DIR}/{name}'
-    exts = ['.json', '.txt', '.xml', '.rc']
-    if ext:
-        exts = [ext]
-    for ext in exts:
-        path = f'{fixture_path}{ext}'
-        if os.path.exists(path):
-            if only_path:
-                return path
-            with open(path) as f:
-                content = f.read()
-            if path.endswith(('.json', '.yaml')):
-                return yaml.load(content, Loader=yaml.Loader)
-            else:
-                return content
-
-
-#---------#
-# GLOBALS #
-#---------#
-ALL_CMDS = discover_internal_tasks()
-TEST_COMMANDS = os.environ.get('TEST_COMMANDS', '')
-if TEST_COMMANDS:
-    TEST_COMMANDS = TEST_COMMANDS.split(',')
-else:
-    TEST_COMMANDS = [cls.__name__ for cls in ALL_CMDS]
-
-FIXTURES = {
-    tool_cls: load_fixture(f'{tool_cls.__name__}_output')
-    for tool_cls in ALL_CMDS
-    if tool_cls.__name__ in TEST_COMMANDS
-}
-INPUTS = {
-    URL: 'https://fake.com',
-    HOST: 'fake.com',
-    USERNAME: 'test',
-    IP: '192.168.1.23',
-    CIDR_RANGE: '192.168.1.0/24'
-}
-OUTPUT_VALIDATORS = {
-    URL: lambda url: validators.url(url),
-    HOST: lambda host: validators.domain(host),
-    USER_ACCOUNT: lambda url: validators.url(url),
-    PORT: lambda port: isinstance(port, int),
-    IP: lambda ip: validators.ipv4(ip) or validators.ipv6(ip),
-    None: lambda x: True,
-}
-meta_opts = {
-    HEADER: 'User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
-    DELAY: 0,
-    DEPTH: 2,
-    FOLLOW_REDIRECT: True,
-    METHOD: 'GET',
-    MATCH_CODES: '200',
-    PROXY: FreeProxy(timeout=0.5).get() if USE_PROXY else False,
-    RATE_LIMIT: 10000,
-    RETRIES: 0,
-    THREADS: 50,
-    TIMEOUT: 1,
-    USER_AGENT: 'Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
-
-    # Individual tasks options
-    'gf.pattern': 'xss',
-    'nmap.output_path': load_fixture('nmap_output', only_path=True, ext='.xml'), # nmap XML fixture
-    'msfconsole.resource_script': load_fixture('msfconsole_input', only_path=True),
-    'dirsearch.output_path': load_fixture('dirsearch_output', only_path=True),
-    'maigret.output_path': load_fixture('maigret_output', only_path=True)
-}
 
 
 class FakeCmd(CommandRunner):
@@ -235,8 +150,8 @@ class TestCmdBuild(unittest.TestCase):
         cmd_opts = {}
         host = 'test.synology.me'
         cls = httpx(host, **cmd_opts)
-        default_match_codess = HTTPCommand.meta_opts[MATCH_CODES]['default']
-        default_threads = HTTPCommand.meta_opts[THREADS]['default']
+        default_match_codess = cls.meta_opts[MATCH_CODES]['default']
+        default_threads = cls.meta_opts[THREADS]['default']
         expected_cmd = f'httpx -u {host} -json -td -cdn -follow-redirects -match-code {default_match_codess} -threads {default_threads}'
         self.assertEqual(cls.cmd, expected_cmd)
         self.assertEqual(cls._print_timestamp, False)
@@ -319,7 +234,7 @@ class TestCmdSchema(unittest.TestCase):
                     fixture,
                     expected_output_keys=cls.output_schema,
                     expected_output_type=dict,
-                    **meta_opts)
+                    **META_OPTS)
         console.print('')
 
     def test_cmd_original_schema(self):
@@ -345,7 +260,7 @@ class TestCmdSchema(unittest.TestCase):
                     expected_output_type=type(fixture),
                     orig=True,
                     raw=isinstance(fixture, str),
-                    **meta_opts)
+                    **META_OPTS)
         console.print('')
 
     def test_cmd_raw_mode(self):
@@ -362,7 +277,7 @@ class TestCmdSchema(unittest.TestCase):
                     fixture,
                     output_validator=OUTPUT_VALIDATORS[cls.output_field],
                     raw=True,
-                    **meta_opts)
+                    **META_OPTS)
         console.print('')
 
     def _test_cmd_mock(
@@ -424,7 +339,7 @@ class TestCmdHooks(unittest.TestCase):
             'on_item_converted': [on_item_converted],
             'on_end': [on_end],
         }
-        fixture = load_fixture('httpx_output')
+        fixture = load_fixture('httpx_output', FIXTURES_DIR)
         with mock_subprocess_popen([json.dumps(fixture)]):
             input = INPUTS[HOST]
             cls = httpx(input, hooks=hooks)
@@ -441,7 +356,7 @@ class TestCmdHooks(unittest.TestCase):
         hooks = {
             'on_init': [on_init]
         }
-        fixture = load_fixture('httpx_output')
+        fixture = load_fixture('httpx_output', FIXTURES_DIR)
         with mock_subprocess_popen([json.dumps(fixture)]):
             with self.assertRaises(Exception, msg='Test passed'):
                 input = INPUTS[HOST]

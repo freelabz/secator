@@ -246,7 +246,7 @@ class CommandRunner:
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		from secsy.celery import run_command
-		return run_command.delay(cls.__name__, *args, opts=kwargs)
+		return run_command.delay([], cls.__name__, *args, opts=kwargs)
 
 	@classmethod
 	def s(cls, *args, **kwargs):

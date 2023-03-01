@@ -85,7 +85,7 @@ class VulnCommand(CommandRunner):
 		VULN_TAGS,
 		VULN_EXTRACTED_RESULTS
 	]
-	output_table_sort_fields = ('_confidence', '_severity', 'cvss_score')
+	output_table_sort_fields = ('_confidence', '_severity', 'matched_at', 'cvss_score')
 	output_type = VULN
 	input_type = HOST
 

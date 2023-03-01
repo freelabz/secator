@@ -5,7 +5,7 @@ import sys
 import rich_click as click
 
 from secsy.cmd import CommandRunner
-from secsy.decorators import (OrderedGroup, register_commands, register_scans,
+from secsy.decorators import (OrderedGroup, register_tasks, register_scans,
                               register_workflows)
 from secsy.utils import (discover_external_tasks, discover_internal_tasks,
                          setup_logging)
@@ -72,7 +72,7 @@ def worker(concurrency):
 		**DEFAULT_CMD_OPTS
 	)
 
-register_commands(cmd)
+register_tasks(cmd)
 register_workflows(workflow)
 register_scans(scan)
 

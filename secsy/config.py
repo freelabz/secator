@@ -48,6 +48,7 @@ class ConfigLoader(DotMap):
 
 	def __init__(self, input={}, name=None, **kwargs):
 		if name:
+			name = name.replace('-', '_') # so that workflows have a nice '-' in CLI
 			config = self._load_from_name(name)
 		elif isinstance(input, str):
 			config = self._load_from_file(input)

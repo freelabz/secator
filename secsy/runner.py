@@ -1,3 +1,4 @@
+import yaml
 import logging
 import os
 from datetime import datetime
@@ -9,26 +10,53 @@ from celery.result import AsyncResult, GroupResult
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
-							TimeElapsedColumn)
+                           TimeElapsedColumn)
+
 from secsy.config import ConfigLoader
-from secsy.definitions import OUTPUT_TYPES, RECORD, REPORTS_FOLDER
+from secsy.definitions import OUTPUT_TYPES, DEBUG, REPORTS_FOLDER
 from secsy.rich import build_table, console
-from secsy.utils import deduplicate, get_command_cls, merge_opts, pluralize
+from secsy.utils import (deduplicate, merge_opts, pluralize, discover_tasks)
 
 logger = logging.getLogger(__name__)
 
 
 class Runner:
 
-	def __init__(self, config, targets, **run_opts):
+	def __init__(self, config, targets, debug=False, **run_opts):
 		self.config = config
 		self.run_opts = run_opts
+		self.debug = debug
 		self.done = False
 		self.results = []
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
 		self.start_time = datetime.fromtimestamp(time())
+
+	def filter_results(self):
+		"""Filter results."""
+		extractors = self.config.results
+		results = []
+		if extractors:
+			# Keep results based on extractors
+			for extractor in extractors:
+				ctx = merge_opts(self.run_opts, self.config.options)
+				tmp = process_extractor(self.results, extractor, ctx=ctx)
+				results.extend(tmp)
+
+			# Keep the field types in results not specified in the extractors.
+			extract_fields = [e['type'] for e in extractors]
+			keep_fields = [
+				_type for _type in OUTPUT_TYPES
+				if _type not in extract_fields
+			]
+			results.extend([
+				item for item in self.results
+				if item['_type'] in keep_fields
+			])
+		else:
+			results = self.results
+		return results
 
 	def log_results(self):
 		"""Log results.
@@ -53,7 +81,7 @@ class Runner:
 				_type = pluralize(items[0]['_type'])
 				render.print(_type.upper(), style='bold gold3', justify='left')
 				render.print(_table)
-				render.print()
+				render.print
 
 		# Make HTML report
 		timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
@@ -67,129 +95,9 @@ class Runner:
 		self.end_time = datetime.fromtimestamp(time())
 		delta = self.end_time - self.start_time
 		delta_str = humanize.naturaldelta(delta)
-		console.print(f':tada: [bold green]Workflow[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{delta_str}[/].')
+		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{delta_str}[/].')
 		console.print()
 
-
-class Scan(Runner):
-	def __init__(self, config, targets, **run_opts):
-		self.config = config
-		self.run_opts = run_opts
-		self.done = False
-		self.results = []
-		if not isinstance(targets, list):
-			targets = [targets]
-		self.targets = targets
-
-	def run(self, sync=True, results=[]):
-		"""Run scan.
-
-		Yields:
-			dict: Item yielded from individual workflow tasks.
-		"""
-		# Add target to results
-		self.results = results + [
-			{'name': name, '_source': 'scan', '_type': 'target'}
-			for name in self.targets
-		]
-		self.results = results
-
-		# Run workflows
-		for name, conf in self.config.workflows.items():
-
-			# Extract opts and and expand target from previous workflows results
-			targets, conf = merge_extracted_values(self.results, conf or {})
-			if not targets:
-				targets = self.targets
-
-			# Merge run options
-			run_opts = conf
-			run_opts.update(self.run_opts)
-
-			# Run workflow
-			wresults = run_workflow(
-				name,
-				targets,
-				sync=sync,
-				results=self.results,
-				**run_opts)
-			self.results.extend(wresults)
-
-		self.log_results()
-		return self.results
-
-
-class Workflow(Runner):
-	"""Workflow runner.
-
-	Args:
-		config (secsy.config.ConfigLoader): Loaded config.
-		targets (list): List of targets to run workflow on.
-		run_opts (dict): Run options.
-
-	Yields:
-		dict: Result (when running in sync mode with `run`).
-
-	Returns:
-		list: List of results (when running in async mode with `run_async`).
-	"""
-
-	def __init__(self, config, targets, **run_opts):
-		self.config = config
-		self.run_opts = run_opts
-		self.done = False
-		self.results = []
-		if not isinstance(targets, list):
-			targets = [targets]
-		self.targets = targets
-
-	def run(self, sync=True, results=[], show_results=True):
-		"""Run workflow.
-
-		Args:
-			sync (bool): Run in sync mode (main thread). If False, run in Celery 
-				worker in distributed mode.
-
-		Returns:
-			list: List of results.
-		"""
-		self.show_results = show_results
-		self.sync = sync
-		fmt_opts = {
-			'print_timestamp': True,
-			'print_cmd': True,
-			'print_cmd_prefix': not sync,
-			'print_item_count': True,
-			'sync': sync,
-			'track': True
-		}
-		self.config.options.update(fmt_opts)
-
-		# Log workflow start
-		self.log_start()
-
-		# Add target to results
-		self.results = results + [
-			{'name': name, '_source': 'workflow', '_type': 'target'}
-			for name in self.targets
-		]
-
-		# Build Celery workflow
-		workflow = self.build_celery_workflow(results=results)
-
-		# Run Celery workflow and get results
-		if sync:
-			with console.status(f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'):
-				result = workflow.apply()
-		else:
-			result = workflow()
-			console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
-			self.process_live_tasks(result)
-		self.results = result.get(propagate=False)
-		self.results = self.filter_results()
-		self.done = True
-		self.log_workflow()
-		return self.results
 
 	def process_live_tasks(self, result):
 		tasks_progress = Progress(
@@ -247,36 +155,117 @@ class Workflow(Runner):
 
 				# Sleep between updates
 				sleep(1)
-			
+
 		if errors:
 			console.print()
 			console.log('Errors:', style='bold red')
 			for error in errors:
 				console.print('  ' + error)
 
-	def filter_results(self):
-		extractors = self.config.results
-		results = []
-		if extractors:
-			# Keep results based on extractors
-			for extractor in extractors:
-				ctx = merge_opts(self.run_opts, self.config.options)
-				tmp = process_extractor(self.results, extractor, ctx=ctx)
-				results.extend(tmp)
 
-			# Keep the field types in results not specified in the extractors.
-			extract_fields = [e['type'] for e in extractors]
-			keep_fields = [
-				_type for _type in OUTPUT_TYPES
-				if _type not in extract_fields
-			]
-			results.extend([
-				item for item in self.results
-				if item['_type'] in keep_fields
-			])
+class Scan(Runner):
+
+	def run(self, sync=True, results=[]):
+		"""Run scan.
+
+		Yields:
+			dict: Item yielded from individual workflow tasks.
+		"""
+		# Add target to results
+		self.results = results + [
+			{'name': name, '_source': 'scan', '_type': 'target'}
+			for name in self.targets
+		]
+		self.results = results
+
+		# Run workflows
+		for name, conf in self.config.workflows.items():
+
+			# Extract opts and and expand target from previous workflows results
+			targets, conf = merge_extracted_values(self.results, conf or {})
+			if not targets:
+				targets = self.targets
+
+			# Merge run options
+			run_opts = conf
+			run_opts.update(self.run_opts)
+
+			# Run workflow
+			wresults = run_workflow(
+				name,
+				targets,
+				sync=sync,
+				results=self.results,
+				**run_opts)
+			self.results.extend(wresults)
+
+		self.log_results()
+		return self.results
+
+
+class Workflow(Runner):
+	"""Workflow runner.
+
+	Args:
+		config (secsy.config.ConfigLoader): Loaded config.
+		targets (list): List of targets to run workflow on.
+		run_opts (dict): Run options.
+
+	Yields:
+		dict: Result (when running in sync mode with `run`).
+
+	Returns:
+		list: List of results (when running in async mode with `run_async`).
+	"""
+
+	def run(self, sync=True, results=[], print_results=True):
+		"""Run workflow.
+
+		Args:
+			sync (bool): Run in sync mode (main thread). If False, run in Celery 
+				worker in distributed mode.
+
+		Returns:
+			list: List of results.
+		"""
+		self.print_results = print_results
+		self.sync = sync
+		fmt_opts = {
+			'print_timestamp': True,
+			'print_cmd': True,
+			'print_cmd_prefix': not sync,
+			'print_item_count': True,
+			'sync': sync,
+			'track': True
+		}
+		self.config.options.update(fmt_opts)
+
+		# Log workflow start
+		self.log_start()
+
+		# Add target to results
+		self.results = results + [
+			{'name': name, '_source': 'workflow', '_type': 'target'}
+			for name in self.targets
+		]
+
+		# Build Celery workflow
+		workflow = self.build_celery_workflow(results=results)
+
+		# Run Celery workflow and get results
+		if sync:
+			with console.status(f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'):
+				result = workflow.apply()
 		else:
-			results = self.results
-		return results
+			result = workflow()
+			console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
+			self.process_live_tasks(result)
+		self.results = result.get(propagate=False)
+		self.results = self.filter_results()
+		self.done = True
+		self.log_workflow()
+		return self.results
+
 
 	def build_celery_workflow(self, results=[]):
 		""""Build Celery workflow.
@@ -293,6 +282,7 @@ class Workflow(Runner):
 		sigs = [forward_results.si(results)] + sigs + [forward_results.s()]
 		workflow = chain(*sigs)
 		return workflow
+
 
 	@staticmethod
 	def get_tasks(obj, targets, workflow_opts, run_opts):
@@ -332,7 +322,7 @@ class Workflow(Runner):
 				sig = chain(*tasks)
 			else:
 				# Get task class
-				task = get_command_cls(task_name)
+				task = Task.get_task_class(task_name)
 
 				# Merge task options (order of priority with overrides)
 				opts = merge_opts(run_opts, workflow_opts, task_opts)
@@ -385,11 +375,105 @@ class Workflow(Runner):
 			console.print()
 
 		# Print workflow results
-		if self.show_results:
+		if self.print_results:
 			self.log_results()
 
+class Task(Runner):
 
-def run_workflow(name, targets, sync=True, results=[], show_results=True, **run_opts):
+	def run(self, sync=True, print_results=True):
+		"""Run task.
+
+		Args:
+			sync (bool): Run in sync mode (main thread). If False, run in Celery 
+				worker in distributed mode.
+
+		Returns:
+			list: List of results.
+		"""
+		self.print_results = print_results
+		self.sync = sync
+		fmt_opts = {
+			'print_timestamp': True,
+			'print_cmd': True,
+			'print_cmd_prefix': not sync,
+			'print_item_count': True,
+			'print_line': True,
+			'sync': sync,
+			'track': True
+		}
+		opts = merge_opts(self.run_opts, fmt_opts)
+
+		# Run Celery workflow and get results
+		task = Task.get_task_class(self.config.name)
+		if sync:
+			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...'):
+				self.results = task(self.targets, **opts).run()
+		else:
+			result = task.delay(self.targets, **opts)
+			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
+			self.process_live_tasks(result)
+			self.results = result.get()
+			self.results = self.results.get('results') or self.results
+		if opts.get('debug', False):
+			console.log(yaml.dump(self.results))
+		self.results = self.filter_results()
+		self.log_results()
+		self.done = True
+		return self.results
+
+	@staticmethod
+	def get_task_class(name):
+		"""Get task class from a name.
+		
+		Args:
+			name (str): Task name.
+		"""
+		tasks_classes = discover_tasks()
+		for task_cls in tasks_classes:
+			if task_cls.__name__ == name:
+				return task_cls
+		console.log(
+			f'Task {name} not found. Aborting.', style='bold red')
+		return None
+
+	@staticmethod
+	def get_tasks_from_conf(config):
+		"""Get task names from config. Ignore hierarchy and keywords.
+		
+		TODO: Add hierarchy tree / add make flow diagrams.
+		"""
+		tasks = []
+		for name, opts in config.items():
+			if name == '_group':
+				tasks.extend(Task.get_tasks_from_conf(opts))
+			elif name == '_chain':
+				tasks.extend(Task.get_tasks_from_conf(opts))
+			else:
+				tasks.append(name)
+		return tasks
+
+#-------#
+# UTILS #
+#-------#
+def run_task(name, targets, sync=True, **run_opts):
+	"""Run task.
+
+	Args:
+		name (str): Task name.
+		targets (list): Targets.
+		run_opts (dict): Run options.
+
+	Yields:
+		dict: Item yielded from individual workflow tasks.
+	"""
+	from dotmap import DotMap
+	config = DotMap({'name': name, 'options': run_opts})
+	task = Task(config, targets, **run_opts)
+	results = task.run(sync=sync)
+	return results
+
+
+def run_workflow(name, targets, sync=True, results=[], print_results=True, **run_opts):
 	"""Run workflow.
 
 	Args:
@@ -400,9 +484,9 @@ def run_workflow(name, targets, sync=True, results=[], show_results=True, **run_
 	Yields:
 		dict: Item yielded from individual workflow tasks.
 	"""
-	workflow = ConfigLoader(name=f'workflows/{name}')
-	workflow = Workflow(workflow, targets, **run_opts)
-	results = workflow.run(sync=sync, results=results, show_results=show_results)
+	config = ConfigLoader(name=f'workflows/{name}')
+	workflow = Workflow(config, targets, **run_opts)
+	results = workflow.run(sync=sync, results=results, print_results=print_results)
 	return results
 
 
@@ -456,8 +540,8 @@ def get_table_fields(output_type):
 	"""
 	# TODO: Rework this with new output models
 	from secsy.tasks._categories import HTTPCommand, VulnCommand
-	from secsy.tasks.subfinder import subfinder
 	from secsy.tasks.naabu import naabu
+	from secsy.tasks.subfinder import subfinder
 	sort_by = ()
 	output_fields = []
 	output_map = {

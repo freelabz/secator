@@ -7,12 +7,14 @@ import os
 import select
 import sys
 import warnings
+import yaml
 from importlib import import_module
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse
 from secsy.definitions import DEFAULT_STDIN_TIMEOUT
+from secsy.rich import console
 
 import tabulate
 from furl import furl
@@ -52,12 +54,15 @@ def expand_input(input):
 		str: Input.
 	"""
 	if input is None: # read from stdin
+		console.print('Waiting for input on stdin ...', style='bold yellow')
 		rlist, _, _ = select.select([sys.stdin], [], [], DEFAULT_STDIN_TIMEOUT)
 		if rlist:
 			data = sys.stdin.read().splitlines()
 		else:
-			print('No input detected from stdin. Aborting.')
-			sys.exit(0)
+			console.print(
+				'No input passed on stdin. Showing help page.',
+				style='bold red')
+			return None
 		return data
 	elif os.path.exists(input):
 		with open(input, 'r') as f:
@@ -238,7 +243,7 @@ def discover_external_tasks():
 	return output
 
 
-def find_tasks():
+def discover_tasks():
 	"""Find all secsy tasks (internal + external)."""
 	return discover_internal_tasks() + discover_external_tasks()
 
@@ -340,9 +345,27 @@ def pluralize(word):
 
 
 def get_task_name_padding(classes=None):
-	all_tasks = find_tasks()
+	all_tasks = discover_tasks()
 	classes = classes or all_tasks
-	return max([len(cls.__name__) for cls in find_tasks() if cls in classes]) + 2
+	return max([len(cls.__name__) for cls in discover_tasks() if cls in classes]) + 2
+
+
+def load_fixture(name, fixtures_dir, ext=None, only_path=False):
+    fixture_path = f'{fixtures_dir}/{name}'
+    exts = ['.json', '.txt', '.xml', '.rc']
+    if ext:
+        exts = [ext]
+    for ext in exts:
+        path = f'{fixture_path}{ext}'
+        if os.path.exists(path):
+            if only_path:
+                return path
+            with open(path) as f:
+                content = f.read()
+            if path.endswith(('.json', '.yaml')):
+                return yaml.load(content, Loader=yaml.Loader)
+            else:
+                return content
 
 
 class TaskError(ValueError):

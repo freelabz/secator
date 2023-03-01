@@ -1,3 +1,4 @@
+import sys
 from collections import OrderedDict
 
 import rich_click as click
@@ -5,10 +6,9 @@ from rich_click.rich_group import RichGroup
 
 from secsy.config import ConfigLoader
 from secsy.definitions import *
-from secsy.runner import run_scan, run_workflow
-from secsy.utils import (discover_external_tasks, discover_internal_tasks,
-                         expand_input, get_command_category, get_command_cls,
-                         get_task_name_padding)
+from secsy.runner import run_scan, run_task, run_workflow, Task
+from secsy.utils import (discover_tasks, expand_input, get_command_category,
+                         get_command_cls, get_task_name_padding)
 
 DEFAULT_CLI_OPTIONS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
@@ -88,8 +88,8 @@ def decorate_command_options(opts):
 	return decorator
 
 
-def register_command(cls, cli_endpoint):
-	"""Register a secsy command with the CLI, from a CommandRunner object.
+def register_task(cls, cli_endpoint):
+	"""Register a secsy task with the CLI, from a CommandRunner object.
 
 	The resulting command has all the meta options + options of the 
 	CommandRunner object, plus some common format parameters that can be passed 
@@ -104,20 +104,28 @@ def register_command(cls, cli_endpoint):
 	"""
 	input_type = cls.input_type or 'input'
 	options = get_command_options(cls)
-	default_opts = {
-		'print_cmd': True,
-		'print_item': True,
-		'print_item_count': True,
-		'print_line': True,
-		'print_timestamp': True,
-	}
+	help_padding = ' ' * (get_task_name_padding() - 6)
+
 	@click.argument(input_type, required=False)
+	@click.option('--worker', is_flag=True, help=f'[italic]global[/]{help_padding}Run tasks in a distributed way inside worker (FASTER).')
+	@click.option('--verbose', is_flag=True, help=f'[italic]global[/]{help_padding}Verbose mode, show full command output.')
 	@decorate_command_options(options)
-	def func(**opts):
+	@click.pass_context
+	def func(ctx, worker, verbose, **opts):
+		default_opts = {
+			'print_cmd': True,
+			'print_timestamp': True,
+			'print_item_count': True,
+			'print_item': True,
+			'print_line': True,
+		}
 		opts.update(default_opts)
 		input = opts.pop(input_type)
 		input = expand_input(input)
-		cls(input, **opts).run()
+		if input is None:
+			click.echo(ctx.get_help())
+			sys.exit(0)
+		run_task(cls.__name__, input, sync=not worker, **opts)
 
 	cls_category = get_command_category(cls)
 	settings = {'ignore_unknown_options': True}
@@ -128,7 +136,7 @@ def register_command(cls, cli_endpoint):
 		short_help=f'{cls_category:<10}{cls.__doc__}')(func)
 
 
-def register_commands(cli_endpoint):
+def register_tasks(cli_endpoint):
 	"""Register secsy commands as Click commands with their options translated 
 	to Click format.
 
@@ -136,9 +144,9 @@ def register_commands(cli_endpoint):
 		cmds (list): List of CommandRunner objects to register.
 		cli_endpoint (click.Group): Click group to register commands with.
 	"""
-	cmds = discover_internal_tasks() + discover_external_tasks()
+	cmds = discover_tasks()
 	for cls in cmds:
-		register_command(cls, cli_endpoint)
+		register_task(cls, cli_endpoint)
 
 
 def register_workflows(cli_endpoint, *dirs):
@@ -152,21 +160,10 @@ def register_workflows(cli_endpoint, *dirs):
 		register_workflow(cli_endpoint, workflow)
 
 
-def get_tasks_from_conf(config):
-	tasks = []
-	for name, opts in config.items():
-		if name == '_group':
-			tasks.extend(get_tasks_from_conf(opts))
-		elif name == '_chain':
-			tasks.extend(get_tasks_from_conf(opts))
-		else:
-			tasks.append(name)
-	return tasks			
-
 def register_workflow(cli_endpoint, config):
 	workflow_name = config.name
 	workflow_description = config.get('description', '')
-	tasks = [get_command_cls(task) for task in get_tasks_from_conf(config.tasks)]
+	tasks = [get_command_cls(task) for task in Task.get_tasks_from_conf(config.tasks)]
 	options = get_command_options(*tasks)
 	help_padding = ' ' * (get_task_name_padding() - 6)
 
@@ -174,7 +171,8 @@ def register_workflow(cli_endpoint, config):
 	@click.option('--worker', is_flag=True, help=f'[italic]global[/]{help_padding}Run tasks in a distributed way inside worker (FASTER).')
 	@click.option('--verbose', is_flag=True, help=f'[italic]global[/]{help_padding}Verbose mode, show full command output.')
 	@decorate_command_options(options)
-	def func(worker, verbose, **opts):
+	@click.pass_context
+	def func(ctx, worker, verbose, **opts):
 		default_opts = {
 			'print_cmd': True,
 			'print_timestamp': True,
@@ -186,6 +184,9 @@ def register_workflow(cli_endpoint, config):
 		opts.update(default_opts)
 		input = opts.pop('target')
 		input = expand_input(input)
+		if input is None:
+			click.echo(ctx.get_help())
+			sys.exit(0)
 		run_workflow(workflow_name, input, sync=not worker, **opts)
 
 	settings = {'ignore_unknown_options': True}
@@ -210,14 +211,15 @@ def register_scans(cli_endpoint, *dirs):
 def register_scan(cli_endpoint, scan):
 	scan_workflows = list(scan.workflows.keys())
 	workflows = [w for w in ALL_CONFIGS.workflows if w.name in scan_workflows]
-	tasks = [get_command_cls(task) for workflow in workflows for task in get_tasks_from_conf(workflow.tasks)]
+	tasks = [get_command_cls(task) for workflow in workflows for task in Task.get_tasks_from_conf(workflow.tasks)]
 	options = get_command_options(*tasks)
 
 	@click.argument('target')
 	@click.option('--worker', is_flag=True, help='[italic]global[/]     Run tasks in a distributed way inside worker (FASTER).')
 	@click.option('--verbose', is_flag=True, help='[italic]global[/]     Verbose mode, show full command output.')
 	@decorate_command_options(options)
-	def func(worker, verbose, **opts):
+	@click.pass_context
+	def func(ctx, worker, verbose, **opts):
 		default_opts = {
 			'print_cmd': True,
 			'print_timestamp': True,
@@ -229,6 +231,9 @@ def register_scan(cli_endpoint, scan):
 		opts.update(default_opts)
 		input = opts.pop('target')
 		input = expand_input(input)
+		if input is None:
+			click.echo(ctx.get_help())
+			sys.exit(0)
 		run_scan(scan.name, input, sync=not worker, **opts)
 
 	settings = {'ignore_unknown_options': True}
