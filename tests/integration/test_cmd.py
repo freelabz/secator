@@ -9,7 +9,7 @@ from time import sleep
 from fp.fp import FreeProxy
 
 from secsy.cmd import CommandRunner
-from secsy.utils import setup_logging, find_internal_tasks
+from secsy.utils import setup_logging, discover_internal_tasks
 from secsy.definitions import *
 from secsy.rich import console
 
@@ -37,7 +37,7 @@ def load_fixture(name):
 TEST_HOST = 'localhost'
 TEST_URL = f'http://localhost:3000'
 TEST_USER = 'test'
-ALL_CMDS = find_internal_tasks()
+ALL_CMDS = discover_internal_tasks()
 TEST_COMMANDS = os.environ.get('TEST_COMMANDS', '')
 if TEST_COMMANDS:
     TEST_COMMANDS = TEST_COMMANDS.split(',')

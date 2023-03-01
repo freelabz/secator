@@ -11,7 +11,8 @@ from time import sleep
 from fp.fp import FreeProxy
 from rich.markup import escape
 
-from secsy.definitions import *
+from secsy.definitions import (DEFAULT_CHUNK_SIZE, OPT_NOT_SUPPORTED,
+                               OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.rich import build_table, console
 from secsy.serializers import JSONSerializer
 from secsy.utils import pluralize
@@ -275,9 +276,9 @@ class CommandRunner:
 	#-------#
 	def run_hooks(self, hook_type, *args):
 		logger.debug(f'Running hooks of type {hook_type}')
-		logger.debug(self._hooks[hook_type])
 		result = None
 		for hook in self._hooks[hook_type]:
+			logger.debug(hook)
 			result = hook(self, *args)
 		if not result and len(args) > 0:
 			return args[0]
@@ -288,8 +289,8 @@ class CommandRunner:
 	#------------#
 	def run_validators(self, validator_type, *args):
 		logger.debug(f'Running validators of type {validator_type}')
-		logger.debug(self._validators[validator_type])
 		for validator in self._validators[validator_type]:
+			logger.debug(validator)
 			if not validator(self, *args):
 				if validator_type == 'input':
 					self._print(f'{validator.__doc__}', color='bold red')
@@ -359,7 +360,6 @@ class CommandRunner:
 
 		# Run the command using subprocess
 		try:
-			os.environ['FORCE_COLORS'] = '3'
 			process = subprocess.Popen(
 				command,
 				stdout=sys.stdout if self._no_capture else subprocess.PIPE,
@@ -532,7 +532,7 @@ class CommandRunner:
 
 		# Print item to console or log, except in table output where we 
 		# want to wait for all the results to come through before printing.
-		if self._json_output and self._print_item and not self._table_output:
+		if self._print_item and self._json_output and not self._table_output:
 			self._print(item, file=sys.stdout)
 
 		# Return item
@@ -606,10 +606,14 @@ class CommandRunner:
 
 	@staticmethod
 	def _get_opt_value(opts, opt_name, opt_prefix='', default=None):
-		vals = [opts.get(f'{opt_prefix}_{opt_name}'), opts.get(opt_name)]
-		if OPT_NOT_SUPPORTED in vals:
+		aliases = [
+			opts.get(f'{opt_prefix}_{opt_name}'),
+			opts.get(f'{opt_prefix}.{opt_name}'),
+			opts.get(opt_name)
+		]
+		if OPT_NOT_SUPPORTED in aliases:
 			return None
-		return next((v for v in vals if v is not None), default)
+		return next((v for v in aliases if v is not None), default)
 
 	def _build_cmd(self):
 		"""Build command string."""
@@ -752,7 +756,7 @@ class CommandRunner:
 			data = json.dumps(data)
 
 			# Add prefix to output
-			data = f'{self.prefix} {data}' if self.prefix else data
+			data = f'{self.prefix:>15} {data}' if self.prefix else data
 
 			# We might want to parse results with e.g 'jq' so we need pure JSON
 			# line with no logging info, unless --color is passed which 

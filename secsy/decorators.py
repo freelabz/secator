@@ -6,9 +6,9 @@ from rich_click.rich_group import RichGroup
 from secsy.config import ConfigLoader
 from secsy.definitions import *
 from secsy.runner import run_scan, run_workflow
-from secsy.utils import (find_external_tasks, find_internal_tasks,
-                         get_command_category, get_command_cls,
-                         expand_input)
+from secsy.utils import (discover_external_tasks, discover_internal_tasks,
+                         expand_input, get_command_category, get_command_cls,
+                         get_task_name_padding)
 
 DEFAULT_CLI_OPTIONS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
@@ -34,17 +34,17 @@ class OrderedGroup(RichGroup):
 
 
 def get_command_options(*tasks):
-	"""Get unified list of command options from a list of secsy commands
-	classes.
+	"""Get unified list of command options from a list of secsy tasks classes.
 
 	Args:
-		commands (list): List of secsy command classes.
+		tasks (list): List of secsy command classes.
 
 	Returns:
 		list: List of deduplicated options.
 	"""
 	opt_cache = []
 	all_opts = OrderedDict({})
+	help_padding = get_task_name_padding()
 	for cls in tasks:
 		opts = OrderedDict(DEFAULT_CLI_OPTIONS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
@@ -65,7 +65,7 @@ def get_command_options(*tasks):
 			opt_conf['show_default'] = True
 			help = opt_conf.get('help', '')
 			if help and prefix and prefix not in help:
-				opt_conf['help'] = f'[italic]{prefix:<10}[/] {help}'
+				opt_conf['help'] = f'[italic]{prefix:<{help_padding}}[/]{help}'
 			all_opts[opt] = opt_conf
 			opt_cache.append(opt)
 	return all_opts
@@ -136,7 +136,7 @@ def register_commands(cli_endpoint):
 		cmds (list): List of CommandRunner objects to register.
 		cli_endpoint (click.Group): Click group to register commands with.
 	"""
-	cmds = find_internal_tasks() + find_external_tasks()
+	cmds = discover_internal_tasks() + discover_external_tasks()
 	for cls in cmds:
 		register_command(cls, cli_endpoint)
 
@@ -168,10 +168,11 @@ def register_workflow(cli_endpoint, config):
 	workflow_description = config.get('description', '')
 	tasks = [get_command_cls(task) for task in get_tasks_from_conf(config.tasks)]
 	options = get_command_options(*tasks)
+	help_padding = ' ' * (get_task_name_padding() - 6)
 
 	@click.argument('target')
-	@click.option('--worker', is_flag=True, help='[italic]global     [/]Run tasks in a distributed way inside worker (FASTER).')
-	@click.option('--verbose', is_flag=True, help='[italic]global     [/]Verbose mode, show full command output.')
+	@click.option('--worker', is_flag=True, help=f'[italic]global[/]{help_padding}Run tasks in a distributed way inside worker (FASTER).')
+	@click.option('--verbose', is_flag=True, help=f'[italic]global[/]{help_padding}Verbose mode, show full command output.')
 	@decorate_command_options(options)
 	def func(worker, verbose, **opts):
 		default_opts = {
@@ -213,8 +214,8 @@ def register_scan(cli_endpoint, scan):
 	options = get_command_options(*tasks)
 
 	@click.argument('target')
-	@click.option('--worker', is_flag=True, help='[italic]global     [/]Run tasks in a distributed way inside worker (FASTER).')
-	@click.option('--verbose', is_flag=True, help='[italic]global     [/]Verbose mode, show full command output.')
+	@click.option('--worker', is_flag=True, help='[italic]global[/]     Run tasks in a distributed way inside worker (FASTER).')
+	@click.option('--verbose', is_flag=True, help='[italic]global[/]     Verbose mode, show full command output.')
 	@decorate_command_options(options)
 	def func(worker, verbose, **opts):
 		default_opts = {

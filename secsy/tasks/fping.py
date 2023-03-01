@@ -26,6 +26,7 @@ class fping(ReconCommand):
 	input_type = IP
 	output_schema = [IP, 'alive']
 	output_type = IP
+	output_field = IP
 
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):

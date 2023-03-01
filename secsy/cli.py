@@ -7,13 +7,13 @@ import rich_click as click
 from secsy.cmd import CommandRunner
 from secsy.decorators import (OrderedGroup, register_commands, register_scans,
                               register_workflows)
-from secsy.utils import (find_external_tasks, find_internal_tasks,
+from secsy.utils import (discover_external_tasks, discover_internal_tasks,
                          setup_logging)
 from secsy.definitions import ASCII
 
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 YAML_MODE = bool(int(os.environ.get('YAML_MODE', '0')))
-ALL_CMDS = find_internal_tasks() + find_external_tasks()
+ALL_CMDS = discover_internal_tasks() + discover_external_tasks()
 
 level = logging.DEBUG if DEBUG else logging.INFO
 setup_logging(level)
@@ -123,8 +123,10 @@ def integration():
 @test.command()
 @click.option('--commands', '-c', type=str, default='', help='Secsy commands to test (comma-separated)')
 @click.option('--coverage', '-x', is_flag=True, help='Run coverage on results')
-def unit(commands, coverage=False):
+@click.option('--debug', '-d', is_flag=True, help='Add debug information')
+def unit(commands, coverage=False, debug=False):
 	os.environ['TEST_COMMANDS'] = commands or ''
+	os.environ['DEBUG'] = str(int(debug))
 	result = CommandRunner.run_command(
 		'coverage run --omit="*test*" -m unittest discover -v tests.unit',
 		**DEFAULT_CMD_OPTS

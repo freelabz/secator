@@ -14,8 +14,8 @@ from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND,
 							   TEMP_FOLDER)
 from secsy.rich import console
 from secsy.runner import merge_extracted_values
-from secsy.utils import (TaskError, deduplicate, find_external_tasks,
-						 find_internal_tasks, flatten)
+from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
+						 discover_internal_tasks, flatten)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 trace.LOG_SUCCESS = """\
 Task %(name)s[%(id)s] succeeded in %(runtime)ss\
 """
-COMMANDS = find_internal_tasks() + find_external_tasks()
+COMMANDS = discover_internal_tasks() + discover_external_tasks()
 
 app = celery.Celery(__name__)
 app.conf.update({

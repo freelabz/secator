@@ -10,12 +10,12 @@ class httpx(HTTPCommand):
 	input_flag = '-u'
 	json_flag = '-json'
 	opts = {
-		'silent': {'is_flag': True, 'default': False},
-		'td': {'is_flag': True, 'default': True},
-		'asn': {'is_flag': True, 'default': False},
-		'cdn': {'is_flag': True, 'default': True},
-		'filter_code': {'type': str},
-		'filter_length': {'type': str},
+		'silent': {'is_flag': True, 'default': False, 'help': 'Silent mode'},
+		'td': {'is_flag': True, 'default': True, 'help': 'Tech detection'},
+		'asn': {'is_flag': True, 'default': False, 'help': 'ASN detection'},
+		'cdn': {'is_flag': True, 'default': True, 'help': 'CDN detection'},
+		'filter_code': {'type': str, 'help': 'Filter HTTP codes'},
+		'filter_length': {'type': str, 'help': 'Filter length'},
 	}
 	opt_key_map = {
 		HEADER: 'header',
