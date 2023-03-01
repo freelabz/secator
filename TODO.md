@@ -16,6 +16,7 @@ v0.0.1
 - [x] Check if IP is local before running some passive tools (e.g subfinder) as they output false positives
 - [x] Add `mapcidr`
 - [x] Add `fping`
+- [x] Allow stdin input for all Secsy commands.
 
 **TODO:**
 - [ ] Add `arp-scan`
@@ -29,20 +30,39 @@ v0.0.1
 - [ ] Reporting
     - [ ] HTML reporting not based on Rich's export_html
     - [ ] Save JSON report
-    - [ ] Output live JSON items for workflows / scans (need to query Celery tasks for results dynamically)
+    - [ ] Output live JSON items for workflows / scans so that they are consumable from library
+- [ ] Add ways to create Workflows dynamically from code (need to revisit the way the output results are):
+    ```
+    from secsy.runner import Workflow, group
+
+    host = 'wikipedia.org'
+    tasks = subfinder.s(host, raw=True) | httpx.s(raw=True) | group(katana.s(), feroxbuster.s())
+    workflow = Workflow.from_dsl(workflow)
+    workflow.delay() # run in Celery worker (fast)
+    workflow.run() # run synchronously (slow)
+
+    def group(*tasks):
+        return chain(forward_results.s(), chord(*tasks, forward_results), forward_results.s())
+    ```
+    - [ ] Cleanup chord-creating code + add tests for it
+
 - [ ] Replace `console.log` by `logger.info` with rich logging handler (add Logging Handler and setup function) + Celery worker
 - [ ] Autodiscover external tools
 - [ ] Use --<tool>.<option_name> in the CLI (instead of `_`) to override option names.
 - [ ] Improve multiple targets support + add tests for it
-- [ ] Add tests for workflows / scans run
 - [ ] Add support for multi output types tool like `feroxbuster`
 - [ ] Make Docker image containing:
     - [ ] Automated install for all tools supported by `secsy`
-    - [ ] Install `katoolin3` from my GitHub and all Kali packages --> installs all Kali Linux tools
+    - [ ] Either:
+        - [ ] Install `katoolin3` from my GitHub and all Kali packages --> installs all Kali Linux tools
+        OR
+        - [ ] Use a `kali` image as base so that most tools are already available
 - [ ] Work on better proxy support, maybe using `proxychains`
 - [ ] Add external pluggable configs/ folder.
-- [ ] Allow stdin input for all Secsy commands.
-
+- [ ] Add tests for workflows / scans run
+    - [ ] run_opts, workflow_opts, scan_opts, task_opts overrides
+    - [ ] results deduplication tests
+    - [ ] + integration tests for existing workflows
 
 - **Integrations:**
     - OWASP ZAP [TODO]
