@@ -4,13 +4,13 @@ from secsy.tasks._categories import ReconCommand
 
 class naabu(ReconCommand):
 	"""Port scanning tool written in Go."""
-	cmd = 'naabu -silent -Pn'
+	cmd = 'naabu -Pn'
 	input_flag = '-host'
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {
-		PORTS: {'type': str},
-		TOP_PORTS: {'type': int}
+		PORTS: {'type': str, 'help':'Ports'},
+		TOP_PORTS: {'type': int, 'help': 'Top ports'}
 	}
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,
@@ -22,7 +22,6 @@ class naabu(ReconCommand):
 
 		# naabu opts
 		PORTS: 'port',
-		TOP_PORTS: '--top-ports'
 	}
 	opt_value_map = {
 		TIMEOUT: lambda x: x*1000 if x and x > 0 else None, # convert to milliseconds

@@ -12,7 +12,7 @@ from fp.fp import FreeProxy
 from secsy.cmd import CommandRunner
 from secsy.definitions import *
 from secsy.rich import console
-from secsy.utils import setup_logging, find_internal_tasks
+from secsy.utils import setup_logging, discover_internal_tasks
 from secsy.tasks import httpx
 from secsy.tasks._categories import HTTPCommand, ReconCommand, VulnCommand
 
@@ -34,19 +34,19 @@ def mock_subprocess_popen(output_list):
     return unittest.mock.patch('subprocess.Popen', mock_popen)
 
 
-def load_fixture(name, ext=None, path=False):
+def load_fixture(name, ext=None, only_path=False):
     fixture_path = f'{FIXTURES_DIR}/{name}'
     exts = ['.json', '.txt', '.xml', '.rc']
     if ext:
         exts = [ext]
     for ext in exts:
-        fixture_path = f'{fixture_path}{ext}'
-        if os.path.exists(fixture_path):
-            if path:
-                return fixture_path
-            with open(fixture_path) as f:
+        path = f'{fixture_path}{ext}'
+        if os.path.exists(path):
+            if only_path:
+                return path
+            with open(path) as f:
                 content = f.read()
-            if fixture_path.endswith(('.json', '.yaml')):
+            if path.endswith(('.json', '.yaml')):
                 return yaml.load(content, Loader=yaml.Loader)
             else:
                 return content
@@ -55,30 +55,31 @@ def load_fixture(name, ext=None, path=False):
 #---------#
 # GLOBALS #
 #---------#
-ALL_CMDS = find_internal_tasks()
+ALL_CMDS = discover_internal_tasks()
 TEST_COMMANDS = os.environ.get('TEST_COMMANDS', '')
 if TEST_COMMANDS:
     TEST_COMMANDS = TEST_COMMANDS.split(',')
 else:
     TEST_COMMANDS = [cls.__name__ for cls in ALL_CMDS]
-TEST_HOST = 'fake.com'
-TEST_URL = 'https://fake.com'
-TEST_USER = 'test'
+
 FIXTURES = {
     tool_cls: load_fixture(f'{tool_cls.__name__}_output')
     for tool_cls in ALL_CMDS
     if tool_cls.__name__ in TEST_COMMANDS
 }
 INPUTS = {
-    URL: TEST_URL,
-    HOST: TEST_HOST,
-    USERNAME: TEST_USER
+    URL: 'https://fake.com',
+    HOST: 'fake.com',
+    USERNAME: 'test',
+    IP: '192.168.1.23',
+    CIDR_RANGE: '192.168.1.0/24'
 }
 OUTPUT_VALIDATORS = {
     URL: lambda url: validators.url(url),
     HOST: lambda host: validators.domain(host),
     USER_ACCOUNT: lambda url: validators.url(url),
     PORT: lambda port: isinstance(port, int),
+    IP: lambda ip: validators.ipv4(ip) or validators.ipv6(ip),
     None: lambda x: True,
 }
 meta_opts = {
@@ -96,11 +97,11 @@ meta_opts = {
     USER_AGENT: 'Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
 
     # Individual tasks options
-    'gf_pattern': 'xss',
-    'nmap_output_path': load_fixture('nmap_output', path=True, ext='.xml'), # nmap XML fixture
-    'msfconsole_resource_script': load_fixture('msfconsole_input', path=True),
-    'dirsearch_output_path': load_fixture('dirsearch_output', path=True),
-    'maigret_output_path': load_fixture('maigret_output', path=True)
+    'gf.pattern': 'xss',
+    'nmap.output_path': load_fixture('nmap_output', only_path=True, ext='.xml'), # nmap XML fixture
+    'msfconsole.resource_script': load_fixture('msfconsole_input', only_path=True),
+    'dirsearch.output_path': load_fixture('dirsearch_output', only_path=True),
+    'maigret.output_path': load_fixture('maigret_output', only_path=True)
 }
 
 
@@ -281,7 +282,7 @@ class TestCmdBuild(unittest.TestCase):
             MATCH_CODES: False, # intentionally omit arg, overriding default value
             'filter_code': '200',
             'filter_length': 50,
-            'httpx_filter_code': '500', # prefixed option keys should override
+            'httpx.filter_code': '500',    # prefixed option keys should override
             'httpx_filter_length': '23,33' # prefixed option keys should override
         }
         host = 'test.synology.me'
@@ -307,9 +308,11 @@ class TestCmdSchema(unittest.TestCase):
         console.print('')
         for cls, fixture in FIXTURES.items():
             if not fixture:
-                console.print(f'Testing {cls.__name__} ... [bold red]No fixture ![/] [bold gold3]Skipping test.[/]')
+                if len(FIXTURES.keys()) == 1: # make test fail.
+                    raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory.')
+                console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/] [bold red]No fixture ! Skipping test.[/]')
                 continue
-            console.print(f'Testing {cls.__name__} ...')
+            console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/]')
             with self.subTest(name=cls.__name__):
                 self._test_cmd_mock(
                     cls,
@@ -323,9 +326,11 @@ class TestCmdSchema(unittest.TestCase):
         console.print('')
         for cls, fixture in FIXTURES.items():
             if not fixture:
-                console.print(f'Testing {cls.__name__} ... [bold red]No fixture ![/] [bold gold3]Skipping test.[/]')
+                if len(FIXTURES.keys()) == 1: # make test fail.
+                    raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory.')
+                console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/] [bold red]No fixture ! Skipping test.[/]')
                 continue
-            console.print(f'Testing {cls.__name__} ...')
+            console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/]')
             with self.subTest(name=cls.__name__):
                 expected_output_keys = None
                 if isinstance(fixture, dict):
@@ -337,8 +342,9 @@ class TestCmdSchema(unittest.TestCase):
                     cls,
                     fixture,
                     expected_output_keys=expected_output_keys,
-                    expected_output_type=dict,
+                    expected_output_type=type(fixture),
                     orig=True,
+                    raw=isinstance(fixture, str),
                     **meta_opts)
         console.print('')
 
@@ -346,7 +352,9 @@ class TestCmdSchema(unittest.TestCase):
         console.print('')
         for cls, fixture in FIXTURES.items():
             if not fixture:
-                console.print(f'Testing {cls.__name__} ... [bold red]No fixture ![/] [bold gold3]Skipping test.[/]')
+                if len(FIXTURES.keys()) == 1: # make test fail.
+                    raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory.')
+                console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/] [bold red]No fixture ! Skipping test.[/]')
                 continue
             with self.subTest(name=cls.__name__):
                 self._test_cmd_mock(
@@ -365,17 +373,16 @@ class TestCmdSchema(unittest.TestCase):
             expected_output_type=None,
             output_validator=None,
             **opts):
-        fixture_data = fixture
-        if isinstance(fixture, dict):
-            fixture_data = json.dumps(fixture)
-        with mock_subprocess_popen([fixture_data]):
+        is_dict = isinstance(fixture, dict)
+        mock = json.dumps(fixture) if is_dict else fixture
+        with mock_subprocess_popen([mock]):
             input = INPUTS[cls.input_type]
-            command = cls(
-                input,
-                **opts)
+            command = cls(input, **opts)
             items = command.run()
             self.assertGreater(len(items), 0)
             for item in items:
+                if DEBUG:
+                    console.log('debug', log_locals=True)
                 if expected_output_type:
                     self.assertEqual(type(item), expected_output_type)
                 if expected_output_keys: # test schema against fixture

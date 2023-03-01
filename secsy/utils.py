@@ -199,7 +199,7 @@ def setup_logger(level='info', format='%(message)s'):
 	return logger
 
 
-def find_internal_tasks():
+def discover_internal_tasks():
 	"""Find internal secsy tasks."""
 	from secsy.cmd import CommandRunner
 	package_dir = Path(__file__).resolve().parent / 'tasks'
@@ -222,7 +222,7 @@ def find_internal_tasks():
 	return task_classes
 
 
-def find_external_tasks():
+def discover_external_tasks():
 	"""Find external secsy tasks."""
 	if not os.path.exists('config.secsy'):
 		return []
@@ -236,6 +236,11 @@ def find_external_tasks():
 		# logger.warning(f'Added external tool {cls_path}')
 		output.append(cls)
 	return output
+
+
+def find_tasks():
+	"""Find all secsy tasks (internal + external)."""
+	return discover_internal_tasks() + discover_external_tasks()
 
 
 def import_dynamic(cls_path, cls_root='CommandRunner'):
@@ -269,7 +274,7 @@ def get_command_cls(cls_name):
 	Returns:
 		cls: Class.
 	"""
-	tasks_classes = find_internal_tasks() + find_external_tasks()
+	tasks_classes = discover_internal_tasks() + discover_external_tasks()
 	for task_cls in tasks_classes:
 		if task_cls.__name__ == cls_name:
 			return task_cls
@@ -332,6 +337,12 @@ def pluralize(word):
 		return word.rstrip('y') + 'ies'
 	else:
 		return f'{word}s'
+
+
+def get_task_name_padding(classes=None):
+	all_tasks = find_tasks()
+	classes = classes or all_tasks
+	return max([len(cls.__name__) for cls in find_tasks() if cls in classes]) + 2
 
 
 class TaskError(ValueError):

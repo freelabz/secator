@@ -26,7 +26,8 @@ def criticity_to_color(value):
 
 formatters = {
 	'confidence': criticity_to_color,
-	'severity': criticity_to_color
+	'severity': criticity_to_color,
+	'cvss_score': lambda score: '' if score == -1 else f'[bold blue]{score}[/]'
 }
 
 def build_table(items, output_fields=[], sort_by=None):
@@ -87,11 +88,11 @@ def build_table(items, output_fields=[], sort_by=None):
 		values = []
 		for key in keys:
 			value = item[key]
+			value = formatters.get(key, lambda x: x)(value)
 			if isinstance(value, dict) or isinstance(value, list):
 				value = yaml.dump(value)
 			elif isinstance(value, int) or isinstance(value, float):
 				value = str(value)
-			value = formatters.get(key, lambda x: x)(value)
 			values.append(value)
 		table.add_row(*values)
 	return table
