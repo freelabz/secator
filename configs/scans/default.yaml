@@ -4,9 +4,9 @@ profile: default
 workflows:
   domain_recon:
   host_recon:
-    input_:
+    targets_:
     - target.name
     - subdomain.host
   url_finder:
-    input_:
+    targets_:
     - url.url

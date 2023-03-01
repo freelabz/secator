@@ -10,12 +10,12 @@ tasks:
         ports_: port.port
       httpx:
         match_codes: False
-        input_:
+        targets_:
           - target.name
           - type: port
             field: '{host}:{port}'
       nuclei:
-        input_: url.url
+        targets_: url.url
         # exclude_tags: [network, ssl]
         tags: [cve, panel, wordpress, exposure, edb, wp-plugin, lfi, xss]
 results:

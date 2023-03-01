@@ -31,6 +31,7 @@ RUN ln -s /usr/local/src/vulscan /usr/share/nmap/scripts/vulscan
 
 # Install metasploit
 RUN apt install -y \
+    gcc \
     gpgv2 \
     autoconf \
     bison \

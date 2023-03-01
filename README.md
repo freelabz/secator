@@ -84,12 +84,12 @@ You can run some pre-written workflows using the `secsy workflow` subcommand:
 secsy workflow <WORKFLOW_NAME> --help # list scan options
 ```
 
-* **Basic host scan** (open ports, network + HTTP vulnerabilities):
+* **Basic host recon** (open ports, network + HTTP vulnerabilities):
     ```sh
     secsy workflow host_scan 192.168.1.18
     ```
 
-* **Basic domain scan** (OSInt, open ports, subdomains, vulnerabilities):
+* **Basic domain recon** (OSInt, open ports, subdomains, vulnerabilities):
     ```sh
     secsy workflow domain_scan mydomain.com
     ```
@@ -97,6 +97,11 @@ secsy workflow <WORKFLOW_NAME> --help # list scan options
 * **Basic URL finder:**
     ```sh
     secsy workflow url_finder https://mydomain.com/start/crawling/from/here/
+    ```
+
+* **Internal network recon:**
+    ```sh
+    secsy workflow network_recon 192.168.0.1/24
     ```
 
 ***Note:*** *To see all the available workflow options, use `--help`.*
