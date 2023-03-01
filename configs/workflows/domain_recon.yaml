@@ -4,11 +4,11 @@ tasks:
   # osint:
   subfinder:
   nuclei:
-    input_:
+    targets_:
     - target.name
     - subdomain.host
     templates: takeovers/
   httpx:
-    input_:
+    targets_:
       - target.name
       - subdomain.host

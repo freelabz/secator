@@ -10,7 +10,7 @@ tasks:
     gospider:
     katana:
   httpx:
-    input_:
+    targets_:
       type: url
       field: url
       condition: item['status_code'] is None

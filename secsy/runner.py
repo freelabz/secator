@@ -497,7 +497,7 @@ def merge_extracted_values(results, opts):
 	for key, val in extractors.items():
 		key = key.rstrip('_')
 		values = extract_from_results(results, val)
-		if key == 'input':
+		if key == 'targets':
 			targets = deduplicate(values)
 		else:
 			opts[key] = deduplicate(values)
