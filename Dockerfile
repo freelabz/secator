@@ -74,5 +74,5 @@ COPY . /code/
 RUN pip3 install -e .
 RUN pip3 install -e .[test]
 
-# Install all tools supported by `secsy`
+# Install all tasks supported by `secsy`
 RUN secsy utils install

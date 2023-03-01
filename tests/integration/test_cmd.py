@@ -8,10 +8,10 @@ from time import sleep
 
 from fp.fp import FreeProxy
 
-from secsy.tools.http import *
-from secsy.tools.recon import *
-from secsy.tools.vuln import *
-from secsy.utils import setup_logging, find_internal_commands
+from secsy.tasks.http import *
+from secsy.tasks.recon import *
+from secsy.tasks.vuln import *
+from secsy.utils import setup_logging, find_internal_tasks
 from secsy.definitions import *
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,7 +38,7 @@ def load_fixture(name):
 TEST_HOST = 'localhost'
 TEST_URL = f'http://localhost:3000'
 TEST_USER = 'test'
-ALL_CMDS = find_internal_commands()
+ALL_CMDS = find_internal_tasks()
 FIXTURES = {
     tool_cls: load_fixture(f'{tool_cls.__name__}_output.json')
     for tool_cls in ALL_CMDS

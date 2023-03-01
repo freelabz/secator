@@ -395,13 +395,6 @@ class Workflow(Runner):
 		if self.show_results:
 			self.log_results()
 
-		if self.done:
-			self.end_time = datetime.fromtimestamp(time())
-			delta = self.end_time - self.start_time
-			delta_str = humanize.naturaldelta(delta)
-			console.print(f':tada: [bold green]Workflow[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{delta_str}[/].')
-			console.print()
-
 
 def run_workflow(name, targets, sync=True, results=[], show_results=True, **run_opts):
 	"""Run workflow.
@@ -468,10 +461,10 @@ def get_table_fields(output_type):
 	Returns:
 		tuple: Tuple of sort_by (tuple), output_fields (list).
 	"""
-	# TODO: Rework this
-	from secsy.tools.http import HTTPCommand
-	from secsy.tools.recon import naabu, subfinder
-	from secsy.tools.vuln import VulnCommand
+	# TODO: Rework this with new output models
+	from secsy.tasks._categories import HTTPCommand, VulnCommand
+	from secsy.tasks.subfinder import subfinder
+	from secsy.tasks.naabu import naabu
 	sort_by = ()
 	output_fields = []
 	output_map = {

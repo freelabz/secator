@@ -8,21 +8,22 @@ from celery import chain, chord, signals
 from celery.app import trace
 from celery.exceptions import Ignore
 from celery.result import AsyncResult, allow_join_result
+from dotenv import load_dotenv
 
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND,
-                               TEMP_FOLDER, DEFAULT_CHUNK_SIZE)
+                               TEMP_FOLDER)
 from secsy.rich import console
-from secsy.rich import handler as rich_handler
 from secsy.runner import merge_extracted_values
-from secsy.utils import (deduplicate, find_external_commands,
-                         find_internal_commands, flatten, TaskError)
+from secsy.utils import (deduplicate, find_external_tasks,
+                         find_internal_tasks, flatten, TaskError)
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
 trace.LOG_SUCCESS = """\
 Task %(name)s[%(id)s] succeeded in %(runtime)ss\
 """
-COMMANDS = find_internal_commands() + find_external_commands()
+COMMANDS = find_internal_tasks() + find_external_tasks()
 
 app = celery.Celery(__name__)
 app.conf.update({

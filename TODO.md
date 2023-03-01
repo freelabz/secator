@@ -55,7 +55,7 @@ v0.0.1
     - [ ] Automated install for all tools supported by `secsy`
     - [ ] Either:
         - [ ] Install `katoolin3` from my GitHub and all Kali packages --> installs all Kali Linux tools
-        OR
+        **OR**
         - [ ] Use a `kali` image as base so that most tools are already available
 - [ ] Work on better proxy support, maybe using `proxychains`
 - [ ] Add external pluggable configs/ folder.
@@ -63,6 +63,7 @@ v0.0.1
     - [ ] run_opts, workflow_opts, scan_opts, task_opts overrides
     - [ ] results deduplication tests
     - [ ] + integration tests for existing workflows
+- [ ] Terminate tasks on client-side CTRL+C
 
 - **Integrations:**
     - OWASP ZAP [TODO]

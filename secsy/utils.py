@@ -194,27 +194,30 @@ def setup_logger(level='info', format='%(message)s'):
 	return logger
 
 
-def find_internal_commands():
+def find_internal_tasks():
 	"""Find internal secsy commands."""
 	from secsy.cmd import CommandRunner
-	package_dir = Path(__file__).resolve().parent / 'tools'
-	tools = []
+	package_dir = Path(__file__).resolve().parent / 'tasks'
+	task_classes = []
 	for (_, module_name, _) in iter_modules([str(package_dir)]):
-		module = import_module(f"secsy.tools.{module_name}")
+		module = import_module(f"secsy.tasks.{module_name}")
 		for attribute_name in dir(module):
 			attribute = getattr(module, attribute_name)
 			if isclass(attribute):
 				bases = inspect.getmro(attribute)
 				for base in bases:
 					if base == CommandRunner and attribute.cmd:
-						tools.append(attribute)
-	# Sort tools by category
-	tools = sorted(tools, key=lambda x: (get_command_category(x), x.__name__))
+						task_classes.append(attribute)
 
-	return tools
+	# Sort task_classes by category
+	task_classes = sorted(
+		task_classes,
+		key=lambda x: (get_command_category(x), x.__name__))
+
+	return task_classes
 
 
-def find_external_commands():
+def find_external_tasks():
 	"""Find external secsy commands."""
 	if not os.path.exists('config.secsy'):
 		return []
@@ -261,10 +264,10 @@ def get_command_cls(cls_name):
 	Returns:
 		cls: Class.
 	"""
-	tools = find_internal_commands() + find_external_commands()
-	for tool in tools:
-		if tool.__name__ == cls_name:
-			return tool
+	tasks_classes = find_internal_tasks() + find_external_tasks()
+	for task_cls in tasks_classes:
+		if task_cls.__name__ == cls_name:
+			return task_cls
 	return None
 
 

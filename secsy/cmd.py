@@ -41,7 +41,7 @@ class CommandRunner:
 	# Meta options
 	meta_opts = {}
 
-	# Additional tools options
+	# Additional command options
 	opts = {}
 
 	# Option key map to transform option names
@@ -375,7 +375,7 @@ class CommandRunner:
 				# Strip line
 				line = line.strip()
 
-				# Some tools output ANSI text, so we need to remove those ANSI chars
+				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
 					ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[m|K]?'
 					line = re.sub(ansi_regex, '', line.strip())
@@ -461,7 +461,7 @@ class CommandRunner:
 			sleep(1)
 
 		# Log results count
-		if self._print_item_count and self._json_output and not self._raw_output:
+		if self._print_item_count and self._json_output and not self._raw_output and not self._orig_output:
 			count = len(self.results)
 			name = self.output_type or 'item'
 			item_name = pluralize(name) if count > 1 else name
@@ -724,7 +724,7 @@ class CommandRunner:
 
 		# Print a JSON item
 		elif isinstance(data, dict):
-			# JSON dumps data so that it's consumable by other tools
+			# JSON dumps data so that it's consumable by other commands
 			data = json.dumps(data)
 
 			# Add prefix to output

@@ -1,108 +1,14 @@
-"""Vulnerability scanners."""
-
 import logging
-import re
 from datetime import datetime
-from itertools import groupby
-from urllib.parse import urlparse
 
 import requests
 import xmltodict
 from cpe import CPE
-from termcolor import colored, cprint
 
-from secsy.cmd import CommandRunner
 from secsy.definitions import *
+from secsy.tasks._categories import VulnCommand
 
 logger = logging.getLogger(__name__)
-
-VULN_META_OPTS = {
-	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
-	DELAY: {'type': float, 'help': 'Delay to add between each requests'},
-    FOLLOW_REDIRECT: {'is_flag': True, 'default': True, 'help': 'Follow HTTP redirects'},
-	PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
-	RATE_LIMIT: {'type':  int, 'help': 'Rate limit, i.e max number of requests per second'},
-	RETRIES: {'type': int, 'help': 'Retries'},
-	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
-	TIMEOUT: {'type': int, 'help': 'Request timeout'},
-	USER_AGENT: {'type': str, 'help': 'User agent, e.g "Mozilla Firefox 1.0"'}
-}
-
-VULN_OUTPUT = [
-	VULN_ID,
-	VULN_PROVIDER,
-	VULN_NAME,
-	VULN_DESCRIPTION,
-	VULN_SEVERITY,
-	VULN_CONFIDENCE,
-	VULN_CVSS_SCORE,
-	VULN_MATCHED_AT,
-	VULN_TAGS,
-	VULN_REFERENCES,
-	VULN_EXTRACTED_RESULTS,
-]
-
-
-class VulnCommand(CommandRunner):
-	meta_opts = VULN_META_OPTS
-	output_schema = VULN_OUTPUT
-	output_table_fields = [VULN_MATCHED_AT, VULN_SEVERITY, VULN_CONFIDENCE, VULN_NAME, VULN_ID, VULN_CVSS_SCORE, VULN_TAGS, VULN_EXTRACTED_RESULTS]
-	output_table_sort_fields = ('_confidence', '_severity', 'cvss_score')
-	output_type = VULN
-	input_type = HOST
-
-	@staticmethod
-	def on_item_converted(self, item):
-		severity_map = {
-			'critical': 0,
-			'high': 1,
-			'medium': 2,
-			'low': 3,
-			'info': 4,
-			None: 5
-		}
-		item['_severity'] = severity_map[item['severity']]
-		item['_confidence'] = severity_map[item['confidence']]
-		return item
-
-
-class dalfox(VulnCommand):
-	"""DalFox is a powerful open source XSS scanning tool."""
-	cmd = 'dalfox'
-	input_type = URL
-	input_flag = 'url'
-	file_flag = 'file'
-	json_flag = '--format json'
-	opt_prefix = '--'
-	opt_key_map = {
-		HEADER: 'header',
-		DELAY: 'delay',
-		FOLLOW_REDIRECT: 'follow-redirects',
-		METHOD: 'method',
-		PROXY: 'proxy',
-		RATE_LIMIT: OPT_NOT_SUPPORTED,
-		THREADS: OPT_NOT_SUPPORTED,
-		TIMEOUT: 'timeout',
-		USER_AGENT: 'user-agent'
-	}
-	output_map = {
-		VULN_ID: 'XSS Injection',
-		VULN_NAME: 'XSS Injection',
-		VULN_PROVIDER: 'dalfox',
-		VULN_TAGS: lambda x: [x['cwe']],
-		VULN_CONFIDENCE: 'high',
-		VULN_MATCHED_AT: lambda x: urlparse(x['data'])._replace(query='').geturl(),
-		VULN_EXTRACTED_RESULTS: lambda x: {
-			k: v for k, v in x.items()
-			if k not in ['type', 'severity', 'cwe']
-		},
-		VULN_SEVERITY: lambda x: x['severity'].lower()
-	}
-
-	@staticmethod
-	def on_line(self, line):
-		line = line.rstrip(',')
-		return line
 
 
 class nmap(VulnCommand):
@@ -490,66 +396,3 @@ class nmapData(dict):
 			VULN_CONFIDENCE: confidence
 		}
 		return vuln
-
-
-# class rustscan(nmap):
-# 	# nmap but faster
-# 	# rustscan -p <PORTS> -a <HOSTS> -- -A --script vulscan/
-# 	pass
-
-
-class nuclei(VulnCommand):
-	"""Fast and customisable vulnerability scanner based on simple YAML based
-	DSL.
-	"""
-	cmd = 'nuclei -silent'
-	file_flag = '-l'
-	input_flag = '-u'
-	json_flag = '-json'
-	opts = {
-		'templates': {'type': str, 'help': 'Templates'},
-		'tags': {'type': str, 'help': 'Tags'},
-		'exclude_tags': {'type': str, 'help': 'Exclude tags'},
-		'exclude_severity': {'type': str, 'help': 'Exclude severity'}
-	}
-	opt_key_map = {
-		HEADER: 'header',
-		DELAY: OPT_NOT_SUPPORTED,
-		FOLLOW_REDIRECT: 'follow-redirects',
-		PROXY: 'proxy',
-		RATE_LIMIT: 'rate-limit',
-		RETRIES: 'retries',
-		THREADS: 'c',
-		TIMEOUT: 'timeout',
-
-		# nuclei opts
-		'exclude_tags': 'exclude-tags',
-		'exclude_severity': 'exclude-severity',
-		'templates': 't'
-	}
-	opt_value_map = {
-		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,
-		'templates': lambda x: ','.join(x) if isinstance(x, list) else x,
-		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
-	}
-	output_map = {
-		VULN_ID: lambda x: nuclei.id_extractor(x),
-		VULN_PROVIDER: 'nuclei',
-		VULN_NAME: lambda x: x['info']['name'],
-		VULN_DESCRIPTION: lambda x: x['info'].get('description'),
-		VULN_SEVERITY: lambda x: x['info'][VULN_SEVERITY],
-		VULN_CONFIDENCE: lambda x: 'high',
-		VULN_CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score', -1),
-		VULN_MATCHED_AT:  'matched-at',
-		VULN_TAGS: lambda x: x['info']['tags'],
-		VULN_REFERENCES: lambda x: x['info']['reference'],
-		VULN_EXTRACTED_RESULTS: lambda x: {'data': x.get('extracted-results', [])}
-	}
-	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest'
-
-	@staticmethod
-	def id_extractor(item):
-		cve_ids = item['info'].get('classification', {}).get('cve-id') or []
-		if len(cve_ids) > 0:
-			return cve_ids[0]
-		return None
