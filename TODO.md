@@ -19,7 +19,14 @@ v0.0.1
 - [x] Allow stdin input for all Secsy commands.
 
 **TODO:**
+- Try to use Celery `chunks` to chunk a task.
+- [ ] `CTRL + C` should let you choose which tasks to abort from the client-side and the worker side.
+- [ ] Fix bug with local filesystem broker
 - [ ] Add `arp-scan`
+- [ ] Auto-generate CLI groups based on 'name' field in YAML:
+    - [ ] If `name: test_sub`, then a subgroup of commands will be automatically generated, so that we can run:
+        - [ ] `secsy workflow test --help` will be a Click group that shows `sub` subcommand.
+        - [ ] `secsy workflow test sub --help` will be the helper for the `sub` subcommand.
 - [ ] Add techniques for IDS evasion (cf https://book.hacktricks.xyz/generic-methodologies-and-resources/pentesting-network/ids-evasion)
 - [ ] Make Celery tasks for:
     - [ ] Results filtering
@@ -46,6 +53,12 @@ v0.0.1
     ```
     - [ ] Cleanup chord-creating code + add tests for it
 
+- [ ] Edit workflow YAML from environment variables and config parameters / overrides from CLI:
+    ```
+    secsy utils copy workflow domain_recon domain_recon_modified
+    secsy utils set workflow.opt1 # Workflow general options
+    secsy utils set workflow.tasks.nmap.rate_limit 10 # Workflow opt
+    ```
 - [ ] Replace `console.log` by `logger.info` with rich logging handler (add Logging Handler and setup function) + Celery worker
 - [ ] Autodiscover external tools
 - [ ] Use --<tool>.<option_name> in the CLI (instead of `_`) to override option names.

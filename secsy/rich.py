@@ -27,7 +27,8 @@ def criticity_to_color(value):
 formatters = {
 	'confidence': criticity_to_color,
 	'severity': criticity_to_color,
-	'cvss_score': lambda score: '' if score == -1 else f'[bold blue]{score}[/]'
+	'cvss_score': lambda score: '' if score == -1 else f'[bold blue]{score}[/]',
+	'port': lambda port: f'[bold blue]{port}[/]'
 }
 
 def build_table(items, output_fields=[], sort_by=None):
