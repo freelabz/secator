@@ -18,6 +18,12 @@ ALL_CMDS = find_internal_tasks() + find_external_tasks()
 level = logging.DEBUG if DEBUG else logging.INFO
 setup_logging(level)
 
+DEFAULT_CMD_OPTS = {
+	'no_capture': True,
+	'print_cmd': True,
+	'print_timestamp': True
+}
+
 
 #--------#
 # GROUPS #
@@ -63,9 +69,7 @@ def worker(concurrency):
 		cmd += f' -c {concurrency}'
 	CommandRunner.run_command(
 		cmd,
-		no_capture=True,
-		print_cmd=True,
-		print_timestamp=True
+		**DEFAULT_CMD_OPTS
 	)
 
 register_commands(cmd)
@@ -100,12 +104,6 @@ def get_proxy(timeout):
 #------#
 # TEST #
 #------#
-DEFAULT_CMD_OPTS = {
-	'print_timestamp': True,
-	'print_line': True,
-	'print_cmd': True,
-}
-
 
 @utils.group()
 def test():
