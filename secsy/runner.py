@@ -57,7 +57,7 @@ class Runner:
 
 		# Make HTML report
 		timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
-		html_title = title.replace(' ', '_').lower()
+		html_title = title.replace(' ', '_').replace("\"", '').lower()
 		os.makedirs(REPORTS_FOLDER, exist_ok=True)
 		html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'
 		render.save_html(html_path)
@@ -155,21 +155,14 @@ class Workflow(Runner):
 		"""
 		self.show_results = show_results
 		self.sync = sync
-		if sync:
-			fmt_opts = {
-				'print_timestamp': True,
-				'print_cmd': True,
-				'print_item_count': True,
-			}
-		else:
-			fmt_opts = {
-				'print_timestamp': False,
-				'print_cmd': True,
-				'print_cmd_prefix': True,
-				'print_item_count': True,
-			}
-		fmt_opts['sync'] = sync
-		fmt_opts['track'] = True
+		fmt_opts = {
+			'print_timestamp': True,
+			'print_cmd': True,
+			'print_cmd_prefix': not sync,
+			'print_item_count': True,
+			'sync': sync,
+			'track': True
+		}
 		self.config.options.update(fmt_opts)
 
 		# Log workflow start

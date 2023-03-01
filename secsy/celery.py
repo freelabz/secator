@@ -11,11 +11,11 @@ from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
 
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND,
-                               TEMP_FOLDER)
+							   TEMP_FOLDER)
 from secsy.rich import console
 from secsy.runner import merge_extracted_values
-from secsy.utils import (deduplicate, find_external_tasks,
-                         find_internal_tasks, flatten, TaskError)
+from secsy.utils import (TaskError, deduplicate, find_external_tasks,
+						 find_internal_tasks, flatten)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -43,18 +43,25 @@ app.conf.update({
 })
 
 
-@signals.celeryd_init.connect
-def setup_log_format(sender, conf, **kwargs):
-    conf.worker_log_format = ''
-    # conf.worker_task_log_format = '[%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s'
+# @signals.celeryd_init.connect
+# def setup_log_format(sender, conf, **kwargs):
+#     conf.worker_log_format = ''
+	# conf.worker_log_format = '[%(processName)s] %(message)s'
+	# conf.worker_task_log_format = '[%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s'
 
+@signals.setup_logging.connect
+def void(*args, **kwargs):
+	""" Override celery's logging setup to prevent it from altering our settings.
+	github.com/celery/celery/issues/1867
+	"""
+	pass
 
 #--------------#
 # Celery tasks #
 #--------------#
 
 def chunker(seq, size):
-    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+	return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
 def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):

@@ -4,6 +4,7 @@ import logging
 import re
 import shlex
 import subprocess
+import sys
 from datetime import datetime
 from time import sleep
 
@@ -116,6 +117,7 @@ class CommandRunner:
 	_print_item = True
 	_print_item_count = True
 	_stop_on_first_match = False
+	_no_capture = False
 
 	# Hooks, validators, formatter
 	hooks = {}
@@ -144,7 +146,7 @@ class CommandRunner:
 		self._orig_output = self.cmd_opts.pop('orig', False)
 
 		# JSON Output
-		_json = self.cmd_opts.pop('json', False)
+		_json = self.cmd_opts.pop('json', False) or self._table_output
 
 		# CLI mode: use nicer prints and colors (no logging statements)
 		self._print_timestamp = self.cmd_opts.pop('print_timestamp', False)
@@ -163,6 +165,9 @@ class CommandRunner:
 
 		# Print task name before line output (useful for multiprocessed envs)
 		self._print_cmd_prefix = self.cmd_opts.pop('print_cmd_prefix', False)
+
+		# No capturing of stdout / stderr. Effectively disables all post-processing (load_item etc...)
+		self._no_capture = self.cmd_opts.pop('no_capture', False)
 
 		# Determine if JSON output or not
 		self._json_output = self.output_return_type == dict
@@ -212,6 +217,13 @@ class CommandRunner:
 		self.chunk_count = self.cmd_opts.pop('chunk_count', None)
 		self._set_print_prefix()
 
+		# Abort if inputs are invalid
+		self._input_validated = True
+		if not self.run_validators('input', self.input):
+			# self._print(f'Input validation failed.', color='bold red')
+			self.run_hooks('on_end')
+			self._input_validated = False
+
 		# Callback before building the command line
 		self.run_hooks('on_init')
 
@@ -222,6 +234,8 @@ class CommandRunner:
 		self._build_cmd()
 
 	def __iter__(self):
+		if not self._input_validated:
+			return
 		yield from self._run_command()
 		self._process_results()
 
@@ -278,7 +292,7 @@ class CommandRunner:
 		for validator in self._validators[validator_type]:
 			if not validator(self, *args):
 				if validator_type == 'input':
-					self._print(validator.__doc__, color='bold red')
+					self._print(f'{validator.__doc__}', color='bold red')
 				return False
 		return True
 
@@ -340,21 +354,16 @@ class CommandRunner:
 		# Output and results
 		self.output = ''
 		self.return_code = 0
-		killed = False
+		self.killed = False
 		self.results = []
-
-		# Abort if inputs were not validated
-		if not self.run_validators('input', self.input):
-			self._print('Input validation failed. Skipping.', color='bold red')
-			self.run_hooks('on_end')
-			return
 
 		# Run the command using subprocess
 		try:
+			os.environ['FORCE_COLORS'] = '3'
 			process = subprocess.Popen(
 				command,
-				stdout=subprocess.PIPE,
-				stderr=subprocess.STDOUT,
+				stdout=sys.stdout if self._no_capture else subprocess.PIPE,
+				stderr=sys.stderr if self._no_capture else subprocess.STDOUT,
 				universal_newlines=True,
 				shell=self.shell,
 				cwd=self.cwd)
@@ -366,8 +375,13 @@ class CommandRunner:
 				self._print(error, color='bold red')
 			return
 
-		# Process the output
 		try:
+			# No capture mode, wait for command to finish and return
+			if self._no_capture:
+				self._wait_until_finished(process)
+				return
+
+			# Process the output in real-time
 			for line in iter(lambda: process.stdout.readline(), b''):
 				if not line:
 					break
@@ -399,7 +413,7 @@ class CommandRunner:
 					yield item
 				elif line:
 					if self._print_line and not (self.quiet and self._json_output):
-						self._print(line)
+						self._print(line, file=sys.stdout)
 					if not self.output_return_type is dict:
 						self.results.append(line)
 						yield line
@@ -417,21 +431,23 @@ class CommandRunner:
 			process.kill()
 			logger.warning('Process was killed manually (CTRL+C / CTRL+X)')
 			self.output = ''
+			self.killed = True
 
 		# Retrieve the return code and output
+		self._wait_until_finished(process)
+
+	def _wait_until_finished(self, process):
+		"""Wait for process to finish and process output and return code."""
 		process.wait()
+		self.output = process.communicate() if self._no_capture else self.output.strip()
 		process.stdout.close()
 		self.return_code = process.returncode if not self.ignore_return_code else 0
-		self.output = self.output.strip()
-		if self.return_code != 0 and not killed:
+		if self.return_code != 0 and not self.killed:
 			error = f'Command failed with return code {self.return_code}.'
 			if self.output:
-				error += f'Output: {self.output}'
+				error += f' Output: {self.output}'
 			self.error = error
 			self._print(error, color='bold red')
-			return
-
-		# Callback after running cmd
 		self.run_hooks('on_end')
 
 	def _configure_proxy(self):	
@@ -469,7 +485,6 @@ class CommandRunner:
 				self._print(f':pill: Found {count} {item_name} !', color='bold green')
 			else:
 				self._print(f':adhesive_bandage: Found 0 {item_name}.', color='bold red')
-			console.print()
 
 		# Print table if in table mode
 		if self._table_output and self.results:
@@ -509,7 +524,7 @@ class CommandRunner:
 		# Print item to console or log, except in table output where we 
 		# want to wait for all the results to come through before printing.
 		if self._json_output and self._print_item and not self._table_output:
-			self._print(item)
+			self._print(item, file=sys.stdout)
 
 		# Return item
 		return item
@@ -705,7 +720,7 @@ class CommandRunner:
 
 		return new_item
 
-	def _print(self, data, color=None):
+	def _print(self, data, color=None, file=sys.stderr):
 		"""Print function.
 
 		Args:
@@ -741,16 +756,18 @@ class CommandRunner:
 		# Print a line
 		elif isinstance(data, str):
 
-			# Add prefix to output
-			data = f'{self.prefix} {data}' if self.prefix else data
-
 			# If raw mode (--raw), we might want to parse results with e.g 
 			# pipe redirections, so we need a pure line with no logging info
 			if self._raw_output or self._orig_output:
+				data = f'{self.prefix} {data}' if self.prefix else data
 				print(data)
 			else:
+				data = escape(data)
+				from rich.text import Text
+				data = Text.from_ansi(data)
 				if color:
-					data = f'[{color}]{escape(data)}[/]'
+					data = f'[{color}]{data}[/]'
+				data = f'{self.prefix} {data}' if self.prefix else data
 				if self._print_timestamp:
 					console.log(data)
 				else:

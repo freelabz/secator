@@ -5,16 +5,16 @@ import unittest
 import unittest.mock
 import validators
 import warnings
+import yaml
 
 from fp.fp import FreeProxy
 
 from secsy.cmd import CommandRunner
 from secsy.definitions import *
-from secsy.tasks.http import *
-from secsy.tasks.recon import *
-from secsy.tasks.vuln import *
 from secsy.rich import console
 from secsy.utils import setup_logging, find_internal_tasks
+from secsy.tasks import httpx
+from secsy.tasks._categories import HTTPCommand, ReconCommand, VulnCommand
 
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
@@ -234,8 +234,8 @@ class TestCmdBuild(unittest.TestCase):
         cmd_opts = {}
         host = 'test.synology.me'
         cls = httpx(host, **cmd_opts)
-        default_match_codess = HTTP_META_OPTS[MATCH_CODES]['default']
-        default_threads = HTTP_META_OPTS[THREADS]['default']
+        default_match_codess = HTTPCommand.meta_opts[MATCH_CODES]['default']
+        default_threads = HTTPCommand.meta_opts[THREADS]['default']
         expected_cmd = f'httpx -u {host} -json -td -cdn -follow-redirects -match-code {default_match_codess} -threads {default_threads}'
         self.assertEqual(cls.cmd, expected_cmd)
         self.assertEqual(cls._print_timestamp, False)
