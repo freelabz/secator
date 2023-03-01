@@ -7,12 +7,13 @@ import rich_click as click
 from secsy.cmd import CommandRunner
 from secsy.decorators import (OrderedGroup, register_commands, register_scans,
                               register_workflows)
-from secsy.utils import (find_external_commands, find_internal_commands,
+from secsy.utils import (find_external_tasks, find_internal_tasks,
                          setup_logging)
+from secsy.definitions import ASCII
 
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 YAML_MODE = bool(int(os.environ.get('YAML_MODE', '0')))
-ALL_CMDS = find_internal_commands() + find_external_commands()
+ALL_CMDS = find_internal_tasks() + find_external_tasks()
 
 level = logging.DEBUG if DEBUG else logging.INFO
 setup_logging(level)
@@ -25,6 +26,7 @@ setup_logging(level)
 @click.group(cls=OrderedGroup)
 def cli():
 	"""Secsy CLI."""
+	print(ASCII)
 	pass
 
 

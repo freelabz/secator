@@ -2,12 +2,11 @@ from collections import OrderedDict
 
 import rich_click as click
 from rich_click.rich_group import RichGroup
-import sys
 
 from secsy.config import ConfigLoader
 from secsy.definitions import *
 from secsy.runner import run_scan, run_workflow
-from secsy.utils import (find_external_commands, find_internal_commands,
+from secsy.utils import (find_external_tasks, find_internal_tasks,
                          get_command_category, get_command_cls,
                          expand_input)
 
@@ -34,7 +33,7 @@ class OrderedGroup(RichGroup):
         return self.commands
 
 
-def get_command_options(*tools):
+def get_command_options(*tasks):
 	"""Get unified list of command options from a list of secsy commands
 	classes.
 
@@ -46,7 +45,7 @@ def get_command_options(*tools):
 	"""
 	opt_cache = []
 	all_opts = OrderedDict({})
-	for cls in tools:
+	for cls in tasks:
 		opts = OrderedDict(DEFAULT_CLI_OPTIONS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
 			if (opt not in cls.opt_key_map and opt not in cls.opts and opt not in DEFAULT_CLI_OPTIONS) or (cls.opt_key_map.get(opt) == OPT_NOT_SUPPORTED):
@@ -135,7 +134,7 @@ def register_commands(cli_endpoint):
 		cmds (list): List of CommandRunner objects to register.
 		cli_endpoint (click.Group): Click group to register commands with.
 	"""
-	cmds = find_internal_commands() + find_external_commands()
+	cmds = find_internal_tasks() + find_external_tasks()
 	for cls in cmds:
 		register_command(cls, cli_endpoint)
 

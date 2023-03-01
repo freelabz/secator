@@ -10,11 +10,11 @@ from fp.fp import FreeProxy
 
 from secsy.cmd import CommandRunner
 from secsy.definitions import *
-from secsy.tools.http import *
-from secsy.tools.recon import *
-from secsy.tools.vuln import *
+from secsy.tasks.http import *
+from secsy.tasks.recon import *
+from secsy.tasks.vuln import *
 from secsy.rich import console
-from secsy.utils import setup_logging, find_internal_commands
+from secsy.utils import setup_logging, find_internal_tasks
 
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
@@ -55,7 +55,7 @@ def load_fixture(name, ext=None, path=False):
 #---------#
 # GLOBALS #
 #---------#
-ALL_CMDS = find_internal_commands()
+ALL_CMDS = find_internal_tasks()
 TEST_COMMANDS = os.environ.get('TEST_COMMANDS', '')
 if TEST_COMMANDS:
     TEST_COMMANDS = TEST_COMMANDS.split(',')
@@ -95,7 +95,7 @@ meta_opts = {
     TIMEOUT: 1,
     USER_AGENT: 'Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
 
-    # Individual tools options
+    # Individual tasks options
     'gf_pattern': 'xss',
     'nmap_output_path': load_fixture('nmap_output', path=True, ext='.xml'), # nmap XML fixture
     'msfconsole_resource_script': load_fixture('msfconsole_input', path=True),

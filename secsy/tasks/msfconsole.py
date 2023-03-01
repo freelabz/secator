@@ -1,4 +1,4 @@
-"""Attack tools."""
+"""Attack tasks."""
 
 import logging
 from datetime import datetime
@@ -7,9 +7,6 @@ from secsy.cmd import CommandRunner
 from secsy.definitions import *
 
 logger = logging.getLogger(__name__)
-
-ATTACK_META_OPTS = {}
-ATTACK_OUTPUT = []
 
 
 class msfconsole(CommandRunner):

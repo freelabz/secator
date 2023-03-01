@@ -1,6 +1,6 @@
 from celery import chain, chord
 from secsy.celery import run_command, forward_results
-from secsy.tools.http import httpx
+from secsy.tasks.http import httpx
 
 
 def build_simple_chain_workflow():

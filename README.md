@@ -6,16 +6,16 @@ security-oriented commands in a single CLI.
 `secsy` is designed to not waste your time and make you efficient at 
 vulnerability assessments, with the following feature set:
 
-* **Curated list of tools**: tools integrated to `secsy` are carefully chosen 
+* **Curated list of commands**: commands integrated to `secsy` are carefully chosen
     to be **fast**, **efficient**, **well-mainted**, and have **structured 
     output** (JSON, JSON lines, CSV, XML).
 
-* **Unified input options**: tools belonging to the same category will have the 
+* **Unified input options**: commands belonging to the same category will have the
     same input options, while still retaining the capability to add 
     tool-specific options.
 
-* **Unified output schema**: tools belonging to the same category will have a 
-    unified output schema, allowing you to run multiple tools and aggregate 
+* **Unified output schema**: commands belonging to the same category will have a
+    unified output schema, allowing you to run multiple commands and aggregate 
     results quickly.
 
 * **CLI and library usage**:
@@ -23,7 +23,7 @@ vulnerability assessments, with the following feature set:
     always structured (list of dicts). Results are also yielded in realtime.
     * When `secsy` is called as a CLI, various output formats are available, 
     such as `plaintext` (default), `json` (`jq` compatible), `raw` (pipeable 
-    to other tools) or `table` (nice to look at).
+    to other commands) or `table` (nice to look at).
 
 
 ## Supported commands
@@ -132,7 +132,47 @@ secsy cmd --help # list available commands
 secsy cmd <COMMAND> --help # list command options
 ```
 
-### Output formatting
+### Input options
+
+The `secsy` CLI is built to be flexible in terms of inputs:
+
+**Direct input**
+
+Input can be passed directly as an argument to the command / workflow / scan you 
+wish to run:
+
+```
+secsy cmd httpx example.com # single input
+secsy cmd httpx example.com,example2.com,example3.com # list input
+```
+
+**File input**
+
+Input can also be passed from a file containing one item per line:
+
+```
+secsy cmd httpx urls.txt
+```
+
+**Stdin input**
+
+Input can also be passed directly from stdin, which in combination with the 
+`--raw --json` switch allows to build workflows directly in the CLI:
+
+```
+cat urls.txt | secsy cmd httpx
+```
+
+An example for a common **ProjectDiscovery** pipe:
+
+```
+secsy cmd subfinder example.com | secsy cmd httpx | secsy cmd nuclei
+```
+
+***Note:*** *for more complex workflows, we highly recommend using the YAML-based
+workflow definitions or the code-based workflow definitions.*
+
+### Output options
 
 The `secsy` CLI is built to be very flexible in terms of output formats:
 - `-json` for JSONLines output
@@ -155,7 +195,7 @@ simply calling them in a `for` loop like, and consume results lazily with e.g a
 Celery task.
 
 ```py
-from secsy.tools.http import ffuf
+from secsy.tasks.http import ffuf
 
 app = Celery(__name__)
 
@@ -180,7 +220,7 @@ For instance, if you want a global rate limit of 1000, but for ffuf you want it
 to be 100m you can do so:
 
 ```py
-from secsy.tools.http import ffuf, gau, gospider, katana
+from secsy.tasks.http import ffuf, gau, gospider, katana
 host = 'wikipedia.org'
 options = {
     'rate_limit': 1000, # reqs/mn
@@ -218,8 +258,8 @@ options = {
 
 **Finding subdomains and run HTTP probe on results**
 ```py
-from secsy.tools.recon import subfinder
-from secsy.tools.http import httpx
+from secsy.tasks.recon import subfinder
+from secsy.tasks.http import httpx
 
 host = 'alibaba.com'
 subdomains = subfinder(host, threads=30).run()
@@ -231,8 +271,8 @@ if probe:
 **Finding open ports and run nmap vulscan on results**
 
 ```py
-from secsy.tools.recon import naabu
-from secsy.tools.vuln import nmap
+from secsy.tasks.recon import naabu
+from secsy.tasks.vuln import nmap
 
 host = 'cnn.com'
 ports_data = naabu(host).run()
@@ -245,7 +285,7 @@ vulns = nmap(host, ports=ports, script='vulscan')
 
 ```py
 from secsy.utils import setup_logger
-from secsy.tools.http import httpx, ffuf, gau, gospider, katana
+from secsy.tasks.http import httpx, ffuf, gau, gospider, katana
 host = 'example.com'
 opts = {
     'match_codes': '200, 302',

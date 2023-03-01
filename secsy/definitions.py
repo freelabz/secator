@@ -1,7 +1,17 @@
 #!/usr/bin/python
 
 import os
+from pkg_resources import get_distribution
+VERSION = get_distribution('secsy').version
+ASCII = f"""
+   ________  ____________  __
+  / ___/ _ \/ ___/ ___/ / / /
+ (__  /  __/ /__(__  / /_/ / 
+/____/\___/\___/____/\__, /  
+                    /____/     v{VERSION}
 
+                    freelabz.com
+"""
 TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
 REPORTS_FOLDER = os.environ.get('REPORTS_FOLDER', '/tmp/reports')
 RECORD = bool(os.environ.get('RECORD', '0'))
