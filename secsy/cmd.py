@@ -378,7 +378,7 @@ class CommandRunner:
 		try:
 			# No capture mode, wait for command to finish and return
 			if self._no_capture:
-				self._wait_until_finished(process)
+				self._wait_for_end(process)
 				return
 
 			# Process the output in real-time
@@ -421,7 +421,7 @@ class CommandRunner:
 				# Stop on first match
 				if self._stop_on_first_match and len(self.results) == 1:
 					process.kill()
-					killed = True
+					self.killed = True
 					break
 
 				# Add the log line to the output
@@ -434,20 +434,29 @@ class CommandRunner:
 			self.killed = True
 
 		# Retrieve the return code and output
-		self._wait_until_finished(process)
+		self._wait_for_end(process)
 
-	def _wait_until_finished(self, process):
+	def _wait_for_end(self, process):
 		"""Wait for process to finish and process output and return code."""
 		process.wait()
-		self.output = process.communicate() if self._no_capture else self.output.strip()
-		process.stdout.close()
-		self.return_code = process.returncode if not self.ignore_return_code else 0
+		self.return_code = process.returncode
+
+		if self._no_capture:
+			self.output = ''
+		else:
+			self.output = self.output.strip()
+			process.stdout.close()
+
+		if self.ignore_return_code:
+			self.return_code = 0
+
 		if self.return_code != 0 and not self.killed:
 			error = f'Command failed with return code {self.return_code}.'
 			if self.output:
 				error += f' Output: {self.output}'
 			self.error = error
 			self._print(error, color='bold red')
+
 		self.run_hooks('on_end')
 
 	def _configure_proxy(self):	

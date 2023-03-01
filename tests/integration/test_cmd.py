@@ -11,6 +11,7 @@ from fp.fp import FreeProxy
 from secsy.cmd import CommandRunner
 from secsy.utils import setup_logging, find_internal_tasks
 from secsy.definitions import *
+from secsy.rich import console
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,10 +116,11 @@ class TestCommand(unittest.TestCase):
         input = INPUTS[cls.input_type]
         command = cls(input, **opts)
         items = command.run()
+        console.print(f'Testing {cls.__name__} ...')
         if expected_return_code:
             self.assertEqual(command.return_code, expected_return_code)
         if not items:
-            warnings.warn(
+            console.print(
                 f'No results from {cls.__name__} ! Skipping item check.')
         for item in items:
             if expected_output_type:
