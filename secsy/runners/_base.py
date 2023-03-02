@@ -1,4 +1,6 @@
 
+import json
+import operator
 import os
 from datetime import datetime
 from time import sleep, time
@@ -12,14 +14,16 @@ from rich.progress import (Progress, SpinnerColumn, TextColumn,
 
 from secsy.definitions import OUTPUT_TYPES, REPORTS_FOLDER
 from secsy.rich import build_table, console
-from secsy.utils import merge_opts, pluralize, get_file_timestamp
-from secsy.runners._helpers import get_task_ids, get_task_info, process_extractor
+from secsy.runners._helpers import (get_task_ids, get_task_info,
+                                    process_extractor)
+from secsy.utils import get_file_timestamp, merge_opts, pluralize
 
 
 class Runner:
 
 	_print_table = True
 	_save_html = True
+	_save_json = True
 
 	def __init__(self, config, targets, debug=False, **run_opts):
 		self.config = config
@@ -67,6 +71,10 @@ class Runner:
 		if not self.results or not self._print_table:
 			return
 
+		self.end_time = datetime.fromtimestamp(time())
+		self.elapsed = self.end_time - self.start_time
+		self.elapsed_human = humanize.naturaldelta(self.elapsed)
+
 		# Print table
 		title = f'{self.__class__.__name__} "{self.config.name}" results'
 		render = Console(record=True)
@@ -80,13 +88,14 @@ class Runner:
 			os.makedirs(REPORTS_FOLDER, exist_ok=True)
 			html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'
 			render.save_html(html_path)
-			console.log(f'Saved HTML report to {html_path}')
+			console.print(f':file_cabinet: Saved HTML report to {html_path}')
+
+		# Make JSON report
+		if self._save_json:
+			self.save_results_json(title)
 
 		# Log execution results
-		self.end_time = datetime.fromtimestamp(time())
-		delta = self.end_time - self.start_time
-		delta_str = humanize.naturaldelta(delta)
-		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{delta_str}[/].')
+		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
 		console.print()
 
 	def print_results_table(self, title, render):
@@ -107,6 +116,55 @@ class Runner:
 				render.print()
 		return tables
 
+	def save_results_json(self, title):
+		timestr = get_file_timestamp()
+		json_title = title.replace(' ', '_').replace("\"", '').lower()
+		json_path = f'{REPORTS_FOLDER}/{json_title}_{timestr}.json'
+
+		# Trim run options
+		exclude_keys = [
+			'json',
+			'orig',
+			'raw',
+			'color',
+			'table',
+			'quiet',
+			'print_cmd',
+			'print_timestamp',
+			'print_item_count'
+		]
+		run_opts = {
+			k: v for k, v in self.run_opts.items()
+			if k not in exclude_keys and v is not None
+		}
+
+		# Prepare JSON report
+		data = {
+			'info': {
+				'title': json_title,
+				'type': self.__class__.__name__,
+				'name': self.config.name,
+				'targets': self.targets,
+				'total_time': str(self.elapsed),
+				'total_human': self.elapsed_human,
+				'run_opts': run_opts,
+			},
+			'results': {},
+		}
+
+		# Fill JSON report
+		for output_type in OUTPUT_TYPES:
+			sort_by, _ = get_table_fields(output_type)
+			items = [item for item in self.results if item['_type'] == output_type]
+			if items:
+				if sort_by and all(sort_by):
+					items = sorted(items, key=operator.itemgetter(*sort_by))
+				data['results'][output_type] = items
+
+		# Save JSON report to file
+		with open(json_path, 'w') as f:
+			json.dump(data, f, indent=2)
+			console.print(f':file_cabinet: Saved JSON report to {json_path}')
 
 	def process_live_tasks(self, result):
 		tasks_progress = Progress(

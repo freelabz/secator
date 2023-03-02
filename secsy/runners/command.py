@@ -10,8 +10,8 @@ from time import sleep
 from fp.fp import FreeProxy
 from rich.markup import escape
 
-from secsy.definitions import (DEFAULT_CHUNK_SIZE, OPT_NOT_SUPPORTED,
-                               OPT_PIPE_INPUT, TEMP_FOLDER)
+from secsy.definitions import (DEFAULT_CHUNK_SIZE, DEFAULT_PROXY_TIMEOUT,
+                               OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp, pluralize
@@ -475,7 +475,7 @@ class Command:
 			self.cmd = f'proxychains {self.cmd}'
 		elif self.proxy and support_proxy:
 			if self.proxy == 'random':
-				self.cmd_opts['proxy'] = FreeProxy(timeout=0.1, anonym=True).get()
+				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, anonym=True).get()
 			else: # tool-specific proxy settings
 				self.cmd_opts['proxy'] = self.proxy
 

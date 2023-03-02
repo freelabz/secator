@@ -1,18 +1,7 @@
 import re
-import yaml
-
-
-class JSONSerializer:
-	def run(self, line):
-		if not (line.startswith('{') and line.endswith('}')):
-			return None
-		try:
-			return yaml.safe_load(line)
-		except yaml.YAMLError:
-			return None
-
 
 class RegexSerializer:
+
 	def __init__(self, regex, fields=[]):
 		self.regex = re.compile(regex)
 		self.fields = fields

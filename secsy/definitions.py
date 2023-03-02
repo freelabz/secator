@@ -25,7 +25,8 @@ DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 
 # Defaults
 DEFAULT_CHUNK_SIZE = 100
-DEFAULT_STDIN_TIMEOUT = 5
+DEFAULT_STDIN_TIMEOUT = 5 # seconds
+DEFAULT_PROXY_TIMEOUT = 1 # seconds
 
 # Constants
 FFUF_DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
