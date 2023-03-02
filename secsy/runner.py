@@ -1,10 +1,11 @@
-import yaml
 import logging
 import os
+from contextlib import nullcontext
 from datetime import datetime
 from time import sleep, time
 
 import humanize
+import yaml
 from celery import chain, chord
 from celery.result import AsyncResult, GroupResult
 from rich.console import Console
@@ -13,14 +14,17 @@ from rich.progress import (Progress, SpinnerColumn, TextColumn,
                            TimeElapsedColumn)
 
 from secsy.config import ConfigLoader
-from secsy.definitions import OUTPUT_TYPES, DEBUG, REPORTS_FOLDER
+from secsy.definitions import DEBUG, OUTPUT_TYPES, REPORTS_FOLDER
 from secsy.rich import build_table, console
-from secsy.utils import (deduplicate, merge_opts, pluralize, discover_tasks)
+from secsy.utils import deduplicate, discover_tasks, merge_opts, pluralize
 
 logger = logging.getLogger(__name__)
 
 
 class Runner:
+
+	_print_table = True
+	_save_html = True
 
 	def __init__(self, config, targets, debug=False, **run_opts):
 		self.config = config
@@ -65,31 +69,23 @@ class Runner:
 			results (list): List of results.
 			output_types (list): List of result types to add to report.
 		"""
-		if not self.results:
+		if not self.results or not self._print_table:
 			return
-		render = Console(record=True)
-		render.print()
+
+		# Print table
 		title = f'{self.__class__.__name__} "{self.config.name}" results'
-		h1 = Markdown(f'# {title}')
-		render.print(h1, style='bold magenta', width=50)
-		render.print()
-		for output_type in OUTPUT_TYPES:
-			sort_by, output_fields = get_table_fields(output_type)
-			items = [item for item in self.results if item['_type'] == output_type]
-			if items:
-				_table = build_table(items, output_fields, sort_by)
-				_type = pluralize(items[0]['_type'])
-				render.print(_type.upper(), style='bold gold3', justify='left')
-				render.print(_table)
-				render.print
+		render = Console(record=True)
+		if self._print_table or self.run_opts.get('table', False):
+			self.print_results_table(title, render)
 
 		# Make HTML report
-		timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
-		html_title = title.replace(' ', '_').replace("\"", '').lower()
-		os.makedirs(REPORTS_FOLDER, exist_ok=True)
-		html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'
-		render.save_html(html_path)
-		console.log(f'Saved HTML report to {html_path}')
+		if self._save_html or self.run_opts.get('html', False):
+			timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+			html_title = title.replace(' ', '_').replace("\"", '').lower()
+			os.makedirs(REPORTS_FOLDER, exist_ok=True)
+			html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'
+			render.save_html(html_path)
+			console.log(f'Saved HTML report to {html_path}')
 
 		# Log execution results
 		self.end_time = datetime.fromtimestamp(time())
@@ -97,6 +93,24 @@ class Runner:
 		delta_str = humanize.naturaldelta(delta)
 		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{delta_str}[/].')
 		console.print()
+
+	def print_results_table(self, title, render):
+		render.print()
+		h1 = Markdown(f'# {title}')
+		render.print(h1, style='bold magenta', width=50)
+		render.print()
+		tables = []
+		for output_type in OUTPUT_TYPES:
+			sort_by, output_fields = get_table_fields(output_type)
+			items = [item for item in self.results if item['_type'] == output_type]
+			if items:
+				_table = build_table(items, output_fields, sort_by)
+				tables.append(tables)
+				_type = pluralize(items[0]['_type'])
+				render.print(_type.upper(), style='bold gold3', justify='left')
+				render.print(_table)
+				render.print()
+		return tables
 
 
 	def process_live_tasks(self, result):
@@ -161,6 +175,18 @@ class Runner:
 			console.log('Errors:', style='bold red')
 			for error in errors:
 				console.print('  ' + error)
+
+def confirm_exit(func):
+	def inner_function(self, *args, **kwargs):
+		try:
+			func(self, *args, **kwargs)
+		except KeyboardInterrupt:
+			from rich.prompt import Confirm
+			exit_confirmed = Confirm.ask('Are you sure you want to exit ?')
+			if exit_confirmed:
+				self.log_results()
+				raise KeyboardInterrupt
+	return inner_function
 
 
 class Scan(Runner):
@@ -228,7 +254,7 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
-		self.print_results = print_results
+		self._print_table = print_results
 		self.sync = sync
 		fmt_opts = {
 			'print_timestamp': True,
@@ -375,12 +401,15 @@ class Workflow(Runner):
 			console.print()
 
 		# Print workflow results
-		if self.print_results:
-			self.log_results()
+		self.log_results()
 
 class Task(Runner):
 
-	def run(self, sync=True, print_results=True):
+	_print_table = False
+	_save_html = False
+
+	@confirm_exit
+	def run(self, sync=True):
 		"""Run task.
 
 		Args:
@@ -390,7 +419,9 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
-		self.print_results = print_results
+		table = self.run_opts.get('table', False)
+		json = self.run_opts.get('json', False)
+		self._print_table = table or not sync
 		self.sync = sync
 		fmt_opts = {
 			'print_timestamp': True,
@@ -399,17 +430,19 @@ class Task(Runner):
 			'print_item_count': True,
 			'print_line': True,
 			'sync': sync,
+			'json': json or not sync,
 			'track': True
 		}
 		opts = merge_opts(self.run_opts, fmt_opts)
 
 		# Run Celery workflow and get results
-		task = Task.get_task_class(self.config.name)
+		task_cls = Task.get_task_class(self.config.name)
 		if sync:
-			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...'):
-				self.results = task(self.targets, **opts).run()
+			task = task_cls(self.targets, **opts)
+			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...') if not task._json_output else nullcontext():
+				self.results = task.run()
 		else:
-			result = task.delay(self.targets, **opts)
+			result = task_cls.delay(self.targets, **opts)
 			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
 			self.process_live_tasks(result)
 			self.results = result.get()

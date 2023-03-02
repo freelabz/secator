@@ -13,7 +13,7 @@ from rich.markup import escape
 
 from secsy.definitions import (DEFAULT_CHUNK_SIZE, OPT_NOT_SUPPORTED,
                                OPT_PIPE_INPUT, TEMP_FOLDER)
-from secsy.rich import build_table, console
+from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
 from secsy.utils import pluralize
 
@@ -413,7 +413,7 @@ class CommandRunner:
 					yield item
 				elif line:
 					if self._print_line and not (self.quiet and self._json_output):
-						self._print(line, file=sys.stdout)
+						self._print(line, out=sys.stdout)
 					if not self.output_return_type is dict:
 						self.results.append(line)
 						yield line
@@ -429,7 +429,7 @@ class CommandRunner:
 
 		except KeyboardInterrupt:
 			process.kill()
-			logger.warning('Process was killed manually (CTRL+C / CTRL+X)')
+			self._print('Process was killed manually (CTRL+C / CTRL+X)', color='bold red')
 			self.output = ''
 			self.killed = True
 
@@ -501,7 +501,7 @@ class CommandRunner:
 			data = self.results
 			if callable(fmt_table):
 				data = fmt_table(self.results)
-			self._print(data)
+			self._print(data, out=sys.stdout)
 
 	def _process_item(self, item: dict):
 		# Run item validators
@@ -533,7 +533,7 @@ class CommandRunner:
 		# Print item to console or log, except in table output where we 
 		# want to wait for all the results to come through before printing.
 		if self._print_item and self._json_output and not self._table_output:
-			self._print(item, file=sys.stdout)
+			self._print(item, out=sys.stdout)
 
 		# Return item
 		return item
@@ -733,7 +733,7 @@ class CommandRunner:
 
 		return new_item
 
-	def _print(self, data, color=None, file=sys.stderr):
+	def _print(self, data, color=None, out=sys.stderr):
 		"""Print function.
 
 		Args:
@@ -741,13 +741,18 @@ class CommandRunner:
 			color (str, Optional): Termcolor color.
 			prefix (bool, Optional): Add task name prefix before output.
 		"""
+		# Choose rich console
+		_console = console_stdout if out == sys.stdout else console
+		log_json = console.print_json
+		log = console.log if self._print_timestamp else _console.print
+
 		# Print a rich table
 		if self._table_output and isinstance(data, list) and isinstance(data[0], dict):
 			data = build_table(
 				data,
 				self.output_table_fields,
 				sort_by=self.output_table_sort_fields)
-			console.log(data)
+			log(data)
 			return
 
 		# Print a JSON item
@@ -756,15 +761,12 @@ class CommandRunner:
 			data = json.dumps(data)
 
 			# Add prefix to output
-			data = f'{self.prefix:>15} {data}' if self.prefix else data
+			data = f'{self.prefix:>15} {data}' if self.prefix and not self._print_item else data
 
 			# We might want to parse results with e.g 'jq' so we need pure JSON
 			# line with no logging info, unless --color is passed which 
 			# clarifies the user intent to use it for visualizing results.
-			if self.color and self._print_item:
-				console.print_json(data)
-			else:
-				print(data)
+			log_json(data) if self.color and self._print_item else _console.print(data, highlight=False)
 
 		# Print a line
 		elif isinstance(data, str):
@@ -772,8 +774,8 @@ class CommandRunner:
 			# If raw mode (--raw), we might want to parse results with e.g 
 			# pipe redirections, so we need a pure line with no logging info
 			if self._raw_output or self._orig_output:
-				data = f'{self.prefix} {data}' if self.prefix else data
-				print(data)
+				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
+				_console.print(data, highlight=False)
 			else:
 				data = escape(data)
 				from rich.text import Text
@@ -781,10 +783,7 @@ class CommandRunner:
 				if color:
 					data = f'[{color}]{data}[/]'
 				data = f'{self.prefix} {data}' if self.prefix else data
-				if self._print_timestamp:
-					console.log(data)
-				else:
-					console.print(data)
+				log(data)
 
 	def _set_print_prefix(self):
 		self.prefix = ''

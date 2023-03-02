@@ -36,6 +36,7 @@ class HTTPCommand(CommandRunner):
 		CONTENT_TYPE,
 		TIME
 	]
+	output_table_sort_fields = (HOST, STATUS_CODE)
 
 
 class ReconCommand(CommandRunner):
