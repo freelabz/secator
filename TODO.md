@@ -40,7 +40,7 @@ v0.0.1
     - [ ] Output live JSON items for workflows / scans so that they are consumable from library
 - [ ] Add ways to create Workflows dynamically from code (need to revisit the way the output results are):
     ```
-    from secsy.runner import Workflow, group
+    from secsy.runners import Workflow, group
 
     host = 'wikipedia.org'
     tasks = subfinder.s(host, raw=True) | httpx.s(raw=True) | group(katana.s(), feroxbuster.s())

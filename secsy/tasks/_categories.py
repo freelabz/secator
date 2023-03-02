@@ -1,8 +1,8 @@
-from secsy.cmd import CommandRunner
+from secsy.runners import Command
 from secsy.definitions import *
 
 
-class HTTPCommand(CommandRunner):
+class HTTPCommand(Command):
 	meta_opts = {
 		HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
 		DELAY: {'type': float, 'help': 'Delay to add between each requests'},
@@ -39,7 +39,7 @@ class HTTPCommand(CommandRunner):
 	output_table_sort_fields = (HOST, STATUS_CODE)
 
 
-class ReconCommand(CommandRunner):
+class ReconCommand(Command):
 	meta_opts = {
 		DELAY: {'type': float, 'help': 'Delay to add between each requests'},
 		PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
@@ -51,7 +51,7 @@ class ReconCommand(CommandRunner):
 	input_type = HOST
 
 
-class VulnCommand(CommandRunner):
+class VulnCommand(Command):
 	meta_opts = {
 		HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
 		DELAY: {'type': float, 'help': 'Delay to add between each requests'},

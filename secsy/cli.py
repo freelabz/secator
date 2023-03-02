@@ -4,7 +4,7 @@ import sys
 
 import rich_click as click
 
-from secsy.cmd import CommandRunner
+from secsy.runners import Command
 from secsy.decorators import (OrderedGroup, register_tasks, register_scans,
                               register_workflows)
 from secsy.utils import (discover_external_tasks, discover_internal_tasks,
@@ -36,25 +36,25 @@ def cli():
 	pass
 
 
-@cli.group(cls=OrderedGroup)
-def cmd():
-	"""Run a command."""
+@cli.group(aliases=['t', 'tk', 'cmd', 'command'])
+def task():
+	"""Run a task."""
 	pass
 
 
-@cli.group()
+@cli.group(aliases=['w', 'wf', 'flow'])
 def workflow():
 	"""Run a workflow."""
 	pass
 
 
-@cli.group()
+@cli.group(aliases=['sc'])
 def scan():
 	"""Run a scan."""
 	pass
 
 
-@cli.group()
+@cli.group(aliases=['ut'])
 def utils():
 	"""Run a utility."""
 	pass
@@ -67,12 +67,12 @@ def worker(concurrency):
 	cmd = 'celery -A secsy.celery.app worker -n runner'
 	if concurrency:
 		cmd += f' -c {concurrency}'
-	CommandRunner.run_command(
+	Command.run_command(
 		cmd,
 		**DEFAULT_CMD_OPTS
 	)
 
-register_tasks(cmd)
+register_tasks(task)
 register_workflows(workflow)
 register_scans(scan)
 
@@ -105,7 +105,7 @@ def get_proxy(timeout):
 # TEST #
 #------#
 
-@utils.group()
+@utils.group(aliases=['t', 'tests'])
 def test():
 	"""Run secsy tests."""
 	pass
@@ -113,7 +113,7 @@ def test():
 
 @test.command()
 def integration():
-	result = CommandRunner.run_command(
+	result = Command.run_command(
 		'python3 -m unittest discover -v tests.integration',
 		**DEFAULT_CMD_OPTS
 	)
@@ -122,17 +122,25 @@ def integration():
 
 @test.command()
 @click.option('--commands', '-c', type=str, default='', help='Secsy commands to test (comma-separated)')
+@click.option('--test', '-t', type=str, default='tests.unit', help='Secsy test to run')
 @click.option('--coverage', '-x', is_flag=True, help='Run coverage on results')
 @click.option('--debug', '-d', is_flag=True, help='Add debug information')
-def unit(commands, coverage=False, debug=False):
+def unit(commands, test, coverage=False, debug=False):
 	os.environ['TEST_COMMANDS'] = commands or ''
 	os.environ['DEBUG'] = str(int(debug))
-	result = CommandRunner.run_command(
-		'coverage run --omit="*test*" -m unittest discover -v tests.unit',
+
+	cmd = 'coverage run --omit="*test*" -m unittest'
+	if test:
+		cmd += f' {test}'
+	else:
+		cmd += ' -v tests.unit'
+
+	result = Command.run_command(
+		cmd,
 		**DEFAULT_CMD_OPTS
 	)
 	if coverage:
-		CommandRunner.run_command(
+		Command.run_command(
 			'coverage report -m',
 			**DEFAULT_CMD_OPTS
 		)
@@ -141,7 +149,7 @@ def unit(commands, coverage=False, debug=False):
 
 @test.command()
 def lint():
-	result = CommandRunner.run_command(
+	result = Command.run_command(
 		'flake8 secsy/',
 		**DEFAULT_CMD_OPTS
 	)
