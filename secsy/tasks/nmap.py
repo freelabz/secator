@@ -1,6 +1,5 @@
 import logging
 import re
-from datetime import datetime
 
 import requests
 import xmltodict
@@ -8,6 +7,7 @@ from cpe import CPE
 
 from secsy.definitions import *
 from secsy.tasks._categories import VulnCommand
+from secsy.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class nmap(VulnCommand):
 	def on_init(self):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
-			timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+			timestr = get_file_timestamp()
 			output_path = f'{TEMP_FOLDER}/nmap_{timestr}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'

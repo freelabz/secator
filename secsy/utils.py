@@ -7,17 +7,19 @@ import os
 import select
 import sys
 import warnings
-import yaml
+from datetime import datetime
 from importlib import import_module
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse
-from secsy.definitions import DEFAULT_STDIN_TIMEOUT
-from secsy.rich import console
 
 import tabulate
+import yaml
 from furl import furl
+
+from secsy.definitions import DEFAULT_STDIN_TIMEOUT
+from secsy.rich import console
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +369,9 @@ def load_fixture(name, fixtures_dir, ext=None, only_path=False):
             else:
                 return content
 
+
+def get_file_timestamp():
+	return datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%f_%p")
 
 class TaskError(ValueError):
 	pass
