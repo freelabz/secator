@@ -8,6 +8,7 @@ from rich.table import Table
 from secsy.definitions import RECORD
 
 console = Console(stderr=True, record=RECORD)
+console_stdout = Console(record=True)
 handler = RichHandler(rich_tracebacks=True)
 
 
