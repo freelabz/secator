@@ -4,6 +4,7 @@ import re
 
 from secsy.definitions import *
 from secsy.tasks._categories import ReconCommand
+from secsy.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from rich.progress import (Progress, SpinnerColumn, TextColumn,
 
 from secsy.definitions import OUTPUT_TYPES, REPORTS_FOLDER
 from secsy.rich import build_table, console
-from secsy.utils import merge_opts, pluralize
+from secsy.utils import merge_opts, pluralize, get_file_timestamp
 from secsy.runners._helpers import get_task_ids, get_task_info, process_extractor
 
 
@@ -75,7 +75,7 @@ class Runner:
 
 		# Make HTML report
 		if self._save_html or self.run_opts.get('html', False):
-			timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+			timestr = get_file_timestamp()
 			html_title = title.replace(' ', '_').replace("\"", '').lower()
 			os.makedirs(REPORTS_FOLDER, exist_ok=True)
 			html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'

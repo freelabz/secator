@@ -1,10 +1,10 @@
 """Attack tasks."""
 
 import logging
-from datetime import datetime
 
 from secsy.runners import Command
 from secsy.definitions import *
+from secsy.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class msfconsole(Command):
                 content = f.read().rstrip('exit') + 'exit\n'
 
             # Make a copy and replace vars inside by env vars passed on the CLI
-            timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+            timestr = get_file_timestamp()
             out_path = f'{TEMP_FOLDER}/msfconsole_{timestr}.rc'
             logger.debug(
                 f'Writing formatted resource script to new temp file {out_path}'

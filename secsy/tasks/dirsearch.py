@@ -1,9 +1,8 @@
-from datetime import datetime
-
 import yaml
 
 from secsy.definitions import *
 from secsy.tasks._categories import HTTPCommand
+from secsy.utils import get_file_timestamp
 
 
 class dirsearch(HTTPCommand):
@@ -62,6 +61,6 @@ class dirsearch(HTTPCommand):
 	def on_init(self):
 		self.output_path = self.get_opt_value('output_path')
 		if not self.output_path:
-			timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+			timestr = get_file_timestamp()
 			self.output_path = f'{TEMP_FOLDER}/dirsearch_{timestr}.json'
 		self.cmd += f' -o {self.output_path}'

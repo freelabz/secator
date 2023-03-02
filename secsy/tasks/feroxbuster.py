@@ -1,9 +1,9 @@
 import shlex
-from datetime import datetime
 from pathlib import Path
 
 from secsy.definitions import *
 from secsy.tasks._categories import HTTPCommand
+from secsy.utils import get_file_timestamp
 
 
 class feroxbuster(HTTPCommand):
@@ -46,7 +46,7 @@ class feroxbuster(HTTPCommand):
 	def on_init(self):
 		self.output_path = self.get_opt_value('output_path')
 		if not self.output_path:
-			timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+			timestr = get_file_timestamp()
 			self.output_path = f'{TEMP_FOLDER}/feroxbuster_{timestr}.json'
 		Path(self.output_path).touch()
 		self.cmd += f' --output {self.output_path}'

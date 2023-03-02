@@ -5,7 +5,6 @@ import re
 import shlex
 import subprocess
 import sys
-from datetime import datetime
 from time import sleep
 
 from fp.fp import FreeProxy
@@ -15,7 +14,7 @@ from secsy.definitions import (DEFAULT_CHUNK_SIZE, OPT_NOT_SUPPORTED,
                                OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
-from secsy.utils import pluralize
+from secsy.utils import get_file_timestamp, pluralize
 
 logger = logging.getLogger(__name__)
 
@@ -664,7 +663,7 @@ class Command:
 		# cat-piped input.
 		# Otherwise pass the file path to the tool.
 		if isinstance(input, list):
-			timestr = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
+			timestr = get_file_timestamp()
 			cmd_name = cmd.split(' ')[0].split('/')[-1]
 			fpath = f'{TEMP_FOLDER}/{cmd_name}_{timestr}.txt'
 
