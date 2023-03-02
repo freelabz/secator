@@ -1,8 +1,8 @@
-from secsy.cmd import CommandRunner
+from secsy.runners import Command
 from secsy.definitions import *
 
 
-class gf(CommandRunner):
+class gf(Command):
     """Wrapper around grep, to help you grep for things."""
     cmd = 'gf'
     file_flag = OPT_PIPE_INPUT

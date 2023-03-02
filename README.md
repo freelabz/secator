@@ -319,7 +319,7 @@ print(f'Found {len(probed_urls)} alive URLs while scraping {host} !')
 ## Developer guide
 
 If you wish to integrate a new command with `secsy`, you can define a new class
-inherited from `secsy.cmd.CommandRunner`.
+inherited from `secsy.runners.Command`.
 
 ### Example
 
@@ -369,9 +369,9 @@ $ bigdog -list sites.txt -json
 A basic definition of `bigdog` using basic `secsy` concepts will be:
 
 ```py
-from secsy.cmd import CommandRunner
+from secsy.runners import Command
 
-class bigdog(CommandRunner):
+class bigdog(Command):
     cmd = 'bigdog'
     json_flag = '-json'    
     input_flag = '-site'
@@ -413,13 +413,13 @@ For instance:
 * `-timeout` allows to specify a request timeout.
 * `-rate` allows to specify the max requests per minute.
 
-You can add the `opts` parameter to your `CommandRunner` object to define the
+You can add the `opts` parameter to your `Command` object to define the
 cmd options:
 
 ```py
-from secsy.cmd import CommandRunner
+from secsy.runners import Command
 
-class bigdog(CommandRunner):
+class bigdog(Command):
     cmd = 'bigdog'
     json_flag = '-json'
     input_flag = '-site'
@@ -567,7 +567,7 @@ new commands to match those:
 from secsy.definitions import OPT_NOT_SUPPORTED
 
 
-class CatHunter(CommandRunner):
+class CatHunter(Command):
     meta_opts = {
         'timeout': {'type': int, 'default': 1, 'help': 'Timeout (in seconds)'},
         'rate': {'type': int, 'default': 1000, 'help': 'Max requests per minute'},
@@ -720,7 +720,7 @@ $ secsy cmd catkiller loadsofcats.com -rate 1000 -timeout 1 -json
 ### Additional options
 
 There are additional class options and functions you can specify in the
-`CommandRunner` objects to customize the command running lifecycle and output
+`Command` objects to customize the command running lifecycle and output
 format:
 
 * `opts` (`dict`, `default: {}`):

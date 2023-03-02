@@ -8,7 +8,7 @@ from time import sleep
 
 from fp.fp import FreeProxy
 
-from secsy.cmd import CommandRunner
+from secsy.runners import Command
 from secsy.utils import setup_logging, discover_internal_tasks
 from secsy.definitions import *
 from secsy.rich import console
@@ -81,14 +81,14 @@ class TestCommand(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter('ignore', category=ResourceWarning)
         warnings.simplefilter('ignore', category=DeprecationWarning)
-        CommandRunner.run_command(
+        Command.run_command(
             f'sh {INTEGRATION_DIR}/setup.sh',
             cwd=INTEGRATION_DIR
         )
         sleep(10)
 
     def tearDown(self):
-        CommandRunner.run_command(
+        Command.run_command(
             f'sh {INTEGRATION_DIR}/teardown.sh',
             cwd=INTEGRATION_DIR
         )

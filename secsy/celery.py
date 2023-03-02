@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND,
 							   TEMP_FOLDER)
 from secsy.rich import console
-from secsy.runner import merge_extracted_values
+from secsy.runners._helpers import merge_extracted_values
 from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
 						 discover_internal_tasks, flatten)
 

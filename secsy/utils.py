@@ -206,7 +206,7 @@ def setup_logger(level='info', format='%(message)s'):
 
 def discover_internal_tasks():
 	"""Find internal secsy tasks."""
-	from secsy.cmd import CommandRunner
+	from secsy.runners import Command
 	package_dir = Path(__file__).resolve().parent / 'tasks'
 	task_classes = []
 	for (_, module_name, _) in iter_modules([str(package_dir)]):
@@ -216,7 +216,7 @@ def discover_internal_tasks():
 			if isclass(attribute):
 				bases = inspect.getmro(attribute)
 				for base in bases:
-					if base == CommandRunner and attribute.cmd:
+					if base == Command and attribute.cmd:
 						task_classes.append(attribute)
 
 	# Sort task_classes by category
@@ -248,7 +248,7 @@ def discover_tasks():
 	return discover_internal_tasks() + discover_external_tasks()
 
 
-def import_dynamic(cls_path, cls_root='CommandRunner'):
+def import_dynamic(cls_path, cls_root='Command'):
 	"""Import class dynamically from class path.
 
 	Args:

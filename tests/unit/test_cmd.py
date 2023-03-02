@@ -5,22 +5,20 @@ import unittest
 import unittest.mock
 import warnings
 
-from secsy.cmd import CommandRunner
+from secsy.runners import Command
 from secsy.definitions import *
 from secsy.rich import console
 from secsy.tasks import httpx
 from secsy.utils import setup_logging, load_fixture
-from secsy.utils_test import mock_subprocess_popen, FIXTURES, INPUTS, META_OPTS, OUTPUT_VALIDATORS
+from secsy.utils_test import mock_subprocess_popen, FIXTURES, FIXTURES_DIR, INPUTS, META_OPTS, OUTPUT_VALIDATORS
 
-TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FIXTURES_DIR = f'{TEST_DIR}/fixtures'
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 level = logging.DEBUG if DEBUG else logging.ERROR
 setup_logging(level)
 
 
-class FakeCmd(CommandRunner):
+class FakeCmd(Command):
     opts = {
         'opt1': {'type': int, 'default': 10},
         'opt2': {'type': str, 'default': '1,2,3'},
@@ -271,6 +269,7 @@ class TestCmdSchema(unittest.TestCase):
                     raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory.')
                 console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/] [bold red]No fixture ! Skipping test.[/]')
                 continue
+            console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/]')
             with self.subTest(name=cls.__name__):
                 self._test_cmd_mock(
                     cls,

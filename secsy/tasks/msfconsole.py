@@ -3,13 +3,13 @@
 import logging
 from datetime import datetime
 
-from secsy.cmd import CommandRunner
+from secsy.runners import Command
 from secsy.definitions import *
 
 logger = logging.getLogger(__name__)
 
 
-class msfconsole(CommandRunner):
+class msfconsole(Command):
     """CLI to access and work with the Metasploit Framework."""
     cmd = 'msfconsole --quiet'
     input_type = HOST
