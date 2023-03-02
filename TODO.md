@@ -86,7 +86,32 @@ v0.0.1
     - Ivre # network scanner meta tool & relationship manager
     - YETI # relationship manager
     - amap [nope] # superseeded by nmap, but can be used for to get info on some services
+
+    - **References:**
+        - https://book.hacktricks.xyz/
+        - https://0xffsec.com/
+        - https://cheatsheet.haax.fr
+        - https://pentestbook.six2dez.com/
+        - https://pentestmonkey.net/
+        - https://docs.trickest.io/
+        - https://www.golinuxcloud.com/social-engineering-attacks/
+        - https://many-passwords.github.io/
+        - https://gtfobins.github.io/
+        - https://www.vaadata.com/
+        - https://docs.google.com/spreadsheets/d/1b4mUxa6cDQuTV2BPC6aA-GR4zGZi0ooPYtBe4IgPsSc/edit#gid=0
+        - https://kellyshortridge.com/blog/posts/index.html
+        - https://www.deciduous.app/
+        - https://www.esecurityplanet.com/threats/how-hackers-evade-detection/
+        - https://www.esecurityplanet.com/networks/use-mitre-attck-to-understand-attacker-behavior/
+        - https://www.netspi.com/blog/technical/network-penetration-testing/10-techniques-for-blindly-mapping-internal-networks/
+        - https://hackertarget.com/quietly-mapping-the-network-attack-surface/
+        - https://www.baeldung.com/linux/monitoring-http-requests-network-interfaces
+        - https://scapy.readthedocs.io/en/latest/usage.html
+        - https://blog.projectdiscovery.io/projectdiscovery-best-kept-secrets/
+        - https://glitchii.github.io/embedbuilder/
+
     - **Tools:**
+
         - `exploit`:
             - msfconsole [x]
             - thc-hydra [TODO] # Network service pentest tool
@@ -95,6 +120,7 @@ v0.0.1
                 - `python $PLUGINS_DIR/shocker/shocker.py -H $TARGET --cgilist $PLUGINS_DIR/shocker/shocker-cgi_list --port 80`
             - smuggler [python][maybe] # HTTP request smuggling / desync testing tool
             - clusterd [python][maybe] # JBoss, ColdFusion, WebLogic, Tomcat, Railo, Axis2, Glassfish
+
         - `vuln`:
             - nuclei [x]
             - nmap-scripts [x]:
@@ -104,17 +130,30 @@ v0.0.1
             - cmsmap [python][maybe] # Find vulnerabilities in common CMS (Wordpress, Joomla, Drupal, Moodle)
             - arachni
             - Inject-X fuzzer [python][maybe] # Scan dynamic URLs for common OWASP vulns
+            - [vuls](https://vuls.io/docs/en/main-features.html)
+
+        - `bruteforce`:
+            - https://0xffsec.com/handbook/brute-forcing/
+
         - `binary`:
             - AFplusplus [TODO] # Binary fuzzer for dinosaurs
 
         - `recon`:
             - `recon/multi`:
                 - blackwidow [python][maybe]
+
+            - `recon/windows`: 
+                - https://www.netspi.com/blog/technical/network-penetration-testing/10-techniques-for-blindly-mapping-internal-networks/
+
+            - `recon/network/internal`:
+                - https://www.netspi.com/blog/technical/network-penetration-testing/10-techniques-for-blindly-mapping-internal-networks/
+    
             - `recon/network`:
                 - nmap [x]
                 - wafwoof [TODO]
                 - whois [shell][maybe] # Network utility (WHOIS)
                 - ssh-audit [python][maybe] # SSH server and client auditing
+                - arp [TODO]
                 - sslscan:
                     - `sslscan --no-failed $TARGET`
                 - asnip:
