@@ -19,7 +19,9 @@ v0.0.1
 - [x] Allow stdin input for all Secsy commands.
 
 **TODO:**
+- Add `-stats` option to Nuclei to display scan status --> use status info for progress bar.
 - Try to use Celery `chunks` to chunk a task.
+- Use `poll_live_tasks` within Celery task when it's broken into chunks to update the results / item count of the main task in real-time.
 - [ ] `CTRL + C` should let you choose which tasks to abort from the client-side and the worker side.
 - [ ] Fix bug with local filesystem broker
 - [ ] Add `arp-scan`

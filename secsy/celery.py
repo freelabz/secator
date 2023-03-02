@@ -135,14 +135,17 @@ def run_command(self, results, name, targets, opts={}):
 	multiple_targets = isinstance(targets, list)
 	single_target_only = multiple_targets and task_cls.file_flag is None
 	break_size_threshold = multiple_targets and len(targets) > task_cls.input_chunk_size
+
 	if single_target_only or (not sync and break_size_threshold):
 		chunk_size = 1 if single_target_only else task_cls.input_chunk_size
+
 		workflow = break_task(
 			task_cls,
 			opts,
 			targets,
 			results=results,
 			chunk_size=chunk_size)
+
 		with allow_join_result():
 			result = workflow.apply() if sync else workflow()
 			task_results = result.get(propagate=False)

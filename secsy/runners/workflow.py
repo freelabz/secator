@@ -67,7 +67,6 @@ class Workflow(Runner):
 			console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
 			self.process_live_tasks(result)
 		self.results = result.get(propagate=False)
-		print(self.results)
 		self.results = self.filter_results()
 		self.done = True
 		self.log_workflow()
