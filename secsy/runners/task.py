@@ -70,9 +70,9 @@ class Task(Runner):
 		for task_cls in tasks_classes:
 			if task_cls.__name__ == name:
 				return task_cls
-		console.log(
-			f'Task {name} not found. Aborting.', style='bold red')
-		return None
+		raise ValueError(
+			f'Task {name} not found. Aborting.', style='bold red'
+		)
 
 	@staticmethod
 	def get_tasks_from_conf(config):

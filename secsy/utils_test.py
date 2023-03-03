@@ -1,4 +1,5 @@
 import logging
+import contextlib
 
 import json
 import logging
@@ -20,7 +21,6 @@ from secsy.utils import setup_logging, discover_internal_tasks, load_fixture
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/tests/'
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
-print(FIXTURES_DIR)
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 ALL_CMDS = discover_internal_tasks()
 TEST_COMMANDS = os.environ.get('TEST_COMMANDS', '')
@@ -85,3 +85,69 @@ def mock_subprocess_popen(output_list):
         return mock_process
     return unittest.mock.patch('subprocess.Popen', mock_popen)
 
+
+@contextlib.contextmanager
+def mock_command(cls, targets=[], opts={}, fixture=None, method=''):
+        mocks = []
+        if isinstance(fixture, dict):
+            fixture = [fixture]
+        
+        is_list = isinstance(fixture, list)
+        if is_list:
+            for item in fixture:
+                if isinstance(item, dict):
+                    mocks.append(json.dumps(item))
+                else:
+                    mocks.append(item)
+        else:
+            mocks.append(fixture)
+
+        with mock_subprocess_popen(mocks):
+            command = cls(targets, **opts)
+            if method == 'run':
+                yield cls(targets, **opts).run()
+            elif method == 'si':
+                yield cls.si([], targets, **opts)
+            elif method in ['s', 'delay']:
+                yield getattr(cls, method)(targets, **opts)
+            else:
+                yield command
+
+
+class CommandOutputTester: # Mixin for unittest.TestCase
+
+    def _test_command_output(
+            self,
+            items,
+            expected_output_keys=None,
+            expected_output_type=None,
+            output_validator=None):
+
+        if not isinstance(items, list):
+            items = [items]
+
+        try:
+            self.assertGreater(len(items), 0)
+
+            for item in items:
+
+                if DEBUG:
+                    console.log('\n', log_locals=True)
+
+                if expected_output_type:
+                    self.assertEqual(type(item), expected_output_type)
+
+                if expected_output_keys: # test schema against fixture
+                    keys = [k for k in item.keys() if not k.startswith('_')]
+                    self.assertEqual(
+                        set(keys).difference(set(expected_output_keys)),
+                        set())
+
+                if callable(output_validator):
+                    self.assertTrue(output_validator(item))
+
+        except Exception:
+            console.print('[bold red] failed[/]')
+            raise
+        
+        console.print('[bold green] ok[/]')

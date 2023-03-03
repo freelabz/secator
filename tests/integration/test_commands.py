@@ -12,6 +12,8 @@ from secsy.runners import Command
 from secsy.utils import setup_logging, discover_internal_tasks
 from secsy.definitions import *
 from secsy.rich import console
+from secsy.celery import app
+from secsy.tasks import httpx
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
