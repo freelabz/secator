@@ -30,7 +30,6 @@ tasks:
           field: ip
           condition: item['alive'] is True
       ports_: port.port
-
     nuclei:
       tags: [cve, xss]
       targets_:
