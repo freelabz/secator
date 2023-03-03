@@ -17,11 +17,11 @@ from secsy.utils import setup_logging, discover_internal_tasks, load_fixture
 #---------#
 # GLOBALS #
 #---------#
+USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/tests/'
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
 print(FIXTURES_DIR)
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
-DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 ALL_CMDS = discover_internal_tasks()
 TEST_COMMANDS = os.environ.get('TEST_COMMANDS', '')
 if TEST_COMMANDS:

@@ -19,6 +19,7 @@ v0.0.1
 - [x] Allow stdin input for all Secsy commands.
 
 **TODO:**
+- [ ] bug: when extractors return None, original targets are used --> FIX THIS
 - [ ] CLI: use previous results as input for next scan
 - [ ] Test:
     - `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`

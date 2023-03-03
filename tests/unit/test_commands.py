@@ -1,6 +1,6 @@
-import json
 import logging
 import os
+import json
 import unittest
 import unittest.mock
 import warnings
@@ -9,8 +9,9 @@ from secsy.runners import Command
 from secsy.definitions import *
 from secsy.rich import console
 from secsy.tasks import httpx
-from secsy.utils import setup_logging, load_fixture
-from secsy.utils_test import mock_subprocess_popen, FIXTURES, FIXTURES_DIR, INPUTS, META_OPTS, OUTPUT_VALIDATORS
+from secsy.utils import setup_logging
+from secsy.utils_test import FIXTURES, META_OPTS, OUTPUT_VALIDATORS, mock_subprocess_popen, INPUTS, load_fixture, FIXTURES_DIR
+from secsy.definitions import DEBUG
 
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
@@ -209,7 +210,6 @@ class TestCmdBuild(unittest.TestCase):
         self.assertEqual(cls._print_cmd, False)
         self.assertEqual(cls._print_cmd_prefix, False)
         self.assertEqual(cls._json_output, True)
-
 
 class TestCmdSchema(unittest.TestCase):
 
