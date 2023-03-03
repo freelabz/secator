@@ -150,7 +150,7 @@ class TestCmdBuild(unittest.TestCase):
         cls = httpx(host, **cmd_opts)
         default_match_codess = cls.meta_opts[MATCH_CODES]['default']
         default_threads = cls.meta_opts[THREADS]['default']
-        expected_cmd = f'httpx -u {host} -json -td -cdn -follow-redirects -match-code {default_match_codess} -threads {default_threads}'
+        expected_cmd = f'httpx -silent -u {host} -json -td -cdn -follow-redirects -match-code {default_match_codess} -threads {default_threads}'
         self.assertEqual(cls.cmd, expected_cmd)
         self.assertEqual(cls._print_timestamp, False)
         self.assertEqual(cls._print_line, False)
@@ -174,7 +174,7 @@ class TestCmdBuild(unittest.TestCase):
         }
         host = 'test.synology.me'
         cls = httpx(host, **cmd_opts)
-        expected_cmd = f"httpx -u {host} -json -td -cdn -filter-code 500 -filter-length 23,33 -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1"
+        expected_cmd = f"httpx -silent -u {host} -json -td -cdn -filter-code 500 -filter-length 23,33 -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1"
         self.assertEqual(cls.cmd, expected_cmd)
         self.assertEqual(cls._print_timestamp, False)
         self.assertEqual(cls._print_line, False)
@@ -200,7 +200,7 @@ class TestCmdBuild(unittest.TestCase):
         }
         host = 'test.synology.me'
         cls = httpx(host, **cmd_opts)
-        expected_cmd = f"httpx -u {host} -json -td -cdn -filter-code 500 -filter-length 23,33 -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1"
+        expected_cmd = f"httpx -silent -u {host} -json -td -cdn -filter-code 500 -filter-length 23,33 -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1"
         self.assertEqual(cls.cmd, expected_cmd)
         self.assertEqual(cls._print_timestamp, False)
         self.assertEqual(cls._print_line, False)

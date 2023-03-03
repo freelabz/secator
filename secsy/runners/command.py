@@ -114,7 +114,6 @@ class Command:
 
 	# Command output formatting options
 	_raw_output = False
-	_plain_output = False
 	_orig_output = False
 	_table_output = False
 	_json_output = False
@@ -146,9 +145,6 @@ class Command:
 		# Raw output
 		self._raw_output = self.cmd_opts.pop('raw', False)
 		
-		# Plain output
-		self._plain_output = self.cmd_opts.pop('plain', False)
-
 		# No convert to unified schema
 		self._orig_output = self.cmd_opts.pop('orig', False)
 
@@ -531,7 +527,7 @@ class Command:
 		self.results.append(item)
 
 		# In raw output mode, extract principal key from dict.
-		if self._plain_output and self.output_field is not None:
+		if self._raw_output and self.output_field is not None:
 			if callable(self.output_field):
 				item = self.output_field(item)
 			else:

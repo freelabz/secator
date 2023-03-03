@@ -145,7 +145,7 @@ def unit(commands, test, coverage=False, debug=False):
 	if test:
 		cmd += f' {test}'
 	else:
-		cmd += ' -v tests.unit'
+		cmd += ' discover -v tests.unit'
 
 	result = Command.run_command(
 		cmd,
