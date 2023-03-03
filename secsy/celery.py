@@ -152,7 +152,7 @@ def run_command(self, results, name, targets, opts={}):
 			results.extend(task_results)
 			state['state'] = 'SUCCESS'
 			state['meta']['results'] = results
-			state['meta']['count'] = len(results)
+			state['meta']['count'] = len(task_results)
 			self.update_state(**state)
 			return results
 

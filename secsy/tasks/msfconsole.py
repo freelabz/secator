@@ -28,8 +28,8 @@ class msfconsole(Command):
 
     @staticmethod
     def on_init(self):
-        command = self.get_opt_value('inline-script')
-        script_path = self.get_opt_value('resource-script')
+        command = self.get_opt_value('inline_script')
+        script_path = self.get_opt_value('resource_script')
         env_vars = {
             k: v for k, v in (i.split('=') for i in self.cmd_opts.pop('env_vars', ()))
         }
@@ -62,7 +62,7 @@ class msfconsole(Command):
             )
             with open(out_path, 'w') as f:
                 content = content.format(**env_vars)
-                print(content) if self.print_timestamp else logger.debug(content)
+                print(content) if self._print_timestamp else logger.debug(content)
                 f.write(content)
 
             # Override original command with new resource script

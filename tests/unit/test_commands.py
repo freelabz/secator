@@ -1,3 +1,4 @@
+import copy
 import logging
 import os
 import json
@@ -10,8 +11,9 @@ from secsy.definitions import *
 from secsy.rich import console
 from secsy.tasks import httpx
 from secsy.utils import setup_logging
-from secsy.utils_test import FIXTURES, META_OPTS, OUTPUT_VALIDATORS, mock_subprocess_popen, INPUTS, load_fixture, FIXTURES_DIR
+from secsy.utils_test import FIXTURES, META_OPTS, OUTPUT_VALIDATORS, mock_subprocess_popen, INPUTS, load_fixture, FIXTURES_DIR, mock_command, CommandOutputTester
 from secsy.definitions import DEBUG
+
 
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
@@ -37,7 +39,7 @@ class FakeCmd(Command):
     }
 
 
-class TestCmdBuild(unittest.TestCase):
+class TestCommandProcessOpts(unittest.TestCase):
     def test_process_opts_defaults(self):
         cmd_opts = {}
         opts_str = FakeCmd._process_opts(
@@ -211,104 +213,92 @@ class TestCmdBuild(unittest.TestCase):
         self.assertEqual(cls._print_cmd_prefix, False)
         self.assertEqual(cls._json_output, True)
 
-class TestCmdSchema(unittest.TestCase):
+
+class TestCommandRun(unittest.TestCase, CommandOutputTester):
 
     def setUp(self):
         warnings.simplefilter('ignore', category=ResourceWarning)
         warnings.simplefilter('ignore', category=DeprecationWarning)
 
+    def _valid_fixture(self, cls, fixture):
+        if not fixture:
+            if len(FIXTURES.keys()) == 1: # make test fail.
+                raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory (must not be an empty file / empty json / empty list).')
+            console.print(f'[dim gold3] skipped (no fixture)[/]')
+            return False
+        return True
+
     def test_cmd_converted_schema(self):
         console.print('')
+
         for cls, fixture in FIXTURES.items():
-            if not fixture:
-                if len(FIXTURES.keys()) == 1: # make test fail.
-                    raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory.')
-                console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/] [bold red]No fixture ! Skipping test.[/]')
-                continue
-            console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/]')
+            console.print(f'\t[bold grey35]{cls.__name__} ...[/] ', end='')
             with self.subTest(name=cls.__name__):
-                self._test_cmd_mock(
-                    cls,
-                    fixture,
-                    expected_output_keys=cls.output_schema,
-                    expected_output_type=dict,
-                    **META_OPTS)
-        console.print('')
+
+                # Validate fixture
+                if not self._valid_fixture(cls, fixture):
+                    continue
+
+                # Run command
+                targets = INPUTS[cls.input_type]
+                with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
+                    self._test_command_output(
+                        results,
+                        expected_output_keys=cls.output_schema,
+                        expected_output_type=dict)
 
     def test_cmd_original_schema(self):
         console.print('')
         for cls, fixture in FIXTURES.items():
-            if not fixture:
-                if len(FIXTURES.keys()) == 1: # make test fail.
-                    raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory.')
-                console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/] [bold red]No fixture ! Skipping test.[/]')
-                continue
-            console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/]')
+
             with self.subTest(name=cls.__name__):
+                console.print(f'\t[bold grey35]{cls.__name__} ...[/]', end='')
+
+                # Validate fixture
+                if not self._valid_fixture(cls, fixture):
+                    continue
+
+                # Get expected output keys from fixture
                 expected_output_keys = None
                 if isinstance(fixture, dict):
                     if 'results' in fixture: # fix for JSON files having a 'results' key
                         expected_output_keys = fixture['results'][0].keys()
                     else:
                         expected_output_keys = fixture.keys()
-                self._test_cmd_mock(
-                    cls,
-                    fixture,
-                    expected_output_keys=expected_output_keys,
-                    expected_output_type=type(fixture),
-                    orig=True,
-                    raw=isinstance(fixture, str),
-                    **META_OPTS)
-        console.print('')
+
+                # Run command
+                targets = INPUTS[cls.input_type]
+                opts = copy.deepcopy(META_OPTS)
+                opts.update({
+                    'orig': True,
+                    'raw': isinstance(fixture, str)
+                })
+                with mock_command(cls, targets, opts, fixture, 'run') as results:
+                    self._test_command_output(
+                        results,
+                        expected_output_keys=expected_output_keys,
+                        expected_output_type=type(fixture))
 
     def test_cmd_raw_mode(self):
-        console.print('')
         for cls, fixture in FIXTURES.items():
-            if not fixture:
-                if len(FIXTURES.keys()) == 1: # make test fail.
-                    raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory.')
-                console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/] [bold red]No fixture ! Skipping test.[/]')
-                continue
-            console.print(f'\t[bold grey35]Testing {cls.__name__} ...[/]')
             with self.subTest(name=cls.__name__):
-                self._test_cmd_mock(
-                    cls,
-                    fixture,
-                    output_validator=OUTPUT_VALIDATORS[cls.output_field],
-                    raw=True,
-                    **META_OPTS)
-        console.print('')
+                console.print(f'\t[bold grey35]{cls.__name__} ...[/]', end='')
 
-    def _test_cmd_mock(
-            self,
-            cls,
-            fixture,
-            expected_output_keys=None,
-            expected_output_type=None,
-            output_validator=None,
-            **opts):
-        is_dict = isinstance(fixture, dict)
-        mock = json.dumps(fixture) if is_dict else fixture
-        with mock_subprocess_popen([mock]):
-            input = INPUTS[cls.input_type]
-            command = cls(input, **opts)
-            items = command.run()
-            self.assertGreater(len(items), 0)
-            for item in items:
-                if DEBUG:
-                    console.log('debug', log_locals=True)
-                if expected_output_type:
-                    self.assertEqual(type(item), expected_output_type)
-                if expected_output_keys: # test schema against fixture
-                    keys = [k for k in item.keys() if not k.startswith('_')]
-                    self.assertEqual(
-                        set(keys).difference(set(expected_output_keys)),
-                        set())
-                if callable(output_validator):
-                    self.assertTrue(output_validator(item))
+                # Validate fixture
+                if not self._valid_fixture(cls, fixture):
+                    continue
+
+                # Run command
+                targets = INPUTS[cls.input_type]
+                opts = copy.deepcopy(META_OPTS)
+                opts['raw'] = True
+                with mock_command(cls, targets, opts, fixture, 'run') as results:
+                    self._test_command_output(
+                        results,
+                        output_validator=OUTPUT_VALIDATORS[cls.output_field])
 
 
-class TestCmdHooks(unittest.TestCase):
+class TestCommandHooks(unittest.TestCase):
 
     def test_cmd_hooks(self):
 
@@ -355,8 +345,8 @@ class TestCmdHooks(unittest.TestCase):
         hooks = {
             'on_init': [on_init]
         }
-        fixture = load_fixture('httpx_output', FIXTURES_DIR)
+        fixture = FIXTURES[httpx]
         with mock_subprocess_popen([json.dumps(fixture)]):
             with self.assertRaises(Exception, msg='Test passed'):
                 input = INPUTS[HOST]
-                cls = httpx(input, hooks=hooks)
+                httpx(input, hooks=hooks)

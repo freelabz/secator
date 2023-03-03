@@ -2,7 +2,7 @@ from celery.result import AsyncResult, GroupResult
 from rich.prompt import Confirm
 
 from secsy.utils import deduplicate
-
+from secsy.rich import console
 
 def merge_extracted_values(results, opts):
 	"""Run extractors and merge extracted values with option dict.
@@ -97,7 +97,7 @@ def get_task_ids(result, ids=[]):
 	get_task_ids(result.parent, ids=ids)
 
 
-def get_task_info(task_id):
+def get_task_info(task_id, debug=False):
 	res = AsyncResult(task_id)
 	data = {}
 	if res.args and len(res.args) > 1:
@@ -105,20 +105,16 @@ def get_task_info(task_id):
 		data['celery_task_id'] = task_id
 		data['name'] = task_name
 		data['state'] = res.state
-		data['error'] = ''
 		data['track'] = False
-		data['results'] = []
-		data['count'] = 0
 		if res.info and not isinstance(res.info, list): # only available in RUNNING, SUCCESS, FAILURE states
 			if isinstance(res.info, BaseException):
 				data['track'] = True
 				data['error'] = str(res.info)
 			else:
-				data['track'] = res.info.get('track', False)
-				data['results'] = res.info.get('results', [])
-				data['count'] = res.info.get('count', 0)
-	# import json
-	# console.print_json(json.dumps(data))
+				data.update(res.info)
+	if debug:
+		import json
+		console.print_json(json.dumps(data))
 	return data
 
 

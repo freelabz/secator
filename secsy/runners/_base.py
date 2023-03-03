@@ -193,9 +193,7 @@ class Runner:
 				task_ids = []
 				get_task_ids(result, ids=task_ids)
 				for task_id in task_ids:
-					info = get_task_info(task_id)
-					if self.debug:
-						print(info)
+					info = get_task_info(task_id, debug=self.debug)
 					if not info or not info['track']:
 						continue
 					state = info['state']

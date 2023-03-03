@@ -5,4 +5,4 @@ tags:
   - nuclei
 tasks:
   nuclei:
-    tags: [cve, panel, wordpress, exposure, edb, wp-plugin, lfi, xss]
+    exclude_tags: [network, ssl]

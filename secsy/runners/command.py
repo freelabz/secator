@@ -10,7 +10,7 @@ from time import sleep
 from fp.fp import FreeProxy
 from rich.markup import escape
 
-from secsy.definitions import (DEFAULT_CHUNK_SIZE, DEFAULT_PROXY_TIMEOUT,
+from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE, DEFAULT_PROXY_TIMEOUT,
                                OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
@@ -225,7 +225,6 @@ class Command:
 		# Abort if inputs are invalid
 		self._input_validated = True
 		if not self.run_validators('input', self.input):
-			# self._print(f'Input validation failed.', color='bold red')
 			self.run_hooks('on_end')
 			self._input_validated = False
 
@@ -250,6 +249,9 @@ class Command:
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		from secsy.celery import run_command
+		# TODO: running chunked group .apply() in run_command doesn't work if 
+		# this isn't set explicitely to False for **VERY** obscure reasons
+		kwargs['sync'] = False
 		return run_command.delay([], cls.__name__, *args, opts=kwargs)
 
 	@classmethod
@@ -258,9 +260,20 @@ class Command:
 		return run_command.s(cls.__name__, *args, opts=kwargs)
 
 	@classmethod
-	def si(cls, *args, **kwargs):
+	def si(cls, results, *args, **kwargs):
 		from secsy.celery import run_command
-		return run_command.si(cls.__name__, *args, opts=kwargs)
+		return run_command.si(results, cls.__name__, *args, opts=kwargs)
+
+	@classmethod
+	def poll(cls, result):
+		from celery.result import AsyncResult
+		from time import sleep
+		while not result.ready():
+			data = AsyncResult(result.id).info
+			if DEBUG and isinstance(data, dict):
+				print(data)
+			sleep(1)
+		return result.get()
 
 	def first(self):
 		try:
@@ -279,10 +292,10 @@ class Command:
 	# Hooks #
 	#-------#
 	def run_hooks(self, hook_type, *args):
-		logger.debug(f'Running hooks of type {hook_type}')
+		# logger.debug(f'Running hooks of type {hook_type}')
 		result = args[0] if len(args) > 0 else None
 		for hook in self._hooks[hook_type]:
-			logger.debug(hook)
+			# logger.debug(hook)
 			result = hook(self, *args)
 		return result
 
@@ -290,9 +303,9 @@ class Command:
 	# Validators #
 	#------------#
 	def run_validators(self, validator_type, *args):
-		logger.debug(f'Running validators of type {validator_type}')
+		# logger.debug(f'Running validators of type {validator_type}')
 		for validator in self._validators[validator_type]:
-			logger.debug(validator)
+			# logger.debug(validator)
 			if not validator(self, *args):
 				if validator_type == 'input':
 					self._print(f'{validator.__doc__}', color='bold red')
