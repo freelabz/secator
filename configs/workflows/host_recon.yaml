@@ -1,9 +1,15 @@
 name: host_recon
-description: Run host recon (open ports, http, vulns).
+description: Run host recon (ports, network vulns) + basic CVE scan on open HTTP services
+tags:
+- subdomains
+- urls
+- vulnerabilities
+- subdomain_takeover
 tasks:
   _group:
     nuclei:
-      tags: [network, ssl]
+      tags:
+        - network, ssl
     _chain:
       naabu:
       nmap:
@@ -16,8 +22,8 @@ tasks:
             field: '{host}:{port}'
       nuclei:
         targets_: url.url
-        # exclude_tags: [network, ssl]
-        tags: [cve, panel, wordpress, exposure, edb, wp-plugin, lfi, xss]
+        tags:
+          - cve, lfi, xss
 results:
   - type: vulnerability
     condition: item['confidence'] == 'high'

@@ -1,8 +1,8 @@
-name: internal
+name: network
 description: Internal network scan
 profile: default
 workflows:
-  network_recon:
+  cidr_mapper:
   host_recon:
     targets_:
     - ip.ip

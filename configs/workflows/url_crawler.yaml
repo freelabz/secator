@@ -1,0 +1,16 @@
+name: url_crawler
+description: Find URLs by crawling
+tasks:
+  _group:
+    cariddi:
+    gau:
+    gospider:
+    katana:
+  httpx:
+    targets_:
+      type: url
+      field: url
+      condition: item['status_code'] is None
+results:
+  - type: url
+    condition: item['status_code'] is not None

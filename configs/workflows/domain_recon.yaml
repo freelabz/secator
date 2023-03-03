@@ -1,7 +1,12 @@
 name: domain_recon
-description: Run domain recon (OSInt, subdomains + takeovers)
+description: Run domain recon
+tags:
+- subdomains
+- urls
+- vulnerabilities
+- subdomain_takeover
+category: recon/dns
 tasks:
-  # osint:
   subfinder:
   nuclei:
     targets_:
@@ -10,5 +15,5 @@ tasks:
     templates: takeovers/
   httpx:
     targets_:
-      - target.name
-      - subdomain.host
+    - target.name
+    - subdomain.host
