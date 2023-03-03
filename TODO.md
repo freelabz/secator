@@ -19,9 +19,16 @@ v0.0.1
 - [x] Allow stdin input for all Secsy commands.
 
 **TODO:**
-- Add `-stats` option to Nuclei to display scan status --> use status info for progress bar.
-- Try to use Celery `chunks` to chunk a task.
-- Use `poll_live_tasks` within Celery task when it's broken into chunks to update the results / item count of the main task in real-time.
+- [ ] CLI: use previous results as input for next scan
+- [ ] Test:
+    - `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
+    - Add multiple tasks with same name - new notation with '/' ?
+- [ ] Parse multiple vulnerability ids
+- [ ] Find exploits from CVEs
+- [ ] Fix `dirsearch` / `feroxbuster` as they time out currently
+- [ ] Add `-stats` option to Nuclei to display scan status --> use status info for progress bar.
+- [ ] Try to use Celery `chunks` to chunk a task.
+- [ ] Use `poll_live_tasks` within Celery task when it's broken into chunks to update the results / item count of the main task in real-time.
 - [ ] `CTRL + C` should let you choose which tasks to abort from the client-side and the worker side.
 - [ ] Fix bug with local filesystem broker
 - [ ] Add `arp-scan`
@@ -30,9 +37,9 @@ v0.0.1
         - [ ] `secsy workflow test --help` will be a Click group that shows `sub` subcommand.
         - [ ] `secsy workflow test sub --help` will be the helper for the `sub` subcommand.
 - [ ] Add techniques for IDS evasion (cf https://book.hacktricks.xyz/generic-methodologies-and-resources/pentesting-network/ids-evasion)
-- [ ] Make Celery tasks for:
-    - [ ] Results filtering
-    - [ ] Results deduplication / merging
+- [ ] Make utils Celery tasks for:
+    - [ ] Results filtering `filter_results`
+    - [x] Results deduplication / merging `forward_results`
 - [ ] Pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
     - [ ] Pydantic + potential db schemas base ?
     - [ ] Used to format results as well
@@ -149,90 +156,90 @@ v0.0.1
 
             - `recon/network/internal`:
                 - https://www.netspi.com/blog/technical/network-penetration-testing/10-techniques-for-blindly-mapping-internal-networks/
-    
+
             - `recon/network`:
-                - nmap [x]
-                - wafwoof [TODO]
-                - whois [shell][maybe] # Network utility (WHOIS)
-                - ssh-audit [python][maybe] # SSH server and client auditing
-                - arp [TODO]
-                - sslscan:
+                - [x] `nmap` [x]
+                - [ ] `wafwoof` [TODO]
+                - [ ] whois [shell][maybe] # Network utility (WHOIS)
+                - [ ] ssh-audit [python][maybe] # SSH server and client auditing
+                - [ ] arp [TODO]
+                - [ ] sslscan:
                     - `sslscan --no-failed $TARGET`
-                - asnip:
+                - [ ] asnip:
                     - `asnip -t $TARGET`
-                - hackertarget [python][maybe] # Network utilities (traceroute, ping test, reverse DNS, zone transfer, whois, ip location, tcp port scan, subnet lookup)
+                - [ ] hackertarget [python][maybe] # Network utilities (traceroute, ping test, reverse DNS, zone transfer, whois, ip location, tcp port scan, subnet lookup)
                 - BruteX [shell][maybe] # Bruteforce all services
                 - `curl -s https://www.ultratools.com/tools/ipWhoisLookupResult\?ipAddress\=$TARGET | grep -A2 label | grep -v input | grep span | cut -d">" -f2 | cut -d"<" -f1 | sed 's/\&nbsp\;//g'`
                 - `wget -q http://www.intodns.com/$TARGET -O $LOOT_DIR/osint/intodns-$TARGET.html`
                 - `curl -s -L --data "ip=$TARGET" https://2ip.me/en/services/information-service/provider-ip\?a\=act | grep -o -E '[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}/[0-9]{1,2}'` # subnet retrieval
             - `recon/http`:
-                - gau [x]
-                - gospider [x]
-                - ffuf [x]
-                - httpx [x]
-                - dirsearch [TODO]
-                - gobuster [TODO]
-                - whatweb [ruby][nope]
-                - wig 
-                - webtech
-                - curl -sX GET "http://index.commoncrawl.org/CC-MAIN-2022-33-index?url=*.$TARGET&output=json" # passive spider
-                - curl -s GET "https://api.hackertarget.com/pagelinks/?q=https://$TARGET" | egrep -v "API count|no links found|input url is invalid|API count|no links found|input url is invalid|error getting links"
-                - wpscan [ruby][maybe] # Wordpress scan
+                - [ ] gau [x]
+                - [ ] gospider [x]
+                - [ ] ffuf [x]
+                - [ ] httpx [x]
+                - [ ] dirsearch [TODO]
+                - [ ] gobuster [TODO]
+                - [ ] whatweb [ruby][nope]
+                - [ ] wig 
+                - [ ] webtech
+                - [ ] curl -sX GET "http://index.commoncrawl.org/CC-MAIN-2022-33-index?url=*.$TARGET&output=json" # passive spider
+                - [ ] curl -s GET "https://api.hackertarget.com/pagelinks/?q=https://$TARGET" | egrep -v "API count|no links found|input url is invalid|API count|no links found|input url is invalid|error getting links"
+                - [ ] wpscan [ruby][maybe] # Wordpress scan
             - `recon/dns`:
-                - subfinder [go][x] # subdomain finder
-                - spyse: # subdomain finder
+                - [ ] subfinder [go][x] # subdomain finder
+                - [ ] spyse: # subdomain finder
                     - `spyse -target $TARGET --subdomains`
-                - censys: # subdomain finder
+                - [ ] censys: # subdomain finder
                     - `python $PLUGINS_DIR/censys-subdomain-finder/censys_subdomain_finder.py --censys-api-id $CENSYS_APP_ID --censys-api-secret $CENSYS_API_SECRET $TARGET`
-                - dnscan [?][maybe] # DNS bruteforcer
+                - [ ] dnscan [?][maybe] # DNS bruteforcer
                     - `python3 $PLUGINS_DIR/dnscan/dnscan.py -d $TARGET -w $DOMAINS_QUICK -o $LOOT_DIR/domains/domains-dnscan-$TARGET.txt -i $LOOT_DIR/domains/domains-ips-$TARGET.txt`
-                - crt.sh # gather certificate subdomain
+                - [ ] crt.sh # gather certificate subdomain
                     - `curl -s https://crt.sh/?q=%25.$TARGET`
-                - github-subdomains (https://github.com/1N3/AttackSurfaceManagement/blob/master/bin/github-subdomains.py)
-                - urlcrazy:
+                - [ ] github-subdomains (https://github.com/1N3/AttackSurfaceManagement/blob/master/bin/github-subdomains.py)
+                - [ ] urlcrazy:
                     - `urlcrazy $TARGET` # dns alterations
-                - shodan:
+                - [ ] shodan:
                     - `shodan init $SHODAN_API_KEY`
                     - `shodan search "hostname:*.$TARGET"`
-                - `curl -fsSL "https://dns.bufferover.run/dns?q=.$TARGET"`
-                - `curl -s "https://rapiddns.io/subdomain/$TARGET?full=1&down=1#exportData()"`
-                - subbrute:
+                - [ ] `curl -fsSL "https://dns.bufferover.run/dns?q=.$TARGET"`
+                - [ ] `curl -s "https://rapiddns.io/subdomain/$TARGET?full=1&down=1#exportData()"`
+                - [ ] subbrute:
                     - `python "$INSTALL_DIR/plugins/massdns/scripts/subbrute.py" $INSTALL_DIR/wordlists/domains-all.txt $TARGET`
-                - altdns:
+                - [ ] altdns:
                     - `altdns -i /tmp/domain -w $INSTALL_DIR/wordlists/altdns.txt`
-                - dnsgen:
+                - [ ] dnsgen:
                     - `dnsgen /tmp/domain`
-                - massdns:
+                - [ ] massdns:
                     - `massdns -r /usr/share/sniper/plugins/massdns/lists/resolvers.txt $LOOT_DIR/domains/domains-$TARGET-alldns.txt -o S -t A -w $LOOT_DIR/domains/domains-$TARGET-massdns.txt`
-                - `dig $TARGET CNAME | egrep -i "netlify|anima|bitly|wordpress|instapage|heroku|github|bitbucket|squarespace|fastly|feed|fresh|ghost|helpscout|helpjuice|instapage|pingdom|surveygizmo|teamwork|tictail|shopify|desk|teamwork|unbounce|helpjuice|helpscout|pingdom|tictail|campaign|monitor|cargocollective|statuspage|tumblr|amazon|hubspot|modulus|unbounce|uservoice|wpengine|cloudapp"` # CNAME subdomain hijacking
-                - subover: # subdomain hijacking
+                - [ ] `dig $TARGET CNAME | egrep -i "netlify|anima|bitly|wordpress|instapage|heroku|github|bitbucket|squarespace|fastly|feed|fresh|ghost|helpscout|helpjuice|instapage|pingdom|surveygizmo|teamwork|tictail|shopify|desk|teamwork|unbounce|helpjuice|helpscout|pingdom|tictail|campaign|monitor|cargocollective|statuspage|tumblr|amazon|hubspot|modulus|unbounce|uservoice|wpengine|cloudapp"` # CNAME subdomain hijacking
+                - [ ] subover: # subdomain hijacking
                     - `subover -l $LOOT_DIR/domains/domains-$TARGET-full.txt`
-                - subjack: # subdomain hijacking scan
+                - [ ] subjack: # subdomain hijacking scan
                     - `~/go/bin/subjack -w $LOOT_DIR/domains/domains-$TARGET-full.txt -c ~/go/src/github.com/haccer/subjack/fingerprints.json -t $THREADS -timeout 30 -o $LOOT_DIR/nmap/subjack-$TARGET.txt -a -v`
             - `recon/cloud`:
                 - cloud tools:
-                    - slurp [TODO] # S3 bucket enumerator 
+                    - [ ] `slurp` # S3 bucket enumerator 
                         - `./slurp-linux-amd64 domain --domain $TARGET` # S3 bucket scan
             - `recon/osint`:
-                - metagoofil:
+                - [ ] `metagoofil`:
                     - `python metagoofil.py -d $TARGET -t doc,pdf,xls,csv,txt -l 25 -n 25 -o $LOOT_DIR/osint/ -f $LOOT_DIR/osint/$TARGET.html` # online documents
-                - gitgraber
+                - [ ] `gitgraber`:
                     - `python3 gitGraber.py -q "\"org:$ORGANIZATION\""` # github secret grabber
-                - goohak:
+                - [ ] `goohak`:
                     - `goohak $TARGET` # google hacking queries
-                - h8mail:
+                - [ ] `h8mail`:
                     - `h8mail -q domain --target $TARGET -o $LOOT_DIR/osint/h8mail-$TARGET.csv` # checking compromised credentials
-                - amass:
+                - [ ] `amass`:
                     - `amass enum -ip -o $LOOT_DIR/domains/domains-$TARGET-amass.txt -rf /usr/share/sniper/plugins/massdns/lists/resolvers.txt -d $TARGET` # dns subdomains
                     - `amass intel -whois -d $TARGET` # reverse whois
                     - `subfinder -o $LOOT_DIR/domains/domains-$TARGET-subfinder.txt -d $TARGET -nW -rL /sniper/wordlists/resolvers.txt`
-                - theHarvester [python][maybe] # OSInt tool
-                - `curl --insecure -L -s "https://urlscan.io/api/v1/search/?q=domain:$TARGET" 2> /dev/null | egrep "country|server|domain|ip|asn|$TARGET|prt"| sort -u` 
-                - `curl -s "https://api.hunter.io/v2/domain-search?domain=$TARGET&api_key=$HUNTERIO_KEY"`
-                - `msfconsole -x "use auxiliary/gather/search_email_collector; set DOMAIN $TARGET; run; exit y"` # gather emails via metasploit
-                - `php /usr/share/sniper/bin/inurlbr.php --dork "site:$TARGET" -s inurlbr-$TARGET`
-                - `curl -s https://www.email-format.com/d/$TARGET| grep @$TARGET | grep -v div | sed "s/\t//g" | sed "s/ //g"`
-                - dig:
+                - [ ] theHarvester [python][maybe] # OSInt tool
+                - [ ] `curl --insecure -L -s "https://urlscan.io/api/v1/search/?q=domain:$TARGET" 2> /dev/null | egrep "country|server|domain|ip|asn|$TARGET|prt"| sort -u` 
+                - [ ] `curl -s "https://api.hunter.io/v2/domain-search?domain=$TARGET&api_key=$HUNTERIO_KEY"`
+                - [ ] `msfconsole -x "use auxiliary/gather/search_email_collector; set DOMAIN $TARGET; run; exit y"` # gather emails via metasploit
+                - [ ] `php /usr/share/sniper/bin/inurlbr.php --dork "site:$TARGET" -s inurlbr-$TARGET`
+                - [ ] `curl -s https://www.email-format.com/d/$TARGET| grep @$TARGET | grep -v div | sed "s/\t//g" | sed "s/ //g"`
+                - [ ] `dig`:
                     - `dig $TARGET txt | egrep -i 'spf|DMARC|dkim'` # email
                     - `dig iport._domainkey.${TARGET} txt | egrep -i 'spf|DMARC|DKIM'` # email
                     - `dig _dmarc.${TARGET} txt | egrep -i 'spf|DMARC|DKIM'` # email

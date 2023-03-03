@@ -24,7 +24,7 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
-		table = self.run_opts.get('table', False)
+		table = self.run_opts.pop('table', False)
 		json = self.run_opts.get('json', False)
 		self._print_table = table or not sync
 		self.sync = sync
@@ -44,14 +44,14 @@ class Task(Runner):
 		task_cls = Task.get_task_class(self.config.name)
 		if sync:
 			task = task_cls(self.targets, **opts)
-			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...') if not task._json_output else nullcontext():
+			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...') if not task._json_output and not task._raw_output and not task._orig_output else nullcontext():
 				self.results = task.run()
 		else:
 			result = task_cls.delay(self.targets, **opts)
 			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
 			self.process_live_tasks(result)
-			self.results = result.get()
-			self.results = self.results.get('results') or self.results
+			self.results = result.get(propagate=False)
+			self.results = self.results['results'] if isinstance(self.results, dict) else self.results
 		if opts.get('debug', False):
 			console.log(yaml.dump(self.results))
 		self.results = self.filter_results()

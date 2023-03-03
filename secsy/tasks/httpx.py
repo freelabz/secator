@@ -5,7 +5,7 @@ from secsy.utils import sanitize_url
 
 class httpx(HTTPCommand):
 	"""Fast and multi-purpose HTTP toolkit."""
-	cmd = 'httpx'
+	cmd = 'httpx -silent'
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-json'

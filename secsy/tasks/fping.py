@@ -32,3 +32,9 @@ class fping(ReconCommand):
 		if validators.ipv4(line) or validators.ipv6(line):
 			return {'ip': line, 'alive': True}
 		return None
+
+	@staticmethod
+	def on_line(self, line):
+		if 'Unreachable' in line:
+			return '' # discard line as it pollutes output
+		return line

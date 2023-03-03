@@ -1,23 +1,28 @@
-import logging
 import os
 import sys
 
 import rich_click as click
+from dotmap import DotMap
 
-from secsy.runners import Command
-from secsy.decorators import (OrderedGroup, register_tasks, register_scans,
-                              register_workflows)
-from secsy.utils import (discover_external_tasks, discover_internal_tasks,
-                         setup_logging)
+from secsy.config import ConfigLoader
+from secsy.decorators import OrderedGroup, register_runner
 from secsy.definitions import ASCII
+from secsy.runners import Command
+from secsy.utils import discover_tasks
+
+click.rich_click.USE_RICH_MARKUP = True
+click.rich_click.SHOW_ARGUMENTS = True # TODO: Turn to True and add help for arguments
+click.rich_click.GROUP_ARGUMENTS_OPTIONS = False
+click.rich_click.SHOW_METAVARS_COLUMN = False
+click.rich_click.APPEND_METAVARS_HELP = False
+# click.rich_click.STYLE_ERRORS_SUGGESTION = "magenta italic"
 
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 YAML_MODE = bool(int(os.environ.get('YAML_MODE', '0')))
-ALL_CMDS = discover_internal_tasks() + discover_external_tasks()
-
-level = logging.DEBUG if DEBUG else logging.INFO
-setup_logging(level)
-
+ALL_TASKS = discover_tasks()
+ALL_CONFIGS = ConfigLoader.load_all()
+ALL_WORKFLOWS = ALL_CONFIGS.workflows
+ALL_SCANS = ALL_CONFIGS.scans
 DEFAULT_CMD_OPTS = {
 	'no_capture': True,
 	'print_cmd': True,
@@ -30,9 +35,11 @@ DEFAULT_CMD_OPTS = {
 #--------#
 
 @click.group(cls=OrderedGroup)
-def cli():
+@click.option('--no-banner', is_flag=True, default=False)
+def cli(no_banner):
 	"""Secsy CLI."""
-	print(ASCII, file=sys.stderr)
+	if not no_banner:
+		print(ASCII, file=sys.stderr)
 	pass
 
 
@@ -41,17 +48,26 @@ def task():
 	"""Run a task."""
 	pass
 
+for cls in ALL_TASKS:
+	config = DotMap({'name': cls.__name__})
+	register_runner(task, config)
 
 @cli.group(aliases=['w', 'wf', 'flow'])
 def workflow():
 	"""Run a workflow."""
 	pass
 
+for config in ALL_WORKFLOWS:
+	register_runner(workflow, config)
+
 
 @cli.group(aliases=['sc'])
 def scan():
 	"""Run a scan."""
 	pass
+
+for config in ALL_SCANS:
+	register_runner(scan, config)
 
 
 @cli.group(aliases=['ut'])
@@ -72,10 +88,6 @@ def worker(concurrency):
 		**DEFAULT_CMD_OPTS
 	)
 
-register_tasks(task)
-register_workflows(workflow)
-register_scans(scan)
-
 
 #-------#
 # UTILS #
@@ -87,9 +99,9 @@ def install(cmds):
 	"""Install commands."""
 	if cmds is not None:
 		cmds = cmds.split(',')
-		cmds = [cls for cls in ALL_CMDS if cls.__name__ in cmds]
+		cmds = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
 	else:
-		cmds = ALL_CMDS
+		cmds = ALL_TASKS
 	for cls in cmds:
 		cls.install()
 
@@ -122,7 +134,7 @@ def integration():
 
 @test.command()
 @click.option('--commands', '-c', type=str, default='', help='Secsy commands to test (comma-separated)')
-@click.option('--test', '-t', type=str, default='tests.unit', help='Secsy test to run')
+@click.option('--test', '-t', type=str, help='Secsy test to run')
 @click.option('--coverage', '-x', is_flag=True, help='Run coverage on results')
 @click.option('--debug', '-d', is_flag=True, help='Add debug information')
 def unit(commands, test, coverage=False, debug=False):

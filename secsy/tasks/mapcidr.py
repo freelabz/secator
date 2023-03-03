@@ -6,7 +6,7 @@ from secsy.tasks._categories import ReconCommand
 
 class mapcidr(ReconCommand):
 	"""A utility program to perform multiple operations for a given subnet/cidr ranges."""
-	cmd = 'mapcidr'
+	cmd = 'mapcidr -silent'
 	input_flag = '-cidr'
 	file_flag = '-cl'
 	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest'
@@ -19,7 +19,7 @@ class mapcidr(ReconCommand):
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
-		THREADS: OPT_NOT_SUPPORTED
+		THREADS: OPT_NOT_SUPPORTED,
 	}
 
 	def item_loader(self, line):
