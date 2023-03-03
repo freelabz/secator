@@ -26,7 +26,7 @@ class TestCommandWorkflow(unittest.TestCase):
 
 	# def test_chain_with_results(self):
 	# 	existing_results = [{
-	# 		"url": "https://***REMOVED***",
+	# 		"url": "https://example.synology.me",
 	# 		"method": "GET",
 	# 		"status_code": 200,
 	# 		"words": 438,
