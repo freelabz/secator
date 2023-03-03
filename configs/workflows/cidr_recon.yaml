@@ -13,23 +13,23 @@ tasks:
     - type: ip
       field: ip
       condition: item['alive'] is True
-  httpx:
-    targets_:
-    - type: port
-      field: '{ip}:{port}'
-  _group:
-    nuclei:
-      tags: [network, ssl]
-      targets_:
-        - type: ip
-          field: ip
-          condition: item['alive'] is True
-    nmap:
-      targets_:
-        - type: ip
-          field: ip
-          condition: item['alive'] is True
-      ports_: port.port
+  # httpx:
+  #   targets_:
+  #   - type: port
+  #     field: '{ip}:{port}'
+  # _group:
+  #   nuclei:
+  #     tags: [network, ssl]
+  #     targets_:
+  #       - type: ip
+  #         field: ip
+  #         condition: item['alive'] is True
+  #   nmap:
+  #     targets_:
+  #       - type: ip
+  #         field: ip
+  #         condition: item['alive'] is True
+  #     ports_: port.port
 
     # nuclei:
     #   tags: [cve, xss]
