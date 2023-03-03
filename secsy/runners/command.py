@@ -39,6 +39,9 @@ class Command:
 	# Base cmd
 	cmd = None
 
+	# Global options
+	global_opts = {}
+
 	# Meta options
 	meta_opts = {}
 
@@ -111,6 +114,7 @@ class Command:
 
 	# Command output formatting options
 	_raw_output = False
+	_plain_output = False
 	_orig_output = False
 	_table_output = False
 	_json_output = False
@@ -141,6 +145,9 @@ class Command:
 
 		# Raw output
 		self._raw_output = self.cmd_opts.pop('raw', False)
+		
+		# Plain output
+		self._plain_output = self.cmd_opts.pop('plain', False)
 
 		# No convert to unified schema
 		self._orig_output = self.cmd_opts.pop('orig', False)
@@ -177,6 +184,8 @@ class Command:
 		# Output formatting
 		self.color = self.cmd_opts.pop('color', False)
 		self.quiet = self.cmd_opts.pop('quiet', False)
+		if 'quiet' in self.opt_key_map:
+			self.cmd_opts['quiet'] = self.quiet
 		self.output_table_fields = self.cmd_opts.pop(
 			'table_fields',
 			self.output_table_fields)
@@ -275,12 +284,10 @@ class Command:
 	#-------#
 	def run_hooks(self, hook_type, *args):
 		logger.debug(f'Running hooks of type {hook_type}')
-		result = None
+		result = args[0] if len(args) > 0 else None
 		for hook in self._hooks[hook_type]:
 			logger.debug(hook)
 			result = hook(self, *args)
-		if not result and len(args) > 0:
-			return args[0]
 		return result
 
 	#------------#
@@ -424,7 +431,8 @@ class Command:
 					break
 
 				# Add the log line to the output
-				self.output += line + '\n'
+				if line:
+					self.output += line + '\n'
 
 		except KeyboardInterrupt:
 			process.kill()
@@ -523,7 +531,7 @@ class Command:
 		self.results.append(item)
 
 		# In raw output mode, extract principal key from dict.
-		if self._raw_output and self.output_field is not None:
+		if self._plain_output and self.output_field is not None:
 			if callable(self.output_field):
 				item = self.output_field(item)
 			else:

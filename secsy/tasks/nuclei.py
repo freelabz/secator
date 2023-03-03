@@ -9,7 +9,7 @@ class nuclei(VulnCommand):
 	cmd = 'nuclei -silent'
 	file_flag = '-l'
 	input_flag = '-u'
-	# input_chunk_size = 1 # TODO: figure out which chunk size is appropriate
+	input_chunk_size = 3 # TODO: figure out which chunk size is appropriate
 	json_flag = '-json'
 	opts = {
 		'templates': {'type': str, 'help': 'Templates'},

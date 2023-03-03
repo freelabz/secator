@@ -4,7 +4,7 @@ from secsy.tasks._categories import ReconCommand
 
 class naabu(ReconCommand):
 	"""Port scanning tool written in Go."""
-	cmd = 'naabu -Pn'
+	cmd = 'naabu -Pn -silent'
 	input_flag = '-host'
 	file_flag = '-list'
 	json_flag = '-json'

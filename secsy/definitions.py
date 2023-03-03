@@ -25,7 +25,7 @@ DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 
 # Defaults
 DEFAULT_CHUNK_SIZE = 100
-DEFAULT_STDIN_TIMEOUT = 5 # seconds
+DEFAULT_STDIN_TIMEOUT = 1000 # seconds
 DEFAULT_PROXY_TIMEOUT = 1 # seconds
 
 # Constants
