@@ -1,0 +1,7 @@
+name: web
+description: Web vulnerability scan
+profile: default
+workflows:
+  nuclei:
+    exclude_tags: [network, ssl]
+    tags: [cve, panel, wordpress, exposure, edb, wp-plugin, lfi, xss]

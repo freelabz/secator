@@ -1,14 +1,10 @@
-name: url_finder
-description: Crawl an URL to find more.
+name: url_fuzzer
+description: Fuzz URLs (slow)
 tasks:
   _group:
-    cariddi:
     dirsearch:
-    # feroxbuster:
+    feroxbuster:
     ffuf:
-    gau:
-    gospider:
-    katana:
   httpx:
     targets_:
       type: url

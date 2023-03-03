@@ -1,0 +1,8 @@
+name: http_recon
+description: Run HTTP recon with Nuclei
+tags:
+  - http
+  - nuclei
+tasks:
+  nuclei:
+    tags: [cve, panel, wordpress, exposure, edb, wp-plugin, lfi, xss]

@@ -1,0 +1,13 @@
+name: cidr_mapper
+tags:
+- cidr
+- localnet
+category: recon/network/local
+description: Expand local CIDR range and find alive hosts
+tasks:
+  mapcidr:
+  fping:
+    targets_: ip.ip
+results:
+  - type: ip
+    condition: item['alive'] is True
