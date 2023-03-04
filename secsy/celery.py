@@ -70,14 +70,17 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 	if chunk_size > 1:
 		chunks = list(chunker(targets, chunk_size))
 
+	# Clone opts
+	opts = task_opts.copy()
+
 	# Build signatures
 	sigs = []
 	for ix, chunk in enumerate(chunks):
 		if len(chunks) > 0: # add chunk to task opts for tracking chunks exec
-			task_opts['chunk'] = ix + 1
-			task_opts['chunk_count'] = len(chunks)
-		task_opts['track'] = True
-		sig = task_cls.s(chunk, **task_opts)
+			opts['chunk'] = ix + 1
+			opts['chunk_count'] = len(chunks)
+			opts['chunked'] = True
+		sig = task_cls.s(chunk, **opts)
 		sigs.append(sig)
 
 	# Build Celery workflow
@@ -96,19 +99,17 @@ def run_command(self, results, name, targets, opts={}):
 	chunk = opts.get('chunk')
 	chunk_count = opts.get('chunk_count')
 	sync = opts.get('sync', True)
-	display_name = name
-	display_name += f' [{chunk}/{chunk_count}]' if chunk else ''
 
 	# Update task state in backend
 	count = 0
-	track = False if chunk else True
 	state = {
 		'state': 'RUNNING',
 		'meta': {
-			'name': display_name,
+			'name': name,
 			'results': [],
-			'count': count,
-			'track': track
+			'chunk': chunk,
+			'chunk_count': chunk_count,
+			'count': count
 		}
 	}
 	self.update_state(**state)
@@ -132,7 +133,7 @@ def run_command(self, results, name, targets, opts={}):
 
 	# If task doesn't support multiple targets, or if the number of targets is 
 	# too big, split into multiple tasks
-	multiple_targets = isinstance(targets, list)
+	multiple_targets = isinstance(targets, list) and len(targets) > 1
 	single_target_only = multiple_targets and task_cls.file_flag is None
 	break_size_threshold = multiple_targets and len(targets) > task_cls.input_chunk_size
 
@@ -147,7 +148,7 @@ def run_command(self, results, name, targets, opts={}):
 			chunk_size=chunk_size)
 
 		with allow_join_result():
-			result = workflow.apply() if sync else workflow()
+			result = workflow.apply() if sync else workflow.delay()
 			task_results = result.get(propagate=False)
 			results.extend(task_results)
 			state['state'] = 'SUCCESS'
@@ -155,6 +156,10 @@ def run_command(self, results, name, targets, opts={}):
 			state['meta']['count'] = len(task_results)
 			self.update_state(**state)
 			return results
+
+	# If list with 1 element
+	if isinstance(targets, list) and len(targets) == 1:
+		targets = targets[0]
 
 	# Run task
 	task = task_cls(targets, **opts)

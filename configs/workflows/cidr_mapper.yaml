@@ -1,9 +1,7 @@
 name: cidr_mapper
-tags:
-- cidr
-- localnet
-category: recon/network/local
 description: Expand local CIDR range and find alive hosts
+category: recon/network/local
+tags: [cidr, localnet]
 tasks:
   mapcidr:
   fping:

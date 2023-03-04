@@ -36,7 +36,6 @@ class Task(Runner):
 			'print_line': True,
 			'sync': sync,
 			'json': json or not sync,
-			'track': True
 		}
 		opts = merge_opts(self.run_opts, fmt_opts)
 

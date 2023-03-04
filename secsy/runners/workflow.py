@@ -42,7 +42,6 @@ class Workflow(Runner):
 			'print_cmd_prefix': not sync,
 			'print_item_count': True,
 			'sync': sync,
-			'track': True,
 		}
 		self.config.options.update(fmt_opts)
 
