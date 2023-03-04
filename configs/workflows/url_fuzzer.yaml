@@ -1,5 +1,7 @@
 name: url_fuzzer
 description: Fuzz URLs (slow)
+category: recon/http
+tags: [http]
 tasks:
   _group:
     dirsearch:

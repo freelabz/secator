@@ -1,10 +1,7 @@
 name: host_recon
 description: Run host recon (ports, network vulns) + basic CVE scan on open HTTP services
-tags:
-- subdomains
-- urls
-- vulnerabilities
-- subdomain_takeover
+category: recon/multi
+tags: [subdomain, url, vulnerability]
 tasks:
   _group:
     nuclei:

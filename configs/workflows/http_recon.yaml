@@ -1,9 +1,7 @@
 name: http_recon
-category: recon/http
 description: Run HTTP recon with Nuclei
-tags:
-  - http
-  - nuclei
+category: recon/http
+tags: [http, nuclei]
 tasks:
   nuclei:
     exclude_tags: [network, ssl]

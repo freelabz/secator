@@ -19,6 +19,7 @@ v0.0.1
 - [x] Allow stdin input for all Secsy commands.
 
 **TODO:**
+- [ ] Find `nmap` bug that causes it to spend lots of time to convert results / get CVEs
 - [ ] Consider if using `selinon` to track tasks is worth it
 - [ ] Add scan ids
 - [ ] Add `secsy workflow --results previous / {path_to_json} / {scan_id}` to launch workflow with previous results
