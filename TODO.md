@@ -19,6 +19,7 @@ v0.0.1
 - [x] Allow stdin input for all Secsy commands.
 
 **TODO:**
+- [ ] Consider if using `selinon` to track tasks is worth it
 - [ ] Add scan ids
 - [ ] Add `secsy workflow --results previous / {path_to_json} / {scan_id}` to launch workflow with previous results
 - [ ] bug: when extractors return None, original targets are used --> FIX THIS
