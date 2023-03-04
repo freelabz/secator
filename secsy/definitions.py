@@ -18,6 +18,7 @@ ASCII = f"""
 # Environment variables
 TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
 REPORTS_FOLDER = os.environ.get('REPORTS_FOLDER', '/tmp/reports')
+os.makedirs(REPORTS_FOLDER, exist_ok=True)
 RECORD = bool(int(os.environ.get('RECORD', '0')))
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{TEMP_FOLDER}/celery/results')

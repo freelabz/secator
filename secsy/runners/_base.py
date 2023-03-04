@@ -7,15 +7,17 @@ from time import sleep, time
 
 import humanize
 from celery.result import AsyncResult
+from rich import print
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
-                           TimeElapsedColumn)
+						   TimeElapsedColumn)
+from rich.tree import Tree
 
 from secsy.definitions import OUTPUT_TYPES, REPORTS_FOLDER
 from secsy.rich import build_table, console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
-                                    process_extractor)
+									get_task_nodes, process_extractor)
 from secsy.utils import get_file_timestamp, merge_opts, pluralize
 
 
@@ -170,6 +172,7 @@ class Runner:
 		tasks_progress = Progress(
 			SpinnerColumn('dots'),
 			TextColumn('[bold gold3]{task.fields[name]}[/]'),
+			TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
 			TextColumn('{task.fields[state]:<20}'),
 			TimeElapsedColumn(),
 			TextColumn('{task.fields[count]}'),
@@ -189,12 +192,13 @@ class Runner:
 			tasks_progress = {}
 
 			# Poll tasks for status
+			res = AsyncResult(result.id)
 			while True:
 				task_ids = []
 				get_task_ids(result, ids=task_ids)
 				for task_id in task_ids:
 					info = get_task_info(task_id, debug=self.debug)
-					if not info or not info['track']:
+					if not info or info['chunk']:
 						continue
 					state = info['state']
 					state_str = f'[{state_colors[state]}]{state}[/]'
@@ -213,8 +217,7 @@ class Runner:
 						if error_str not in errors:
 							errors.append(error_str)
 
-				# Update all tasks to 100 % if workflow has finished running
-				res = AsyncResult(result.id)
+				# Update all tasks to 100 %
 				if res.ready():
 					for progress_id in tasks_progress.values():
 						progress.update(progress_id, advance=100)
@@ -223,11 +226,60 @@ class Runner:
 				# Sleep between updates
 				sleep(1)
 
+		# Get task tree
+		nodes = []
+		ids = []
+		get_task_nodes(result, ids=ids, nodes=nodes, parent=None)
+		nodes = sorted(nodes, key=lambda x: x['level'])
+		nodes = build_nodes_hierarchy(nodes)
+		root = Tree('Tasks')
+		build_tree(root, nodes[0], nodes)
+		# print(root)
+
 		if errors:
 			console.print()
 			console.log('Errors:', style='bold red')
 			for error in errors:
 				console.print('  ' + error)
+
+
+def build_nodes_hierarchy(nodes):
+	for node in nodes:
+		parent_id = node.get('parent')
+		parent = [n for n in nodes if n['celery_id'] == parent_id]
+		if parent:
+			parent = parent[0]
+			children = parent.get('children', [])
+			children.append(node['celery_id'])
+			parent['children'] = children
+	return nodes
+
+
+def build_tree(root, node, nodes):
+	name = node.get('name')
+
+	# Skip utility Celery tasks
+	while name is None:
+		children = [c for c in nodes if c['celery_id'] in node.get('children', [])]
+		if not children:
+			break
+		node = children[0]
+		name = node.get('name')
+
+	# Make subtree, skip _group subtree
+	if name == '_group':
+		subtree = root
+	else:
+		subtree = root.add(name)
+
+	# Add children to subtree
+	children = [
+		c for c in nodes
+		if c['celery_id'] in node.get('children', [])
+	]
+	for child in children:
+		build_tree(subtree, child, nodes)
+
 
 def collect_results(result):
 	"""Collect results from complex workflow by parsing all parents.

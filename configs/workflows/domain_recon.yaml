@@ -1,11 +1,7 @@
 name: domain_recon
 description: Run domain recon
-tags:
-- subdomains
-- urls
-- vulnerabilities
-- subdomain_takeover
 category: recon/dns
+tags: [subdomain, url, vulnerability, subdomain_takeover]
 tasks:
   subfinder:
   nuclei:

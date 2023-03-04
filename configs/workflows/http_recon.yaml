@@ -1,4 +1,5 @@
 name: http_recon
+category: recon/http
 description: Run HTTP recon with Nuclei
 tags:
   - http

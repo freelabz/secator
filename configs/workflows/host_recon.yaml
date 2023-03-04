@@ -8,8 +8,7 @@ tags:
 tasks:
   _group:
     nuclei:
-      tags:
-        - network, ssl
+      tags: [network, ssl]
     _chain:
       naabu:
       nmap:
@@ -22,8 +21,6 @@ tasks:
             field: '{host}:{port}'
       nuclei:
         targets_: url.url
-        tags:
-          - cve, lfi, xss
 results:
   - type: vulnerability
     condition: item['confidence'] == 'high'

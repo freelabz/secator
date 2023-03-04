@@ -1,9 +1,7 @@
 name: cidr_recon
-tags:
-- cidr
-- localnet
+description: Find vulnerabilities on local network
 category: recon/network/local
-description: Expand local CIDR range and find alive hosts
+tags: [cidr, localnet]
 tasks:
   mapcidr:
   fping:
@@ -31,7 +29,7 @@ tasks:
           condition: item['alive'] is True
       ports_: port.port
     nuclei:
-      tags: [cve, xss]
+      exclude_tags: [network, ssl]
       targets_:
         - type: url
           field: url
