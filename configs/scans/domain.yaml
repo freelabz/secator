@@ -7,6 +7,6 @@ workflows:
     targets_:
     - target.name
     - subdomain.host
-  url_finder:
+  url_crawler:
     targets_:
     - url.url
