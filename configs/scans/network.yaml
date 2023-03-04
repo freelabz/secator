@@ -6,6 +6,6 @@ workflows:
   host_recon:
     targets_:
     - ip.ip
-  url_finder:
+  url_crawler:
     targets_:
     - url.url
