@@ -232,9 +232,6 @@ class Runner:
 		get_task_nodes(result, ids=ids, nodes=nodes, parent=None)
 		nodes = sorted(nodes, key=lambda x: x['level'])
 		nodes = build_nodes_hierarchy(nodes)
-		root = Tree('Tasks')
-		build_tree(root, nodes[0], nodes)
-		# print(root)
 
 		if errors:
 			console.print()
