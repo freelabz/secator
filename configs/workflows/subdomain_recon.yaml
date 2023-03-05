@@ -1,6 +1,5 @@
-name: domain_recon
+name: subdomain_recon
 description: Find subdomains and HTTP servers
-category: recon/dns
 tags: [subdomain, url, vulnerability, subdomain_takeover]
 tasks:
   subfinder:
@@ -10,7 +9,12 @@ tasks:
       - target.name
       - subdomain.host
       templates: takeovers/
-    httpx:
-      targets_:
-      - target.name
-      - subdomain.host
+    _chain:
+      naabu:
+        targets_:
+          - target.name
+          - subdomain.host
+      httpx:
+        targets_:
+        - type: port
+          field: '{host}:{port}'

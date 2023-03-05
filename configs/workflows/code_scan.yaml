@@ -1,6 +1,5 @@
 name: code_scan
 description: Run vulnerability scan on code repositories
-category: vuln/code
 tags: [vulnerability, code]
 tasks:
   grype:

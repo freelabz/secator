@@ -1,6 +1,5 @@
 name: url_crawler
 description: Find URLs by crawling
-category: recon/http
 tags: [http]
 tasks:
   _group:

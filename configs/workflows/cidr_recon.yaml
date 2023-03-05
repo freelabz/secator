@@ -1,6 +1,5 @@
 name: cidr_recon
 description: Discover network IPs and HTTP servers
-category: recon/network
 tags: [cidr, network]
 tasks:
   mapcidr:
