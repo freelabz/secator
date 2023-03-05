@@ -17,80 +17,82 @@ v0.0.1
 - [x] Add `mapcidr`
 - [x] Add `fping`
 - [x] Allow stdin input for all Secsy commands.
+- [x] Find `nmap` bug that causes it to spend lots of time to convert results / get CVEs
+- [x] Work on better proxy support, maybe using `proxychains`
 
 **TODO:**
-- [ ] Find `nmap` bug that causes it to spend lots of time to convert results / get CVEs
-- [ ] Consider if using `selinon` to track tasks is worth it
-- [ ] Add scan ids
-- [ ] Add `secsy workflow --results previous / {path_to_json} / {scan_id}` to launch workflow with previous results
+- [ ] fix: fix bug with local filesystem broker
+- [ ] fix: fix `dirsearch` / `feroxbuster` as they time out currently
+- [ ] fix: use Celery `chunks` to chunk a task.
+- [ ] fix: broken tasks chunks do not update main task results / results count.
+- [ ] fix: Running task.run() and task.delay().get() should have the same output:
+    - `[<ITEM1>,<ITEM2>]` for task.run()
+    - `{'name': 'task', 'results': [<ITEM1>, <ITEM2>]}` for task.delay().get()
 - [ ] bug: when extractors return None, original targets are used --> FIX THIS
-- [ ] CLI: use previous results as input for next scan
-- [ ] Test:
-    - `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
-    - Add multiple tasks with same name - new notation with '/' ?
-- [ ] Parse multiple vulnerability ids
-- [ ] Find exploits from CVEs
-- [ ] Fix `dirsearch` / `feroxbuster` as they time out currently
-- [ ] Add `-stats` option to Nuclei to display scan status --> use status info for progress bar.
-- [ ] Try to use Celery `chunks` to chunk a task.
-- [ ] Use `poll_live_tasks` within Celery task when it's broken into chunks to update the results / item count of the main task in real-time.
-- [ ] `CTRL + C` should let you choose which tasks to abort from the client-side and the worker side.
-- [ ] Fix bug with local filesystem broker
-- [ ] Add `arp-scan`
-- [ ] Auto-generate CLI groups based on 'name' field in YAML:
-    - [ ] If `name: test_sub`, then a subgroup of commands will be automatically generated, so that we can run:
-        - [ ] `secsy workflow test --help` will be a Click group that shows `sub` subcommand.
-        - [ ] `secsy workflow test sub --help` will be the helper for the `sub` subcommand.
-- [ ] Add techniques for IDS evasion (cf https://book.hacktricks.xyz/generic-methodologies-and-resources/pentesting-network/ids-evasion)
-- [ ] Make utils Celery tasks for:
-    - [ ] Results filtering `filter_results`
-    - [x] Results deduplication / merging `forward_results`
-- [ ] Pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
+- [ ] test: test workflows like `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
+
+- [ ] feat: pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
     - [ ] Pydantic + potential db schemas base ?
     - [ ] Used to format results as well
-- [ ] Reporting
+- [ ] feat: Turn `task.delay().get()` into an iterator. Need to subclass `AsyncResult` with an `__iter__(self)` function that runs `poll_live_tasks`, so that we can run:
+    - `for result in task.delay():` and `for result in task:` in the same way
+- [ ] feat: Allow (hidden) arguments of type `nuclei.rate-limit` or `NUCLEI_RATE_LIMIT` when running tasks / workflows.
+- [ ] feat: Consider if using `selinon` to track tasks is worth it
+- [ ] feat: Add scan ids to `Workflow` / `Scan` objects. Could be the Celery workflow task id for `Workflow`.
+- [ ] feat: use previous results as input for next scan:  `secsy workflow --results previous / {path_to_json} / {scan_id}`
+- [ ] feat: support multiple tasks with same name but differenciatesd - new notation with '<task_name>/<alias>' or `<task_name>:\n<alias>: alias` ?
+- [ ] feat: parse multiple vulnerability ids
+- [ ] feat: find exploits from CVEs
+- [ ] feat: add `-stats` option to Nuclei to display scan status --> use status info for progress bar.
+- [ ] feat: add tasks statuses under main progress bar (turn `console.status` into a `Live` instance)
+- [ ] feat: `CTRL + C` should let you choose which tasks to abort from the client-side and the worker side.
+- [ ] feat: add `arp-scan`
+- [ ] feat: add techniques for IDS evasion (cf https://book.hacktricks.xyz/generic-methodologies-and-resources/pentesting-network/ids-evasion)
+- [ ] feat: make utils Celery tasks for:
+    - [ ] Results filtering `filter_results`
+    - [x] Results deduplication / merging `forward_results`
+- [ ] feat: reporting
     - [ ] HTML reporting not based on Rich's export_html
-    - [ ] Save JSON report
+    - [x] Save JSON report
     - [ ] Output live JSON items for workflows / scans so that they are consumable from library
-- [ ] Add ways to create Workflows dynamically from code (need to revisit the way the output results are):
+- [ ] feat: add ways to create Workflows dynamically from code (need to revisit the way the output results are):
     ```
     from secsy.runners import Workflow, group
 
     host = 'wikipedia.org'
     tasks = subfinder.s(host, raw=True) | httpx.s(raw=True) | group(katana.s(), feroxbuster.s())
-    workflow = Workflow.from_dsl(workflow)
+    workflow = Workflow.from_dsl(tasks)
     workflow.delay() # run in Celery worker (fast)
     workflow.run() # run synchronously (slow)
 
     def group(*tasks):
         return chain(forward_results.s(), chord(*tasks, forward_results), forward_results.s())
     ```
-    - [ ] Cleanup chord-creating code + add tests for it
 
-- [ ] Edit workflow YAML from environment variables and config parameters / overrides from CLI:
+- [ ] feat: edit workflow YAML from environment variables and config parameters / overrides from CLI:
+    `secsy config copy workflows/domain_recon domain_recon_2`
+    `secsy config set workflows/domain_recon_2 workflow.opt1 10` # Workflow opt
+    `secsy config set workflows/domain_recon_2 workflow.tasks.nmap.rate_limit 10` # Workflow task opt
     ```
-    secsy utils copy workflow domain_recon domain_recon_modified
-    secsy utils set workflow.opt1 # Workflow general options
-    secsy utils set workflow.tasks.nmap.rate_limit 10 # Workflow opt
-    ```
-- [ ] Replace `console.log` by `logger.info` with rich logging handler (add Logging Handler and setup function) + Celery worker
-- [ ] Autodiscover external tools
-- [ ] Use --<tool>.<option_name> in the CLI (instead of `_`) to override option names.
-- [ ] Improve multiple targets support + add tests for it
-- [ ] Add support for multi output types tool like `feroxbuster`
-- [ ] Make Docker image containing:
+- [ ] feat: generate reports from JSON with the CLI:
+    `secsy report previous/<path_to_json_report> -o html`
+    `secsy view <path_to_json_report> --table`
+- [ ] feat: replace `console.log` by `logger.info` with rich logging handler (add Logging Handler and setup function) + Celery worker
+- [ ] feat: autodiscover external tools
+- [ ] feat: use --<tool>.<option_name> in the CLI (instead of `_`) to override option names.
+- [ ] feat: improve multiple targets support + add tests for it
+- [ ] feat: add support for multi output types tool like `feroxbuster`
+- [ ] feat: make Docker image containing:
     - [ ] Automated install for all tools supported by `secsy`
     - [ ] Either:
         - [ ] Install `katoolin3` from my GitHub and all Kali packages --> installs all Kali Linux tools
         **OR**
         - [ ] Use a `kali` image as base so that most tools are already available
-- [ ] Work on better proxy support, maybe using `proxychains`
-- [ ] Add external pluggable configs/ folder.
-- [ ] Add tests for workflows / scans run
+- [ ] feat: add external pluggable configs/ folder.
+- [ ] feat: add tests for workflows / scans run
     - [ ] run_opts, workflow_opts, scan_opts, task_opts overrides
     - [ ] results deduplication tests
     - [ ] + integration tests for existing workflows
-- [ ] Terminate tasks on client-side CTRL+C
 
 - **Integrations:**
     - OWASP ZAP [TODO]
