@@ -1,5 +1,5 @@
 name: url_crawler
-description: Find URLs by crawling
+description: Find URLs by crawling (fast)
 tags: [http]
 tasks:
   _group:
