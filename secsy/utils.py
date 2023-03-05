@@ -67,9 +67,12 @@ def expand_input(input):
 			return None
 		return data
 	elif os.path.exists(input):
-		with open(input, 'r') as f:
-			data = f.read().splitlines()
-		return data
+		if os.path.isfile(input):
+			with open(input, 'r') as f:
+				data = f.read().splitlines()
+			return data
+		else:
+			return input
 	elif isinstance(input, str):
 		input = input.split(',')
 
