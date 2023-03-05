@@ -32,7 +32,7 @@ v0.1.0
 - [ ] fix: original targets are used instead of no targets when extractors return None
 - [ ] refactor: use Celery `chunks` to chunk a task instead of own Fabric.
 - [ ] test: test workflows like `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
-
+- [ ] feat: add `grype` code scanner
 - [ ] feat: pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
     - [ ] Pydantic + potential db schemas base ?
     - [ ] Used to format results as well
