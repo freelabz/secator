@@ -1,9 +1,9 @@
+from contextlib import nullcontext
 from datetime import datetime
 from time import time
 
 from celery import chain, chord
 
-from contextlib import nullcontext
 from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.runners.task import Task
@@ -174,7 +174,8 @@ class Workflow(Runner):
 			# Options
 			items = [
 				f'[italic]{k}[/]: {v}'
-				for k, v in opts.items() if v is not None
+				for k, v in opts.items() 
+				if not k.startswith('print_') and v is not None
 			]
 			if items:
 				console.print('Options:', style='bold gold3')

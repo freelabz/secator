@@ -25,11 +25,25 @@ def criticity_to_color(value):
 		value = f'[bold green]{value.upper()}[/]'
 	return value
 
+def status_to_color(value):
+	value = int(value) if value else ''
+	if value < 400:
+		value = f'[bold green]{value}[/]'
+	elif value in [400, 499]:
+		value = f'[bold dark_orange]{value}[/]'
+	elif value >= 500:
+		value = f'[bold red3]{value}[/]'
+	return value
+
 formatters = {
 	'confidence': criticity_to_color,
 	'severity': criticity_to_color,
-	'cvss_score': lambda score: '' if score == -1 else f'[bold blue]{score}[/]',
-	'port': lambda port: f'[bold blue]{port}[/]'
+	'cvss_score': lambda score: '' if score == -1 else f'[bold cyan]{score}[/]',
+	'port': lambda port: f'[bold cyan]{port}[/]',
+	'url': lambda host: f'[bold underline blue]{host}[/]',
+	'ip': lambda ip: f'[bold yellow]{ip}[/]',
+	'status_code': status_to_color,
+	'_source': lambda source: f'[bold dim gold3]{source}[/]'
 }
 
 def build_table(items, output_fields=[], sort_by=None):

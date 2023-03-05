@@ -25,11 +25,11 @@ class Runner:
 	_save_html = True
 	_save_json = True
 
-	def __init__(self, config, targets, **run_opts):
+	def __init__(self, config, targets, results=[], **run_opts):
 		self.config = config
 		self.run_opts = run_opts
 		self.done = False
-		self.results = []
+		self.results = results
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
