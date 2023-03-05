@@ -19,7 +19,7 @@ class dalfox(VulnCommand):
 		METHOD: 'method',
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
-		THREADS: OPT_NOT_SUPPORTED,
+		THREADS: 'worker',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent'
 	}
@@ -36,6 +36,7 @@ class dalfox(VulnCommand):
 		},
 		VULN_SEVERITY: lambda x: x['severity'].lower()
 	}
+	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
 
 	@staticmethod
 	def on_line(self, line):
