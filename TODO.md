@@ -29,7 +29,7 @@ v0.1.0
 - [ ] fix: Running task.run() and task.delay().get() should have the same output:
     - `[<ITEM1>,<ITEM2>]` for task.run()
     - `{'name': 'task', 'results': [<ITEM1>, <ITEM2>]}` for task.delay().get()
-- [ ] fix: original targets are used instead of no targets when extractors return None
+- [ ] fix: original targets are used instead of no targets when extractors return None (feature ?)
 - [ ] refactor: use Celery `chunks` to chunk a task instead of own Fabric.
 - [ ] test: test workflows like `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
 - [ ] feat: add `grype` code scanner
