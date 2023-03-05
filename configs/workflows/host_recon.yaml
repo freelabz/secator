@@ -3,13 +3,16 @@ description: Run host recon (ports, network vulns) + basic CVE scan on open HTTP
 category: recon/multi
 tags: [subdomain, url, vulnerability]
 tasks:
+  naabu:
+  nmap:
+    ports_: port.port
   _group:
     nuclei:
       tags: [network, ssl]
+      targets_:
+        - type: port
+          field: '{host}:{port}'
     _chain:
-      naabu:
-      nmap:
-        ports_: port.port
       httpx:
         match_codes: False
         targets_:
