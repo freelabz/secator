@@ -12,6 +12,7 @@ tasks:
       field: ip
       condition: item['alive'] is True
   httpx:
+    match_codes: False
     targets_:
     - type: port
       field: '{ip}:{port}'
@@ -33,3 +34,9 @@ tasks:
       targets_:
         - type: url
           field: url
+results:
+  - type: vulnerability
+    condition: item['confidence'] == 'high'
+
+  - type: ip
+    condition: item['alive'] is True
