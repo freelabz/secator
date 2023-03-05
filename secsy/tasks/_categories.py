@@ -113,14 +113,16 @@ class VulnCommand(Command):
 		item['reference'] = item.get('references', [''])[0]
 		return item
 
-	def lookup_local_cve(self, cve_id):
+	@staticmethod
+	def lookup_local_cve(cve_id):
 		cve_path = f'{TEMP_FOLDER}/cves/{cve_id}.json'
 		if os.path.exists(cve_path):
 			with open(cve_path, 'r') as f:
 				return json.load(f)
 		return None
 
-	def lookup_cve(self, cve_id, cpes=[]):
+	@staticmethod
+	def lookup_cve(cve_id, cpes=[]):
 		"""Search for a CVE in local db or using cve.circl.lu and return 
 		vulnerability data.
 
@@ -131,7 +133,7 @@ class VulnCommand(Command):
 		Returns:
 			dict: vulnerability data.
 		"""
-		cve_info = self.lookup_local_cve(cve_id)
+		cve_info = VulnCommand.lookup_local_cve(cve_id)
 		if not cve_info:
 			logger.error(f'CVE {cve_id} not found locally. Use `secsy utils download-cves` to update the local database.')
 			try:
@@ -227,7 +229,17 @@ class VulnCommand(Command):
 		}
 		return vuln
 
-	def lookup_ghsa(self, ghsa_id):
+	@staticmethod
+	def lookup_ghsa(ghsa_id):
+		"""Search for a GHSA on Github and and return associated CVE 
+		vulnerability data.
+
+		Args:
+			ghsa (str): CVE ID in the form GHSA-*
+
+		Returns:
+			dict: vulnerability data.
+		"""
 		reference = f'https://github.com/advisories/{ghsa_id}'
 		response = requests.get(reference)
 		from bs4 import BeautifulSoup
@@ -239,6 +251,6 @@ class VulnCommand(Command):
 		# cwe = info[1].find('a').text
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
-		data = self.lookup_cve(cve_id)
+		data = VulnCommand.lookup_cve(cve_id)
 		data['tags'].append('ghsa')
 		return data

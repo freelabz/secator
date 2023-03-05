@@ -22,10 +22,10 @@ class subfinder(ReconCommand):
 	output_map = {
 		DOMAIN: 'input',
 	}
-	output_schema = [DOMAIN, HOST, SOURCES]
+	output_schema = [HOST, DOMAIN, SOURCES]
 	output_type = SUBDOMAIN
 	output_field = HOST
-	output_table_sort_fields = (DOMAIN, HOST)
+	output_table_sort_fields = (HOST,)
 	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
 	proxychains = False
 
