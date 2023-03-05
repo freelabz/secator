@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -6,7 +7,7 @@ from dotmap import DotMap
 
 from secsy.config import ConfigLoader
 from secsy.decorators import OrderedGroup, register_runner
-from secsy.definitions import ASCII
+from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER
 from secsy.runners import Command
 from secsy.utils import discover_tasks
 
@@ -105,12 +106,41 @@ def install(cmds):
 	for cls in cmds:
 		cls.install()
 
+
 @utils.command()
 @click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
 def get_proxy(timeout):
 	from fp.fp import FreeProxy
 	url = FreeProxy(timeout=timeout, anonym=True).get()
 	print(url)
+
+
+@utils.command()
+@click.option('--force', is_flag=True)
+def download_cves(force):
+	cve_json_path = f'{TEMP_FOLDER}/circl-cve-search-expanded.json'
+	if not os.path.exists(cve_json_path) or force:
+		Command.run_command(
+			f'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
+			cwd=TEMP_FOLDER,
+			**DEFAULT_CMD_OPTS
+		)
+		Command.run_command(
+			f'gunzip {TEMP_FOLDER}/circl-cve-search-expanded.json.gz',
+			cwd=TEMP_FOLDER,
+			**DEFAULT_CMD_OPTS
+		)
+	os.makedirs(CVES_FOLDER, exist_ok=True)
+	from secsy.rich import console
+	with console.status('[bold yellow]Saving CVEs to disk ...[/]'):
+		with open(f'{TEMP_FOLDER}/circl-cve-search-expanded.json', 'r') as f:
+			for line in f:
+				data = json.loads(line)
+				cve_id = data['id']
+				cve_path = f'{TEMP_FOLDER}/cves/{cve_id}.json'
+				with open(cve_path, 'w') as f:
+					f.write(line)
+				console.print(f'CVE saved to {cve_path}')
 
 
 #------#

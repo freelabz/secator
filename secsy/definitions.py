@@ -23,6 +23,7 @@ RECORD = bool(int(os.environ.get('RECORD', '0')))
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{TEMP_FOLDER}/celery/results')
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
+CVES_FOLDER = f'{TEMP_FOLDER}/cves'
 
 # Defaults
 DEFAULT_CHUNK_SIZE = 100
