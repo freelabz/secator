@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 
@@ -294,6 +295,13 @@ class nmapData(dict):
 
 	def _parse_http_csrf_output(self, out, port_data):
 		pass
+	
+	def lookup_local_cve(self, cve_id):
+		cve_path = f'{TEMP_FOLDER}/cves/{cve_id}.json'
+		if os.path.exists(cve_path):
+			with open(cve_path, 'r') as f:
+				return json.load(f)
+		return None
 
 	def lookup_cve(self, cve_id, cpes=[]):
 		"""Search for a CVE using CVESearch and return Vulnerability data.
@@ -305,12 +313,15 @@ class nmapData(dict):
 		Returns:
 			dict: Vulnerability dict.
 		"""
-		try:
-			cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
-			if not cve_info:
-				logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
-		except requests.exceptions.ConnectionError:
-			return None
+		cve_info = self.lookup_local_cve(cve_id)
+		if not cve_info:
+			logger.error(f'CVE {cve_id} not found locally. Use `secsy utils download-cves` to update the local database.')
+			try:
+				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
+				if not cve_info:
+					logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
+			except requests.exceptions.ConnectionError:
+				return None
 
 		# Match the CPE string against the affected products CPE FS strings from the 
 		# CVE data if a CPE was passed.
