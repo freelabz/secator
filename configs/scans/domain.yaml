@@ -1,5 +1,5 @@
 name: domain
-description: Default domain scan (domain_scan, host_scan, url_finder)
+description: Default domain scan (domain_scan, host_scan, url_crawler)
 profile: default
 workflows:
   domain_recon:

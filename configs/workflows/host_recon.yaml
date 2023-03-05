@@ -1,5 +1,5 @@
 name: host_recon
-description: Run host recon (ports, network vulns) + basic CVE scan on open HTTP services
+description: Run vulnerability scan on network and HTTP services
 category: recon/multi
 tags: [subdomain, url, vulnerability]
 tasks:
@@ -16,7 +16,6 @@ tasks:
       httpx:
         match_codes: False
         targets_:
-          - target.name
           - type: port
             field: '{host}:{port}'
       nuclei:

@@ -1,5 +1,5 @@
 name: network
-description: Internal network scan
+description: Internal network scan (cidr_recon, url_crawler)
 profile: default
 workflows:
   cidr_recon:
