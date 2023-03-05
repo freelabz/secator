@@ -2,10 +2,7 @@ name: network
 description: Internal network scan
 profile: default
 workflows:
-  cidr_mapper:
-  host_recon:
-    targets_:
-    - ip.ip
+  cidr_recon:
   url_crawler:
     targets_:
     - url.url

@@ -17,6 +17,7 @@ tasks:
           - type: port
             field: '{host}:{port}'
       nuclei:
+        exclude_tags: [network, ssl]
         targets_: url.url
 results:
   - type: vulnerability
