@@ -77,7 +77,7 @@ def build_table(items, output_fields=[], sort_by=None):
 		key_str = key
 		if not key.startswith('_'):
 			key_str = ' '.join(key.split('_')).upper()
-		no_wrap = key in ['url', 'references', 'matched_at']
+		no_wrap = key in ['url', 'reference', 'references', 'matched_at']
 		overflow = None if no_wrap else 'fold'
 		table.add_column(
 			key_str,
