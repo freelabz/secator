@@ -413,19 +413,22 @@ class Command:
 				line = self.run_hooks('on_line', line)
 
 				# Run item_loader to try parsing as dict
-				item = None
+				items = None
 				if self._json_output:
 					if callable(self.item_loader):
-						item = self.item_loader(line)
+						items = self.item_loader(line)
 					else:
-						item = self.item_loader.run(line)
+						items = self.item_loader.run(line)
 
 				# Process dict item or line
-				if item:
-					item = self._process_item(item)
-					if not item:
-						continue
-					yield item
+				if items:
+					if not isinstance(items, list):
+						items = [items]
+					for item in items:
+						item = self._process_item(item)
+						if not item:
+							continue
+						yield item
 				elif line:
 					if self._print_line and not (self.quiet and self._json_output):
 						self._print(line, out=sys.stdout)
