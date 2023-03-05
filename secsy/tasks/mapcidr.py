@@ -5,7 +5,7 @@ from secsy.tasks._categories import ReconCommand
 
 
 class mapcidr(ReconCommand):
-	"""A utility program to perform multiple operations for a given subnet/cidr ranges."""
+	"""Utility program to perform multiple operations for a given subnet/cidr ranges."""
 	cmd = 'mapcidr -silent'
 	input_flag = '-cidr'
 	file_flag = '-cl'

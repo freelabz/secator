@@ -91,7 +91,7 @@ def get_command_options(*tasks):
 			opt_conf['show_default'] = True
 			help = opt_conf.get('help', '')
 			if help and prefix and prefix not in help:
-				opt_conf['help'] = f'[italic]{prefix:<{help_padding}}[/]{help}'
+				opt_conf['help'] = f'[dim italic magenta]{prefix:<{help_padding}}[/]{help}'
 			all_opts[opt] = opt_conf
 			opt_cache.append(opt)
 	return all_opts
@@ -170,9 +170,9 @@ def register_runner(cli_endpoint, config):
 
 
 	@click.argument(input_type, required=input_required)
-	@click.option('--worker', is_flag=True, help=f'[italic]global[/]{help_padding}Run tasks in a distributed way inside worker (FASTER).')
-	@click.option('--verbose', is_flag=True, help=f'[italic]global[/]{help_padding}Verbose mode, show full command output.')
-	@click.option('--debug', is_flag=True, help=f'[italic]global[/]{help_padding}Debug mode, show debug logs.')
+	@click.option('--worker', is_flag=True, help=f'[dim italic magenta]global[/]{help_padding}Run tasks in a distributed way inside worker (FASTER).')
+	@click.option('--verbose', is_flag=True, help=f'[dim italic magenta]global[/]{help_padding}Verbose mode, show full command output.')
+	@click.option('--debug', is_flag=True, help=f'[dim italic magenta]global[/]{help_padding}Debug mode, show debug logs.')
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, worker, verbose, debug, **opts):

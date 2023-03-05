@@ -40,7 +40,7 @@ def grype_item_loader(self, line):
 
 
 class grype(VulnCommand):
-	"""A vulnerability scanner for container images and filesystems. Easily install the binary to try it out. Works with Syft, the powerful SBOM (software bill of materials) tool for container images and filesystems."""
+	"""Vulnerability scanner for container images and filesystems."""
 	cmd = 'grype --quiet'
 	input_flag = ''
 	file_flag = OPT_NOT_SUPPORTED

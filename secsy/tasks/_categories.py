@@ -30,6 +30,9 @@ class HTTPCommand(Command):
 	output_schema = [
 		URL,
 		METHOD,
+		TITLE,
+		WEBSERVER,
+		TECH,
 		STATUS_CODE,
 		WORDS, LINES,
 		CONTENT_TYPE,
@@ -40,6 +43,9 @@ class HTTPCommand(Command):
 	output_table_fields = [
 		URL,
 		STATUS_CODE,
+		TITLE,
+		WEBSERVER,
+		TECH,
 		CONTENT_TYPE,
 		TIME
 	]

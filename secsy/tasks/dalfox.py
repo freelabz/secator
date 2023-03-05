@@ -5,7 +5,7 @@ from secsy.tasks._categories import VulnCommand
 
 
 class dalfox(VulnCommand):
-	"""DalFox is a powerful open source XSS scanning tool."""
+	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox'
 	input_type = URL
 	input_flag = 'url'
