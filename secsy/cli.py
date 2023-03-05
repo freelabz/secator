@@ -53,25 +53,25 @@ for cls in ALL_TASKS:
 	config = DotMap({'name': cls.__name__})
 	register_runner(task, config)
 
-@cli.group(aliases=['w', 'wf', 'flow'])
+@cli.group(cls=OrderedGroup, aliases=['w', 'wf', 'flow'])
 def workflow():
 	"""Run a workflow."""
 	pass
 
-for config in ALL_WORKFLOWS:
+for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 	register_runner(workflow, config)
 
 
-@cli.group(aliases=['sc'])
+@cli.group(aliases=['s', 'sc'])
 def scan():
 	"""Run a scan."""
 	pass
 
-for config in ALL_SCANS:
+for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
 
 
-@cli.group(aliases=['ut'])
+@cli.group(aliases=['u', 'ut'])
 def utils():
 	"""Run a utility."""
 	pass

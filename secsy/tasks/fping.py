@@ -5,6 +5,7 @@ from secsy.tasks._categories import ReconCommand
 
 
 class fping(ReconCommand):
+	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
 	cmd = 'fping -a'
 	file_flag = '-f'
 	input_flag = None
@@ -27,6 +28,7 @@ class fping(ReconCommand):
 	output_schema = [IP, 'alive']
 	output_type = IP
 	output_field = IP
+	output_table_sort_fields = (IP,)
 
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):

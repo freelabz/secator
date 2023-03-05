@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class maigret(ReconCommand):
-	"""Collects a dossier on a person by username."""
+	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
 	file_flag = None
 	input_flag = None
