@@ -7,12 +7,10 @@ from time import sleep, time
 
 import humanize
 from celery.result import AsyncResult
-from rich import print
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
 						   TimeElapsedColumn)
-from rich.tree import Tree
 
 from secsy.definitions import OUTPUT_TYPES, REPORTS_FOLDER
 from secsy.rich import build_table, console
@@ -27,10 +25,9 @@ class Runner:
 	_save_html = True
 	_save_json = True
 
-	def __init__(self, config, targets, debug=False, **run_opts):
+	def __init__(self, config, targets, **run_opts):
 		self.config = config
 		self.run_opts = run_opts
-		self.debug = debug
 		self.done = False
 		self.results = []
 		if not isinstance(targets, list):
@@ -44,9 +41,9 @@ class Runner:
 		results = []
 		if extractors:
 			# Keep results based on extractors
+			opts = merge_opts(self.config.options, self.run_opts)
 			for extractor in extractors:
-				ctx = merge_opts(self.run_opts, self.config.options)
-				tmp = process_extractor(self.results, extractor, ctx=ctx)
+				tmp = process_extractor(self.results, extractor, ctx=opts)
 				results.extend(tmp)
 
 			# Keep the field types in results not specified in the extractors.
@@ -119,25 +116,18 @@ class Runner:
 		return tables
 
 	def save_results_json(self, title):
+		from secsy.decorators import DEFAULT_CLI_OPTIONS
 		timestr = get_file_timestamp()
 		json_title = title.replace(' ', '_').replace("\"", '').lower()
 		json_path = f'{REPORTS_FOLDER}/{json_title}_{timestr}.json'
 
-		# Trim run options
-		exclude_keys = [
-			'json',
-			'orig',
-			'raw',
-			'color',
-			'table',
-			'quiet',
-			'print_cmd',
-			'print_timestamp',
-			'print_item_count'
-		]
-		run_opts = {
-			k: v for k, v in self.run_opts.items()
-			if k not in exclude_keys and v is not None
+		# Trim options
+		opts = merge_opts(self.config.options, self.run_opts)
+		opts = {
+			k: v for k, v in opts.items()
+			if k not in DEFAULT_CLI_OPTIONS.keys() \
+				and not k.startswith('print_') \
+				and v is not None
 		}
 
 		# Prepare JSON report
@@ -149,7 +139,7 @@ class Runner:
 				'targets': self.targets,
 				'total_time': str(self.elapsed),
 				'total_human': self.elapsed_human,
-				'run_opts': run_opts,
+				'opts': opts,
 			},
 			'results': {},
 		}
@@ -197,7 +187,7 @@ class Runner:
 				task_ids = []
 				get_task_ids(result, ids=task_ids)
 				for task_id in task_ids:
-					info = get_task_info(task_id, debug=self.debug)
+					info = get_task_info(task_id)
 					if not info or info.get('chunk'):
 						continue
 					state = info['state']

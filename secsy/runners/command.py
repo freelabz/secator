@@ -450,6 +450,7 @@ class Command:
 			process.kill()
 			self._print('Process was killed manually (CTRL+C / CTRL+X)', color='bold red')
 			self.output = ''
+			self.error = 'Process killed manually'
 			self.killed = True
 
 		# Retrieve the return code and output

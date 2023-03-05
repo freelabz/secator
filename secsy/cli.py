@@ -143,6 +143,17 @@ def download_cves(force):
 				console.print(f'CVE saved to {cve_path}')
 
 
+@utils.command()
+def check_celery_worker():
+	from secsy.celery import is_celery_worker_alive
+	from secsy.rich import console
+	alive = is_celery_worker_alive()
+	if alive:
+		console.print('Celery worker is alive !', style='bold green')
+	else:
+		console.print('No Celery worker alive.', style='bold red')
+
+
 #------#
 # TEST #
 #------#

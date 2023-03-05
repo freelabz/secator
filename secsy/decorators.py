@@ -2,10 +2,10 @@ import sys
 from collections import OrderedDict
 
 import rich_click as click
-from dotmap import DotMap
 from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
+from secsy.celery import is_celery_worker_alive
 from secsy.definitions import *
 from secsy.runners import Scan, Task, Workflow
 from secsy.utils import (expand_input, get_command_category, get_command_cls,
@@ -165,28 +165,31 @@ def register_runner(cli_endpoint, config):
 		no_args_is_help = False
 		input_required = False
 
-	options = get_command_options(*tasks)
 	help_padding = ' ' * (get_task_name_padding() - 6)
+	global_options = {
+		'sync': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Run tasks synchronously (automatic if no worker is alive).'},
+		'debug': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Debug mode, show debug logs.'}
+	}
+	options = get_command_options(*tasks)
 
 
 	@click.argument(input_type, required=input_required)
-	@click.option('--worker', is_flag=True, help=f'[dim italic magenta]global[/]{help_padding}Run tasks in a distributed way inside worker (FASTER).')
-	@click.option('--verbose', is_flag=True, help=f'[dim italic magenta]global[/]{help_padding}Verbose mode, show full command output.')
-	@click.option('--debug', is_flag=True, help=f'[dim italic magenta]global[/]{help_padding}Debug mode, show debug logs.')
+	@decorate_command_options(global_options)
 	@decorate_command_options(options)
 	@click.pass_context
-	def func(ctx, worker, verbose, debug, **opts):
+	def func(ctx, sync, debug, **opts):
 		opts.update(fmt_opts)
-		if cli_endpoint.name in ['scans', 'workflows']:
-			opts['print_item'] = verbose
-			opts['print_line'] = verbose
+		if cli_endpoint.name in ['scan', 'workflow']:
+			opts['print_item'] = debug
+			opts['print_line'] = debug
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
 		if input is None:
 			click.echo(ctx.get_help())
 			sys.exit(0)
-		runner = runner_cls(config, targets, debug=debug, **opts)
-		runner.run(sync=not worker)
+		sync = sync if sync else not is_celery_worker_alive()
+		runner = runner_cls(config, targets, **opts)
+		runner.run(sync=sync)
 
 	settings = {'ignore_unknown_options': True}
 	cli_endpoint.command(

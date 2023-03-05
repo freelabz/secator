@@ -51,8 +51,6 @@ class Task(Runner):
 			self.process_live_tasks(result)
 			self.results = result.get(propagate=False)
 			self.results = self.results['results'] if isinstance(self.results, dict) else self.results
-		if opts.get('debug', False):
-			console.log(yaml.dump(self.results))
 		self.results = self.filter_results()
 		self.log_results()
 		self.done = True
