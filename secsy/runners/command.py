@@ -509,7 +509,7 @@ class Command:
 		if self._print_item_count and self._json_output and not self._raw_output and not self._orig_output:
 			count = len(self.results)
 			name = self.output_type or 'item'
-			item_name = pluralize(name) if count > 1 else name
+			item_name = pluralize(name) if count > 1 or count == 0 else name
 			if count > 0:
 				self._print(f':pill: Found {count} {item_name} !', color='bold green')
 			else:
