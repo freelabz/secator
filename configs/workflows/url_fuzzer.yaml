@@ -1,6 +1,5 @@
 name: url_fuzzer
 description: Find URLs by fuzzing (slow)
-category: recon/http
 tags: [http]
 tasks:
   _group:

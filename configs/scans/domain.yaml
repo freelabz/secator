@@ -1,8 +1,8 @@
 name: domain
-description: Default domain scan (domain_scan, host_scan, url_crawler)
+description: Default domain scan (subdomain_recon, host_recon, url_crawler)
 profile: default
 workflows:
-  domain_recon:
+  subdomain_recon:
   host_recon:
     targets_:
     - target.name

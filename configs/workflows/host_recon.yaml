@@ -1,6 +1,5 @@
 name: host_recon
 description: Run vulnerability scan on network and HTTP services
-category: recon/multi
 tags: [subdomain, url, vulnerability]
 tasks:
   naabu:
