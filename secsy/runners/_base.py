@@ -67,11 +67,11 @@ class Runner:
 			results (list): List of results.
 			output_types (list): List of result types to add to report.
 		"""
-		if not self.results:
-			console.log('No results found.', style='bold red')
+		if not self.done or not self._print_table:
 			return
 
-		if not self._print_table:
+		if not self.results:
+			console.log('No results found.', style='bold red')
 			return
 
 		self.end_time = datetime.fromtimestamp(time())

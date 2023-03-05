@@ -104,8 +104,9 @@ def run_command(self, results, name, targets, opts={}):
 	# Update task state in backend
 	count = 0
 	task_results = []
+	task_state = 'RUNNING'
 	state = {
-		'state': 'RUNNING',
+		'state': task_state,
 		'meta': {
 			'name': name,
 			'results': [],
