@@ -8,6 +8,7 @@ from secsy.definitions import *
 
 logger = logging.getLogger(__name__)
 
+
 class HTTPCommand(Command):
 	meta_opts = {
 		HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
