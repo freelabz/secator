@@ -168,6 +168,7 @@ def register_runner(cli_endpoint, config):
 	help_padding = ' ' * (get_task_name_padding() - 6)
 	global_options = {
 		'sync': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Run tasks synchronously (automatic if no worker is alive).'},
+		'worker': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Run tasks in worker (automatic if worker is alive).'},
 		'debug': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Debug mode, show debug logs.'}
 	}
 	options = get_command_options(*tasks)
@@ -177,7 +178,7 @@ def register_runner(cli_endpoint, config):
 	@decorate_command_options(global_options)
 	@decorate_command_options(options)
 	@click.pass_context
-	def func(ctx, sync, debug, **opts):
+	def func(ctx, sync, worker, debug, **opts):
 		opts.update(fmt_opts)
 		if cli_endpoint.name in ['scan', 'workflow']:
 			opts['print_item'] = debug
@@ -187,7 +188,14 @@ def register_runner(cli_endpoint, config):
 		if input is None:
 			click.echo(ctx.get_help())
 			sys.exit(0)
-		sync = sync if sync else not is_celery_worker_alive()
+		if sync:
+			sync = True
+		elif worker:
+			sync = False
+		elif cli_endpoint.name in ['scan', 'workflow']: # automatically run in worker if it's alive
+			sync = not is_celery_worker_alive()
+		else:
+			sync = True
 		runner = runner_cls(config, targets, **opts)
 		runner.run(sync=sync)
 

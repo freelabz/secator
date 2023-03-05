@@ -72,6 +72,10 @@ class Workflow(Runner):
 			console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
 			self.process_live_tasks(result)
 		self.results = result.get(propagate=False)
+		if isinstance(self.results, BaseException):
+			exc_str = f'[bold red]{self.results.__class__.__name__}[/]: {str(self.results)}'
+			console.log(f'Error occurred while running workflow:\n\t{exc_str}')
+			return []
 		self.results = self.filter_results()
 		self.done = True
 		self.log_workflow()

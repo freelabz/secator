@@ -1,16 +1,19 @@
 import operator
 
+import click
+import rich_click
 import yaml
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.table import Table
+from rich.traceback import install
 
-from secsy.definitions import RECORD
+from secsy.definitions import DEBUG, RECORD
 
 console = Console(stderr=True, record=RECORD)
 console_stdout = Console(record=True)
 handler = RichHandler(rich_tracebacks=True)
-
+install(show_locals=DEBUG, suppress=[click, rich_click])
 
 def criticity_to_color(value):
 	if value == 'critical':
@@ -43,7 +46,7 @@ formatters = {
 	'url': lambda host: f'[bold underline blue]{host}[/]',
 	'ip': lambda ip: f'[bold yellow]{ip}[/]',
 	'status_code': status_to_color,
-	'_source': lambda source: f'[bold dim gold3]{source}[/]'
+	'_source': lambda source: f'[bold gold3]{source}[/]'
 }
 
 def build_table(items, output_fields=[], sort_by=None):

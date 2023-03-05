@@ -86,7 +86,7 @@ def get_task_nodes(result, ids=[], nodes=[], level=0, parent=None):
 		nodes.append(node)
 		get_task_nodes(result.parent, ids=ids, nodes=nodes, level=level-1, parent=result.id)
 
-	elif isinstance(result, AsyncResult):
+	elif isinstance(result, AsyncResult) and not isinstance(result.info, list) and not isinstance(result.info, BaseException):
 		node['state'] = result.state
 		node['info'] = result.info
 		if result.id not in ids and len(result.args) > 1:
@@ -146,15 +146,12 @@ def get_task_info(task_id):
 		data['state'] = res.state
 		data['chunk_info'] = ''
 		data['count'] = 0
-		if res.info and not isinstance(res.info, list): # only available in RUNNING, SUCCESS, FAILURE states
-			if isinstance(res.info, BaseException):
-				data['error'] = str(res.info)
-			else:
-				chunk = res.info.get('chunk', '')
-				chunk_count = res.info.get('chunk_count', '')
-				if chunk:
-					data['chunk_info'] = f'{chunk}/{chunk_count}'
-				data.update(res.info)
+		if res.info and not isinstance(res.info, list) and not isinstance(res.info, BaseException):
+			chunk = res.info.get('chunk', '')
+			chunk_count = res.info.get('chunk_count', '')
+			if chunk:
+				data['chunk_info'] = f'{chunk}/{chunk_count}'
+			data.update(res.info)
 	return data
 
 

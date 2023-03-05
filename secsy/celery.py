@@ -10,9 +10,10 @@ from celery.exceptions import Ignore
 from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
 
-from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND,
+from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND, DEBUG,
 							   TEMP_FOLDER)
 from secsy.rich import console
+from secsy.runners import Task
 from secsy.runners._helpers import merge_extracted_values
 from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
 						 discover_internal_tasks, flatten)
@@ -102,6 +103,7 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Update task state in backend
 	count = 0
+	task_results = []
 	state = {
 		'state': 'RUNNING',
 		'meta': {
@@ -114,78 +116,83 @@ def run_command(self, results, name, targets, opts={}):
 	}
 	self.update_state(**state)
 
-	# Flatten + dedupe results
-	results = flatten(results)
-	results = deduplicate(results, key='_uuid')
+	try:
+		# Flatten + dedupe results
+		results = flatten(results)
+		results = deduplicate(results, key='_uuid')
 
-	# Get expanded targets
-	if not chunk:
-		_targets, opts = merge_extracted_values(results, opts)
-		if _targets:
-			targets = _targets
+		# Get expanded targets
+		if not chunk:
+			_targets, opts = merge_extracted_values(results, opts)
+			if _targets:
+				targets = _targets
 
-	# Get task class
-	task_cls = [task for task in COMMANDS if task.__name__ == name]
-	if not task_cls:
-		console.log(f'Task {name} not found. Aborting.', style='bold red')
-		return
-	task_cls = task_cls[0]
+		# Get task class
+		task_cls = Task.get_task_class(name)
 
-	# If task doesn't support multiple targets, or if the number of targets is 
-	# too big, split into multiple tasks
-	multiple_targets = isinstance(targets, list) and len(targets) > 1
-	single_target_only = multiple_targets and task_cls.file_flag is None
-	break_size_threshold = multiple_targets and len(targets) > task_cls.input_chunk_size
+		# If task doesn't support multiple targets, or if the number of targets is 
+		# too big, split into multiple tasks
+		multiple_targets = isinstance(targets, list) and len(targets) > 1
+		single_target_only = multiple_targets and task_cls.file_flag is None
+		break_size_threshold = multiple_targets and len(targets) > task_cls.input_chunk_size
 
-	if single_target_only or (not sync and break_size_threshold):
-		chunk_size = 1 if single_target_only else task_cls.input_chunk_size
+		if single_target_only or (not sync and break_size_threshold):
+			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
 
-		workflow = break_task(
-			task_cls,
-			opts,
-			targets,
-			results=results,
-			chunk_size=chunk_size)
+			workflow = break_task(
+				task_cls,
+				opts,
+				targets,
+				results=results,
+				chunk_size=chunk_size)
 
-		with allow_join_result():
-			result = workflow.apply() if sync else workflow.delay()
-			task_results = result.get(propagate=False)
-			results.extend(task_results)
-			state['state'] = 'SUCCESS'
-			state['meta']['results'] = results
+			with allow_join_result():
+				result = workflow.apply() if sync else workflow.delay()
+				task_results = result.get()
+				results.extend(task_results)
+				state['state'] = 'SUCCESS'
+				state['meta']['results'] = results
+				state['meta']['count'] = len(task_results)
+				self.update_state(**state)
+				return results
+
+		# If list with 1 element
+		if isinstance(targets, list) and len(targets) == 1:
+			targets = targets[0]
+
+		# Run task
+		task = task_cls(targets, **opts)
+		for item in task:
+			result_uuid = str(uuid.uuid4())
+			item['_uuid'] = result_uuid
+			task_results.append(item)
+			results.append(item)
+			count += 1
+			state['meta']['results'] = task_results
 			state['meta']['count'] = len(task_results)
 			self.update_state(**state)
-			return results
 
-	# If list with 1 element
-	if isinstance(targets, list) and len(targets) == 1:
-		targets = targets[0]
+		# Update task state based on task return code
+		if task.return_code == 0:
+			task_state = 'SUCCESS'
+			task_exc = None
+		else:
+			task_state = 'FAILURE'
+			task_exc = TaskError(task.error)
 
-	# Run task
-	task = task_cls(targets, **opts)
-	task_results = []
-	for item in task:
-		result_uuid = str(uuid.uuid4())
-		item['_uuid'] = result_uuid
-		task_results.append(item)
-		results.append(item)
-		count += 1
-		state['meta']['results'] = task_results
-		state['meta']['count'] = len(task_results)
+	except BaseException as exc:
+		task_state = 'FAILURE'
+		task_exc = exc
+
+	finally:
+		# Set task state and exception
+		state['state'] = task_state
+		if task_state == 'FAILURE':
+			state['meta']['exc_type'] = type(task_exc).__name__
+			state['meta']['exc_message'] = str(task_exc)
+
+		# Update task state with final status
 		self.update_state(**state)
-
-	# Update task state based on task return code
-	task_state = 'SUCCESS' if task.return_code == 0 else 'FAILURE'
-	state['state'] = task_state
-	if task_state == 'FAILURE':
-		exc = TaskError(task.error)
-		state['meta']['exc_type'] = type(exc).__name__
-		state['meta']['exc_message'] = task.error
-		self.update_state(**state)
-		return results
-
-	# Task is success
-	self.update_state(**state)
 
 	# If running in chunk mode, only return chunk result, not all results
 	return task_results if chunk else results
@@ -303,6 +310,6 @@ def get_nested_results(result, results=[]):
 
 
 def is_celery_worker_alive():
-    """Check if a Celery worker is available."""
-    result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
-    return bool(result)
+	"""Check if a Celery worker is available."""
+	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
+	return bool(result)
