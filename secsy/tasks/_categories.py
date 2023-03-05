@@ -1,10 +1,12 @@
-from cpe import CPE
 import json
-import requests
 import logging
 
-from secsy.runners import Command
+import requests
+from bs4 import BeautifulSoup
+from cpe import CPE
+
 from secsy.definitions import *
+from secsy.runners import Command
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +118,8 @@ class VulnCommand(Command):
 		}
 		item['_severity'] = severity_map[item['severity']]
 		item['_confidence'] = severity_map[item['confidence']]
-		item['reference'] = item.get('references', [''])[0]
+		references = item.get('references') or ['']
+		item['reference'] = references[0]
 		return item
 
 	@staticmethod
@@ -248,13 +251,7 @@ class VulnCommand(Command):
 		"""
 		reference = f'https://github.com/advisories/{ghsa_id}'
 		response = requests.get(reference)
-		from bs4 import BeautifulSoup
 		soup = BeautifulSoup(response.text, 'lxml')
-		# name = soup.find_all('h2')[0].text.strip()
-		info = soup.find_all('div', {'class': 'js-repository-advisory-details'})
-		# severity = info[0][0].text.strip().lower()
-		# cvss_score = int(info[0][1].text.strip())
-		# cwe = info[1].find('a').text
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
 		data = VulnCommand.lookup_cve(cve_id)

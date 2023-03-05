@@ -10,6 +10,7 @@ description = "Sexy security tools command runner"
 version = "0.0.1"
 release_status = "Development Status :: 3 - Alpha"
 dependencies = [
+    'bs4',
     'celery',
     'cpe',
     'dotmap',

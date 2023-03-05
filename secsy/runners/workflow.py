@@ -172,10 +172,13 @@ class Workflow(Runner):
 					console.print(f' • {target}')
 
 			# Options
+			from secsy.decorators import DEFAULT_CLI_OPTIONS
 			items = [
 				f'[italic]{k}[/]: {v}'
-				for k, v in opts.items() 
-				if not k.startswith('print_') and v is not None
+				for k, v in opts.items()
+				if not k.startswith('print_') \
+					and k not in DEFAULT_CLI_OPTIONS \
+					and v is not None
 			]
 			if items:
 				console.print('Options:', style='bold gold3')
