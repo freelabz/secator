@@ -19,6 +19,7 @@ v0.1.0
 - [x] feat: allow stdin input for all Secsy commands.
 - [x] fix: `nmap` spend lots of time to convert results / get CVEs
 - [x] feat: work on better proxy support, using `proxychains` and/or `free-proxy`
+- [x] feat: improve multiple targets support + add tests for it
 
 **TODO:**
 - [ ] docs: add docs for building workflow / scan YAML files
@@ -32,6 +33,7 @@ v0.1.0
 - [ ] fix: original targets are used instead of no targets when extractors return None (feature ?)
 - [ ] refactor: use Celery `chunks` to chunk a task instead of own Fabric.
 - [ ] test: test workflows like `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
+- [ ] feat: add support for multi output types tool like `feroxbuster` or `nmap`
 - [ ] feat: add `grype` code scanner
 - [ ] feat: pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
     - [ ] Pydantic + potential db schemas base ?
@@ -82,8 +84,6 @@ v0.1.0
 - [ ] feat: replace `console.log` by `logger.info` with rich logging handler (add Logging Handler and setup function) + Celery worker
 - [ ] feat: autodiscover external tools
 - [ ] feat: use --<tool>.<option_name> in the CLI (instead of `_`) to override option names.
-- [ ] feat: improve multiple targets support + add tests for it
-- [ ] feat: add support for multi output types tool like `feroxbuster`
 - [ ] feat: make Docker image containing:
     - [ ] Automated install for all tools supported by `secsy`
     - [ ] Either:
