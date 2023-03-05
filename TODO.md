@@ -1,34 +1,36 @@
 # TODO
 
-v0.0.1
+v0.1.0
 
 **DONE:**
-- [x] Check for insecure SSL / TLS configurations
-- [x] IP Address v4 & v6 support
-- [x] Select which results will be ignored in final reports, based on conditions
-- [x] Autodiscover default tools
-- [x] Transform secsy commands into Celery tasks dynamically, so that we can call:
+- [x] feat: check for insecure SSL / TLS configurations
+- [x] feat: IP Address v4 & v6 support
+- [x] feat: select which results will be ignored in final reports, based on conditions
+- [x] feat: autodiscover default tools
+- [x] feat: transform secsy commands into Celery tasks dynamically, so that we can call:
     - [x] `httpx(something)` # run synchronously in main thread
     - [x] `httpx(something).delay()` # run in Celery worker, no wait for results
-    - [x] Result backend and task broker for Celery integration, add new class `Runner` which takes run configuration options (`cloud`, `celery`, `local (default)`)
-- [x] Rework logging vs prints
-- [x] Options '_' to '-' conversion
-- [x] Check if IP is local before running some passive tools (e.g subfinder) as they output false positives
-- [x] Add `mapcidr`
-- [x] Add `fping`
-- [x] Allow stdin input for all Secsy commands.
-- [x] Find `nmap` bug that causes it to spend lots of time to convert results / get CVEs
-- [x] Work on better proxy support, maybe using `proxychains`
+    - [x] result backend and task broker for Celery integration, add new class `Runner` which takes run configuration options (`cloud`, `celery`, `local (default)`)
+- [x] feat: rework logging vs prints
+- [x] feat: options '_' to '-' conversion
+- [x] feat: check if IP is local before running some passive tools (e.g subfinder) as they output false positives
+- [x] feat: add `mapcidr`
+- [x] feat: add `fping`
+- [x] feat: allow stdin input for all Secsy commands.
+- [x] fix: `nmap` spend lots of time to convert results / get CVEs
+- [x] feat: work on better proxy support, using `proxychains` and/or `free-proxy`
 
 **TODO:**
-- [ ] fix: fix bug with local filesystem broker
-- [ ] fix: fix `dirsearch` / `feroxbuster` as they time out currently
-- [ ] fix: use Celery `chunks` to chunk a task.
-- [ ] fix: broken tasks chunks do not update main task results / results count.
+- [ ] docs: add docs for building workflow / scan YAML files
+- [ ] docs: add github-pages site
+- [ ] fix: local filesystem broker is broken
+- [ ] fix: `dirsearch` / `feroxbuster` tasks time out
+- [ ] fix: broken tasks chunks should update main task results / results count.
 - [ ] fix: Running task.run() and task.delay().get() should have the same output:
     - `[<ITEM1>,<ITEM2>]` for task.run()
     - `{'name': 'task', 'results': [<ITEM1>, <ITEM2>]}` for task.delay().get()
-- [ ] bug: when extractors return None, original targets are used --> FIX THIS
+- [ ] fix: original targets are used instead of no targets when extractors return None
+- [ ] refactor: use Celery `chunks` to chunk a task instead of own Fabric.
 - [ ] test: test workflows like `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
 
 - [ ] feat: pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
