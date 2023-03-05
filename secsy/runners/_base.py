@@ -67,7 +67,11 @@ class Runner:
 			results (list): List of results.
 			output_types (list): List of result types to add to report.
 		"""
-		if not self.results or not self._print_table:
+		if not self.results:
+			console.log('No results found.', style='bold red')
+			return
+
+		if not self._print_table:
 			return
 
 		self.end_time = datetime.fromtimestamp(time())
@@ -175,7 +179,6 @@ class Runner:
 			'FAILURE': 'bold red',
 			'REVOKED': 'bold magenta'
 		}
-		errors = []
 		with tasks_progress as progress:
 
 			# Make progress tasks
@@ -201,12 +204,6 @@ class Runner:
 						if state in ['SUCCESS', 'FAILURE']:
 							progress.update(progress_id, advance=100, **info)
 
-					# Add error
-					if state == 'FAILURE':
-						error_str = f'[bold gold3]{info["name"]}[/]: [bold red]{info["error"]}[/]'
-						if error_str not in errors:
-							errors.append(error_str)
-
 				# Update all tasks to 100 %
 				if res.ready():
 					for progress_id in tasks_progress.values():
@@ -215,19 +212,6 @@ class Runner:
 
 				# Sleep between updates
 				sleep(1)
-
-		# Get task tree
-		nodes = []
-		ids = []
-		get_task_nodes(result, ids=ids, nodes=nodes, parent=None)
-		nodes = sorted(nodes, key=lambda x: x['level'])
-		nodes = build_nodes_hierarchy(nodes)
-
-		if errors:
-			console.print()
-			console.log('Errors:', style='bold red')
-			for error in errors:
-				console.print('  ' + error)
 
 
 def build_nodes_hierarchy(nodes):

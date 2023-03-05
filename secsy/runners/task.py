@@ -1,6 +1,6 @@
 from contextlib import nullcontext
 
-import yaml
+from celery.result import AsyncResult
 
 from secsy.rich import console
 from secsy.runners._base import Runner
@@ -50,7 +50,11 @@ class Task(Runner):
 			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
 			self.process_live_tasks(result)
 			self.results = result.get(propagate=False)
-			self.results = self.results['results'] if isinstance(self.results, dict) else self.results
+			if isinstance(self.results, BaseException):
+				exc_str = f'[bold red]{self.results.__class__.__name__}[/]: {str(self.results)}'
+				console.log(f'Error occurred while running task:\n\t{exc_str}')
+				return []
+			self.results = self.results['results']
 		self.results = self.filter_results()
 		self.log_results()
 		self.done = True
