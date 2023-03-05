@@ -1,7 +1,7 @@
 name: cidr_recon
-description: Find vulnerabilities on local network
-category: recon/network/local
-tags: [cidr, localnet]
+description: Discover network IPs and HTTP servers
+category: recon/network
+tags: [cidr, network]
 tasks:
   mapcidr:
   fping:
@@ -16,27 +16,6 @@ tasks:
     targets_:
     - type: port
       field: '{ip}:{port}'
-  _group:
-    nuclei:
-      tags: [network, ssl]
-      targets_:
-        - type: ip
-          field: ip
-          condition: item['alive'] is True
-    nmap:
-      targets_:
-        - type: ip
-          field: ip
-          condition: item['alive'] is True
-      ports_: port.port
-    nuclei:
-      exclude_tags: [network, ssl]
-      targets_:
-        - type: url
-          field: url
 results:
-  - type: vulnerability
-    condition: item['confidence'] == 'high'
-
   - type: ip
     condition: item['alive'] is True
