@@ -24,23 +24,18 @@ class Scan(Runner):
 		self.results = results
 
 		# Run workflows
-		for name, conf in self.config.workflows.items():
+		for name, workflow_opts in self.config.workflows.items():
 
 			# Extract opts and and expand target from previous workflows results
-			targets, conf = merge_extracted_values(self.results, conf or {})
+			targets, workflow_opts = merge_extracted_values(self.results, workflow_opts or {})
 			if not targets:
 				targets = self.targets
-
-			# Merge run options
-			run_opts = conf
-			run_opts.update(self.run_opts)
 
 			# Run workflow
 			workflow = Workflow(
 				ConfigLoader(name=f'workflows/{name}'),
 				targets,
-				debug=self.debug,
-				**run_opts
+				**self.run_opts
 			)
 			workflow_results = workflow.run(sync=sync, print_results=True)
 			self.results.extend(workflow_results)

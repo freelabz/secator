@@ -3,6 +3,7 @@ from time import time
 
 from celery import chain, chord
 
+from contextlib import nullcontext
 from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.runners.task import Task
@@ -43,7 +44,12 @@ class Workflow(Runner):
 			'print_item_count': True,
 			'sync': sync,
 		}
-		self.config.options.update(fmt_opts)
+		self.run_opts = merge_opts(self.run_opts, fmt_opts)
+
+		# Check if we can add a console status
+		print_line = self.run_opts.get('print_line', False)
+		print_item = self.run_opts.get('print_item', False)
+		print_status = not (print_line or print_item)
 
 		# Log workflow start
 		self.log_start()
@@ -59,7 +65,7 @@ class Workflow(Runner):
 
 		# Run Celery workflow and get results
 		if sync:
-			with console.status(f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'):
+			with console.status(f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...') if print_status else nullcontext():
 				result = workflow.apply()
 		else:
 			result = workflow()

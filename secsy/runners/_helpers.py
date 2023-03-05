@@ -136,7 +136,7 @@ def get_task_ids(result, ids=[]):
 	get_task_ids(result.parent, ids=ids)
 
 
-def get_task_info(task_id, debug=False):
+def get_task_info(task_id):
 	res = AsyncResult(task_id)
 	data = {}
 	if res.args and len(res.args) > 1:
@@ -155,9 +155,6 @@ def get_task_info(task_id, debug=False):
 				if chunk:
 					data['chunk_info'] = f'{chunk}/{chunk_count}'
 				data.update(res.info)
-	if debug:
-		import json
-		console.print_json(json.dumps(data))
 	return data
 
 

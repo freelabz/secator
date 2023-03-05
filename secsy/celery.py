@@ -300,3 +300,9 @@ def get_nested_results(result, results=[]):
 		if res is not None:
 			results.extend(res)
 		get_nested_results(result.parent, results=results)
+
+
+def is_celery_worker_alive():
+    """Check if a Celery worker is available."""
+    result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
+    return bool(result)
