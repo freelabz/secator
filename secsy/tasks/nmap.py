@@ -238,7 +238,7 @@ class nmapData(dict):
 				VULN_TAGS: [vuln_id, provider_name]
 			}
 			if provider_name == 'MITRE CVE':
-				vuln_data = self.lookup_cve(vuln['id'], cpes=cpes)
+				vuln_data = VulnCommand.lookup_cve(vuln['id'], cpes=cpes)
 				if vuln_data:
 					vuln.update(vuln_data)
 				yield vuln
@@ -281,7 +281,7 @@ class nmapData(dict):
 				}
 				if vuln_type == 'CVE':
 					vuln[VULN_TAGS].append('cve')
-					vuln_data = self.lookup_cve(vuln_id, cpes=[cpe])
+					vuln_data = VulnCommand.lookup_cve(vuln_id, cpes=[cpe])
 					if vuln_data:
 						vuln.update(vuln_data)
 					yield vuln

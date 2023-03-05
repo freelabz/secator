@@ -144,13 +144,16 @@ def get_task_info(task_id, debug=False):
 		data['celery_task_id'] = task_id
 		data['name'] = task_name
 		data['state'] = res.state
-		chunk = res.info.get('chunk', '')
-		chunk_count = res.info.get('chunk_count', '')
-		data['chunk_info'] = f'{chunk}/{chunk_count}' if chunk else ''
+		data['chunk_info'] = ''
+		data['count'] = 0
 		if res.info and not isinstance(res.info, list): # only available in RUNNING, SUCCESS, FAILURE states
 			if isinstance(res.info, BaseException):
 				data['error'] = str(res.info)
 			else:
+				chunk = res.info.get('chunk', '')
+				chunk_count = res.info.get('chunk_count', '')
+				if chunk:
+					data['chunk_info'] = f'{chunk}/{chunk_count}'
 				data.update(res.info)
 	if debug:
 		import json

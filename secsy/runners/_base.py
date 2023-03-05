@@ -198,7 +198,7 @@ class Runner:
 				get_task_ids(result, ids=task_ids)
 				for task_id in task_ids:
 					info = get_task_info(task_id, debug=self.debug)
-					if not info or info['chunk']:
+					if not info or info.get('chunk'):
 						continue
 					state = info['state']
 					state_str = f'[{state_colors[state]}]{state}[/]'
