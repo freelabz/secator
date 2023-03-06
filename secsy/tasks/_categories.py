@@ -114,7 +114,8 @@ class VulnCommand(Command):
 			'medium': 2,
 			'low': 3,
 			'info': 4,
-			None: 5
+			'unknown': 5,
+			None: 6
 		}
 		item['_severity'] = severity_map[item['severity']]
 		item['_confidence'] = severity_map[item['confidence']]
