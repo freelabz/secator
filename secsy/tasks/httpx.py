@@ -38,7 +38,6 @@ class httpx(HTTPCommand):
 
 	@staticmethod
 	def on_item(self, item):
-		raise ValueError()
 		for k, v in item.items():
 			if k == 'time':
 				response_time = float(''.join(ch for ch in v if not ch.isalpha()))

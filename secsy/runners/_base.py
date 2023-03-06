@@ -12,7 +12,7 @@ from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
 						   TimeElapsedColumn)
 
-from secsy.definitions import OUTPUT_TYPES, REPORTS_FOLDER
+from secsy.definitions import DEBUG, OUTPUT_TYPES, REPORTS_FOLDER
 from secsy.rich import build_table, console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
 									get_task_nodes, process_extractor)
@@ -182,11 +182,11 @@ class Runner:
 			get_task_ids(result, ids=task_ids)
 			for task_id in task_ids:
 				info = get_task_info(task_id)
-				if not info or info.get('chunk'):
+				if not info:
 					continue
 				if info['error']:
 					self.errors.append(
-						'Error in task "{name}":\n{error}'.format(**info)
+						'Error in task {name} {chunk_info}:\n{error}'.format(**info)
 					)
 				yield info
 
@@ -221,10 +221,19 @@ class Runner:
 
 			# Get live results and print progress
 			for info in self.get_live_results(result):
+
+				# Re-yield so that we can consume it externally
+				yield info
+
+ 				# Ignore partials in output unless DEBUG=1
+				if info['chunk_info'] and not DEBUG:
+					continue
+
 				task_id = info['id']
 				state = 'FAILURE' if info['error'] else info['state']
 				state_str = f'[{state_colors[state]}]{state}[/]'
 				info['state'] = state_str
+
 				if task_id not in tasks_progress:
 					id = progress.add_task('', **info)
 					tasks_progress[task_id] = id

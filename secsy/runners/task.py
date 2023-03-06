@@ -48,12 +48,13 @@ class Task(Runner):
 		else:
 			result = task_cls.delay(self.targets, **opts)
 			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
-			self.process_live_tasks(result)
+			list(self.process_live_tasks(result))
 			self.results = result.get()
 			self.results = self.results['results']
+		print(self.results)
 		self.results = self.filter_results()
-		self.log_results()
 		self.done = True
+		self.log_results()
 		return self.results
 
 	@staticmethod
