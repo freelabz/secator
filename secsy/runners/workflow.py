@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 from datetime import datetime
 from time import time
+import traceback
 
 from celery import chain, chord
 
@@ -49,7 +50,7 @@ class Workflow(Runner):
 		# Check if we can add a console status
 		print_line = self.run_opts.get('print_line', False)
 		print_item = self.run_opts.get('print_item', False)
-		print_status = not (print_line or print_item)
+		print_status = sync and not (print_line or print_item)
 
 		# Log workflow start
 		self.log_start()
@@ -64,21 +65,22 @@ class Workflow(Runner):
 		workflow = self.build_celery_workflow(results=results)
 
 		# Run Celery workflow and get results
-		if sync:
-			with console.status(f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...') if print_status else nullcontext():
+		status = f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'
+		with console.status(status) if print_status else nullcontext():
+			if sync:
 				result = workflow.apply()
-		else:
-			result = workflow()
-			console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
-			self.process_live_tasks(result)
-		self.results = result.get(propagate=False)
-		if isinstance(self.results, BaseException):
-			exc_str = f'[bold red]{self.results.__class__.__name__}[/]: {str(self.results)}'
-			console.log(f'Error occurred while running workflow:\n\t{exc_str}')
-			return []
+			else:
+				result = workflow()
+				console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
+				self.process_live_tasks(result)
+
+		# Get workflow results
+		results = result.get()
+		self.results = results
 		self.results = self.filter_results()
 		self.done = True
 		self.log_workflow()
+		
 		return self.results
 
 	def build_celery_workflow(self, results=[]):
@@ -140,11 +142,7 @@ class Workflow(Runner):
 				# Merge task options (order of priority with overrides)
 				opts = merge_opts(run_opts, workflow_opts, task_opts)
 
-				# TODO: If the task doesn't support multiple input targets, split
-				# TODO: add more split support for huge lists of URLs etc.
-				# if task.file_flag is None and isinstance(_targets, list):
-					# sig = group(task(targets, opts=opts).s() for input in target)
-				# else:
+				# Create task signature
 				sig = task.s(targets, **opts)
 			sigs.append(sig)
 		return sigs

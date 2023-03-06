@@ -34,6 +34,7 @@ class Runner:
 			targets = [targets]
 		self.targets = targets
 		self.start_time = datetime.fromtimestamp(time())
+		self.errors = []
 
 	def filter_results(self):
 		"""Filter results."""
@@ -67,6 +68,9 @@ class Runner:
 			results (list): List of results.
 			output_types (list): List of result types to add to report.
 		"""
+		for error in self.errors:
+			console.log(error, style='bold red')
+
 		if not self.done or not self._print_table:
 			return
 
@@ -162,6 +166,37 @@ class Runner:
 			json.dump(data, f, indent=2)
 			console.print(f':file_cabinet: Saved JSON report to {json_path}')
 
+	def get_live_results(self, result):
+		"""Poll workflow results in real-time. Fetch task metadata and partial 
+		results from each task that runs.
+
+		Args:
+			result (celery.result.AsyncResult): Result object.
+
+		Yields:
+			dict: Current task state and results.
+		"""
+		res = AsyncResult(result.id)
+		while True:
+			task_ids = []
+			get_task_ids(result, ids=task_ids)
+			for task_id in task_ids:
+				info = get_task_info(task_id)
+				if not info or info.get('chunk'):
+					continue
+				if info['error']:
+					self.errors.append(
+						'Error in task "{name}":\n{error}'.format(**info)
+					)
+				yield info
+
+			# Update all tasks to 100 %
+			if res.ready():
+				break
+
+			# Sleep between updates
+			sleep(1)
+
 	def process_live_tasks(self, result):
 		tasks_progress = Progress(
 			SpinnerColumn('dots'),
@@ -170,7 +205,7 @@ class Runner:
 			TextColumn('{task.fields[state]:<20}'),
 			TimeElapsedColumn(),
 			TextColumn('{task.fields[count]}'),
-			TextColumn('\[[bold magenta]{task.fields[celery_task_id]:<30}[/]]'),
+			TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),
 			refresh_per_second=1
 		)
 		state_colors = {
@@ -184,34 +219,23 @@ class Runner:
 			# Make progress tasks
 			tasks_progress = {}
 
-			# Poll tasks for status
-			res = AsyncResult(result.id)
-			while True:
-				task_ids = []
-				get_task_ids(result, ids=task_ids)
-				for task_id in task_ids:
-					info = get_task_info(task_id)
-					if not info or info.get('chunk'):
-						continue
-					state = info['state']
-					state_str = f'[{state_colors[state]}]{state}[/]'
-					info['state'] = state_str
-					if task_id not in tasks_progress:
-						id = progress.add_task('', **info)
-						tasks_progress[task_id] = id
-					else:
-						progress_id = tasks_progress[task_id]
-						if state in ['SUCCESS', 'FAILURE']:
-							progress.update(progress_id, advance=100, **info)
+			# Get live results and print progress
+			for info in self.get_live_results(result):
+				task_id = info['id']
+				state = 'FAILURE' if info['error'] else info['state']
+				state_str = f'[{state_colors[state]}]{state}[/]'
+				info['state'] = state_str
+				if task_id not in tasks_progress:
+					id = progress.add_task('', **info)
+					tasks_progress[task_id] = id
+				else:
+					progress_id = tasks_progress[task_id]
+					if state in ['SUCCESS', 'FAILURE']:
+						progress.update(progress_id, advance=100, **info)
 
-				# Update all tasks to 100 %
-				if res.ready():
-					for progress_id in tasks_progress.values():
-						progress.update(progress_id, advance=100)
-					break
-
-				# Sleep between updates
-				sleep(1)
+			# Update all tasks to 100 %
+			for progress_id in tasks_progress.values():
+				progress.update(progress_id, advance=100)
 
 
 def build_nodes_hierarchy(nodes):

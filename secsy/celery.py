@@ -1,22 +1,22 @@
-import json
 import logging
+import traceback
 import uuid
 from time import sleep
 
 import celery
 from celery import chain, chord, signals
 from celery.app import trace
-from celery.exceptions import Ignore
+from celery.exceptions import Ignore, Reject
 from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
 
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND, DEBUG,
-							   TEMP_FOLDER)
+                               TEMP_FOLDER)
 from secsy.rich import console
 from secsy.runners import Task
 from secsy.runners._helpers import merge_extracted_values
 from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
-						 discover_internal_tasks, flatten)
+                         discover_internal_tasks, flatten)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -105,6 +105,7 @@ def run_command(self, results, name, targets, opts={}):
 	count = 0
 	task_results = []
 	task_state = 'RUNNING'
+	task = None
 	state = {
 		'state': task_state,
 		'meta': {
@@ -187,16 +188,25 @@ def run_command(self, results, name, targets, opts={}):
 
 	finally:
 		# Set task state and exception
-		state['state'] = task_state
+		state['state'] = 'SUCCESS'
+
+		# Handle task failure
 		if task_state == 'FAILURE':
-			state['meta']['exc_type'] = type(task_exc).__name__
-			state['meta']['exc_message'] = str(task_exc)
+			exc_str = ' '.join(traceback.format_exception(
+				etype=type(task_exc),
+				value=task_exc,
+				tb=task_exc.__traceback__))
+			state['meta']['error'] = exc_str
+			if task:
+				task._print(exc_str, color='bold red')
+			else:
+				console.log(exc_str)
 
 		# Update task state with final status
 		self.update_state(**state)
 
-	# If running in chunk mode, only return chunk result, not all results
-	return task_results if chunk else results
+		# If running in chunk mode, only return chunk result, not all results
+		return task_results if chunk else results
 
 
 @app.task

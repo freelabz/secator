@@ -2,7 +2,8 @@ from celery.result import AsyncResult, GroupResult
 from rich.prompt import Confirm
 
 from secsy.utils import deduplicate
-from secsy.rich import console
+from secsy.definitions import DEBUG
+
 
 def merge_extracted_values(results, opts):
 	"""Run extractors and merge extracted values with option dict.
@@ -110,6 +111,7 @@ def get_task_nodes(result, ids=[], nodes=[], level=0, parent=None):
 	# Browse parent
 	get_task_nodes(result.parent, ids=ids, nodes=nodes, level=level-1, parent=result.id)
 
+
 def get_task_ids(result, ids=[]):
 	"""Get all Celery task ids recursively.
 
@@ -138,20 +140,22 @@ def get_task_ids(result, ids=[]):
 
 def get_task_info(task_id):
 	res = AsyncResult(task_id)
+	if not (res.args and len(res.args) > 1):
+		return
 	data = {}
-	if res.args and len(res.args) > 1:
-		task_name = res.args[1]
-		data['celery_task_id'] = task_id
-		data['name'] = task_name
-		data['state'] = res.state
-		data['chunk_info'] = ''
-		data['count'] = 0
-		if res.info and not isinstance(res.info, list) and not isinstance(res.info, BaseException):
-			chunk = res.info.get('chunk', '')
-			chunk_count = res.info.get('chunk_count', '')
-			if chunk:
-				data['chunk_info'] = f'{chunk}/{chunk_count}'
-			data.update(res.info)
+	task_name = res.args[1]
+	data['id'] = task_id
+	data['name'] = task_name
+	data['state'] = res.state
+	data['chunk_info'] = ''
+	data['count'] = 0
+	data['error'] = None
+	if res.info and not isinstance(res.info, list):
+		chunk = res.info.get('chunk', '')
+		chunk_count = res.info.get('chunk_count', '')
+		if chunk:
+			data['chunk_info'] = f'{chunk}/{chunk_count}'
+		data.update(res.info)
 	return data
 
 
