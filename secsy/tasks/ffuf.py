@@ -54,6 +54,6 @@ class ffuf(HTTPCommand):
 		return True
 
 	@staticmethod
-	def on_item_convert(self, item):
+	def on_item_converted(self, item):
 		item[METHOD] = self.cmd_opts.get(METHOD, 'GET')
 		return item

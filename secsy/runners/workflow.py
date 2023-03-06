@@ -72,7 +72,7 @@ class Workflow(Runner):
 			else:
 				result = workflow()
 				console.log(f'Celery workflow [bold magenta]{str(result)}[/] sent to broker.')
-				self.process_live_tasks(result)
+				list(self.process_live_tasks(result))
 
 		# Get workflow results
 		results = result.get()
