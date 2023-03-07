@@ -1,7 +1,5 @@
 from contextlib import nullcontext
 
-from celery.result import AsyncResult
-
 from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.runners._helpers import confirm_exit
@@ -51,7 +49,6 @@ class Task(Runner):
 			list(self.process_live_tasks(result))
 			self.results = result.get()
 			self.results = self.results['results']
-		print(self.results)
 		self.results = self.filter_results()
 		self.done = True
 		self.log_results()

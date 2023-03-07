@@ -7,12 +7,15 @@ from secsy.utils import get_file_timestamp
 
 class dirsearch(HTTPCommand):
 	"""Advanced web path brute-forcer."""
-	cmd = 'dirsearch -q'
+	cmd = 'dirsearch'
 	input_flag = '-u'
 	file_flag = '-l'
 	json_flag = '--format json'
 	opt_prefix = '--'
 	encoding = 'ansi'
+	opts = {
+		'exclude_regex': {'type': str, 'help': 'Exclude responses by regular expression'}
+	}
 	opt_key_map = {
 		HEADER: 'header',
 		DELAY: 'delay',

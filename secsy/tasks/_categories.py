@@ -16,8 +16,8 @@ class HTTPCommand(Command):
 		HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
 		DELAY: {'type': float, 'help': 'Delay to add between each requests'},
 		DEPTH: {'type': int, 'help': 'Scan / crawl depth'},
-		FOLLOW_REDIRECT: {'is_flag': True, 'default': True, 'help': 'Follow HTTP redirects'},
-		MATCH_CODES: {'type': str, 'default': '200,204,301,302,307,401,405', 'help': 'Match HTTP status codes e.g "201,300,301"'},
+		FOLLOW_REDIRECT: {'is_flag': True, 'help': 'Follow HTTP redirects'},
+		MATCH_CODES: {'type': str, 'help': 'Match HTTP status codes e.g "201,300,301"'},
 		METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
 		PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
 		RATE_LIMIT: {'type':  int, 'help': 'Rate limit, i.e max number of requests per second'},
@@ -89,6 +89,7 @@ class VulnCommand(Command):
 		VULN_MATCHED_AT,
 		VULN_TAGS,
 		VULN_REFERENCES,
+		VULN_REFERENCE,
 		VULN_EXTRACTED_RESULTS,
 	]
 	output_table_fields = [

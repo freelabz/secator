@@ -40,6 +40,7 @@ class FakeCmd(Command):
 
 
 class TestCommandProcessOpts(unittest.TestCase):
+
     def test_process_opts_defaults(self):
         cmd_opts = {}
         opts_str = FakeCmd._process_opts(
@@ -151,9 +152,8 @@ class TestCommandProcessOpts(unittest.TestCase):
         cmd_opts = {}
         host = 'test.synology.me'
         cls = httpx(host, **cmd_opts)
-        default_match_codess = cls.meta_opts[MATCH_CODES]['default']
         default_threads = cls.meta_opts[THREADS]['default']
-        expected_cmd = f'httpx -silent -u {host} -json -td -cdn -follow-redirects -match-code {default_match_codess} -threads {default_threads}'
+        expected_cmd = f'httpx -silent -u {host} -json -td -cdn -threads {default_threads}'
         self.assertEqual(cls.cmd, expected_cmd)
         self.assertEqual(cls._print_timestamp, False)
         self.assertEqual(cls._print_line, False)

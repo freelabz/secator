@@ -13,7 +13,6 @@ tasks:
           field: '{host}:{port}'
     _chain:
       httpx:
-        match_codes: False
         targets_:
           - type: port
             field: '{host}:{port}'

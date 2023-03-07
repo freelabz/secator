@@ -131,9 +131,13 @@ class Command:
 		return f'{self.__class__.__name__}'
 
 	def __init__(self, input=None, **cmd_opts):
-		self.input = input
 		self.cmd_opts = cmd_opts.copy()
 		self.results = []
+
+		# Process input
+		self.input = input
+		if isinstance(self.input, list) and len(self.input) == 1:
+			self.input = self.input[0]
 
 		# Yield dicts if CLI supports JSON
 		if self.output_return_type is dict or (self.json_flag is not None):

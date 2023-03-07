@@ -29,7 +29,9 @@ def criticity_to_color(value):
 	return value
 
 def status_to_color(value):
-	value = int(value) if value else ''
+	value = int(value) if value else None
+	if value is None:
+		return value
 	if value < 400:
 		value = f'[bold green]{value}[/]'
 	elif value in [400, 499]:
