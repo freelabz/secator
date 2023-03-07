@@ -70,7 +70,7 @@ class VulnCommand(Command):
 	meta_opts = {
 		HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
 		DELAY: {'type': float, 'help': 'Delay to add between each requests'},
-		FOLLOW_REDIRECT: {'is_flag': True, 'default': True, 'help': 'Follow HTTP redirects'},
+		FOLLOW_REDIRECT: {'is_flag': True, 'help': 'Follow HTTP redirects'},
 		PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
 		RATE_LIMIT: {'type':  int, 'help': 'Rate limit, i.e max number of requests per second'},
 		RETRIES: {'type': int, 'help': 'Retries'},

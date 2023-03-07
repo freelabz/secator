@@ -56,7 +56,7 @@ class ffuf(HTTPCommand):
 		# Remove query path and add /FUZZ keyword
 		self.input = urlunparse(urlparse(self.input))
 		if not self.input.endswith('FUZZ'):
-			self.input += 'FUZZ'
+			self.input = self.input.rstrip('/') + '/FUZZ'
 		return True
 
 	@staticmethod

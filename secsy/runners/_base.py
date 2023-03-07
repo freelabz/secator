@@ -10,12 +10,12 @@ from celery.result import AsyncResult
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
-						   TimeElapsedColumn)
+                           TimeElapsedColumn)
 
 from secsy.definitions import DEBUG, OUTPUT_TYPES, REPORTS_FOLDER
 from secsy.rich import build_table, console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
-									get_task_nodes, process_extractor)
+                                    get_task_nodes, process_extractor)
 from secsy.utils import get_file_timestamp, merge_opts, pluralize
 
 
@@ -166,7 +166,8 @@ class Runner:
 			json.dump(data, f, indent=2)
 			console.print(f':file_cabinet: Saved JSON report to {json_path}')
 
-	def get_live_results(self, result):
+	@staticmethod
+	def get_live_results(result):
 		"""Poll workflow results in real-time. Fetch task metadata and partial 
 		results from each task that runs.
 
@@ -184,10 +185,6 @@ class Runner:
 				info = get_task_info(task_id)
 				if not info:
 					continue
-				if info['error']:
-					self.errors.append(
-						'Error in task {name} {chunk_info}:\n{error}'.format(**info)
-					)
 				yield info
 
 			# Update all tasks to 100 %
@@ -220,17 +217,24 @@ class Runner:
 			tasks_progress = {}
 
 			# Get live results and print progress
-			for info in self.get_live_results(result):
+			for info in Runner.get_live_results(result):
 
 				# Re-yield so that we can consume it externally
 				yield info
 
  				# Ignore partials in output unless DEBUG=1
-				if info['chunk_info'] and not DEBUG:
+				if info['chunk'] and not DEBUG:
 					continue
 
+				# Handle error if any
+				state = info['state']
+				if info['error']:
+					state = 'FAILURE'
+					self.errors.append(
+						'Error in task {name} {chunk_info}:\n{error}'.format(**info)
+					)
+
 				task_id = info['id']
-				state = 'FAILURE' if info['error'] else info['state']
 				state_str = f'[{state_colors[state]}]{state}[/]'
 				info['state'] = state_str
 

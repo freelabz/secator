@@ -22,6 +22,8 @@ v0.1.0
 - [x] feat: improve multiple targets support + add tests for it
 
 **TODO:**
+- [ ] feat: consider using Celery alternative like Dramatiq because CELERY IS SO FUCKING ENNOYING TO WORK WITH SOMETIMES URGHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+- [ ] feat: add indicator for subtasks finishing next to the task name (e.g: 1/5 means 1 chunk out of 5 have finished)
 - [ ] feat: allow extra args supported by cmd but not supported by secsy yet ????????
 - [ ] feat: Make new category class for fuzzers
 - [ ] feat: Improve web login forms testing, add `login_forms` workflow and yield output cookies / session ID / token:
