@@ -1,9 +1,9 @@
 import logging
 
-from secsy.runners._base import Runner
-from secsy.runners.workflow import Workflow
 from secsy.config import ConfigLoader
+from secsy.runners._base import Runner
 from secsy.runners._helpers import merge_extracted_values
+from secsy.runners.workflow import Workflow
 
 logger = logging.getLogger(__name__)
 

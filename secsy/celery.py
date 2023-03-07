@@ -89,7 +89,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 		forward_results.s(results),
 		chord(
 			tuple(sigs),
-			forward_results.s()
+			forward_results.s(),
 		)
 	)
 	return workflow
@@ -140,7 +140,6 @@ def run_command(self, results, name, targets, opts={}):
 
 		if single_target_only or (not sync and break_size_threshold):
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
-
 			workflow = break_task(
 				task_cls,
 				opts,
@@ -148,8 +147,37 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 
+			result = workflow.apply() if sync else workflow()
+			# self.update_state(**state)
+
+			# TODO: here we want to update the parent task state with the
+			# children info as they are executing, to update the run count etc...
+			# but we cannot call `self.update_state` after the previous line
+			# for (once again) some obscure Celery reason, thus preventing us to
+			# do this ... Try to refactor this in a much cleaner way by using a 
+			# dispatcher task, maybe it could work ...
+			# if not sync:
+				# from secsy.runners._base import Runner
+				# from secsy.runners._helpers import get_task_ids
+				# ntasks = len(targets) // chunk_size
+				# state['meta']['chunk_info'] = f'0/{ntasks}'
+				# state['meta']['error'] = None
+				# print(state)
+				# subtasks = {}
+				# task_ids = []
+				# get_task_ids(result, ids=task_ids)
+				# for info in Runner.get_live_results(result):
+				# 	print(info)
+				# 	subtasks[info['id']] = info
+				# 	ready_count = sum(subtasks.get(id, {}).get('count', 0) for id in task_ids)
+				# 	error = '\n\n'.join([subtasks.get(id, {}).get('error') or '' for id in task_ids])
+				# 	print(ready_count)
+				# 	print(error)
+				# 	state['meta']['chunk_info'] = f'{ready_count}/{chunk_size}'
+				# 	state['meta']['error'] = error.strip()
+				# 	self.update_state(**state)
+				# 	sleep(1)
 			with allow_join_result():
-				result = workflow.apply() if sync else workflow.delay()
 				task_results = result.get()
 				results.extend(task_results)
 				state['state'] = 'SUCCESS'

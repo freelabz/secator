@@ -10,8 +10,9 @@ from time import sleep
 from fp.fp import FreeProxy
 from rich.markup import escape
 
-from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE, DEFAULT_PROXY_TIMEOUT,
-                               OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, TEMP_FOLDER)
+from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
+                               DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
+                               OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp, pluralize
@@ -253,6 +254,7 @@ class Command:
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		from secsy.celery import run_command
+
 		# TODO: running chunked group .apply() in run_command doesn't work if 
 		# this isn't set explicitely to False for **VERY** obscure reasons
 		kwargs['sync'] = False
@@ -270,8 +272,9 @@ class Command:
 
 	@classmethod
 	def poll(cls, result):
-		from celery.result import AsyncResult
 		from time import sleep
+
+		from celery.result import AsyncResult
 		while not result.ready():
 			data = AsyncResult(result.id).info
 			if DEBUG and isinstance(data, dict):
@@ -500,7 +503,7 @@ class Command:
 			self.cmd = f'proxychains {self.cmd}'
 		elif self.proxy and support_proxy:
 			if self.proxy == 'random':
-				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, anonym=True).get()
+				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
 			else: # tool-specific proxy settings
 				self.cmd_opts['proxy'] = self.proxy
 

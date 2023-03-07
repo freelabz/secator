@@ -2,7 +2,6 @@ from celery.result import AsyncResult, GroupResult
 from rich.prompt import Confirm
 
 from secsy.utils import deduplicate
-from secsy.definitions import DEBUG
 
 
 def merge_extracted_values(results, opts):
@@ -128,8 +127,7 @@ def get_task_ids(result, ids=[]):
 	elif isinstance(result, AsyncResult):
 		if result.id not in ids:
 			ids.append(result.id)
-
-	# Browse children
+	
 	if result.children:
 		for child in result.children:
 			get_task_ids(child, ids=ids)
@@ -150,9 +148,14 @@ def get_task_info(task_id):
 	data['chunk_info'] = ''
 	data['count'] = 0
 	data['error'] = None
+	data['ready'] = False
+	if res.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
+		data['ready'] = True
 	if res.info and not isinstance(res.info, list):
 		chunk = res.info.get('chunk', '')
 		chunk_count = res.info.get('chunk_count', '')
+		data['chunk'] = chunk
+		data['chunk_count'] = chunk_count
 		if chunk:
 			data['chunk_info'] = f'{chunk}/{chunk_count}'
 		data.update(res.info)

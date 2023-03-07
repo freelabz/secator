@@ -1,7 +1,6 @@
 from contextlib import nullcontext
 from datetime import datetime
 from time import time
-import traceback
 
 from celery import chain, chord
 

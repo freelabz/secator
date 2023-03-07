@@ -79,11 +79,14 @@ def utils():
 
 @cli.command()
 @click.option('-c', '--concurrency', type=int, help='Number of child processes processing the queue.')
-def worker(concurrency):
+@click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
+def worker(concurrency, reload):
 	"""Run a Celery worker."""
 	cmd = 'celery -A secsy.celery.app worker -n runner'
 	if concurrency:
 		cmd += f' -c {concurrency}'
+	if reload:
+		cmd = f'watchmedo auto-restart --directory=./ --patterns="celery.py;tasks/*.py" --recursive -- {cmd}'
 	Command.run_command(
 		cmd,
 		**DEFAULT_CMD_OPTS
@@ -111,7 +114,7 @@ def install(cmds):
 @click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
 def get_proxy(timeout):
 	from fp.fp import FreeProxy
-	url = FreeProxy(timeout=timeout, anonym=True).get()
+	url = FreeProxy(timeout=timeout, rand=True, anonym=True).get()
 	print(url)
 
 
