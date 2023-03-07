@@ -173,6 +173,14 @@ def register_runner(cli_endpoint, config):
 	}
 	options = get_command_options(*tasks)
 
+	# TODO: maybe allow this in the future
+	# def get_unknown_opts(ctx):
+	# 	return {
+	# 		(ctx.args[i][2:]
+    # 		if str(ctx.args[i]).startswith("--") \
+	# 		else ctx.args[i][1:]): ctx.args[i+1]
+	# 		for i in range(0, len(ctx.args), 2)
+	# 	}
 
 	@click.argument(input_type, required=input_required)
 	@decorate_command_options(global_options)
@@ -180,6 +188,9 @@ def register_runner(cli_endpoint, config):
 	@click.pass_context
 	def func(ctx, sync, worker, debug, **opts):
 		opts.update(fmt_opts)
+		# TODO: maybe allow this in the future
+		# unknown_opts = get_unknown_opts(ctx)
+		# opts.update(unknown_opts)
 		if cli_endpoint.name in ['scan', 'workflow']:
 			opts['print_item'] = debug
 			opts['print_line'] = debug
@@ -199,7 +210,7 @@ def register_runner(cli_endpoint, config):
 		runner = runner_cls(config, targets, **opts)
 		runner.run(sync=sync)
 
-	settings = {'ignore_unknown_options': True}
+	settings = {'ignore_unknown_options': True, 'allow_extra_args': True}
 	cli_endpoint.command(
 		name=config.name,
 		context_settings=settings,

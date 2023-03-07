@@ -4,7 +4,7 @@ from secsy.tasks._categories import HTTPCommand
 
 class cariddi(HTTPCommand):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
-	cmd = 'cariddi -plain'
+	cmd = 'cariddi -err -e -ext 1'
 	opt_key_map = {
 		HEADER: 'headers',
 		DELAY: 'd',

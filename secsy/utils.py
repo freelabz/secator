@@ -80,6 +80,7 @@ def expand_input(input):
 	# Usefull for commands that can take only one input at a time.
 	if isinstance(input, list) and len(input) == 1:
 		return input[0]
+
 	return input
 
 

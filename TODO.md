@@ -22,6 +22,17 @@ v0.1.0
 - [x] feat: improve multiple targets support + add tests for it
 
 **TODO:**
+- [ ] feat: allow extra args supported by cmd but not supported by secsy yet ????????
+- [ ] feat: Make new category class for fuzzers
+- [ ] feat: Improve web login forms testing, add `login_forms` workflow and yield output cookies / session ID / token:
+    - [ ] Add --cookies to http commands
+    - [ ] Add --data to http commands
+    - [ ] Add ffuf -mr to match text regex from errors (usefull for fuzzing)
+    - [ ] Disable ffuf auto-calibration by default
+- [ ] fix: disable `follow-redirects` by default as it hides some juicy endpoints
+- [ ] feat: auto-collect missing params from command '--help'
+- [ ] feat: add scan profiles
+- [ ] feat: make Command inherit from Runner, add hooks / validators to Runner
 - [ ] docs: add docs for building workflow / scan YAML files
 - [ ] docs: add github-pages site
 - [ ] fix: local filesystem broker is broken
