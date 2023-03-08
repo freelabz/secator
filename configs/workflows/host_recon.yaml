@@ -18,7 +18,10 @@ tasks:
             field: '{host}:{port}'
       nuclei:
         exclude_tags: [network, ssl]
-        targets_: url.url
+        targets_:
+          - type: url
+            field: url
+            condition: item['status_code'] is not None
 results:
   - type: vulnerability
     condition: item['confidence'] == 'high'
