@@ -147,7 +147,7 @@ class VulnCommand(Command):
 		"""
 		cve_info = VulnCommand.lookup_local_cve(cve_id)
 		if not cve_info:
-			logger.error(f'CVE {cve_id} not found locally. Use `secsy utils download-cves` to update the local database.')
+			logger.debug(f'{cve_id} not found locally. Use `secsy utils download-cves` to update the local database.')
 			try:
 				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
 				if not cve_info:
