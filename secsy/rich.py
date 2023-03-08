@@ -15,6 +15,7 @@ console_stdout = Console(record=True)
 handler = RichHandler(rich_tracebacks=True)
 install(show_locals=DEBUG, suppress=[click, rich_click])
 
+
 def criticity_to_color(value):
 	if value == 'critical':
 		value = f'[bold red3]{value.upper()}[/]'
@@ -28,6 +29,7 @@ def criticity_to_color(value):
 		value = f'[bold green]{value.upper()}[/]'
 	return value
 
+
 def status_to_color(value):
 	value = int(value) if value else None
 	if value is None:
@@ -40,7 +42,8 @@ def status_to_color(value):
 		value = f'[bold red3]{value}[/]'
 	return value
 
-formatters = {
+
+FORMATTERS = {
 	'confidence': criticity_to_color,
 	'severity': criticity_to_color,
 	'cvss_score': lambda score: '' if score == -1 else f'[bold cyan]{score}[/]',
@@ -50,6 +53,7 @@ formatters = {
 	'status_code': status_to_color,
 	'_source': lambda source: f'[bold gold3]{source}[/]'
 }
+
 
 def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 	"""Build rich table.
@@ -105,6 +109,7 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		table.add_column(
 			key_str,
 			overflow=overflow,
+			min_width=10,
 			no_wrap=no_wrap,
 			header_style='bold blue')
 
@@ -113,7 +118,7 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		values = []
 		for key in keys:
 			value = item[key]
-			value = formatters.get(key, lambda x: x)(value)
+			value = FORMATTERS.get(key, lambda x: x)(value)
 			if isinstance(value, dict) or isinstance(value, list):
 				value = yaml.dump(value)
 			elif isinstance(value, int) or isinstance(value, float):

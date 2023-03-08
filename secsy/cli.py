@@ -103,7 +103,7 @@ def report():
 
 @report.command('show')
 @click.argument('json_path')
-@click.option('-e', '--exclude-fields', type=str, help='List of fields to exclude (comma-separated)')
+@click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
 def report_show(json_path, exclude_fields):
 	from secsy.runners._base import Runner
 	from secsy.utils import flatten
