@@ -20,8 +20,14 @@ v0.1.0
 - [x] fix: `nmap` spend lots of time to convert results / get CVEs
 - [x] feat: work on better proxy support, using `proxychains` and/or `free-proxy`
 - [x] feat: improve multiple targets support + add tests for it
+- [x] fix: disable `follow-redirects` by default as it hides some juicy endpoints
+- [x] feat: add `grype` code scanner
+- [x] feat: add tasks statuses under main progress bar (turn `console.status` into a `Live` instance)
 
 **TODO:**
+- [ ] feat: add `--dry` flag to every workflow/scan/task command to test e.g pipes. `--dry` would use subprocess mock to run offline.
+- [ ] feat: workflow/scan show results count by `output_type` in real-time + show vulns in real time in a nicely formatted format like Nuclei's ?
+- [ ] refactor: reporting should go in it's own class, and have different formatting class for CSV, JSON, HTML, PDF, etc...
 - [ ] feat: consider using Celery alternative like Dramatiq because CELERY IS SO FUCKING ENNOYING TO WORK WITH SOMETIMES URGHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 - [ ] feat: add indicator for subtasks finishing next to the task name (e.g: 1/5 means 1 chunk out of 5 have finished)
 - [ ] feat: allow extra args supported by cmd but not supported by secsy yet ????????
@@ -29,10 +35,9 @@ v0.1.0
 - [ ] feat: Improve web login forms testing, add `login_forms` workflow and yield output cookies / session ID / token:
     - [ ] Add `--cookies` to http commands
     - [ ] Add `--data` to http commands
-    - [ ] Add `ffuf -mr` to match text regex from errors (usefull for fuzzing)
-    - [ ] Disable `ffuf` auto-calibration by default
-- [ ] fix: disable `follow-redirects` by default as it hides some juicy endpoints
-- [ ] feat: auto-collect missing params from command '--help'
+    - [x] Add `ffuf -mr` to match text regex from errors (usefull for fuzzing)
+    - [x] Disable `ffuf` auto-calibration by default
+- [ ] feat: auto-collect missing params from command `--help`
 - [ ] feat: add scan profiles
 - [ ] feat: make Command inherit from Runner, add hooks / validators to Runner
 - [ ] docs: add docs for building workflow / scan YAML files
@@ -45,9 +50,8 @@ v0.1.0
     - `{'name': 'task', 'results': [<ITEM1>, <ITEM2>]}` for task.delay().get()
 - [ ] fix: original targets are used instead of no targets when extractors return None (feature ?)
 - [ ] refactor: use Celery `chunks` to chunk a task instead of own Fabric.
-- [ ] test: test workflows like `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
+- [ ] test: add tests for CLI workflows like `secsy cmd mapcidr 192.168.1.0/24 --raw | secsy cmd fping --raw | secsy cmd naabu --raw | secsy cmd httpx --json --table`
 - [ ] feat: add support for multi output types tool like `feroxbuster` or `nmap`
-- [ ] feat: add `grype` code scanner
 - [ ] feat: pull out tools output types into specific classes, e.g Port, Subdomain, Vulnerability
     - [ ] Pydantic + potential db schemas base ?
     - [ ] Used to format results as well
@@ -58,10 +62,9 @@ v0.1.0
 - [ ] feat: Add scan ids to `Workflow` / `Scan` objects. Could be the Celery workflow task id for `Workflow`.
 - [ ] feat: use previous results as input for next scan:  `secsy workflow --results previous / {path_to_json} / {scan_id}`
 - [ ] feat: support multiple tasks with same name but differenciatesd - new notation with '<task_name>/<alias>' or `<task_name>:\n<alias>: alias` ?
-- [ ] feat: parse multiple vulnerability ids
+- [ ] feat: parse multiple vulnerability ids types other than MITRE CVE
 - [ ] feat: find exploits from CVEs
 - [ ] feat: add `-stats` option to Nuclei to display scan status --> use status info for progress bar.
-- [ ] feat: add tasks statuses under main progress bar (turn `console.status` into a `Live` instance)
 - [ ] feat: `CTRL + C` should let you choose which tasks to abort from the client-side and the worker side.
 - [ ] feat: add `arp-scan`
 - [ ] feat: add techniques for IDS evasion (cf https://book.hacktricks.xyz/generic-methodologies-and-resources/pentesting-network/ids-evasion)
@@ -69,7 +72,7 @@ v0.1.0
     - [ ] Results filtering `filter_results`
     - [x] Results deduplication / merging `forward_results`
 - [ ] feat: reporting
-    - [ ] HTML reporting not based on Rich's export_html
+    - [ ] HTML reporting not based on Rich's `export_html`
     - [x] Save JSON report
     - [ ] Output live JSON items for workflows / scans so that they are consumable from library
 - [ ] feat: add ways to create Workflows dynamically from code (need to revisit the way the output results are):
@@ -92,8 +95,8 @@ v0.1.0
     `secsy config set workflows/domain_recon_2 workflow.tasks.nmap.rate_limit 10` # Workflow task opt
     ```
 - [ ] feat: generate reports from JSON with the CLI:
-    `secsy report previous/<path_to_json_report> -o html`
-    `secsy view <path_to_json_report> --table`
+    - [ ] `secsy report previous/<path_to_json_report> -o html`
+    - [x] `secsy report view <path_to_json_report>`
 - [ ] feat: replace `console.log` by `logger.info` with rich logging handler (add Logging Handler and setup function) + Celery worker
 - [ ] feat: autodiscover external tools
 - [ ] feat: use --<tool>.<option_name> in the CLI (instead of `_`) to override option names.
