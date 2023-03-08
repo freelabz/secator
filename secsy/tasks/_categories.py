@@ -31,16 +31,17 @@ class HTTPCommand(Command):
 	output_type = URL
 	output_schema = [
 		URL,
-		METHOD,
+		STATUS_CODE,
 		TITLE,
 		WEBSERVER,
 		TECH,
-		STATUS_CODE,
-		WORDS, LINES,
 		CONTENT_TYPE,
 		CONTENT_LENGTH,
+		TIME,
+		METHOD,
+		WORDS,
+		LINES,
 		HOST,
-		TIME
 	]
 	output_table_fields = [
 		URL,
@@ -79,18 +80,18 @@ class VulnCommand(Command):
 		USER_AGENT: {'type': str, 'help': 'User agent, e.g "Mozilla Firefox 1.0"'}
 	}
 	output_schema = [
-		VULN_ID,
-		VULN_PROVIDER,
-		VULN_NAME,
-		VULN_DESCRIPTION,
+		VULN_MATCHED_AT,
 		VULN_SEVERITY,
 		VULN_CONFIDENCE,
+		VULN_NAME,
+		VULN_ID,
 		VULN_CVSS_SCORE,
-		VULN_MATCHED_AT,
 		VULN_TAGS,
+		VULN_EXTRACTED_RESULTS,
+		VULN_PROVIDER,
+		VULN_DESCRIPTION,
 		VULN_REFERENCES,
 		VULN_REFERENCE,
-		VULN_EXTRACTED_RESULTS,
 	]
 	output_table_fields = [
 		VULN_MATCHED_AT,
