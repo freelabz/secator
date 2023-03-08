@@ -10,6 +10,7 @@ class Task(Runner):
 
 	_print_table = False
 	_save_html = False
+	_save_csv = False
 
 	@confirm_exit
 	def run(self, sync=True):
@@ -54,10 +55,11 @@ class Task(Runner):
 		self.log_results()
 		return self.results
 
+
 	@staticmethod
 	def get_task_class(name):
 		"""Get task class from a name.
-		
+
 		Args:
 			name (str): Task name.
 		"""
@@ -69,10 +71,11 @@ class Task(Runner):
 			f'Task {name} not found. Aborting.', style='bold red'
 		)
 
+
 	@staticmethod
 	def get_tasks_from_conf(config):
 		"""Get task names from config. Ignore hierarchy and keywords.
-		
+
 		TODO: Add hierarchy tree / add make flow diagrams.
 		"""
 		tasks = []
