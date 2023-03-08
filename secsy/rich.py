@@ -51,12 +51,13 @@ formatters = {
 	'_source': lambda source: f'[bold gold3]{source}[/]'
 }
 
-def build_table(items, output_fields=[], sort_by=None):
+def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 	"""Build rich table.
 
 	Args:
 		items (list): List of items.
 		output_fields (list, Optional): List of fields to add.
+		exclude_fields (list, Optional): List of fields to exclude.
 		sort_by (tuple, Optional): Tuple of sort_by keys.
 
 	Returns:
@@ -78,6 +79,9 @@ def build_table(items, output_fields=[], sort_by=None):
 		keys = cls.output_table_fields
 	else:
 		keys = list(items[0].keys())
+
+	# List of fields to exclude
+	keys = [k for k in keys if k not in exclude_fields]
 
 	# Remove meta fields not needed in output
 	if '_cls' in keys:

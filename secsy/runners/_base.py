@@ -1,4 +1,4 @@
-
+import csv
 import json
 import operator
 import os
@@ -15,7 +15,7 @@ from rich.progress import (Progress, SpinnerColumn, TextColumn,
 from secsy.definitions import DEBUG, OUTPUT_TYPES, REPORTS_FOLDER
 from secsy.rich import build_table, console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
-                                    get_task_nodes, process_extractor)
+                                    process_extractor)
 from secsy.utils import get_file_timestamp, merge_opts, pluralize
 
 
@@ -24,6 +24,8 @@ class Runner:
 	_print_table = True
 	_save_html = True
 	_save_json = True
+	_save_csv = True
+
 
 	def __init__(self, config, targets, results=[], **run_opts):
 		self.config = config
@@ -35,6 +37,7 @@ class Runner:
 		self.targets = targets
 		self.start_time = datetime.fromtimestamp(time())
 		self.errors = []
+
 
 	def filter_results(self):
 		"""Filter results."""
@@ -61,6 +64,7 @@ class Runner:
 			results = self.results
 		return results
 
+
 	def log_results(self):
 		"""Log results.
 
@@ -86,7 +90,7 @@ class Runner:
 		title = f'{self.__class__.__name__} "{self.config.name}" results'
 		render = Console(record=True)
 		if self._print_table or self.run_opts.get('table', False):
-			self.print_results_table(title, render)
+			Runner.print_results_table(self.results, title, render=console)
 
 		# Make HTML report
 		if self._save_html or self.run_opts.get('html', False):
@@ -101,11 +105,17 @@ class Runner:
 		if self._save_json:
 			self.save_results_json(title)
 
+		# Make CSV report
+		if self._save_csv:
+			self.save_results_csv(title)
+
 		# Log execution results
 		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
 		console.print()
 
-	def print_results_table(self, title, render):
+
+	@staticmethod
+	def print_results_table(results, title, render=console, exclude_fields=[]):
 		render.print()
 		h1 = Markdown(f'# {title}')
 		render.print(h1, style='bold magenta', width=50)
@@ -113,9 +123,13 @@ class Runner:
 		tables = []
 		for output_type in OUTPUT_TYPES:
 			sort_by, output_fields = get_table_fields(output_type)
-			items = [item for item in self.results if item['_type'] == output_type]
+			items = [item for item in results if item['_type'] == output_type]
 			if items:
-				_table = build_table(items, output_fields, sort_by)
+				_table = build_table(
+					items,
+					output_fields=output_fields,
+					exclude_fields=exclude_fields,
+					sort_by=sort_by)
 				tables.append(tables)
 				_type = pluralize(items[0]['_type'])
 				render.print(_type.upper(), style='bold gold3', justify='left')
@@ -123,11 +137,10 @@ class Runner:
 				render.print()
 		return tables
 
-	def save_results_json(self, title):
+
+	def prepare_report(self, title):
 		from secsy.decorators import DEFAULT_CLI_OPTIONS
-		timestr = get_file_timestamp()
 		json_title = title.replace(' ', '_').replace("\"", '').lower()
-		json_path = f'{REPORTS_FOLDER}/{json_title}_{timestr}.json'
 
 		# Trim options
 		opts = merge_opts(self.config.options, self.run_opts)
@@ -138,7 +151,7 @@ class Runner:
 				and v is not None
 		}
 
-		# Prepare JSON report
+		# Prepare report structure
 		data = {
 			'info': {
 				'title': json_title,
@@ -152,7 +165,7 @@ class Runner:
 			'results': {},
 		}
 
-		# Fill JSON report
+		# Fill report
 		for output_type in OUTPUT_TYPES:
 			sort_by, _ = get_table_fields(output_type)
 			items = [item for item in self.results if item['_type'] == output_type]
@@ -160,11 +173,43 @@ class Runner:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.itemgetter(*sort_by))
 				data['results'][output_type] = items
+		return data
+
+
+	def save_results_csv(self, title):
+		data = self.prepare_report(title)
+		title = data['info']['title']
+		results = data['results']
+		timestr = get_file_timestamp()
+		csv_paths = []
+		for output_type, items in results.items():
+			if not items:
+				continue
+			keys = list(items[0].keys())
+			csv_path = f'{REPORTS_FOLDER}/{title}_{output_type}_{timestr}.csv'
+			csv_paths.append(csv_path)
+			with open(csv_path, 'w', newline='') as output_file:
+				dict_writer = csv.DictWriter(output_file, keys)
+				dict_writer.writeheader()
+				dict_writer.writerows(items)
+		if len(csv_paths) == 1:
+			csv_paths_str = csv_paths[0]
+		else:
+			csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
+		console.print(f':file_cabinet: Saved CSV reports to {csv_paths_str}')
+
+
+	def save_results_json(self, title):
+		data = self.prepare_report(title)
+		title = data['info']['title']
+		timestr = get_file_timestamp()
+		json_path = f'{REPORTS_FOLDER}/{title}_{timestr}.json'
 
 		# Save JSON report to file
 		with open(json_path, 'w') as f:
 			json.dump(data, f, indent=2)
 			console.print(f':file_cabinet: Saved JSON report to {json_path}')
+
 
 	@staticmethod
 	def get_live_results(result):
@@ -193,6 +238,7 @@ class Runner:
 
 			# Sleep between updates
 			sleep(1)
+
 
 	def process_live_tasks(self, result):
 		tasks_progress = Progress(

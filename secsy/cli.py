@@ -97,6 +97,28 @@ def worker(concurrency, reload):
 # UTILS #
 #-------#
 
+@utils.group()
+def report():
+	pass
+
+@report.command('show')
+@click.argument('json_path')
+@click.option('-e', '--exclude-fields', type=str, help='List of fields to exclude (comma-separated)')
+def report_show(json_path, exclude_fields):
+	from secsy.runners._base import Runner
+	from secsy.utils import flatten
+	from secsy.rich import console
+	with open(json_path, 'r') as f:
+		report = json.load(f)
+		results = flatten(list(report['results'].values()))
+	exclude_fields = exclude_fields.split(',')
+	Runner.print_results_table(
+		results,
+		title=report['info']['title'],
+		render=console,
+		exclude_fields=exclude_fields)
+
+
 @utils.command()
 @click.argument('cmds', required=False)
 def install(cmds):
