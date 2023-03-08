@@ -25,6 +25,7 @@ v0.1.0
 - [x] feat: add tasks statuses under main progress bar (turn `console.status` into a `Live` instance)
 
 **TODO:**
+- [ ] feat: avoid `nmap` duplicates by scanning subdomain ip instead of subdomain
 - [ ] feat: merge multiple workflow reports into one consolidated JSON report.
 - [ ] feat: add `--dry` flag to every workflow/scan/task command to test e.g pipes. `--dry` would use subprocess mock to run offline.
 - [ ] feat: workflow/scan show results count by `output_type` in real-time + show vulns in real time in a nicely formatted format like Nuclei's ?
