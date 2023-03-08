@@ -24,6 +24,8 @@ CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{TEMP_FOLDER}/celery/results')
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 CVES_FOLDER = f'{TEMP_FOLDER}/cves'
+GOOGLE_DRIVE_PARENT_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_PARENT_FOLDER_ID')
+GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
 
 # Defaults
 DEFAULT_CHUNK_SIZE = 100

@@ -12,7 +12,7 @@ from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
                            TimeElapsedColumn)
 
-from secsy.definitions import DEBUG, OUTPUT_TYPES, REPORTS_FOLDER
+from secsy.definitions import DEBUG, OUTPUT_TYPES, REPORTS_FOLDER, GOOGLE_DRIVE_PARENT_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
 from secsy.rich import build_table, console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
                                     process_extractor)
@@ -25,6 +25,7 @@ class Runner:
 	_save_html = True
 	_save_json = True
 	_save_csv = True
+	_save_google_sheet = True
 
 
 	def __init__(self, config, targets, results=[], **run_opts):
@@ -105,12 +106,12 @@ class Runner:
 		# Print table
 		title = f'{self.__class__.__name__} "{self.config.name}" results'
 		render = Console(record=True)
+		timestr = get_file_timestamp()
 		if self._print_table or self.run_opts.get('table', False):
 			Runner.print_results_table(self.results, title, render=console)
 
 		# Make HTML report
 		if self._save_html or self.run_opts.get('html', False):
-			timestr = get_file_timestamp()
 			html_title = title.replace(' ', '_').replace("\"", '').lower()
 			os.makedirs(REPORTS_FOLDER, exist_ok=True)
 			html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'
@@ -119,11 +120,15 @@ class Runner:
 
 		# Make JSON report
 		if self._save_json:
-			self.save_results_json(title)
+			self.save_results_json(title, timestr)
 
 		# Make CSV report
 		if self._save_csv:
-			self.save_results_csv(title)
+			self.save_results_csv(title, timestr)
+
+		# Make Google Sheet report
+		if self._save_google_sheet:
+			self.save_results_google_sheets(title, timestr)
 
 		# Log execution results
 		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
@@ -304,11 +309,10 @@ class Runner:
 		return data
 
 
-	def save_results_csv(self, title):
+	def save_results_csv(self, title, timestr):
 		data = self.prepare_report(title)
 		title = data['info']['title']
 		results = data['results']
-		timestr = get_file_timestamp()
 		csv_paths = []
 		for output_type, items in results.items():
 			if not items:
@@ -327,10 +331,69 @@ class Runner:
 		console.print(f':file_cabinet: Saved CSV reports to {csv_paths_str}')
 
 
-	def save_results_json(self, title):
+	def save_results_google_sheets(self, title, timestr):
+		import gspread
+		import yaml
+		data = self.prepare_report(title)
+		info = data['info']
+		title = data['info']['title']
+		sheet_title = f'{data["info"]["title"]}_{timestr}'
+		results = data['results']
+		if not GOOGLE_CREDENTIALS_PATH:
+			console.print('Missing GOOGLE_CREDENTIALS_PATH to save to Google Sheets')
+			return
+		if not GOOGLE_DRIVE_PARENT_FOLDER_ID:
+			console.print('Missing GOOGLE_DRIVE_PARENT_FOLDER_ID to save to Google Sheets.')
+			return
+		client = gspread.service_account(GOOGLE_CREDENTIALS_PATH)
+		sheet = client.create(title, folder_id=GOOGLE_DRIVE_PARENT_FOLDER_ID)
+
+		# Add options worksheet for input data
+		info = data['info']
+		info['targets'] = '\n'.join(info['targets'])
+		info['opts'] = yaml.dump(info['opts'])
+		keys = [k.replace('_', ' ').upper() for k in list(info.keys())]
+		ws = sheet.add_worksheet('OPTIONS', rows=2, cols=len(keys))
+		sheet.values_update(
+			ws.title,
+			params={'valueInputOption': 'USER_ENTERED'},
+			body={'values': [keys, list(info.values())]}
+		)
+
+		# Add one worksheet per output type
+		for output_type, items in results.items():
+			if not items:
+				continue
+			keys = [
+				k.replace('_', ' ').upper()
+				for k in list(items[0].keys())
+			]
+			csv_path = f'{REPORTS_FOLDER}/{title}_{output_type}_{timestr}.csv'
+			sheet_title = pluralize(output_type).upper()
+			ws = sheet.add_worksheet(sheet_title, rows=len(items), cols=len(keys))
+			with open(csv_path, 'r') as f:
+				data = csv.reader(f)
+				data = list(data)
+				data[0] = [
+					k.replace('_', ' ').upper()
+					for k in data[0]
+				]
+				sheet.values_update(
+					ws.title,
+					params={'valueInputOption': 'USER_ENTERED'},
+					body={'values': data}
+				)
+
+		# Delete 'default' worksheet
+		ws = sheet.get_worksheet(0)
+		sheet.del_worksheet(ws)
+
+		console.print(f':file_cabinet: Saved Google Sheets reports to [u magenta]{sheet.url}[/]')
+
+
+	def save_results_json(self, title, timestr):
 		data = self.prepare_report(title)
 		title = data['info']['title']
-		timestr = get_file_timestamp()
 		json_path = f'{REPORTS_FOLDER}/{title}_{timestr}.json'
 
 		# Save JSON report to file
@@ -340,6 +403,9 @@ class Runner:
 
 
 # TODO: move all functions to utils
+
+def plusplus(oldChar):
+     return chr(ord(oldChar)+1)
 
 def build_nodes_hierarchy(nodes):
 	for node in nodes:
