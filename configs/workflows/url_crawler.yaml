@@ -2,7 +2,7 @@ name: url_crawler
 description: Find URLs by crawling (fast)
 tags: [http]
 options:
-  match_codes: [200,204,301,302,307,401,405]
+  match_codes: 200,204,301,302,307,401,405
 tasks:
   _group:
     cariddi:
