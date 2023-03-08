@@ -10,6 +10,7 @@ class Task(Runner):
 
 	_print_table = False
 	_save_html = False
+	_save_json = False
 	_save_csv = False
 
 	@confirm_exit

@@ -39,30 +39,46 @@ class Runner:
 		self.errors = []
 
 
-	def filter_results(self):
-		"""Filter results."""
-		extractors = self.config.results
-		results = []
-		if extractors:
-			# Keep results based on extractors
-			opts = merge_opts(self.config.options, self.run_opts)
-			for extractor in extractors:
-				tmp = process_extractor(self.results, extractor, ctx=opts)
-				results.extend(tmp)
+	def log_start(self):
+		"""Log runner start."""
+		remote_str = 'starting' if self.sync else 'sent to [bold gold3]Celery[/] worker'
+		runner_name = self.__class__.__name__
+		console.print(f':tada: [bold green]{runner_name}[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
+		self.log_header()
 
-			# Keep the field types in results not specified in the extractors.
-			extract_fields = [e['type'] for e in extractors]
-			keep_fields = [
-				_type for _type in OUTPUT_TYPES
-				if _type not in extract_fields
-			]
-			results.extend([
-				item for item in self.results
-				if item['_type'] in keep_fields
-			])
-		else:
-			results = self.results
-		return results
+
+	def log_header(self):
+		runner_name = self.__class__.__name__
+		opts = merge_opts(self.run_opts, self.config.options)
+		console.print()
+		console.print(f'[bold gold3]{runner_name}:[/]    {self.config.name}')
+
+		# Description
+		description = self.config.description
+		if description:
+			console.print(f'[bold gold3]Description:[/] {description}')
+
+		# Targets
+		if self.targets:
+			console.print('Targets: ', style='bold gold3')
+			for target in self.targets:
+				console.print(f' • {target}')
+
+		# Options
+		from secsy.decorators import DEFAULT_CLI_OPTIONS
+		items = [
+			f'[italic]{k}[/]: {v}'
+			for k, v in opts.items()
+			if not k.startswith('print_') \
+				and k not in DEFAULT_CLI_OPTIONS \
+				and v is not None
+		]
+		if items:
+			console.print('Options:', style='bold gold3')
+			for item in items:
+				console.print(f' • {item}')
+
+		console.print()
 
 
 	def log_results(self):
@@ -112,6 +128,118 @@ class Runner:
 		# Log execution results
 		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
 		console.print()
+
+
+	@staticmethod
+	def get_live_results(result):
+		"""Poll Celery subtasks results in real-time. Fetch task metadata and 
+		partial results from each task that runs.
+
+		Args:
+			result (celery.result.AsyncResult): Result object.
+
+		Yields:
+			dict: Current task state and results.
+		"""
+		res = AsyncResult(result.id)
+		while True:
+			task_ids = []
+			get_task_ids(result, ids=task_ids)
+			for task_id in task_ids:
+				info = get_task_info(task_id)
+				if not info:
+					continue
+				yield info
+
+			# Update all tasks to 100 %
+			if res.ready():
+				break
+
+			# Sleep between updates
+			sleep(1)
+
+
+	def process_live_tasks(self, result):
+		tasks_progress = Progress(
+			SpinnerColumn('dots'),
+			TextColumn('[bold gold3]{task.fields[name]}[/]'),
+			TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
+			TextColumn('{task.fields[state]:<20}'),
+			TimeElapsedColumn(),
+			TextColumn('{task.fields[count]}'),
+			TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),
+			refresh_per_second=1
+		)
+		state_colors = {
+			'RUNNING': 'bold yellow',
+			'SUCCESS': 'bold green',
+			'FAILURE': 'bold red',
+			'REVOKED': 'bold magenta'
+		}
+		with tasks_progress as progress:
+
+			# Make progress tasks
+			tasks_progress = {}
+
+			# Get live results and print progress
+			for info in Runner.get_live_results(result):
+
+				# Re-yield so that we can consume it externally
+				yield info
+
+ 				# Ignore partials in output unless DEBUG=1
+				if info['chunk'] and not DEBUG:
+					continue
+
+				# Handle error if any
+				state = info['state']
+				if info['error']:
+					state = 'FAILURE'
+					self.errors.append(
+						'Error in task {name} {chunk_info}:\n{error}'.format(**info)
+					)
+
+				task_id = info['id']
+				state_str = f'[{state_colors[state]}]{state}[/]'
+				info['state'] = state_str
+
+				if task_id not in tasks_progress:
+					id = progress.add_task('', **info)
+					tasks_progress[task_id] = id
+				else:
+					progress_id = tasks_progress[task_id]
+					if state in ['SUCCESS', 'FAILURE']:
+						progress.update(progress_id, advance=100, **info)
+
+			# Update all tasks to 100 %
+			for progress_id in tasks_progress.values():
+				progress.update(progress_id, advance=100)
+
+
+	def filter_results(self):
+		"""Filter results."""
+		extractors = self.config.results
+		results = []
+		if extractors:
+			# Keep results based on extractors
+			opts = merge_opts(self.config.options, self.run_opts)
+			for extractor in extractors:
+				tmp = process_extractor(self.results, extractor, ctx=opts)
+				results.extend(tmp)
+
+			# Keep the field types in results not specified in the extractors.
+			extract_fields = [e['type'] for e in extractors]
+			keep_fields = [
+				_type for _type in OUTPUT_TYPES
+				if _type not in extract_fields
+			]
+			results.extend([
+				item for item in self.results
+				if item['_type'] in keep_fields
+			])
+		else:
+			results = self.results
+		return results
 
 
 	@staticmethod
@@ -211,91 +339,7 @@ class Runner:
 			console.print(f':file_cabinet: Saved JSON report to {json_path}')
 
 
-	@staticmethod
-	def get_live_results(result):
-		"""Poll workflow results in real-time. Fetch task metadata and partial 
-		results from each task that runs.
-
-		Args:
-			result (celery.result.AsyncResult): Result object.
-
-		Yields:
-			dict: Current task state and results.
-		"""
-		res = AsyncResult(result.id)
-		while True:
-			task_ids = []
-			get_task_ids(result, ids=task_ids)
-			for task_id in task_ids:
-				info = get_task_info(task_id)
-				if not info:
-					continue
-				yield info
-
-			# Update all tasks to 100 %
-			if res.ready():
-				break
-
-			# Sleep between updates
-			sleep(1)
-
-
-	def process_live_tasks(self, result):
-		tasks_progress = Progress(
-			SpinnerColumn('dots'),
-			TextColumn('[bold gold3]{task.fields[name]}[/]'),
-			TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
-			TextColumn('{task.fields[state]:<20}'),
-			TimeElapsedColumn(),
-			TextColumn('{task.fields[count]}'),
-			TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),
-			refresh_per_second=1
-		)
-		state_colors = {
-			'RUNNING': 'bold yellow',
-			'SUCCESS': 'bold green',
-			'FAILURE': 'bold red',
-			'REVOKED': 'bold magenta'
-		}
-		with tasks_progress as progress:
-
-			# Make progress tasks
-			tasks_progress = {}
-
-			# Get live results and print progress
-			for info in Runner.get_live_results(result):
-
-				# Re-yield so that we can consume it externally
-				yield info
-
- 				# Ignore partials in output unless DEBUG=1
-				if info['chunk'] and not DEBUG:
-					continue
-
-				# Handle error if any
-				state = info['state']
-				if info['error']:
-					state = 'FAILURE'
-					self.errors.append(
-						'Error in task {name} {chunk_info}:\n{error}'.format(**info)
-					)
-
-				task_id = info['id']
-				state_str = f'[{state_colors[state]}]{state}[/]'
-				info['state'] = state_str
-
-				if task_id not in tasks_progress:
-					id = progress.add_task('', **info)
-					tasks_progress[task_id] = id
-				else:
-					progress_id = tasks_progress[task_id]
-					if state in ['SUCCESS', 'FAILURE']:
-						progress.update(progress_id, advance=100, **info)
-
-			# Update all tasks to 100 %
-			for progress_id in tasks_progress.values():
-				progress.update(progress_id, advance=100)
-
+# TODO: move all functions to utils
 
 def build_nodes_hierarchy(nodes):
 	for node in nodes:
@@ -333,28 +377,6 @@ def build_tree(root, node, nodes):
 	]
 	for child in children:
 		build_tree(subtree, child, nodes)
-
-
-def collect_results(result):
-	"""Collect results from complex workflow by parsing all parents.
-
-	Args:
-		result (Union[AsyncResult, GroupResult]): Celery result object.
-
-	Returns:
-		list: List of collected results.
-	"""
-	out = []
-	current = result
-	while not result.ready():
-		continue
-	result = result.get()
-	while(current.parent is not None):
-		current = current.parent
-		result = current.get()
-		if isinstance(result, list):
-			out.extend(result)
-	return out
 
 
 def get_table_fields(output_type):
