@@ -25,6 +25,7 @@ v0.1.0
 - [x] feat: add tasks statuses under main progress bar (turn `console.status` into a `Live` instance)
 
 **TODO:**
+- [ ] feat: add support for `jq` instead of doing local dangerous `eval` statements...
 - [ ] feat: avoid `nmap` duplicates by scanning subdomain ip instead of subdomain
 - [ ] feat: merge multiple workflow reports into one consolidated JSON report.
 - [ ] feat: add `--dry` flag to every workflow/scan/task command to test e.g pipes. `--dry` would use subprocess mock to run offline.
