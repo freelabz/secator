@@ -17,11 +17,15 @@ class Scan(Runner):
 			dict: Item yielded from individual workflow tasks.
 		"""
 		# Add target to results
+		self.sync = sync
 		self.results = results + [
 			{'name': name, '_source': 'scan', '_type': 'target'}
 			for name in self.targets
 		]
 		self.results = results
+
+		# Log scan start
+		self.log_start()
 
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
@@ -37,8 +41,10 @@ class Scan(Runner):
 				targets,
 				**self.run_opts
 			)
-			workflow_results = workflow.run(sync=sync, print_results=True)
+			workflow._print_table = False
+			workflow_results = workflow.run(sync=sync)
 			self.results.extend(workflow_results)
 
+		self.done = True
 		self.log_results()
 		return self.results

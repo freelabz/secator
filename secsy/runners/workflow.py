@@ -25,7 +25,7 @@ class Workflow(Runner):
 		list: List of results (when running in async mode with `run_async`).
 	"""
 
-	def run(self, sync=True, results=[], print_results=True):
+	def run(self, sync=True, results=[]):
 		"""Run workflow.
 
 		Args:
@@ -35,7 +35,6 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
-		self._print_table = print_results
 		self.sync = sync
 		fmt_opts = {
 			'print_timestamp': True,
@@ -78,7 +77,7 @@ class Workflow(Runner):
 		self.results = results
 		self.results = self.filter_results()
 		self.done = True
-		self.log_workflow()
+		self.log_results()
 		
 		return self.results
 
@@ -145,48 +144,3 @@ class Workflow(Runner):
 				sig = task.s(targets, **opts)
 			sigs.append(sig)
 		return sigs
-
-	def log_start(self):
-		"""Log workflow start."""
-		self.start_time = datetime.fromtimestamp(time())
-		remote_str = 'starting' if self.sync else 'sent to [bold gold3]Celery[/] worker'
-		console.print(f':tada: [bold green]Workflow[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
-		self.log_workflow()
-
-	def log_workflow(self):
-		"""Log workflow."""
-		# Print workflow options
-		if not self.done:
-			opts = merge_opts(self.run_opts, self.config.options)
-			console.print()
-			console.print(f'[bold gold3]Workflow:[/]    {self.config.name}')
-
-			# Description
-			description = self.config.description
-			if description:
-				console.print(f'[bold gold3]Description:[/] {description}')
-
-			# Targets
-			if self.targets:
-				console.print('Targets: ', style='bold gold3')
-				for target in self.targets:
-					console.print(f' • {target}')
-
-			# Options
-			from secsy.decorators import DEFAULT_CLI_OPTIONS
-			items = [
-				f'[italic]{k}[/]: {v}'
-				for k, v in opts.items()
-				if not k.startswith('print_') \
-					and k not in DEFAULT_CLI_OPTIONS \
-					and v is not None
-			]
-			if items:
-				console.print('Options:', style='bold gold3')
-				for item in items:
-					console.print(f' • {item}')
-			
-			console.print()
-
-		# Print workflow results
-		self.log_results()
