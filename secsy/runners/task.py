@@ -12,6 +12,7 @@ class Task(Runner):
 	_save_html = False
 	_save_json = False
 	_save_csv = False
+	_save_google_sheet = False
 
 	@confirm_exit
 	def run(self, sync=True):
