@@ -16,6 +16,7 @@ dependencies = [
     'dotmap',
     'free-proxy',
     'furl',
+    'gspread',
     'humanize',
     'pygments',
     'python-dotenv',
