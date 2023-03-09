@@ -1,20 +1,10 @@
 name: subdomain_recon
-description: Find subdomains and HTTP servers
-tags: [subdomain, url, vulnerability, subdomain_takeover]
+description: Find subdomains and takeovers
+tags: [subdomain, url, vulnerability, tech, subdomain_takeover]
 tasks:
   subfinder:
-  _group:
-    nuclei:
-      targets_:
-      - target.name
-      - subdomain.host
-      templates: takeovers/
-    _chain:
-      naabu:
-        targets_:
-          - target.name
-          - subdomain.host
-      httpx:
-        targets_:
-        - type: port
-          field: '{host}:{port}'
+  nuclei:
+    targets_:
+    - target.name
+    - subdomain.host
+    tags: [takeover, dns]
