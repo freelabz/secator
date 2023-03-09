@@ -9,8 +9,7 @@ from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
 
-from secsy.definitions import (CELERY_BROKER_URL, CELERY_FOLDER_IN,
-                               CELERY_FOLDER_OUT, CELERY_RESULT_BACKEND)
+from secsy.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER, CELERY_RESULT_BACKEND)
 from secsy.rich import console
 from secsy.runners import Task
 from secsy.runners._helpers import merge_extracted_values
@@ -30,8 +29,8 @@ app.conf.update({
 	# Broker config
 	'broker_url': CELERY_BROKER_URL,
 	'broker_transport_options': {
-		'data_folder_in': CELERY_FOLDER_IN,
-		'data_folder_out': CELERY_FOLDER_OUT,
+		'data_folder_in': CELERY_DATA_FOLDER,
+		'data_folder_out': CELERY_DATA_FOLDER,
 	},
 
 	# Backend config
