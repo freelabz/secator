@@ -31,7 +31,7 @@ class naabu(ReconCommand):
 	output_field = PORT # TODO: lambda self, x: '{host}:{port}'.format(**x)
 	output_table_sort_fields = (HOST, PORT)
 	output_type = PORT
-	install_cmd = 'go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'
+	install_cmd = 'sudo apt install -y libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'
 
 	@staticmethod
 	def on_item_converted(self, item):

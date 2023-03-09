@@ -40,7 +40,7 @@ class nmap(VulnCommand):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
-	install_cmd = 'sudo apt install nmap'
+	install_cmd = 'sudo apt install -y nmap'
 
 	def __iter__(self):
 		# TODO: deduplicate this and amass as it's the same function

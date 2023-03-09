@@ -123,6 +123,7 @@ def report_show(json_path, exclude_fields):
 @click.argument('cmds', required=False)
 def install(cmds):
 	"""Install commands."""
+	from secsy.rich import console
 	if cmds is not None:
 		cmds = cmds.split(',')
 		cmds = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
@@ -130,6 +131,7 @@ def install(cmds):
 		cmds = ALL_TASKS
 	for cls in cmds:
 		cls.install()
+		console.print()
 
 
 @utils.command()

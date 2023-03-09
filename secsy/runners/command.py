@@ -325,17 +325,31 @@ class Command:
 	@classmethod
 	def install(cls):
 		"""Install command by running the content of cls.install_cmd."""
+		console.log(f'Installing {cls.__name__}...', style='bold yellow')
 		if not cls.install_cmd:
-			logger.warning(f'Installation of "{cls.__name__}" is not supported yet. Please install it manually.')
+			console.log(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
 			return
-		return cls.run_command(cls.install_cmd, print_timestamp=True)
+		ret = cls.run_command(
+			cls.install_cmd,
+			name=cls.__name__,
+			print_timestamp=True,
+			print_cmd=True,
+			print_line=True,
+			cls_attributes={'shell': True}
+		)
+		if ret.return_code != 0:
+			console.log(f'Failed to install {cls.__name__}.', style='bold red')
+		else:
+			console.log(f'{cls.__name__} installed successfully !', style='bold green')
 
 	@classmethod
-	def run_command(cls, cmd, **kwargs):
+	def run_command(cls, cmd, name='helperClass', cls_attributes={}, **kwargs):
 		"""Run adhoc command. Can be used without defining an inherited class 
 		to run a command, while still enjoying all the good stuff in this class.
 		"""
-		helper_cls = type('helperClass', (Command,), {'cmd': cmd})(**kwargs)
+		helper_cls = type(name, (Command,), {'cmd': cmd})(**kwargs)
+		for k, v in cls_attributes.items():
+			setattr(helper_cls, k, v)
 		helper_cls._print_line = True
 		helper_cls.run()
 		return helper_cls
@@ -389,8 +403,13 @@ class Command:
 				universal_newlines=True,
 				shell=self.shell,
 				cwd=self.cwd)
-		except FileNotFoundError:
-			error = f'{self.name} not found. Install it with `secsy utils install {self.name}`.'
+		except FileNotFoundError as e:
+			if self.name in str(e):
+				error = f'{self.name} not installed.'
+				if self.install_cmd:
+					error += f' Install it with `secsy utils install {self.name}`.'
+			else:
+				error = str(e)
 			self.error = error
 			self.return_code = 1
 			if error:
@@ -479,7 +498,7 @@ class Command:
 
 		if self.return_code != 0 and not self.killed:
 			error = f'Command failed with return code {self.return_code}.'
-			if self.output:
+			if not self._print_line and self.output:
 				error += f' Output: {self.output}'
 			self.error = error
 			self._print(error, color='bold red')
