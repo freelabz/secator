@@ -220,7 +220,7 @@ def run_command(self, results, name, targets, opts={}):
 		# Handle task failure
 		if task_state == 'FAILURE':
 			exc_str = ' '.join(traceback.format_exception(
-				etype=type(task_exc),
+				task_exc,
 				value=task_exc,
 				tb=task_exc.__traceback__))
 			state['meta']['error'] = exc_str
