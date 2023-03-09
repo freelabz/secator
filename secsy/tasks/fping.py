@@ -9,7 +9,6 @@ class fping(ReconCommand):
 	cmd = 'fping -a'
 	file_flag = '-f'
 	input_flag = None
-	install_cmd = 'apt install fping'
 	ignore_return_code = True
 	opt_prefix = '--'
 	opt_key_map = {
@@ -29,6 +28,7 @@ class fping(ReconCommand):
 	output_type = IP
 	output_field = IP
 	output_table_sort_fields = (IP,)
+	install_cmd = 'sudo apt install -y fping'
 
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):
