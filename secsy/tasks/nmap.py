@@ -41,7 +41,6 @@ class nmap(VulnCommand):
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
 	install_cmd = 'sudo apt install nmap'
-	proxychains = False
 
 	def __iter__(self):
 		# TODO: deduplicate this and amass as it's the same function
