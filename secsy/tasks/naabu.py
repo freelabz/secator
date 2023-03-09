@@ -27,6 +27,9 @@ class naabu(ReconCommand):
 		TIMEOUT: lambda x: x*1000 if x and x > 0 else None, # convert to milliseconds
 		RETRIES: lambda x: 1 if x == 0 else x
 	}
+	output_map = {
+		PORT: lambda x: x['port']['Port']
+	}
 	output_schema = [PORT, HOST, IP]
 	output_field = PORT # TODO: lambda self, x: '{host}:{port}'.format(**x)
 	output_table_sort_fields = (HOST, PORT)
