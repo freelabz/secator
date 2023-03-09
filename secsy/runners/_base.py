@@ -200,9 +200,9 @@ class Runner:
 				state = info['state']
 				if info['error']:
 					state = 'FAILURE'
-					self.errors.append(
-						'Error in task {name} {chunk_info}:\n{error}'.format(**info)
-					)
+					error = 'Error in task {name} {chunk_info}:\n{error}'.format(**info)
+					if error not in self.errors:
+						self.errors.append(error)
 
 				task_id = info['id']
 				state_str = f'[{state_colors[state]}]{state}[/]'

@@ -17,19 +17,17 @@ ASCII = f"""
 
 # Celery local fs folders
 TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
-CELERY_FOLDER_IN = f'{TEMP_FOLDER}/celery/in'
-CELERY_FOLDER_OUT = f'{TEMP_FOLDER}/celery/out'
-CELERY_FOLDER_RESULTS = f'{TEMP_FOLDER}/celery/results'
+CELERY_DATA_FOLDER = f'{TEMP_FOLDER}/celery/data'
+CELERY_RESULTS_FOLDER = f'{TEMP_FOLDER}/celery/results'
 REPORTS_FOLDER = os.environ.get('REPORTS_FOLDER', '/tmp/reports')
-os.makedirs(CELERY_FOLDER_IN, exist_ok=True)
-os.makedirs(CELERY_FOLDER_OUT, exist_ok=True)
-os.makedirs(CELERY_FOLDER_RESULTS, exist_ok=True)
+os.makedirs(CELERY_DATA_FOLDER, exist_ok=True)
+os.makedirs(CELERY_RESULTS_FOLDER, exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 
 # Environment variables
 RECORD = bool(int(os.environ.get('RECORD', '0')))
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{CELERY_FOLDER_RESULTS}')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{CELERY_RESULTS_FOLDER}')
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 CVES_FOLDER = f'{TEMP_FOLDER}/cves'
 GOOGLE_DRIVE_PARENT_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_PARENT_FOLDER_ID')
