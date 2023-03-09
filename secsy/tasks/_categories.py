@@ -182,7 +182,7 @@ class VulnCommand(Command):
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
-		cvss = cve_info.get('cvss')
+		cvss = cve_info.get('cvss') or 0
 		# exploit_ids = cve_info.get('refmap', {}).get('exploit-db', [])
 		# osvdb_ids = cve_info.get('refmap', {}).get('osvdb', [])
 

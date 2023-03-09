@@ -44,7 +44,7 @@ class nuclei(VulnCommand):
 		VULN_DESCRIPTION: lambda x: x['info'].get('description'),
 		VULN_SEVERITY: lambda x: x['info'][VULN_SEVERITY],
 		VULN_CONFIDENCE: lambda x: 'high',
-		VULN_CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score'),
+		VULN_CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
 		VULN_MATCHED_AT:  'matched-at',
 		VULN_TAGS: lambda x: x['info']['tags'],
 		VULN_REFERENCES: lambda x: x['info']['reference'],
