@@ -40,7 +40,7 @@ class nmap(VulnCommand):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
-	install_cmd = 'sudo apt install -y nmap'
+	install_cmd = 'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
 
 	def __iter__(self):
 		# TODO: deduplicate this and amass as it's the same function
