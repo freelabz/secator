@@ -6,12 +6,11 @@ from time import sleep
 import celery
 from celery import chain, chord, signals
 from celery.app import trace
-from celery.exceptions import Ignore, Reject
 from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
 
-from secsy.definitions import (CELERY_BROKER_URL, CELERY_RESULT_BACKEND, DEBUG,
-                               TEMP_FOLDER)
+from secsy.definitions import (CELERY_BROKER_URL, CELERY_FOLDER_IN,
+                               CELERY_FOLDER_OUT, CELERY_RESULT_BACKEND)
 from secsy.rich import console
 from secsy.runners import Task
 from secsy.runners._helpers import merge_extracted_values
@@ -31,8 +30,8 @@ app.conf.update({
 	# Broker config
 	'broker_url': CELERY_BROKER_URL,
 	'broker_transport_options': {
-		'data_folder_in': f'{TEMP_FOLDER}/in',
-		'data_folder_out': f'{TEMP_FOLDER}/out',
+		'data_folder_in': CELERY_FOLDER_IN,
+		'data_folder_out': CELERY_FOLDER_OUT,
 	},
 
 	# Backend config
