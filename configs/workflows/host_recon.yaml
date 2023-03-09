@@ -4,20 +4,21 @@ tags: [subdomain, url, vulnerability]
 tasks:
   naabu:
   nmap:
+    targets_: port.ip
     ports_: port.port
   _group:
     nuclei:
       tags: [network, ssl]
       targets_:
         - type: port
-          field: '{host}:{port}'
+          field: '{ip}:{port}'
     _chain:
       httpx:
         targets_:
           - type: port
             field: '{host}:{port}'
       nuclei:
-        exclude_tags: [network, ssl]
+        exclude_tags: [network, ssl, file, dns, osint, token-spray]
         targets_:
           - type: url
             field: url
