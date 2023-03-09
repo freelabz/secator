@@ -169,7 +169,8 @@ def register_runner(cli_endpoint, config):
 	global_options = {
 		'sync': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Run tasks synchronously (automatic if no worker is alive).'},
 		'worker': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Run tasks in worker (automatic if worker is alive).'},
-		'debug': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Debug mode, show debug logs.'}
+		'debug': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Debug mode, show debug logs.'},
+		'proxy': {'help': f'[dim italic magenta]global[/]{help_padding}HTTP proxy.'},
 	}
 	options = get_command_options(*tasks)
 
@@ -186,11 +187,12 @@ def register_runner(cli_endpoint, config):
 	@decorate_command_options(global_options)
 	@decorate_command_options(options)
 	@click.pass_context
-	def func(ctx, sync, worker, debug, **opts):
+	def func(ctx, sync, worker, debug, proxy, **opts):
 		opts.update(fmt_opts)
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
+		opts['proxy'] = proxy
 		if cli_endpoint.name in ['scan', 'workflow']:
 			opts['print_item'] = debug
 			opts['print_line'] = debug
