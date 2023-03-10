@@ -8,17 +8,23 @@ from rich_click.rich_group import RichGroup
 from secsy.celery import is_celery_worker_alive
 from secsy.definitions import *
 from secsy.runners import Scan, Task, Workflow
-from secsy.utils import (expand_input, get_command_category, get_command_cls,
-                         get_task_name_padding)
+from secsy.utils import (deduplicate, expand_input, get_command_category,
+                         get_command_cls, get_task_name_padding)
 
-
-DEFAULT_CLI_OPTIONS = {
+DEFAULT_OUTPUT_OPTIONS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
 	'color': {'is_flag': True, 'default': False, 'help': 'Enable output coloring'},
 	'table': {'is_flag': True, 'default': False, 'help': 'Enable Table mode'},
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
+}
+
+DEFAULT_EXECUTION_OPTIONS = {
+	'sync': {'is_flag': True, 'help': f'Run tasks synchronously (automatic if no worker is alive)'},
+	'worker': {'is_flag': True, 'help': f'Run tasks in worker (automatic if worker is alive)'},
+	'debug': {'is_flag': True, 'help': f'Debug mode'},
+	'proxy': {'type': str, 'help': f'HTTP proxy'},
 }
 
 
@@ -71,28 +77,39 @@ def get_command_options(*tasks):
 	opt_cache = []
 	all_opts = OrderedDict({})
 	help_padding = get_task_name_padding()
+
 	for cls in tasks:
-		opts = OrderedDict(DEFAULT_CLI_OPTIONS, **cls.meta_opts, **cls.opts)
+		opts = OrderedDict(DEFAULT_EXECUTION_OPTIONS, **DEFAULT_OUTPUT_OPTIONS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
-			if opt not in cls.opt_key_map and opt not in cls.opts and opt not in DEFAULT_CLI_OPTIONS:
+
+			# Opt is not supported by this task
+			if opt not in cls.opt_key_map and opt not in cls.opts and opt not in DEFAULT_OUTPUT_OPTIONS and opt not in DEFAULT_EXECUTION_OPTIONS:
 				continue
+
 			if cls.opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
 				continue
+
+			# Get opt prefix
 			prefix = None
 			if opt in cls.opts:
 				prefix = cls.__name__
 			elif opt in cls.meta_opts:
-				prefix = 'meta'
-			elif opt in DEFAULT_CLI_OPTIONS:
-				prefix = 'global'
+				prefix = 'Meta'
+			elif opt in DEFAULT_OUTPUT_OPTIONS:
+				prefix = 'Output'
+			elif opt in DEFAULT_EXECUTION_OPTIONS:
+				prefix = 'Execution'
+
+			# Check if opt already processed before
 			opt = opt.replace('_', '-')
 			if opt in opt_cache:
 				continue
-			opt_conf['show_default'] = True
-			help = opt_conf.get('help', '')
-			if help and prefix and prefix not in help:
-				opt_conf['help'] = f'[dim italic magenta]{prefix:<{help_padding}}[/]{help}'
-			all_opts[opt] = opt_conf
+
+			# Build help
+			conf = opt_conf.copy()
+			conf['show_default'] = True
+			conf['prefix'] = prefix
+			all_opts[opt] = conf
 			opt_cache.append(opt)
 	return all_opts
 
@@ -109,7 +126,12 @@ def decorate_command_options(opts):
 	def decorator(f):
 		reversed_opts = OrderedDict(list(opts.items())[::-1])
 		for opt_name, opt_conf in reversed_opts.items():
-			f = click.option(f'--{opt_name}', **opt_conf)(f)
+			conf = opt_conf.copy()
+			short = conf.pop('short', None)
+			conf.pop('prefix', None)
+			long = f'--{opt_name}'
+			short = f'-{short}' if short else f'-{opt_name}'
+			f = click.option(long, short, **conf)(f)
 		return f
 	return decorator
 
@@ -137,6 +159,7 @@ def register_runner(cli_endpoint, config):
 			if workflow.name in list(config.workflows.keys())
 		]
 		input_type = 'targets'
+		name = config.name
 		short_help = config.description or ''
 		fmt_opts['json'] = True
 		runner_cls = Scan
@@ -147,6 +170,7 @@ def register_runner(cli_endpoint, config):
 			get_command_cls(task) for task in Task.get_tasks_from_conf(config.tasks)
 		]
 		input_type = 'targets'
+		name = config.name
 		short_help = config.description or ''
 		fmt_opts['json'] = True
 		runner_cls = Workflow
@@ -158,6 +182,7 @@ def register_runner(cli_endpoint, config):
 		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
 		input_type = task_cls.input_type or 'targets'
+		name = config.name
 		short_help = f'[dim italic magenta]{task_category:<10}[/]{task_cls.__doc__}'
 		fmt_opts['print_item'] = True
 		fmt_opts['print_line'] = True
@@ -165,13 +190,6 @@ def register_runner(cli_endpoint, config):
 		no_args_is_help = False
 		input_required = False
 
-	help_padding = ' ' * (get_task_name_padding() - 6)
-	global_options = {
-		'sync': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Run tasks synchronously (automatic if no worker is alive).'},
-		'worker': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Run tasks in worker (automatic if worker is alive).'},
-		'debug': {'is_flag': True, 'help': f'[dim italic magenta]global[/]{help_padding}Debug mode, show debug logs.'},
-		'proxy': {'help': f'[dim italic magenta]global[/]{help_padding}HTTP proxy.'},
-	}
 	options = get_command_options(*tasks)
 
 	# TODO: maybe allow this in the future
@@ -184,7 +202,6 @@ def register_runner(cli_endpoint, config):
 	# 	}
 
 	@click.argument(input_type, required=input_required)
-	@decorate_command_options(global_options)
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, sync, worker, debug, proxy, **opts):
@@ -218,3 +235,46 @@ def register_runner(cli_endpoint, config):
 		context_settings=settings,
 		no_args_is_help=no_args_is_help,
 		short_help=short_help)(func)
+
+	generate_rich_click_opt_groups(cli_endpoint, name, input_type, options)
+
+
+def generate_rich_click_command_groups(cli_endpoint, name, options):
+	sortorder = {
+		'Execution': 0,
+		'Output': 1,
+		'Meta': 2,
+	}
+	prefixes = deduplicate([opt['prefix'] for opt in options.values()])
+	prefixes = sorted(prefixes, key=lambda x: sortorder.get(x, 3))
+
+
+def generate_rich_click_opt_groups(cli_endpoint, name, input_type, options):
+	from secsy.utils import deduplicate
+	sortorder = {
+		'Execution': 0,
+		'Output': 1,
+		'Meta': 2,
+	}
+	prefixes = deduplicate([opt['prefix'] for opt in options.values()])
+	prefixes = sorted(prefixes, key=lambda x: sortorder.get(x, 3))
+	opt_group = [
+		{
+			'name': 'Targets',
+			'options': [input_type],
+		},
+	]
+	for prefix in prefixes:
+		prefix_opts = [
+			opt for opt, conf in options.items()
+			if conf['prefix'] == prefix
+		]
+		opt_names = [f'--{opt_name}' for opt_name in prefix_opts]
+		if prefix == 'Execution':
+			opt_names.append('--help')
+		opt_group.append({
+			'name': prefix + ' options',
+			'options': opt_names
+		})
+	endpoint_name = f'secsy {cli_endpoint.name} {name}'
+	click.rich_click.OPTION_GROUPS[endpoint_name] = opt_group
