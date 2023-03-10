@@ -123,7 +123,8 @@ def install(cmds):
 	else:
 		cmds = ALL_TASKS
 	for cls in cmds:
-		cls.install()
+		with console.status('Installing {cls.__name__} ...'):
+			cls.install()
 		console.print()
 
 @utils.command()
