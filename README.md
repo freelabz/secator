@@ -1,29 +1,49 @@
 # `secsy` - Sexy security swiss-knife
 
-`secsy` is a sexy security **security swiss-knife** that wraps common 
+`secsy` is a sexy security **security swiss-knife** that wraps common
 security-oriented commands in a single CLI.
 
-`secsy` is designed to not waste your time and make you efficient at 
+`secsy` is designed to not waste your time and make you efficient at
 vulnerability assessments, with the following feature set:
 
-* **Curated list of commands**: commands integrated to `secsy` are carefully chosen
-    to be **fast**, **efficient**, **well-mainted**, and have **structured 
-    output** (JSON, JSON lines, CSV, XML).
+* **Curated list of commands**: commands integrated to `secsy` are carefully 
+    chosen to be **fast**, **efficient**, **well-maintained**, and for the vast
+    majority have **structured output** (either `JSON`, `JSON lines`, `CSV`, or
+    `XML`) making it easier to build complex workflows (we do make exceptions
+    and write custom parsers for really awesome tools that don't have it).
 
-* **Unified input options**: commands belonging to the same category will have the
-    same input options, while still retaining the capability to add 
-    tool-specific options.
+* **Unified input options**: commands belonging to the same category will have
+    the same input options, while still retaining the capability to add specific
+    command options.
 
 * **Unified output schema**: commands belonging to the same category will have a
-    unified output schema, allowing you to run multiple commands and aggregate 
+    unified output schema, allowing you to run multiple commands and aggregate
     results quickly.
 
 * **CLI and library usage**:
-    * When `secsy` is called as a library from other Python code, the output is 
+    * When `secsy` is called as a library from other Python code, the output is
     always structured (list of dicts). Results are also yielded in realtime.
-    * When `secsy` is called as a CLI, various output formats are available, 
-    such as `plaintext` (default), `json` (`jq` compatible), `raw` (pipeable 
+    * When `secsy` is called as a CLI, various output formats are available,
+    such as `plaintext` (default), `json` (`jq` compatible), `raw` (pipeable
     to other commands) or `table` (nice to look at).
+
+* **Distributed options**:
+    * By default, `secsy` will work in synchronous mode in both CLI and library
+    modes.
+    * When you want to increase the scanning speed you can run in distributed
+    mode, where you can easily configure task queues with Celery by configuring
+    your broker and results backend.
+
+* **From simple tasks to complex workflows**:
+    * You can use `secsy` to run simple tasks like in CTFs, bug-bounties or 
+    hackathon, or to automate your whole recon and pentesting workflows.
+
+* **Customizable**:
+    * You can add more supported commands to `secsy` in a breeze (ad-hoc 
+    plugins), and contribute them back to the repo if they can serve the greater
+    good.
+    * You can create endless workflows with pretty much as much complexity as 
+    you like.
 
 
 ## Supported commands
@@ -31,30 +51,46 @@ vulnerability assessments, with the following feature set:
 `secsy` integrates the following commands: 
 
 **HTTP:**
-* [cariddi](https://github.com/edoardottt/cariddi) - Fast crawler and endpoint / secrets / api keys / tokens matcher.
+* [cariddi](https://github.com/edoardottt/cariddi) - Fast crawler and endpoint
+/ secrets / api keys / tokens matcher.
 * [dirsearch](https://github.com/maurosoria/dirsearch) - Web path discovery.
+* [feroxbuster](https://github.com/epi052/feroxbuster) - Simple, fast, recursive
+content discovery tool written in Rust.
 * [ffuf](https://github.com/ffuf/ffuf) - Fast web fuzzer written in Go.
-* [gau](https://github.com/lc/gau): Offline URL crawler (Alien Vault, The Wayback Machine, Common Crawl, URLScan).
-* [gospider](https://github.com/jaeles-project/gospider) - Fast web spider written in Go.
+* [gau](https://github.com/lc/gau): Offline URL crawler (Alien Vault, The
+Wayback Machine, Common Crawl, URLScan).
+* [gospider](https://github.com/jaeles-project/gospider) - Fast web spider
+written in Go.
 * [httpx](https://github.com/projectdiscovery/httpx) - Fast HTTP prober.
-* [katana](https://github.com/projectdiscovery/katana) - Next-generation crawling and spidering framework.
+* [katana](https://github.com/projectdiscovery/katana) - Next-generation
+crawling and spidering framework.
 
 **Misc:**
 * [gf](https://github.com/tomnomnom/gf) - A wrapper around grep to avoid typing common patterns.
-* [msfconsole](https://docs.rapid7.com/metasploit/msf-overview) - Provies a command line interface to access and work with the Metasploit Framework.
+* [msfconsole](https://docs.rapid7.com/metasploit/msf-overview) - CLI to access
+and work with the Metasploit Framework.
 
 **Recon:**
+* [fping](https://fping.org/) - Find alive hosts on local networks.
 * [maigret](https://github.com/soxoj/maigret) - Hunt for user accounts across many websites.
+* [mapcidr](https://github.com/projectdiscovery/mapcidr) - Expand CIDR ranges into IPs.
 * [naabu](https://github.com/projectdiscovery/naabu) - Fast port discovery tool.
 * [subfinder](https://github.com/projectdiscovery/subfinder) - Fast subdomain finder.
 
 **Vulnerabilities:**
 * [dalfox](https://github.com/hahwul/dalfox) - Powerful XSS scanning tool and parameter analyzer.
+* [grype](https://github.com/anchore/grype) - A vulnerability scanner for container images and filesystems.
 * [nmap](https://github.com/nmap/nmap) - Vulnerability scanner using NSE scripts.
 * [nuclei](https://github.com/projectdiscovery/nuclei) - Fast and customisable vulnerability scanner based on simple YAML based DSL.
 
 Feel free to request new commands to be added by opening an issue, but please 
-check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secsy`, you can plug it in (see #Developer-guide)
+check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secsy`, you can plug it in (see the [dev guide](#Developer-guide)).
+
+## Requirements
+
+* go
+* python3
+* pip3
 
 ## Installation
 
@@ -63,7 +99,7 @@ check that the command complies with our selection criterias before doing so. If
 git clone https://github.com/ocervell/secsy-cli
 cd secsy-cli
 python3 -m virtualenv -p python3 ~/.virtualenv/secsy
-python3 setup.py develop
+pip3 install -e .
 ```
 
 ## CLI Usage
@@ -74,63 +110,77 @@ python3 setup.py develop
 secsy --help
 ```
 
+#### Tasks
+
+Run any of the supported commands out-of-the box using the `secsy task` subcommand:
+
+```sh
+secsy task --help # list available commands
+secsy task <COMMAND> --help # list command options
+```
+
 #### Workflows
 
-A workflow is a set of pre-defined tasks that run one after the other.
+A workflow is a set of pre-defined tasks.
 
 You can run some pre-written workflows using the `secsy workflow` subcommand:
 
 ```sh
-secsy workflow <WORKFLOW_NAME> --help # list scan options
+secsy workflow --help # list available workflows
+secsy workflow <NAME> --help # list workflow options
 ```
 
 * **Basic host recon** (open ports, network + HTTP vulnerabilities):
     ```sh
-    secsy workflow host_scan 192.168.1.18
+    secsy workflow host_recon 192.168.1.18
     ```
 
-* **Basic domain recon** (OSInt, open ports, subdomains, vulnerabilities):
+* **Basic subdomain recon** (subdomains, root URLs):
     ```sh
-    secsy workflow domain_scan mydomain.com
+    secsy workflow subdomain_recon mydomain.com
     ```
 
-* **Basic URL finder:**
+* **Basic URL crawler:**
     ```sh
-    secsy workflow url_finder https://mydomain.com/start/crawling/from/here/
+    secsy workflow url_crawler https://mydomain.com/start/crawling/from/here/
     ```
 
-* **Internal network recon:**
+* **Basic URL fuzzer:**
     ```sh
-    secsy workflow network_recon 192.168.0.1/24
+    secsy workflow url_fuzzer https://mydomain.com/start/fuzzing/from/here/
     ```
 
-***Note:*** *To see all the available workflow options, use `--help`.*
+* **Internal CIDR recon:**
+    ```sh
+    secsy workflow cidr_recon 192.168.0.1/24
+    ```
+
+* **Code scan:**
+    ```sh
+    secsy workflow code_scan /path/to/code/repo
+    ```
+
 
 #### Scans
 
 A scan is a set of workflows that run one after the other.
 
-You can run some pre-written workflows using the `secsy scan` subcommand:
+You can run some pre-written scans using the `secsy scan` subcommand:
 
 ```sh
-secsy scan <SCAN_NAME> --help # list scan options
+secsy scan --help # list available scans
+secsy scan <NAME> --help # list scan options
 ```
 
-* **Default scan**:
+* **Domain scan**:
     ```sh
-    secsy scan default 192.168.1.18
+    secsy scan domain example.com
     ```
 
-***Note:*** *To see all the available scan options, use `--help`.*
-
-#### Commands
-
-Run any of the supported commands out-of-the box using the `secsy cmd` subcommand:
-
-```sh
-secsy cmd --help # list available commands
-secsy cmd <COMMAND> --help # list command options
-```
+* **Network scan**:
+    ```sh
+    secsy scan network 192.168.1.0/24
+    ```
 
 ### Input options
 
@@ -142,8 +192,8 @@ Input can be passed directly as an argument to the command / workflow / scan you
 wish to run:
 
 ```
-secsy cmd httpx example.com # single input
-secsy cmd httpx example.com,example2.com,example3.com # list input
+secsy task httpx example.com # single input
+secsy task httpx example.com,example2.com,example3.com # multiple inputs
 ```
 
 **File input**
@@ -151,7 +201,7 @@ secsy cmd httpx example.com,example2.com,example3.com # list input
 Input can also be passed from a file containing one item per line:
 
 ```
-secsy cmd httpx urls.txt
+secsy task httpx urls.txt
 ```
 
 **Stdin input**
@@ -160,13 +210,13 @@ Input can also be passed directly from stdin, which in combination with the
 `--raw --json` switch allows to build workflows directly in the CLI:
 
 ```
-cat urls.txt | secsy cmd httpx
+cat urls.txt | secsy task httpx
 ```
 
 An example for a common **ProjectDiscovery** pipe:
 
 ```
-secsy cmd subfinder example.com | secsy cmd httpx | secsy cmd nuclei
+secsy task subfinder example.com --raw --json | secsy task httpx --raw --json | secsy task nuclei
 ```
 
 ***Note:*** *for more complex workflows, we highly recommend using the YAML-based
@@ -175,10 +225,10 @@ workflow definitions or the code-based workflow definitions.*
 ### Output options
 
 The `secsy` CLI is built to be very flexible in terms of output formats:
-- `-json` for JSONLines output
-- `-json -color` for nicely formatted JSONLines output (`jq` style)
-- `-table` for nicely formatted table output
-- `-raw` for raw text output (consumable by other tools)
+- `--json` for JSONLines output
+- `--json --color` for nicely formatted JSONLines output (`jq` style)
+- `--table` for nicely formatted table output
+- `--raw` for plaintext output. When combined with `--json`, output single output field.
 
 If none of these options are passed, the command output will be the original 
 output.
@@ -216,8 +266,8 @@ wait for command to finish before outputting results (e.g: `nmap`).
 Options specified with the name of the command name prefixed will override 
 global options for that specific command.
 
-For instance, if you want a global rate limit of 1000, but for ffuf you want it 
-to be 100m you can do so:
+For instance, if you want a global rate limit of `1000` (reqs/s), but for ffuf you want it 
+to be `100` you can do so:
 
 ```py
 from secsy.tasks.http import ffuf, gau, gospider, katana
@@ -244,31 +294,31 @@ requests / minute.
 
 **Disabling default options:**
 
-Options sometimes have a default value that is considered 'sane' for all usage.
-
-Sometimes you might wish to disable those defaults and omit passing the option 
-instead. You can set the option to `False` in order to do this.
+Sometimes you might wish to omit passing the option and use the command 
+defaults. You can set the option to `False` in order to do this.
 
 ```py
 options = {
     'rate_limit': 1000, # reqs/mn
-    'ffuf_rate_limit': False, # explicitely disabling `rate_limit` option for ffuf
+    'ffuf_rate_limit': False, # explicitely disabling `rate_limit` option, will use ffuf defaults
 }
 ```
 
-**Finding subdomains and run HTTP probe on results**
+**Examples:**
+
+***Find subdomains using `subfinder` and run HTTP probe using `httpx` on found subdomains***
 ```py
 from secsy.tasks.recon import subfinder
 from secsy.tasks.http import httpx
 
 host = 'alibaba.com'
-subdomains = subfinder(host, threads=30).run()
-probe = httpx(host)
-if probe:
-    print('Found alive URL {url}[{status_code}]'.format(**probe))
+subdomains = subfinder(host, threads=30, raw=True).run()
+probes = httpx(subdomains).run()
+for probe in probes:
+    print('Found alive subdomain URL {url}[{status_code}]'.format(**probe))
 ```
 
-**Finding open ports and run nmap vulscan on results**
+***Find open ports and run `nmap`'s `vulscan` NSE script on results***
 
 ```py
 from secsy.tasks.recon import naabu
@@ -278,10 +328,11 @@ host = 'cnn.com'
 ports_data = naabu(host).run()
 ports = [p['port'] for p in ports_data]
 print(f'Open ports: {ports}')
-vulns = nmap(host, ports=ports, script='vulscan')
+for port in ports:
+    vulns = nmap(host, ports=ports, script='vulscan').run()
 ```
 
-**Finding URLs**
+***Finding URLs***
 
 ```py
 from secsy.utils import setup_logger
@@ -311,9 +362,65 @@ for tool in [gospider, katana, ffuf, gau]
 print(f'Found {len(all_urls)} URLs while scraping {host} !')
 
 # Probe URLs with httpx
-all_urls = httpx(all_urls, **opts)
+all_urls = httpx(all_urls, **opts).run()
 
 print(f'Found {len(probed_urls)} alive URLs while scraping {host} !')
+```
+
+## Distributed runs
+
+By default, `secsy` runs all tasks synchronously. You can set up a task queue 
+using Celery with the broker and a results backend of your choice, and run 
+Celery workers to execute tasks from the broker queue.
+
+The following is an example using `redis`, but you can use any [supported Celery 
+broker and backend](https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/index.html).
+
+**Install `redis`:**
+
+```sh
+sudo apt install redis
+```
+
+**Start `redis` and enable at boot:**
+```sh
+sudo systemctl enable redis
+sudo systemctl start redis
+```
+
+**Configure `secsy` to use Redis:**
+
+Create a `.env` file in the directory where you run `secsy`, and fill it like so:
+```
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+```
+
+**Start a Celery worker:**
+
+```
+secsy worker
+```
+
+**Run a built-in workflow:**
+
+```
+secsy workflow host_scan wikipedia.org
+```
+
+**Note:** If you want to run a workflow synchronously (bypassing the broker) 
+for some reason, you can use the `--sync` flag to force it to run synchronously.
+
+**Run a built-in workflow from Python:**
+
+```
+from secsy.runners import Workflow
+from secsy.config import ConfigLoader
+
+config = ConfigLoader(name='host_scan')
+workflow = Workflow(config)
+results = workflow.run()
+print(results)
 ```
 
 ## Developer guide
@@ -435,9 +542,9 @@ You can register this command with Click by adding it to the list
 `secsy.cli.ALL_CMDS`, and then use it from the CLI:
 
 ```
-secsy cmd bigdog --help
-secsy cmd bigdog loadsofcats.com
-secsy cmd bigdog loadsofcats.com -timeout 1 -rate 100 -json
+secsy task bigdog --help
+secsy task bigdog loadsofcats.com
+secsy task bigdog loadsofcats.com -timeout 1 -rate 100 -json
 ```
 
 Note that as CLI options defined in the class are automatically added to the 
@@ -445,7 +552,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **Table output** (`-table`)
     ```sh
-    $ secsy cmd bigdog loadsofcats.com -table
+    $ secsy task bigdog loadsofcats.com -table
         / \__
        (    @\___  =============
       /         O  BIGDOG v1.0.0
@@ -462,7 +569,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **JSON Lines output** (`-json`)
     ```sh
-    $ secsy cmd bigdog loadsofcats.com -json
+    $ secsy task bigdog loadsofcats.com -json
         / \__
        (    @\___  =============
       /         O  BIGDOG v1.0.0
@@ -474,7 +581,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **Quiet mode** (`-quiet`)
     ```sh
-    $ secsy cmd bigdog loadsofcats.com -quiet
+    $ secsy task bigdog loadsofcats.com -quiet
     ```
 
 ### Advanced example
