@@ -340,10 +340,10 @@ class Runner:
 		sheet_title = f'{data["info"]["title"]}_{timestr}'
 		results = data['results']
 		if not GOOGLE_CREDENTIALS_PATH:
-			console.print('Missing GOOGLE_CREDENTIALS_PATH to save to Google Sheets')
+			console.print(':file_cabinet: Missing GOOGLE_CREDENTIALS_PATH to save to Google Sheets', style='red')
 			return
 		if not GOOGLE_DRIVE_PARENT_FOLDER_ID:
-			console.print('Missing GOOGLE_DRIVE_PARENT_FOLDER_ID to save to Google Sheets.')
+			console.print(':file_cabinet: Missing GOOGLE_DRIVE_PARENT_FOLDER_ID to save to Google Sheets.', style='red')
 			return
 		client = gspread.service_account(GOOGLE_CREDENTIALS_PATH)
 		sheet = client.create(title, folder_id=GOOGLE_DRIVE_PARENT_FOLDER_ID)

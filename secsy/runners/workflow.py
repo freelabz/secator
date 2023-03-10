@@ -78,7 +78,7 @@ class Workflow(Runner):
 		self.results = self.filter_results()
 		self.done = True
 		self.log_results()
-		
+
 		return self.results
 
 	def build_celery_workflow(self, results=[]):
