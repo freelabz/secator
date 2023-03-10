@@ -325,7 +325,7 @@ class Command:
 	@classmethod
 	def install(cls):
 		"""Install command by running the content of cls.install_cmd."""
-		console.log(f'Installing {cls.__name__}...', style='bold yellow')
+		console.log(f':pill: Installing {cls.__name__}...', style='bold yellow')
 		if not cls.install_cmd:
 			console.log(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
 			return
@@ -341,6 +341,8 @@ class Command:
 			console.log(f'Failed to install {cls.__name__}.', style='bold red')
 		else:
 			console.log(f'{cls.__name__} installed successfully !', style='bold green')
+		return ret
+
 
 	@classmethod
 	def run_command(cls, cmd, name='helperClass', cls_attributes={}, **kwargs):
