@@ -225,10 +225,10 @@ workflow definitions or the code-based workflow definitions.*
 ### Output options
 
 The `secsy` CLI is built to be very flexible in terms of output formats:
-- `--json` for JSONLines output
-- `--json --color` for nicely formatted JSONLines output (`jq` style)
-- `--table` for nicely formatted table output
-- `--raw` for plaintext output. When combined with `--json`, output single output field.
+- `-json` for JSONLines output
+- `-json -color` for nicely formatted JSONLines output (`jq` style)
+- `-table` for nicely formatted table output
+- `-raw` for plaintext output (used for piping into other tools)
 
 If none of these options are passed, the command output will be the original 
 output.
