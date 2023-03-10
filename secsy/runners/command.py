@@ -149,12 +149,12 @@ class Command:
 
 		# Raw output
 		self._raw_output = self.cmd_opts.pop('raw', False)
-		
+
 		# No convert to unified schema
 		self._orig_output = self.cmd_opts.pop('orig', False)
 
 		# JSON Output
-		_json = self.cmd_opts.pop('json', False) or self._table_output
+		_json = self.cmd_opts.pop('json', False) or self._table_output or self._raw_output
 
 		# CLI mode: use nicer prints and colors (no logging statements)
 		self._print_timestamp = self.cmd_opts.pop('print_timestamp', False)
@@ -374,7 +374,7 @@ class Command:
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
-		# TODO: this is uniquely for logging timestamp to show up properly !!!
+		# TODO: this is rawuely for logging timestamp to show up properly !!!
 		if self._print_timestamp:
 			sleep(1)
 
@@ -527,7 +527,7 @@ class Command:
 				self.cmd_opts['proxy'] = self.proxy
 
 	def _process_results(self):
-		# TODO: this is uniquely for logging timestamp to show up properly !!!
+		# TODO: this is rawuely for logging timestamp to show up properly !!!
 		if self._print_timestamp:
 			sleep(1)
 
@@ -818,9 +818,10 @@ class Command:
 		# Print a line
 		elif isinstance(data, str):
 
-			# If raw mode (--raw), we might want to parse results with e.g 
-			# pipe redirections, so we need a pure line with no logging info
-			if not ignore_raw and (self._raw_output or self._orig_output):
+			# If orig mode (--orig) ir raw mode (--raw), we might want to 
+			# parse results with e.g pipe redirections, so we need a pure line 
+			# with no logging info.
+			if not ignore_raw and (self._orig_output, self._raw_output):
 				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
 				_console.print(data, highlight=False)
 			else:

@@ -38,8 +38,8 @@ class OrderedGroup(RichGroup):
 		a list of names, all after the first will be aliases for the first.
 		"""
 		def decorator(f):
-			aliased_group = []
 			aliases = kwargs.pop('aliases', [])
+			aliased_group = []
 			if aliases:
 				max_width = _get_rich_console().width
 				# we have a list so create group aliases
@@ -53,6 +53,7 @@ class OrderedGroup(RichGroup):
 
 			# create the main group
 			grp = super(OrderedGroup, self).group(*args, **kwargs)(f)
+			grp.aliases = aliases
 
 			# for all of the aliased groups, share the main group commands
 			for aliased in aliased_group:
@@ -76,7 +77,6 @@ def get_command_options(*tasks):
 	"""
 	opt_cache = []
 	all_opts = OrderedDict({})
-	help_padding = get_task_name_padding()
 
 	for cls in tasks:
 		opts = OrderedDict(DEFAULT_EXECUTION_OPTIONS, **DEFAULT_OUTPUT_OPTIONS, **cls.meta_opts, **cls.opts)
@@ -111,6 +111,7 @@ def get_command_options(*tasks):
 			conf['prefix'] = prefix
 			all_opts[opt] = conf
 			opt_cache.append(opt)
+
 	return all_opts
 
 
@@ -204,12 +205,11 @@ def register_runner(cli_endpoint, config):
 	@click.argument(input_type, required=input_required)
 	@decorate_command_options(options)
 	@click.pass_context
-	def func(ctx, sync, worker, debug, proxy, **opts):
+	def func(ctx, sync, worker, debug, **opts):
 		opts.update(fmt_opts)
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
-		opts['proxy'] = proxy
 		if cli_endpoint.name in ['scan', 'workflow']:
 			opts['print_item'] = debug
 			opts['print_line'] = debug
@@ -239,16 +239,6 @@ def register_runner(cli_endpoint, config):
 	generate_rich_click_opt_groups(cli_endpoint, name, input_type, options)
 
 
-def generate_rich_click_command_groups(cli_endpoint, name, options):
-	sortorder = {
-		'Execution': 0,
-		'Output': 1,
-		'Meta': 2,
-	}
-	prefixes = deduplicate([opt['prefix'] for opt in options.values()])
-	prefixes = sorted(prefixes, key=lambda x: sortorder.get(x, 3))
-
-
 def generate_rich_click_opt_groups(cli_endpoint, name, input_type, options):
 	from secsy.utils import deduplicate
 	sortorder = {
@@ -276,5 +266,7 @@ def generate_rich_click_opt_groups(cli_endpoint, name, input_type, options):
 			'name': prefix + ' options',
 			'options': opt_names
 		})
-	endpoint_name = f'secsy {cli_endpoint.name} {name}'
-	click.rich_click.OPTION_GROUPS[endpoint_name] = opt_group
+	aliases = [cli_endpoint.name, *cli_endpoint.aliases]
+	for alias in aliases:
+		endpoint_name = f'secsy {alias} {name}'
+		click.rich_click.OPTION_GROUPS[endpoint_name] = opt_group
