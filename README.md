@@ -849,7 +849,7 @@ format:
 * `output_field` (`str`, `default: None`):
 
     Return this field when specifying `--raw` to the CLI. 
-    Can be used to forward output to other tools
+    Can be used to forward output to other tools.
 
 * `shell` (`bool`, `default: False`):
 

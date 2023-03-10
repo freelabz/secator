@@ -11,13 +11,6 @@ from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER
 from secsy.runners import Command
 from secsy.utils import discover_tasks
 
-click.rich_click.USE_RICH_MARKUP = True
-click.rich_click.SHOW_ARGUMENTS = True # TODO: Turn to True and add help for arguments
-click.rich_click.GROUP_ARGUMENTS_OPTIONS = False
-click.rich_click.SHOW_METAVARS_COLUMN = False
-click.rich_click.APPEND_METAVARS_HELP = False
-# click.rich_click.STYLE_ERRORS_SUGGESTION = "magenta italic"
-
 DEBUG = bool(int(os.environ.get('DEBUG', '0')))
 YAML_MODE = bool(int(os.environ.get('YAML_MODE', '0')))
 ALL_TASKS = discover_tasks()
@@ -62,7 +55,7 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 	register_runner(workflow, config)
 
 
-@cli.group(aliases=['s', 'sc'])
+@cli.group(cls=OrderedGroup, aliases=['s', 'sc'])
 def scan():
 	"""Run a scan."""
 	pass
