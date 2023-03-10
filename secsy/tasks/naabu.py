@@ -9,8 +9,8 @@ class naabu(ReconCommand):
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {
-		PORTS: {'type': str, 'help':'Ports'},
-		TOP_PORTS: {'type': int, 'help': 'Top ports'}
+		PORTS: {'type': str, 'short': 'p', 'help':'Ports'},
+		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports'}
 	}
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,

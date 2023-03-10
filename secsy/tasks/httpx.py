@@ -14,8 +14,8 @@ class httpx(HTTPCommand):
 		'td': {'is_flag': True, 'default': True, 'help': 'Tech detection'},
 		'asn': {'is_flag': True, 'default': False, 'help': 'ASN detection'},
 		'cdn': {'is_flag': True, 'default': True, 'help': 'CDN detection'},
-		'filter_code': {'type': str, 'help': 'Filter HTTP codes'},
-		'filter_length': {'type': str, 'help': 'Filter length'},
+		'filter_code': {'type': str, 'short': 'fc', 'help': 'Filter HTTP codes'},
+		'filter_length': {'type': str, 'short': 'fl', 'help': 'Filter length'},
 	}
 	opt_key_map = {
 		HEADER: 'header',

@@ -12,10 +12,10 @@ class nuclei(VulnCommand):
 	input_chunk_size = 3 # TODO: figure out which chunk size is appropriate
 	json_flag = '-json'
 	opts = {
-		'templates': {'type': str, 'help': 'Templates'},
+		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'tags': {'type': str, 'help': 'Tags'},
-		'exclude_tags': {'type': str, 'help': 'Exclude tags'},
-		'exclude_severity': {'type': str, 'help': 'Exclude severity'}
+		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
+		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'}
 	}
 	opt_key_map = {
 		HEADER: 'header',

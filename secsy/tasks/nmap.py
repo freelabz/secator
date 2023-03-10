@@ -21,7 +21,7 @@ class nmap(VulnCommand):
 	opts = {
 		PORTS: {'type': str, 'help': 'Ports to scan'},
 		SCRIPT: {'type': str, 'default': 'vulscan/,vulners', 'help': 'NSE scripts'},
-		'output_path': {'type': str, 'default': None, 'help': 'Output XML file path'}
+		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'}
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,

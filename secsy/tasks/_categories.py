@@ -10,21 +10,36 @@ from secsy.runners import Command
 
 logger = logging.getLogger(__name__)
 
+OPTS = {
+	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
+	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
+	DEPTH: {'type': int, 'help': 'Scan / crawl depth'},
+	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'fr', 'help': 'Follow HTTP redirects'},
+	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
+	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
+	PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
+	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
+	RETRIES: {'type': int, 'help': 'Retries'},
+	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
+	TIMEOUT: {'type': int, 'help': 'Request timeout'},
+	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
+}
+
 
 class HTTPCommand(Command):
 	meta_opts = {
-		HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
-		DELAY: {'type': float, 'help': 'Delay to add between each requests'},
-		DEPTH: {'type': int, 'help': 'Scan / crawl depth'},
-		FOLLOW_REDIRECT: {'is_flag': True, 'help': 'Follow HTTP redirects'},
-		MATCH_CODES: {'type': str, 'help': 'Match HTTP status codes e.g "201,300,301"'},
-		METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
-		PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
-		RATE_LIMIT: {'type':  int, 'help': 'Rate limit, i.e max number of requests per second'},
-		RETRIES: {'type': int, 'help': 'Retries'},
-		THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
-		TIMEOUT: {'type': int, 'help': 'Request timeout'},
-		USER_AGENT: {'type': str, 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
+		HEADER: OPTS[HEADER],
+		DELAY: OPTS[DELAY],
+		DEPTH: OPTS[DEPTH],
+		FOLLOW_REDIRECT: OPTS[FOLLOW_REDIRECT],
+		MATCH_CODES: OPTS[MATCH_CODES],
+		METHOD: OPTS[METHOD],
+		PROXY: OPTS[PROXY],
+		RATE_LIMIT: OPTS[RATE_LIMIT],
+		RETRIES: OPTS[RETRIES],
+		THREADS: OPTS[THREADS],
+		TIMEOUT: OPTS[TIMEOUT],
+		USER_AGENT: OPTS[USER_AGENT],
 	}
 	input_type = URL
 	output_field = URL
@@ -57,27 +72,27 @@ class HTTPCommand(Command):
 
 class ReconCommand(Command):
 	meta_opts = {
-		DELAY: {'type': float, 'help': 'Delay to add between each requests'},
-		PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
-		RATE_LIMIT: {'type':  int, 'help': 'Rate limit, i.e max number of requests per second'},
-		RETRIES: {'type': int, 'help': 'Retries'},
-		THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
-		TIMEOUT: {'type': int, 'help': 'Request timeout'},
+		DELAY: OPTS[DELAY],
+		PROXY: OPTS[PROXY],
+		RATE_LIMIT: OPTS[RATE_LIMIT],
+		RETRIES: OPTS[RETRIES],
+		THREADS: OPTS[THREADS],
+		TIMEOUT: OPTS[TIMEOUT],
 	}
 	input_type = HOST
 
 
 class VulnCommand(Command):
 	meta_opts = {
-		HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
-		DELAY: {'type': float, 'help': 'Delay to add between each requests'},
-		FOLLOW_REDIRECT: {'is_flag': True, 'help': 'Follow HTTP redirects'},
-		PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
-		RATE_LIMIT: {'type':  int, 'help': 'Rate limit, i.e max number of requests per second'},
-		RETRIES: {'type': int, 'help': 'Retries'},
-		THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
-		TIMEOUT: {'type': int, 'help': 'Request timeout'},
-		USER_AGENT: {'type': str, 'help': 'User agent, e.g "Mozilla Firefox 1.0"'}
+		HEADER: OPTS[HEADER],
+		DELAY: OPTS[DELAY],
+		FOLLOW_REDIRECT: OPTS[FOLLOW_REDIRECT],
+		PROXY: OPTS[PROXY],
+		RATE_LIMIT: OPTS[RATE_LIMIT],
+		RETRIES: OPTS[RETRIES],
+		THREADS: OPTS[THREADS],
+		TIMEOUT: OPTS[TIMEOUT],
+		USER_AGENT: OPTS[USER_AGENT]
 	}
 	output_schema = [
 		VULN_MATCHED_AT,

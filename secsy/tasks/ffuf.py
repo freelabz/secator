@@ -12,13 +12,13 @@ class ffuf(HTTPCommand):
 	file_flag = None
 	json_flag = '-json'
 	opts = {
-		AUTO_CALIBRATION: {'is_flag': True, 'help': 'Filter out HTTP responses based on status codes, content length, etc.'},
-		WORDLIST: {'type': str, 'default': FFUF_DEFAULT_WORDLIST, 'help': 'Wordlist to fuzz from.'},
-		'mw': {'type': str, 'help': 'Match responses by content length'},
+		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Filter out HTTP responses based on status codes, content length, etc.'},
+		WORDLIST: {'type': str, 'short': 'w', 'default': FFUF_DEFAULT_WORDLIST, 'help': 'Wordlist to fuzz from.'},
+		'mw': {'type': str, 'help': 'Match responses by word count'},
 		'mr': {'type': str, 'help': 'Match regex in URL or response body'},
-		'fc': {'type': str, 'help': 'Exclude responses with HTTP status codes'},
-		'fw': {'type': str, 'help': 'Exclude responses by content length'},
-		'fr': {'type': str, 'help': 'Exclude responses matching regular expression'},
+		'fc': {'type': str, 'help': 'Filter out responses with HTTP codes'},
+		'fw': {'type': str, 'help': 'Filter out responses with word count'},
+		'fr': {'type': str, 'help': 'Filter out responses matching regular expression'},
 	}
 	opt_key_map = {
 		HEADER: 'H',
