@@ -383,7 +383,7 @@ class Command:
 
 		# Log cmd
 		if self._print_cmd:
-			self._print(self.cmd, color='bold cyan')
+			self._print(self.cmd, color='bold cyan', ignore_raw=True)
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -779,13 +779,14 @@ class Command:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr):
+	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False):
 		"""Print function.
 
 		Args:
 			data (str or dict): Input data.
 			color (str, Optional): Termcolor color.
-			prefix (bool, Optional): Add task name prefix before output.
+			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
+			ignore_raw (bool, Optional): Ignore raw mode.
 		"""
 		# Choose rich console
 		_console = console_stdout if out == sys.stdout else console
@@ -819,7 +820,7 @@ class Command:
 
 			# If raw mode (--raw), we might want to parse results with e.g 
 			# pipe redirections, so we need a pure line with no logging info
-			if self._raw_output or self._orig_output:
+			if not ignore_raw and (self._raw_output or self._orig_output):
 				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
 				_console.print(data, highlight=False)
 			else:
