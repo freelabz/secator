@@ -95,7 +95,7 @@ check that the command complies with our selection criterias before doing so. If
 ## Installation
 
 <!-- `pip3 install secsy` -->
-```
+```sh
 git clone https://github.com/ocervell/secsy-cli
 cd secsy-cli
 python3 -m virtualenv -p python3 ~/.virtualenv/secsy
@@ -106,7 +106,7 @@ pip3 install -e .
 
 ### Usage
 
-```
+```sh
 secsy --help
 ```
 
@@ -191,7 +191,7 @@ The `secsy` CLI is built to be flexible in terms of inputs:
 Input can be passed directly as an argument to the command / workflow / scan you 
 wish to run:
 
-```
+```sh
 secsy task httpx example.com # single input
 secsy task httpx example.com,example2.com,example3.com # multiple inputs
 ```
@@ -200,7 +200,7 @@ secsy task httpx example.com,example2.com,example3.com # multiple inputs
 
 Input can also be passed from a file containing one item per line:
 
-```
+```sh
 secsy task httpx urls.txt
 ```
 
@@ -209,13 +209,13 @@ secsy task httpx urls.txt
 Input can also be passed directly from stdin, which in combination with the 
 `--raw --json` switch allows to build workflows directly in the CLI:
 
-```
+```sh
 cat urls.txt | secsy task httpx
 ```
 
 An example for a common **ProjectDiscovery** pipe:
 
-```
+```sh
 secsy task subfinder example.com --raw --json | secsy task httpx --raw --json | secsy task nuclei
 ```
 
@@ -391,20 +391,20 @@ sudo systemctl start redis
 **Configure `secsy` to use Redis:**
 
 Create a `.env` file in the directory where you run `secsy`, and fill it like so:
-```
+```sh
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 ```
 
 **Start a Celery worker:**
 
-```
+```sh
 secsy worker
 ```
 
 **Run a built-in workflow:**
 
-```
+```sh
 secsy workflow host_scan wikipedia.org
 ```
 
@@ -413,11 +413,23 @@ for some reason, you can use the `--sync` flag to force it to run synchronously.
 
 **Run a built-in workflow from Python:**
 
-```
+```py
 from secsy.runners import Workflow
 from secsy.config import ConfigLoader
 
 config = ConfigLoader(name='host_scan')
+workflow = Workflow(config)
+results = workflow.run()
+print(results)
+```
+
+**Run a custom workflow from Python:**
+
+```py
+from secsy.runners import Workflow
+from secsy.config import COnfigLoader
+
+config = ConfigLoader(path='/path/to/my/custom/workflow.yaml')
 workflow = Workflow(config)
 results = workflow.run()
 print(results)
@@ -836,7 +848,7 @@ format:
 
 * `output_field` (`str`, `default: None`):
 
-    Return this field when specifying `-raw` to the CLI. 
+    Return this field when specifying `--raw` to the CLI. 
     Can be used to forward output to other tools
 
 * `shell` (`bool`, `default: False`):
@@ -859,7 +871,7 @@ format:
 
     Callback to modify item with original schema. Must return the item.
 
-* `def on_item_convert(self, item)`:
+* `def on_item_converted(self, item)`:
 
     Callback to modify item with the target schema defined by `self.output_schema`. Must return the item.
 
@@ -880,17 +892,6 @@ format:
     Returns True if item needs to be kept (yielded), or False if item can be 
     skipped.
 
-* `def before_cmd_build(self)`:
+* `def item_loader(self, line)`:
 
-    Callback to run before building the command line string. Must return `None`.
-
-* `def after_cmd_build(self)`:
-
-    Callback to run after building the command line string. Must return `None`.
-
-* `def load_item(self, line)`:
-
-    Load a line as dictionary. Defaults to `yaml.safe_load(line)`. Can be used when
-    cmds do not support JSON (`json_flag` is not `None`) but we still want to
-    parse the output as JSON. This is where you add output regex parsers and
-    the like.
+    Load a line as dictionary.
