@@ -126,7 +126,6 @@ def install(cmds):
 		cls.install()
 		console.print()
 
-
 @utils.command()
 @click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
 def get_proxy(timeout):
