@@ -45,7 +45,7 @@ class ffuf(HTTPCommand):
 		TIME: lambda x: x['duration'] * 10**-9
 	}
 	encoding = 'ansi'
-	install_cmd = 'go install -v github.com/ffuf/ffuf@latest'
+	install_cmd = 'go install -v github.com/ffuf/ffuf@latest && git clone https://github.com/danielmiessler/SecLists /usr/share/seclists'
 
 	@staticmethod
 	def validate_input(self, input):
