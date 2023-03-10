@@ -823,7 +823,7 @@ class Command:
 			# If orig mode (--orig) ir raw mode (--raw), we might want to 
 			# parse results with e.g pipe redirections, so we need a pure line 
 			# with no logging info.
-			if not ignore_raw and (self._orig_output, self._raw_output):
+			if not ignore_raw and (self._orig_output or self._raw_output):
 				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
 				_console.print(data, highlight=False)
 			else:
