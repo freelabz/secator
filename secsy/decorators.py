@@ -27,6 +27,8 @@ DEFAULT_EXECUTION_OPTIONS = {
 	'proxy': {'type': str, 'help': f'HTTP proxy'},
 }
 
+DEFAULT_CLI_OPTIONS = list(DEFAULT_OUTPUT_OPTIONS.keys()) + list(DEFAULT_EXECUTION_OPTIONS.keys())
+
 
 class OrderedGroup(RichGroup):
 	def __init__(self, name=None, commands=None, **attrs):
