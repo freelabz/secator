@@ -4,15 +4,19 @@ import sys
 
 import rich_click as click
 from dotmap import DotMap
+from fp.fp import FreeProxy
 
+from secsy.celery import *
 from secsy.config import ConfigLoader
 from secsy.decorators import OrderedGroup, register_runner
-from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER
+from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, ROOT_FOLDER, DEBUG
+from secsy.rich import console
 from secsy.runners import Command
-from secsy.utils import discover_tasks
+from secsy.runners._base import Runner
+from secsy.utils import discover_tasks, flatten
 
-DEBUG = bool(int(os.environ.get('DEBUG', '0')))
-YAML_MODE = bool(int(os.environ.get('YAML_MODE', '0')))
+click.rich_click.USE_RICH_MARKUP = True
+
 ALL_TASKS = discover_tasks()
 ALL_CONFIGS = ConfigLoader.load_all()
 ALL_WORKFLOWS = ALL_CONFIGS.workflows
@@ -22,6 +26,8 @@ DEFAULT_CMD_OPTS = {
 	'print_cmd': True,
 	'print_timestamp': True
 }
+if DEBUG:
+	console.print(f'Celery app configuration:\n{app.conf}')
 
 
 #--------#
@@ -92,15 +98,14 @@ def worker(concurrency, reload):
 
 @utils.group()
 def report():
+	"""Reporting utilities."""
 	pass
 
 @report.command('show')
 @click.argument('json_path')
 @click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
 def report_show(json_path, exclude_fields):
-	from secsy.runners._base import Runner
-	from secsy.utils import flatten
-	from secsy.rich import console
+	"""Show a JSON report as a nicely-formatted table."""
 	with open(json_path, 'r') as f:
 		report = json.load(f)
 		results = flatten(list(report['results'].values()))
@@ -115,22 +120,22 @@ def report_show(json_path, exclude_fields):
 @utils.command()
 @click.argument('cmds', required=False)
 def install(cmds):
-	"""Install commands."""
-	from secsy.rich import console
+	"""Install secsy-supported commands."""
 	if cmds is not None:
 		cmds = cmds.split(',')
 		cmds = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
 	else:
 		cmds = ALL_TASKS
 	for cls in cmds:
-		with console.status('Installing {cls.__name__} ...'):
+		with console.status(f'Installing {cls.__name__} ...'):
 			cls.install()
 		console.print()
+
 
 @utils.command()
 @click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
 def get_proxy(timeout):
-	from fp.fp import FreeProxy
+	"""Get a random proxy."""
 	url = FreeProxy(timeout=timeout, rand=True, anonym=True).get()
 	print(url)
 
@@ -138,6 +143,7 @@ def get_proxy(timeout):
 @utils.command()
 @click.option('--force', is_flag=True)
 def download_cves(force):
+	"""Download CVEs to file system. CVE lookup perf is improved quite a lot."""
 	cve_json_path = f'{TEMP_FOLDER}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		Command.run_command(
@@ -165,13 +171,29 @@ def download_cves(force):
 
 @utils.command()
 def check_celery_worker():
-	from secsy.celery import is_celery_worker_alive
-	from secsy.rich import console
+	"""Generate if a Celery worker is ready to consume from the queue."""
 	alive = is_celery_worker_alive()
 	if alive:
 		console.print('Celery worker is alive !', style='bold green')
 	else:
 		console.print('No Celery worker alive.', style='bold red')
+
+
+@utils.command()
+def generate_bash_install():
+	"""Generate bash install script for all secsy-supported tasks."""
+	path = ROOT_FOLDER + '/scripts/install.sh'
+	with open(path, 'w') as f:
+		f.write('#!/bin/bash\n\n')
+		for task in ALL_TASKS:
+			if task.install_cmd:
+				f.write(f'# {task.__name__}\n')
+				f.write(task.install_cmd + '\n\n')
+	Command.run_command(
+		f'chmod +x {path}',
+		**DEFAULT_CMD_OPTS
+	)
+	console.print(f':file_cabinet: [bold green]Saved install script to {path}[/]')
 
 
 #------#
