@@ -1,0 +1,27 @@
+version: "3.7"
+
+services:
+
+  secsy:
+    image: secsy
+    restart: unless-stopped
+    entrypoint: ""
+    command: tail -F anything
+    environment:
+    - CELERY_BROKER_URL=redis://redis:6379/0
+    - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  worker:
+    image: secsy
+    restart: unless-stopped
+    command: worker
+    environment:
+    - CELERY_BROKER_URL=redis://redis:6379/0
+    - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:latest

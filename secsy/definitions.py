@@ -20,6 +20,7 @@ TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
 CELERY_DATA_FOLDER = f'{TEMP_FOLDER}/celery/data'
 CELERY_RESULTS_FOLDER = f'{TEMP_FOLDER}/celery/results'
 REPORTS_FOLDER = os.environ.get('REPORTS_FOLDER', '/tmp/reports')
+ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 os.makedirs(CELERY_DATA_FOLDER, exist_ok=True)
 os.makedirs(CELERY_RESULTS_FOLDER, exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)

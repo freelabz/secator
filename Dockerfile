@@ -16,18 +16,10 @@ RUN apt update -y && \
     python3.10 \
     python3-dev \
     python3-pip \
+    curl \
+    git \
+    sudo \
     wget
-
-# Download and install go 1.19
-RUN wget https://golang.org/dl/go1.19.5.linux-amd64.tar.gz
-RUN tar -xvf go1.19.5.linux-amd64.tar.gz
-RUN rm go1.19.5.linux-amd64.tar.gz
-RUN mv go /usr/local
-
-# Install nmap + vulscan
-RUN apt install -y nmap
-RUN git clone https://github.com/scipag/vulscan /usr/local/src/vulscan
-RUN ln -s /usr/local/src/vulscan /usr/share/nmap/scripts/vulscan
 
 # Install metasploit
 RUN apt install -y \
@@ -62,17 +54,28 @@ RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/conf
 RUN chmod 755 msfinstall
 RUN ./msfinstall
 
-# Download wordlists
-RUN mkdir -p /usr/src/wordlist
-RUN wget https://raw.githubusercontent.com/maurosoria/dirsearch/master/db/dicc.txt -O /usr/src/wordlist/dicc.txt
+# Download and install go 1.19
+RUN wget https://golang.org/dl/go1.20.2.linux-amd64.tar.gz
+RUN tar -xvf go1.20.2.linux-amd64.tar.gz
+RUN rm go1.20.2.linux-amd64.tar.gz
+RUN mv go /usr/local
 
 # Copy code
 WORKDIR /code
-COPY . /code/
+
+# Install secsy tasks
+COPY scripts/install.sh .
+RUN ./install.sh
 
 # Install Python package and CLI
-RUN pip3 install -e .
-RUN pip3 install -e .[test]
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Install all tasks supported by `secsy`
-RUN secsy utils install
+# Copy rest of the code
+COPY . /code/
+
+# Install secsy
+RUN pip3 install --no-deps .
+
+# Set entrypoint
+ENTRYPOINT ["secsy"]
