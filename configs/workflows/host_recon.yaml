@@ -2,27 +2,23 @@ name: host_recon
 description: Run vulnerability scan on network and HTTP services
 tags: [subdomain, url, vulnerability]
 tasks:
-  naabu:
+  _group:
+    naabu:
+    nuclei:
+      tags: [network, ssl]
   nmap:
     targets_: port.ip
     ports_: port.port
-  _group:
-    nuclei:
-      tags: [network, ssl]
-      targets_:
-        - type: port
-          field: '{ip}:{port}'
-    _chain:
-      httpx:
-        targets_:
-          - type: port
-            field: '{host}:{port}'
-      nuclei:
-        exclude_tags: [network, ssl, file, dns, osint, token-spray]
-        targets_:
-          - type: url
-            field: url
-            condition: item['status_code'] is not None
+  httpx:
+    targets_:
+      - type: port
+        field: '{host}:{port}'
+  nuclei:
+    exclude_tags: [network, ssl, file, dns, osint, token-spray]
+    targets_:
+      - type: url
+        field: url
+        condition: item['status_code'] is not None
 results:
   - type: vulnerability
     condition: item['confidence'] == 'high'
