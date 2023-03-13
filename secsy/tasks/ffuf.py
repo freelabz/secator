@@ -52,11 +52,6 @@ class ffuf(HTTPCommand):
 		"""No list input supported for this command. Pass a single input instead."""
 		if isinstance(input, list):
 			return False
-
-		# Remove query path and add /FUZZ keyword
-		self.input = urlunparse(urlparse(self.input))
-		if not self.input.endswith('FUZZ'):
-			self.input = self.input.rstrip('/') + '/FUZZ'
 		return True
 
 	@staticmethod
