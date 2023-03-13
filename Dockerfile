@@ -55,14 +55,12 @@ RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/conf
 RUN chmod 755 msfinstall
 RUN ./msfinstall
 
-# Download and install go 1.19
-RUN wget https://golang.org/dl/go1.20.2.linux-amd64.tar.gz
-RUN tar -xvf go1.20.2.linux-amd64.tar.gz
-RUN rm go1.20.2.linux-amd64.tar.gz
-RUN mv go /usr/local
-
 # Copy code
 WORKDIR /code
+
+# Download and install go 1.19
+COPY scripts/install_go.sh .
+RUN ./install_go.sh
 
 # Download CVEs
 COPY scripts/download_cves.sh .
