@@ -6,3 +6,6 @@ tasks:
     dirsearch:
     feroxbuster:
     ffuf:
+      target_:
+        type: target
+        field: '{name}/FUZZ'
