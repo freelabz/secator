@@ -28,6 +28,7 @@ RUN apt install -y \
     autoconf \
     bison \
     build-essential \
+    jq \
     postgresql \
     libaprutil1 \
     libgmp3-dev \
@@ -62,6 +63,10 @@ RUN mv go /usr/local
 
 # Copy code
 WORKDIR /code
+
+# Download CVEs
+COPY scripts/download_cves.sh .
+RUN ./download_cves.sh
 
 # Install secsy tasks
 COPY scripts/install.sh .
