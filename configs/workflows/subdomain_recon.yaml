@@ -3,6 +3,17 @@ description: Find subdomains and takeovers
 tags: [subdomain, url, vulnerability, tech, subdomain_takeover]
 tasks:
   subfinder:
+  # TODO: add subdomain bruteforcers
+  # gobuster:
+  #   input: vhost
+  #   domain_:
+  #     - target.name
+  #   wordlist: /usr/share/seclists/Discovery/DNS/combined_subdomains.txt
+  # gobuster:
+  #   input: dns
+  #   domain_:
+  #     - target.name
+  #   wordlist: /usr/share/seclists/Discovery/DNS/combined_subdomains.txt
   _group:
     nuclei:
       targets_:
