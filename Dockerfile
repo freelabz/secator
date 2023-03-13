@@ -58,13 +58,13 @@ RUN ./msfinstall
 # Copy code
 WORKDIR /code
 
-# Download and install go 1.19
-COPY scripts/install_go.sh .
-RUN ./install_go.sh
-
 # Download CVEs
 COPY scripts/download_cves.sh .
 RUN ./download_cves.sh
+
+# Download and install go 1.19
+COPY scripts/install_go.sh .
+RUN ./install_go.sh
 
 # Install secsy tasks
 COPY scripts/install.sh .
