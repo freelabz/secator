@@ -67,8 +67,8 @@ COPY scripts/install_go.sh .
 RUN ./install_go.sh
 
 # Install secsy tasks
-COPY scripts/install.sh .
-RUN ./install.sh
+COPY scripts/install_commands.sh .
+RUN ./install_commands.sh
 
 # Install Python package and CLI
 COPY requirements.txt .
