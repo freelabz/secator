@@ -126,8 +126,8 @@ def install(cmds):
 		cmds = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
 	else:
 		cmds = ALL_TASKS
-	for cls in cmds:
-		with console.status(f'Installing {cls.__name__} ...'):
+	for ix, cls in enumerate(cmds):
+		with console.status(f'[{ix}/{len(cmds)}] Installing {cls.__name__} ...'):
 			cls.install()
 		console.print()
 
