@@ -182,7 +182,7 @@ def check_celery_worker():
 @utils.command()
 def generate_bash_install():
 	"""Generate bash install script for all secsy-supported tasks."""
-	path = ROOT_FOLDER + '/scripts/install.sh'
+	path = ROOT_FOLDER + '/scripts/install_commands.sh'
 	with open(path, 'w') as f:
 		f.write('#!/bin/bash\n\n')
 		for task in ALL_TASKS:
