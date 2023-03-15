@@ -149,6 +149,7 @@ class Command:
 
 		# Raw output
 		self._raw_output = self.cmd_opts.pop('raw', False)
+		self._format_output = self.cmd_opts.pop('format', False)
 
 		# No convert to unified schema
 		self._orig_output = self.cmd_opts.pop('orig', False)
@@ -573,7 +574,9 @@ class Command:
 
 		# In raw output mode, extract principal key from dict.
 		if self._raw_output and self.output_field is not None:
-			if callable(self.output_field):
+			if self._format_output:
+				item = self._format_output.format(**item)
+			elif callable(self.output_field):
 				item = self.output_field(item)
 			else:
 				item = item[self.output_field]
@@ -818,7 +821,7 @@ class Command:
 			log_json(data) if self.color and self._print_item else _console.print(data, highlight=False)
 
 		# Print a line
-		elif isinstance(data, str):
+		else:
 
 			# If orig mode (--orig) ir raw mode (--raw), we might want to 
 			# parse results with e.g pipe redirections, so we need a pure line 

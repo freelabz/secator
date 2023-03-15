@@ -15,6 +15,8 @@ DEFAULT_OUTPUT_OPTIONS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
+	'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
+	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter'}, # TODO add this
 	'color': {'is_flag': True, 'default': False, 'help': 'Enable output coloring'},
 	'table': {'is_flag': True, 'default': False, 'help': 'Enable Table mode'},
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
@@ -207,8 +209,11 @@ def register_runner(cli_endpoint, config):
 	@click.argument(input_type, required=input_required)
 	@decorate_command_options(options)
 	@click.pass_context
-	def func(ctx, sync, worker, debug, **opts):
+	def func(ctx, **opts):
 		opts.update(fmt_opts)
+		sync = opts['sync']
+		worker = opts['worker']
+		debug = opts['debug']
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
