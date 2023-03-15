@@ -117,7 +117,7 @@ class VulnCommand(Command):
 		VULN_CVSS_SCORE,
 		VULN_TAGS,
 		VULN_EXTRACTED_RESULTS,
-		'reference'
+		VULN_REFERENCE
 	]
 	output_table_sort_fields = ('_confidence', '_severity', 'matched_at', 'cvss_score')
 	output_type = VULN
@@ -273,5 +273,5 @@ class VulnCommand(Command):
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
 		data = VulnCommand.lookup_cve(cve_id)
-		data['tags'].append('ghsa')
+		data[VULN_TAGS].append('ghsa')
 		return data
