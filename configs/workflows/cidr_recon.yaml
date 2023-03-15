@@ -1,4 +1,5 @@
 name: cidr_recon
+alias: cidrrec
 description: Discover network IPs and HTTP servers
 tags: [cidr, network]
 tasks:

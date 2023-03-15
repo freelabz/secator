@@ -1,4 +1,5 @@
 name: subdomain_recon
+alias: subrec
 description: Find subdomains and takeovers
 tags: [subdomain, url, vulnerability, tech, subdomain_takeover]
 tasks:
