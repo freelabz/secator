@@ -260,7 +260,8 @@ class Command:
 		# TODO: running chunked group .apply() in run_command doesn't work if 
 		# this isn't set explicitely to False for **VERY** obscure reasons
 		kwargs['sync'] = False
-		return run_command.delay([], cls.__name__, *args, opts=kwargs)
+		results = kwargs.get('results', [])
+		return run_command.delay(results, cls.__name__, *args, opts=kwargs)
 
 	@classmethod
 	def s(cls, *args, **kwargs):
