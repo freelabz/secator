@@ -43,7 +43,7 @@ def cli(no_banner):
 	pass
 
 
-@cli.group(aliases=['+', 'task', 't', 'cmd'])
+@cli.group(aliases=['x', 'task', 't', 'cmd'])
 def task():
 	"""Run a task."""
 	pass
@@ -52,7 +52,8 @@ for cls in ALL_TASKS:
 	config = DotMap({'name': cls.__name__})
 	register_runner(task, config)
 
-@cli.group(cls=OrderedGroup, aliases=['x', 'w', 'wf', 'flow'])
+
+@cli.group(cls=OrderedGroup, aliases=['w', 'wf', 'flow'])
 def workflow():
 	"""Run a workflow."""
 	pass
@@ -61,7 +62,7 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 	register_runner(workflow, config)
 
 
-@cli.group(cls=OrderedGroup, aliases=['s', 'sc'])
+@cli.group(cls=OrderedGroup, aliases=['z', 's', 'sc'])
 def scan():
 	"""Run a scan."""
 	pass

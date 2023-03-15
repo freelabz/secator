@@ -42,6 +42,7 @@ class Workflow(Runner):
 			'print_cmd_prefix': not sync,
 			'print_item_count': True,
 			'sync': sync,
+			'raw_yield': False
 		}
 		self.run_opts = merge_opts(self.run_opts, fmt_opts)
 

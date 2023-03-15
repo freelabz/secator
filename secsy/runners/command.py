@@ -191,6 +191,7 @@ class Command:
 		self.output_table_fields = self.cmd_opts.pop(
 			'table_fields',
 			self.output_table_fields)
+		self._raw_yield = self.cmd_opts.pop('raw_yield', True)
 
 		# Hooks
 		self._hooks = {name: [] for name in HOOKS}
@@ -344,7 +345,6 @@ class Command:
 			console.log(f'{cls.__name__} installed successfully !', style='bold green')
 		return ret
 
-
 	@classmethod
 	def run_command(cls, cmd, name='helperClass', cls_attributes={}, **kwargs):
 		"""Run adhoc command. Can be used without defining an inherited class 
@@ -460,7 +460,7 @@ class Command:
 						yield item
 				elif line:
 					if self._print_line and not (self.quiet and self._json_output):
-						self._print(line, out=sys.stdout)
+						self._print(line, out=sys.stderr)
 					if not self.output_return_type is dict:
 						self.results.append(line)
 						yield line
@@ -484,6 +484,7 @@ class Command:
 
 		# Retrieve the return code and output
 		self._wait_for_end(process)
+
 
 	def _wait_for_end(self, process):
 		"""Wait for process to finish and process output and return code."""
@@ -572,7 +573,32 @@ class Command:
 		# Add item to result
 		self.results.append(item)
 
-		# In raw output mode, extract principal key from dict.
+		# Item to print
+		item_str = item
+
+		# In raw mode, print principal key or output format field.
+		if self._raw_output and self.output_field is not None:
+			item_str = self._rawify(item)
+
+		# In raw yield mode, extract principal key from dict (default 'on' for library usage)
+		if self._raw_yield and self.output_field is not None:
+			item = self._rawify(item)
+			item_str = item
+
+		# Print item to console or log
+		if self._print_item and self._json_output and not self._table_output:
+			self._print(item_str, out=sys.stdout)
+
+		# Return item
+		return item
+
+
+	def _rawify(self, item=None):
+		if not item:
+			return [
+				self._convert_output_format(item)
+				for item in self.results
+			]
 		if self._raw_output and self.output_field is not None:
 			if self._format_output:
 				item = self._format_output.format(**item)
@@ -580,13 +606,6 @@ class Command:
 				item = self.output_field(item)
 			else:
 				item = item[self.output_field]
-
-		# Print item to console or log, except in table output where we 
-		# want to wait for all the results to come through before printing.
-		if self._print_item and self._json_output and not self._table_output:
-			self._print(item, out=sys.stdout)
-
-		# Return item
 		return item
 
 

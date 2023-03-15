@@ -36,7 +36,8 @@ class Task(Runner):
 			'print_item_count': True,
 			'print_line': True,
 			'sync': sync,
-			'json': json or not sync,
+			'json': json or table or not sync,
+			'raw_yield': False
 		}
 		opts = merge_opts(self.run_opts, fmt_opts)
 
