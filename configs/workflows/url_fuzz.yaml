@@ -1,4 +1,5 @@
-name: url_fuzzer
+name: url_fuzz
+alias: ufuzz
 description: Find URLs by fuzzing (slow)
 tags: [http]
 tasks:
@@ -6,6 +7,6 @@ tasks:
     dirsearch:
     feroxbuster:
     ffuf:
-      target_:
-        type: target
-        field: '{name}/FUZZ'
+      targets_:
+        - type: target
+          field: '{name}/FUZZ'

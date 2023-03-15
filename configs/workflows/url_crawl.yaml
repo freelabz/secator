@@ -1,4 +1,5 @@
-name: url_crawler
+name: url_crawl
+alias: ucrawl
 description: Find URLs by crawling (fast)
 tags: [http]
 options:
