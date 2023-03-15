@@ -263,7 +263,7 @@ class Runner:
 					output_fields=output_fields,
 					exclude_fields=exclude_fields,
 					sort_by=sort_by)
-				tables.append(tables)
+				tables.append(_table)
 				_type = pluralize(items[0]['_type'])
 				render.print(_type.upper(), style='bold gold3', justify='left')
 				render.print(_table)
