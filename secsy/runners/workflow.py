@@ -1,3 +1,5 @@
+import uuid
+
 from contextlib import nullcontext
 from datetime import datetime
 from time import time
@@ -55,13 +57,14 @@ class Workflow(Runner):
 		self.log_start()
 
 		# Add target to results
+		_uuid = str(uuid.uuid4())
 		self.results = results + [
-			{'name': name, '_source': 'workflow', '_type': 'target'}
+			{'name': name, '_source': 'workflow', '_type': 'target', '_uuid': _uuid}
 			for name in self.targets
 		]
 
 		# Build Celery workflow
-		workflow = self.build_celery_workflow(results=results)
+		workflow = self.build_celery_workflow(results=self.results)
 
 		# Run Celery workflow and get results
 		status = f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'
