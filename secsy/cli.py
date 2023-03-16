@@ -231,7 +231,7 @@ def revshells(name, host, port, interface, listen):
 	with open(f'{SCRIPTS_FOLDER}/revshells.json') as f:
 		shells = json.loads(f.read())
 		for sh in shells:
-			sh['alias'] = '_'.join(sh['name'].lower().replace('-c', '').replace('-e', '').replace('-i', '').replace('c#', 'cs').replace('#', '').strip().split(' ')).replace('_1', '')
+			sh['alias'] = '_'.join(sh['name'].lower().replace('-c', '').replace('-e', '').replace('-i', '').replace('c#', 'cs').replace('#', '').replace('(', '').replace(')', '').strip().split(' ')).replace('_1', '')
 			cmd = re.sub(r"\s\s+", "", sh.get('command', ''), flags=re.UNICODE)
 			cmd = cmd.replace('\n', ' ')
 			sh['cmd_short'] = (cmd[:30] + '..') if len(cmd) > 30 else cmd
@@ -249,11 +249,15 @@ def revshells(name, host, port, interface, listen):
 		alias = shell['alias']
 		name = shell['name']
 		command_str = Template(command).render(ip=host, port=port, shell='bash')
-		console.print(Rule('[bold gold3][bold red]REMOTE SHELL', style='bold red', align='left'))
+		console.print(Rule(f'[bold gold3]{alias}[/] - [bold red]{name} REMOTE SHELL', style='bold red', align='left'))
 		lang = shell.get('lang') or 'sh'
-		md = Markdown(f'```{lang}\n{command_str}\n```')
-		console.print(md)
-		console.print(f'Save this script as rev.{lang} and run it on your target', style='dim italic')
+		if len(command.splitlines()) == 1:
+			console.print()
+			print(f'\033[0;36m{command_str}')
+		else:
+			md = Markdown(f'```{lang}\n{command_str}\n```')
+			console.print(md)
+			console.print(f'Save this script as rev.{lang} and run it on your target', style='dim italic')
 		console.print()
 		console.print(Rule(style='bold red'))
 
