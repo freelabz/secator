@@ -196,7 +196,8 @@ def run_command(self, results, name, targets, opts={}):
 			task_results.append(item)
 			results.append(item)
 			count += 1
-			state['meta']['results'] = task_results
+			state['meta']['task_results'] = task_results
+			state['meta']['results'] = results
 			state['meta']['count'] = len(task_results)
 			self.update_state(**state)
 
@@ -215,6 +216,8 @@ def run_command(self, results, name, targets, opts={}):
 	finally:
 		# Set task state and exception
 		state['state'] = 'SUCCESS'
+		state['meta']['results'] = results
+		state['meta']['task_results'] = task_results
 
 		# Handle task failure
 		if task_state == 'FAILURE':
@@ -237,6 +240,12 @@ def run_command(self, results, name, targets, opts={}):
 
 @app.task
 def forward_results(results):
+	if isinstance(results, list):
+		for ix, item in enumerate(results):
+			if 'results' in item:
+				results[ix] = item['results']
+	elif 'results' in results:
+		results = results['results']
 	results = flatten(results)
 	results = deduplicate(results, key='_uuid')
 	return results

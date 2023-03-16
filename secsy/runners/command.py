@@ -296,6 +296,7 @@ class Command:
 		return Command._get_opt_value(
 			self.cmd_opts,
 			opt_name,
+			dict(self.opts, **self.meta_opts),
 			opt_prefix=self.name)
 
 	#-------#
@@ -633,6 +634,7 @@ class Command:
 			opt_val = Command._get_opt_value(
 				opts,
 				opt_name,
+				opts_conf,
 				opt_prefix=command_name,
 				default=default_val)
 
@@ -676,12 +678,15 @@ class Command:
 		return opts_str.strip()
 
 	@staticmethod
-	def _get_opt_value(opts, opt_name, opt_prefix='', default=None):
+	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
 		aliases = [
 			opts.get(f'{opt_prefix}_{opt_name}'),
 			opts.get(f'{opt_prefix}.{opt_name}'),
-			opts.get(opt_name)
+			opts.get(opt_name),
 		]
+		alias = [conf.get('short') for _, conf in opts_conf.items() if conf.get('short') in opts]
+		if alias:
+			aliases.append(opts.get(alias[0]))
 		if OPT_NOT_SUPPORTED in aliases:
 			return None
 		return next((v for v in aliases if v is not None), default)

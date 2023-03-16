@@ -138,7 +138,7 @@ def get_task_ids(result, ids=[]):
 
 def get_task_info(task_id):
 	res = AsyncResult(task_id)
-	if not (res.args and len(res.args) > 1):
+	if not (res and res.args and len(res.args) > 1):
 		return
 	data = {}
 	task_name = res.args[1]
