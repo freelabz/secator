@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set +x
+
 # gf
 go install -v github.com/tomnomnom/gf@latest
 
