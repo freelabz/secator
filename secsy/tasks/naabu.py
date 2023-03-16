@@ -31,7 +31,7 @@ class naabu(ReconCommand):
 		PORT: lambda x: x['port']['Port']
 	}
 	output_schema = [PORT, HOST, IP]
-	output_field = PORT
+	output_field = lambda self, x: '{host}:{port}'.format(**x)
 	output_table_sort_fields = (HOST, PORT)
 	output_type = PORT
 	install_cmd = 'sudo apt install -y libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'
