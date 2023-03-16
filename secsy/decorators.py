@@ -8,8 +8,8 @@ from rich_click.rich_group import RichGroup
 from secsy.celery import is_celery_worker_alive
 from secsy.definitions import *
 from secsy.runners import Scan, Task, Workflow
-from secsy.utils import (deduplicate, expand_input, get_command_category,
-                         get_command_cls, get_task_name_padding)
+from secsy.utils import (expand_input, get_command_category,
+                         get_command_cls)
 
 DEFAULT_OUTPUT_OPTIONS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
@@ -236,7 +236,7 @@ def register_runner(cli_endpoint, config):
 		runner = runner_cls(config, targets, **opts)
 		runner.run(sync=sync)
 
-	settings = {'ignore_unknown_options': True, 'allow_extra_args': True}
+	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}
 	cli_endpoint.command(
 		name=config.name,
 		context_settings=settings,
