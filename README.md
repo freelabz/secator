@@ -112,52 +112,52 @@ secsy --help
 
 #### Tasks
 
-Run any of the supported commands out-of-the box using the `secsy task` subcommand:
+Run any of the supported commands out-of-the box using the `secsy x` (execute) subcommand:
 
 ```sh
-secsy task --help # list available commands
-secsy task <COMMAND> --help # list command options
+secsy x --help # list available commands
+secsy x <COMMAND> --help # list command options
 ```
 
 #### Workflows
 
 A workflow is a set of pre-defined tasks.
 
-You can run some pre-written workflows using the `secsy workflow` subcommand:
+You can run some pre-written workflows using the `secsy w` (workflow) subcommand:
 
 ```sh
-secsy workflow --help # list available workflows
-secsy workflow <NAME> --help # list workflow options
+secsy w --help # list available workflows
+secsy w <NAME> --help # list workflow options
 ```
 
 * **Basic host recon** (open ports, network + HTTP vulnerabilities):
     ```sh
-    secsy workflow host_recon 192.168.1.18
+    secsy w host_recon 192.168.1.18
     ```
 
 * **Basic subdomain recon** (subdomains, root URLs):
     ```sh
-    secsy workflow subdomain_recon mydomain.com
+    secsy w subdomain_recon mydomain.com
     ```
 
 * **Basic URL crawler:**
     ```sh
-    secsy workflow url_crawler https://mydomain.com/start/crawling/from/here/
+    secsy w url_crawler https://mydomain.com/start/crawling/from/here/
     ```
 
 * **Basic URL fuzzer:**
     ```sh
-    secsy workflow url_fuzzer https://mydomain.com/start/fuzzing/from/here/
+    secsy w url_fuzzer https://mydomain.com/start/fuzzing/from/here/
     ```
 
 * **Internal CIDR recon:**
     ```sh
-    secsy workflow cidr_recon 192.168.0.1/24
+    secsy w cidr_recon 192.168.0.1/24
     ```
 
 * **Code scan:**
     ```sh
-    secsy workflow code_scan /path/to/code/repo
+    secsy w code_scan /path/to/code/repo
     ```
 
 
@@ -165,21 +165,21 @@ secsy workflow <NAME> --help # list workflow options
 
 A scan is a set of workflows that run one after the other.
 
-You can run some pre-written scans using the `secsy scan` subcommand:
+You can run some pre-written scans using the `secsy z` subcommand:
 
 ```sh
-secsy scan --help # list available scans
-secsy scan <NAME> --help # list scan options
+secsy z --help # list available scans
+secsy z <NAME> --help # list scan options
 ```
 
 * **Domain scan**:
     ```sh
-    secsy scan domain example.com
+    secsy z domain example.com
     ```
 
 * **Network scan**:
     ```sh
-    secsy scan network 192.168.1.0/24
+    secsy z network 192.168.1.0/24
     ```
 
 ### Input options
@@ -192,8 +192,8 @@ Input can be passed directly as an argument to the command / workflow / scan you
 wish to run:
 
 ```sh
-secsy task httpx example.com # single input
-secsy task httpx example.com,example2.com,example3.com # multiple inputs
+secsy x httpx example.com # single input
+secsy x httpx example.com,example2.com,example3.com # multiple inputs
 ```
 
 **File input**
@@ -201,23 +201,28 @@ secsy task httpx example.com,example2.com,example3.com # multiple inputs
 Input can also be passed from a file containing one item per line:
 
 ```sh
-secsy task httpx urls.txt
+secsy x httpx urls.txt
 ```
 
 **Stdin input**
 
-Input can also be passed directly from stdin, which in combination with the 
-`--raw --json` switch allows to build workflows directly in the CLI:
+Input can also be passed directly from `stdin`:
 
 ```sh
-cat urls.txt | secsy task httpx
+cat urls.txt | secsy x httpx
 ```
 
-An example for a common **ProjectDiscovery** pipe:
+You can thus chain commands with piping from `stdin`:
 
-```sh
-secsy task subfinder example.com --raw --json | secsy task httpx --raw --json | secsy task nuclei
-```
+- Common **ProjectDiscovery** pipe:
+    ```sh
+    secsy x subfinder example.com | secsy x httpx | secsy x nuclei
+    ```
+
+- HTTP URL crawling:
+    ```sh
+    secsy x katana https://example.com | secsy x httpx -orig
+    ```
 
 ***Note:*** *for more complex workflows, we highly recommend using the YAML-based
 workflow definitions or the code-based workflow definitions.*
@@ -405,7 +410,7 @@ secsy worker
 **Run a built-in workflow:**
 
 ```sh
-secsy workflow host_scan wikipedia.org
+secsy w host_scan wikipedia.org
 ```
 
 **Note:** If you want to run a workflow synchronously (bypassing the broker) 
@@ -554,9 +559,9 @@ You can register this command with Click by adding it to the list
 `secsy.cli.ALL_CMDS`, and then use it from the CLI:
 
 ```
-secsy task bigdog --help
-secsy task bigdog loadsofcats.com
-secsy task bigdog loadsofcats.com -timeout 1 -rate 100 -json
+secsy x bigdog --help
+secsy x bigdog loadsofcats.com
+secsy x bigdog loadsofcats.com -timeout 1 -rate 100 -json
 ```
 
 Note that as CLI options defined in the class are automatically added to the 
@@ -564,7 +569,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **Table output** (`-table`)
     ```sh
-    $ secsy task bigdog loadsofcats.com -table
+    $ secsy x bigdog loadsofcats.com -table
         / \__
        (    @\___  =============
       /         O  BIGDOG v1.0.0
@@ -581,7 +586,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **JSON Lines output** (`-json`)
     ```sh
-    $ secsy task bigdog loadsofcats.com -json
+    $ secsy x bigdog loadsofcats.com -json
         / \__
        (    @\___  =============
       /         O  BIGDOG v1.0.0
@@ -593,7 +598,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **Quiet mode** (`-quiet`)
     ```sh
-    $ secsy task bigdog loadsofcats.com -quiet
+    $ secsy x bigdog loadsofcats.com -quiet
     ```
 
 ### Advanced example
@@ -714,9 +719,9 @@ class catkiller(CatHunter):
     opt_prefix = '--' 
 
     # Map `catkiller` options to CatHunter.meta_opts
-    # secsy cmd catkiller loadsofcats.com --max-wait 1000 --max-rate 10 --json
+    # secsy x catkiller loadsofcats.com --max-wait 1000 --max-rate 10 --json
     # will become
-    # secsy cmd catkiller loadsofcats.com -timeout 1 -rate 10 -json
+    # secsy x catkiller loadsofcats.com -timeout 1 -rate 10 -json
     opt_keys = {
         'rate': 'max-rate'
         'timeout': 'max-wait'
@@ -830,9 +835,9 @@ If you register these commands in the CLI, you can now call these commands using
 `secsy`:
 
 ```sh
-$ secsy cmd bigdog loadsofcats.com -rate 1000 -timeout 1 -json
-$ secsy cmd eagle loadsofcats.com -rate 1000 -timeout 1 -json
-$ secsy cmd catkiller loadsofcats.com -rate 1000 -timeout 1 -json
+$ secsy x bigdog loadsofcats.com -rate 1000 -timeout 1 -json
+$ secsy x eagle loadsofcats.com -rate 1000 -timeout 1 -json
+$ secsy x catkiller loadsofcats.com -rate 1000 -timeout 1 -json
 ```
 
 
