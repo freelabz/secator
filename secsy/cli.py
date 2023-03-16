@@ -189,7 +189,7 @@ def generate_bash_install():
 		for task in ALL_TASKS:
 			if task.install_cmd:
 				f.write(f'# {task.__name__}\n')
-				f.write(task.install_cmd + '\n\n')
+				f.write(task.install_cmd + ' || true' + '\n\n')
 	Command.run_command(
 		f'chmod +x {path}',
 		**DEFAULT_CMD_OPTS
