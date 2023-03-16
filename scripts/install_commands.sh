@@ -49,7 +49,7 @@ go install -v github.com/hahwul/dalfox/v2@latest || true
 curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin || true
 
 # nmap
-sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true
+sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true
 
 # nuclei
 go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest || true
