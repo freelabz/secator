@@ -18,6 +18,7 @@ dependencies = [
     'furl',
     'gspread',
     'humanize',
+    'netifaces',
     'pygments',
     'python-dotenv',
     'pyyaml',

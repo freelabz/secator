@@ -379,3 +379,19 @@ def get_file_timestamp():
 
 class TaskError(ValueError):
 	pass
+
+def detect_host(interface=None):
+	import netifaces
+	ifaces = netifaces.interfaces()
+	for iface in ifaces:
+		addrs = netifaces.ifaddresses(iface)
+		if (interface and iface != interface) or iface == 'lo':
+			continue
+		host = addrs[netifaces.AF_INET][0]['addr']
+		interface = iface
+		if 'tun' in iface:
+			break
+	return host
+
+def find_list_item(l, val, key='id', default=None):
+	return next((item for item in l if item[key] == val), default)
