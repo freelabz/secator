@@ -14,6 +14,7 @@ class dirsearch(HTTPCommand):
 	opt_prefix = '--'
 	encoding = 'ansi'
 	opts = {
+		'exclude_status': {'type': str, 'short': 'fc', 'help': 'Exclude responses by code'},
 		'exclude_regex': {'type': str, 'short': 'fr', 'help': 'Exclude responses by regular expression'}
 	}
 	opt_key_map = {
