@@ -1,0 +1,15 @@
+name: dir_finder
+alias: dfind
+description: Find URLs by fuzzing (slow)
+tags: [http]
+tasks:
+  ffuf:
+    wordlist: /usr/share/seclists/Discovery/Web-Content/combined_directories.txt
+    targets_:
+      - type: target
+        field: '{name}/FUZZ'
+  katana:
+  httpx:
+    - type: url
+      field: url
+      condition: item['status_code'] is not None
