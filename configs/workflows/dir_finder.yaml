@@ -1,6 +1,6 @@
 name: dir_finder
 alias: dfind
-description: Find URLs by fuzzing (slow)
+description: Find HTTP directories
 tags: [http]
 tasks:
   ffuf:
