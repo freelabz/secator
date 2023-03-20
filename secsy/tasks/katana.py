@@ -35,6 +35,8 @@ class katana(HTTPCommand):
 		TIME: 'timestamp',
 		METHOD: lambda x: x['request']['method'],
 		STATUS_CODE: lambda x: x['response'].get('status_code'),
-		CONTENT_TYPE: lambda x: x['response'].get('content_type', ';').split(';')[0]
+		CONTENT_TYPE: lambda x: x['response'].get('content_type', ';').split(';')[0],
+		TECH: lambda x: x['response'].get('technologies', []),
+		# TAGS: lambda x: x['response'].get('server')
 	}
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
