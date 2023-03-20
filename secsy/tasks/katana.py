@@ -34,8 +34,3 @@ class katana(HTTPCommand):
 		HOST: lambda x: urlparse(x['endpoint']).netloc
 	}
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
-
-	def item_loader(self, line):
-		if validators.url(line):
-			return { URL: line }
-		return None
