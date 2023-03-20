@@ -10,6 +10,7 @@ tasks:
         field: '{name}/FUZZ'
   katana:
   httpx:
+    follow_redirects: True
     targets_:
       - type: url
         field: url
