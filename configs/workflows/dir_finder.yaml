@@ -10,6 +10,7 @@ tasks:
         field: '{name}/FUZZ'
   katana:
   httpx:
-    - type: url
-      field: url
-      condition: item['status_code'] is not None
+    targets_:
+      - type: url
+        field: url
+        condition: item['status_code'] is not None
