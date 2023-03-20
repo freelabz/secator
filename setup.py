@@ -17,6 +17,7 @@ dependencies = [
     'free-proxy',
     'furl',
     'gspread',
+    'jinja2',
     'humanize',
     'netifaces',
     'pygments',
