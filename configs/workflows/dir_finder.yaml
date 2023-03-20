@@ -13,7 +13,7 @@ tasks:
     targets_:
       - type: url
         field: url
-        condition: item['status_code'] is not None
+        condition: item['status_code'] is None
   results:
   - type: url
     condition: item['status_code'] is not None
