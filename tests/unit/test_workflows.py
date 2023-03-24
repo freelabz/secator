@@ -4,7 +4,7 @@ from secsy.tasks import httpx
 import unittest
 import json
 from secsy.definitions import DEBUG
-from secsy.utils_test import mock_command, FIXTURES
+from secsy.utils_test import mock_command, FIXTURES, TEST_COMMANDS
 from secsy.celery import forward_results
 from secsy.rich import console
 
@@ -14,6 +14,9 @@ TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'kar
 class TestCommandWorkflow(unittest.TestCase):
 
 	def test_chain(self):
+		if not 'httpx' in TEST_COMMANDS:
+			return
+
 		with mock_command(httpx, fixture=[FIXTURES[httpx]] * len(TARGETS)):
 			sigs = [forward_results.si([])] + [httpx.s(target) for target in TARGETS]
 			workflow = chain(*sigs)

@@ -1,7 +1,14 @@
 {
-    "timestamp": "2023-01-18T13:12:40.604827382+01:00",
-    "endpoint": "https://example.synology.me/assets/css/theme-auto.css?v=9ab833a031df67b5e031baa9ba951d16",
-    "source": "https://example.synology.me",
-    "tag": "link",
-    "attribute": "href"
+    "timestamp": "2023-03-24T10:21:37.343309968Z",
+    "request": {
+        "method": "GET",
+        "endpoint": "https://***REMOVED***/",
+        "tag": "file",
+        "attribute": "robotstxt",
+        "source": "https://***REMOVED***/robots.txt",
+        "raw": "GET / HTTP/1.1\r\nHost: ***REMOVED***\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36\r\nAccept-Encoding: gzip\r\n\r\n"
+    },
+    "response": {
+        "headers": {}
+    }
 }

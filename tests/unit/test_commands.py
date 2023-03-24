@@ -11,7 +11,7 @@ from secsy.definitions import *
 from secsy.rich import console
 from secsy.tasks import httpx
 from secsy.utils import setup_logging
-from secsy.utils_test import FIXTURES, META_OPTS, OUTPUT_VALIDATORS, mock_subprocess_popen, INPUTS, load_fixture, FIXTURES_DIR, mock_command, CommandOutputTester
+from secsy.utils_test import FIXTURES, META_OPTS, OUTPUT_VALIDATORS, mock_subprocess_popen, INPUTS, load_fixture, FIXTURES_DIR, TEST_COMMANDS, mock_command, CommandOutputTester
 from secsy.definitions import DEBUG
 
 
@@ -149,6 +149,8 @@ class TestCommandProcessOpts(unittest.TestCase):
         self.assertEqual(opt_value, None)
 
     def test_httpx_build_cmd_defaults(self):
+        if not 'httpx' in TEST_COMMANDS:
+            return
         cmd_opts = {}
         host = 'test.synology.me'
         cls = httpx(host, **cmd_opts)
@@ -164,6 +166,8 @@ class TestCommandProcessOpts(unittest.TestCase):
         self.assertEqual(cls._json_output, True)
 
     def test_httpx_build_cmd_with_opts(self):
+        if not 'httpx' in TEST_COMMANDS:
+            return
         cmd_opts = {
             FOLLOW_REDIRECT: False,
             DELAY: 1,
@@ -188,6 +192,8 @@ class TestCommandProcessOpts(unittest.TestCase):
         self.assertEqual(cls._json_output, True)
 
     def test_httpx_build_cmd_with_opts_with_prefix(self):
+        if not 'httpx' in TEST_COMMANDS:
+            return
         cmd_opts = {
             FOLLOW_REDIRECT: False,
             DELAY: 1,
@@ -301,6 +307,8 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 class TestCommandHooks(unittest.TestCase):
 
     def test_cmd_hooks(self):
+        if not 'httpx' in TEST_COMMANDS:
+            return
 
         def on_item(self, item):
             item['url'] = 'test_changed_url'
@@ -340,8 +348,12 @@ class TestCommandHooks(unittest.TestCase):
             self.assertEqual(cls.results, [{'url': 'test_changed_result'}])
 
     def test_cmd_failed_hook(self):
+        if not 'httpx' in TEST_COMMANDS:
+            return
+
         def on_init(self):
             raise Exception('Test passed')
+
         hooks = {
             'on_init': [on_init]
         }
