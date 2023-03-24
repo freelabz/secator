@@ -1,5 +1,3 @@
-import validators
-
 from urllib.parse import urlparse
 
 from secsy.definitions import *
