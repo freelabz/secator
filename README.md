@@ -251,16 +251,17 @@ Celery task.
 
 ```py
 from secsy.tasks.http import ffuf
+from .models import Urls
 
 app = Celery(__name__)
 
 @app.task
-def process_ffuf_item(result):
-    Results.objects.create(**result)
+def process_url(url):
+    Urls.objects.create(**url)
 
 host = 'wikipedia.org'
-for result in ffuf(host):
-    process_ffuf_item.delay(result)
+for url in ffuf(host):
+    process_url.delay(url)
 ```
 
 ***Note:*** all commands support being run like generators, even if some of them
@@ -331,10 +332,9 @@ from secsy.tasks.vuln import nmap
 
 host = 'cnn.com'
 ports_data = naabu(host).run()
-ports = [p['port'] for p in ports_data]
+ports = [p.port for p in ports_data]
 print(f'Open ports: {ports}')
-for port in ports:
-    vulns = nmap(host, ports=ports, script='vulscan').run()
+vulns = nmap(host, ports=ports, script='vulscan').run()
 ```
 
 ***Finding URLs***
