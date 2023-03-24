@@ -1,5 +1,6 @@
 from secsy.definitions import *
 from secsy.tasks._categories import ReconCommand
+from secsy.output_types import Port
 
 
 class naabu(ReconCommand):
@@ -28,16 +29,10 @@ class naabu(ReconCommand):
 		RETRIES: lambda x: 1 if x == 0 else x
 	}
 	output_map = {
-		PORT: lambda x: x['port']['Port']
+		Port: {
+			PORT: lambda x: x['port']['Port'],
+			HOST: lambda x: x['host'] if 'host' in x else x['ip']
+		}
 	}
-	output_schema = [PORT, HOST, IP]
-	output_field = lambda self, x: '{host}:{port}'.format(**x)
-	output_table_sort_fields = (HOST, PORT)
-	output_type = PORT
+	output_types = [Port]
 	install_cmd = 'sudo apt install -y libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'
-
-	@staticmethod
-	def on_item_converted(self, item):
-		if item['host'] is None:
-			item['host'] = item['ip']
-		return item

@@ -7,6 +7,7 @@ from cpe import CPE
 
 from secsy.definitions import *
 from secsy.runners import Command
+from secsy.output_types import Vulnerability, URL as URL_cls
 
 logger = logging.getLogger(__name__)
 
@@ -42,32 +43,7 @@ class HTTPCommand(Command):
 		USER_AGENT: OPTS[USER_AGENT],
 	}
 	input_type = URL
-	output_field = URL
-	output_type = URL
-	output_schema = [
-		URL,
-		STATUS_CODE,
-		TITLE,
-		WEBSERVER,
-		TECH,
-		CONTENT_TYPE,
-		CONTENT_LENGTH,
-		TIME,
-		METHOD,
-		WORDS,
-		LINES,
-		HOST,
-	]
-	output_table_fields = [
-		URL,
-		STATUS_CODE,
-		TITLE,
-		WEBSERVER,
-		TECH,
-		CONTENT_TYPE,
-		TIME
-	]
-	output_table_sort_fields = (URL,)
+	output_type = URL_cls
 
 
 class ReconCommand(Command):
@@ -94,34 +70,8 @@ class VulnCommand(Command):
 		TIMEOUT: OPTS[TIMEOUT],
 		USER_AGENT: OPTS[USER_AGENT]
 	}
-	output_schema = [
-		VULN_MATCHED_AT,
-		VULN_SEVERITY,
-		VULN_CONFIDENCE,
-		VULN_NAME,
-		VULN_ID,
-		VULN_CVSS_SCORE,
-		VULN_TAGS,
-		VULN_EXTRACTED_RESULTS,
-		VULN_PROVIDER,
-		VULN_DESCRIPTION,
-		VULN_REFERENCES,
-		VULN_REFERENCE,
-	]
-	output_table_fields = [
-		VULN_MATCHED_AT,
-		VULN_SEVERITY,
-		VULN_CONFIDENCE,
-		VULN_NAME,
-		VULN_ID,
-		VULN_CVSS_SCORE,
-		VULN_TAGS,
-		VULN_EXTRACTED_RESULTS,
-		VULN_REFERENCE
-	]
-	output_table_sort_fields = ('_confidence', '_severity', 'matched_at', 'cvss_score')
-	output_type = VULN
 	input_type = HOST
+	output_type = Vulnerability
 
 	@staticmethod
 	def on_item_converted(self, item):
@@ -134,10 +84,11 @@ class VulnCommand(Command):
 			'unknown': 5,
 			None: 6
 		}
-		item['_severity'] = severity_map[item['severity']]
-		item['_confidence'] = severity_map[item['confidence']]
-		references = item.get('references') or ['']
-		item['reference'] = references[0]
+		if item._type == 'vulnerability':
+			item.severity_nb = severity_map[item.severity]
+			item.confidence_nb = severity_map[item.confidence]
+			references = item.references or ['']
+			item.reference = references[0]
 		return item
 
 	@staticmethod

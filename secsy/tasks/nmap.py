@@ -6,6 +6,7 @@ import xmltodict
 from secsy.definitions import *
 from secsy.tasks._categories import VulnCommand
 from secsy.utils import get_file_timestamp
+from secsy.output_types import Port, Vulnerability
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class nmap(VulnCommand):
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
+	output_types = [Port, Vulnerability]
 	opts = {
 		PORTS: {'type': str, 'help': 'Ports to scan'},
 		SCRIPT: {'type': str, 'default': 'vulscan/,vulners', 'help': 'NSE scripts'},
@@ -55,11 +57,11 @@ class nmap(VulnCommand):
 			self._print(note)
 		if os.path.exists(self.output_path):
 			nmap_data = self.xml_to_json()
-			for vuln in nmap_data:
-				vuln = self._process_item(vuln)
-				if not vuln:
+			for item in nmap_data:
+				item = self._process_item(item)
+				if not item:
 					continue
-				yield vuln
+				yield item
 		self._print_item_count = prev
 		self._process_results()
 
@@ -118,7 +120,6 @@ class nmapData(dict):
 					metadata = {
 						VULN_MATCHED_AT: f'{hostname}:{port_number}',
 						VULN_EXTRACTED_RESULTS: extracted_results,
-						'_source': 'nmap'
 					}
 					if not func:
 						logger.debug(f'Script output parser for "{script_id}" is not supported YET.')

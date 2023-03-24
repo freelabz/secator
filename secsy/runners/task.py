@@ -28,6 +28,7 @@ class Task(Runner):
 		table = self.run_opts.pop('table', False)
 		json = self.run_opts.get('json', False)
 		orig = self.run_opts.get('orig', False)
+		raw = self.run_opts.get('raw', False)
 		self._print_table = table or not sync
 		self.sync = sync
 		fmt_opts = {
@@ -38,7 +39,7 @@ class Task(Runner):
 			'print_line': True,
 			'sync': sync,
 			'json': json or table or not sync,
-			'raw': not (json or table or orig or not sync),
+			'raw': raw or not (json or table or orig or not sync),
 			'raw_yield': False
 		}
 		opts = merge_opts(self.run_opts, fmt_opts)

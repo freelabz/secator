@@ -12,8 +12,9 @@ from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
                            TimeElapsedColumn)
 
-from secsy.definitions import DEBUG, OUTPUT_TYPES, REPORTS_FOLDER, GOOGLE_DRIVE_PARENT_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
+from secsy.definitions import DEBUG, REPORTS_FOLDER, GOOGLE_DRIVE_PARENT_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
 from secsy.rich import build_table, console
+from secsy.output_types import OUTPUT_TYPES
 from secsy.runners._helpers import (get_task_ids, get_task_info,
                                     process_extractor)
 from secsy.utils import get_file_timestamp, merge_opts, pluralize
@@ -240,7 +241,7 @@ class Runner:
 			]
 			results.extend([
 				item for item in self.results
-				if item['_type'] in keep_fields
+				if item._type in keep_fields
 			])
 		else:
 			results = self.results
@@ -255,8 +256,8 @@ class Runner:
 		render.print()
 		tables = []
 		for output_type in OUTPUT_TYPES:
-			sort_by, output_fields = get_table_fields(output_type)
-			items = [item for item in results if item['_type'] == output_type]
+			sort_by, output_fields = output_type._sort_by, output_type._table_fields
+			items = [item for item in results if item._type == output_type.get_name()]
 			if items:
 				_table = build_table(
 					items,
@@ -264,7 +265,7 @@ class Runner:
 					exclude_fields=exclude_fields,
 					sort_by=sort_by)
 				tables.append(_table)
-				_type = pluralize(items[0]['_type'])
+				_type = pluralize(items[0]._type)
 				render.print(_type.upper(), style='bold gold3', justify='left')
 				render.print(_table)
 				render.print()
@@ -301,7 +302,7 @@ class Runner:
 		# Fill report
 		for output_type in OUTPUT_TYPES:
 			sort_by, _ = get_table_fields(output_type)
-			items = [item for item in self.results if item['_type'] == output_type]
+			items = [item for item in self.results if item._type == output_type]
 			if items:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.itemgetter(*sort_by))
