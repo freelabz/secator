@@ -16,6 +16,7 @@ from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
 from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp, pluralize
+from secsy.output_types import OutputType
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ class Command:
 		self._orig_output = self.cmd_opts.pop('orig', False)
 
 		# JSON Output
-		_json = self.cmd_opts.pop('json', False) or self._table_output or self._raw_output
+		_json = self.cmd_opts.pop('json', True) or self._table_output or self._raw_output
 
 		# CLI mode: use nicer prints and colors (no logging statements)
 		self._print_timestamp = self.cmd_opts.pop('print_timestamp', False)
@@ -191,7 +192,7 @@ class Command:
 		self.output_table_fields = self.cmd_opts.pop(
 			'table_fields',
 			self.output_table_fields)
-		self._raw_yield = self.cmd_opts.pop('raw_yield', True)
+		self._raw_yield = self.cmd_opts.pop('raw_yield', False)
 
 		# Hooks
 		self._hooks = {name: [] for name in HOOKS}
@@ -212,10 +213,6 @@ class Command:
 				self._validators[key].append(instance_func)
 			self._validators[key].extend(validators.get(key, []))
 			self._validators[key].extend(self.validators.get(key, []))
-
-		# Output table sort fields
-		if not self.output_table_sort_fields and self.output_field:
-			self.output_table_sort_fields = (self.output_field,)
 
 		# Current working directory for cmd
 		self.cwd = self.cmd_opts.pop('cwd', None)
@@ -533,14 +530,16 @@ class Command:
 				self.cmd_opts['proxy'] = self.proxy
 
 	def _process_results(self):
-		# TODO: this is rawuely for logging timestamp to show up properly !!!
+		# TODO: this is only for logging timestamp to show up properly !!!
 		if self._print_timestamp:
 			sleep(1)
 
 		# Log results count
 		if self._print_item_count and self._json_output and not self._raw_output and not self._orig_output:
 			count = len(self.results)
-			name = self.output_type or 'item'
+			name = 'item'
+			if self.output_type:
+				name = self.output_type.get_name() or name
 			item_name = pluralize(name) if count > 1 or count == 0 else name
 			if count > 0:
 				self._print(f':pill: Found {count} {item_name} !', color='bold green')
@@ -579,11 +578,11 @@ class Command:
 		item_str = item
 
 		# In raw mode, print principal key or output format field.
-		if self._raw_output and self.output_field is not None:
+		if self._raw_output:
 			item_str = self._rawify(item)
 
 		# In raw yield mode, extract principal key from dict (default 'on' for library usage)
-		if self._raw_yield and self.output_field is not None:
+		if self._raw_yield:
 			item = self._rawify(item)
 			item_str = item
 
@@ -598,16 +597,14 @@ class Command:
 	def _rawify(self, item=None):
 		if not item:
 			return [
-				self._convert_output_format(item)
+				self._rawify(item)
 				for item in self.results
 			]
-		if self._raw_output and self.output_field is not None:
+		if self._raw_output:
 			if self._format_output:
 				item = self._format_output.format(**item)
-			elif callable(self.output_field):
-				item = self.output_field(item)
 			else:
-				item = item[self.output_field]
+				item = repr(item)
 		return item
 
 
@@ -782,30 +779,27 @@ class Command:
 		Returns:
 			dict: Item with new schema.
 		"""
-		new_item = {}
-		if not self.output_schema:
-			logger.debug(
-				'Skipping converting schema as no output_schema is defined.')
-			return item
-		for key in self.output_schema:
-			if key in self.output_map:
-				mapped_key = self.output_map[key]
-				if callable(mapped_key):
-					mapped_val = mapped_key(item)
-				else:
-					mapped_val = item.get(mapped_key)
-				new_item[key] = mapped_val
-			elif key in item:
-				new_item[key] = item[key]
-			else:
-				new_item[key] = None
+		# Load item using available output types and get the first matching 
+		# output type based on the schema
+		new_item = None
+		for klass in getattr(self, 'output_types', []):
+			output_map = self.output_map.get(klass, {})
+			try:
+				new_item = klass.load(item, output_map)
+				break # found an item that fits
+			except TypeError as e: # can't load using class
+				logger.debug(f'Cannot load item with {klass}')
+				print(str(e))
+				continue
+
+		# No output type was found, so make no conversion
+		if not new_item:
+			from dotmap import DotMap
+			new_item = DotMap(item)
+			new_item._type = 'unknown'
 
 		# Add source to item
-		new_item['_source'] = self.name
-
-		# Add output type to item if any
-		if self.output_type:
-			new_item['_type'] = self.output_type
+		new_item._source = self.name
 
 		return new_item
 
@@ -825,17 +819,21 @@ class Command:
 
 		# Print a rich table
 		if self._table_output and isinstance(data, list) and isinstance(data[0], dict):
-			data = build_table(
-				data,
-				self.output_table_fields,
-				sort_by=self.output_table_sort_fields)
-			log(data)
-			return
+			for klass in self.output_types:
+				table_data = [
+					item for item in data if item._type == klass.get_name()
+				]
+				table = build_table(
+					table_data,
+					klass._table_fields,
+					sort_by=klass._sort_by)
+				log(table)
+				return
 
 		# Print a JSON item
-		elif isinstance(data, dict):
+		elif isinstance(data, OutputType):
 			# JSON dumps data so that it's consumable by other commands
-			data = json.dumps(data)
+			data = json.dumps(data.toDict())
 
 			# Add prefix to output
 			data = f'{self.prefix:>15} {data}' if self.prefix and not self._print_item else data
