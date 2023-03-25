@@ -61,7 +61,6 @@ class Task(Runner):
 		self.log_results()
 		return self.results
 
-
 	@staticmethod
 	def get_task_class(name):
 		"""Get task class from a name.
@@ -76,7 +75,6 @@ class Task(Runner):
 		raise ValueError(
 			f'Task {name} not found. Aborting.', style='bold red'
 		)
-
 
 	@staticmethod
 	def get_tasks_from_conf(config):

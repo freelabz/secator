@@ -1,8 +1,6 @@
 import uuid
 
 from contextlib import nullcontext
-from datetime import datetime
-from time import time
 
 from celery import chain, chord
 

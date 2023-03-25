@@ -1,4 +1,3 @@
-import logging
 import contextlib
 
 import json
@@ -6,13 +5,12 @@ import logging
 import os
 import unittest.mock
 import validators
-import yaml
 
 from fp.fp import FreeProxy
 
 from secsy.definitions import *
 from secsy.rich import console
-from secsy.utils import setup_logging, discover_internal_tasks, load_fixture
+from secsy.utils import discover_internal_tasks, load_fixture
 
 
 #---------#

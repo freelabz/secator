@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import List
 
 from secsy.definitions import *
 from secsy.output_types import OutputType

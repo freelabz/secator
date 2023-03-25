@@ -301,18 +301,18 @@ def poll_task(result, seen=[]):
 		# Task done running
 		if isinstance(res.info, list):
 			for item in res.info:
-				if item['_uuid'] not in seen:
+				if item._uuid not in seen:
 					yield res.id, None, item
-					seen.append(item['_uuid'])
+					seen.append(item._uuid)
 			return
 
 		# Get task partial results, remove duplicates
 		results = res.info['results']
 		name = res.info['name']
 		for item in results:
-			if item['_uuid'] not in seen:
+			if item._uuid not in seen:
 				yield res.id, name, item
-				seen.append(item['_uuid'])
+				seen.append(item._uuid)
 
 		# Task still running, keep polling
 		if not res.ready():

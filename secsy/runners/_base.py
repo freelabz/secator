@@ -13,8 +13,8 @@ from rich.progress import (Progress, SpinnerColumn, TextColumn,
                            TimeElapsedColumn)
 
 from secsy.definitions import DEBUG, REPORTS_FOLDER, GOOGLE_DRIVE_PARENT_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
-from secsy.rich import build_table, console
 from secsy.output_types import OUTPUT_TYPES
+from secsy.rich import build_table, console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
                                     process_extractor)
 from secsy.utils import get_file_timestamp, merge_opts, pluralize
