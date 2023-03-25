@@ -43,4 +43,4 @@ class OutputType:
 		return [f.name for f in fields(cls)]
 
 	def toDict(self):
-		return {k: str(v) for k, v in asdict(self).items()}
+		return self.__dict__.copy()

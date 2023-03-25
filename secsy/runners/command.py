@@ -611,7 +611,7 @@ class Command:
 			if self._format_output:
 				item = self._format_output.format(**item)
 			elif isinstance(item, OutputType):
-				item = repr(item)
+				item = str(item)
 		return item
 
 

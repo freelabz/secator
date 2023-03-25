@@ -16,5 +16,5 @@ class Target(OutputType):
 	]
 	_sort_by = ('name',)
 
-	def __repr__(self):
+	def __str__(self):
 		return self.name

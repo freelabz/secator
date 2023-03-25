@@ -70,6 +70,7 @@ def process_extractor(results, extractor, ctx={}):
 	else:
 		return items
 
+
 def get_task_nodes(result, ids=[], nodes=[], level=0, parent=None):
 	"""Get Celery task tree."""
 	if result is None:

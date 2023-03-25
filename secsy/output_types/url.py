@@ -33,5 +33,5 @@ class Url(OutputType):
 	]
 	_sort_by = (URL,)
 
-	def __repr__(self):
+	def __str__(self):
 		return self.url
