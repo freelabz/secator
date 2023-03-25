@@ -6,6 +6,7 @@ from time import time
 
 from celery import chain, chord
 
+from secsy.output_types import Target
 from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.runners.task import Task
@@ -59,7 +60,7 @@ class Workflow(Runner):
 		# Add target to results
 		_uuid = str(uuid.uuid4())
 		self.results = results + [
-			{'name': name, '_source': 'workflow', '_type': 'target', '_uuid': _uuid}
+			Target(name=name, _source='workflow', _type='target', _uuid=_uuid)
 			for name in self.targets
 		]
 

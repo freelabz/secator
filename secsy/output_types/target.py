@@ -6,20 +6,16 @@ from secsy.output_types import OutputType
 
 
 @dataclass
-class Subdomain(OutputType):
-	host: str
-	domain: str
-	sources: List[str] = field(default_factory=list)
+class Target(OutputType):
+	name: str
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='', repr=True)
 	_uuid: str = field(default='', repr=True)
 
 	_table_fields = [
-		HOST,
-		DOMAIN,
-		SOURCES
+		'name',
 	]
-	_sort_by = (HOST,)
+	_sort_by = ('name',)
 
 	def __repr__(self):
-		return self.host
+		return self.name

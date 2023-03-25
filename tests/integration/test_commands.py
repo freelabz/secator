@@ -58,7 +58,7 @@ INPUTS = {
 OUTPUT_VALIDATORS = {
     URL: lambda url: validators.url(url),
     HOST: lambda host: validators.domain(host),
-    USER_ACCOUNT: lambda url: validators.url(url),
+    USERNAME: lambda url: validators.url(url),
     PORT: lambda port: isinstance(port, int),
     None: lambda x: True,
 }

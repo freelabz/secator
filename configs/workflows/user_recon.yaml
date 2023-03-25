@@ -1,0 +1,12 @@
+name: user_recon
+alias: urecon
+description: Find user accounts
+tags: [user_account]
+tasks:
+  _group:
+    dirsearch:
+    feroxbuster:
+    ffuf:
+      targets_:
+        - type: target
+          field: '{name}/FUZZ'

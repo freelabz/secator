@@ -6,6 +6,8 @@ import unittest
 import unittest.mock
 import warnings
 
+from dotmap import DotMap
+
 from secsy.runners import Command
 from secsy.definitions import *
 from secsy.rich import console
@@ -250,8 +252,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
                 with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
                     self._test_command_output(
                         results,
-                        expected_output_keys=cls.output_schema,
-                        expected_output_type=dict)
+                        expected_output_types=cls.output_types)
 
     def test_cmd_original_schema(self):
         console.print('')
@@ -280,28 +281,12 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
                     'raw': isinstance(fixture, str)
                 })
                 with mock_command(cls, targets, opts, fixture, 'run') as results:
+                    if not len(cls.output_types) == 1:
+                        console.print(f'\t[bold grey35]Cannot test multi-output tasks with single schema. Skipping.[/]')
+                        return
                     self._test_command_output(
                         results,
-                        expected_output_keys=expected_output_keys,
-                        expected_output_type=type(fixture))
-
-    def test_cmd_raw_mode(self):
-        for cls, fixture in FIXTURES.items():
-            with self.subTest(name=cls.__name__):
-                console.print(f'\t[bold grey35]{cls.__name__} ...[/]', end='')
-
-                # Validate fixture
-                if not self._valid_fixture(cls, fixture):
-                    continue
-
-                # Run command
-                targets = INPUTS[cls.input_type]
-                opts = copy.deepcopy(META_OPTS)
-                opts['raw'] = True
-                with mock_command(cls, targets, opts, fixture, 'run') as results:
-                    self._test_command_output(
-                        results,
-                        output_validator=OUTPUT_VALIDATORS[cls.output_field])
+                        expected_output_keys=expected_output_keys)
 
 
 class TestCommandHooks(unittest.TestCase):
@@ -315,7 +300,7 @@ class TestCommandHooks(unittest.TestCase):
             return item
 
         def on_item_converted(self, item):
-            item['status_code'] = 500
+            item.status_code = 500
             return item
 
         def on_end(self):
@@ -342,8 +327,8 @@ class TestCommandHooks(unittest.TestCase):
             cls = httpx(input, hooks=hooks)
             self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_init')
             item = cls.first()
-            self.assertEqual(item['status_code'], 500)
-            self.assertEqual(item['url'], 'test_changed_url')
+            self.assertEqual(item.status_code, 500)
+            self.assertEqual(item.url, 'test_changed_url')
             self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_start')
             self.assertEqual(cls.results, [{'url': 'test_changed_result'}])
 

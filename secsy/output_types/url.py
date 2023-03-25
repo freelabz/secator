@@ -20,6 +20,7 @@ class Url(OutputType):
 	lines: int = 0
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='', repr=True)
+	_uuid: str = field(default='', repr=True)
 
 	_table_fields = [
 		URL,

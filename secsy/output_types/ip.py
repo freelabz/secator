@@ -11,6 +11,7 @@ class Ip(OutputType):
 	alive: bool = False
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='', repr=True)
+	_uuid: str = field(default='', repr=True)
 
 	_table_fields = [IP, ALIVE]
 	_sort_by = (IP,)
