@@ -8,11 +8,13 @@ from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
+from kombu.serialization import register
 
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER, CELERY_RESULT_BACKEND)
 from secsy.rich import console
 from secsy.runners import Task
 from secsy.runners._helpers import merge_extracted_values
+from secsy.serializers.dataclass import DataclassEncoder, my_dumps, my_loads
 from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
                          discover_internal_tasks, flatten)
 
@@ -24,6 +26,13 @@ Task %(name)s[%(id)s] succeeded in %(runtime)ss\
 """
 COMMANDS = discover_internal_tasks() + discover_external_tasks()
 
+register(
+	'dataclass',
+	my_dumps,
+	my_loads,
+	content_type='application/x-dataclass',
+	content_encoding='utf-8')
+
 app = celery.Celery(__name__)
 app.conf.update({
 	# Broker config
@@ -32,6 +41,10 @@ app.conf.update({
 		'data_folder_in': CELERY_DATA_FOLDER,
 		'data_folder_out': CELERY_DATA_FOLDER,
 	},
+
+	'accept_content': ['dataclass'],
+	'task_serializer': 'dataclass',
+	'result_serializer': 'dataclass',
 
 	# Backend config
 	'result_backend': CELERY_RESULT_BACKEND,
@@ -119,7 +132,7 @@ def run_command(self, results, name, targets, opts={}):
 	try:
 		# Flatten + dedupe results
 		results = flatten(results)
-		results = deduplicate(results, key='_uuid')
+		results = deduplicate(results, attr='_uuid')
 
 		# Get expanded targets
 		if not chunk:
@@ -192,7 +205,7 @@ def run_command(self, results, name, targets, opts={}):
 		task = task_cls(targets, **opts)
 		for item in task:
 			result_uuid = str(uuid.uuid4())
-			item['_uuid'] = result_uuid
+			item._uuid = result_uuid
 			task_results.append(item)
 			results.append(item)
 			count += 1
@@ -242,12 +255,12 @@ def run_command(self, results, name, targets, opts={}):
 def forward_results(results):
 	if isinstance(results, list):
 		for ix, item in enumerate(results):
-			if 'results' in item:
+			if isinstance(item, dict) and 'results' in item:
 				results[ix] = item['results']
 	elif 'results' in results:
 		results = results['results']
 	results = flatten(results)
-	results = deduplicate(results, key='_uuid')
+	results = deduplicate(results, attr='_uuid')
 	return results
 
 

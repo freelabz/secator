@@ -1,4 +1,3 @@
-# import celery
 import json
 import logging
 import re
@@ -10,6 +9,7 @@ from dotmap import DotMap
 
 from fp.fp import FreeProxy
 from rich.markup import escape
+from rich.text import Text
 
 from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
                                DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
@@ -556,11 +556,7 @@ class Command:
 
 		# Print table if in table mode
 		if self._table_output and self.results:
-			fmt_table = getattr(self, 'on_table', None)
-			data = self.results
-			if callable(fmt_table):
-				data = fmt_table(self.results)
-			self._print(data, out=sys.stdout)
+			self._print(self.results, out=sys.stdout)
 
 	def _process_item(self, item: dict):
 		# Run item validators
@@ -828,7 +824,7 @@ class Command:
 		log = console.log if self._print_timestamp else _console.print
 
 		# Print a rich table
-		if self._table_output and isinstance(data, list) and isinstance(data[0], dict):
+		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
 			for klass in self.output_types:
 				table_data = [
 					item for item in data if item._type == klass.get_name()
@@ -841,9 +837,13 @@ class Command:
 				return
 
 		# Print a JSON item
-		elif isinstance(data, (OutputType, DotMap)):
+		elif isinstance(data, (OutputType, DotMap, dict)):
+			# If object has a 'toDict' method, use it
+			if getattr(data, 'toDict', None):
+				data = data.toDict()
+
 			# JSON dumps data so that it's consumable by other commands
-			data = json.dumps(data.toDict())
+			data = json.dumps(data)
 
 			# Add prefix to output
 			data = f'{self.prefix:>15} {data}' if self.prefix and not self._print_item else data
@@ -855,7 +855,6 @@ class Command:
 
 		# Print a line
 		else:
-
 			# If orig mode (--orig) ir raw mode (--raw), we might want to 
 			# parse results with e.g pipe redirections, so we need a pure line 
 			# with no logging info.
@@ -864,7 +863,6 @@ class Command:
 				_console.print(data, highlight=False)
 			else:
 				data = escape(data)
-				from rich.text import Text
 				data = Text.from_ansi(data)
 				if color:
 					data = f'[{color}]{data}[/]'
