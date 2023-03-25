@@ -15,5 +15,5 @@ class UserAccount(OutputType):
 	_table_fields = [SITE_NAME, USERNAME, URL]
 	_sort_by = (URL, USERNAME)
 
-	def __repr__(self) -> str:
+	def __str__(self) -> str:
 		return f'{self.site_name} -> {self.username}'

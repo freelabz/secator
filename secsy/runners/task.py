@@ -14,7 +14,6 @@ class Task(Runner):
 	_save_csv = False
 	_save_google_sheet = False
 
-	@confirm_exit
 	def run(self, sync=True):
 		"""Run task.
 

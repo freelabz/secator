@@ -21,5 +21,5 @@ class Subdomain(OutputType):
 	]
 	_sort_by = (HOST,)
 
-	def __repr__(self):
+	def __str__(self):
 		return self.host

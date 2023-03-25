@@ -18,5 +18,5 @@ class Port(OutputType):
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (IP, PORT)
 
-	def __repr__(self) -> str:
+	def __str__(self) -> str:
 		return f'{self.host}:{self.port}'
