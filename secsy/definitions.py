@@ -68,18 +68,20 @@ DEFAULT_OUTPUT_FORMAT = {
 
 # Constants
 FFUF_DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
-OUTPUT_TYPES = ['target', 'subdomain', 'port', 'ip', 'url', 'vulnerability']
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
 
 # Vocab
+ALIVE = 'alive'
 AUTO_CALIBRATION = 'auto_calibration'
 CONTENT_TYPE = 'content_type'
 CONTENT_LENGTH = 'content_length'
 CIDR_RANGE = 'cidr_range'
+CPES = 'cpes'
 DELAY = 'delay'
 DOMAIN = 'domain'
 DEPTH = 'depth'
+EXTRA_DATA = 'extra_data'
 FAILED_HTTP_STATUS = -1
 FOLLOW_REDIRECT = 'follow_redirect'
 HEADER = 'header'
@@ -109,7 +111,6 @@ TIME = 'time'
 TIMEOUT = 'timeout'
 TOP_PORTS = 'top_ports'
 URL = 'url'
-USER_ACCOUNT = 'user_account'
 USER_AGENT = 'user_agent'
 USERNAME = 'username'
 SCRIPT = 'script'
@@ -118,6 +119,7 @@ STATUS_CODE = 'status_code'
 SUBDOMAIN = 'subdomain'
 TECH = 'tech'
 TITLE = 'title'
+SITE_NAME = 'site_name'
 VULN = 'vulnerability'
 VULN_CONFIDENCE = 'confidence'
 VULN_CVSS_SCORE = 'cvss_score'

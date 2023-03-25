@@ -93,6 +93,7 @@ class nmapData(dict):
 	def __iter__(self):
 		for host in self._get_hosts():
 			hostname = self._get_hostname(host)
+			ip = self._get_ip(host)
 			for port in self._get_ports(host):
 				port_number = port['@portid']
 				if not port_number or not port_number.isdigit():
@@ -106,6 +107,15 @@ class nmapData(dict):
 
 				# Get script output
 				scripts = self._get_scripts(port)
+
+				# Yield port data
+				yield {
+					PORT: port_number,
+					HOST: hostname,
+					IP: ip,
+					CPES: cpes,
+					EXTRA_DATA: extracted_results
+				}
 
 				# Parse each script output to get vulns
 				for script in scripts:
@@ -155,6 +165,9 @@ class nmapData(dict):
 		else:
 			hostname = host_cfg.get('address', {}).get('@addr', None)
 		return hostname
+
+	def _get_ip(self, host_cfg):
+		return host_cfg.get('address', {}).get('@addr', None)
 
 	def _get_extracted_results(self, port_cfg):
 		extracted_results = {

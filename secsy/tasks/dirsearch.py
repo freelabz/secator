@@ -2,12 +2,13 @@ import yaml
 
 from secsy.definitions import *
 from secsy.tasks._categories import HTTPCommand
+from secsy.output_types import Url
 from secsy.utils import get_file_timestamp
 
 
 class dirsearch(HTTPCommand):
 	"""Advanced web path brute-forcer."""
-	cmd = 'dirsearch'
+	cmd = 'dirsearch -q'
 	input_flag = '-u'
 	file_flag = '-l'
 	json_flag = '--format json'
@@ -32,9 +33,11 @@ class dirsearch(HTTPCommand):
 		USER_AGENT: 'user-agent',
 	}
 	output_map = {
-		CONTENT_LENGTH: 'content-length',
-		CONTENT_TYPE: 'content-type',
-		STATUS_CODE: 'status'
+		Url: {
+			CONTENT_LENGTH: 'content-length',
+			CONTENT_TYPE: 'content-type',
+			STATUS_CODE: 'status'
+		}
 	}
 	install_cmd = 'pip3 install dirsearch'
 

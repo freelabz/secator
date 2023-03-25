@@ -7,7 +7,7 @@ from cpe import CPE
 
 from secsy.definitions import *
 from secsy.runners import Command
-from secsy.output_types import Vulnerability, URL as URL_cls
+from secsy.output_types import Vulnerability, Url
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class HTTPCommand(Command):
 		USER_AGENT: OPTS[USER_AGENT],
 	}
 	input_type = URL
-	output_type = URL_cls
+	output_types = [Url]
 
 
 class ReconCommand(Command):
@@ -71,7 +71,7 @@ class VulnCommand(Command):
 		USER_AGENT: OPTS[USER_AGENT]
 	}
 	input_type = HOST
-	output_type = Vulnerability
+	output_types = [Vulnerability]
 
 	@staticmethod
 	def on_item_converted(self, item):

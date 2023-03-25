@@ -1,4 +1,5 @@
 from secsy.definitions import *
+from secsy.output_types import Subdomain
 from secsy.tasks._categories import ReconCommand
 
 
@@ -20,12 +21,11 @@ class subfinder(ReconCommand):
 		PROXY: lambda x: x.replace('http://', '').replace('https://', '') if x else None
 	}
 	output_map = {
-		DOMAIN: 'input',
+		Subdomain: {
+			DOMAIN: 'input',
+		}
 	}
-	output_schema = [HOST, DOMAIN, SOURCES]
-	output_type = SUBDOMAIN
-	output_field = HOST
-	output_table_sort_fields = (HOST,)
+	output_types = [Subdomain]
 	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
 
 	@staticmethod

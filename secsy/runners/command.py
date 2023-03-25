@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import sys
 from time import sleep
+from dotmap import DotMap
 
 from fp.fp import FreeProxy
 from rich.markup import escape
@@ -484,7 +485,6 @@ class Command:
 		# Retrieve the return code and output
 		self._wait_for_end(process)
 
-
 	def _wait_for_end(self, process):
 		"""Wait for process to finish and process output and return code."""
 		process.wait()
@@ -529,6 +529,14 @@ class Command:
 			else: # tool-specific proxy settings
 				self.cmd_opts['proxy'] = self.proxy
 
+	def _get_results_count(self):
+		count_map = {}
+		for output_type in self.output_types:
+			name = output_type.get_name()
+			count = len([r for r in self.results if r._type == name])
+			count_map[name] = count
+		return count_map
+
 	def _process_results(self):
 		# TODO: this is only for logging timestamp to show up properly !!!
 		if self._print_timestamp:
@@ -536,15 +544,15 @@ class Command:
 
 		# Log results count
 		if self._print_item_count and self._json_output and not self._raw_output and not self._orig_output:
-			count = len(self.results)
-			name = 'item'
-			if self.output_type:
-				name = self.output_type.get_name() or name
-			item_name = pluralize(name) if count > 1 or count == 0 else name
-			if count > 0:
-				self._print(f':pill: Found {count} {item_name} !', color='bold green')
+			count_map = self._get_results_count()
+			if all(count == 0 for count in count_map.values()):
+				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
 			else:
-				self._print(f':adhesive_bandage: Found 0 {item_name}.', color='bold red')
+				results_str = ':pill: Found ' + ' and '.join([
+					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
+					for name, count in count_map.items()
+				]) + '.'
+				self._print(results_str, color='bold green')
 
 		# Print table if in table mode
 		if self._table_output and self.results:
@@ -570,6 +578,8 @@ class Command:
 
 			# Run item convert hooks
 			item = self.run_hooks('on_item_converted', item)
+		else:
+			item = DotMap(item)
 
 		# Add item to result
 		self.results.append(item)
@@ -603,7 +613,7 @@ class Command:
 		if self._raw_output:
 			if self._format_output:
 				item = self._format_output.format(**item)
-			else:
+			elif isinstance(item, OutputType):
 				item = repr(item)
 		return item
 
@@ -779,17 +789,17 @@ class Command:
 		Returns:
 			dict: Item with new schema.
 		"""
-		# Load item using available output types and get the first matching 
+		# Load item using available output types and get the first matching
 		# output type based on the schema
 		new_item = None
-		for klass in getattr(self, 'output_types', []):
+		output_types = getattr(self, 'output_types', [])
+		for klass in output_types:
 			output_map = self.output_map.get(klass, {})
 			try:
 				new_item = klass.load(item, output_map)
 				break # found an item that fits
 			except TypeError as e: # can't load using class
-				logger.debug(f'Cannot load item with {klass}')
-				print(str(e))
+				logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
 				continue
 
 		# No output type was found, so make no conversion
@@ -831,7 +841,7 @@ class Command:
 				return
 
 		# Print a JSON item
-		elif isinstance(data, OutputType):
+		elif isinstance(data, (OutputType, DotMap)):
 			# JSON dumps data so that it's consumable by other commands
 			data = json.dumps(data.toDict())
 

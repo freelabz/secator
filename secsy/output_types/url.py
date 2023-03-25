@@ -1,8 +1,11 @@
-from secsy.output_types import OutputType
 from dataclasses import dataclass, field
-from secsy.definitions import URL, STATUS_CODE, TITLE, WEBSERVER, TECH, CONTENT_TYPE, TIME
 
-class URL(OutputType):
+from secsy.definitions import URL, STATUS_CODE, TITLE, WEBSERVER, TECH, CONTENT_TYPE, TIME
+from secsy.output_types import OutputType
+
+
+@dataclass
+class Url(OutputType):
 	url: str
 	host: str = ''
 	status_code: int = 0
@@ -18,7 +21,6 @@ class URL(OutputType):
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='', repr=True)
 
-	_output_field = URL
 	_table_fields = [
 		URL,
 		STATUS_CODE,
@@ -29,3 +31,6 @@ class URL(OutputType):
 		TIME
 	]
 	_sort_by = (URL,)
+
+	def __repr__(self):
+		return self.url
