@@ -1,18 +1,18 @@
-import re
-
-from secsy.output_types import OutputType
-from secsy.definitions import USER_ACCOUNT, URL
-
 from dataclasses import dataclass, field
 
+from secsy.definitions import USERNAME, URL, SITE_NAME
+from secsy.output_types import OutputType
+
+@dataclass
 class UserAccount(OutputType):
-    user_account: str
-    url: str
+    site_name: str
+    username: str
+    url: str = ''
     _source: str = field(default='', repr=True)
     _type: str = field(default='', repr=True)
 
-    _table_fields = []
-    _sort_by = (USER_ACCOUNT,)
+    _table_fields = [SITE_NAME, USERNAME, URL]
+    _sort_by = (URL, USERNAME)
 
     def __repr__(self) -> str:
         return f'{self.host}:{self.port}'

@@ -256,14 +256,15 @@ class Runner:
 		render.print()
 		tables = []
 		for output_type in OUTPUT_TYPES:
-			sort_by, output_fields = output_type._sort_by, output_type._table_fields
-			items = [item for item in results if item._type == output_type.get_name()]
+			items = [
+				item for item in results if item._type == output_type.get_name()
+			]
 			if items:
 				_table = build_table(
 					items,
-					output_fields=output_fields,
+					output_fields=output_type._table_fields,
 					exclude_fields=exclude_fields,
-					sort_by=sort_by)
+					sort_by=output_type._sort_by)
 				tables.append(_table)
 				_type = pluralize(items[0]._type)
 				render.print(_type.upper(), style='bold gold3', justify='left')

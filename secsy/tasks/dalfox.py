@@ -2,6 +2,7 @@ from urllib.parse import urlparse
 
 from secsy.definitions import *
 from secsy.tasks._categories import VulnCommand
+from secsy.output_types import Vulnerability
 
 
 class dalfox(VulnCommand):
@@ -24,17 +25,19 @@ class dalfox(VulnCommand):
 		USER_AGENT: 'user-agent'
 	}
 	output_map = {
-		VULN_ID: 'XSS Injection',
-		VULN_NAME: 'XSS Injection',
-		VULN_PROVIDER: 'dalfox',
-		VULN_TAGS: lambda x: [x['cwe']],
-		VULN_CONFIDENCE: 'high',
-		VULN_MATCHED_AT: lambda x: urlparse(x['data'])._replace(query='').geturl(),
-		VULN_EXTRACTED_RESULTS: lambda x: {
-			k: v for k, v in x.items()
-			if k not in ['type', 'severity', 'cwe']
-		},
-		VULN_SEVERITY: lambda x: x['severity'].lower()
+		Vulnerability: {
+			VULN_ID: 'XSS Injection',
+			VULN_NAME: 'XSS Injection',
+			VULN_PROVIDER: 'dalfox',
+			VULN_TAGS: lambda x: [x['cwe']],
+			VULN_CONFIDENCE: 'high',
+			VULN_MATCHED_AT: lambda x: urlparse(x['data'])._replace(query='').geturl(),
+			VULN_EXTRACTED_RESULTS: lambda x: {
+				k: v for k, v in x.items()
+				if k not in ['type', 'severity', 'cwe']
+			},
+			VULN_SEVERITY: lambda x: x['severity'].lower()
+		}
 	}
 	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
 

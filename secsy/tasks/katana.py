@@ -1,6 +1,7 @@
 from urllib.parse import urlparse
 
 from secsy.definitions import *
+from secsy.output_types import Url
 from secsy.tasks._categories import HTTPCommand
 
 
@@ -28,13 +29,15 @@ class katana(HTTPCommand):
 		DELAY: lambda x: int(x) if isinstance(x, float) else x
 	}
 	output_map = {
-		URL: lambda x: x['request']['endpoint'],
-		HOST: lambda x: urlparse(x['request']['endpoint']).netloc,
-		TIME: 'timestamp',
-		METHOD: lambda x: x['request']['method'],
-		STATUS_CODE: lambda x: x['response'].get('status_code'),
-		CONTENT_TYPE: lambda x: x['response'].get('content_type', ';').split(';')[0],
-		TECH: lambda x: x['response'].get('technologies', []),
-		# TAGS: lambda x: x['response'].get('server')
+		Url: {
+			URL: lambda x: x['request']['endpoint'],
+			HOST: lambda x: urlparse(x['request']['endpoint']).netloc,
+			TIME: 'timestamp',
+			METHOD: lambda x: x['request']['method'],
+			STATUS_CODE: lambda x: x['response'].get('status_code'),
+			CONTENT_TYPE: lambda x: x['response'].get('content_type', ';').split(';')[0],
+			TECH: lambda x: x['response'].get('technologies', []),
+			# TAGS: lambda x: x['response'].get('server')
+		}
 	}
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'

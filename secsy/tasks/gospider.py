@@ -1,6 +1,7 @@
 from furl import furl
 
 from secsy.definitions import *
+from secsy.output_types import Url
 from secsy.tasks._categories import HTTPCommand
 
 
@@ -30,9 +31,11 @@ class gospider(HTTPCommand):
 		DELAY: lambda x: round(x) if isinstance(x, float) else x
 	}
 	output_map = {
-		URL: 'output',
-		STATUS_CODE: 'status',
-		CONTENT_LENGTH: 'length',
+		Url: {
+			URL: 'output',
+			STATUS_CODE: 'status',
+			CONTENT_LENGTH: 'length',
+		}
 	}
 	install_cmd = 'go install -v github.com/jaeles-project/gospider@latest'
 	ignore_return_code = True

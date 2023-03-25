@@ -1,9 +1,8 @@
-from secsy.output_types import OutputType
 from dataclasses import dataclass, field
+from typing import List
 
 from secsy.definitions import *
-
-from typing import List
+from secsy.output_types import OutputType
 
 
 @dataclass
@@ -14,5 +13,12 @@ class Subdomain(OutputType):
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='', repr=True)
 
-	_output_field = HOST
+	_table_fields = [
+		HOST,
+		DOMAIN,
+		SOURCES
+	]
 	_sort_by = (HOST,)
+
+	def __repr__(self):
+		return self.host

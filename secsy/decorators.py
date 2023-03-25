@@ -214,6 +214,8 @@ def register_runner(cli_endpoint, config):
 		sync = opts['sync']
 		worker = opts['worker']
 		debug = opts['debug']
+		if debug:
+			os.environ['DEBUG'] = '1'
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)

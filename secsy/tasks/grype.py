@@ -1,15 +1,16 @@
 from furl import furl
 
 from secsy.definitions import *
+from secsy.output_types import Vulnerability
 from secsy.tasks._categories import VulnCommand
 
 
 def grype_item_loader(self, line):
 	"""Load vulnerabilty dicts from grype line output."""
 	split = [i for i in line.split(' ') if i]
-	if not len(split) == 5:
+	if not len(split) == 6 or split[0] == 'NAME':
 		return None
-	product, version, product_type, vuln_id, severity = tuple(split)
+	product, version_vuln, version, product_type, vuln_id, severity = tuple(split)
 	extracted_results = {
 		'product': product,
 		'version': version,
@@ -56,6 +57,7 @@ class grype(VulnCommand):
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED
 	}
+	output_types = [Vulnerability]
 	install_cmd = 'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
 	item_loader = grype_item_loader
 	
