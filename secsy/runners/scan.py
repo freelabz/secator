@@ -1,6 +1,7 @@
 import logging
 
 from secsy.config import ConfigLoader
+from secsy.output_types import Target
 from secsy.runners._base import Runner
 from secsy.runners._helpers import merge_extracted_values
 from secsy.runners.workflow import Workflow
@@ -19,7 +20,7 @@ class Scan(Runner):
 		# Add target to results
 		self.sync = sync
 		self.results = results + [
-			{'name': name, '_source': 'scan', '_type': 'target'}
+			Target(name=name, _source='scan', _type='target')
 			for name in self.targets
 		]
 		self.results = results

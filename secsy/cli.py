@@ -163,7 +163,6 @@ def download_cves(force):
 			**DEFAULT_CMD_OPTS
 		)
 	os.makedirs(CVES_FOLDER, exist_ok=True)
-	from secsy.rich import console
 	with console.status('[bold yellow]Saving CVEs to disk ...[/]'):
 		with open(f'{TEMP_FOLDER}/circl-cve-search-expanded.json', 'r') as f:
 			for line in f:

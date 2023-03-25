@@ -15,6 +15,7 @@ from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse
 
+import netifaces
 import tabulate
 import yaml
 from furl import furl
@@ -383,7 +384,6 @@ class TaskError(ValueError):
 	pass
 
 def detect_host(interface=None):
-	import netifaces
 	ifaces = netifaces.interfaces()
 	for iface in ifaces:
 		addrs = netifaces.ifaddresses(iface)

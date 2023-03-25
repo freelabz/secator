@@ -1,7 +1,5 @@
-import inspect
 import re
 from dataclasses import dataclass, fields, asdict
-from secsy.rich import console
 
 import logging
 

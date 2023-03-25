@@ -5,6 +5,8 @@ import shlex
 import subprocess
 import sys
 from time import sleep
+
+from celery.result import AsyncResult
 from dotmap import DotMap
 
 from fp.fp import FreeProxy
@@ -275,7 +277,6 @@ class Command:
 	def poll(cls, result):
 		from time import sleep
 
-		from celery.result import AsyncResult
 		while not result.ready():
 			data = AsyncResult(result.id).info
 			if DEBUG and isinstance(data, dict):
@@ -800,7 +801,6 @@ class Command:
 
 		# No output type was found, so make no conversion
 		if not new_item:
-			from dotmap import DotMap
 			new_item = DotMap(item)
 			new_item._type = 'unknown'
 
