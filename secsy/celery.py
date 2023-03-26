@@ -14,7 +14,7 @@ from secsy.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER, CELERY_RES
 from secsy.rich import console
 from secsy.runners import Task
 from secsy.runners._helpers import merge_extracted_values
-from secsy.serializers.dataclass import DataclassEncoder, my_dumps, my_loads
+from secsy.serializers.dataclass import dumps_dataclass, loads_dataclass
 from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
                          discover_internal_tasks, flatten)
 
@@ -28,8 +28,8 @@ COMMANDS = discover_internal_tasks() + discover_external_tasks()
 
 register(
 	'dataclass',
-	my_dumps,
-	my_loads,
+	dumps_dataclass,
+	loads_dataclass,
 	content_type='application/x-dataclass',
 	content_encoding='utf-8')
 
@@ -42,7 +42,7 @@ app.conf.update({
 		'data_folder_out': CELERY_DATA_FOLDER,
 	},
 
-	'accept_content': ['dataclass'],
+	'accept_content': ['application/x-dataclass'],
 	'task_serializer': 'dataclass',
 	'result_serializer': 'dataclass',
 

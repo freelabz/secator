@@ -2,7 +2,7 @@ from contextlib import nullcontext
 
 from secsy.rich import console
 from secsy.runners._base import Runner
-from secsy.runners._helpers import confirm_exit
+from secsy.serializers.dataclass import loads_dataclass
 from secsy.utils import discover_tasks, merge_opts
 
 
@@ -55,6 +55,7 @@ class Task(Runner):
 			list(self.process_live_tasks(result))
 			self.results = result.get()
 			self.results = self.results['results']
+			self.results = [loads_dataclass(o) for o in self.results]
 		self.results = self.filter_results()
 		self.done = True
 		self.log_results()

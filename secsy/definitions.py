@@ -20,7 +20,8 @@ TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
 CELERY_DATA_FOLDER = f'{TEMP_FOLDER}/celery/data'
 CELERY_RESULTS_FOLDER = f'{TEMP_FOLDER}/celery/results'
 PAYLOADS_FOLDER = f'{TEMP_FOLDER}/payloads'
-REPORTS_FOLDER = os.environ.get('REPORTS_FOLDER', '/tmp/reports')
+REPORTS_FOLDER = os.environ.get('SECSY_REPORTS_FOLDER', '/tmp/reports')
+CONFIG_FOLDER = os.environ.get('SECSY_CONFIG_FOLDER', '~/.secsy')
 ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 SCRIPTS_FOLDER =f'{ROOT_FOLDER}/scripts'
 REVSHELLS_FOLDER = f'{TEMP_FOLDER}/revshells'
@@ -28,6 +29,7 @@ os.makedirs(CELERY_DATA_FOLDER, exist_ok=True)
 os.makedirs(CELERY_RESULTS_FOLDER, exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 os.makedirs(PAYLOADS_FOLDER, exist_ok=True)
+os.makedirs(CONFIG_FOLDER, exist_ok=True)
 
 # Environment variables
 RECORD = bool(int(os.environ.get('RECORD', '0')))

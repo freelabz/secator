@@ -166,6 +166,8 @@ def register_runner(cli_endpoint, config):
 		input_type = 'targets'
 		name = config.name
 		short_help = config.description or ''
+		if config.alias:
+			short_help += f' [dim]alias: {config.alias}'
 		fmt_opts['json'] = True
 		runner_cls = Scan
 
@@ -177,6 +179,8 @@ def register_runner(cli_endpoint, config):
 		input_type = 'targets'
 		name = config.name
 		short_help = config.description or ''
+		if config.alias:
+			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
 		fmt_opts['json'] = True
 		runner_cls = Workflow
 

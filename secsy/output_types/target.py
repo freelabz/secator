@@ -8,7 +8,7 @@ from secsy.output_types import OutputType
 class Target(OutputType):
 	name: str
 	_source: str = field(default='', repr=True)
-	_type: str = field(default='', repr=True)
+	_type: str = field(default='target', repr=True)
 	_uuid: str = field(default='', repr=True)
 
 	_table_fields = [
