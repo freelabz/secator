@@ -14,7 +14,7 @@ from fp.fp import FreeProxy
 from secsy.celery import *
 from secsy.config import ConfigLoader
 from secsy.decorators import OrderedGroup, register_runner
-from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER, REVSHELLS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, DEBUG
+from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER, CONFIG_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, DEBUG
 from secsy.rich import console
 from secsy.runners import Command
 from secsy.runners._base import Runner
@@ -208,12 +208,44 @@ def generate_bash_aliases():
 
 @utils.command()
 def enable_aliases():
-	pass
+	aliases = []
+	aliases.extend([
+		f'alias {task.__name__}="secsy x {task.__name__}"'
+		for task in ALL_TASKS
+	])
+	aliases.extend([
+		f'alias {workflow.alias or workflow.name}="secsy w {workflow.name}"'
+		for workflow in ALL_WORKFLOWS
+	])
+	aliases.extend([
+		f'alias {scan.alias or scan.name}="secsy s {scan.name}"'
+		for scan in ALL_SCANS
+	])
+	aliases.append('alias listx="secsy x --help"')
+	aliases.append('alias listw="secsy w --help"')
+	aliases.append('alias lists="secsy s --help"')
+	aliases_str = '\n'.join(aliases)
+
+	fpath = f'{CONFIG_FOLDER}/.aliases'
+	with open(fpath, 'w') as f:
+		f.write(aliases_str)
+	
+	console.print(f':file_cabinet: Alias file written to {fpath}', style='bold green')
+	console.print('You can now run:')
+	md = f"""
+```sh
+source {fpath}                     # load the aliases in the current shell
+echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load them automatically
+```
+"""
+	console.print(Markdown(md))
+	console.print()
 
 
 @utils.command()
 def disable_aliases():
-	pass
+	for task in ALL_TASKS:
+		Command.run_command(f'unalias {task.name}', cls_attributes={'shell':True})
 
 
 @utils.command()

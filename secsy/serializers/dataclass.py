@@ -1,25 +1,33 @@
 import json
-from dataclasses import dataclass, asdict
-from secsy.output_types import OutputType
+from secsy.output_types import OUTPUT_TYPES
 
 
 class DataclassEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, OutputType):
-            return json.dumps(asdict(obj))
+        if hasattr(obj, 'toDict'):
+            return obj.toDict()
         else:
             return json.JSONEncoder.default(self, obj)
 
 
-def my_decoder(obj):
+def get_output_cls(type):
+    try:
+        return [cls for cls in OUTPUT_TYPES if cls.get_name() == type][0]
+    except IndexError:
+        return None
+
+
+def dataclass_decoder(obj):
     if '_type' in obj:
-        return OutputType.load(obj)
+        output_cls = get_output_cls(obj['_type'])
+        if output_cls:
+            return output_cls.load(obj)
     return obj
 
 
-def my_dumps(obj):
+def dumps_dataclass(obj):
     return json.dumps(obj, cls=DataclassEncoder)
 
 
-def my_loads(obj):
-    return json.loads(obj, object_hook=my_decoder)
+def loads_dataclass(obj):
+    return json.loads(obj, object_hook=dataclass_decoder)

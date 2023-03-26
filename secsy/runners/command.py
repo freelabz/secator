@@ -519,11 +519,12 @@ class Command:
 		"""
 		proxy_opt = self.opt_key_map.get('proxy', False)
 		support_proxychains = getattr(self, 'proxychains', True)
+		proxychains_flavor = getattr(self, 'proxychains_flavor', 'proxychains')
 		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
 		if self.proxy == 'proxychains':
 			if not support_proxychains:
 				return
-			self.cmd = f'proxychains {self.cmd}'
+			self.cmd = f'{proxychains_flavor} {self.cmd}'
 		elif self.proxy and support_proxy:
 			if self.proxy == 'random':
 				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()

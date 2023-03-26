@@ -29,7 +29,7 @@ class nmap(VulnCommand):
 		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: 'scan-delay',
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
-		PROXY: OPT_NOT_SUPPORTED, # TODO: nmap actually supports --proxies but it does not work in TCP scan mode [https://github.com/nmap/nmap/issues/1098]
+		PROXY: None, # TODO: nmap actually supports --proxies but it does not work in TCP scan mode [https://github.com/nmap/nmap/issues/1098]
 		RATE_LIMIT: 'max-rate',
 		RETRIES: 'max-retries',
 		THREADS: OPT_NOT_SUPPORTED,
@@ -42,6 +42,7 @@ class nmap(VulnCommand):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
+	proxychains_flavor = 'proxychains4'
 	install_cmd = 'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
 
 	def __iter__(self):

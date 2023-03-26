@@ -16,4 +16,4 @@ from secsy.output_types.url import Url
 from secsy.output_types.user_account import UserAccount
 from secsy.output_types.vulnerability import Vulnerability
 
-OUTPUT_TYPES = [UserAccount, Subdomain, Ip, Port, Url, Vulnerability]
+OUTPUT_TYPES = [Target, UserAccount, Subdomain, Ip, Port, Url, Vulnerability]

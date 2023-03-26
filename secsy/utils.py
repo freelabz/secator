@@ -190,8 +190,8 @@ def deduplicate(l, attr=None):
 	Returns:
 		list: Deduplicated list.
 	"""
-	from secsy.output_types import OutputType
-	if attr and len(l) > 0 and isinstance(l[0], OutputType):
+	from secsy.output_types import OUTPUT_TYPES
+	if attr and len(l) > 0 and isinstance(l[0], tuple(OUTPUT_TYPES)):
 		memo = set()
 		res = []
 		for sub in l:

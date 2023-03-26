@@ -10,7 +10,7 @@ class Ip(OutputType):
 	host: str = ''
 	alive: bool = False
 	_source: str = field(default='', repr=True)
-	_type: str = field(default='', repr=True)
+	_type: str = field(default='ip', repr=True)
 	_uuid: str = field(default='', repr=True)
 
 	_table_fields = [IP, ALIVE]
