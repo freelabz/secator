@@ -282,7 +282,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
                 })
                 with mock_command(cls, targets, opts, fixture, 'run') as results:
                     if not len(cls.output_types) == 1:
-                        console.print(f'\t[bold grey35]Cannot test multi-output tasks with single schema. Skipping.[/]')
+                        console.print(f'[dim gold3] skipped (multi-output task with single schema)[/]')
                         return
                     self._test_command_output(
                         results,
