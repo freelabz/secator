@@ -13,7 +13,7 @@ from secsy.definitions import *
 from secsy.rich import console
 from secsy.tasks import httpx
 from secsy.utils import setup_logging
-from secsy.utils_test import FIXTURES, META_OPTS, OUTPUT_VALIDATORS, mock_subprocess_popen, INPUTS, load_fixture, FIXTURES_DIR, TEST_COMMANDS, mock_command, CommandOutputTester
+from secsy.utils_test import FIXTURES, META_OPTS, mock_subprocess_popen, INPUTS, load_fixture, FIXTURES_DIR, TEST_COMMANDS, mock_command, CommandOutputTester
 from secsy.definitions import DEBUG
 
 
