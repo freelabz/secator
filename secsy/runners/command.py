@@ -863,8 +863,8 @@ class Command:
 				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
 				_console.print(data, highlight=False)
 			else:
-				data = escape(data)
-				data = Text.from_ansi(data)
+				# data = escape(data)
+				# data = Text.from_ansi(data)
 				if color:
 					data = f'[{color}]{data}[/]'
 				data = f'{self.prefix} {data}' if self.prefix else data
