@@ -229,9 +229,14 @@ def enable_aliases():
 	fpath = f'{CONFIG_FOLDER}/.aliases'
 	with open(fpath, 'w') as f:
 		f.write(aliases_str)
+	console.print(f'Aliases:')
+	for alias in aliases:
+		alias_split = alias.split('=')
+		alias_name, alias_cmd = alias_split[0].replace('alias ', ''), alias_split[1].replace('"', '')
+		console.print(f'[bold magenta]{alias_name:<15}-> {alias_cmd}')
 	
 	console.print(f':file_cabinet: Alias file written to {fpath}', style='bold green')
-	console.print('You can now run:')
+	console.print('To load the aliases, run:')
 	md = f"""
 ```sh
 source {fpath}                     # load the aliases in the current shell
