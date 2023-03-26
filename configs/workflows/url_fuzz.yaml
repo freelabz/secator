@@ -1,5 +1,5 @@
 name: url_fuzz
-alias: ufuzz
+alias: urlfuzz
 description: Find URLs by fuzzing (slow)
 tags: [http]
 tasks:
