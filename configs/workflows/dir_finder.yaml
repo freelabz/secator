@@ -1,5 +1,5 @@
-name: dir_finder
-alias: dfind
+name: dir_find
+alias: dirfind
 description: Find HTTP directories
 tags: [http]
 tasks:

@@ -1,5 +1,5 @@
-name: user_recon
-alias: urecon
+name: user_hunt
+alias: userhunt
 description: Find user accounts
 tags: [user_account]
 tasks:
