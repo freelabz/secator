@@ -96,6 +96,14 @@ check that the command complies with our selection criterias before doing so. If
 
 ## Installation
 
+### One-line install
+
+```
+curl https://raw.githubusercontent.com/freelabz/secsy-cli/main/scripts/install.sh?token=GHSAT0AAAAAACAUB3MIMTYB5SWVYSN5BPUKZBBTICQ | sh
+```
+
+### Development build
+
 <!-- `pip3 install secsy` -->
 ```sh
 git clone https://github.com/ocervell/secsy-cli
@@ -241,7 +249,7 @@ If none of these options are passed, the command output will be the original
 output.
 
 <!-- ![](images/formatting_httpx.gif) -->
-![](images/formatting_ffuf.gif)
+![](images/fmt.gif)
 
 ## Library usage
 
