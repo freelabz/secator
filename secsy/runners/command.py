@@ -349,12 +349,12 @@ class Command:
 		"""Run adhoc command. Can be used without defining an inherited class 
 		to run a command, while still enjoying all the good stuff in this class.
 		"""
-		helper_cls = type(name, (Command,), {'cmd': cmd})(**kwargs)
+		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
-			setattr(helper_cls, k, v)
-		helper_cls._print_line = True
-		helper_cls.run()
-		return helper_cls
+			setattr(cmd_instance, k, v)
+		cmd_instance._print_line = True
+		cmd_instance.run()
+		return cmd_instance
 
 	#----------#
 	# Internal #

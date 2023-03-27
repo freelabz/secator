@@ -363,6 +363,68 @@ def serve(directory, host, port, interface):
 	)
 
 
+@utils.command()
+@click.argument('record_name', type=str, default=None)
+@click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')
+@click.option('--width', '-w', type=int, default=None, help='Recording width')
+@click.option('--height', '-h', type=int, default=None, help='Recording height')
+@click.option('--edit-only', is_flag=True, default=False, help='Recording height')
+def record(record_name, script, width, height, edit_only):
+	attrs = {'shell': True}
+	output_file = f'{record_name}.cast'
+
+	# If existing cast file, remove it
+	if os.path.exists(output_file):
+		os.unlink(output_file)
+		console.print(f'Removed existing {output_file}', style='bold green')
+
+	# Run automated 'story' script with asciinema-automation
+	if script:
+		with console.status('[bold gold3]Recording with asciinema ...[/]'):
+			Command.run_command(
+				f'asciinema-automation -aa "-c /bin/bash" {script} {record_name}.cast',
+				cls_attributes=attrs,
+				raw=True,
+				**DEFAULT_CMD_OPTS,
+			)
+			console.print(f'Generated {record_name}.cast', style='bold green')
+
+	# Resize cast file
+	with console.status('[bold gold3]Replacing width and height in cast file'):
+		with open(f'{record_name}.cast', 'r') as f:
+			lines = f.readlines()
+		updated_line = json.loads(lines[0])
+		updated_line['width'] = width or console.size.width
+		updated_line['height'] = height or console.size.height
+		updated_line['env']['SHELL'] = '/bin/sh'
+		lines[0] = json.dumps(updated_line) + '\n'
+		with open(f'{record_name}.cast', 'w') as f:
+			f.writelines(lines)
+		console.print('')
+
+	# Edit cast file to reduce long timeouts
+	# with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
+	# 	cmd = Command.run_command(
+	# 		f'asciinema-edit quantize --range 4 {record_name}.cast',
+	# 		cls_attributes=attrs,
+	# 		raw=True,
+	# 		**DEFAULT_CMD_OPTS,
+	# 	)
+	# 	print(f"CMD OUTPUT: {cmd.output}")
+	# 	with open(f'{record_name}.cast', 'w') as f:
+	# 		f.write(cmd.output)
+	# 	console.print(f'Edited {record_name}.cast', style='bold green')
+
+	# Convert to GIF
+	with console.status(f'[bold gold3]Converting to {record_name}.gif ...[/]'):
+		Command.run_command(
+			f'agg {record_name}.cast {record_name}.gif',
+			cls_attributes=attrs,
+			**DEFAULT_CMD_OPTS,
+		)
+		console.print(f'Generated {record_name}.gif', style='bold green')
+
+
 #------#
 # TEST #
 #------#
