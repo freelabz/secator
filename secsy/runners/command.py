@@ -190,8 +190,6 @@ class Command:
 		# Output formatting
 		self.color = self.cmd_opts.pop('color', False)
 		self.quiet = self.cmd_opts.pop('quiet', False)
-		if 'quiet' in self.opt_key_map:
-			self.cmd_opts['quiet'] = self.quiet
 		self.output_table_fields = self.cmd_opts.pop(
 			'table_fields',
 			self.output_table_fields)
@@ -436,7 +434,7 @@ class Command:
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
-					ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[m|K]?'
+					ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
 					line = re.sub(ansi_regex, '', line.strip())
 
 				# Run on_line hooks
