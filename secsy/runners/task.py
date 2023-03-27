@@ -1,5 +1,6 @@
 from contextlib import nullcontext
 
+from secsy.definitions import RECORD
 from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.serializers.dataclass import loads_dataclass
@@ -47,7 +48,7 @@ class Task(Runner):
 		task_cls = Task.get_task_class(self.config.name)
 		if sync:
 			task = task_cls(self.targets, **opts)
-			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...') if not task._json_output and not task._raw_output and not task._orig_output else nullcontext():
+			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...') if not RECORD and not task._json_output and not task._raw_output and not task._orig_output else nullcontext():
 				self.results = task.run()
 		else:
 			result = task_cls.delay(self.targets, **opts)
