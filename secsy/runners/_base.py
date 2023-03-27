@@ -319,8 +319,6 @@ class Runner:
 		for output_type, items in results.items():
 			if not items:
 				continue
-			if output_type == 'target':
-				continue
 			keys = list(items[0].keys())
 			csv_path = f'{output_folder}/{title}_{output_type}_{timestr}.csv'
 			csv_paths.append(csv_path)

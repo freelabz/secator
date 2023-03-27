@@ -196,6 +196,8 @@ secsy z <NAME> --help # list scan options
 
 The `secsy` CLI is built to be flexible in terms of inputs:
 
+![](images/input.gif)
+
 **Direct input**
 
 Input can be passed directly as an argument to the command / workflow / scan you 
