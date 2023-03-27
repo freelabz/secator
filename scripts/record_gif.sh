@@ -2,7 +2,7 @@ name=$1
 castname=$1.cast
 gifname=$1.gif
 
-if [ !-f "$castname" ]; then
+if [ ! -f "$castname" ]; then
     RECORD=1 asciinema rec -c "env PS1=\"\$ \" /bin/bash --norc -i" $castname
 fi
 
