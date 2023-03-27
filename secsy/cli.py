@@ -218,7 +218,7 @@ def enable_aliases():
 		for workflow in ALL_WORKFLOWS
 	])
 	aliases.extend([
-		f'alias {scan.alias or scan.name}="secsy s {scan.name}"'
+		f'alias scan_{scan.alias or scan.name}="secsy s {scan.name}"'
 		for scan in ALL_SCANS
 	])
 	aliases.append('alias listx="secsy x --help"')

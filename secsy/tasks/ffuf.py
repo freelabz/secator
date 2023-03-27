@@ -21,7 +21,7 @@ class ffuf(HTTPCommand):
 		'fc': {'type': str, 'help': 'Filter out responses with HTTP codes'},
 		'fw': {'type': str, 'help': 'Filter out responses with word count'},
 		'fr': {'type': str, 'help': 'Filter out responses with regular expression'},
-		'fs': {'type': str, 'help': 'Filter out responses with size'}
+		'fs': {'type': str, 'help': 'Filter out responses with size'},
 	}
 	opt_key_map = {
 		HEADER: 'H',
