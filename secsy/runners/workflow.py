@@ -4,6 +4,7 @@ from contextlib import nullcontext
 
 from celery import chain, chord
 
+from secsy.definitions import RECORD
 from secsy.output_types import Target
 from secsy.rich import console
 from secsy.runners._base import Runner
@@ -67,7 +68,7 @@ class Workflow(Runner):
 
 		# Run Celery workflow and get results
 		status = f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'
-		with console.status(status) if print_status else nullcontext():
+		with console.status(status) if not RECORD and print_status else nullcontext():
 			if sync:
 				result = workflow.apply()
 			else:
