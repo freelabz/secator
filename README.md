@@ -3,7 +3,7 @@
 `secsy` is a sexy security **security swiss-knife** that wraps common
 security-oriented commands in a single CLI.
 
-![](images/demo.gif)
+![](images/short_demo.gif)
 
 `secsy` is designed to not waste your time and make you efficient at
 vulnerability assessments, with the following feature set:
