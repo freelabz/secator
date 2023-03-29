@@ -202,11 +202,6 @@ def generate_bash_install():
 
 
 @utils.command()
-def generate_bash_aliases():
-	pass
-
-
-@utils.command()
 def enable_aliases():
 	aliases = []
 	aliases.extend([
@@ -214,16 +209,20 @@ def enable_aliases():
 		for task in ALL_TASKS
 	])
 	aliases.extend([
-		f'alias {workflow.alias or workflow.name}="secsy w {workflow.name}"'
+		f'alias {workflow.alias}="secsy w {workflow.name}"'
 		for workflow in ALL_WORKFLOWS
 	])
 	aliases.extend([
-		f'alias scan_{scan.alias or scan.name}="secsy s {scan.name}"'
+		f'alias {workflow.name}="secsy w {workflow.name}"'
+		for workflow in ALL_WORKFLOWS
+	])
+	aliases.extend([
+		f'alias scan_{scan.name}="secsy s {scan.name}"'
 		for scan in ALL_SCANS
 	])
-	aliases.append('alias listx="secsy x --help"')
-	aliases.append('alias listw="secsy w --help"')
-	aliases.append('alias lists="secsy s --help"')
+	aliases.append('alias listx="secsy x"')
+	aliases.append('alias listw="secsy w"')
+	aliases.append('alias lists="secsy s"')
 	aliases_str = '\n'.join(aliases)
 
 	fpath = f'{CONFIG_FOLDER}/.aliases'
@@ -366,63 +365,90 @@ def serve(directory, host, port, interface):
 @utils.command()
 @click.argument('record_name', type=str, default=None)
 @click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')
+@click.option('--interactive', '-i', is_flag=True, default=False, help='Interactive record.')
 @click.option('--width', '-w', type=int, default=None, help='Recording width')
 @click.option('--height', '-h', type=int, default=None, help='Recording height')
-@click.option('--edit-only', is_flag=True, default=False, help='Recording height')
-def record(record_name, script, width, height, edit_only):
-	attrs = {'shell': True}
-	output_file = f'{record_name}.cast'
-
-	# If existing cast file, remove it
-	if os.path.exists(output_file):
-		os.unlink(output_file)
-		console.print(f'Removed existing {output_file}', style='bold green')
+@click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
+def record(record_name, script, interactive, width, height, output_dir):
+	height = height or console.size.height
+	width = width or console.size.width
+	attrs = {
+		'shell': False,
+		'env': {
+			'RECORD': '1',
+			'LINES': str(height),
+			'PS1': '$ ',
+			'COLUMNS': str(width),
+			'TERM': 'xterm-256color'
+		}
+	}
+	output_cast_path = f'{output_dir}/{record_name}.cast'
+	output_gif_path = f'{output_dir}/{record_name}.gif'
 
 	# Run automated 'story' script with asciinema-automation
 	if script:
+		# If existing cast file, remove it
+		if os.path.exists(output_cast_path):
+			os.unlink(output_cast_path)
+			console.print(f'Removed existing {output_cast_path}', style='bold green')
+
 		with console.status('[bold gold3]Recording with asciinema ...[/]'):
 			Command.run_command(
-				f'asciinema-automation -aa "-c /bin/bash" {script} {record_name}.cast',
+				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 100',
 				cls_attributes=attrs,
 				raw=True,
 				**DEFAULT_CMD_OPTS,
 			)
-			console.print(f'Generated {record_name}.cast', style='bold green')
+			console.print(f'Generated {output_cast_path}', style='bold green')
+	elif interactive:
+		os.environ.update(attrs['env'])
+		Command.run_command(
+			f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}',
+		)
 
 	# Resize cast file
-	with console.status('[bold gold3]Replacing width and height in cast file'):
-		with open(f'{record_name}.cast', 'r') as f:
-			lines = f.readlines()
-		updated_line = json.loads(lines[0])
-		updated_line['width'] = width or console.size.width
-		updated_line['height'] = height or console.size.height
-		updated_line['env']['SHELL'] = '/bin/sh'
-		lines[0] = json.dumps(updated_line) + '\n'
-		with open(f'{record_name}.cast', 'w') as f:
-			f.writelines(lines)
-		console.print('')
+	if os.path.exists(output_cast_path):
+		with console.status('[bold gold3]Cleaning up .cast and set custom settings ...'):
+			with open(output_cast_path, 'r') as f:
+				lines = f.readlines()
+			updated_lines = []
+			for ix, line in enumerate(lines):
+				tmp_line = json.loads(line)
+				if ix == 0:
+					tmp_line['width'] = width
+					tmp_line['height'] = height
+					tmp_line['env']['SHELL'] = '/bin/sh'
+					lines[0] = json.dumps(tmp_line) + '\n'
+					updated_lines.append(json.dumps(tmp_line) + '\n')
+				elif tmp_line[2].endswith(' \r'):
+					tmp_line[2] = tmp_line[2].replace(' \r', '')
+					updated_lines.append(json.dumps(tmp_line) + '\n')
+				else:
+					updated_lines.append(line)
+			with open(output_cast_path, 'w') as f:
+				f.writelines(updated_lines)
+			console.print('')
 
-	# Edit cast file to reduce long timeouts
-	# with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
-	# 	cmd = Command.run_command(
-	# 		f'asciinema-edit quantize --range 4 {record_name}.cast',
-	# 		cls_attributes=attrs,
-	# 		raw=True,
-	# 		**DEFAULT_CMD_OPTS,
-	# 	)
-	# 	print(f"CMD OUTPUT: {cmd.output}")
-	# 	with open(f'{record_name}.cast', 'w') as f:
-	# 		f.write(cmd.output)
-	# 	console.print(f'Edited {record_name}.cast', style='bold green')
+		# Edit cast file to reduce long timeouts
+		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
+			Command.run_command(
+				f'asciinema-edit quantize --range 4 {output_cast_path} --out {output_cast_path}.tmp',
+				cls_attributes=attrs,
+				raw=True,
+				**DEFAULT_CMD_OPTS,
+			)
+			if os.path.exists(f'{output_cast_path}.tmp'):
+				os.replace(f'{output_cast_path}.tmp', output_cast_path)
+			console.print(f'Edited {output_cast_path}', style='bold green')
 
 	# Convert to GIF
-	with console.status(f'[bold gold3]Converting to {record_name}.gif ...[/]'):
+	with console.status(f'[bold gold3]Converting to {output_gif_path} ...[/]'):
 		Command.run_command(
-			f'agg {record_name}.cast {record_name}.gif',
+			f'agg {output_cast_path} {output_gif_path}',
 			cls_attributes=attrs,
 			**DEFAULT_CMD_OPTS,
 		)
-		console.print(f'Generated {record_name}.gif', style='bold green')
+		console.print(f'Generated {output_gif_path}', style='bold green')
 
 
 #------#

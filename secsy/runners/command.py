@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import shlex
 import subprocess
@@ -82,6 +83,9 @@ class Command:
 
 	# Output encoding
 	encoding = 'utf-8'
+
+	# Environment variables
+	env = {}
 
 	# Flag to take the input
 	input_flag = None
@@ -398,12 +402,15 @@ class Command:
 
 		# Run the command using subprocess
 		try:
+			env = os.environ
+			env.update(self.env)
 			process = subprocess.Popen(
 				command,
 				stdout=sys.stdout if self._no_capture else subprocess.PIPE,
 				stderr=sys.stderr if self._no_capture else subprocess.STDOUT,
 				universal_newlines=True,
 				shell=self.shell,
+				env=env,
 				cwd=self.cwd)
 		except FileNotFoundError as e:
 			if self.name in str(e):

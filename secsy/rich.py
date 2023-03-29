@@ -3,6 +3,7 @@ import operator
 import click
 import rich_click
 import yaml
+from rich import box
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.table import Table
@@ -72,7 +73,8 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		items = sorted(items, key=operator.attrgetter(*sort_by))
 
 	# Create rich table
-	table = Table(show_lines=True)
+	box_style = box.DOUBLE if RECORD else None
+	table = Table(show_lines=True, box=box_style)
 
 	# Get table schema if any, default to first item keys
 	keys = output_fields
