@@ -9,14 +9,15 @@ from secsy.celery import is_celery_worker_alive
 from secsy.definitions import *
 from secsy.runners import Scan, Task, Workflow
 from secsy.utils import (expand_input, get_command_category,
-                         get_command_cls)
+                         get_command_cls, import_dynamic)
 
 DEFAULT_OUTPUT_OPTIONS = {
+	'output': {'type': str, 'default': '', 'help': 'Output options', 'short': 'o'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
 	'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
-	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter'}, # TODO add this
+	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'color': {'is_flag': True, 'default': False, 'help': 'Enable output coloring'},
 	'table': {'is_flag': True, 'default': False, 'help': 'Enable Table mode'},
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
@@ -239,7 +240,16 @@ def register_runner(cli_endpoint, config):
 			sync = not is_celery_worker_alive()
 		else:
 			sync = True
-		runner = runner_cls(config, targets, **opts)
+		
+		# Build exporters
+		exporters = []
+		if opts['output']:
+			exporters = [
+				import_dynamic(f'secsy.exporters.{o.capitalize()}Exporter', 'Exporter')
+				for o in opts['output'].split(',')
+			]
+			exporters = [e for e in exporters if e]
+		runner = runner_cls(config, targets, exporters=exporters, **opts)
 		runner.run(sync=sync)
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}

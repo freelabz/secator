@@ -8,6 +8,8 @@ from secsy.utils import discover_tasks, merge_opts
 
 class Task(Runner):
 
+	DEFAULT_EXPORTERS = []
+
 	def run(self, sync=True):
 		"""Run task.
 
@@ -18,7 +20,7 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
-		table = self.run_opts.pop('table', False)
+		table = self.run_opts.get('table', False)
 		json = self.run_opts.get('json', False)
 		orig = self.run_opts.get('orig', False)
 		raw = self.run_opts.get('raw', False)

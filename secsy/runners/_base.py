@@ -13,7 +13,7 @@ from secsy.runners._helpers import (get_task_ids, get_task_info,
                                     process_extractor)
 from secsy.utils import merge_opts
 from secsy.report import Report
-from secsy.exporters import CSVExporter, GoogleSheetsExporter, JSONExporter, HTMLExporter, TableExporter
+from secsy.exporters import CsvExporter, GdriveExporter, JsonExporter, HtmlExporter, TableExporter
 
 
 class Runner:
@@ -36,10 +36,10 @@ class Runner:
 
 	DEFAULT_EXPORTERS = [
 		TableExporter,
-		CSVExporter,
-		GoogleSheetsExporter,
-		JSONExporter,
-		HTMLExporter,
+		CsvExporter,
+		GdriveExporter,
+		JsonExporter,
+		HtmlExporter,
 	]
 
 	def __init__(self, config, targets, results=[], workspace_name=None, exporters=[], **run_opts):

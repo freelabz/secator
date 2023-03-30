@@ -8,7 +8,7 @@ from secsy.rich import console
 from secsy.utils import pluralize
 
 
-class GoogleSheetsExporter(Exporter):
+class GdriveExporter(Exporter):
 	def send(self):
 		import gspread
 		info = self.report.data['info']
@@ -68,4 +68,4 @@ class GoogleSheetsExporter(Exporter):
 		ws = sheet.get_worksheet(0)
 		sheet.del_worksheet(ws)
 
-		console.log(f':file_cabinet: Saved Google Sheets reports to [u magenta]{sheet.url}[/]')
+		console.print(f':file_cabinet: Saved Google Sheets reports to [u magenta]{sheet.url}[/]')

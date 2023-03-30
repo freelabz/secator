@@ -402,15 +402,17 @@ def find_list_item(l, val, key='id', default=None):
 	return next((item for item in l if item[key] == val), default)
 
 
-def print_results_table(results, title, exclude_fields=[]):
+def print_results_table(results, title=None, exclude_fields=[], log=False):
 	from secsy.output_types import OUTPUT_TYPES
 	from secsy.rich import build_table
 	from rich.markdown import Markdown
-	console.print()
-	title = ' '.join(title.capitalize().split('_')) + ' results'
-	h1 = Markdown(f'# {title}')
-	console.print(h1, style='bold magenta', width=50)
-	console.print()
+	_print = console.log if log else console.print
+	_print()
+	if title:
+		title = ' '.join(title.capitalize().split('_')) + ' results'
+		h1 = Markdown(f'# {title}')
+		_print(h1, style='bold magenta', width=50)
+		_print()
 	tables = []
 	for output_type in OUTPUT_TYPES:
 		items = [
@@ -424,7 +426,7 @@ def print_results_table(results, title, exclude_fields=[]):
 				sort_by=output_type._sort_by)
 			tables.append(_table)
 			_type = pluralize(items[0]._type)
-			console.print(_type.upper(), style='bold gold3', justify='left')
-			console.print(_table)
-			console.print()
+			_print(_type.upper(), style='bold gold3', justify='left')
+			_print(_table)
+			_print()
 	return tables

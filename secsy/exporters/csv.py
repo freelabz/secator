@@ -4,7 +4,7 @@ from secsy.exporters._base import Exporter
 from secsy.rich import console
 
 
-class CSVExporter(Exporter):
+class CsvExporter(Exporter):
     def send(self):
         title = self.report.data['info']['title']
         results = self.report.data['results']
@@ -26,4 +26,4 @@ class CSVExporter(Exporter):
         else:
             csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
 
-        console.log(f':file_cabinet: Saved CSV reports to {csv_paths_str}')
+        console.print(f':file_cabinet: Saved CSV reports to {csv_paths_str}')
