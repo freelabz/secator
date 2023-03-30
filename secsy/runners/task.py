@@ -3,17 +3,10 @@ from contextlib import nullcontext
 from secsy.definitions import RECORD
 from secsy.rich import console
 from secsy.runners._base import Runner
-from secsy.serializers.dataclass import loads_dataclass
 from secsy.utils import discover_tasks, merge_opts
 
 
 class Task(Runner):
-
-	_print_table = False
-	_save_html = False
-	_save_json = False
-	_save_csv = False
-	_save_google_sheet = False
 
 	def run(self, sync=True):
 		"""Run task.
