@@ -6,6 +6,7 @@ import xmltodict
 from secsy.definitions import *
 from secsy.tasks._categories import VulnCommand
 from secsy.utils import get_file_timestamp
+from secsy.output_types import Port, Vulnerability
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class nmap(VulnCommand):
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
+	output_types = [Port, Vulnerability]
 	opts = {
 		PORTS: {'type': str, 'help': 'Ports to scan'},
 		SCRIPT: {'type': str, 'default': 'vulscan/,vulners', 'help': 'NSE scripts'},
@@ -27,7 +29,7 @@ class nmap(VulnCommand):
 		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: 'scan-delay',
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
-		PROXY: OPT_NOT_SUPPORTED, # TODO: nmap actually supports --proxies but it does not work in TCP scan mode [https://github.com/nmap/nmap/issues/1098]
+		PROXY: None, # TODO: nmap actually supports --proxies but it does not work in TCP scan mode [https://github.com/nmap/nmap/issues/1098]
 		RATE_LIMIT: 'max-rate',
 		RETRIES: 'max-retries',
 		THREADS: OPT_NOT_SUPPORTED,
@@ -40,6 +42,7 @@ class nmap(VulnCommand):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
+	proxychains_flavor = 'proxychains4'
 	install_cmd = 'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
 
 	def __iter__(self):
@@ -55,11 +58,11 @@ class nmap(VulnCommand):
 			self._print(note)
 		if os.path.exists(self.output_path):
 			nmap_data = self.xml_to_json()
-			for vuln in nmap_data:
-				vuln = self._process_item(vuln)
-				if not vuln:
+			for item in nmap_data:
+				item = self._process_item(item)
+				if not item:
 					continue
-				yield vuln
+				yield item
 		self._print_item_count = prev
 		self._process_results()
 
@@ -91,6 +94,7 @@ class nmapData(dict):
 	def __iter__(self):
 		for host in self._get_hosts():
 			hostname = self._get_hostname(host)
+			ip = self._get_ip(host)
 			for port in self._get_ports(host):
 				port_number = port['@portid']
 				if not port_number or not port_number.isdigit():
@@ -105,6 +109,15 @@ class nmapData(dict):
 				# Get script output
 				scripts = self._get_scripts(port)
 
+				# Yield port data
+				yield {
+					PORT: port_number,
+					HOST: hostname,
+					IP: ip,
+					CPES: cpes,
+					EXTRA_DATA: extracted_results
+				}
+
 				# Parse each script output to get vulns
 				for script in scripts:
 					script_id = script['id']
@@ -118,7 +131,6 @@ class nmapData(dict):
 					metadata = {
 						VULN_MATCHED_AT: f'{hostname}:{port_number}',
 						VULN_EXTRACTED_RESULTS: extracted_results,
-						'_source': 'nmap'
 					}
 					if not func:
 						logger.debug(f'Script output parser for "{script_id}" is not supported YET.')
@@ -154,6 +166,9 @@ class nmapData(dict):
 		else:
 			hostname = host_cfg.get('address', {}).get('@addr', None)
 		return hostname
+
+	def _get_ip(self, host_cfg):
+		return host_cfg.get('address', {}).get('@addr', None)
 
 	def _get_extracted_results(self, port_cfg):
 		extracted_results = {

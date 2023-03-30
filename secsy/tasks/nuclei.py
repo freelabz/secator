@@ -1,5 +1,6 @@
 from secsy.definitions import *
 from secsy.tasks._categories import VulnCommand
+from secsy.output_types import Vulnerability
 
 
 class nuclei(VulnCommand):
@@ -38,17 +39,19 @@ class nuclei(VulnCommand):
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
 	output_map = {
-		VULN_ID: lambda x: nuclei.id_extractor(x),
-		VULN_PROVIDER: 'nuclei',
-		VULN_NAME: lambda x: x['info']['name'],
-		VULN_DESCRIPTION: lambda x: x['info'].get('description'),
-		VULN_SEVERITY: lambda x: x['info'][VULN_SEVERITY],
-		VULN_CONFIDENCE: lambda x: 'high',
-		VULN_CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
-		VULN_MATCHED_AT:  'matched-at',
-		VULN_TAGS: lambda x: x['info']['tags'],
-		VULN_REFERENCES: lambda x: x['info']['reference'],
-		VULN_EXTRACTED_RESULTS: lambda x: {'data': x.get('extracted-results', [])}
+		Vulnerability: {
+			VULN_ID: lambda x: nuclei.id_extractor(x),
+			VULN_PROVIDER: 'nuclei',
+			VULN_NAME: lambda x: x['info']['name'],
+			VULN_DESCRIPTION: lambda x: x['info'].get('description'),
+			VULN_SEVERITY: lambda x: x['info'][VULN_SEVERITY],
+			VULN_CONFIDENCE: lambda x: 'high',
+			VULN_CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
+			VULN_MATCHED_AT:  'matched-at',
+			VULN_TAGS: lambda x: x['info']['tags'],
+			VULN_REFERENCES: lambda x: x['info']['reference'],
+			VULN_EXTRACTED_RESULTS: lambda x: {'data': x.get('extracted-results', [])}
+		}
 	}
 	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest'
 

@@ -1,6 +1,7 @@
 from urllib.parse import urlparse, urlunparse
 
 from secsy.definitions import *
+from secsy.output_types import Url
 from secsy.tasks._categories import HTTPCommand
 
 
@@ -20,7 +21,7 @@ class ffuf(HTTPCommand):
 		'fc': {'type': str, 'help': 'Filter out responses with HTTP codes'},
 		'fw': {'type': str, 'help': 'Filter out responses with word count'},
 		'fr': {'type': str, 'help': 'Filter out responses with regular expression'},
-		'fs': {'type': str, 'help': 'Filter out responses with size'}
+		'fs': {'type': str, 'help': 'Filter out responses with size'},
 	}
 	opt_key_map = {
 		HEADER: 'H',
@@ -41,10 +42,12 @@ class ffuf(HTTPCommand):
 		AUTO_CALIBRATION: 'ac',
 	}
 	output_map = {
-		STATUS_CODE: 'status',
-		CONTENT_LENGTH: 'length',
-		CONTENT_TYPE: 'content-type',
-		TIME: lambda x: x['duration'] * 10**-9
+		Url: {
+			STATUS_CODE: 'status',
+			CONTENT_LENGTH: 'length',
+			CONTENT_TYPE: 'content-type',
+			TIME: lambda x: x['duration'] * 10**-9
+		}
 	}
 	encoding = 'ansi'
 	install_cmd = 'go install -v github.com/ffuf/ffuf@latest && sudo git clone https://github.com/danielmiessler/SecLists /usr/share/seclists'
@@ -58,5 +61,5 @@ class ffuf(HTTPCommand):
 
 	@staticmethod
 	def on_item_converted(self, item):
-		item[METHOD] = self.cmd_opts.get(METHOD, 'GET')
+		item.method = self.cmd_opts.get(METHOD, 'GET')
 		return item

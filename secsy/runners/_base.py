@@ -3,6 +3,7 @@ import json
 import operator
 import os
 from datetime import datetime
+from pathlib import Path
 from time import sleep, time
 
 import humanize
@@ -12,12 +13,12 @@ from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
                            TimeElapsedColumn)
 
-from secsy.definitions import DEBUG, OUTPUT_TYPES, REPORTS_FOLDER, GOOGLE_DRIVE_PARENT_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
+from secsy.definitions import DEBUG, REPORTS_FOLDER, GOOGLE_DRIVE_PARENT_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
+from secsy.output_types import OUTPUT_TYPES
 from secsy.rich import build_table, console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
                                     process_extractor)
 from secsy.utils import get_file_timestamp, merge_opts, pluralize
-
 
 class Runner:
 
@@ -26,7 +27,6 @@ class Runner:
 	_save_json = True
 	_save_csv = True
 	_save_google_sheet = True
-
 
 	def __init__(self, config, targets, results=[], **run_opts):
 		self.config = config
@@ -38,7 +38,7 @@ class Runner:
 		self.targets = targets
 		self.start_time = datetime.fromtimestamp(time())
 		self.errors = []
-
+		self.workspace_path = None
 
 	def log_start(self):
 		"""Log runner start."""
@@ -46,7 +46,6 @@ class Runner:
 		runner_name = self.__class__.__name__
 		console.print(f':tada: [bold green]{runner_name}[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
 		self.log_header()
-
 
 	def log_header(self):
 		runner_name = self.__class__.__name__
@@ -81,7 +80,6 @@ class Runner:
 
 		console.print()
 
-
 	def log_results(self):
 		"""Log results.
 
@@ -110,30 +108,39 @@ class Runner:
 		if self._print_table or self.run_opts.get('table', False):
 			Runner.print_results_table(self.results, title, render=console)
 
+		# Get report path on disk
+		output_folder = Path(REPORTS_FOLDER)
+		if self.workspace_path:
+			output_folder = output_folder / Path(self.workspace_path)
+		output_folder = output_folder / Path(pluralize(self.__class__.__name__).lower())
+		output_folder = str(output_folder)
+		os.makedirs(output_folder, exist_ok=True)
+
+		# Prepare report JSON
+		data = self.prepare_report(title=self.config.name)
+
 		# Make HTML report
 		if self._save_html or self.run_opts.get('html', False):
-			html_title = title.replace(' ', '_').replace("\"", '').lower()
-			os.makedirs(REPORTS_FOLDER, exist_ok=True)
-			html_path = f'{REPORTS_FOLDER}/{html_title}_{timestr}.html'
+			title = data['info']['title']
+			html_path = f'{output_folder}/{title}_{timestr}.html'
 			render.save_html(html_path)
 			console.print(f':file_cabinet: Saved HTML report to {html_path}')
 
 		# Make JSON report
 		if self._save_json:
-			self.save_results_json(title, timestr)
+			self.save_results_json(data, timestr, output_folder)
 
 		# Make CSV report
 		if self._save_csv:
-			self.save_results_csv(title, timestr)
+			self.save_results_csv(data, timestr, output_folder)
 
 		# Make Google Sheet report
 		if self._save_google_sheet:
-			self.save_results_google_sheets(title, timestr)
+			self.save_results_google_sheets(data, timestr, output_folder)
 
 		# Log execution results
 		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
 		console.print()
-
 
 	@staticmethod
 	def get_live_results(result):
@@ -162,7 +169,6 @@ class Runner:
 
 			# Sleep between updates
 			sleep(1)
-
 
 	def process_live_tasks(self, result):
 		tasks_progress = Progress(
@@ -220,7 +226,6 @@ class Runner:
 			for progress_id in tasks_progress.values():
 				progress.update(progress_id, advance=100)
 
-
 	def filter_results(self):
 		"""Filter results."""
 		extractors = self.config.results
@@ -240,12 +245,11 @@ class Runner:
 			]
 			results.extend([
 				item for item in self.results
-				if item['_type'] in keep_fields
+				if item._type in keep_fields
 			])
 		else:
 			results = self.results
 		return results
-
 
 	@staticmethod
 	def print_results_table(results, title, render=console, exclude_fields=[]):
@@ -255,25 +259,24 @@ class Runner:
 		render.print()
 		tables = []
 		for output_type in OUTPUT_TYPES:
-			sort_by, output_fields = get_table_fields(output_type)
-			items = [item for item in results if item['_type'] == output_type]
+			items = [
+				item for item in results if item._type == output_type.get_name()
+			]
 			if items:
 				_table = build_table(
 					items,
-					output_fields=output_fields,
+					output_fields=output_type._table_fields,
 					exclude_fields=exclude_fields,
-					sort_by=sort_by)
+					sort_by=output_type._sort_by)
 				tables.append(_table)
-				_type = pluralize(items[0]['_type'])
+				_type = pluralize(items[0]._type)
 				render.print(_type.upper(), style='bold gold3', justify='left')
 				render.print(_table)
 				render.print()
 		return tables
 
-
 	def prepare_report(self, title):
 		from secsy.decorators import DEFAULT_CLI_OPTIONS
-		json_title = title.replace(' ', '_').replace("\"", '').lower()
 
 		# Trim options
 		opts = merge_opts(self.config.options, self.run_opts)
@@ -287,7 +290,7 @@ class Runner:
 		# Prepare report structure
 		data = {
 			'info': {
-				'title': json_title,
+				'title': title,
 				'type': self.__class__.__name__,
 				'name': self.config.name,
 				'targets': self.targets,
@@ -300,27 +303,24 @@ class Runner:
 
 		# Fill report
 		for output_type in OUTPUT_TYPES:
+			output_name = output_type.get_name()
 			sort_by, _ = get_table_fields(output_type)
-			items = [item for item in self.results if item['_type'] == output_type]
+			items = [item for item in self.results if item._type == output_name]
 			if items:
 				if sort_by and all(sort_by):
-					items = sorted(items, key=operator.itemgetter(*sort_by))
-				data['results'][output_type] = items
+					items = sorted(items, key=operator.attrgetter(*sort_by))
+				data['results'][output_name] = [i.toDict() for i in items]
 		return data
 
-
-	def save_results_csv(self, title, timestr):
-		data = self.prepare_report(title)
+	def save_results_csv(self, data, timestr, output_folder):
 		title = data['info']['title']
 		results = data['results']
 		csv_paths = []
 		for output_type, items in results.items():
 			if not items:
 				continue
-			if output_type == 'target':
-				continue
 			keys = list(items[0].keys())
-			csv_path = f'{REPORTS_FOLDER}/{title}_{output_type}_{timestr}.csv'
+			csv_path = f'{output_folder}/{title}_{output_type}_{timestr}.csv'
 			csv_paths.append(csv_path)
 			with open(csv_path, 'w', newline='') as output_file:
 				dict_writer = csv.DictWriter(output_file, keys)
@@ -332,11 +332,9 @@ class Runner:
 			csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
 		console.print(f':file_cabinet: Saved CSV reports to {csv_paths_str}')
 
-
-	def save_results_google_sheets(self, title, timestr):
+	def save_results_google_sheets(self, data, timestr, output_folder):
 		import gspread
 		import yaml
-		data = self.prepare_report(title)
 		info = data['info']
 		title = data['info']['title']
 		sheet_title = f'{data["info"]["title"]}_{timestr}'
@@ -370,7 +368,7 @@ class Runner:
 				k.replace('_', ' ').upper()
 				for k in list(items[0].keys())
 			]
-			csv_path = f'{REPORTS_FOLDER}/{title}_{output_type}_{timestr}.csv'
+			csv_path = f'{output_folder}/{title}_{output_type}_{timestr}.csv'
 			sheet_title = pluralize(output_type).upper()
 			ws = sheet.add_worksheet(sheet_title, rows=len(items), cols=len(keys))
 			with open(csv_path, 'r') as f:
@@ -392,11 +390,9 @@ class Runner:
 
 		console.print(f':file_cabinet: Saved Google Sheets reports to [u magenta]{sheet.url}[/]')
 
-
-	def save_results_json(self, title, timestr):
-		data = self.prepare_report(title)
+	def save_results_json(self, data, timestr, output_folder):
 		title = data['info']['title']
-		json_path = f'{REPORTS_FOLDER}/{title}_{timestr}.json'
+		json_path = f'{output_folder}/{title}_{timestr}.json'
 
 		# Save JSON report to file
 		with open(json_path, 'w') as f:
@@ -405,9 +401,6 @@ class Runner:
 
 
 # TODO: move all functions to utils
-
-def plusplus(oldChar):
-     return chr(ord(oldChar)+1)
 
 def build_nodes_hierarchy(nodes):
 	for node in nodes:
@@ -456,22 +449,9 @@ def get_table_fields(output_type):
 	Returns:
 		tuple: Tuple of sort_by (tuple), output_fields (list).
 	"""
-	# TODO: Rework this with new output models
-	from secsy.tasks._categories import HTTPCommand, VulnCommand
-	from secsy.tasks.naabu import naabu
-	from secsy.tasks.subfinder import subfinder
 	sort_by = ()
 	output_fields = []
-	output_map = {
-		'vulnerability': VulnCommand,
-		'port': naabu,
-		'url': HTTPCommand,
-		'subdomain': subfinder
-	}
-	if output_type in output_map:
-		task_cls = output_map[output_type]
-		sort_by = task_cls.output_table_sort_fields
-		if not sort_by:
-			sort_by = (task_cls.output_field,)
-		output_fields = task_cls.output_table_fields
+	if output_type in OUTPUT_TYPES:
+		sort_by = output_type._sort_by
+		output_fields = output_type._table_fields
 	return sort_by, output_fields

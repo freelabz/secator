@@ -62,13 +62,14 @@ def process_extractor(results, extractor, ctx={}):
 		_type, _field = tuple(extractor.split('.'))
 		_condition = 'True'
 	items = [
-		item for item in results if item['_type'] == _type and eval(_condition)
+		item for item in results if item._type == _type and eval(_condition)
 	]
 	if _field:
 		_field = '{' + _field + '}' if not _field.startswith('{') else _field
-		return [_field.format(**item) for item in items]
+		return [_field.format(**item.toDict()) for item in items]
 	else:
 		return items
+
 
 def get_task_nodes(result, ids=[], nodes=[], level=0, parent=None):
 	"""Get Celery task tree."""

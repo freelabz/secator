@@ -1,8 +1,9 @@
 from contextlib import nullcontext
 
+from secsy.definitions import RECORD
 from secsy.rich import console
 from secsy.runners._base import Runner
-from secsy.runners._helpers import confirm_exit
+from secsy.serializers.dataclass import loads_dataclass
 from secsy.utils import discover_tasks, merge_opts
 
 
@@ -14,7 +15,6 @@ class Task(Runner):
 	_save_csv = False
 	_save_google_sheet = False
 
-	@confirm_exit
 	def run(self, sync=True):
 		"""Run task.
 
@@ -28,6 +28,7 @@ class Task(Runner):
 		table = self.run_opts.pop('table', False)
 		json = self.run_opts.get('json', False)
 		orig = self.run_opts.get('orig', False)
+		raw = self.run_opts.get('raw', False)
 		self._print_table = table or not sync
 		self.sync = sync
 		fmt_opts = {
@@ -38,7 +39,7 @@ class Task(Runner):
 			'print_line': True,
 			'sync': sync,
 			'json': json or table or not sync,
-			'raw': not (json or table or orig or not sync),
+			'raw': raw or not (json or table or orig or not sync),
 			'raw_yield': False
 		}
 		opts = merge_opts(self.run_opts, fmt_opts)
@@ -47,7 +48,7 @@ class Task(Runner):
 		task_cls = Task.get_task_class(self.config.name)
 		if sync:
 			task = task_cls(self.targets, **opts)
-			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...') if not task._json_output and not task._raw_output and not task._orig_output else nullcontext():
+			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...') if not RECORD and not task._json_output and not task._raw_output and not task._orig_output else nullcontext():
 				self.results = task.run()
 		else:
 			result = task_cls.delay(self.targets, **opts)
@@ -59,7 +60,6 @@ class Task(Runner):
 		self.done = True
 		self.log_results()
 		return self.results
-
 
 	@staticmethod
 	def get_task_class(name):
@@ -75,7 +75,6 @@ class Task(Runner):
 		raise ValueError(
 			f'Task {name} not found. Aborting.', style='bold red'
 		)
-
 
 	@staticmethod
 	def get_tasks_from_conf(config):

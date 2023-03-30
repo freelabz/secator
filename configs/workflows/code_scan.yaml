@@ -1,5 +1,5 @@
 name: code_scan
-alias: cs
+alias: codescan
 description: Run vulnerability scan on code repositories
 tags: [vulnerability, code]
 tasks:

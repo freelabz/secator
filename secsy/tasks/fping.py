@@ -1,6 +1,7 @@
 import validators
 
 from secsy.definitions import *
+from secsy.output_types import Ip
 from secsy.tasks._categories import ReconCommand
 
 
@@ -24,10 +25,7 @@ class fping(ReconCommand):
 		TIMEOUT: lambda x: x * 1000 # convert s to ms
 	}
 	input_type = IP
-	output_schema = [IP, 'alive']
-	output_type = IP
-	output_field = IP
-	output_table_sort_fields = (IP,)
+	output_types = [Ip]
 	install_cmd = 'sudo apt install -y fping'
 
 	def item_loader(self, line):
