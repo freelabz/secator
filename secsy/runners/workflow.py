@@ -10,6 +10,16 @@ from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.runners.task import Task
 from secsy.utils import merge_opts
+from secsy.exporters import TableExporter
+
+
+DEFAULT_CLI_FORMAT_OPTIONS = {
+	'print_timestamp': True,
+	'print_cmd': True,
+	'print_line': True,
+	'print_item_count': True,
+	'raw_yield': False
+}
 
 
 class Workflow(Runner):
@@ -25,20 +35,24 @@ class Workflow(Runner):
 			list: List of results.
 		"""
 		self.sync = sync
-		fmt_opts = {
-			'print_timestamp': True,
-			'print_cmd': True,
-			'print_cmd_prefix': not sync,
-			'print_item_count': True,
-			'sync': sync,
-			'raw_yield': False
-		}
-		self.run_opts = merge_opts(self.run_opts, fmt_opts)
+
+		# Overriding library defaults with CLI defaults
+		fmt_opts = DEFAULT_CLI_FORMAT_OPTIONS
+		fmt_opts['sync'] = sync
 
 		# Check if we can add a console status
 		print_line = self.run_opts.get('print_line', False)
 		print_item = self.run_opts.get('print_item', False)
 		print_status = sync and not (print_line or print_item)
+
+		# In async mode, display results back in client-side
+		if not sync:
+			fmt_opts['print_cmd_prefix'] = True
+			if not self.exporters:
+				self.exporters = [TableExporter]
+
+		# Merge runtime options
+		self.run_opts = merge_opts(self.run_opts, fmt_opts)
 
 		# Log workflow start
 		self.log_start()

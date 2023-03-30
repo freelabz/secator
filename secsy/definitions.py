@@ -47,21 +47,18 @@ DEFAULT_STDIN_TIMEOUT = 1000 # seconds
 DEFAULT_PROXY_TIMEOUT = 1 # seconds
 DEFAULT_OUTPUT_FORMAT = {
    'task': {
-      '_print_table': False,
       '_save_html': False,
       '_save_json': False,
       '_save_csv': False,
       '_save_google_sheet': False,
    },
    'workflow': {
-	   '_print_table': True,
 	   '_save_html': True,
 	   '_save_json': True,
 	   '_save_csv': True,
 	   '_save_google_sheet': True,
    },
    'scan': {
-	   '_print_table': True,
 	   '_save_html': True,
 	   '_save_json': True,
 	   '_save_csv': True,

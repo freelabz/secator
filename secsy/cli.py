@@ -267,6 +267,9 @@ def revshells(name, host, port, interface, listen):
 	"""Show reverse shell source codes and run netcat listener."""
 	if host is None: # detect host automatically
 		host = detect_host(interface)
+		if not host:
+			console.print(f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.', style='bold red')
+			return
 
 	with open(f'{SCRIPTS_FOLDER}/revshells.json') as f:
 		shells = json.loads(f.read())
@@ -329,7 +332,6 @@ def serve(directory, host, port, interface):
 			'command': 'wget https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh -O linpeas.sh && chmod 700 linpeas.sh'
 		}
 	]
-	console.print('Downloading payloads ...', style='bold yellow')
 	for ix, payload in enumerate(DEFAULT_PAYLOADS):
 		descr = payload.get('description', '')
 		fname = payload['fname']
@@ -348,12 +350,15 @@ def serve(directory, host, port, interface):
 		console.print()
 
 	console.print(Rule())
-	console.print('Available payloads: ', style='bold yellow')
+	console.print(f'Available payloads in {directory}: ', style='bold yellow')
 	opts = DEFAULT_CMD_OPTS.copy()
 	opts['print_cmd'] = False
 	for fname in os.listdir(directory):
 		if not host:
 			host = detect_host(interface)
+			if not host:
+				console.print(f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.', style='bold red')
+				return
 		payload = find_list_item(DEFAULT_PAYLOADS, fname, key='fname', default={})
 		fdescr = payload.get('description', 'No description')
 		console.print(f'{fname} [dim]({fdescr})[/]', style='bold magenta')

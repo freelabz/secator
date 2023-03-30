@@ -109,7 +109,6 @@ class Runner:
 			return
 
 		if not self.results:
-			console.log('No results found.', style='bold red')
 			return
 
 		self.end_time = datetime.fromtimestamp(time())

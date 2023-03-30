@@ -387,6 +387,7 @@ def get_file_timestamp():
 
 def detect_host(interface=None):
 	ifaces = netifaces.interfaces()
+	host = None
 	for iface in ifaces:
 		addrs = netifaces.ifaddresses(iface)
 		if (interface and iface != interface) or iface == 'lo':
