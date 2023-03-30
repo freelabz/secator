@@ -48,7 +48,7 @@ def cli(no_banner):
 	pass
 
 
-@cli.group(aliases=['x', 'task', 't', 'cmd'])
+@cli.group(aliases=['x', 't', 'cmd'])
 def task():
 	"""Run a task."""
 	pass
@@ -76,35 +76,18 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
 
 
-@cli.group(aliases=['u', 'utils'])
+@cli.group(aliases=['u'])
 def utils():
-	"""Run a utility."""
+	"""Utilities."""
 	pass
 
+#--------#
+# REPORT #
+#--------#
 
-@cli.command()
-@click.option('-c', '--concurrency', type=int, help='Number of child processes processing the queue.')
-@click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
-def worker(concurrency, reload):
-	"""Run a Celery worker."""
-	cmd = 'celery -A secsy.celery.app worker -n runner'
-	if concurrency:
-		cmd += f' -c {concurrency}'
-	if reload:
-		cmd = f'watchmedo auto-restart --directory=./ --patterns="celery.py;tasks/*.py" --recursive -- {cmd}'
-	Command.run_command(
-		cmd,
-		**DEFAULT_CMD_OPTS
-	)
-
-
-#-------#
-# UTILS #
-#-------#
-
-@utils.group()
+@cli.group(aliases=['r'])
 def report():
-	"""Reporting utilities."""
+	"""Reports."""
 	pass
 
 @report.command('show')
@@ -121,6 +104,34 @@ def report_show(json_path, exclude_fields):
 		title=report['info']['title'],
 		exclude_fields=exclude_fields)
 
+
+#--------#
+# WORKER #
+#--------#
+
+@cli.command()
+@click.option('-c', '--concurrency', type=int, help='Number of child processes processing the queue.')
+@click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
+@click.option('--check', is_flag=True, help='Check if Celery git sworker is alive')
+def worker(concurrency, reload, check):
+	"""Celery worker."""
+	if check:
+		is_celery_worker_alive()
+		return
+	cmd = 'celery -A secsy.celery.app worker -n runner'
+	if concurrency:
+		cmd += f' -c {concurrency}'
+	if reload:
+		cmd = f'watchmedo auto-restart --directory=./ --patterns="celery.py;tasks/*.py" --recursive -- {cmd}'
+	Command.run_command(
+		cmd,
+		**DEFAULT_CMD_OPTS
+	)
+
+
+#-------#
+# UTILS #
+#-------#
 
 @utils.command()
 @click.argument('cmds', required=False)
@@ -139,10 +150,13 @@ def install(cmds):
 
 @utils.command()
 @click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
-def get_proxy(timeout):
+@click.option('--number', '-n', type=int, default=1, help='Number of proxies')
+def get_proxy(timeout, number):
 	"""Get a random proxy."""
-	url = FreeProxy(timeout=timeout, rand=True, anonym=True).get()
-	print(url)
+	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
+	for _ in range(number):
+		url = proxy.get()
+		print(url)
 
 
 @utils.command()
@@ -174,16 +188,6 @@ def download_cves(force):
 
 
 @utils.command()
-def check_celery_worker():
-	"""Generate if a Celery worker is ready to consume from the queue."""
-	alive = is_celery_worker_alive()
-	if alive:
-		console.print('Celery worker is alive !', style='bold green')
-	else:
-		console.print('No Celery worker alive.', style='bold red')
-
-
-@utils.command()
 def generate_bash_install():
 	"""Generate bash install script for all secsy-supported tasks."""
 	path = ROOT_FOLDER + '/scripts/install_commands.sh'
@@ -202,6 +206,7 @@ def generate_bash_install():
 
 @utils.command()
 def enable_aliases():
+	"""Enable aliases."""
 	aliases = []
 	aliases.extend([
 		f'alias {task.__name__}="secsy x {task.__name__}"'
@@ -247,6 +252,7 @@ echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load 
 
 @utils.command()
 def disable_aliases():
+	"""Disable aliases."""
 	for task in ALL_TASKS:
 		Command.run_command(f'unalias {task.name}', cls_attributes={'shell':True})
 
@@ -310,6 +316,7 @@ def revshells(name, host, port, interface, listen):
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
+	"""Serve payloads in HTTP server."""
 	DEFAULT_PAYLOADS = [
 		{
 			'fname': 'lse.sh',
@@ -369,6 +376,7 @@ def serve(directory, host, port, interface):
 @click.option('--height', '-h', type=int, default=None, help='Recording height')
 @click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
 def record(record_name, script, interactive, width, height, output_dir):
+	"""Record secsy session using asciinema."""
 	height = height or console.size.height
 	width = width or console.size.width
 	attrs = {
@@ -454,9 +462,9 @@ def record(record_name, script, interactive, width, height, output_dir):
 # TEST #
 #------#
 
-@utils.group(aliases=['t', 'tests'])
+@cli.group(aliases=['t', 'tests'])
 def test():
-	"""Run secsy tests."""
+	"""Tests."""
 	pass
 
 

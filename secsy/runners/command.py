@@ -19,7 +19,7 @@ from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
                                OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
-from secsy.utils import get_file_timestamp, pluralize
+from secsy.utils import get_file_timestamp, pluralize, print_results_table
 from secsy.output_types import OutputType
 
 logger = logging.getLogger(__name__)
@@ -831,16 +831,7 @@ class Command:
 
 		# Print a rich table
 		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
-			for klass in self.output_types:
-				table_data = [
-					item for item in data if item._type == klass.get_name()
-				]
-				table = build_table(
-					table_data,
-					klass._table_fields,
-					sort_by=klass._sort_by)
-				log(table)
-				return
+			print_results_table(self.results, log=True)
 
 		# Print a JSON item
 		elif isinstance(data, (OutputType, DotMap, dict)):

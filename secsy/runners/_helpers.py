@@ -71,47 +71,6 @@ def process_extractor(results, extractor, ctx={}):
 		return items
 
 
-def get_task_nodes(result, ids=[], nodes=[], level=0, parent=None):
-	"""Get Celery task tree."""
-	if result is None:
-		return
-	
-	node = {
-		'celery_id': result.id,
-		'level': level,
-		'parent': parent,
-	}
-
-	if isinstance(result, GroupResult):
-		node['name'] = '_group'
-		nodes.append(node)
-		get_task_nodes(result.parent, ids=ids, nodes=nodes, level=level-1, parent=result.id)
-
-	elif isinstance(result, AsyncResult) and not isinstance(result.info, list) and not isinstance(result.info, BaseException):
-		node['state'] = result.state
-		node['info'] = result.info
-		if result.id not in ids and len(result.args) > 1:
-			ids.append(result.id)
-			name = result.args[1]
-			info = result.info
-			chunk = info.get('chunk')
-			chunk_count = info.get('chunk_count')
-			if chunk:
-				name += f' {chunk}/{chunk_count}'
-			node['name'] = name
-			node['state'] = result.state
-			node['info']['results'] = [] # TODO: remove this
-		nodes.append(node)
-
-	# Browse children
-	if result.children:
-		for child in result.children:
-			get_task_nodes(child, ids=ids, nodes=nodes, level=level+1, parent=result.id)
-
-	# Browse parent
-	get_task_nodes(result.parent, ids=ids, nodes=nodes, level=level-1, parent=result.id)
-
-
 def get_task_ids(result, ids=[]):
 	"""Get all Celery task ids recursively.
 

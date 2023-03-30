@@ -1,6 +1,6 @@
 from secsy.exporters._base import Exporter
 
 
-class HTMLExporter(Exporter):
+class HtmlExporter(Exporter):
     def send(self):
         pass
