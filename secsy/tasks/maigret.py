@@ -3,6 +3,7 @@ import logging
 import re
 
 from secsy.definitions import *
+from secsy.output_types import UserAccount
 from secsy.tasks._categories import ReconCommand
 from secsy.utils import get_file_timestamp
 
@@ -28,8 +29,13 @@ class maigret(ReconCommand):
 		THREADS: OPT_NOT_SUPPORTED
 	}
 	input_type = USERNAME
-	output_schema = ['sitename', 'username', 'url_user']
-	output_type = USER_ACCOUNT
+	output_types = [UserAccount]
+	output_map = {
+		UserAccount: {
+			SITE_NAME: 'sitename',
+			URL: lambda x: x['status']['url']
+		}
+	}
 	install_cmd = 'pip3 install maigret'
 
 	def __iter__(self):

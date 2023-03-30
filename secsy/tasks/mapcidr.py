@@ -1,6 +1,7 @@
 import validators
 
 from secsy.definitions import *
+from secsy.output_types import Ip
 from secsy.tasks._categories import ReconCommand
 
 
@@ -11,8 +12,7 @@ class mapcidr(ReconCommand):
 	file_flag = '-cl'
 	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest'
 	input_type = CIDR_RANGE
-	output_schema = [IP, 'alive']
-	output_type = IP
+	output_types = [Ip]
 	opt_key_map = {
 		THREADS: OPT_NOT_SUPPORTED,
 		PROXY: OPT_NOT_SUPPORTED,

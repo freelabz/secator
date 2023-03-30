@@ -3,6 +3,8 @@
 `secsy` is a sexy security **security swiss-knife** that wraps common
 security-oriented commands in a single CLI.
 
+![](images/short_demo.gif)
+
 `secsy` is designed to not waste your time and make you efficient at
 vulnerability assessments, with the following feature set:
 
@@ -93,6 +95,14 @@ check that the command complies with our selection criterias before doing so. If
 * pip3
 
 ## Installation
+
+### One-line install
+
+```
+curl https://raw.githubusercontent.com/freelabz/secsy-cli/main/scripts/install.sh?token=GHSAT0AAAAAACAUB3MIMTYB5SWVYSN5BPUKZBBTICQ | sh
+```
+
+### Development build
 
 <!-- `pip3 install secsy` -->
 ```sh
@@ -186,6 +196,8 @@ secsy z <NAME> --help # list scan options
 
 The `secsy` CLI is built to be flexible in terms of inputs:
 
+![](images/input.gif)
+
 **Direct input**
 
 Input can be passed directly as an argument to the command / workflow / scan you 
@@ -239,7 +251,7 @@ If none of these options are passed, the command output will be the original
 output.
 
 <!-- ![](images/formatting_httpx.gif) -->
-![](images/formatting_ffuf.gif)
+![](images/fmt.gif)
 
 ## Library usage
 
@@ -251,16 +263,17 @@ Celery task.
 
 ```py
 from secsy.tasks.http import ffuf
+from .models import Urls
 
 app = Celery(__name__)
 
 @app.task
-def process_ffuf_item(result):
-    Results.objects.create(**result)
+def process_url(url):
+    Urls.objects.create(**url)
 
 host = 'wikipedia.org'
-for result in ffuf(host):
-    process_ffuf_item.delay(result)
+for url in ffuf(host):
+    process_url.delay(url)
 ```
 
 ***Note:*** all commands support being run like generators, even if some of them
@@ -331,10 +344,9 @@ from secsy.tasks.vuln import nmap
 
 host = 'cnn.com'
 ports_data = naabu(host).run()
-ports = [p['port'] for p in ports_data]
+ports = [p.port for p in ports_data]
 print(f'Open ports: {ports}')
-for port in ports:
-    vulns = nmap(host, ports=ports, script='vulscan').run()
+vulns = nmap(host, ports=ports, script='vulscan').run()
 ```
 
 ***Finding URLs***

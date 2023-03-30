@@ -3,6 +3,7 @@ import operator
 import click
 import rich_click
 import yaml
+from rich import box
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.table import Table
@@ -67,22 +68,16 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 	Returns:
 		rich.table.Table: rich table.
 	"""
-
 	# Sort items by one or multiple fields
 	if sort_by and all(sort_by):
-		items = sorted(items, key=operator.itemgetter(*sort_by))
+		items = sorted(items, key=operator.attrgetter(*sort_by))
 
 	# Create rich table
-	table = Table(show_lines=True)
+	box_style = box.DOUBLE if RECORD else None
+	table = Table(show_lines=True, box=box_style)
 
 	# Get table schema if any, default to first item keys
-	cls = items[0].get('_cls')
-	if output_fields:
-		keys = output_fields
-	elif cls and cls.output_table_fields:
-		keys = cls.output_table_fields
-	else:
-		keys = list(items[0].keys())
+	keys = output_fields
 
 	# List of fields to exclude
 	keys = [k for k in keys if k not in exclude_fields]
@@ -117,7 +112,7 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 	for item in items:
 		values = []
 		for key in keys:
-			value = item[key]
+			value = getattr(item, key)
 			value = FORMATTERS.get(key, lambda x: x)(value)
 			if isinstance(value, dict) or isinstance(value, list):
 				value = yaml.dump(value)

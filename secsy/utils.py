@@ -3,6 +3,7 @@ import inspect
 import itertools
 import logging
 import mimetypes
+import operator
 import os
 import select
 import sys
@@ -14,6 +15,7 @@ from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse
 
+import netifaces
 import tabulate
 import yaml
 from furl import furl
@@ -179,8 +181,8 @@ def fmt_table(data, output_table_fields=[], sort_by=None):
 	return '\n' + tabulate.tabulate(values, headers=headers, tablefmt='fancy_grid') + '\n'
 
 
-def deduplicate(l, key=None):
-	"""Deduplicate list of dicts or simple list.
+def deduplicate(l, attr=None):
+	"""Deduplicate list of OutputType items.
 
 	Args:
 		l (list): Input list.
@@ -188,14 +190,15 @@ def deduplicate(l, key=None):
 	Returns:
 		list: Deduplicated list.
 	"""
-	if key and len(l) > 0 and isinstance(l[0], dict):
+	from secsy.output_types import OUTPUT_TYPES
+	if attr and len(l) > 0 and isinstance(l[0], tuple(OUTPUT_TYPES)):
 		memo = set()
 		res = []
 		for sub in l:
-			if key in sub and sub[key] not in memo:
+			if attr in sub.keys() and getattr(sub, attr) not in memo:
 				res.append(sub)
-				memo.add(sub[key])
-		return sorted(res, key=lambda x: x[key])
+				memo.add(getattr(sub, attr))
+		return sorted(res, key=operator.attrgetter(attr))
 	return sorted(list(dict.fromkeys(l)))
 
 
@@ -381,7 +384,6 @@ class TaskError(ValueError):
 	pass
 
 def detect_host(interface=None):
-	import netifaces
 	ifaces = netifaces.interfaces()
 	for iface in ifaces:
 		addrs = netifaces.ifaddresses(iface)

@@ -2,6 +2,7 @@ import shlex
 from pathlib import Path
 
 from secsy.definitions import *
+from secsy.output_types import Url
 from secsy.tasks._categories import HTTPCommand
 from secsy.utils import get_file_timestamp
 
@@ -36,10 +37,12 @@ class feroxbuster(HTTPCommand):
 		USER_AGENT: 'user-agent',
 	}
 	output_map = {
-		STATUS_CODE: 'status',
-		CONTENT_TYPE: lambda x: x['headers'].get('content-type'),
-		LINES: 'line_count',
-		WORDS: 'word_count'
+		Url: {
+			STATUS_CODE: 'status',
+			CONTENT_TYPE: lambda x: x['headers'].get('content-type'),
+			LINES: 'line_count',
+			WORDS: 'word_count'
+		}
 	}
 	install_cmd = 'sudo apt install -y unzip && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash && sudo mv feroxbuster /usr/local/bin'
 

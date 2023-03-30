@@ -1,4 +1,3 @@
-import logging
 import contextlib
 
 import json
@@ -6,13 +5,12 @@ import logging
 import os
 import unittest.mock
 import validators
-import yaml
 
 from fp.fp import FreeProxy
 
 from secsy.definitions import *
 from secsy.rich import console
-from secsy.utils import setup_logging, discover_internal_tasks, load_fixture
+from secsy.utils import discover_internal_tasks, load_fixture
 
 
 #---------#
@@ -41,7 +39,7 @@ INPUTS = {
 OUTPUT_VALIDATORS = {
     URL: lambda url: validators.url(url),
     HOST: lambda host: validators.domain(host),
-    USER_ACCOUNT: lambda url: validators.url(url),
+    USERNAME: lambda url: validators.url(url),
     PORT: lambda port: isinstance(port, int),
     IP: lambda ip: validators.ipv4(ip) or validators.ipv6(ip),
     None: lambda x: True,
@@ -120,7 +118,7 @@ class CommandOutputTester: # Mixin for unittest.TestCase
             self,
             items,
             expected_output_keys=None,
-            expected_output_type=None,
+            expected_output_types=None,
             output_validator=None):
 
         if not isinstance(items, list):
@@ -134,13 +132,12 @@ class CommandOutputTester: # Mixin for unittest.TestCase
                 if DEBUG:
                     console.log('\n', log_locals=True)
 
-                if expected_output_type:
-                    self.assertEqual(type(item), expected_output_type)
+                if expected_output_types:
+                    self.assertIn(type(item), expected_output_types)
 
-                if expected_output_keys: # test schema against fixture
-                    keys = [k for k in item.keys() if not k.startswith('_')]
+                if expected_output_keys:
                     self.assertEqual(
-                        set(keys).difference(set(expected_output_keys)),
+                        set(item.keys()).difference(set(expected_output_keys)),
                         set())
 
                 if callable(output_validator):

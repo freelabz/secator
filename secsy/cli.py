@@ -14,7 +14,7 @@ from fp.fp import FreeProxy
 from secsy.celery import *
 from secsy.config import ConfigLoader
 from secsy.decorators import OrderedGroup, register_runner
-from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER, REVSHELLS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, DEBUG
+from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER, CONFIG_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, DEBUG
 from secsy.rich import console
 from secsy.runners import Command
 from secsy.runners._base import Runner
@@ -163,7 +163,6 @@ def download_cves(force):
 			**DEFAULT_CMD_OPTS
 		)
 	os.makedirs(CVES_FOLDER, exist_ok=True)
-	from secsy.rich import console
 	with console.status('[bold yellow]Saving CVEs to disk ...[/]'):
 		with open(f'{TEMP_FOLDER}/circl-cve-search-expanded.json', 'r') as f:
 			for line in f:
@@ -203,18 +202,54 @@ def generate_bash_install():
 
 
 @utils.command()
-def generate_bash_aliases():
-	pass
-
-
-@utils.command()
 def enable_aliases():
-	pass
+	aliases = []
+	aliases.extend([
+		f'alias {task.__name__}="secsy x {task.__name__}"'
+		for task in ALL_TASKS
+	])
+	aliases.extend([
+		f'alias {workflow.alias}="secsy w {workflow.name}"'
+		for workflow in ALL_WORKFLOWS
+	])
+	aliases.extend([
+		f'alias {workflow.name}="secsy w {workflow.name}"'
+		for workflow in ALL_WORKFLOWS
+	])
+	aliases.extend([
+		f'alias scan_{scan.name}="secsy s {scan.name}"'
+		for scan in ALL_SCANS
+	])
+	aliases.append('alias listx="secsy x"')
+	aliases.append('alias listw="secsy w"')
+	aliases.append('alias lists="secsy s"')
+	aliases_str = '\n'.join(aliases)
+
+	fpath = f'{CONFIG_FOLDER}/.aliases'
+	with open(fpath, 'w') as f:
+		f.write(aliases_str)
+	console.print(f'Aliases:')
+	for alias in aliases:
+		alias_split = alias.split('=')
+		alias_name, alias_cmd = alias_split[0].replace('alias ', ''), alias_split[1].replace('"', '')
+		console.print(f'[bold magenta]{alias_name:<15}-> {alias_cmd}')
+	
+	console.print(f':file_cabinet: Alias file written to {fpath}', style='bold green')
+	console.print('To load the aliases, run:')
+	md = f"""
+```sh
+source {fpath}                     # load the aliases in the current shell
+echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load them automatically
+```
+"""
+	console.print(Markdown(md))
+	console.print()
 
 
 @utils.command()
 def disable_aliases():
-	pass
+	for task in ALL_TASKS:
+		Command.run_command(f'unalias {task.name}', cls_attributes={'shell':True})
 
 
 @utils.command()
@@ -325,6 +360,95 @@ def serve(directory, host, port, interface):
 		cwd=directory,
 		**DEFAULT_CMD_OPTS
 	)
+
+
+@utils.command()
+@click.argument('record_name', type=str, default=None)
+@click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')
+@click.option('--interactive', '-i', is_flag=True, default=False, help='Interactive record.')
+@click.option('--width', '-w', type=int, default=None, help='Recording width')
+@click.option('--height', '-h', type=int, default=None, help='Recording height')
+@click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
+def record(record_name, script, interactive, width, height, output_dir):
+	height = height or console.size.height
+	width = width or console.size.width
+	attrs = {
+		'shell': False,
+		'env': {
+			'RECORD': '1',
+			'LINES': str(height),
+			'PS1': '$ ',
+			'COLUMNS': str(width),
+			'TERM': 'xterm-256color'
+		}
+	}
+	output_cast_path = f'{output_dir}/{record_name}.cast'
+	output_gif_path = f'{output_dir}/{record_name}.gif'
+
+	# Run automated 'story' script with asciinema-automation
+	if script:
+		# If existing cast file, remove it
+		if os.path.exists(output_cast_path):
+			os.unlink(output_cast_path)
+			console.print(f'Removed existing {output_cast_path}', style='bold green')
+
+		with console.status('[bold gold3]Recording with asciinema ...[/]'):
+			Command.run_command(
+				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 100',
+				cls_attributes=attrs,
+				raw=True,
+				**DEFAULT_CMD_OPTS,
+			)
+			console.print(f'Generated {output_cast_path}', style='bold green')
+	elif interactive:
+		os.environ.update(attrs['env'])
+		Command.run_command(
+			f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}',
+		)
+
+	# Resize cast file
+	if os.path.exists(output_cast_path):
+		with console.status('[bold gold3]Cleaning up .cast and set custom settings ...'):
+			with open(output_cast_path, 'r') as f:
+				lines = f.readlines()
+			updated_lines = []
+			for ix, line in enumerate(lines):
+				tmp_line = json.loads(line)
+				if ix == 0:
+					tmp_line['width'] = width
+					tmp_line['height'] = height
+					tmp_line['env']['SHELL'] = '/bin/sh'
+					lines[0] = json.dumps(tmp_line) + '\n'
+					updated_lines.append(json.dumps(tmp_line) + '\n')
+				elif tmp_line[2].endswith(' \r'):
+					tmp_line[2] = tmp_line[2].replace(' \r', '')
+					updated_lines.append(json.dumps(tmp_line) + '\n')
+				else:
+					updated_lines.append(line)
+			with open(output_cast_path, 'w') as f:
+				f.writelines(updated_lines)
+			console.print('')
+
+		# Edit cast file to reduce long timeouts
+		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
+			Command.run_command(
+				f'asciinema-edit quantize --range 4 {output_cast_path} --out {output_cast_path}.tmp',
+				cls_attributes=attrs,
+				raw=True,
+				**DEFAULT_CMD_OPTS,
+			)
+			if os.path.exists(f'{output_cast_path}.tmp'):
+				os.replace(f'{output_cast_path}.tmp', output_cast_path)
+			console.print(f'Edited {output_cast_path}', style='bold green')
+
+	# Convert to GIF
+	with console.status(f'[bold gold3]Converting to {output_gif_path} ...[/]'):
+		Command.run_command(
+			f'agg {output_cast_path} {output_gif_path}',
+			cls_attributes=attrs,
+			**DEFAULT_CMD_OPTS,
+		)
+		console.print(f'Generated {output_gif_path}', style='bold green')
 
 
 #------#

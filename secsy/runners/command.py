@@ -1,14 +1,18 @@
-# import celery
 import json
 import logging
+import os
 import re
 import shlex
 import subprocess
 import sys
 from time import sleep
 
+from celery.result import AsyncResult
+from dotmap import DotMap
+
 from fp.fp import FreeProxy
 from rich.markup import escape
+from rich.text import Text
 
 from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
                                DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
@@ -16,6 +20,7 @@ from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
 from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp, pluralize
+from secsy.output_types import OutputType
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +83,9 @@ class Command:
 
 	# Output encoding
 	encoding = 'utf-8'
+
+	# Environment variables
+	env = {}
 
 	# Flag to take the input
 	input_flag = None
@@ -155,7 +163,7 @@ class Command:
 		self._orig_output = self.cmd_opts.pop('orig', False)
 
 		# JSON Output
-		_json = self.cmd_opts.pop('json', False) or self._table_output or self._raw_output
+		_json = self.cmd_opts.pop('json', True) or self._table_output or self._raw_output
 
 		# CLI mode: use nicer prints and colors (no logging statements)
 		self._print_timestamp = self.cmd_opts.pop('print_timestamp', False)
@@ -186,12 +194,10 @@ class Command:
 		# Output formatting
 		self.color = self.cmd_opts.pop('color', False)
 		self.quiet = self.cmd_opts.pop('quiet', False)
-		if 'quiet' in self.opt_key_map:
-			self.cmd_opts['quiet'] = self.quiet
 		self.output_table_fields = self.cmd_opts.pop(
 			'table_fields',
 			self.output_table_fields)
-		self._raw_yield = self.cmd_opts.pop('raw_yield', True)
+		self._raw_yield = self.cmd_opts.pop('raw_yield', False)
 
 		# Hooks
 		self._hooks = {name: [] for name in HOOKS}
@@ -212,10 +218,6 @@ class Command:
 				self._validators[key].append(instance_func)
 			self._validators[key].extend(validators.get(key, []))
 			self._validators[key].extend(self.validators.get(key, []))
-
-		# Output table sort fields
-		if not self.output_table_sort_fields and self.output_field:
-			self.output_table_sort_fields = (self.output_field,)
 
 		# Current working directory for cmd
 		self.cwd = self.cmd_opts.pop('cwd', None)
@@ -277,7 +279,6 @@ class Command:
 	def poll(cls, result):
 		from time import sleep
 
-		from celery.result import AsyncResult
 		while not result.ready():
 			data = AsyncResult(result.id).info
 			if DEBUG and isinstance(data, dict):
@@ -352,12 +353,12 @@ class Command:
 		"""Run adhoc command. Can be used without defining an inherited class 
 		to run a command, while still enjoying all the good stuff in this class.
 		"""
-		helper_cls = type(name, (Command,), {'cmd': cmd})(**kwargs)
+		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
-			setattr(helper_cls, k, v)
-		helper_cls._print_line = True
-		helper_cls.run()
-		return helper_cls
+			setattr(cmd_instance, k, v)
+		cmd_instance._print_line = True
+		cmd_instance.run()
+		return cmd_instance
 
 	#----------#
 	# Internal #
@@ -401,12 +402,15 @@ class Command:
 
 		# Run the command using subprocess
 		try:
+			env = os.environ
+			env.update(self.env)
 			process = subprocess.Popen(
 				command,
 				stdout=sys.stdout if self._no_capture else subprocess.PIPE,
 				stderr=sys.stderr if self._no_capture else subprocess.STDOUT,
 				universal_newlines=True,
 				shell=self.shell,
+				env=env,
 				cwd=self.cwd)
 		except FileNotFoundError as e:
 			if self.name in str(e):
@@ -437,7 +441,7 @@ class Command:
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
-					ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[m|K]?'
+					ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
 					line = re.sub(ansi_regex, '', line.strip())
 
 				# Run on_line hooks
@@ -487,7 +491,6 @@ class Command:
 		# Retrieve the return code and output
 		self._wait_for_end(process)
 
-
 	def _wait_for_end(self, process):
 		"""Wait for process to finish and process output and return code."""
 		process.wait()
@@ -521,39 +524,46 @@ class Command:
 		"""
 		proxy_opt = self.opt_key_map.get('proxy', False)
 		support_proxychains = getattr(self, 'proxychains', True)
+		proxychains_flavor = getattr(self, 'proxychains_flavor', 'proxychains')
 		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
 		if self.proxy == 'proxychains':
 			if not support_proxychains:
 				return
-			self.cmd = f'proxychains {self.cmd}'
+			self.cmd = f'{proxychains_flavor} {self.cmd}'
 		elif self.proxy and support_proxy:
 			if self.proxy == 'random':
 				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
 			else: # tool-specific proxy settings
 				self.cmd_opts['proxy'] = self.proxy
 
+	def _get_results_count(self):
+		count_map = {}
+		for output_type in self.output_types:
+			name = output_type.get_name()
+			count = len([r for r in self.results if r._type == name])
+			count_map[name] = count
+		return count_map
+
 	def _process_results(self):
-		# TODO: this is rawuely for logging timestamp to show up properly !!!
+		# TODO: this is only for logging timestamp to show up properly !!!
 		if self._print_timestamp:
 			sleep(1)
 
 		# Log results count
 		if self._print_item_count and self._json_output and not self._raw_output and not self._orig_output:
-			count = len(self.results)
-			name = self.output_type or 'item'
-			item_name = pluralize(name) if count > 1 or count == 0 else name
-			if count > 0:
-				self._print(f':pill: Found {count} {item_name} !', color='bold green')
+			count_map = self._get_results_count()
+			if all(count == 0 for count in count_map.values()):
+				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
 			else:
-				self._print(f':adhesive_bandage: Found 0 {item_name}.', color='bold red')
+				results_str = ':pill: Found ' + ' and '.join([
+					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
+					for name, count in count_map.items()
+				]) + '.'
+				self._print(results_str, color='bold green')
 
 		# Print table if in table mode
 		if self._table_output and self.results:
-			fmt_table = getattr(self, 'on_table', None)
-			data = self.results
-			if callable(fmt_table):
-				data = fmt_table(self.results)
-			self._print(data, out=sys.stdout)
+			self._print(self.results, out=sys.stdout)
 
 	def _process_item(self, item: dict):
 		# Run item validators
@@ -571,6 +581,8 @@ class Command:
 
 			# Run item convert hooks
 			item = self.run_hooks('on_item_converted', item)
+		else:
+			item = DotMap(item)
 
 		# Add item to result
 		self.results.append(item)
@@ -579,11 +591,11 @@ class Command:
 		item_str = item
 
 		# In raw mode, print principal key or output format field.
-		if self._raw_output and self.output_field is not None:
+		if self._raw_output:
 			item_str = self._rawify(item)
 
 		# In raw yield mode, extract principal key from dict (default 'on' for library usage)
-		if self._raw_yield and self.output_field is not None:
+		if self._raw_yield:
 			item = self._rawify(item)
 			item_str = item
 
@@ -598,16 +610,14 @@ class Command:
 	def _rawify(self, item=None):
 		if not item:
 			return [
-				self._convert_output_format(item)
+				self._rawify(item)
 				for item in self.results
 			]
-		if self._raw_output and self.output_field is not None:
+		if self._raw_output:
 			if self._format_output:
 				item = self._format_output.format(**item)
-			elif callable(self.output_field):
-				item = self.output_field(item)
-			else:
-				item = item[self.output_field]
+			elif isinstance(item, OutputType):
+				item = str(item)
 		return item
 
 
@@ -782,30 +792,26 @@ class Command:
 		Returns:
 			dict: Item with new schema.
 		"""
-		new_item = {}
-		if not self.output_schema:
-			logger.debug(
-				'Skipping converting schema as no output_schema is defined.')
-			return item
-		for key in self.output_schema:
-			if key in self.output_map:
-				mapped_key = self.output_map[key]
-				if callable(mapped_key):
-					mapped_val = mapped_key(item)
-				else:
-					mapped_val = item.get(mapped_key)
-				new_item[key] = mapped_val
-			elif key in item:
-				new_item[key] = item[key]
-			else:
-				new_item[key] = None
+		# Load item using available output types and get the first matching
+		# output type based on the schema
+		new_item = None
+		output_types = getattr(self, 'output_types', [])
+		for klass in output_types:
+			output_map = self.output_map.get(klass, {})
+			try:
+				new_item = klass.load(item, output_map)
+				break # found an item that fits
+			except TypeError as e: # can't load using class
+				logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
+				continue
+
+		# No output type was found, so make no conversion
+		if not new_item:
+			new_item = DotMap(item)
+			new_item._type = 'unknown'
 
 		# Add source to item
-		new_item['_source'] = self.name
-
-		# Add output type to item if any
-		if self.output_type:
-			new_item['_type'] = self.output_type
+		new_item._source = self.name
 
 		return new_item
 
@@ -824,16 +830,24 @@ class Command:
 		log = console.log if self._print_timestamp else _console.print
 
 		# Print a rich table
-		if self._table_output and isinstance(data, list) and isinstance(data[0], dict):
-			data = build_table(
-				data,
-				self.output_table_fields,
-				sort_by=self.output_table_sort_fields)
-			log(data)
-			return
+		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
+			for klass in self.output_types:
+				table_data = [
+					item for item in data if item._type == klass.get_name()
+				]
+				table = build_table(
+					table_data,
+					klass._table_fields,
+					sort_by=klass._sort_by)
+				log(table)
+				return
 
 		# Print a JSON item
-		elif isinstance(data, dict):
+		elif isinstance(data, (OutputType, DotMap, dict)):
+			# If object has a 'toDict' method, use it
+			if getattr(data, 'toDict', None):
+				data = data.toDict()
+
 			# JSON dumps data so that it's consumable by other commands
 			data = json.dumps(data)
 
@@ -847,7 +861,6 @@ class Command:
 
 		# Print a line
 		else:
-
 			# If orig mode (--orig) ir raw mode (--raw), we might want to 
 			# parse results with e.g pipe redirections, so we need a pure line 
 			# with no logging info.
@@ -855,9 +868,8 @@ class Command:
 				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
 				_console.print(data, highlight=False)
 			else:
-				data = escape(data)
-				from rich.text import Text
-				data = Text.from_ansi(data)
+				# data = escape(data)
+				# data = Text.from_ansi(data)
 				if color:
 					data = f'[{color}]{data}[/]'
 				data = f'{self.prefix} {data}' if self.prefix else data

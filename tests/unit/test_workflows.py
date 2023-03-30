@@ -24,7 +24,7 @@ class TestCommandWorkflow(unittest.TestCase):
 			results = result.get()
 			if DEBUG:
 				console.print_json(json.dumps(results))
-			urls = [r['url'] for r in results]
+			urls = [r.url for r in results]
 			self.assertEqual(len(urls), len(TARGETS))
 
 	# def test_chain_with_results(self):
@@ -93,4 +93,4 @@ class TestCommandWorkflow(unittest.TestCase):
 	# 	# for task_id, name, result in poll_task(find_root_task(workflow), seen):
 	# 	#     print(task_id, name, result)
 	# 	#     results.append(result)
-	# 	# print([r for r in results if r['_type'] == 'url'])
+	# 	# print([r for r in results if r._type == 'url'])
