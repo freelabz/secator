@@ -13,19 +13,6 @@ from secsy.utils import merge_opts
 
 
 class Workflow(Runner):
-	"""Workflow runner.
-
-	Args:
-		config (secsy.config.ConfigLoader): Loaded config.
-		targets (list): List of targets to run workflow on.
-		run_opts (dict): Run options.
-
-	Yields:
-		dict: Result (when running in sync mode with `run`).
-
-	Returns:
-		list: List of results (when running in async mode with `run_async`).
-	"""
 
 	def run(self, sync=True, results=[]):
 		"""Run workflow.

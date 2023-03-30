@@ -1,44 +1,59 @@
-import csv
-import json
-import operator
-import os
 from datetime import datetime
-from pathlib import Path
 from time import sleep, time
 
 import humanize
 from celery.result import AsyncResult
-from rich.console import Console
-from rich.markdown import Markdown
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
                            TimeElapsedColumn)
 
-from secsy.definitions import DEBUG, REPORTS_FOLDER, GOOGLE_DRIVE_PARENT_FOLDER_ID, GOOGLE_CREDENTIALS_PATH
+from secsy.definitions import DEBUG
 from secsy.output_types import OUTPUT_TYPES
-from secsy.rich import build_table, console
+from secsy.rich import console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
                                     process_extractor)
-from secsy.utils import get_file_timestamp, merge_opts, pluralize
+from secsy.utils import merge_opts
+from secsy.report import Report
+from secsy.exporters import CSVExporter, GoogleSheetsExporter, JSONExporter, HTMLExporter, TableExporter
+
 
 class Runner:
+	"""Runner class.
 
-	_print_table = True
-	_save_html = True
-	_save_json = True
-	_save_csv = True
-	_save_google_sheet = True
+	Args:
+		config (secsy.config.ConfigLoader): Loaded config.
+		targets (list): List of targets to run task on.
+		results (list): List of existing results to re-use.
+		workspace_name (str): Workspace name.
+		expoters (list): List of exporter classes to use.
+		run_opts (dict): Run options.
 
-	def __init__(self, config, targets, results=[], **run_opts):
+	Yields:
+		dict: Result (when running in sync mode with `run`).
+
+	Returns:
+		list: List of results (when running in async mode with `run_async`).
+	"""
+
+	DEFAULT_EXPORTERS = [
+		TableExporter,
+		CSVExporter,
+		GoogleSheetsExporter,
+		JSONExporter,
+		HTMLExporter,
+	]
+
+	def __init__(self, config, targets, results=[], workspace_name=None, exporters=[], **run_opts):
 		self.config = config
-		self.run_opts = run_opts
-		self.done = False
-		self.results = results
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
+		self.results = results
+		self.workspace_name = workspace_name
+		self.exporters = exporters or self.DEFAULT_EXPORTERS
+		self.run_opts = run_opts
+		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.errors = []
-		self.workspace_path = None
 
 	def log_start(self):
 		"""Log runner start."""
@@ -90,7 +105,7 @@ class Runner:
 		for error in self.errors:
 			console.log(error, style='bold red')
 
-		if not self.done or not self._print_table:
+		if not self.done:
 			return
 
 		if not self.results:
@@ -101,42 +116,11 @@ class Runner:
 		self.elapsed = self.end_time - self.start_time
 		self.elapsed_human = humanize.naturaldelta(self.elapsed)
 
-		# Print table
-		title = f'{self.__class__.__name__} "{self.config.name}" results'
-		render = Console(record=True)
-		timestr = get_file_timestamp()
-		if self._print_table or self.run_opts.get('table', False):
-			Runner.print_results_table(self.results, title, render=console)
-
-		# Get report path on disk
-		output_folder = Path(REPORTS_FOLDER)
-		if self.workspace_path:
-			output_folder = output_folder / Path(self.workspace_path)
-		output_folder = output_folder / Path(pluralize(self.__class__.__name__).lower())
-		output_folder = str(output_folder)
-		os.makedirs(output_folder, exist_ok=True)
-
-		# Prepare report JSON
-		data = self.prepare_report(title=self.config.name)
-
-		# Make HTML report
-		if self._save_html or self.run_opts.get('html', False):
-			title = data['info']['title']
-			html_path = f'{output_folder}/{title}_{timestr}.html'
-			render.save_html(html_path)
-			console.print(f':file_cabinet: Saved HTML report to {html_path}')
-
-		# Make JSON report
-		if self._save_json:
-			self.save_results_json(data, timestr, output_folder)
-
-		# Make CSV report
-		if self._save_csv:
-			self.save_results_csv(data, timestr, output_folder)
-
-		# Make Google Sheet report
-		if self._save_google_sheet:
-			self.save_results_google_sheets(data, timestr, output_folder)
+		# Build and send report
+		report = Report(self, exporters=self.exporters)
+		report.build()
+		report.send()
+		self.report = report
 
 		# Log execution results
 		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
@@ -250,208 +234,3 @@ class Runner:
 		else:
 			results = self.results
 		return results
-
-	@staticmethod
-	def print_results_table(results, title, render=console, exclude_fields=[]):
-		render.print()
-		h1 = Markdown(f'# {title}')
-		render.print(h1, style='bold magenta', width=50)
-		render.print()
-		tables = []
-		for output_type in OUTPUT_TYPES:
-			items = [
-				item for item in results if item._type == output_type.get_name()
-			]
-			if items:
-				_table = build_table(
-					items,
-					output_fields=output_type._table_fields,
-					exclude_fields=exclude_fields,
-					sort_by=output_type._sort_by)
-				tables.append(_table)
-				_type = pluralize(items[0]._type)
-				render.print(_type.upper(), style='bold gold3', justify='left')
-				render.print(_table)
-				render.print()
-		return tables
-
-	def prepare_report(self, title):
-		from secsy.decorators import DEFAULT_CLI_OPTIONS
-
-		# Trim options
-		opts = merge_opts(self.config.options, self.run_opts)
-		opts = {
-			k: v for k, v in opts.items()
-			if k not in DEFAULT_CLI_OPTIONS \
-				and not k.startswith('print_') \
-				and v is not None
-		}
-
-		# Prepare report structure
-		data = {
-			'info': {
-				'title': title,
-				'type': self.__class__.__name__,
-				'name': self.config.name,
-				'targets': self.targets,
-				'total_time': str(self.elapsed),
-				'total_human': self.elapsed_human,
-				'opts': opts,
-			},
-			'results': {},
-		}
-
-		# Fill report
-		for output_type in OUTPUT_TYPES:
-			output_name = output_type.get_name()
-			sort_by, _ = get_table_fields(output_type)
-			items = [item for item in self.results if item._type == output_name]
-			if items:
-				if sort_by and all(sort_by):
-					items = sorted(items, key=operator.attrgetter(*sort_by))
-				data['results'][output_name] = [i.toDict() for i in items]
-		return data
-
-	def save_results_csv(self, data, timestr, output_folder):
-		title = data['info']['title']
-		results = data['results']
-		csv_paths = []
-		for output_type, items in results.items():
-			if not items:
-				continue
-			keys = list(items[0].keys())
-			csv_path = f'{output_folder}/{title}_{output_type}_{timestr}.csv'
-			csv_paths.append(csv_path)
-			with open(csv_path, 'w', newline='') as output_file:
-				dict_writer = csv.DictWriter(output_file, keys)
-				dict_writer.writeheader()
-				dict_writer.writerows(items)
-		if len(csv_paths) == 1:
-			csv_paths_str = csv_paths[0]
-		else:
-			csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
-		console.print(f':file_cabinet: Saved CSV reports to {csv_paths_str}')
-
-	def save_results_google_sheets(self, data, timestr, output_folder):
-		import gspread
-		import yaml
-		info = data['info']
-		title = data['info']['title']
-		sheet_title = f'{data["info"]["title"]}_{timestr}'
-		results = data['results']
-		if not GOOGLE_CREDENTIALS_PATH:
-			console.print(':file_cabinet: Missing GOOGLE_CREDENTIALS_PATH to save to Google Sheets', style='red')
-			return
-		if not GOOGLE_DRIVE_PARENT_FOLDER_ID:
-			console.print(':file_cabinet: Missing GOOGLE_DRIVE_PARENT_FOLDER_ID to save to Google Sheets.', style='red')
-			return
-		client = gspread.service_account(GOOGLE_CREDENTIALS_PATH)
-		sheet = client.create(title, folder_id=GOOGLE_DRIVE_PARENT_FOLDER_ID)
-
-		# Add options worksheet for input data
-		info = data['info']
-		info['targets'] = '\n'.join(info['targets'])
-		info['opts'] = yaml.dump(info['opts'])
-		keys = [k.replace('_', ' ').upper() for k in list(info.keys())]
-		ws = sheet.add_worksheet('OPTIONS', rows=2, cols=len(keys))
-		sheet.values_update(
-			ws.title,
-			params={'valueInputOption': 'USER_ENTERED'},
-			body={'values': [keys, list(info.values())]}
-		)
-
-		# Add one worksheet per output type
-		for output_type, items in results.items():
-			if not items:
-				continue
-			keys = [
-				k.replace('_', ' ').upper()
-				for k in list(items[0].keys())
-			]
-			csv_path = f'{output_folder}/{title}_{output_type}_{timestr}.csv'
-			sheet_title = pluralize(output_type).upper()
-			ws = sheet.add_worksheet(sheet_title, rows=len(items), cols=len(keys))
-			with open(csv_path, 'r') as f:
-				data = csv.reader(f)
-				data = list(data)
-				data[0] = [
-					k.replace('_', ' ').upper()
-					for k in data[0]
-				]
-				sheet.values_update(
-					ws.title,
-					params={'valueInputOption': 'USER_ENTERED'},
-					body={'values': data}
-				)
-
-		# Delete 'default' worksheet
-		ws = sheet.get_worksheet(0)
-		sheet.del_worksheet(ws)
-
-		console.print(f':file_cabinet: Saved Google Sheets reports to [u magenta]{sheet.url}[/]')
-
-	def save_results_json(self, data, timestr, output_folder):
-		title = data['info']['title']
-		json_path = f'{output_folder}/{title}_{timestr}.json'
-
-		# Save JSON report to file
-		with open(json_path, 'w') as f:
-			json.dump(data, f, indent=2)
-			console.print(f':file_cabinet: Saved JSON report to {json_path}')
-
-
-# TODO: move all functions to utils
-
-def build_nodes_hierarchy(nodes):
-	for node in nodes:
-		parent_id = node.get('parent')
-		parent = [n for n in nodes if n['celery_id'] == parent_id]
-		if parent:
-			parent = parent[0]
-			children = parent.get('children', [])
-			children.append(node['celery_id'])
-			parent['children'] = children
-	return nodes
-
-
-def build_tree(root, node, nodes):
-	name = node.get('name')
-
-	# Skip utility Celery tasks
-	while name is None:
-		children = [c for c in nodes if c['celery_id'] in node.get('children', [])]
-		if not children:
-			break
-		node = children[0]
-		name = node.get('name')
-
-	# Make subtree, skip _group subtree
-	if name == '_group':
-		subtree = root
-	else:
-		subtree = root.add(name)
-
-	# Add children to subtree
-	children = [
-		c for c in nodes
-		if c['celery_id'] in node.get('children', [])
-	]
-	for child in children:
-		build_tree(subtree, child, nodes)
-
-
-def get_table_fields(output_type):
-	"""Get output fields and sort fields based on output type.
-
-	Args:
-		output_type (str): Output type.
-
-	Returns:
-		tuple: Tuple of sort_by (tuple), output_fields (list).
-	"""
-	sort_by = ()
-	output_fields = []
-	if output_type in OUTPUT_TYPES:
-		sort_by = output_type._sort_by
-		output_fields = output_type._table_fields
-	return sort_by, output_fields

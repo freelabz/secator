@@ -26,6 +26,10 @@ from secsy.rich import console
 logger = logging.getLogger(__name__)
 
 
+class TaskError(ValueError):
+	pass
+
+
 def setup_logging(level):
 	"""Setup logging.
 
@@ -380,8 +384,6 @@ def load_fixture(name, fixtures_dir, ext=None, only_path=False):
 def get_file_timestamp():
 	return datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%f_%p")
 
-class TaskError(ValueError):
-	pass
 
 def detect_host(interface=None):
 	ifaces = netifaces.interfaces()
@@ -395,5 +397,34 @@ def detect_host(interface=None):
 			break
 	return host
 
+
 def find_list_item(l, val, key='id', default=None):
 	return next((item for item in l if item[key] == val), default)
+
+
+def print_results_table(results, title, exclude_fields=[]):
+	from secsy.output_types import OUTPUT_TYPES
+	from secsy.rich import build_table
+	from rich.markdown import Markdown
+	console.print()
+	title = ' '.join(title.capitalize().split('_')) + ' results'
+	h1 = Markdown(f'# {title}')
+	console.print(h1, style='bold magenta', width=50)
+	console.print()
+	tables = []
+	for output_type in OUTPUT_TYPES:
+		items = [
+			item for item in results if item._type == output_type.get_name()
+		]
+		if items:
+			_table = build_table(
+				items,
+				output_fields=output_type._table_fields,
+				exclude_fields=exclude_fields,
+				sort_by=output_type._sort_by)
+			tables.append(_table)
+			_type = pluralize(items[0]._type)
+			console.print(_type.upper(), style='bold gold3', justify='left')
+			console.print(_table)
+			console.print()
+	return tables

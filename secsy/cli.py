@@ -17,8 +17,8 @@ from secsy.decorators import OrderedGroup, register_runner
 from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER, CONFIG_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, DEBUG
 from secsy.rich import console
 from secsy.runners import Command
-from secsy.runners._base import Runner
-from secsy.utils import discover_tasks, flatten, detect_host, find_list_item
+from secsy.utils import discover_tasks, flatten, detect_host, find_list_item, print_results_table
+from secsy.serializers.dataclass import loads_dataclass
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -113,13 +113,12 @@ def report():
 def report_show(json_path, exclude_fields):
 	"""Show a JSON report as a nicely-formatted table."""
 	with open(json_path, 'r') as f:
-		report = json.load(f)
+		report = loads_dataclass(f.read())
 		results = flatten(list(report['results'].values()))
 	exclude_fields = exclude_fields.split(',')
-	Runner.print_results_table(
+	print_results_table(
 		results,
 		title=report['info']['title'],
-		render=console,
 		exclude_fields=exclude_fields)
 
 

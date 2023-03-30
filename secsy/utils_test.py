@@ -1,7 +1,6 @@
 import contextlib
 
 import json
-import logging
 import os
 import unittest.mock
 import validators
@@ -86,30 +85,30 @@ def mock_subprocess_popen(output_list):
 
 @contextlib.contextmanager
 def mock_command(cls, targets=[], opts={}, fixture=None, method=''):
-        mocks = []
-        if isinstance(fixture, dict):
-            fixture = [fixture]
-        
-        is_list = isinstance(fixture, list)
-        if is_list:
-            for item in fixture:
-                if isinstance(item, dict):
-                    mocks.append(json.dumps(item))
-                else:
-                    mocks.append(item)
-        else:
-            mocks.append(fixture)
-
-        with mock_subprocess_popen(mocks):
-            command = cls(targets, **opts)
-            if method == 'run':
-                yield cls(targets, **opts).run()
-            elif method == 'si':
-                yield cls.si([], targets, **opts)
-            elif method in ['s', 'delay']:
-                yield getattr(cls, method)(targets, **opts)
+    mocks = []
+    if isinstance(fixture, dict):
+        fixture = [fixture]
+    
+    is_list = isinstance(fixture, list)
+    if is_list:
+        for item in fixture:
+            if isinstance(item, dict):
+                mocks.append(json.dumps(item))
             else:
-                yield command
+                mocks.append(item)
+    else:
+        mocks.append(fixture)
+
+    with mock_subprocess_popen(mocks):
+        command = cls(targets, **opts)
+        if method == 'run':
+            yield cls(targets, **opts).run()
+        elif method == 'si':
+            yield cls.si([], targets, **opts)
+        elif method in ['s', 'delay']:
+            yield getattr(cls, method)(targets, **opts)
+        else:
+            yield command
 
 
 class CommandOutputTester: # Mixin for unittest.TestCase
