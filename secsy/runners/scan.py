@@ -42,7 +42,6 @@ class Scan(Runner):
 				targets,
 				**self.run_opts
 			)
-			workflow._print_table = False
 			workflow_results = workflow.run(sync=sync)
 			self.results.extend(workflow_results)
 

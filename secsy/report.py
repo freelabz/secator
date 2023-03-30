@@ -21,6 +21,7 @@ class Report:
 		self.runner = runner
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
+		self.workspace_name = runner.workspace_name
 		self.create_local_folders()
 
 	def as_table(self):

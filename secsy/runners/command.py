@@ -17,7 +17,7 @@ from rich.text import Text
 from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
                                DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
                                OPT_PIPE_INPUT, TEMP_FOLDER)
-from secsy.rich import build_table, console, console_stdout
+from secsy.rich import console, console_stdout
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp, pluralize, print_results_table
 from secsy.output_types import OutputType
@@ -729,7 +729,6 @@ class Command:
 			command_name=self.name)
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
-
 
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function 

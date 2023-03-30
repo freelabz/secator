@@ -4,6 +4,14 @@ from secsy.definitions import RECORD
 from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.utils import discover_tasks, merge_opts
+from secsy.exporters import TableExporter
+
+DEFAULT_CLI_FORMAT_OPTIONS = {
+	'print_timestamp': True,
+	'print_cmd': True,
+	'print_line': True,
+	'raw_yield': False
+}
 
 
 class Task(Runner):
@@ -20,23 +28,28 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
+		self.sync = sync
+
+		# Overriding library defaults with CLI defaults
 		table = self.run_opts.get('table', False)
 		json = self.run_opts.get('json', False)
 		orig = self.run_opts.get('orig', False)
 		raw = self.run_opts.get('raw', False)
-		self._print_table = table or not sync
-		self.sync = sync
-		fmt_opts = {
-			'print_timestamp': True,
-			'print_cmd': True,
-			'print_cmd_prefix': not sync,
-			'print_item_count': True,
-			'print_line': True,
+		fmt_opts = DEFAULT_CLI_FORMAT_OPTIONS.copy()
+		fmt_opts.update({
 			'sync': sync,
-			'json': json or table or not sync,
-			'raw': raw or not (json or table or orig or not sync),
+			'raw': raw or not (json or table or orig),
 			'raw_yield': False
-		}
+		})
+
+		# In async mode, display results back in client-side
+		if not sync:
+			if not self.exporters:
+				self.exporters = [TableExporter]
+			fmt_opts['json'] = True
+			fmt_opts['print_cmd_prefix'] = True
+
+		# Merge runtime options
 		opts = merge_opts(self.run_opts, fmt_opts)
 
 		# Run Celery workflow and get results

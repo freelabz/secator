@@ -11,8 +11,9 @@ from secsy.runners import Scan, Task, Workflow
 from secsy.utils import (expand_input, get_command_category,
                          get_command_cls, import_dynamic)
 
-DEFAULT_OUTPUT_OPTIONS = {
+DEFAULT_RUNNER_OPTIONS = {
 	'output': {'type': str, 'default': '', 'help': 'Output options', 'short': 'o'},
+	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
@@ -23,14 +24,14 @@ DEFAULT_OUTPUT_OPTIONS = {
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
 
-DEFAULT_EXECUTION_OPTIONS = {
+DEFAULT_RUNNER_META_OPTIONS = {
 	'sync': {'is_flag': True, 'help': f'Run tasks synchronously (automatic if no worker is alive)'},
 	'worker': {'is_flag': True, 'help': f'Run tasks in worker (automatic if worker is alive)'},
 	'debug': {'is_flag': True, 'help': f'Debug mode'},
 	'proxy': {'type': str, 'help': f'HTTP proxy'},
 }
 
-DEFAULT_CLI_OPTIONS = list(DEFAULT_OUTPUT_OPTIONS.keys()) + list(DEFAULT_EXECUTION_OPTIONS.keys())
+DEFAULT_CLI_OPTIONS = list(DEFAULT_RUNNER_OPTIONS.keys()) + list(DEFAULT_RUNNER_META_OPTIONS.keys())
 
 
 class OrderedGroup(RichGroup):
@@ -84,11 +85,11 @@ def get_command_options(*tasks):
 	all_opts = OrderedDict({})
 
 	for cls in tasks:
-		opts = OrderedDict(DEFAULT_EXECUTION_OPTIONS, **DEFAULT_OUTPUT_OPTIONS, **cls.meta_opts, **cls.opts)
+		opts = OrderedDict(DEFAULT_RUNNER_META_OPTIONS, **DEFAULT_RUNNER_OPTIONS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
 
 			# Opt is not supported by this task
-			if opt not in cls.opt_key_map and opt not in cls.opts and opt not in DEFAULT_OUTPUT_OPTIONS and opt not in DEFAULT_EXECUTION_OPTIONS:
+			if opt not in cls.opt_key_map and opt not in cls.opts and opt not in DEFAULT_RUNNER_OPTIONS and opt not in DEFAULT_RUNNER_META_OPTIONS:
 				continue
 
 			if cls.opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
@@ -100,9 +101,9 @@ def get_command_options(*tasks):
 				prefix = cls.__name__
 			elif opt in cls.meta_opts:
 				prefix = 'Meta'
-			elif opt in DEFAULT_OUTPUT_OPTIONS:
+			elif opt in DEFAULT_RUNNER_OPTIONS:
 				prefix = 'Output'
-			elif opt in DEFAULT_EXECUTION_OPTIONS:
+			elif opt in DEFAULT_RUNNER_META_OPTIONS:
 				prefix = 'Execution'
 
 			# Check if opt already processed before
@@ -219,6 +220,7 @@ def register_runner(cli_endpoint, config):
 		sync = opts['sync']
 		worker = opts['worker']
 		debug = opts['debug']
+		ws = opts.pop('workspace')
 		if debug:
 			os.environ['DEBUG'] = '1'
 		# TODO: maybe allow this in the future
@@ -249,7 +251,7 @@ def register_runner(cli_endpoint, config):
 				for o in opts['output'].split(',')
 			]
 			exporters = [e for e in exporters if e]
-		runner = runner_cls(config, targets, exporters=exporters, **opts)
+		runner = runner_cls(config, targets, workspace_name=ws, exporters=exporters, **opts)
 		runner.run(sync=sync)
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}

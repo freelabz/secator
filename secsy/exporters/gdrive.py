@@ -11,6 +11,7 @@ from secsy.utils import pluralize
 class GdriveExporter(Exporter):
 	def send(self):
 		import gspread
+		ws = self.report.workspace_name
 		info = self.report.data['info']
 		title = self.report.data['info']['title']
 		sheet_title = f'{self.report.data["info"]["title"]}_{self.report.timestamp}'
@@ -22,7 +23,16 @@ class GdriveExporter(Exporter):
 			console.print(':file_cabinet: Missing GOOGLE_DRIVE_PARENT_FOLDER_ID to save to Google Sheets.', style='red')
 			return
 		client = gspread.service_account(GOOGLE_CREDENTIALS_PATH)
-		sheet = client.create(title, folder_id=GOOGLE_DRIVE_PARENT_FOLDER_ID)
+
+		# Create workspace folder if it doesn't exist
+		folder_id = self.get_folder_by_name(ws, parent_id=GOOGLE_DRIVE_PARENT_FOLDER_ID)
+		if ws and not folder_id:
+			folder_id = self.create_folder(
+				folder_name=ws,
+				parent_id=GOOGLE_DRIVE_PARENT_FOLDER_ID)
+
+		# Create worksheet
+		sheet = client.create(title, folder_id=folder_id)
 
 		# Add options worksheet for input data
 		info = self.report.data['info']
@@ -69,3 +79,39 @@ class GdriveExporter(Exporter):
 		sheet.del_worksheet(ws)
 
 		console.print(f':file_cabinet: Saved Google Sheets reports to [u magenta]{sheet.url}[/]')
+
+	def create_folder(self, folder_name, parent_id=None):
+		from googleapiclient.discovery import build
+		from google.oauth2 import service_account
+		creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH)
+		service = build('drive', 'v3', credentials=creds)
+		body = {
+			'name': folder_name,
+			'mimeType': "application/vnd.google-apps.folder"
+		}
+		if parent_id:
+			body['parents'] = [parent_id]
+		folder = service.files().create(body=body, fields='id').execute()
+		return folder['id']
+
+	def list_folders(self, parent_id):
+		from googleapiclient.discovery import build
+		from google.oauth2 import service_account
+		creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH)
+		service = build('drive', 'v3', credentials=creds)
+		driveid = service.files().get(fileId='root').execute()['id']
+		response = service.files().list(
+			q=f"'{parent_id}' in parents and mimeType='application/vnd.google-apps.folder'",
+			driveId=driveid,
+			corpora='drive',
+			includeItemsFromAllDrives=True,
+			supportsAllDrives=True
+		).execute()
+		return response
+
+	def get_folder_by_name(self, name, parent_id=None):
+		response = self.list_folders(parent_id=parent_id)
+		existing = [i for i in response['files'] if i['name'] == name]
+		if existing:
+			return existing[0]['id']
+		return None
