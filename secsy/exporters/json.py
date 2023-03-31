@@ -2,6 +2,7 @@ import json
 
 from secsy.exporters._base import Exporter
 from secsy.rich import console
+from secsy.serializers.dataclass import dumps_dataclass
 
 
 class JsonExporter(Exporter):
@@ -11,6 +12,6 @@ class JsonExporter(Exporter):
 
 		# Save JSON report to file
 		with open(json_path, 'w') as f:
-			json.dump(self.report.data, f, indent=2)
+			f.write(dumps_dataclass(self.report.data))
 		
 		console.print(f':file_cabinet: Saved JSON report to {json_path}')

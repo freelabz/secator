@@ -109,11 +109,13 @@ class Runner:
 			return
 
 		if not self.results:
+			console.log('No results found.', style='bold red')
 			return
 
 		self.end_time = datetime.fromtimestamp(time())
 		self.elapsed = self.end_time - self.start_time
 		self.elapsed_human = humanize.naturaldelta(self.elapsed)
+		console.print()
 
 		# Build and send report
 		report = Report(self, exporters=self.exporters)

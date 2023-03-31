@@ -4,7 +4,7 @@ from secsy.definitions import RECORD
 from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.utils import discover_tasks, merge_opts
-from secsy.exporters import TableExporter
+from secsy.exporters import TableExporter, RawExporter
 
 DEFAULT_CLI_FORMAT_OPTIONS = {
 	'print_timestamp': True,
@@ -45,7 +45,7 @@ class Task(Runner):
 		# In async mode, display results back in client-side
 		if not sync:
 			if not self.exporters:
-				self.exporters = [TableExporter]
+				self.exporters = [RawExporter]
 			fmt_opts['json'] = True
 			fmt_opts['print_cmd_prefix'] = True
 

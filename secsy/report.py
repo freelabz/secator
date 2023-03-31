@@ -64,7 +64,7 @@ class Report:
 			if items:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))
-				data['results'][output_name] = [i.toDict() for i in items]
+				data['results'][output_name] = items
 
 		# Save data
 		self.data = data
