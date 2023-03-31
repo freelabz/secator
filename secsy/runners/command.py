@@ -17,7 +17,7 @@ from rich.text import Text
 from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
                                DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
                                OPT_PIPE_INPUT, TEMP_FOLDER)
-from secsy.rich import console, console_stdout
+from secsy.rich import build_table, console, console_stdout
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp, pluralize, print_results_table
 from secsy.output_types import OutputType
@@ -730,6 +730,7 @@ class Command:
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
 
+
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function 
 		facilitate this based on wheter we pass a string or a list to the cmd.
@@ -830,7 +831,7 @@ class Command:
 
 		# Print a rich table
 		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
-			print_results_table(self.results, log=True)
+			print_results_table(self.results)
 
 		# Print a JSON item
 		elif isinstance(data, (OutputType, DotMap, dict)):

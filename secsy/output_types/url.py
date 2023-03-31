@@ -32,6 +32,21 @@ class Url(OutputType):
 		TIME
 	]
 	_sort_by = (URL,)
+	_raw_field = URL
 
 	def __str__(self):
 		return self.url
+	
+	# def __str__(self):
+	# 	s = f'{self.url}'
+	# 	if self.status_code and self.status_code != 0:
+	# 		s += f' [{self.status_code}]'
+	# 	if self.title:
+	# 		s += f' [{self.title}]'
+	# 	if self.webserver:
+	# 		s += f' [{self.webserver}]'
+	# 	if self.tech:
+	# 		s += f' {self.tech}'
+	# 	if self.content_type:
+	# 		s += f' [{self.content_type}]'
+	# 	return s

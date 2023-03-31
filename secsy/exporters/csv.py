@@ -11,6 +11,7 @@ class CsvExporter(Exporter):
         csv_paths = []
 
         for output_type, items in results.items():
+            items = [i.toDict() for i in items]
             if not items:
                 continue
             keys = list(items[0].keys())

@@ -21,7 +21,6 @@ DEFAULT_CLI_FORMAT_OPTIONS = {
 	'raw_yield': False
 }
 
-
 class Workflow(Runner):
 
 	def run(self, sync=True, results=[]):
