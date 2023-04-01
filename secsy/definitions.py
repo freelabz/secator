@@ -45,29 +45,9 @@ GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
 DEFAULT_CHUNK_SIZE = 100
 DEFAULT_STDIN_TIMEOUT = 1000 # seconds
 DEFAULT_PROXY_TIMEOUT = 1 # seconds
-DEFAULT_OUTPUT_FORMAT = {
-   'task': {
-      '_save_html': False,
-      '_save_json': False,
-      '_save_csv': False,
-      '_save_google_sheet': False,
-   },
-   'workflow': {
-	   '_save_html': True,
-	   '_save_json': True,
-	   '_save_csv': True,
-	   '_save_google_sheet': True,
-   },
-   'scan': {
-	   '_save_html': True,
-	   '_save_json': True,
-	   '_save_csv': True,
-	   '_save_google_sheet': True,
-   },
-}
 
 # Constants
-FFUF_DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
+DEFAULT_FFUF_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
 

@@ -14,7 +14,7 @@ class ffuf(HTTPCommand):
 	json_flag = '-json'
 	opts = {
 		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Filter out HTTP responses based on status codes, content length, etc.'},
-		WORDLIST: {'type': str, 'short': 'w', 'default': FFUF_DEFAULT_WORDLIST, 'help': 'Wordlist to fuzz from.'},
+		WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_FFUF_WORDLIST, 'help': 'Wordlist to fuzz from.'},
 		'mw': {'type': str, 'help': 'Match responses with word count'},
 		'mr': {'type': str, 'help': 'Match responses with regular expression'},
 		'ms': {'type': str, 'help': 'Match respones with size'},
