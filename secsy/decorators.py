@@ -1,3 +1,4 @@
+import os
 import sys
 from collections import OrderedDict
 
@@ -6,12 +7,12 @@ from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
 from secsy.celery import is_celery_worker_alive
-from secsy.definitions import *
+from secsy.definitions import OPT_NOT_SUPPORTED
 from secsy.runners import Scan, Task, Workflow
 from secsy.utils import (expand_input, get_command_category,
-                         get_command_cls, import_dynamic)
+						 get_command_cls, import_dynamic)
 
-DEFAULT_RUNNER_OPTIONS = {
+RUNNER_OPTS = {
 	'output': {'type': str, 'default': '', 'help': 'Output options', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
@@ -24,14 +25,14 @@ DEFAULT_RUNNER_OPTIONS = {
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
 
-DEFAULT_RUNNER_META_OPTIONS = {
-	'sync': {'is_flag': True, 'help': f'Run tasks synchronously (automatic if no worker is alive)'},
-	'worker': {'is_flag': True, 'help': f'Run tasks in worker (automatic if worker is alive)'},
-	'debug': {'is_flag': True, 'help': f'Debug mode'},
-	'proxy': {'type': str, 'help': f'HTTP proxy'},
+RUNNER_GLOBAL_OPTS = {
+	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
+	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
+	'debug': {'is_flag': True, 'help': 'Debug mode'},
+	'proxy': {'type': str, 'help': 'HTTP proxy'},
 }
 
-DEFAULT_CLI_OPTIONS = list(DEFAULT_RUNNER_OPTIONS.keys()) + list(DEFAULT_RUNNER_META_OPTIONS.keys())
+DEFAULT_CLI_OPTIONS = list(RUNNER_OPTS.keys()) + list(RUNNER_GLOBAL_OPTS.keys())
 
 
 class OrderedGroup(RichGroup):
@@ -85,11 +86,14 @@ def get_command_options(*tasks):
 	all_opts = OrderedDict({})
 
 	for cls in tasks:
-		opts = OrderedDict(DEFAULT_RUNNER_META_OPTIONS, **DEFAULT_RUNNER_OPTIONS, **cls.meta_opts, **cls.opts)
+		opts = OrderedDict(RUNNER_GLOBAL_OPTS, **RUNNER_OPTS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
 
 			# Opt is not supported by this task
-			if opt not in cls.opt_key_map and opt not in cls.opts and opt not in DEFAULT_RUNNER_OPTIONS and opt not in DEFAULT_RUNNER_META_OPTIONS:
+			if opt not in cls.opt_key_map\
+				and opt not in cls.opts\
+				and opt not in RUNNER_OPTS\
+				and opt not in RUNNER_GLOBAL_OPTS:
 				continue
 
 			if cls.opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
@@ -101,9 +105,9 @@ def get_command_options(*tasks):
 				prefix = cls.__name__
 			elif opt in cls.meta_opts:
 				prefix = 'Meta'
-			elif opt in DEFAULT_RUNNER_OPTIONS:
+			elif opt in RUNNER_OPTS:
 				prefix = 'Output'
-			elif opt in DEFAULT_RUNNER_META_OPTIONS:
+			elif opt in RUNNER_GLOBAL_OPTS:
 				prefix = 'Execution'
 
 			# Check if opt already processed before
@@ -207,7 +211,7 @@ def register_runner(cli_endpoint, config):
 	# def get_unknown_opts(ctx):
 	# 	return {
 	# 		(ctx.args[i][2:]
-    # 		if str(ctx.args[i]).startswith("--") \
+	# 		if str(ctx.args[i]).startswith("--") \
 	# 		else ctx.args[i][1:]): ctx.args[i+1]
 	# 		for i in range(0, len(ctx.args), 2)
 	# 	}
@@ -238,11 +242,11 @@ def register_runner(cli_endpoint, config):
 			sync = True
 		elif worker:
 			sync = False
-		elif cli_endpoint.name in ['scan', 'workflow']: # automatically run in worker if it's alive
+		elif cli_endpoint.name in ['scan', 'workflow']:  # automatically run in worker if it's alive
 			sync = not is_celery_worker_alive()
 		else:
 			sync = True
-		
+
 		# Build exporters
 		exporters = []
 		if opts['output']:

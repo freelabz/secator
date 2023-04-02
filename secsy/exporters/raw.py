@@ -1,5 +1,3 @@
-import json
-
 from secsy.exporters._base import Exporter
 from secsy.rich import console
 

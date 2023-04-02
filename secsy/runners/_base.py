@@ -4,16 +4,15 @@ from time import sleep, time
 import humanize
 from celery.result import AsyncResult
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
-                           TimeElapsedColumn)
+						   TimeElapsedColumn)
 
 from secsy.definitions import DEBUG
 from secsy.output_types import OUTPUT_TYPES
 from secsy.rich import console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
-                                    process_extractor)
+									process_extractor)
 from secsy.utils import merge_opts
 from secsy.report import Report
-from secsy.exporters import CsvExporter, GdriveExporter, JsonExporter, HtmlExporter, TableExporter
 
 
 class Runner:
@@ -34,13 +33,7 @@ class Runner:
 		list: List of results (when running in async mode with `run_async`).
 	"""
 
-	DEFAULT_EXPORTERS = [
-		TableExporter,
-		CsvExporter,
-		GdriveExporter,
-		JsonExporter,
-		HtmlExporter,
-	]
+	DEFAULT_EXPORTERS = []
 
 	def __init__(self, config, targets, results=[], workspace_name=None, exporters=[], **run_opts):
 		self.config = config
@@ -59,7 +52,8 @@ class Runner:
 		"""Log runner start."""
 		remote_str = 'starting' if self.sync else 'sent to [bold gold3]Celery[/] worker'
 		runner_name = self.__class__.__name__
-		console.print(f':tada: [bold green]{runner_name}[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
+		console.print(
+			f':tada: [bold green]{runner_name}[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
 		self.log_header()
 
 	def log_header(self):
@@ -84,9 +78,9 @@ class Runner:
 		items = [
 			f'[italic]{k}[/]: {v}'
 			for k, v in opts.items()
-			if not k.startswith('print_') \
-				and k not in DEFAULT_CLI_OPTIONS \
-				and v is not None
+			if not k.startswith('print_')
+			and k not in DEFAULT_CLI_OPTIONS
+			and v is not None
 		]
 		if items:
 			console.print('Options:', style='bold gold3')
@@ -124,13 +118,14 @@ class Runner:
 		self.report = report
 
 		# Log execution results
-		console.print(f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] [bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
+		console.print(
+			f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
+			f'[bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
 		console.print()
 
 	@staticmethod
 	def get_live_results(result):
-		"""Poll Celery subtasks results in real-time. Fetch task metadata and 
-		partial results from each task that runs.
+		"""Poll Celery subtasks results in real-time. Fetch task metadata and partial results from each task that runs.
 
 		Args:
 			result (celery.result.AsyncResult): Result object.
@@ -148,7 +143,7 @@ class Runner:
 					continue
 				yield info
 
-			# Update all tasks to 100 %
+			# Break out of while loop
 			if res.ready():
 				break
 
@@ -163,7 +158,7 @@ class Runner:
 			TextColumn('{task.fields[state]:<20}'),
 			TimeElapsedColumn(),
 			TextColumn('{task.fields[count]}'),
-			TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),
+			TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
 			refresh_per_second=1
 		)
 		state_colors = {
@@ -188,6 +183,7 @@ class Runner:
 					continue
 
 				# Handle error if any
+				# TODO: error handling should be moved to process_live_tasks
 				state = info['state']
 				if info['error']:
 					state = 'FAILURE'

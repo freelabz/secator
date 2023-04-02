@@ -36,7 +36,7 @@ class Url(OutputType):
 
 	def __str__(self):
 		return self.url
-	
+
 	# def __str__(self):
 	# 	s = f'{self.url}'
 	# 	if self.status_code and self.status_code != 0:

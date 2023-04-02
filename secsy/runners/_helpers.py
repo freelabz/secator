@@ -4,7 +4,7 @@ from rich.prompt import Confirm
 from secsy.utils import deduplicate
 
 
-def merge_extracted_values(results, opts):
+def run_extractors(results, opts):
 	"""Run extractors and merge extracted values with option dict.
 
 	Args:
@@ -87,7 +87,7 @@ def get_task_ids(result, ids=[]):
 	elif isinstance(result, AsyncResult):
 		if result.id not in ids:
 			ids.append(result.id)
-	
+
 	if result.children:
 		for child in result.children:
 			get_task_ids(child, ids=ids)

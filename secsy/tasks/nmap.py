@@ -1,12 +1,20 @@
 import logging
+import os
 import re
 
 import xmltodict
 
-from secsy.definitions import *
+from secsy.definitions import (CPES, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
+							   HEADER, HOST, IP, OPT_NOT_SUPPORTED, PORT,
+							   PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT,
+							   TEMP_FOLDER, THREADS, TIMEOUT, USER_AGENT,
+							   VULN_CONFIDENCE, VULN_CVSS_SCORE,
+							   VULN_DESCRIPTION, VULN_EXTRACTED_RESULTS,
+							   VULN_ID, VULN_MATCHED_AT, VULN_NAME,
+							   VULN_PROVIDER, VULN_REFERENCES, VULN_TAGS)
+from secsy.output_types import Port, Vulnerability
 from secsy.tasks._categories import VulnCommand
 from secsy.utils import get_file_timestamp
-from secsy.output_types import Port, Vulnerability
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +22,7 @@ logger = logging.getLogger(__name__)
 class nmap(VulnCommand):
 	"""Network Mapper is a free and open source utility for network discovery
 	and security auditing."""
-	cmd = f'nmap -sT -sV -Pn'
+	cmd = 'nmap -sT -sV -Pn'
 	input_flag = None
 	input_chunk_size = 1
 	file_flag = '-iL'
@@ -29,7 +37,7 @@ class nmap(VulnCommand):
 		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: 'scan-delay',
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
-		PROXY: None, # TODO: nmap actually supports --proxies but it does not work in TCP scan mode [https://github.com/nmap/nmap/issues/1098]
+		PROXY: None,  # TODO: supports --proxies but not in TCP mode [https://github.com/nmap/nmap/issues/1098]
 		RATE_LIMIT: 'max-rate',
 		RETRIES: 'max-retries',
 		THREADS: OPT_NOT_SUPPORTED,
@@ -43,7 +51,10 @@ class nmap(VulnCommand):
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
 	proxychains_flavor = 'proxychains4'
-	install_cmd = 'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
+	install_cmd = (
+		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
+		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
+	)
 
 	def __iter__(self):
 		# TODO: deduplicate this and amass as it's the same function
@@ -71,7 +82,7 @@ class nmap(VulnCommand):
 		with open(self.output_path, 'r') as f:
 			content = f.read()
 			try:
-				results = xmltodict.parse(content) # parse XML to dict
+				results = xmltodict.parse(content)  # parse XML to dict
 			except Exception as e:
 				logger.exception(e)
 				logger.error(
@@ -188,7 +199,7 @@ class nmapData(dict):
 				version, os, extra_version = tuple(version_split)
 				version = f'{version}-{extra_version}'
 			elif len(version_split) == 2:
-				version, os =  tuple(version_split)
+				version, os = tuple(version_split)
 			elif len(version_split) == 1:
 				version = version_split[0]
 			else:
@@ -233,7 +244,7 @@ class nmapData(dict):
 			if not line:
 				continue
 			line = line.strip()
-			if not line.startswith('[') and line != 'No findings': # provider line
+			if not line.startswith('[') and line != 'No findings':  # provider line
 				provider_name, _ = tuple(line.split(' - '))
 				continue
 			reg = r'\[([ A-Za-z0-9_@./#&+-]*)\] (.*)'
@@ -268,7 +279,7 @@ class nmapData(dict):
 				cpe = line
 				continue
 			elems = tuple(line.split('\t'))
-			if len(elems) == 4: # exploit
+			if len(elems) == 4:  # exploit
 				# TODO: Implement exploit processing
 				exploit_id, cvss_score, reference_url, exploit_str = elems
 				vuln = {
@@ -280,7 +291,7 @@ class nmapData(dict):
 					VULN_TAGS: ['exploit', exploit_id, provider_name],
 					VULN_CONFIDENCE: 'low'
 				}
-			elif len(elems) == 3: # vuln
+			elif len(elems) == 3:  # vuln
 				vuln_id, vuln_description, _ = tuple(line.split('\t'))
 				vuln_type = vuln_id.split('-')[0]
 				vuln = {

@@ -2,23 +2,25 @@ import json
 import os
 import re
 import sys
-from jinja2 import Template
 
 import rich_click as click
+from dotmap import DotMap
+from fp.fp import FreeProxy
+from jinja2 import Template
 from rich.markdown import Markdown
 from rich.rule import Rule
 
-from dotmap import DotMap
-from fp.fp import FreeProxy
-
-from secsy.celery import *
+from secsy.celery import app, is_celery_worker_alive
 from secsy.config import ConfigLoader
 from secsy.decorators import OrderedGroup, register_runner
-from secsy.definitions import ASCII, TEMP_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER, CONFIG_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, DEBUG
+from secsy.definitions import (ASCII, CONFIG_FOLDER, CVES_FOLDER, DEBUG,
+							   PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER,
+							   TEMP_FOLDER)
 from secsy.rich import console
 from secsy.runners import Command
-from secsy.utils import discover_tasks, flatten, detect_host, find_list_item, print_results_table
 from secsy.serializers.dataclass import loads_dataclass
+from secsy.utils import (detect_host, discover_tasks, find_list_item, flatten,
+						 print_results_table)
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -39,6 +41,7 @@ if DEBUG:
 # GROUPS #
 #--------#
 
+
 @click.group(cls=OrderedGroup)
 @click.option('--no-banner', '-nb', is_flag=True, default=False)
 def cli(no_banner):
@@ -53,6 +56,7 @@ def task():
 	"""Run a task."""
 	pass
 
+
 for cls in ALL_TASKS:
 	config = DotMap({'name': cls.__name__})
 	register_runner(task, config)
@@ -63,6 +67,7 @@ def workflow():
 	"""Run a workflow."""
 	pass
 
+
 for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 	register_runner(workflow, config)
 
@@ -71,6 +76,7 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 def scan():
 	"""Run a scan."""
 	pass
+
 
 for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
@@ -81,14 +87,17 @@ def utils():
 	"""Utilities."""
 	pass
 
+
 #--------#
 # REPORT #
 #--------#
+
 
 @cli.group(aliases=['r'])
 def report():
 	"""Reports."""
 	pass
+
 
 @report.command('show')
 @click.argument('json_path')
@@ -108,6 +117,7 @@ def report_show(json_path, exclude_fields):
 #--------#
 # WORKER #
 #--------#
+
 
 @cli.command()
 @click.option('-c', '--concurrency', type=int, help='Number of child processes processing the queue.')
@@ -132,6 +142,7 @@ def worker(concurrency, reload, check):
 #-------#
 # UTILS #
 #-------#
+
 
 @utils.command()
 @click.argument('cmds', required=False)
@@ -166,7 +177,7 @@ def download_cves(force):
 	cve_json_path = f'{TEMP_FOLDER}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		Command.run_command(
-			f'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
+			'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
 			cwd=TEMP_FOLDER,
 			**DEFAULT_CMD_OPTS
 		)
@@ -232,12 +243,12 @@ def enable_aliases():
 	fpath = f'{CONFIG_FOLDER}/.aliases'
 	with open(fpath, 'w') as f:
 		f.write(aliases_str)
-	console.print(f'Aliases:')
+	console.print('Aliases:')
 	for alias in aliases:
 		alias_split = alias.split('=')
 		alias_name, alias_cmd = alias_split[0].replace('alias ', ''), alias_split[1].replace('"', '')
 		console.print(f'[bold magenta]{alias_name:<15}-> {alias_cmd}')
-	
+
 	console.print(f':file_cabinet: Alias file written to {fpath}', style='bold green')
 	console.print('To load the aliases, run:')
 	md = f"""
@@ -254,27 +265,38 @@ echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load 
 def disable_aliases():
 	"""Disable aliases."""
 	for task in ALL_TASKS:
-		Command.run_command(f'unalias {task.name}', cls_attributes={'shell':True})
+		Command.run_command(f'unalias {task.name}', cls_attributes={'shell': True})
 
 
 @utils.command()
 @click.argument('name', type=str, default=None, required=False)
-@click.option('--host', '-h', type=str, default=None, help='Specify LHOST for revshell. If unspecified, LHOST will be auto-detected.')
+@click.option('--host', '-h', type=str, default=None, help='Specify LHOST for revshell, otherwise autodetected.')
 @click.option('--port', '-p', type=int, default=9001, show_default=True, help='Specify PORT for revshell')
 @click.option('--interface', '-i', type=str, help='Interface to use to detect IP')
 @click.option('--listen', '-l', is_flag=True, default=False, help='Spawn netcat listener on specified port')
 def revshells(name, host, port, interface, listen):
 	"""Show reverse shell source codes and run netcat listener."""
-	if host is None: # detect host automatically
+	if host is None:  # detect host automatically
 		host = detect_host(interface)
 		if not host:
-			console.print(f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.', style='bold red')
+			console.print(
+				f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.',
+				style='bold red')
 			return
 
 	with open(f'{SCRIPTS_FOLDER}/revshells.json') as f:
 		shells = json.loads(f.read())
 		for sh in shells:
-			sh['alias'] = '_'.join(sh['name'].lower().replace('-c', '').replace('-e', '').replace('-i', '').replace('c#', 'cs').replace('#', '').replace('(', '').replace(')', '').strip().split(' ')).replace('_1', '')
+			sh['alias'] = '_'.join(sh['name'].lower()
+				.replace('-c', '')
+				.replace('-e', '')
+				.replace('-i', '')
+				.replace('c#', 'cs')
+				.replace('#', '')
+				.replace('(', '')
+				.replace(')', '')
+				.strip()
+				.split(' ')).replace('_1', '')
 			cmd = re.sub(r"\s\s+", "", sh.get('command', ''), flags=re.UNICODE)
 			cmd = cmd.replace('\n', ' ')
 			sh['cmd_short'] = (cmd[:30] + '..') if len(cmd) > 30 else cmd
@@ -284,7 +306,10 @@ def revshells(name, host, port, interface, listen):
 	]
 	if not shell:
 		console.print('Available shells:', style='bold yellow')
-		shells_str = ['[bold magenta]{alias:<20}[/][dim white]{name:<20}[/][dim gold3]{cmd_short:<20}[/]'.format(**sh) for sh in shells]
+		shells_str = [
+			'[bold magenta]{alias:<20}[/][dim white]{name:<20}[/][dim gold3]{cmd_short:<20}[/]'.format(**sh)
+			for sh in shells
+		]
 		console.print('\n'.join(shells_str))
 	else:
 		shell = shell[0]
@@ -320,24 +345,26 @@ def revshells(name, host, port, interface, listen):
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
 	"""Serve payloads in HTTP server."""
-	DEFAULT_PAYLOADS = [
+	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
+	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
+	PAYLOADS = [
 		{
 			'fname': 'lse.sh',
 			'description': 'Linux Smart Enumeration',
-			'command': f'wget https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh -O lse.sh && chmod 700 lse.sh'
+			'command': f'wget {LSE_URL} -O lse.sh && chmod 700 lse.sh'
 		},
 		{
 			'fname': 'linpeas.sh',
 			'description': 'Linux Privilege Escalation Awesome Script',
-			'command': 'wget https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh -O linpeas.sh && chmod 700 linpeas.sh'
+			'command': f'wget {LINPEAS_URL} -O linpeas.sh && chmod 700 linpeas.sh'
 		}
 	]
-	for ix, payload in enumerate(DEFAULT_PAYLOADS):
+	for ix, payload in enumerate(PAYLOADS):
 		descr = payload.get('description', '')
 		fname = payload['fname']
 		if not os.path.exists(f'{directory}/{fname}'):
-			with console.status(f'[bold yellow][{ix}/{len(DEFAULT_PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
-				cmd = payload['command']
+			with console.status(f'[bold yellow][{ix}/{len(PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
+				cmd = payload['command'] + f' && chmod 799 {fname}'
 				console.print(f'[bold magenta]{fname} [dim]({descr})[/] ...[/]', )
 				opts = DEFAULT_CMD_OPTS.copy()
 				opts['no_capture'] = False
@@ -357,9 +384,11 @@ def serve(directory, host, port, interface):
 		if not host:
 			host = detect_host(interface)
 			if not host:
-				console.print(f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.', style='bold red')
+				console.print(
+					f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.',
+					style='bold red')
 				return
-		payload = find_list_item(DEFAULT_PAYLOADS, fname, key='fname', default={})
+		payload = find_list_item(PAYLOADS, fname, key='fname', default={})
 		fdescr = payload.get('description', 'No description')
 		console.print(f'{fname} [dim]({fdescr})[/]', style='bold magenta')
 		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
@@ -466,6 +495,7 @@ def record(record_name, script, interactive, width, height, output_dir):
 #------#
 # TEST #
 #------#
+
 
 @cli.group(aliases=['t', 'tests'])
 def test():

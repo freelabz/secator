@@ -1,4 +1,7 @@
-from secsy.definitions import *
+from secsy.definitions import (DELAY, DEPTH, FOLLOW_REDIRECT, HEADER,
+							   MATCH_CODES, METHOD, OPT_NOT_SUPPORTED, PROXY,
+							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL,
+							   USER_AGENT)
 from secsy.tasks._categories import HTTPCommand
 from secsy.utils import sanitize_url
 
@@ -24,7 +27,7 @@ class httpx(HTTPCommand):
 		FOLLOW_REDIRECT: 'follow-redirects',
 		MATCH_CODES: 'match-code',
 		METHOD: 'x',
-		PROXY: OPT_NOT_SUPPORTED, # TODO: httpx supports only HTTP -proxy for now https://github.com/yt-dlp/yt-dlp/pull/3668
+		PROXY: OPT_NOT_SUPPORTED,  # TODO: httpx supports only HTTP -proxy https://github.com/yt-dlp/yt-dlp/pull/3668
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retries',
 		THREADS: 'threads',

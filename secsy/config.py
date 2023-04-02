@@ -10,12 +10,12 @@ from secsy.rich import console
 DEFAULT_CONFIGS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/configs'
 CONFIGS_DIR_KEYS = ['workflows', 'scans', 'profiles']
 
+
 def load_config(name):
 	"""Load a config by name.
 
 	Args:
-		name: Name of the config, for instances profiles/aggressive or 
-			workflows/domain_scan.
+		name: Name of the config, for instances profiles/aggressive or workflows/domain_scan.
 
 	Returns:
 		dict: Loaded config.
@@ -27,6 +27,7 @@ def load_config(name):
 		return
 	with path.open('r') as f:
 		return yaml.load(f.read(), Loader=yaml.Loader)
+
 
 def find_configs(*dirs):
 	results = {}
@@ -48,7 +49,7 @@ class ConfigLoader(DotMap):
 
 	def __init__(self, input={}, name=None, **kwargs):
 		if name:
-			name = name.replace('-', '_') # so that workflows have a nice '-' in CLI
+			name = name.replace('-', '_')  # so that workflows have a nice '-' in CLI
 			config = self._load_from_name(name)
 		elif isinstance(input, str):
 			config = self._load_from_file(input)
@@ -65,7 +66,7 @@ class ConfigLoader(DotMap):
 				return yaml.load(f.read(), Loader=yaml.Loader)
 
 	def _load_from_name(self, name):
-			return load_config(name)
+		return load_config(name)
 
 	@classmethod
 	def load_all(cls):

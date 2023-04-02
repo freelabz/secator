@@ -1,8 +1,13 @@
+import os
+
 import yaml
 
-from secsy.definitions import *
-from secsy.tasks._categories import HTTPCommand
+from secsy.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
+							   FOLLOW_REDIRECT, HEADER, MATCH_CODES, METHOD,
+							   PROXY, RATE_LIMIT, RETRIES, STATUS_CODE,
+							   TEMP_FOLDER, THREADS, TIMEOUT, USER_AGENT)
 from secsy.output_types import Url
+from secsy.tasks._categories import HTTPCommand
 from secsy.utils import get_file_timestamp
 
 
