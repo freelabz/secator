@@ -38,7 +38,7 @@ def load_fixture(name):
 
 
 TEST_HOST = 'localhost'
-TEST_URL = f'http://localhost:3000'
+TEST_URL = f'http://localhost:3000?q=test'
 TEST_USER = 'test'
 ALL_CMDS = discover_internal_tasks()
 TEST_COMMANDS = os.environ.get('TEST_COMMANDS', '')
@@ -77,6 +77,7 @@ OPTIONS = {
     TIMEOUT: 1,
     USER_AGENT: 'Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
     'msfconsole_resource_script': load_fixture('msfconsole_input.rc'),
+    'pattern': 'xss'
 }
 
 
@@ -100,13 +101,12 @@ class TestCommand(unittest.TestCase, CommandOutputTester):
         all_items = []
         for cls, _ in FIXTURES.items():
             with self.subTest(name=cls.__name__):
-                items = self._test_cmd(
+                self._test_cmd(
                     cls,
                     expected_output_keys=cls.output_schema,
                     expected_output_type=dict,
                     expected_return_code=0,
                     **OPTIONS)
-                all_items.extend(items)
 
     def _test_cmd(
             self,
