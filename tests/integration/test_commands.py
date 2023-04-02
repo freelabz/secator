@@ -10,6 +10,7 @@ from fp.fp import FreeProxy
 
 from secsy.runners import Command
 from secsy.utils import setup_logging, discover_internal_tasks
+from secsy.utils_test import CommandOutputTester
 from secsy.definitions import *
 from secsy.rich import console
 from secsy.celery import app
@@ -79,7 +80,7 @@ OPTIONS = {
 }
 
 
-class TestCommand(unittest.TestCase):
+class TestCommand(unittest.TestCase, CommandOutputTester):
     def setUp(self):
         warnings.simplefilter('ignore', category=ResourceWarning)
         warnings.simplefilter('ignore', category=DeprecationWarning)
@@ -110,28 +111,17 @@ class TestCommand(unittest.TestCase):
     def _test_cmd(
             self,
             cls,
-            expected_output_keys=None,
-            expected_output_type=None,
             expected_return_code=None,
-            output_validator=None,
             **opts):
         input = INPUTS[cls.input_type]
         command = cls(input, **opts)
-        items = command.run()
+        results = command.run()
         console.print(f'Testing {cls.__name__} ...')
         if expected_return_code:
             self.assertEqual(command.return_code, expected_return_code)
-        if not items:
+        if not results:
             console.print(
                 f'No results from {cls.__name__} ! Skipping item check.')
-        for item in items:
-            if expected_output_type:
-                self.assertEqual(type(item), expected_output_type)
-            if expected_output_keys: # test schema against fixture
-                    keys = [k for k in item.keys() if not k.startswith('_')]
-                    self.assertEqual(
-                        set(keys).difference(set(expected_output_keys)),
-                        set())
-            if callable(output_validator):
-                self.assertTrue(output_validator(item))
-        return items
+        self._test_command_output(
+            results,
+            expected_output_types=cls.output_types)

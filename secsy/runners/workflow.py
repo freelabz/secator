@@ -10,7 +10,6 @@ from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.runners.task import Task
 from secsy.utils import merge_opts
-from secsy.exporters import TableExporter, JsonExporter, CsvExporter
 
 
 class Workflow(Runner):

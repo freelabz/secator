@@ -403,8 +403,6 @@ def find_list_item(array, val, key='id', default=None):
 
 
 def print_results_table(results, title=None, exclude_fields=[], log=False):
-	from rich.markdown import Markdown
-
 	from secsy.output_types import OUTPUT_TYPES
 	from secsy.rich import build_table
 	_print = console.log if log else console.print
