@@ -1,6 +1,9 @@
 from furl import furl
 
-from secsy.definitions import *
+from secsy.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FOLLOW_REDIRECT,
+							   HEADER, MATCH_CODES, METHOD, OPT_NOT_SUPPORTED,
+							   PROXY, RATE_LIMIT, RETRIES, STATUS_CODE,
+							   THREADS, TIMEOUT, URL, USER_AGENT)
 from secsy.output_types import Url
 from secsy.tasks._categories import HTTPCommand
 
@@ -48,7 +51,7 @@ class gospider(HTTPCommand):
 			netloc_out = furl(item['output']).netloc
 			if netloc_in != netloc_out:
 				return False
-		except ValueError: # gospider returns invalid URLs for output sometimes
+		except ValueError:  # gospider returns invalid URLs for output sometimes
 			return False
 
 		match_codess = self.cmd_opts.get(MATCH_CODES, '')

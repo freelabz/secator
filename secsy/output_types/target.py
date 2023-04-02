@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 
-from secsy.definitions import *
 from secsy.output_types import OutputType
 
 

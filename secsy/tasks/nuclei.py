@@ -1,6 +1,12 @@
-from secsy.definitions import *
-from secsy.tasks._categories import VulnCommand
+from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
+							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+							   THREADS, TIMEOUT, VULN_CONFIDENCE,
+							   VULN_CVSS_SCORE, VULN_DESCRIPTION,
+							   VULN_EXTRACTED_RESULTS, VULN_ID,
+							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
+							   VULN_REFERENCES, VULN_SEVERITY, VULN_TAGS)
 from secsy.output_types import Vulnerability
+from secsy.tasks._categories import VulnCommand
 
 
 class nuclei(VulnCommand):
@@ -10,7 +16,7 @@ class nuclei(VulnCommand):
 	cmd = 'nuclei -silent'
 	file_flag = '-l'
 	input_flag = '-u'
-	input_chunk_size = 3 # TODO: figure out which chunk size is appropriate
+	input_chunk_size = 3  # TODO: figure out which chunk size is appropriate
 	json_flag = '-json'
 	opts = {
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},

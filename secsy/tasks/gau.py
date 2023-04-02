@@ -1,4 +1,7 @@
-from secsy.definitions import *
+from secsy.definitions import (DELAY, DEPTH, FOLLOW_REDIRECT, HEADER,
+							   MATCH_CODES, METHOD, OPT_NOT_SUPPORTED,
+							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
+							   THREADS, TIMEOUT, USER_AGENT)
 from secsy.tasks._categories import HTTPCommand
 
 

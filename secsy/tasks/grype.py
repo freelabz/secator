@@ -1,6 +1,7 @@
-from furl import furl
 
-from secsy.definitions import *
+from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
+							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+							   THREADS, TIMEOUT)
 from secsy.output_types import Vulnerability
 from secsy.tasks._categories import VulnCommand
 
@@ -58,6 +59,7 @@ class grype(VulnCommand):
 		TIMEOUT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Vulnerability]
-	install_cmd = 'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
+	install_cmd = (
+		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
+	)
 	item_loader = grype_item_loader
-	
