@@ -14,13 +14,13 @@ from secsy.celery import app, is_celery_worker_alive
 from secsy.config import ConfigLoader
 from secsy.decorators import OrderedGroup, register_runner
 from secsy.definitions import (ASCII, CONFIG_FOLDER, CVES_FOLDER, DEBUG,
-							   PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER,
-							   TEMP_FOLDER)
+                               PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER,
+                               TEMP_FOLDER)
 from secsy.rich import console
 from secsy.runners import Command
 from secsy.serializers.dataclass import loads_dataclass
 from secsy.utils import (detect_host, discover_tasks, find_list_item, flatten,
-						 print_results_table)
+                         print_results_table)
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -504,7 +504,17 @@ def test():
 
 
 @test.command()
-def integration():
+@click.option('--commands', '-c', type=str, default='', help='Secsy commands to test (comma-separated)')
+@click.option('--test', '-t', type=str, help='Secsy test to run')
+@click.option('--debug', '-d', is_flag=True, help='Add debug information')
+def integration(commands, test, debug=False):
+	os.environ['TEST_COMMANDS'] = commands or ''
+	os.environ['DEBUG'] = str(int(debug))
+	cmd = 'python -m unittest'
+	if test:
+		cmd += f' {test}'
+	else:
+		cmd += ' discover -v tests.integration'
 	result = Command.run_command(
 		'python3 -m unittest discover -v tests.integration',
 		**DEFAULT_CMD_OPTS

@@ -12,7 +12,7 @@ class Tag(OutputType):
 	_uuid: str = field(default='', repr=True)
 
 	_table_fields = ['match']
-	_sort_by = ('match')
+	_sort_by = ('match',)
 
 	def __str__(self) -> str:
-		return self.input
+		return self.match
