@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import os
+
 from pkg_resources import get_distribution
 
 # Globals

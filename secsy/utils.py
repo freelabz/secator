@@ -19,6 +19,7 @@ import netifaces
 import tabulate
 import yaml
 from furl import furl
+from rich.markdown import Markdown
 
 from secsy.definitions import DEFAULT_STDIN_TIMEOUT
 from secsy.rich import console
@@ -395,5 +396,35 @@ def detect_host(interface=None):
 			break
 	return host
 
-def find_list_item(l, val, key='id', default=None):
-	return next((item for item in l if item[key] == val), default)
+
+def find_list_item(array, val, key='id', default=None):
+	return next((item for item in array if item[key] == val), default)
+
+
+def print_results_table(results, title=None, exclude_fields=[], log=False):
+	from secsy.output_types import OUTPUT_TYPES
+	from secsy.rich import build_table
+	_print = console.log if log else console.print
+	_print()
+	if title:
+		title = ' '.join(title.capitalize().split('_')) + ' results'
+		h1 = Markdown(f'# {title}')
+		_print(h1, style='bold magenta', width=50)
+		_print()
+	tables = []
+	for output_type in OUTPUT_TYPES:
+		items = [
+			item for item in results if item._type == output_type.get_name()
+		]
+		if items:
+			_table = build_table(
+				items,
+				output_fields=output_type._table_fields,
+				exclude_fields=exclude_fields,
+				sort_by=output_type._sort_by)
+			tables.append(_table)
+			_type = pluralize(items[0]._type)
+			_print(_type.upper(), style='bold gold3', justify='left')
+			_print(_table)
+			_print()
+	return tables
