@@ -9,7 +9,6 @@ from time import sleep
 
 from celery.result import AsyncResult
 from dotmap import DotMap
-
 from fp.fp import FreeProxy
 from rich.markup import escape
 from rich.text import Text
