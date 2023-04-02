@@ -6,7 +6,6 @@ from secsy.output_types import Target
 from secsy.runners._base import Runner
 from secsy.runners._helpers import run_extractors
 from secsy.runners.workflow import Workflow
-from secsy.exporters import TableExporter, JsonExporter, CsvExporter
 
 logger = logging.getLogger(__name__)
 

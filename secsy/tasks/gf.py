@@ -1,4 +1,5 @@
 from secsy.definitions import OPT_PIPE_INPUT, URL
+from secsy.output_types import Tag
 from secsy.runners import Command
 
 
@@ -15,6 +16,5 @@ class gf(Command):
 	}
 	input_type = URL
 	install_cmd = 'go install -v github.com/tomnomnom/gf@latest'
-	output_type = 'tags'
-	output_schema = ['match']
-	item_loader = lambda self, line: {'match': line}  # noqa: E731
+	output_types = [Tag]
+	item_loader = lambda self, line: {'match': line, 'extra_data': {'pattern': self.pattern}}  # noqa: E731

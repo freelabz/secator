@@ -68,8 +68,8 @@ class Command:
 	# Output schema
 	output_schema = []
 
-	# Output type
-	output_type = None
+	# Output types
+	output_types = None
 
 	# Run in shell if True (not recommended)
 	shell = False
@@ -105,6 +105,7 @@ class Command:
 	install_cmd = None
 
 	# Dict return
+	# TODO: deprecate this
 	output_return_type = dict
 
 	# Table fields
