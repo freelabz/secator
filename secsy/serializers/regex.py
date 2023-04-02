@@ -1,5 +1,6 @@
 import re
 
+
 class RegexSerializer:
 
 	def __init__(self, regex, fields=[]):

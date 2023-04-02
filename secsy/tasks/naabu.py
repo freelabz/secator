@@ -1,6 +1,8 @@
-from secsy.definitions import *
-from secsy.tasks._categories import ReconCommand
+from secsy.definitions import (DELAY, HOST, OPT_NOT_SUPPORTED, PORT, PORTS,
+							   PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
+							   TOP_PORTS)
 from secsy.output_types import Port
+from secsy.tasks._categories import ReconCommand
 
 
 class naabu(ReconCommand):
@@ -10,7 +12,7 @@ class naabu(ReconCommand):
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {
-		PORTS: {'type': str, 'short': 'p', 'help':'Ports'},
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports'},
 		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'}
 	}
 	opt_key_map = {
@@ -25,7 +27,7 @@ class naabu(ReconCommand):
 		PORTS: 'port',
 	}
 	opt_value_map = {
-		TIMEOUT: lambda x: x*1000 if x and x > 0 else None, # convert to milliseconds
+		TIMEOUT: lambda x: x*1000 if x and x > 0 else None,  # convert to milliseconds
 		RETRIES: lambda x: 1 if x == 0 else x
 	}
 	output_map = {

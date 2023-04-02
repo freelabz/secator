@@ -10,13 +10,14 @@ from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
 from kombu.serialization import register
 
-from secsy.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER, CELERY_RESULT_BACKEND)
+from secsy.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
+							   CELERY_RESULT_BACKEND)
 from secsy.rich import console
 from secsy.runners import Task
-from secsy.runners._helpers import merge_extracted_values
+from secsy.runners._helpers import run_extractors
 from secsy.serializers.dataclass import dumps_dataclass, loads_dataclass
 from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
-                         discover_internal_tasks, flatten)
+						 discover_internal_tasks, flatten)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -55,15 +56,9 @@ app.conf.update({
 })
 
 
-# @signals.celeryd_init.connect
-# def setup_log_format(sender, conf, **kwargs):
-#     conf.worker_log_format = ''
-	# conf.worker_log_format = '[%(processName)s] %(message)s'
-	# conf.worker_task_log_format = '[%(processName)s] [%(task_name)s(%(task_id)s)] %(message)s'
-
 @signals.setup_logging.connect
 def void(*args, **kwargs):
-	""" Override celery's logging setup to prevent it from altering our settings.
+	"""Override celery's logging setup to prevent it from altering our settings.
 	github.com/celery/celery/issues/1867
 	"""
 	pass
@@ -71,6 +66,7 @@ def void(*args, **kwargs):
 #--------------#
 # Celery tasks #
 #--------------#
+
 
 def chunker(seq, size):
 	return (seq[pos:pos + size] for pos in range(0, len(seq), size))
@@ -88,7 +84,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 	# Build signatures
 	sigs = []
 	for ix, chunk in enumerate(chunks):
-		if len(chunks) > 0: # add chunk to task opts for tracking chunks exec
+		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 			opts['chunked'] = True
@@ -136,15 +132,14 @@ def run_command(self, results, name, targets, opts={}):
 
 		# Get expanded targets
 		if not chunk:
-			_targets, opts = merge_extracted_values(results, opts)
+			_targets, opts = run_extractors(results, opts)
 			if _targets:
 				targets = _targets
 
 		# Get task class
 		task_cls = Task.get_task_class(name)
 
-		# If task doesn't support multiple targets, or if the number of targets is 
-		# too big, split into multiple tasks
+		# If task doesn't support multiple targets, or if the number of targets is too big, split into multiple tasks
 		multiple_targets = isinstance(targets, list) and len(targets) > 1
 		single_target_only = multiple_targets and task_cls.file_flag is None
 		break_size_threshold = multiple_targets and len(targets) > task_cls.input_chunk_size
@@ -165,29 +160,29 @@ def run_command(self, results, name, targets, opts={}):
 			# children info as they are executing, to update the run count etc...
 			# but we cannot call `self.update_state` after the previous line
 			# for (once again) some obscure Celery reason, thus preventing us to
-			# do this ... Try to refactor this in a much cleaner way by using a 
+			# do this ... Try to refactor this in a much cleaner way by using a
 			# dispatcher task, maybe it could work ...
 			# if not sync:
-				# from secsy.runners._base import Runner
-				# from secsy.runners._helpers import get_task_ids
-				# ntasks = len(targets) // chunk_size
-				# state['meta']['chunk_info'] = f'0/{ntasks}'
-				# state['meta']['error'] = None
-				# print(state)
-				# subtasks = {}
-				# task_ids = []
-				# get_task_ids(result, ids=task_ids)
-				# for info in Runner.get_live_results(result):
-				# 	print(info)
-				# 	subtasks[info['id']] = info
-				# 	ready_count = sum(subtasks.get(id, {}).get('count', 0) for id in task_ids)
-				# 	error = '\n\n'.join([subtasks.get(id, {}).get('error') or '' for id in task_ids])
-				# 	print(ready_count)
-				# 	print(error)
-				# 	state['meta']['chunk_info'] = f'{ready_count}/{chunk_size}'
-				# 	state['meta']['error'] = error.strip()
-				# 	self.update_state(**state)
-				# 	sleep(1)
+			# 	from secsy.runners._base import Runner
+			# 	from secsy.runners._helpers import get_task_ids
+			# 	ntasks = len(targets) // chunk_size
+			# 	state['meta']['chunk_info'] = f'0/{ntasks}'
+			# 	state['meta']['error'] = None
+			# 	print(state)
+			# 	subtasks = {}
+			# 	task_ids = []
+			# 	get_task_ids(result, ids=task_ids)
+			# 	for info in Runner.get_live_results(result):
+			# 		print(info)
+			# 		subtasks[info['id']] = info
+			# 		ready_count = sum(subtasks.get(id, {}).get('count', 0) for id in task_ids)
+			# 		error = '\n\n'.join([subtasks.get(id, {}).get('error') or '' for id in task_ids])
+			# 		print(ready_count)
+			# 		print(error)
+			# 		state['meta']['chunk_info'] = f'{ready_count}/{chunk_size}'
+			# 		state['meta']['error'] = error.strip()
+			# 		self.update_state(**state)
+			# 		sleep(1)
 			with allow_join_result():
 				task_results = result.get()
 				results.extend(task_results)
@@ -323,9 +318,9 @@ def poll_task(result, seen=[]):
 def get_results(result):
 	"""Get all intermediate results from Celery result object.
 
-	Use this when running complex workflows with .si() i.e not passing results 
+	Use this when running complex workflows with .si() i.e not passing results
 	between tasks.
-	
+
 	Args:
 		result (Union[AsyncResult, GroupResult]): Celery result.
 
@@ -371,4 +366,9 @@ def get_nested_results(result, results=[]):
 def is_celery_worker_alive():
 	"""Check if a Celery worker is available."""
 	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
-	return bool(result)
+	result = bool(result)
+	if result:
+		console.print('Celery worker is alive !', style='bold green')
+	else:
+		console.print('No Celery worker alive.', style='bold red')
+	return result
