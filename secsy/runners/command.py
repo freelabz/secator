@@ -11,15 +11,15 @@ from celery.result import AsyncResult
 from dotmap import DotMap
 
 from fp.fp import FreeProxy
-from rich.markup import escape
-from rich.text import Text
+# from rich.markup import escape
+# from rich.text import Text
 
 from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
-                               DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
-                               OPT_PIPE_INPUT, TEMP_FOLDER)
-from secsy.rich import build_table, console, console_stdout
+							   DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
+							   OPT_PIPE_INPUT, TEMP_FOLDER)
+from secsy.rich import console, console_stdout
 from secsy.serializers import JSONSerializer
-from secsy.utils import get_file_timestamp, pluralize
+from secsy.utils import get_file_timestamp, pluralize, print_results_table
 from secsy.output_types import OutputType
 
 logger = logging.getLogger(__name__)
@@ -45,20 +45,17 @@ class Command:
 	# Base cmd
 	cmd = None
 
-	# Global options
-	global_opts = {}
-
 	# Meta options
 	meta_opts = {}
 
 	# Additional command options
 	opts = {}
 
+	# Option prefix char
+	opt_prefix = '-'
+
 	# Option key map to transform option names
 	opt_key_map = {}
-
-	# Option character
-	opt_prefix = '-'
 
 	# Option value map to transform option values
 	opt_value_map = {}
@@ -259,8 +256,7 @@ class Command:
 	def delay(cls, *args, **kwargs):
 		from secsy.celery import run_command
 
-		# TODO: running chunked group .apply() in run_command doesn't work if 
-		# this isn't set explicitely to False for **VERY** obscure reasons
+		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
 		kwargs['sync'] = False
 		results = kwargs.get('results', [])
 		return run_command.delay(results, cls.__name__, *args, opts=kwargs)
@@ -350,8 +346,8 @@ class Command:
 
 	@classmethod
 	def run_command(cls, cmd, name='helperClass', cls_attributes={}, **kwargs):
-		"""Run adhoc command. Can be used without defining an inherited class 
-		to run a command, while still enjoying all the good stuff in this class.
+		"""Run adhoc command. Can be used without defining an inherited class to run a command, while still enjoying
+		all the good stuff in this class.
 		"""
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
@@ -364,8 +360,8 @@ class Command:
 	# Internal #
 	#----------#
 	def _run_command(self):
-		"""Run command and yields its output in real-time. Also saves the command 
-		line, return code and output to the database.
+		"""Run command and yields its output in real-time. Also saves the command line, return code and output to the
+		database.
 
 		Args:
 			cmd (str): Command to run.
@@ -467,7 +463,7 @@ class Command:
 				elif line:
 					if self._print_line and not (self.quiet and self._json_output):
 						self._print(line, out=sys.stderr)
-					if not self.output_return_type is dict:
+					if self.output_return_type is not dict:
 						self.results.append(line)
 						yield line
 
@@ -514,13 +510,12 @@ class Command:
 
 		self.run_hooks('on_end')
 
-	def _configure_proxy(self):	
-		"""Configure proxy. Start with global settings like 'proxychains' or 
-		'random', or fallback to tool-specific proxy settings.
+	def _configure_proxy(self):
+		"""Configure proxy. Start with global settings like 'proxychains' or 'random', or fallback to tool-specific
+		proxy settings.
 
-		TODO: Move this to a subclass of Command, or to a configurable 
-		attribute to pass to derived classes as it's not related to core 
-		functionality.
+		TODO: Move this to a subclass of Command, or to a configurable attribute to pass to derived classes as it's not
+		related to core functionality.
 		"""
 		proxy_opt = self.opt_key_map.get('proxy', False)
 		support_proxychains = getattr(self, 'proxychains', True)
@@ -533,7 +528,7 @@ class Command:
 		elif self.proxy and support_proxy:
 			if self.proxy == 'random':
 				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
-			else: # tool-specific proxy settings
+			else:  # tool-specific proxy settings
 				self.cmd_opts['proxy'] = self.proxy
 
 	def _get_results_count(self):
@@ -606,7 +601,6 @@ class Command:
 		# Return item
 		return item
 
-
 	def _rawify(self, item=None):
 		if not item:
 			return [
@@ -619,7 +613,6 @@ class Command:
 			elif isinstance(item, OutputType):
 				item = str(item)
 		return item
-
 
 	@staticmethod
 	def _process_opts(
@@ -669,7 +662,7 @@ class Command:
 				opt_name = mapped_opt_name
 
 			# Avoid shell injections and detect opt prefix
-			opt_name = str(opt_name).split(' ')[0] # avoid cmd injection
+			opt_name = str(opt_name).split(' ')[0]  # avoid cmd injection
 
 			# Replace '_' with '-'
 			opt_name = opt_name.replace('_', '-')
@@ -678,7 +671,7 @@ class Command:
 			if len(opt_name) > 0 and opt_name[0] not in ['-', '--']:
 				opt_name = f'{opt_prefix}{opt_name}'
 
-			# Append opt name + opt value to option string
+			# Append opt name + opt value to option string.
 			# Note: does not append opt value if value is True (flag)
 			opts_str += f' {opt_name}'
 			if opt_val is not True:
@@ -730,10 +723,9 @@ class Command:
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
 
-
 	def _build_cmd_input(self):
-		"""Many commands take as input a string or a list. This function 
-		facilitate this based on wheter we pass a string or a list to the cmd.
+		"""Many commands take as input a string or a list. This function facilitate this based on wheter we pass a
+		string or a list to the cmd.
 		"""
 		cmd = self.cmd
 		input = self.input
@@ -746,8 +738,7 @@ class Command:
 		if isinstance(input, list) and len(input) == 1:
 			input = input[0]
 
-		# If input is a list and the tool does not supports file input flag, use 
-		# cat-piped input.
+		# If input is a list and the tool does not supports file input flag, use cat-piped input.
 		# Otherwise pass the file path to the tool.
 		if isinstance(input, list):
 			timestr = get_file_timestamp()
@@ -762,13 +753,11 @@ class Command:
 				cmd = f'cat {fpath} | {cmd}'
 			else:
 				cmd += f' {self.file_flag} {fpath}'
-			
+
 			self.input_path = fpath
 
-		# If input is a string but the tool does not support an input flag, use
-		# echo-piped input.
-		# If the tool's input flag is set to None, assume it is a positional
-		# argument at the end of the command.
+		# If input is a string but the tool does not support an input flag, use echo-piped input.
+		# If the tool's input flag is set to None, assume it is a positional argument at the end of the command.
 		# Otherwise use the input flag to pass the input.
 		else:
 			input = shlex.quote(input)
@@ -800,8 +789,8 @@ class Command:
 			output_map = self.output_map.get(klass, {})
 			try:
 				new_item = klass.load(item, output_map)
-				break # found an item that fits
-			except TypeError as e: # can't load using class
+				break  # found an item that fits
+			except TypeError as e:  # can't load using class
 				logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
 				continue
 
@@ -831,16 +820,7 @@ class Command:
 
 		# Print a rich table
 		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
-			for klass in self.output_types:
-				table_data = [
-					item for item in data if item._type == klass.get_name()
-				]
-				table = build_table(
-					table_data,
-					klass._table_fields,
-					sort_by=klass._sort_by)
-				log(table)
-				return
+			print_results_table(self.results)
 
 		# Print a JSON item
 		elif isinstance(data, (OutputType, DotMap, dict)):
@@ -854,16 +834,14 @@ class Command:
 			# Add prefix to output
 			data = f'{self.prefix:>15} {data}' if self.prefix and not self._print_item else data
 
-			# We might want to parse results with e.g 'jq' so we need pure JSON
-			# line with no logging info, unless --color is passed which 
-			# clarifies the user intent to use it for visualizing results.
+			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
+			# user intent to use it for visualizing results.
 			log_json(data) if self.color and self._print_item else _console.print(data, highlight=False)
 
 		# Print a line
 		else:
-			# If orig mode (--orig) ir raw mode (--raw), we might want to 
-			# parse results with e.g pipe redirections, so we need a pure line 
-			# with no logging info.
+			# If orig mode (--orig) ir raw mode (--raw), we might want to parse results with e.g pipe redirections, so
+			# we need a pure line with no logging info.
 			if not ignore_raw and (self._orig_output or self._raw_output):
 				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
 				_console.print(data, highlight=False)

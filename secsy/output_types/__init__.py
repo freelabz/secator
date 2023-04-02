@@ -7,7 +7,7 @@ __all__ = [
     'UserAccount',
     'Vulnerability'
 ]
-from secsy.output_types._base import OutputType
+from secsy.output_types._base import OutputType  # noqa: F401
 from secsy.output_types.ip import Ip
 from secsy.output_types.port import Port
 from secsy.output_types.subdomain import Subdomain

@@ -3,13 +3,27 @@ import logging
 from secsy.config import ConfigLoader
 from secsy.output_types import Target
 from secsy.runners._base import Runner
-from secsy.runners._helpers import merge_extracted_values
+from secsy.runners._helpers import run_extractors
 from secsy.runners.workflow import Workflow
+from secsy.exporters import TableExporter, JsonExporter, CsvExporter
 
 logger = logging.getLogger(__name__)
 
 
 class Scan(Runner):
+
+	DEFAULT_EXPORTERS = [
+		TableExporter,
+		JsonExporter,
+		CsvExporter
+	]
+	DEFAULT_FORMAT_OPTIONS = {
+		'print_timestamp': True,
+		'print_cmd': True,
+		'print_line': True,
+		'print_item_count': True,
+		'raw_yield': False
+	}
 
 	def run(self, sync=True, results=[]):
 		"""Run scan.
@@ -24,6 +38,8 @@ class Scan(Runner):
 			for name in self.targets
 		]
 		self.results = results
+		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
+		fmt_opts['sync'] = sync
 
 		# Log scan start
 		self.log_start()
@@ -32,7 +48,7 @@ class Scan(Runner):
 		for name, workflow_opts in self.config.workflows.items():
 
 			# Extract opts and and expand target from previous workflows results
-			targets, workflow_opts = merge_extracted_values(self.results, workflow_opts or {})
+			targets, workflow_opts = run_extractors(self.results, workflow_opts or {})
 			if not targets:
 				targets = self.targets
 
@@ -42,7 +58,6 @@ class Scan(Runner):
 				targets,
 				**self.run_opts
 			)
-			workflow._print_table = False
 			workflow_results = workflow.run(sync=sync)
 			self.results.extend(workflow_results)
 

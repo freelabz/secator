@@ -1,4 +1,7 @@
-from secsy.definitions import *
+from secsy.definitions import (DELAY, DEPTH, FOLLOW_REDIRECT, HEADER,
+							   MATCH_CODES, METHOD, OPT_NOT_SUPPORTED,
+							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
+							   THREADS, TIMEOUT, URL, USER_AGENT)
 from secsy.tasks._categories import HTTPCommand
 
 
@@ -24,5 +27,5 @@ class cariddi(HTTPCommand):
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@latest'
 
 	def item_loader(self, line):
-		if not 'protocol error' in line and self._json_output:
+		if 'protocol error' not in line and self._json_output:
 			return {URL: line}

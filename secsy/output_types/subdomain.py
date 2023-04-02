@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List
 
-from secsy.definitions import *
+from secsy.definitions import DOMAIN, HOST, SOURCES
 from secsy.output_types import OutputType
 
 

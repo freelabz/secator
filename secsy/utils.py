@@ -26,12 +26,16 @@ from secsy.rich import console
 logger = logging.getLogger(__name__)
 
 
+class TaskError(ValueError):
+	pass
+
+
 def setup_logging(level):
 	"""Setup logging.
 
 	Args:
 		level: logging level.
-	
+
 	Returns:
 		logging.Logger: logger.
 	"""
@@ -47,7 +51,7 @@ def setup_logging(level):
 
 def expand_input(input):
 	"""Expand user-provided input on the CLI:
-	- If input is a path, read the file and return the lines. 
+	- If input is a path, read the file and return the lines.
 	- If it's a comma-separated list, return the list.
 	- Otherwise, return the original input.
 
@@ -57,7 +61,7 @@ def expand_input(input):
 	Returns:
 		str: Input.
 	"""
-	if input is None: # read from stdin
+	if input is None:  # read from stdin
 		console.print('Waiting for input on stdin ...', style='bold yellow')
 		rlist, _, _ = select.select([sys.stdin], [], [], DEFAULT_STDIN_TIMEOUT)
 		if rlist:
@@ -73,8 +77,7 @@ def expand_input(input):
 			with open(input, 'r') as f:
 				data = f.read().splitlines()
 			return data
-		else:
-			return input
+		return input
 	elif isinstance(input, str):
 		input = input.split(',')
 
@@ -104,8 +107,7 @@ def sanitize_url(http_url):
 
 
 def match_extensions(response, allowed_ext=['.html']):
-	"""Check if a URL is a file from the HTTP response by looking at the 
-	content_type and the URL.
+	"""Check if a URL is a file from the HTTP response by looking at the content_type and the URL.
 
 	Args:
 		response (dict): httpx response.
@@ -172,34 +174,34 @@ def fmt_table(data, output_table_fields=[], sort_by=None):
 		for k in keys:
 			value = item.get(k)
 			if isinstance(value, list):
-					value = ', '.join(sorted(value))
+				value = ', '.join(sorted(value))
 			elif isinstance(value, dict):
-					value = '\n'.join(f'{k}:{v}' for k, v in value.items())
+				value = '\n'.join(f'{k}:{v}' for k, v in value.items())
 			new_item[k] = value
 		fmt_data.append(new_item)
 	values = [d.values() for d in fmt_data]
 	return '\n' + tabulate.tabulate(values, headers=headers, tablefmt='fancy_grid') + '\n'
 
 
-def deduplicate(l, attr=None):
+def deduplicate(array, attr=None):
 	"""Deduplicate list of OutputType items.
 
 	Args:
-		l (list): Input list.
+		array (list): Input list.
 
 	Returns:
 		list: Deduplicated list.
 	"""
 	from secsy.output_types import OUTPUT_TYPES
-	if attr and len(l) > 0 and isinstance(l[0], tuple(OUTPUT_TYPES)):
+	if attr and len(array) > 0 and isinstance(array[0], tuple(OUTPUT_TYPES)):
 		memo = set()
 		res = []
-		for sub in l:
+		for sub in array:
 			if attr in sub.keys() and getattr(sub, attr) not in memo:
 				res.append(sub)
 				memo.add(getattr(sub, attr))
 		return sorted(res, key=operator.attrgetter(attr))
-	return sorted(list(dict.fromkeys(l)))
+	return sorted(list(dict.fromkeys(array)))
 
 
 def setup_logger(level='info', format='%(message)s'):
@@ -274,7 +276,7 @@ def import_dynamic(cls_path, cls_root='Command'):
 		if root_cls.__name__ == cls_root:
 			return cls
 		return None
-	except Exception as e:
+	except Exception:
 		warnings.warn(f'"{package}.{name}" not found.')
 		return None
 
@@ -324,7 +326,7 @@ def merge_opts(*options):
 	return all_opts
 
 
-def flatten(l: list):
+def flatten(array: list):
 	"""Flatten list if it contains multiple sublists.
 
 	Args:
@@ -333,9 +335,9 @@ def flatten(l: list):
 	Returns:
 		list: Output list.
 	"""
-	if isinstance(l, list) and len(l) > 0 and isinstance(l[0], list):
-		return list(itertools.chain(*l))
-	return l
+	if isinstance(array, list) and len(array) > 0 and isinstance(array[0], list):
+		return list(itertools.chain(*array))
+	return array
 
 
 def pluralize(word):
@@ -360,31 +362,30 @@ def get_task_name_padding(classes=None):
 
 
 def load_fixture(name, fixtures_dir, ext=None, only_path=False):
-    fixture_path = f'{fixtures_dir}/{name}'
-    exts = ['.json', '.txt', '.xml', '.rc']
-    if ext:
-        exts = [ext]
-    for ext in exts:
-        path = f'{fixture_path}{ext}'
-        if os.path.exists(path):
-            if only_path:
-                return path
-            with open(path) as f:
-                content = f.read()
-            if path.endswith(('.json', '.yaml')):
-                return yaml.load(content, Loader=yaml.Loader)
-            else:
-                return content
+	fixture_path = f'{fixtures_dir}/{name}'
+	exts = ['.json', '.txt', '.xml', '.rc']
+	if ext:
+		exts = [ext]
+	for ext in exts:
+		path = f'{fixture_path}{ext}'
+		if os.path.exists(path):
+			if only_path:
+				return path
+			with open(path) as f:
+				content = f.read()
+			if path.endswith(('.json', '.yaml')):
+				return yaml.load(content, Loader=yaml.Loader)
+			else:
+				return content
 
 
 def get_file_timestamp():
 	return datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%f_%p")
 
-class TaskError(ValueError):
-	pass
 
 def detect_host(interface=None):
 	ifaces = netifaces.interfaces()
+	host = None
 	for iface in ifaces:
 		addrs = netifaces.ifaddresses(iface)
 		if (interface and iface != interface) or iface == 'lo':
@@ -395,5 +396,36 @@ def detect_host(interface=None):
 			break
 	return host
 
-def find_list_item(l, val, key='id', default=None):
-	return next((item for item in l if item[key] == val), default)
+
+def find_list_item(array, val, key='id', default=None):
+	return next((item for item in array if item[key] == val), default)
+
+
+def print_results_table(results, title=None, exclude_fields=[], log=False):
+	from secsy.output_types import OUTPUT_TYPES
+	from secsy.rich import build_table
+	from rich.markdown import Markdown
+	_print = console.log if log else console.print
+	_print()
+	if title:
+		title = ' '.join(title.capitalize().split('_')) + ' results'
+		h1 = Markdown(f'# {title}')
+		_print(h1, style='bold magenta', width=50)
+		_print()
+	tables = []
+	for output_type in OUTPUT_TYPES:
+		items = [
+			item for item in results if item._type == output_type.get_name()
+		]
+		if items:
+			_table = build_table(
+				items,
+				output_fields=output_type._table_fields,
+				exclude_fields=exclude_fields,
+				sort_by=output_type._sort_by)
+			tables.append(_table)
+			_type = pluralize(items[0]._type)
+			_print(_type.upper(), style='bold gold3', justify='left')
+			_print(_table)
+			_print()
+	return tables

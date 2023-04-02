@@ -33,7 +33,7 @@ dependencies = [
     'xmltodict'
 ]
 extras = {
-    'test': ['coverage']
+    'test': ['coverage', 'flake8']
 }
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
