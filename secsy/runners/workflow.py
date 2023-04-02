@@ -10,25 +10,29 @@ from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.runners.task import Task
 from secsy.utils import merge_opts
-from secsy.exporters import TableExporter
+from secsy.exporters import TableExporter, JsonExporter, CsvExporter
 
-
-DEFAULT_CLI_FORMAT_OPTIONS = {
-	'print_timestamp': True,
-	'print_cmd': True,
-	'print_line': True,
-	'print_item_count': True,
-	'raw_yield': False
-}
 
 class Workflow(Runner):
+
+	DEFAULT_EXPORTERS = [
+		TableExporter,
+		JsonExporter,
+		CsvExporter
+	]
+	DEFAULT_FORMAT_OPTIONS = {
+		'print_timestamp': True,
+		'print_cmd': True,
+		'print_line': True,
+		'print_item_count': True,
+		'raw_yield': False
+	}
 
 	def run(self, sync=True, results=[]):
 		"""Run workflow.
 
 		Args:
-			sync (bool): Run in sync mode (main thread). If False, run in Celery 
-				worker in distributed mode.
+			sync (bool): Run in sync mode (main thread). If False, run in Celery worker in distributed mode.
 
 		Returns:
 			list: List of results.
@@ -36,7 +40,7 @@ class Workflow(Runner):
 		self.sync = sync
 
 		# Overriding library defaults with CLI defaults
-		fmt_opts = DEFAULT_CLI_FORMAT_OPTIONS
+		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
 		fmt_opts['sync'] = sync
 
 		# Check if we can add a console status
@@ -48,7 +52,7 @@ class Workflow(Runner):
 		if not sync:
 			fmt_opts['print_cmd_prefix'] = True
 			if not self.exporters:
-				self.exporters = [TableExporter]
+				self.exporters = self.DEFAULT_EXPORTERS
 
 		# Merge runtime options
 		self.run_opts = merge_opts(self.run_opts, fmt_opts)

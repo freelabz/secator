@@ -1,6 +1,10 @@
 from urllib.parse import urlparse
 
-from secsy.definitions import *
+from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FOLLOW_REDIRECT,
+							   HEADER, HOST, MATCH_CODES, METHOD,
+							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+							   STATUS_CODE, TECH, THREADS, TIME, TIMEOUT, URL,
+							   USER_AGENT)
 from secsy.output_types import Url
 from secsy.tasks._categories import HTTPCommand
 

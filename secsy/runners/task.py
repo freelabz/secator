@@ -4,26 +4,23 @@ from secsy.definitions import RECORD
 from secsy.rich import console
 from secsy.runners._base import Runner
 from secsy.utils import discover_tasks, merge_opts
-from secsy.exporters import TableExporter, RawExporter
-
-DEFAULT_CLI_FORMAT_OPTIONS = {
-	'print_timestamp': True,
-	'print_cmd': True,
-	'print_line': True,
-	'raw_yield': False
-}
 
 
 class Task(Runner):
 
 	DEFAULT_EXPORTERS = []
+	DEFAULT_FORMAT_OPTIONS = {
+		'print_timestamp': True,
+		'print_cmd': True,
+		'print_line': True,
+		'raw_yield': False
+	}
 
 	def run(self, sync=True):
 		"""Run task.
 
 		Args:
-			sync (bool): Run in sync mode (main thread). If False, run in Celery 
-				worker in distributed mode.
+			sync (bool): Run in sync mode (main thread). If False, run in Celery worker in distributed mode.
 
 		Returns:
 			list: List of results.
@@ -35,7 +32,7 @@ class Task(Runner):
 		json = self.run_opts.get('json', False)
 		orig = self.run_opts.get('orig', False)
 		raw = self.run_opts.get('raw', False)
-		fmt_opts = DEFAULT_CLI_FORMAT_OPTIONS.copy()
+		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
 		fmt_opts.update({
 			'sync': sync,
 			'raw': raw or not (json or table or orig),
@@ -44,8 +41,6 @@ class Task(Runner):
 
 		# In async mode, display results back in client-side
 		if not sync:
-			if not self.exporters:
-				self.exporters = [RawExporter]
 			fmt_opts['json'] = True
 			fmt_opts['print_cmd_prefix'] = True
 
@@ -56,7 +51,9 @@ class Task(Runner):
 		task_cls = Task.get_task_class(self.config.name)
 		if sync:
 			task = task_cls(self.targets, **opts)
-			with console.status(f'[bold yellow]Running task [bold magenta]{self.config.name} ...') if not RECORD and not task._json_output and not task._raw_output and not task._orig_output else nullcontext():
+			print_status = not RECORD and not task._json_output and not task._raw_output and not task._orig_output
+			status = f'[bold yellow]Running task [bold magenta]{self.config.name} ...'
+			with console.status(status) if print_status else nullcontext():
 				self.results = task.run()
 		else:
 			result = task_cls.delay(self.targets, **opts)

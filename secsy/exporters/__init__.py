@@ -1,8 +1,8 @@
 __all__ = [
-    'CSVExporter',
+    'CsvExporter',
     'GdriveExporter',
-    'HTMLExporter',
-    'JSONExporter',
+    'HtmlExporter',
+    'JsonExporter',
     'RawExporter',
     'TableExporter'
 ]

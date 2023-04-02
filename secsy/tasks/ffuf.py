@@ -1,6 +1,9 @@
-from urllib.parse import urlparse, urlunparse
-
-from secsy.definitions import *
+from secsy.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH, CONTENT_TYPE,
+							   DEFAULT_FFUF_WORDLIST, DELAY, DEPTH,
+							   FOLLOW_REDIRECT, HEADER, MATCH_CODES, METHOD,
+							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+							   STATUS_CODE, THREADS, TIME, TIMEOUT, USER_AGENT,
+							   WORDLIST)
 from secsy.output_types import Url
 from secsy.tasks._categories import HTTPCommand
 
@@ -13,7 +16,7 @@ class ffuf(HTTPCommand):
 	file_flag = None
 	json_flag = '-json'
 	opts = {
-		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Filter out HTTP responses based on status codes, content length, etc.'},
+		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Auto-calibration'},
 		WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_FFUF_WORDLIST, 'help': 'Wordlist to fuzz from.'},
 		'mw': {'type': str, 'help': 'Match responses with word count'},
 		'mr': {'type': str, 'help': 'Match responses with regular expression'},
@@ -50,7 +53,10 @@ class ffuf(HTTPCommand):
 		}
 	}
 	encoding = 'ansi'
-	install_cmd = 'go install -v github.com/ffuf/ffuf@latest && sudo git clone https://github.com/danielmiessler/SecLists /usr/share/seclists'
+	install_cmd = (
+		'go install -v github.com/ffuf/ffuf@latest && '
+		'sudo git clone https://github.com/danielmiessler/SecLists /usr/share/seclists'
+	)
 
 	@staticmethod
 	def validate_input(self, input):

@@ -1,11 +1,14 @@
 import json
 import logging
+import os
 import re
 
-from secsy.definitions import *
+from secsy.definitions import (DELAY, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
+							   RETRIES, SITE_NAME, THREADS, TIMEOUT, URL,
+							   USERNAME)
 from secsy.output_types import UserAccount
 from secsy.tasks._categories import ReconCommand
-from secsy.utils import get_file_timestamp
+
 
 logger = logging.getLogger(__name__)
 

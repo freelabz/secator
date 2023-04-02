@@ -1,16 +1,17 @@
 import contextlib
-
 import json
 import os
 import unittest.mock
-import validators
 
+import validators
 from fp.fp import FreeProxy
 
-from secsy.definitions import *
+from secsy.definitions import (CIDR_RANGE, DEBUG, DELAY, DEPTH,
+                               FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
+                               METHOD, PORT, PROXY, RATE_LIMIT, RETRIES,
+                               THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
 from secsy.rich import console
 from secsy.utils import discover_internal_tasks, load_fixture
-
 
 #---------#
 # GLOBALS #
@@ -66,7 +67,7 @@ META_OPTS = {
 
     # Individual tasks options
     'gf.pattern': 'xss',
-    'nmap.output_path': load_fixture('nmap_output', FIXTURES_DIR, only_path=True, ext='.xml'), # nmap XML fixture
+    'nmap.output_path': load_fixture('nmap_output', FIXTURES_DIR, only_path=True, ext='.xml'),  # nmap XML fixture
     'msfconsole.resource_script': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
     'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
     'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True)
@@ -78,8 +79,10 @@ def mock_subprocess_popen(output_list):
     mock_process.wait.return_value = 0
     mock_process.stdout.readline.side_effect = output_list
     mock_process.returncode = 0
+
     def mock_popen(*args, **kwargs):
         return mock_process
+
     return unittest.mock.patch('subprocess.Popen', mock_popen)
 
 
@@ -88,7 +91,7 @@ def mock_command(cls, targets=[], opts={}, fixture=None, method=''):
     mocks = []
     if isinstance(fixture, dict):
         fixture = [fixture]
-    
+
     is_list = isinstance(fixture, list)
     if is_list:
         for item in fixture:
@@ -111,7 +114,7 @@ def mock_command(cls, targets=[], opts={}, fixture=None, method=''):
             yield command
 
 
-class CommandOutputTester: # Mixin for unittest.TestCase
+class CommandOutputTester:  # Mixin for unittest.TestCase
 
     def _test_command_output(
             self,
@@ -145,5 +148,5 @@ class CommandOutputTester: # Mixin for unittest.TestCase
         except Exception:
             console.print('[bold red] failed[/]')
             raise
-        
+
         console.print('[bold green] ok[/]')

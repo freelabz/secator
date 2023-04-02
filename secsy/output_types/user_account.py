@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from secsy.definitions import USERNAME, URL, SITE_NAME
 from secsy.output_types import OutputType
 
+
 @dataclass
 class UserAccount(OutputType):
 	site_name: str

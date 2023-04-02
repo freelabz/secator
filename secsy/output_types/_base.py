@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass, fields, asdict
+from dataclasses import dataclass, fields
 
 import logging
 
