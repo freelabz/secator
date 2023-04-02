@@ -1,8 +1,13 @@
 from urllib.parse import urlparse
 
-from secsy.definitions import *
-from secsy.tasks._categories import VulnCommand
+from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, METHOD,
+							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, THREADS,
+							   TIMEOUT, URL, USER_AGENT, VULN_CONFIDENCE,
+							   VULN_EXTRACTED_RESULTS, VULN_ID,
+							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
+							   VULN_SEVERITY, VULN_TAGS)
 from secsy.output_types import Vulnerability
+from secsy.tasks._categories import VulnCommand
 
 
 class dalfox(VulnCommand):

@@ -1,6 +1,7 @@
 import validators
 
-from secsy.definitions import *
+from secsy.definitions import (DELAY, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
+							   RETRIES, THREADS, TIMEOUT)
 from secsy.output_types import Ip
 from secsy.tasks._categories import ReconCommand
 
@@ -22,7 +23,7 @@ class fping(ReconCommand):
 	}
 	opt_value_map = {
 		DELAY: lambda x: x * 1000,  # convert s to ms
-		TIMEOUT: lambda x: x * 1000 # convert s to ms
+		TIMEOUT: lambda x: x * 1000  # convert s to ms
 	}
 	input_type = IP
 	output_types = [Ip]
@@ -36,5 +37,5 @@ class fping(ReconCommand):
 	@staticmethod
 	def on_line(self, line):
 		if 'Unreachable' in line:
-			return '' # discard line as it pollutes output
+			return ''  # discard line as it pollutes output
 		return line

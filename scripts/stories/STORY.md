@@ -64,8 +64,10 @@ from secsy.config import ConfigLoader
 
 config = ConfigLoader(name='workflows/host_recon')
 callbacks = {
-    Port: [save_port_to_db],
-    Vulnerability: [save_vulnerability_to_db, send_vulnerability_to_discord],
+    'output': {
+        Port: [save_port_to_db],
+        Vulnerability: [save_vulnerability_to_db, send_vulnerability_to_discord],
+    }
 }
 workflow = Workflow(config, callbacks=callbacks)
 result = workflow.delay()

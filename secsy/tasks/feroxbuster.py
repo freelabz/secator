@@ -1,7 +1,11 @@
 import shlex
 from pathlib import Path
 
-from secsy.definitions import *
+from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FOLLOW_REDIRECT,
+							   HEADER, LINES, MATCH_CODES, METHOD,
+							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
+							   RATE_LIMIT, RETRIES, STATUS_CODE, TEMP_FOLDER,
+							   THREADS, TIMEOUT, USER_AGENT, WORDS)
 from secsy.output_types import Url
 from secsy.tasks._categories import HTTPCommand
 from secsy.utils import get_file_timestamp
@@ -16,11 +20,11 @@ class feroxbuster(HTTPCommand):
 	opt_prefix = '--'
 	opts = {
 		'wordlist': {'type': str, 'help': 'Wordlist'},
-		'auto_tune': {'is_flag': True, 'help': 'Automatically lower scan rate when an excessive amount of errors are encountered'},
-		'extract_links': {'is_flag': True, 'default': True, 'help': 'Extract links from response body (html, javascript, etc...); make new requests based on findings'},
-		'collect_backups': {'is_flag': True, 'help': 'Automatically request likely backup extensions for "found" urls'},
-		'collect_extensions': {'is_flag': True, 'help': 'Automatically discover extensions ad add them to --extensions'},
-		'collect_words': {'is_flag': True, 'help': 'Automatically discover important words from within responses and add them to the wordlist'},
+		'auto_tune': {'is_flag': True, 'help': 'Automatically lower scan rate when too many errors are encountered'},
+		'extract_links': {'is_flag': True, 'default': True, 'help': 'Extract links from response body'},
+		'collect_backups': {'is_flag': True, 'help': 'Request likely backup extensions for found urls'},
+		'collect_extensions': {'is_flag': True, 'help': 'Discover extensions and add them to --extensions'},
+		'collect_words': {'is_flag': True, 'help': 'Discover important words and add them to the wordlist'},
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -44,7 +48,11 @@ class feroxbuster(HTTPCommand):
 			WORDS: 'word_count'
 		}
 	}
-	install_cmd = 'sudo apt install -y unzip && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash && sudo mv feroxbuster /usr/local/bin'
+	install_cmd = (
+		'sudo apt install -y unzip && '
+		'curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | '
+		'bash && sudo mv feroxbuster /usr/local/bin'
+	)
 
 	@staticmethod
 	def on_init(self):

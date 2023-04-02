@@ -14,7 +14,7 @@ ASCII = f"""
                     /____/     v{VERSION}
 
                     freelabz.com
-"""
+"""  # noqa: W605,W291
 
 # Celery local fs folders
 CONFIG_FOLDER = os.environ.get('SECSY_CONFIG_FOLDER', f'{os.path.expanduser("~")}/.secsy')
@@ -24,7 +24,7 @@ CELERY_RESULTS_FOLDER = f'{TEMP_FOLDER}/celery/results'
 PAYLOADS_FOLDER = f'{TEMP_FOLDER}/payloads'
 REPORTS_FOLDER = os.environ.get('SECSY_REPORTS_FOLDER', f'{CONFIG_FOLDER}/reports')
 ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-SCRIPTS_FOLDER =f'{ROOT_FOLDER}/scripts'
+SCRIPTS_FOLDER = f'{ROOT_FOLDER}/scripts'
 REVSHELLS_FOLDER = f'{TEMP_FOLDER}/revshells'
 os.makedirs(TEMP_FOLDER, exist_ok=True)
 os.makedirs(CELERY_DATA_FOLDER, exist_ok=True)
@@ -44,34 +44,11 @@ GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
 
 # Defaults
 DEFAULT_CHUNK_SIZE = 100
-DEFAULT_STDIN_TIMEOUT = 1000 # seconds
-DEFAULT_PROXY_TIMEOUT = 1 # seconds
-DEFAULT_OUTPUT_FORMAT = {
-   'task': {
-      '_print_table': False,
-      '_save_html': False,
-      '_save_json': False,
-      '_save_csv': False,
-      '_save_google_sheet': False,
-   },
-   'workflow': {
-	   '_print_table': True,
-	   '_save_html': True,
-	   '_save_json': True,
-	   '_save_csv': True,
-	   '_save_google_sheet': True,
-   },
-   'scan': {
-	   '_print_table': True,
-	   '_save_html': True,
-	   '_save_json': True,
-	   '_save_csv': True,
-	   '_save_google_sheet': True,
-   },
-}
+DEFAULT_STDIN_TIMEOUT = 1000  # seconds
+DEFAULT_PROXY_TIMEOUT = 1  # seconds
 
 # Constants
-FFUF_DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
+DEFAULT_FFUF_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
 

@@ -1,13 +1,20 @@
 import json
 import logging
+import os
 
 import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secsy.definitions import *
+from secsy.definitions import (DELAY, DEPTH, FOLLOW_REDIRECT, HEADER, HOST,
+							   MATCH_CODES, METHOD, PROXY, RATE_LIMIT, RETRIES,
+							   TEMP_FOLDER, THREADS, TIMEOUT, URL, USER_AGENT,
+							   VULN_CONFIDENCE, VULN_CVSS_SCORE,
+							   VULN_DESCRIPTION, VULN_ID, VULN_NAME,
+							   VULN_PROVIDER, VULN_REFERENCES, VULN_SEVERITY,
+							   VULN_TAGS)
+from secsy.output_types import Url, Vulnerability
 from secsy.runners import Command
-from secsy.output_types import Vulnerability, Url
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +108,7 @@ class VulnCommand(Command):
 
 	@staticmethod
 	def lookup_cve(cve_id, cpes=[]):
-		"""Search for a CVE in local db or using cve.circl.lu and return 
-		vulnerability data.
+		"""Search for a CVE in local db or using cve.circl.lu and return vulnerability data.
 
 		Args:
 			cve_id (str): CVE ID in the form CVE-*
@@ -121,12 +127,11 @@ class VulnCommand(Command):
 			except requests.exceptions.ConnectionError:
 				return None
 
-		# Match the CPE string against the affected products CPE FS strings from the 
-		# CVE data if a CPE was passed.
-		# This allow to limit the number of False positives (high) that we get from
-		# nmap NSE vuln scripts like vulscan and ensure we keep only right matches.
-		# The check is not executed if no CPE was passed (sometimes nmap cannot 
-		# properly detect a CPE) or if the CPE version cannot be determined.
+		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.
+		# This allow to limit the number of False positives (high) that we get from nmap NSE vuln scripts like vulscan
+		# and ensure we keep only right matches.
+		# The check is not executed if no CPE was passed (sometimes nmap cannot properly detect a CPE) or if the CPE
+		# version cannot be determined.
 		# TODO: Add info to Vulnerability model for the following things
 		# * CPE product found     - product_detected=True
 		# * CPE version was found - product_version_detected=True
@@ -209,8 +214,7 @@ class VulnCommand(Command):
 
 	@staticmethod
 	def lookup_ghsa(ghsa_id):
-		"""Search for a GHSA on Github and and return associated CVE 
-		vulnerability data.
+		"""Search for a GHSA on Github and and return associated CVE vulnerability data.
 
 		Args:
 			ghsa (str): CVE ID in the form GHSA-*

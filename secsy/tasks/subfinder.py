@@ -1,4 +1,5 @@
-from secsy.definitions import *
+from secsy.definitions import (DELAY, DOMAIN, OPT_NOT_SUPPORTED, PROXY,
+							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secsy.output_types import Subdomain
 from secsy.tasks._categories import ReconCommand
 

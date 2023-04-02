@@ -4,8 +4,7 @@ from pathlib import Path
 
 from secsy.definitions import REPORTS_FOLDER
 from secsy.output_types import OUTPUT_TYPES
-from secsy.utils import (get_file_timestamp, merge_opts, pluralize,
-                         print_results_table)
+from secsy.utils import merge_opts, pluralize, get_file_timestamp, print_results_table
 
 
 # TODO: initialize from data, not from runner

@@ -1,6 +1,7 @@
 import validators
 
-from secsy.definitions import *
+from secsy.definitions import (CIDR_RANGE, OPT_NOT_SUPPORTED, PROXY,
+							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secsy.output_types import Ip
 from secsy.tasks._categories import ReconCommand
 
