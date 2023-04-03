@@ -1,5 +1,5 @@
 __all__ = [
-    'OutputType'
+    'OutputType',
     'Ip',
     'Port',
     'Subdomain',

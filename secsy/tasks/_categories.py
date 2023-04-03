@@ -81,24 +81,6 @@ class VulnCommand(Command):
 	output_types = [Vulnerability]
 
 	@staticmethod
-	def on_item_converted(self, item):
-		severity_map = {
-			'critical': 0,
-			'high': 1,
-			'medium': 2,
-			'low': 3,
-			'info': 4,
-			'unknown': 5,
-			None: 6
-		}
-		if item._type == 'vulnerability':
-			item.severity_nb = severity_map[item.severity]
-			item.confidence_nb = severity_map[item.confidence]
-			references = item.references or ['']
-			item.reference = references[0]
-		return item
-
-	@staticmethod
 	def lookup_local_cve(cve_id):
 		cve_path = f'{TEMP_FOLDER}/cves/{cve_id}.json'
 		if os.path.exists(cve_path):

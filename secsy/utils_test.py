@@ -3,12 +3,11 @@ import json
 import os
 import unittest.mock
 
-import validators
 from fp.fp import FreeProxy
 
 from secsy.definitions import (CIDR_RANGE, DEBUG, DELAY, DEPTH,
                                FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
-                               METHOD, PORT, PROXY, RATE_LIMIT, RETRIES,
+                               METHOD, PROXY, RATE_LIMIT, RETRIES,
                                THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
 from secsy.rich import console
 from secsy.utils import discover_internal_tasks, load_fixture
@@ -36,15 +35,6 @@ INPUTS = {
     CIDR_RANGE: '192.168.1.0/24'
 }
 
-OUTPUT_VALIDATORS = {
-    URL: lambda url: validators.url(url),
-    HOST: lambda host: validators.domain(host),
-    USERNAME: lambda url: validators.url(url),
-    PORT: lambda port: isinstance(port, int),
-    IP: lambda ip: validators.ipv4(ip) or validators.ipv6(ip),
-    None: lambda x: True,
-}
-
 FIXTURES = {
     tool_cls: load_fixture(f'{tool_cls.__name__}_output', FIXTURES_DIR)
     for tool_cls in ALL_CMDS
@@ -68,7 +58,7 @@ META_OPTS = {
     # Individual tasks options
     'gf.pattern': 'xss',
     'nmap.output_path': load_fixture('nmap_output', FIXTURES_DIR, only_path=True, ext='.xml'),  # nmap XML fixture
-    'msfconsole.resource_script': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
+    'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
     'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
     'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True)
 }
@@ -118,20 +108,20 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 
     def _test_command_output(
             self,
-            items,
-            expected_output_keys=None,
-            expected_output_types=None,
-            output_validator=None):
+            results,
+            expected_output_keys=[],
+            expected_output_types=[],
+            expected_results=[]):
 
-        if not isinstance(items, list):
-            items = [items]
+        if not isinstance(results, list):
+            results = [results]
 
         try:
-            self.assertGreater(len(items), 0)
+            self.assertGreater(len(results), 0)
 
-            for item in items:
+            for item in results:
 
-                if DEBUG:
+                if DEBUG > 1:
                     console.log('\n', log_locals=True)
 
                 if expected_output_types:
@@ -142,8 +132,9 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
                         set(item.keys()).difference(set(expected_output_keys)),
                         set())
 
-                if callable(output_validator):
-                    self.assertTrue(output_validator(item))
+                if expected_results:
+                    for result in expected_results:
+                        self.assertIn(result, results)
 
         except Exception:
             console.print('[bold red] failed[/]')

@@ -277,7 +277,7 @@ class Command:
 
 		while not result.ready():
 			data = AsyncResult(result.id).info
-			if DEBUG and isinstance(data, dict):
+			if DEBUG > 1 and isinstance(data, dict):
 				print(data)
 			sleep(1)
 		return result.get()

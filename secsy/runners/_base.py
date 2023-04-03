@@ -178,8 +178,9 @@ class Runner:
 				# Re-yield so that we can consume it externally
 				yield info
 
- 				# Ignore partials in output unless DEBUG=1
-				if info['chunk'] and not DEBUG:
+ 				# Ignore partials in output unless DEBUG > 1
+				# TODO: weird to change behavior based on debug flag, could cause issues
+				if info['chunk'] and not DEBUG > 1:
 					continue
 
 				# Handle error if any
