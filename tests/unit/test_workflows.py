@@ -22,7 +22,7 @@ class TestCommandWorkflow(unittest.TestCase):
 			workflow = chain(*sigs)
 			result = workflow.apply()
 			results = result.get()
-			if DEBUG:
+			if DEBUG > 1:
 				console.print_json(json.dumps(results))
 			urls = [r.url for r in results]
 			self.assertEqual(len(urls), len(TARGETS))

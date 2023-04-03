@@ -28,7 +28,7 @@ RUNNER_OPTS = {
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
 	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
-	'debug': {'is_flag': True, 'help': 'Debug mode'},
+	'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 }
 
@@ -226,13 +226,13 @@ def register_runner(cli_endpoint, config):
 		debug = opts['debug']
 		ws = opts.pop('workspace')
 		if debug:
-			os.environ['DEBUG'] = '1'
+			os.environ['DEBUG'] = str(debug)
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 		if cli_endpoint.name in ['scan', 'workflow']:
-			opts['print_item'] = debug
-			opts['print_line'] = debug
+			opts['print_item'] = debug > 1
+			opts['print_line'] = debug > 1
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
 		if input is None:

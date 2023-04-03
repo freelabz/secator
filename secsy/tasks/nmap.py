@@ -5,13 +5,13 @@ import re
 import xmltodict
 
 from secsy.definitions import (CPES, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
-							   HEADER, HOST, IP, OPT_NOT_SUPPORTED, PORT,
-							   PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT,
-							   TEMP_FOLDER, THREADS, TIMEOUT, USER_AGENT,
-							   VULN_CONFIDENCE, VULN_CVSS_SCORE,
-							   VULN_DESCRIPTION, VULN_EXTRACTED_RESULTS,
-							   VULN_ID, VULN_MATCHED_AT, VULN_NAME,
-							   VULN_PROVIDER, VULN_REFERENCES, VULN_TAGS)
+                               HEADER, HOST, IP, OPT_NOT_SUPPORTED, PORT,
+                               PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT,
+                               SERVICE_NAME, TEMP_FOLDER, THREADS, TIMEOUT,
+                               USER_AGENT, VULN_CONFIDENCE, VULN_CVSS_SCORE,
+                               VULN_DESCRIPTION, VULN_EXTRACTED_RESULTS,
+                               VULN_ID, VULN_MATCHED_AT, VULN_NAME,
+                               VULN_PROVIDER, VULN_REFERENCES, VULN_TAGS)
 from secsy.output_types import Port, Vulnerability
 from secsy.tasks._categories import VulnCommand
 from secsy.utils import get_file_timestamp
@@ -46,6 +46,7 @@ class nmap(VulnCommand):
 
 		# Nmap opts
 		PORTS: '-p',
+		'output_path': '-oX'
 	}
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
@@ -110,6 +111,7 @@ class nmapData(dict):
 				port_number = port['@portid']
 				if not port_number or not port_number.isdigit():
 					continue
+				port_number = int(port_number)
 
 				# Get extracted results
 				extracted_results = self._get_extracted_results(port)
@@ -125,7 +127,6 @@ class nmapData(dict):
 					PORT: port_number,
 					HOST: hostname,
 					IP: ip,
-					CPES: cpes,
 					EXTRA_DATA: extracted_results
 				}
 
