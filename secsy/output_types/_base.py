@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, _MISSING_TYPE
 
 import logging
 
@@ -11,10 +11,22 @@ class OutputType:
 	_table_fields = []
 	_sort_by = ()
 
+	def __post_init__(self):
+		"""Initialize default fields to their proper types."""
+		for field in fields(self):
+			default_factory = field.default_factory
+			default = field.default
+			if getattr(self, field.name) is None:
+				if not isinstance(default, _MISSING_TYPE):
+					setattr(self, field.name, field.default)
+				elif not isinstance(default_factory, _MISSING_TYPE):
+					setattr(self, field.name, default_factory())
+
 	@classmethod
 	def load(cls, item, output_map={}):
 		new_item = {}
-		for key in cls.keys():
+		for field in fields(cls):
+			key = field.name
 			if key in output_map:
 				mapped_key = output_map[key]
 				if callable(mapped_key):

@@ -1,0 +1,12 @@
+name: url_vuln
+alias: urlvuln
+description: Run vulnerability scan on select URLs
+tags: [url, vulnerability]
+tasks:
+  _group:
+    gf:
+      description: Tag URLs
+      targets_: url.url
+    dalfox:
+      description: Test XSS from potential URLs containing XSS
+      targets_: tag.match

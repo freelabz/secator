@@ -9,8 +9,9 @@ class Port(OutputType):
 	port: int
 	host: str
 	ip: str = ''
+	service_name: str = ''
 	cpes: list = field(default_factory=list)
-	extra_data: dict = field(default_factory=dict)
+	extra_data: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='port', repr=True)
 	_uuid: str = field(default='', repr=True)
@@ -20,3 +21,8 @@ class Port(OutputType):
 
 	def __str__(self) -> str:
 		return f'{self.host}:{self.port}'
+
+	def __post_init__(self):
+		super().__post_init__()
+		self.cpes = self.extra_data.get('cpe', [])
+		self.service_name = self.extra_data.get('service_name', '')

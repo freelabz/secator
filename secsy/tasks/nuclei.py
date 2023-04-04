@@ -4,7 +4,7 @@ from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   VULN_CVSS_SCORE, VULN_DESCRIPTION,
 							   VULN_EXTRACTED_RESULTS, VULN_ID,
 							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
-							   VULN_REFERENCES, VULN_SEVERITY, VULN_TAGS)
+							   VULN_REFERENCES, VULN_SEVERITY, VULN_TAGS, USER_AGENT)
 from secsy.output_types import Vulnerability
 from secsy.tasks._categories import VulnCommand
 
@@ -17,7 +17,7 @@ class nuclei(VulnCommand):
 	file_flag = '-l'
 	input_flag = '-u'
 	input_chunk_size = 3  # TODO: figure out which chunk size is appropriate
-	json_flag = '-json'
+	json_flag = '-jsonl'
 	opts = {
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'tags': {'type': str, 'help': 'Tags'},
@@ -33,6 +33,7 @@ class nuclei(VulnCommand):
 		RETRIES: 'retries',
 		THREADS: 'c',
 		TIMEOUT: 'timeout',
+		USER_AGENT: OPT_NOT_SUPPORTED,
 
 		# nuclei opts
 		'exclude_tags': 'exclude-tags',
