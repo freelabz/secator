@@ -27,6 +27,7 @@ class msfconsole(Command):
 		# 'e': 'environment'
 	}
 	encoding = 'ansi'
+	ignore_return_code = True
 
 	@staticmethod
 	def on_init(self):
