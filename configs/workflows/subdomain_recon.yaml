@@ -4,6 +4,7 @@ description: Find subdomains and takeovers
 tags: [subdomain, url, vulnerability, tech, subdomain_takeover]
 tasks:
   subfinder:
+    description: Listing subdomains (passive)
   # TODO: add subdomain bruteforcers
   # gobuster:
   #   input: vhost
@@ -17,11 +18,13 @@ tasks:
   #   wordlist: /usr/share/seclists/Discovery/DNS/combined_subdomains.txt
   _group:
     nuclei:
+      description: Checking for subdomain takeovers
       targets_:
       - target.name
       - subdomain.host
       tags: [takeover, dns]
     httpx:
+      description: Running HTTP probes on subdomain root hosts
       targets_:
       - target.name
       - subdomain.host
