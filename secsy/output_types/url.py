@@ -7,7 +7,7 @@ from secsy.output_types import OutputType
 @dataclass
 class Url(OutputType):
 	url: str
-	host: str = ''
+	host: str = field(default='', compare=False)
 	status_code: int = 0
 	title: str = ''
 	webserver: str = ''
