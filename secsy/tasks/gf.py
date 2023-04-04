@@ -6,6 +6,7 @@ from secsy.runners import Command
 
 HOME_DIR = os.path.expanduser('~')
 
+
 class gf(Command):
 	"""Wrapper around grep, to help you grep for things."""
 	cmd = 'gf'
