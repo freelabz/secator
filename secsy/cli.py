@@ -14,13 +14,13 @@ from secsy.celery import app, is_celery_worker_alive
 from secsy.config import ConfigLoader
 from secsy.decorators import OrderedGroup, register_runner
 from secsy.definitions import (ASCII, CONFIG_FOLDER, CVES_FOLDER, DEBUG,
-                               PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER,
-                               TEMP_FOLDER)
+							   PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER,
+							   TEMP_FOLDER)
 from secsy.rich import console
 from secsy.runners import Command
 from secsy.serializers.dataclass import loads_dataclass
 from secsy.utils import (detect_host, discover_tasks, find_list_item, flatten,
-                         print_results_table)
+						 print_results_table)
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -33,7 +33,7 @@ DEFAULT_CMD_OPTS = {
 	'print_cmd': True,
 	'print_timestamp': True
 }
-if DEBUG:
+if DEBUG > 0:
 	console.print(f'Celery app configuration:\n{app.conf}')
 
 
@@ -506,10 +506,10 @@ def test():
 @test.command()
 @click.option('--commands', '-c', type=str, default='', help='Secsy commands to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secsy test to run')
-@click.option('--debug', '-d', is_flag=True, help='Add debug information')
-def integration(commands, test, debug=False):
+@click.option('--debug', '-d', type=int, default=0, help='Add debug information')
+def integration(commands, test, debug):
 	os.environ['TEST_COMMANDS'] = commands or ''
-	os.environ['DEBUG'] = str(int(debug))
+	os.environ['DEBUG'] = str(debug)
 	cmd = 'python -m unittest'
 	if test:
 		cmd += f' {test}'
@@ -526,10 +526,10 @@ def integration(commands, test, debug=False):
 @click.option('--commands', '-c', type=str, default='', help='Secsy commands to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secsy test to run')
 @click.option('--coverage', '-x', is_flag=True, help='Run coverage on results')
-@click.option('--debug', '-d', is_flag=True, help='Add debug information')
+@click.option('--debug', '-d', type=int, default=0, help='Add debug information')
 def unit(commands, test, coverage=False, debug=False):
 	os.environ['TEST_COMMANDS'] = commands or ''
-	os.environ['DEBUG'] = str(int(debug))
+	os.environ['DEBUG'] = str(debug)
 
 	cmd = 'coverage run --omit="*test*" -m unittest'
 	if test:

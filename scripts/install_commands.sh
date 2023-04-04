@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # gf
-go install -v github.com/tomnomnom/gf@latest || true
+go install -v github.com/tomnomnom/gf@latest && git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true || true
 
 # cariddi
 go install -v github.com/edoardottt/cariddi/cmd/cariddi@latest || true

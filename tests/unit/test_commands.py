@@ -1,25 +1,21 @@
 import copy
-import logging
-import os
 import json
+import logging
 import unittest
 import unittest.mock
 import warnings
 
-from dotmap import DotMap
-
-from secsy.runners import Command
 from secsy.definitions import *
+from secsy.definitions import DEBUG
 from secsy.rich import console
+from secsy.runners import Command
 from secsy.tasks import httpx
 from secsy.utils import setup_logging
-from secsy.utils_test import FIXTURES, META_OPTS, mock_subprocess_popen, INPUTS, load_fixture, FIXTURES_DIR, TEST_COMMANDS, mock_command, CommandOutputTester
-from secsy.definitions import DEBUG
+from secsy.utils_test import (FIXTURES, FIXTURES_DIR, INPUTS, META_OPTS,
+                              TEST_COMMANDS, CommandOutputTester, load_fixture,
+                              mock_command, mock_subprocess_popen)
 
-
-USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
-DEBUG = bool(int(os.environ.get('DEBUG', '0')))
-level = logging.DEBUG if DEBUG else logging.ERROR
+level = logging.DEBUG if DEBUG > 0 else logging.ERROR
 setup_logging(level)
 
 
