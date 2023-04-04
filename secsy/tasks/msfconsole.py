@@ -19,13 +19,14 @@ class msfconsole(Command):
 	opts = {
 		'resource': {'type': str, 'help': 'Metasploit commands.', 'short': 'r'},
 		'execute_command': {'type': str, 'help': 'Metasploit resource script.', 'short': 'x'},
-		# 'environment': {'type': str, 'default': '', 'help': 'Environment variables string in the format KEY=VALUE.', 'short': 'env'}
+		# 'environment': {'type': str, 'default': '', 'help': 'Environment variables string KEY=VALUE.', 'short': 'env'}
 	}
 	opt_key_map = {
 		'x': 'execute_command',
 		'r': 'resource',
 		# 'e': 'environment'
 	}
+	encoding = 'ansi'
 
 	@staticmethod
 	def on_init(self):
@@ -38,7 +39,7 @@ class msfconsole(Command):
 
 		# Passing msfconsole command directly, simply add RHOST / RHOSTS from host input and run then exit
 		if command:
-			self.cmd_opts['execute_command'] = (
+			self.cmd_opts['msfconsole.execute_command'] = (
 				f'setg RHOST {self.input}; '
 				f'setg RHOSTS {self.input}; '
 				f'{command.format(**env_vars)}; '
@@ -61,11 +62,10 @@ class msfconsole(Command):
 			)
 			with open(out_path, 'w') as f:
 				content = content.format(**env_vars)
-				print(content) if self._print_timestamp else logger.debug(content)
 				f.write(content)
 
 			# Override original command with new resource script
-			self.cmd_opts['resource'] = out_path
+			self.cmd_opts['msfconsole.resource'] = out_path
 
 		# Nothing passed, error out
 		else:

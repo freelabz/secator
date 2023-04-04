@@ -67,7 +67,7 @@ class feroxbuster(HTTPCommand):
 	def on_start(self):
 		if self.input_path:
 			self.cmd += ' --stdin'
-		self.cmd += f' & tail --pid $! -f {shlex.quote(self.output_path)}'
+		self.cmd += f' & tail --pid=$! -f {shlex.quote(self.output_path)}'
 		self.shell = True
 
 	@staticmethod

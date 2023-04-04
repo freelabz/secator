@@ -4,14 +4,14 @@ import re
 
 import xmltodict
 
-from secsy.definitions import (CPES, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
-                               HEADER, HOST, IP, OPT_NOT_SUPPORTED, PORT,
-                               PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT,
-                               SERVICE_NAME, TEMP_FOLDER, THREADS, TIMEOUT,
-                               USER_AGENT, VULN_CONFIDENCE, VULN_CVSS_SCORE,
-                               VULN_DESCRIPTION, VULN_EXTRACTED_RESULTS,
-                               VULN_ID, VULN_MATCHED_AT, VULN_NAME,
-                               VULN_PROVIDER, VULN_REFERENCES, VULN_TAGS)
+from secsy.definitions import (DELAY, EXTRA_DATA, FOLLOW_REDIRECT, HEADER,
+							   HOST, IP, OPT_NOT_SUPPORTED, PORT, PORTS, PROXY,
+							   RATE_LIMIT, RETRIES, SCRIPT, TEMP_FOLDER,
+							   THREADS, TIMEOUT, USER_AGENT, VULN_CONFIDENCE,
+							   VULN_CVSS_SCORE, VULN_DESCRIPTION,
+							   VULN_EXTRACTED_RESULTS, VULN_ID,
+							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
+							   VULN_REFERENCES, VULN_TAGS)
 from secsy.output_types import Port, Vulnerability
 from secsy.tasks._categories import VulnCommand
 from secsy.utils import get_file_timestamp

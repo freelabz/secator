@@ -14,7 +14,7 @@ from secsy.definitions import DEBUG, RECORD
 console = Console(stderr=True, record=RECORD)
 console_stdout = Console(record=True)
 handler = RichHandler(rich_tracebacks=True)
-install(show_locals=DEBUG > 1, suppress=[click, rich_click])
+install(show_locals=DEBUG > 2, suppress=[click, rich_click])
 
 
 def criticity_to_color(value):
