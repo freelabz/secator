@@ -17,7 +17,7 @@ class nuclei(VulnCommand):
 	file_flag = '-l'
 	input_flag = '-u'
 	input_chunk_size = 3  # TODO: figure out which chunk size is appropriate
-	json_flag = '-json'
+	json_flag = '-jsonl'
 	opts = {
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'tags': {'type': str, 'help': 'Tags'},
