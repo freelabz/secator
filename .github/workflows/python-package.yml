@@ -78,6 +78,8 @@ jobs:
         python -m pip install .[test]
         ./scripts/install_go.sh
         ./scripts/install_commands.sh
+        echo "export PATH=$PATH:~/go/bin" >> ~/.bashrc
+        source ~/.bashrc
     - name: Run integration tests
       run: |
         secsy test integration
