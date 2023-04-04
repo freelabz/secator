@@ -1,0 +1,4 @@
+ftp/
+video/
+api-docs/
+.well-known/security.txt
