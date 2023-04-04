@@ -17,4 +17,4 @@ class gf(Command):
 	input_type = URL
 	install_cmd = 'go install -v github.com/tomnomnom/gf@latest'
 	output_types = [Tag]
-	item_loader = lambda self, line: {'match': line, 'extra_data': {'pattern': self.get_opt_value('pattern')}}  # noqa: E731
+	item_loader = lambda self, line: {'match': line, 'name': self.get_opt_value('pattern')}  # noqa: E731

@@ -124,6 +124,9 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
                 if DEBUG > 1:
                     console.log('\n', log_locals=True)
 
+                if DEBUG > 0:
+                    print(repr(item))
+
                 if expected_output_types:
                     self.assertIn(type(item), expected_output_types)
 
@@ -132,9 +135,9 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
                         set(item.keys()).difference(set(expected_output_keys)),
                         set())
 
-                if expected_results:
-                    for result in expected_results:
-                        self.assertIn(result, results)
+            if expected_results:
+                for result in expected_results:
+                    self.assertIn(result, results)
 
         except Exception:
             console.print('[bold red] failed[/]')

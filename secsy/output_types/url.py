@@ -14,7 +14,7 @@ class Url(OutputType):
 	tech: list = field(default_factory=list)
 	content_type: str = ''
 	content_length: int = 0
-	time: str = ''
+	time: str = field(default='', compare=False)
 	method: str = ''
 	words: int = 0
 	lines: int = 0
