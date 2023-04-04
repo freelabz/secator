@@ -4,9 +4,24 @@ description: Run vulnerability scan on select URLs
 tags: [url, vulnerability]
 tasks:
   _group:
-    gf:
-      description: Tag URLs
-      targets_: url.url
+    gf/xss:
+      description: Hunt XSS params
+      pattern: xss
+    gf/lfi:
+      description: Hunt LFI params
+      pattern: lfi
+    gf/rce:
+      description: Hunt RCE params
+      pattern: rce
+    gf/interestingparams:
+      description: Hunt interesting params
+      pattern: interestingparams
+    gf/idor:
+      description: Hunt Idor params
+      pattern: idor
+    gf/debug_logic:
+      description: Hunt debug params
+      pattern: debug_logic
     dalfox:
-      description: Test XSS from potential URLs containing XSS
+      description: Check URL vulnerabilities
       targets_: tag.match

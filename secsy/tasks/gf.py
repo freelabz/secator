@@ -9,7 +9,7 @@ class gf(Command):
 	file_flag = OPT_PIPE_INPUT
 	input_flag = OPT_PIPE_INPUT
 	opts = {
-		'pattern': {'type': str, 'required': True, 'help': 'Pattern names to match against (comma-delimited)'}
+		'pattern': {'type': str, 'help': 'Pattern names to match against (comma-delimited)'}
 	}
 	opt_key_map = {
 		'pattern': ''

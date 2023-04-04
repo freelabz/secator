@@ -2,6 +2,5 @@ name: aggressive
 options:
   rate_limit: 100000
   delay: 0
-  timeout: 5
   proxy: random
   user_agent: random

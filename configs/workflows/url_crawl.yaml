@@ -11,6 +11,7 @@ tasks:
     gospider:
     katana:
   httpx:
+    description: Running HTTP probes on crawled URLs
     targets_:
       type: url
       field: url

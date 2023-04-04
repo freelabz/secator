@@ -2,6 +2,5 @@ name: default
 options:
   rate_limit: 1000
   delay: 1
-  timeout: 5
   proxy: null
   user_agent: 'Mozilla ...'
