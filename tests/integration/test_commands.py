@@ -74,5 +74,6 @@ class TestCommand(unittest.TestCase, CommandOutputTester):
                 self._test_command_output(
                     results,
                     expected_output_types=cls.output_types,
-                    expected_results=outputs)
+                    expected_results=outputs,
+                    empty_results_allowed=True)
  

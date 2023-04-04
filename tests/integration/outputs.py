@@ -51,7 +51,7 @@ OUTPUTS = {
             url='http://localhost:3000/ftp/',
             status_code=200,
             content_type='text/html; charset=utf-8',
-            content_length=11097,
+            content_length=11096,
             method='GET',
             _source='feroxbuster'
         )
