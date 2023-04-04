@@ -9,6 +9,7 @@ from secsy.definitions import (CIDR_RANGE, DEBUG, DELAY, DEPTH,
                                FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
                                METHOD, PROXY, RATE_LIMIT, RETRIES,
                                THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
+from secsy.output_types import OutputType
 from secsy.rich import console
 from secsy.utils import discover_internal_tasks, load_fixture
 
@@ -121,10 +122,10 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 
             for item in results:
 
-                if DEBUG > 1:
+                if DEBUG > 2:
                     console.log('\n', log_locals=True)
 
-                if DEBUG > 0:
+                if DEBUG > 0 and isinstance(item, OutputType):
                     print(repr(item))
 
                 if expected_output_types:

@@ -11,7 +11,7 @@ class Subdomain(OutputType):
 	domain: str
 	sources: List[str] = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True)
-	_type: str = field(default='suybdomain', repr=True)
+	_type: str = field(default='subdomain', repr=True)
 	_uuid: str = field(default='', repr=True)
 
 	_table_fields = [

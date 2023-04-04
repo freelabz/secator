@@ -1,7 +1,7 @@
 {
     "info": {
-        "args": "/home/vagrant/.secsy/bin/dirsearch -q -o /home/vagrant/secsy-cli/tests//fixtures/dirsearch_output.json -u http://localhost:3000/ --format json --header User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1 --max-recursion-depth 2 --follow-redirects --include-status 200 --http-method GET --max-rate 10000 --threads 50 --timeout 1 --user-agent Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1",
-        "time": "Tue Apr  4 00:21:16 2023"
+        "args": "/home/vagrant/.secsy/bin/dirsearch -q -o /home/vagrant/secsy-cli/tests//fixtures/dirsearch_output.json -u http://localhost:3000/ --format json --header User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1 --max-recursion-depth 2 --follow-redirects --include-status 200 --http-method GET --max-rate 10000 --threads 50 --user-agent Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1",
+        "time": "Tue Apr  4 09:46:23 2023"
     },
     "results": [
         {
@@ -19,7 +19,7 @@
             "url": "http://localhost:3000/api-docs/"
         },
         {
-            "content-length": 11082,
+            "content-length": 11081,
             "content-type": "text/html",
             "redirect": "",
             "status": 200,
@@ -33,14 +33,14 @@
             "url": "http://localhost:3000/main.js"
         },
         {
-            "content-length": 23628,
+            "content-length": 23627,
             "content-type": "text/plain",
             "redirect": "",
             "status": 200,
             "url": "http://localhost:3000/metrics"
         },
         {
-            "content-length": 23559,
+            "content-length": 23570,
             "content-type": "text/plain",
             "redirect": "",
             "status": 200,

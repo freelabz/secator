@@ -437,8 +437,11 @@ class Command:
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
-					ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
-					line = re.sub(ansi_regex, '', line.strip())
+					# ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
+					# line = re.sub(ansi_regex, '', line.strip())
+					ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+					line = ansi_escape.sub('', line)
+					line = line.replace('\\x0d\\x0a', '\n')
 
 				# Run on_line hooks
 				line = self.run_hooks('on_line', line)
@@ -557,8 +560,11 @@ class Command:
 				self._print(results_str, color='bold green')
 
 		# Print table if in table mode
-		if self._table_output and self.results:
-			self._print(self.results, out=sys.stdout)
+		if self._table_output and self.results and len(self.results) > 0:
+			if isinstance(self.results[0], str):
+				self._print('\n'.join(self.results))
+			else:
+				self._print(self.results, out=sys.stdout)
 
 	def _process_item(self, item: dict):
 		# Run item validators

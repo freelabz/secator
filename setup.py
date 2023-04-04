@@ -47,7 +47,7 @@ setup(name=name,
       author='FLZ Security',
       author_email='olivier.cervello@gmail.com',
       license='MIT',
-      packages=find_packages(exclude=['contrib', 'docs', 'tests']),
+      packages=find_packages(exclude=['contrib', 'docs']),
       classifiers=[
           release_status,
           'Intended Audience :: Developers',
