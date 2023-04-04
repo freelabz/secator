@@ -26,7 +26,7 @@ class TestCommand(unittest.TestCase, CommandOutputTester):
             f'sh {INTEGRATION_DIR}/setup.sh',
             cwd=INTEGRATION_DIR
         )
-        sleep(10)
+        sleep(15)
 
     def tearDown(self):
         Command.run_command(
