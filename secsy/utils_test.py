@@ -112,13 +112,15 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
             results,
             expected_output_keys=[],
             expected_output_types=[],
-            expected_results=[]):
+            expected_results=[],
+            empty_results_allowed=False):
 
         if not isinstance(results, list):
             results = [results]
 
         try:
-            self.assertGreater(len(results), 0)
+            if not empty_results_allowed:
+                self.assertGreater(len(results), 0)
 
             for item in results:
 
