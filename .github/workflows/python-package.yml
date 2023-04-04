@@ -84,4 +84,4 @@ jobs:
       run: echo "${HOME}/go/bin" >> $GITHUB_PATH
     - name: Run integration tests
       run: |
-        secsy test integration
+        secsy test integration -d 2

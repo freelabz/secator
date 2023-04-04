@@ -27,11 +27,10 @@ class TestCommand(unittest.TestCase, CommandOutputTester):
         # sleep(10)
 
     def tearDown(self):
-        pass
-        # Command.run_command(
-        #     f'sh {INTEGRATION_DIR}/teardown.sh',
-        #     cwd=INTEGRATION_DIR
-        # )
+        Command.run_command(
+            f'sh {INTEGRATION_DIR}/teardown.sh',
+            cwd=INTEGRATION_DIR
+        )
 
     def test_all_commands(self):
         opts = META_OPTS.copy()
@@ -42,7 +41,7 @@ class TestCommand(unittest.TestCase, CommandOutputTester):
         opts['print_line'] = DEBUG > 1
         opts['table'] = DEBUG > 0
         opts['ffuf.fs'] = 1987
-        opts['wordlist'] = load_fixture('ffuf_wordlist', INTEGRATION_DIR, only_path=True)
+        opts['wordlist'] = load_fixture('wordlist', INTEGRATION_DIR, only_path=True)
         opts['match_codes'] = '200'
         opts['maigret.site'] = 'github'
         opts['nmap.ports'] = '3000,8080'
