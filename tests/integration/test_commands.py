@@ -191,6 +191,7 @@ class TestCommand(unittest.TestCase, CommandOutputTester):
         opts['ffuf.fs'] = 1987
         opts['match_codes'] = '200'
         opts['maigret.site'] = 'github'
+        opts['nmap.ports'] = '3000,8080'
         for cls, _ in FIXTURES.items():
             with self.subTest(name=cls.__name__):
                 console.print(f'Testing {cls.__name__} ...')
