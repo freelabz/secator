@@ -2,12 +2,14 @@ import logging
 import os
 import unittest
 import warnings
+from time import sleep
 
 from secsy.definitions import DEBUG
 from secsy.rich import console
 from secsy.runners import Command
 from secsy.utils import setup_logging
-from secsy.utils_test import FIXTURES, META_OPTS, CommandOutputTester, load_fixture
+from secsy.utils_test import (FIXTURES, META_OPTS, CommandOutputTester,
+                              load_fixture)
 from tests.integration.inputs import INPUTS
 from tests.integration.outputs import OUTPUTS
 
@@ -24,7 +26,7 @@ class TestCommand(unittest.TestCase, CommandOutputTester):
             f'sh {INTEGRATION_DIR}/setup.sh',
             cwd=INTEGRATION_DIR
         )
-        # sleep(10)
+        sleep(10)
 
     def tearDown(self):
         Command.run_command(
