@@ -35,7 +35,7 @@ class dalfox(VulnCommand):
 			VULN_NAME: 'XSS Injection',
 			VULN_PROVIDER: 'dalfox',
 			VULN_TAGS: lambda x: [x['cwe']],
-			VULN_CONFIDENCE: 'high',
+			VULN_CONFIDENCE: lambda x: 'high',
 			VULN_MATCHED_AT: lambda x: urlparse(x['data'])._replace(query='').geturl(),
 			VULN_EXTRACTED_RESULTS: lambda x: {
 				k: v for k, v in x.items()

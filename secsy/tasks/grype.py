@@ -1,7 +1,7 @@
 
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT)
+							   THREADS, TIMEOUT, USER_AGENT)
 from secsy.output_types import Vulnerability
 from secsy.tasks._categories import VulnCommand
 
@@ -56,7 +56,8 @@ class grype(VulnCommand):
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: OPT_NOT_SUPPORTED,
-		TIMEOUT: OPT_NOT_SUPPORTED
+		TIMEOUT: OPT_NOT_SUPPORTED,
+		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Vulnerability]
 	install_cmd = (

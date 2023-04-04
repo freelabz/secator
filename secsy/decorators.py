@@ -13,7 +13,7 @@ from secsy.utils import (expand_input, get_command_category,
 						 get_command_cls, import_dynamic)
 
 RUNNER_OPTS = {
-	'output': {'type': str, 'default': '', 'help': 'Output options', 'short': 'o'},
+	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
