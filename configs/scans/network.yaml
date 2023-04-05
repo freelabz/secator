@@ -5,4 +5,9 @@ workflows:
   cidr_recon:
   url_crawl:
     targets_:
+    - type: ip
+      field: ip
+      condition: item.alive
+  url_vuln:
+    targets_:
     - url.url

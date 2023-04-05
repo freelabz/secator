@@ -73,6 +73,8 @@ class Task(Runner):
 		Args:
 			name (str): Task name.
 		"""
+		if '/' in name:
+			name = name.split('/')[0]
 		tasks_classes = discover_tasks()
 		for task_cls in tasks_classes:
 			if task_cls.__name__ == name:
@@ -94,5 +96,7 @@ class Task(Runner):
 			elif name == '_chain':
 				tasks.extend(Task.get_tasks_from_conf(opts))
 			else:
+				if '/' in name:
+					name = name.split('/')[0]
 				tasks.append(name)
 		return tasks

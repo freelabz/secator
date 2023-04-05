@@ -19,10 +19,12 @@ class Workflow(Runner):
 		JsonExporter,
 		CsvExporter
 	]
+
 	DEFAULT_FORMAT_OPTIONS = {
 		'print_timestamp': True,
 		'print_cmd': True,
-		'print_line': True,
+		'print_line': False,
+		'print_item': False,
 		'print_item_count': True,
 		'raw_yield': False
 	}

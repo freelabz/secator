@@ -5,8 +5,11 @@ tags: [http]
 tasks:
   _group:
     dirsearch:
+      description: Fuzzing URLs
     feroxbuster:
+      description: Fuzzing URLs
     ffuf:
+      description: Fuzzing URLs
       targets_:
         - type: target
           field: '{name}/FUZZ'
