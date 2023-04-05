@@ -4,3 +4,4 @@ description: Find user accounts
 tags: [user_account]
 tasks:
   maigret:
+    description: Hunting user accounts
