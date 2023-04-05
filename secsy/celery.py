@@ -106,6 +106,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 def run_command(self, results, name, targets, opts={}):
 	chunk = opts.get('chunk')
 	chunk_count = opts.get('chunk_count')
+	description = opts.get('description')
 	sync = opts.get('sync', True)
 
 	# Update task state in backend
@@ -120,7 +121,8 @@ def run_command(self, results, name, targets, opts={}):
 			'results': [],
 			'chunk': chunk,
 			'chunk_count': chunk_count,
-			'count': count
+			'count': count,
+			'description': description
 		}
 	}
 	self.update_state(**state)

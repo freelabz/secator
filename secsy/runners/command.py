@@ -139,6 +139,7 @@ class Command:
 	def __init__(self, input=None, **cmd_opts):
 		self.cmd_opts = cmd_opts.copy()
 		self.results = []
+		self.sync = self.cmd_opts.pop('sync', True)
 
 		# Process input
 		self.input = input
@@ -388,7 +389,7 @@ class Command:
 
 		# Log cmd
 		if self._print_cmd:
-			if self.description:
+			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', ignore_log=True)
 			self._print(self.cmd, color='bold cyan', ignore_raw=True)
 
