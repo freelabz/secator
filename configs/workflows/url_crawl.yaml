@@ -8,8 +8,11 @@ tasks:
   _group:
     # cariddi:
     gau:
+      description: Searching for passive URLs
     gospider:
+      description: Crawling URLs
     katana:
+      description: Crawling URLs
   httpx:
     description: Running HTTP probes on crawled URLs
     targets_:
