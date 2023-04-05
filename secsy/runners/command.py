@@ -866,7 +866,7 @@ class Command:
 				data = f'{self.prefix} {data}' if self.prefix else data
 				try:
 					log(data)
-				except:
+				except:  # noqa: E722
 					print(data)
 
 	def _set_print_prefix(self):
