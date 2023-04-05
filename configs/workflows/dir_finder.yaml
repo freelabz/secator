@@ -4,12 +4,18 @@ description: Find HTTP directories
 tags: [http]
 tasks:
   ffuf:
-    wordlist: /usr/share/seclists/Discovery/Web-Content/combined_directories.txt
+    description: Searching for HTTP directories
+    wordlist: /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt
     targets_:
       - type: target
         field: '{name}/FUZZ'
-  katana:
+  cariddi:
+    description: Crawling HTTP directories for content
+    targets_:
+      - target.name
+      - url.url
   httpx:
+    description: Running HTTP probes on crawled URLs
     follow_redirects: True
     targets_:
       - type: url

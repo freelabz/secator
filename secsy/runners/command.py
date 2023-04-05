@@ -139,6 +139,7 @@ class Command:
 	def __init__(self, input=None, **cmd_opts):
 		self.cmd_opts = cmd_opts.copy()
 		self.results = []
+		self.sync = self.cmd_opts.pop('sync', True)
 
 		# Process input
 		self.input = input
@@ -182,6 +183,9 @@ class Command:
 
 		# No capturing of stdout / stderr. Effectively disables all post-processing (load_item etc...)
 		self._no_capture = self.cmd_opts.pop('no_capture', False)
+
+		# Description
+		self.description = self.cmd_opts.pop('description', None)
 
 		# Determine if JSON output or not
 		self._json_output = self.output_return_type == dict
@@ -385,6 +389,8 @@ class Command:
 
 		# Log cmd
 		if self._print_cmd:
+			if self.sync and self.description:
+				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', ignore_log=True)
 			self._print(self.cmd, color='bold cyan', ignore_raw=True)
 
 		# Prepare cmds
@@ -810,7 +816,7 @@ class Command:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False):
+	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
 		"""Print function.
 
 		Args:
@@ -818,6 +824,7 @@ class Command:
 			color (str, Optional): Termcolor color.
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
 			ignore_raw (bool, Optional): Ignore raw mode.
+			ignore_log (bool, Optional): Ignore log stamps.
 		"""
 		# Choose rich console
 		_console = console_stdout if out == sys.stdout else console
@@ -848,16 +855,19 @@ class Command:
 		else:
 			# If orig mode (--orig) ir raw mode (--raw), we might want to parse results with e.g pipe redirections, so
 			# we need a pure line with no logging info.
-			if not ignore_raw and (self._orig_output or self._raw_output):
+			if ignore_log or (not ignore_raw and (self._orig_output or self._raw_output)):
 				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
-				_console.print(data, highlight=False)
+				_console.print(data, highlight=False, style=color)
 			else:
 				# data = escape(data)
 				# data = Text.from_ansi(data)
 				if color:
 					data = f'[{color}]{data}[/]'
 				data = f'{self.prefix} {data}' if self.prefix else data
-				log(data)
+				try:
+					log(data)
+				except:  # noqa: E722
+					print(data)
 
 	def _set_print_prefix(self):
 		self.prefix = ''

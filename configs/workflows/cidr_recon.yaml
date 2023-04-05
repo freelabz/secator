@@ -4,17 +4,22 @@ description: Discover network IPs and HTTP servers
 tags: [cidr, network]
 tasks:
   mapcidr:
+    description: Finding CIDR range IPs
   fping:
+    description: Checking for alive IPs
     targets_: ip.ip
   naabu:
+    description: Scanning alive IPs' ports
     targets_:
     - type: ip
       field: ip
       condition: item.alive
   httpx:
+    description: Probing HTTP services on open ports
     targets_:
     - type: port
       field: '{ip}:{port}'
 results:
   - type: ip
     condition: item.alive
+  # - url.url

@@ -153,12 +153,13 @@ class Runner:
 	def process_live_tasks(self, result):
 		tasks_progress = Progress(
 			SpinnerColumn('dots'),
+			TextColumn('[bold cyan]{task.fields[descr]}[/]'),
 			TextColumn('[bold gold3]{task.fields[name]}[/]'),
 			TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
 			TextColumn('{task.fields[state]:<20}'),
 			TimeElapsedColumn(),
 			TextColumn('{task.fields[count]}'),
-			TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
+			# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
 			refresh_per_second=1
 		)
 		state_colors = {
