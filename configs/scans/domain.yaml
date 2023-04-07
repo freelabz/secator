@@ -1,5 +1,5 @@
 name: domain
-description: Default domain scan (subdomain_recon, host_recon, url_crawler)
+description: Default domain scan (subdomain_recon, host_recon, url_crawl)
 profile: default
 workflows:
   subdomain_recon:
@@ -8,5 +8,8 @@ workflows:
     - target.name
     - subdomain.host
   url_crawl:
+    targets_:
+    - url.url
+  url_tag:
     targets_:
     - url.url

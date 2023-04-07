@@ -1,0 +1,11 @@
+name: url
+description: Default URL scan (url_crawl, url_tag)
+profile: default
+workflows:
+  url_crawl:
+  url_tag:
+    targets_:
+    - url.url
+  url_vuln:
+    targets_:
+    - url.url

@@ -21,3 +21,8 @@ class gf(Command):
 	)
 	output_types = [Tag]
 	item_loader = lambda self, line: {'match': line, 'name': self.get_opt_value('pattern')}  # noqa: E731
+
+	@staticmethod
+	def on_item_converted(self, item):
+		item.extra_data = {'source': 'url'}
+		return item

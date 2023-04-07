@@ -25,10 +25,13 @@ tasks:
     targets_:
       - type: url
         field: url
-        condition: item.status_code is not None
+        condition: item.status_code != 0
 results:
   - type: port
     condition: item._source == 'nmap'
 
   - type: vulnerability
     condition: item.confidence == 'high'
+
+  - type: url
+    condition: item.status_code != 0

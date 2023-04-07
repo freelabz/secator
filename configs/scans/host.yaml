@@ -1,8 +1,8 @@
-name: network
-description: Internal network scan (cidr_recon, url_crawl)
+name: host
+description: Default host scan (host_recon, url_crawl, url_tag)
 profile: default
 workflows:
-  cidr_recon:
+  host_recon:
   url_crawl:
     targets_:
     - url.url
