@@ -1,27 +1,8 @@
 name: url_vuln
-alias: urlvuln
-description: Run vulnerability scan on select URLs
-tags: [url, vulnerability]
+alias: url_vuln
+description: Search URL vulnerabilities
+tags: [http, vulnerability]
 tasks:
-  _group:
-    gf/xss:
-      description: Hunt XSS params
-      pattern: xss
-    gf/lfi:
-      description: Hunt LFI params
-      pattern: lfi
-    gf/rce:
-      description: Hunt RCE params
-      pattern: rce
-    gf/interestingparams:
-      description: Hunt interesting params
-      pattern: interestingparams
-    gf/idor:
-      description: Hunt Idor params
-      pattern: idor
-    gf/debug_logic:
-      description: Hunt debug params
-      pattern: debug_logic
-    dalfox:
-      description: Check URL vulnerabilities
-      targets_: tag.match
+  nuclei:
+    description: Searching for vulnerabilities on alive HTTP services
+    exclude_tags: [network, ssl, file, dns, osint, token-spray]

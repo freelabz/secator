@@ -60,7 +60,10 @@ class Report:
 		for output_type in OUTPUT_TYPES:
 			output_name = output_type.get_name()
 			sort_by, _ = get_table_fields(output_type)
-			items = [item for item in self.runner.results if isinstance(item, OutputType) and item._type == output_name]
+			items = [
+				item for item in self.runner.results
+				if isinstance(item, OutputType) and item._type == output_name
+			]
 			if items:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))

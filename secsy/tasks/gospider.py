@@ -53,14 +53,4 @@ class gospider(HTTPCommand):
 				return False
 		except ValueError:  # gospider returns invalid URLs for output sometimes
 			return False
-
-		match_codess = self.cmd_opts.get(MATCH_CODES, '')
-		if match_codess:
-			http_statuses = match_codess.split(',')
-			if not str(item['status']) in http_statuses:
-				return False
-
-		if item['status'] == 0:
-			return False
-
 		return True

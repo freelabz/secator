@@ -12,7 +12,7 @@ class Tag(OutputType):
 	_type: str = field(default='tag', repr=True)
 	_uuid: str = field(default='', repr=True)
 
-	_table_fields = ['match', 'name']
+	_table_fields = ['match', 'name', 'extra_data']
 	_sort_by = ('match', 'name')
 
 	def __post_init__(self):

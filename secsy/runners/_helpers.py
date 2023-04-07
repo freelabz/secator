@@ -4,18 +4,18 @@ from rich.prompt import Confirm
 from secsy.utils import deduplicate
 
 
-def run_extractors(results, opts):
+def run_extractors(results, opts, targets=[]):
 	"""Run extractors and merge extracted values with option dict.
 
 	Args:
 		results (list): List of results.
 		opts (dict): Options.
+		targets (list): Original targets.
 
 	Returns:
 		tuple: targets, options.
 	"""
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
-	targets = None
 	for key, val in extractors.items():
 		key = key.rstrip('_')
 		values = extract_from_results(results, val)

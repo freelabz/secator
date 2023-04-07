@@ -1,7 +1,7 @@
 name: url_fuzz
 alias: urlfuzz
 description: Find URLs by fuzzing (slow)
-tags: [http]
+tags: [http, fuzz]
 tasks:
   _group:
     dirsearch:

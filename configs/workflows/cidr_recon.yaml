@@ -22,4 +22,4 @@ tasks:
 results:
   - type: ip
     condition: item.alive
-  # - url.url
+  - type: url
