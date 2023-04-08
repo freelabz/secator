@@ -10,9 +10,16 @@ from secsy.output_types import Vulnerability
 from secsy.tasks._categories import VulnCommand
 
 
+DALFOX_TYPE_MAP = {
+	'G': 'grep',
+	'R': 'reflected',
+	'V': 'verify'
+}
+
+
 class dalfox(VulnCommand):
 	"""Powerful open source XSS scanning tool."""
-	cmd = 'dalfox'
+	cmd = 'dalfox --silence'
 	input_type = URL
 	input_flag = 'url'
 	file_flag = 'file'
@@ -31,10 +38,10 @@ class dalfox(VulnCommand):
 	}
 	output_map = {
 		Vulnerability: {
-			VULN_ID: 'XSS Injection',
-			VULN_NAME: 'XSS Injection',
+			VULN_ID: lambda x: None,
+			VULN_NAME: lambda x: DALFOX_TYPE_MAP[x['type']],
 			VULN_PROVIDER: 'dalfox',
-			VULN_TAGS: lambda x: [x['cwe']],
+			VULN_TAGS: lambda x: [x['cwe']] if x['cwe'] else [],
 			VULN_CONFIDENCE: lambda x: 'high',
 			VULN_MATCHED_AT: lambda x: urlparse(x['data'])._replace(query='').geturl(),
 			VULN_EXTRACTED_RESULTS: lambda x: {
@@ -45,6 +52,7 @@ class dalfox(VulnCommand):
 		}
 	}
 	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
+	encoding = 'ansi'
 
 	@staticmethod
 	def on_line(self, line):

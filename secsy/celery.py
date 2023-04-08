@@ -134,9 +134,9 @@ def run_command(self, results, name, targets, opts={}):
 
 		# Get expanded targets
 		if not chunk:
-			_targets, opts = run_extractors(results, opts)
-			if _targets:
-				targets = _targets
+			targets, opts = run_extractors(results, opts, targets)
+			if not targets:
+				raise ValueError('No targets were specified as input.')
 
 		# Get task class
 		task_cls = Task.get_task_class(name)

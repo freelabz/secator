@@ -3,16 +3,17 @@ from time import sleep, time
 
 import humanize
 from celery.result import AsyncResult
+from rich.panel import Panel
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
 						   TimeElapsedColumn)
 
 from secsy.definitions import DEBUG
 from secsy.output_types import OUTPUT_TYPES
+from secsy.report import Report
 from secsy.rich import console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
 									process_extractor)
 from secsy.utils import merge_opts
-from secsy.report import Report
 
 
 class Runner:
@@ -52,26 +53,27 @@ class Runner:
 		"""Log runner start."""
 		remote_str = 'starting' if self.sync else 'sent to [bold gold3]Celery[/] worker'
 		runner_name = self.__class__.__name__
+		self.log_header()
 		console.print(
 			f':tada: [bold green]{runner_name}[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
-		self.log_header()
 
 	def log_header(self):
 		runner_name = self.__class__.__name__
 		opts = merge_opts(self.run_opts, self.config.options)
 		console.print()
-		console.print(f'[bold gold3]{runner_name}:[/]    {self.config.name}')
 
 		# Description
-		description = self.config.description
-		if description:
-			console.print(f'[bold gold3]Description:[/] {description}')
+		panel_str = f':scroll: [bold gold3]Description:[/] {self.config.description}'
+
+		# Workspace
+		if self.workspace_name:
+			panel_str += f'\n:construction_worker: [bold gold3]Workspace:[/] {self.workspace_name}'
 
 		# Targets
 		if self.targets:
-			console.print('Targets: ', style='bold gold3')
+			panel_str += '\n:pear: [bold gold3]Targets:[/]'
 			for target in self.targets:
-				console.print(f' • {target}')
+				panel_str += f'\n   • {target}'
 
 		# Options
 		from secsy.decorators import DEFAULT_CLI_OPTIONS
@@ -83,11 +85,24 @@ class Runner:
 			and v is not None
 		]
 		if items:
-			console.print('Options:', style='bold gold3')
+			panel_str += '\n:pushpin: [bold gold3]Options:[/]'
 			for item in items:
-				console.print(f' • {item}')
+				panel_str += f'\n   • {item}'
 
-		console.print()
+		if self.exporters:
+			panel_str += '\n:email:  [bold gold3]Exporters:[/]'
+			for exporter in self.exporters:
+				exporter_name = exporter.__name__.replace('Exporter', '').lower()
+				panel_str += f'\n   • {exporter_name}'
+
+		panel = Panel(
+			panel_str,
+			title=f'[bold gold3]{runner_name}[/] [bold magenta]{self.config.name}[/]',
+			border_style='bold gold3',
+			expand=False,
+			highlight=True
+		)
+		console.print(panel)
 
 	def log_results(self):
 		"""Log results.
@@ -152,9 +167,10 @@ class Runner:
 
 	def process_live_tasks(self, result):
 		tasks_progress = Progress(
+			TextColumn('  '),
 			SpinnerColumn('dots'),
-			TextColumn('[bold cyan]{task.fields[descr]}[/]'),
-			TextColumn('[bold gold3]{task.fields[name]}[/]'),
+			TextColumn('[bold gold3]{task.fields[descr]}[/]  '),
+			TextColumn('[bold cyan]{task.fields[name]}[/]'),
 			TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
 			TextColumn('{task.fields[state]:<20}'),
 			TimeElapsedColumn(),

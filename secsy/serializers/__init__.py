@@ -1,7 +1,7 @@
 __all__ = [
     'JSONSerializer',
     'RegexSerializer',
-    'DataclassEncoder'
+    'DataclassEncoder',
 ]
 from secsy.serializers.json import JSONSerializer
 from secsy.serializers.regex import RegexSerializer
