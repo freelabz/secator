@@ -16,6 +16,8 @@ dependencies = [
     'dotmap',
     'free-proxy',
     'furl',
+    'google-api-python-client',
+    'google-auth',
     'gspread',
     'jinja2',
     'humanize',

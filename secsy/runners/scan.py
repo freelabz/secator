@@ -6,6 +6,7 @@ from secsy.output_types import Target
 from secsy.runners._base import Runner
 from secsy.runners._helpers import run_extractors
 from secsy.runners.workflow import Workflow
+from secsy.rich import console
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +49,17 @@ class Scan(Runner):
 		for name, workflow_opts in self.config.workflows.items():
 
 			# Extract opts and and expand target from previous workflows results
-			targets, workflow_opts = run_extractors(self.results, workflow_opts or {})
+			targets, workflow_opts = run_extractors(self.results, workflow_opts or {}, self.targets)
 			if not targets:
-				targets = self.targets
+				console.log(f'No targets were specified for workflow {name}. Skipping.')
+				continue
 
 			# Run workflow
 			workflow = Workflow(
 				ConfigLoader(name=f'workflows/{name}'),
 				targets,
+				exporters=self.exporters,
+				workspace_name=self.workspace_name,
 				**self.run_opts
 			)
 			workflow_results = workflow.run(sync=sync)

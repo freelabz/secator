@@ -15,7 +15,7 @@ OUTPUTS = {
     'dalfox': [
         Vulnerability(
             matched_at='http://testphp.vulnweb.com/listproducts.php',
-            name=None,
+            name='verify',
             confidence='high',
             severity='high',
             cvss_score=0,
@@ -33,8 +33,25 @@ OUTPUTS = {
         ),
     ],
     'cariddi': [
-        Url(url='http://localhost:3000/robots.txt', status_code=0, _source='cariddi'),
-        Url(url='http://localhost:3000/main.js', status_code=0, _source='cariddi')
+        Url(
+            url='http://localhost:3000/robots.txt',
+            status_code=200,
+            content_length=28,
+            content_type='text/plain',
+            method='GET',
+            words=4,
+            lines=2,
+            _source='cariddi'
+        ),
+        Url(
+            url='http://localhost:3000/main.js',
+            status_code=200,
+            content_type='application/javascript',
+            method='GET',
+            words=6048,
+            lines=1,
+            _source='cariddi'
+        )
     ],
     'feroxbuster': [
         Url(
@@ -51,7 +68,7 @@ OUTPUTS = {
             url='http://localhost:3000/ftp/',
             status_code=200,
             content_type='text/html; charset=utf-8',
-            content_length=11096,
+            content_length=11097,
             method='GET',
             _source='feroxbuster'
         )
