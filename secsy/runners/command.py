@@ -12,7 +12,7 @@ from dotmap import DotMap
 from fp.fp import FreeProxy
 
 from secsy.definitions import (DEBUG, DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
-                               OPT_PIPE_INPUT, TEMP_FOLDER)
+							   OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.output_types import OutputType
 from secsy.rich import console, console_stdout
 from secsy.serializers import JSONSerializer
