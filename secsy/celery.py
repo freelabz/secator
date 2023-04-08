@@ -144,7 +144,7 @@ def run_command(self, results, name, targets, opts={}):
 		# If task doesn't support multiple targets, or if the number of targets is too big, split into multiple tasks
 		multiple_targets = isinstance(targets, list) and len(targets) > 1
 		single_target_only = multiple_targets and task_cls.file_flag is None
-		break_size_threshold = multiple_targets and len(targets) > task_cls.input_chunk_size
+		break_size_threshold = multiple_targets and task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
 
 		if single_target_only or (not sync and break_size_threshold):
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
