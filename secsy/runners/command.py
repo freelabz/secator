@@ -10,16 +10,17 @@ from time import sleep
 from celery.result import AsyncResult
 from dotmap import DotMap
 from fp.fp import FreeProxy
-# from rich.markup import escape
-# from rich.text import Text
 
-from secsy.definitions import (DEBUG, DEFAULT_CHUNK_SIZE,
-							   DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
+from secsy.definitions import (DEBUG, DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, TEMP_FOLDER)
+from secsy.output_types import OutputType
 from secsy.rich import console, console_stdout
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp, pluralize, print_results_table
-from secsy.output_types import OutputType
+
+# from rich.markup import escape
+# from rich.text import Text
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +93,8 @@ class Command:
 	# Input path (if a file is constructed)
 	input_path = None
 
-	# Input chunk size
-	input_chunk_size = DEFAULT_CHUNK_SIZE
+	# Input chunk size (default None)
+	input_chunk_size = None
 
 	# Flag to take a file as input
 	file_flag = None
