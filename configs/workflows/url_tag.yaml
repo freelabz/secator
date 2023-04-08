@@ -27,4 +27,4 @@ tasks:
     targets_:
       - type: tag
         field: match
-        condition: tag.name in ['xss', 'lfi']
+        condition: item.name in ['xss', 'lfi']
