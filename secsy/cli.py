@@ -347,6 +347,7 @@ def serve(directory, host, port, interface):
 	"""Serve payloads in HTTP server."""
 	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
 	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
+	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/master/SUDO_KILLERv2.4.2.sh'
 	PAYLOADS = [
 		{
 			'fname': 'lse.sh',
@@ -357,6 +358,11 @@ def serve(directory, host, port, interface):
 			'fname': 'linpeas.sh',
 			'description': 'Linux Privilege Escalation Awesome Script',
 			'command': f'wget {LINPEAS_URL} -O linpeas.sh && chmod 700 linpeas.sh'
+		},
+		{
+			'fname': 'sudo_killer.sh',
+			'description': 'SUDO_KILLER',
+			'command': f'wget {SUDOKILLER_URL} -O sudo_killer.sh && chmod 700 sudo_killer.sh'
 		}
 	]
 	for ix, payload in enumerate(PAYLOADS):
@@ -364,7 +370,7 @@ def serve(directory, host, port, interface):
 		fname = payload['fname']
 		if not os.path.exists(f'{directory}/{fname}'):
 			with console.status(f'[bold yellow][{ix}/{len(PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
-				cmd = payload['command'] + f' && chmod 799 {fname}'
+				cmd = payload['command']
 				console.print(f'[bold magenta]{fname} [dim]({descr})[/] ...[/]', )
 				opts = DEFAULT_CMD_OPTS.copy()
 				opts['no_capture'] = False
