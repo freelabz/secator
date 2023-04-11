@@ -21,7 +21,7 @@ tasks:
         condition: item._source == 'nmap'
   nuclei:
     description: Searching for vulnerabilities on alive HTTP services
-    exclude_tags: [network, ssl, file, dns, osint, token-spray]
+    exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
     targets_:
       - type: url
         field: url
