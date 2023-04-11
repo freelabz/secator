@@ -13,7 +13,7 @@ class Url(OutputType):
 	webserver: str = ''
 	tech: list = field(default_factory=list)
 	content_type: str = ''
-	content_length: int = 0
+	content_length: int = field(default=0, repr=True, compare=False)
 	time: str = field(default='', compare=False)
 	method: str = ''
 	words: int = 0
