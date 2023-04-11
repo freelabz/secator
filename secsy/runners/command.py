@@ -125,6 +125,7 @@ class Command:
 	_table_output = False
 	_json_output = False
 	_print_item = True
+	_print_progress = True
 	_print_item_count = True
 	_stop_on_first_match = False
 	_no_capture = False
@@ -178,6 +179,9 @@ class Command:
 
 		# Print cmd name
 		self._print_cmd = self.cmd_opts.pop('print_cmd', False)
+
+		# Print progress
+		self._print_progress = self.cmd_opts.pop('print_progress', True)
 
 		# Print task name before line output (useful for multiprocessed envs)
 		self._print_cmd_prefix = self.cmd_opts.pop('print_cmd_prefix', False)
@@ -544,6 +548,8 @@ class Command:
 	def _get_results_count(self):
 		count_map = {}
 		for output_type in self.output_types:
+			if output_type.__name__ == 'Progress':
+				continue
 			name = output_type.get_name()
 			count = len([r for r in self.results if r._type == name])
 			count_map[name] = count
@@ -592,8 +598,12 @@ class Command:
 		else:
 			item = DotMap(item)
 
+		# Get item klass
+		item_klass = item.__class__.__name__
+
 		# Add item to result
-		self.results.append(item)
+		if not item_klass == 'Progress':
+			self.results.append(item)
 
 		# Item to print
 		item_str = item
@@ -608,7 +618,11 @@ class Command:
 			item_str = item
 
 		# Print item to console or log
-		if self._print_item and self._json_output and not self._table_output:
+		if item_klass == 'Progress' and self._print_progress:
+			self._print(str(item_str), out=sys.stderr, ignore_log=True, color='dim cyan')
+			item = None
+
+		elif self._print_item and self._json_output and not self._table_output:
 			self._print(item_str, out=sys.stdout)
 
 		# Return item
@@ -803,8 +817,8 @@ class Command:
 			try:
 				new_item = klass.load(item, output_map)
 				break  # found an item that fits
-			except TypeError as e:  # can't load using class
-				logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
+			except (TypeError, KeyError):  # can't load using class
+				# logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
 				continue
 
 		# No output type was found, so make no conversion

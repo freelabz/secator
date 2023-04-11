@@ -25,6 +25,7 @@ class Workflow(Runner):
 		'print_cmd': True,
 		'print_line': False,
 		'print_item': False,
+		'print_metric': True,
 		'print_item_count': True,
 		'raw_yield': False
 	}
@@ -47,7 +48,8 @@ class Workflow(Runner):
 		# Check if we can add a console status
 		print_line = self.run_opts.get('print_line', False)
 		print_item = self.run_opts.get('print_item', False)
-		print_status = sync and not (print_line or print_item)
+		print_metric = self.run_opts.get('print_metric', True)
+		live_status = sync and not (print_line or print_item or print_metric)
 
 		# In async mode, display results back in client-side
 		if not sync:
@@ -73,7 +75,7 @@ class Workflow(Runner):
 
 		# Run Celery workflow and get results
 		status = f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'
-		with console.status(status) if not RECORD and print_status else nullcontext():
+		with console.status(status) if not RECORD and live_status else nullcontext():
 			if sync:
 				result = workflow.apply()
 			else:
