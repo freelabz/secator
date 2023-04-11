@@ -3,9 +3,12 @@ description: Internal network scan (cidr_recon, url_crawl)
 profile: default
 workflows:
   cidr_recon:
+  url_nuclei:
+    targets_:
+    - url.url
   url_crawl:
     targets_:
     - url.url
-  url_tag:
+  url_vuln:
     targets_:
     - url.url
