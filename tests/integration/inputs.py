@@ -15,3 +15,16 @@ INPUTS = {
     'nuclei': 'http://localhost:3000/',
     'subfinder': 'api.github.com'
 }
+
+INPUTS_WORKFLOWS = {
+	# 'cidr_recon': '127.0.0.1/24',
+    # 'code_scan': ROOT_FOLDER,
+    # 'dir_finder': 'localhost:3000',  # TODO: add fixture with directories
+    # 'host_recon': 'localhost',
+	# 'subdomain_recon': 'api.github.com',
+    # 'url_crawl': 'localhost:3000',
+    'url_fuzz': 'localhost:3000',
+    'url_nuclei': ['http://localhost:3000', 'http://localhost:8080'],
+    'url_vuln': 'localhost:3000',
+    # 'user_hunt': 'ocervell'
+}

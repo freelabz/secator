@@ -1,20 +1,20 @@
-from celery import chain, chord
+from celery import chain
 from secsy.celery import app
 from secsy.tasks import httpx
 import unittest
 import json
 from secsy.definitions import DEBUG
-from secsy.utils_test import mock_command, FIXTURES, TEST_COMMANDS
+from secsy.utils_test import mock_command, FIXTURES, TEST_TASKS
 from secsy.celery import forward_results
 from secsy.rich import console
 
 TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
 
 
-class TestCommandWorkflow(unittest.TestCase):
+class TestAdHocWorkflow(unittest.TestCase):
 
 	def test_chain(self):
-		if not 'httpx' in TEST_COMMANDS:
+		if not 'httpx' in TEST_TASKS:
 			return
 
 		with mock_command(httpx, fixture=[FIXTURES[httpx]] * len(TARGETS)):
