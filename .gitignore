@@ -5,6 +5,11 @@ __pycache__/
 *.txt
 *.sh
 
+# Others
+*.json
+*.yml
+resume.cfg
+
 # C extensions
 *.so
 
