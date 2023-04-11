@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from secsy.definitions import URL, STATUS_CODE, TITLE, WEBSERVER, TECH, CONTENT_TYPE, TIME
+from secsy.definitions import URL, STATUS_CODE, TITLE, WEBSERVER, TECH, CONTENT_TYPE, CONTENT_LENGTH, TIME
 from secsy.output_types import OutputType
 
 
@@ -20,7 +20,7 @@ class Url(OutputType):
 	lines: int = 0
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='url', repr=True)
-	_uuid: str = field(default='', repr=True)
+	_uuid: str = field(default='', repr=True, compare=False)
 
 	_table_fields = [
 		URL,
@@ -29,6 +29,7 @@ class Url(OutputType):
 		WEBSERVER,
 		TECH,
 		CONTENT_TYPE,
+		CONTENT_LENGTH,
 		TIME
 	]
 	_sort_by = (URL,)

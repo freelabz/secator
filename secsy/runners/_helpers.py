@@ -66,9 +66,8 @@ def process_extractor(results, extractor, ctx={}):
 	]
 	if _field:
 		_field = '{' + _field + '}' if not _field.startswith('{') else _field
-		return [_field.format(**item.toDict()) for item in items]
-	else:
-		return items
+		items = [_field.format(**item.toDict()) for item in items]
+	return items
 
 
 def get_task_ids(result, ids=[]):

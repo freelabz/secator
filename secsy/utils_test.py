@@ -21,11 +21,11 @@ TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/tests
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 ALL_CMDS = discover_internal_tasks()
-TEST_COMMANDS = os.environ.get('TEST_COMMANDS', '')
-if TEST_COMMANDS:
-    TEST_COMMANDS = TEST_COMMANDS.split(',')
+TEST_TASKS = os.environ.get('TEST_TASKS', '')
+if TEST_TASKS:
+    TEST_TASKS = TEST_TASKS.split(',')
 else:
-    TEST_COMMANDS = [cls.__name__ for cls in ALL_CMDS]
+    TEST_TASKS = [cls.__name__ for cls in ALL_CMDS]
 
 
 INPUTS = {
@@ -39,7 +39,7 @@ INPUTS = {
 FIXTURES = {
     tool_cls: load_fixture(f'{tool_cls.__name__}_output', FIXTURES_DIR)
     for tool_cls in ALL_CMDS
-    if tool_cls.__name__ in TEST_COMMANDS
+    if tool_cls.__name__ in TEST_TASKS
 }
 
 META_OPTS = {
