@@ -26,12 +26,12 @@ tasks:
       description: Hunting debug params
       pattern: debug_logic
 
-  # dalfox:
-  #   description: Attack XSS vulnerabilities
-  #   targets_:
-  #     - type: tag
-  #       field: match
-  #       condition: item.name in ['xss']
+  dalfox:
+    description: Attack XSS vulnerabilities
+    targets_:
+      - type: tag
+        field: match
+        condition: item.name in ['xss', 'lfi']
 
   # TODO: Add support for SQLMap
   # sqlmap:

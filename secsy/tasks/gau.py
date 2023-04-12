@@ -1,14 +1,14 @@
-from secsy.definitions import (DELAY, DEPTH, FOLLOW_REDIRECT, HEADER,
-							   MATCH_CODES, METHOD, OPT_NOT_SUPPORTED,
+from secsy.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
+							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
+							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, USER_AGENT)
-from secsy.tasks._categories import HTTPCommand
+from secsy.tasks._categories import HttpCrawler
 
 
-class gau(HTTPCommand):
-	"""Fetches known URLs from AlienVault's Open Threat Exchange, the Wayback
-	Machine, Common Crawl, and URLScan.
-	"""
+class gau(HttpCrawler):
+	"""Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan."""
 	cmd = 'gau'
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
@@ -17,8 +17,15 @@ class gau(HTTPCommand):
 		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: OPT_NOT_SUPPORTED,
 		DEPTH: OPT_NOT_SUPPORTED,
-		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		FILTER_CODES: 'fc',
+		FILTER_REGEX: OPT_NOT_SUPPORTED,
+		FILTER_SIZE: OPT_NOT_SUPPORTED,
+		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		MATCH_CODES: 'mc',
+		MATCH_REGEX: OPT_NOT_SUPPORTED,
+		MATCH_SIZE: OPT_NOT_SUPPORTED,
+		MATCH_WORDS: OPT_NOT_SUPPORTED,
+		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
 		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,

@@ -1,10 +1,10 @@
 from secsy.definitions import (DELAY, DOMAIN, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secsy.output_types import Subdomain
-from secsy.tasks._categories import ReconCommand
+from secsy.tasks._categories import ReconDns
 
 
-class subfinder(ReconCommand):
+class subfinder(ReconDns):
 	"""Fast passive subdomain enumeration tool."""
 	cmd = 'subfinder -silent -cs'
 	file_flag = '-dL'

@@ -13,13 +13,13 @@ from secsy.definitions import (DELAY, EXTRA_DATA, FOLLOW_REDIRECT, HEADER,
 							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
 							   VULN_REFERENCES, VULN_TAGS)
 from secsy.output_types import Port, Vulnerability
-from secsy.tasks._categories import VulnCommand
+from secsy.tasks._categories import VulnMulti
 from secsy.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
 
-class nmap(VulnCommand):
+class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery
 	and security auditing."""
 	cmd = 'nmap -sT -sV -Pn'
@@ -261,7 +261,7 @@ class nmapData(dict):
 				VULN_TAGS: [vuln_id, provider_name]
 			}
 			if provider_name == 'MITRE CVE':
-				vuln_data = VulnCommand.lookup_cve(vuln['id'], cpes=cpes)
+				vuln_data = VulnMulti.lookup_cve(vuln['id'], cpes=cpes)
 				if vuln_data:
 					vuln.update(vuln_data)
 				yield vuln
@@ -304,7 +304,7 @@ class nmapData(dict):
 				}
 				if vuln_type == 'CVE':
 					vuln[VULN_TAGS].append('cve')
-					vuln_data = VulnCommand.lookup_cve(vuln_id, cpes=[cpe])
+					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=[cpe])
 					if vuln_data:
 						vuln.update(vuln_data)
 					yield vuln

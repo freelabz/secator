@@ -104,6 +104,9 @@ def get_command_options(*tasks):
 			if opt in cls.opts:
 				prefix = cls.__name__
 			elif opt in cls.meta_opts:
+				# TODO: Add options categories
+				# category = get_command_category(cls)
+				# prefix = category
 				prefix = 'Meta'
 			elif opt in RUNNER_OPTS:
 				prefix = 'Output'
@@ -198,7 +201,7 @@ def register_runner(cli_endpoint, config):
 		task_category = get_command_category(task_cls)
 		input_type = task_cls.input_type or 'targets'
 		name = config.name
-		short_help = f'[dim italic magenta]{task_category:<10}[/]{task_cls.__doc__}'
+		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
 		fmt_opts['print_item'] = True
 		fmt_opts['print_line'] = True
 		runner_cls = Task

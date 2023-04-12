@@ -107,7 +107,7 @@ def mock_command(cls, targets=[], opts={}, fixture=None, method=''):
 
 class CommandOutputTester:  # Mixin for unittest.TestCase
 
-    def _test_command_output(
+    def _test_task_output(
             self,
             results,
             expected_output_keys=[],

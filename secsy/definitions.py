@@ -43,6 +43,7 @@ GOOGLE_DRIVE_PARENT_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_PARENT_FOLDER_ID')
 GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
 
 # Defaults
+DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-silent -td -asn -cdn')
 DEFAULT_STDIN_TIMEOUT = 1000  # seconds
 DEFAULT_PROXY_TIMEOUT = 1  # seconds
 
@@ -63,7 +64,12 @@ DOMAIN = 'domain'
 DEPTH = 'depth'
 EXTRA_DATA = 'extra_data'
 FAILED_HTTP_STATUS = -1
+FILTER_CODES = 'filter_codes'
+FILTER_WORDS = 'filter_words'
 FOLLOW_REDIRECT = 'follow_redirect'
+PATH = 'path'
+FILTER_REGEX = 'filter_regex'
+FILTER_SIZE = 'filter_size'
 HEADER = 'header'
 HOST = 'host'
 INPUT = 'input'
@@ -72,11 +78,9 @@ JSON = 'json'
 LINES = 'lines'
 METHOD = 'method'
 MATCH_CODES = 'match_codes'
-MATCH_CONTENT_LENGTH = 'match_content_length'
 MATCH_REGEX = 'match_regex'
-FILTER_CODES = 'filter_codes'
-FILTER_CONTENT_LENGTH = 'filter_content_length'
-FILTER_REGEX = 'filter_regex'
+MATCH_SIZE = 'match_size'
+MATCH_WORDS = 'match_words'
 OUTPUT_PATH = 'output_path'
 PROBE = 'probe'
 PORTS = 'ports'

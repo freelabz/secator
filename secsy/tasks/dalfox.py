@@ -7,7 +7,7 @@ from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, METHOD,
 							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
 							   VULN_SEVERITY, VULN_TAGS)
 from secsy.output_types import Vulnerability
-from secsy.tasks._categories import VulnCommand
+from secsy.tasks._categories import VulnHttp
 
 
 DALFOX_TYPE_MAP = {
@@ -17,7 +17,7 @@ DALFOX_TYPE_MAP = {
 }
 
 
-class dalfox(VulnCommand):
+class dalfox(VulnHttp):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox --silence'
 	input_type = URL

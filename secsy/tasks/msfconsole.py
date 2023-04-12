@@ -3,13 +3,13 @@
 import logging
 
 from secsy.definitions import HOST, TEMP_FOLDER
-from secsy.runners import Command
+from secsy.tasks._categories import VulnMulti
 from secsy.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
 
-class msfconsole(Command):
+class msfconsole(VulnMulti):
 	"""CLI to access and work with the Metasploit Framework."""
 	cmd = 'msfconsole --quiet'
 	input_type = HOST
