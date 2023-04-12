@@ -7,20 +7,19 @@ from time import sleep
 from secsy.definitions import DEBUG
 from secsy.utils import setup_logging
 from secsy.utils_test import CommandOutputTester
-from tests.integration.inputs import INPUTS_WORKFLOWS
-from tests.integration.outputs import OUTPUTS_WORKFLOWS
+from tests.integration.inputs import INPUTS_SCANS
+from tests.integration.outputs import OUTPUTS_SCANS
 
-from secsy.cli import ALL_WORKFLOWS
-from secsy.config import ConfigLoader
+from secsy.cli import ALL_SCANS
 from secsy.rich import console
-from secsy.runners import Workflow, Command
+from secsy.runners import Scan, Command
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
 level = logging.DEBUG if DEBUG > 0 else logging.INFO
 setup_logging(level)
 
 
-class TestWorkflows(unittest.TestCase, CommandOutputTester):
+class TestScans(unittest.TestCase, CommandOutputTester):
 
 	def setUp(self):
 		warnings.simplefilter('ignore', category=ResourceWarning)
@@ -37,31 +36,30 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			cwd=INTEGRATION_DIR
 		)
 
-	def test_all_workflows(self):
+	def test_all_scans(self):
 		opts = {
-			'filter_size': 1987,
-			# 'fr': 'Unexpected path',
+			'fs': 1987,
 			'follow_redirect': True,
 			'rate_limit': 1000
 		}
-		for conf in ALL_WORKFLOWS:
+		for conf in ALL_SCANS:
 			with self.subTest(name=conf.name):
 				console.print(f'Testing workflow {conf.name} ...')
-				inputs = INPUTS_WORKFLOWS.get(conf.name, [])
-				outputs = OUTPUTS_WORKFLOWS.get(conf.name, [])
+				inputs = INPUTS_SCANS.get(conf.name, [])
+				outputs = OUTPUTS_SCANS.get(conf.name, [])
 				if not inputs:
 					console.print(
-						f'No inputs for workflow {conf.name} ! Skipping.', style='dim red'
+						f'No inputs for scan {conf.name} ! Skipping.', style='dim red'
 					)
 					continue
-				workflow = Workflow(conf, targets=inputs, **opts)
+				workflow = Scan(conf, targets=inputs, **opts)
 				results = workflow.run()
 				if DEBUG > 0:
 					for result in results:
 						print(repr(result))
 				if not outputs:
 					console.print(
-						f'No outputs for workflow {conf.name} ! Skipping.', style='dim red'
+						f'No outputs for scan {conf.name} ! Skipping.', style='dim red'
 					)
 					continue
 				self._test_task_output(

@@ -1,14 +1,16 @@
 from secsy.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH, CONTENT_TYPE,
 							   DEFAULT_FFUF_WORDLIST, DELAY, DEPTH,
-							   FOLLOW_REDIRECT, HEADER, MATCH_CODES, METHOD,
-							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   STATUS_CODE, THREADS, TIME, TIMEOUT, USER_AGENT,
-							   WORDLIST)
+							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
+							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
+							   RATE_LIMIT, RETRIES, STATUS_CODE, THREADS, TIME,
+							   TIMEOUT, USER_AGENT, WORDLIST)
 from secsy.output_types import Url
-from secsy.tasks._categories import HTTPCommand
+from secsy.tasks._categories import HttpCrawler
 
 
-class ffuf(HTTPCommand):
+class ffuf(HttpCrawler):
 	"""Fast web fuzzer written in Go."""
 	cmd = 'ffuf -noninteractive -recursion'
 	input_flag = '-u'
@@ -30,8 +32,15 @@ class ffuf(HTTPCommand):
 		HEADER: 'H',
 		DELAY: 'p',
 		DEPTH: 'recursion-depth',
+		FILTER_CODES: 'fc',
+		FILTER_REGEX: 'fr',
+		FILTER_SIZE: 'fs',
+		FILTER_WORDS: 'fw',
 		FOLLOW_REDIRECT: 'r',
 		MATCH_CODES: 'mc',
+		MATCH_REGEX: 'mr',
+		MATCH_SIZE: 'ms',
+		MATCH_WORDS: 'mw',
 		METHOD: 'X',
 		PROXY: 'x',
 		RATE_LIMIT: 'rate',

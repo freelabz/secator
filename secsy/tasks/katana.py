@@ -1,15 +1,17 @@
 from urllib.parse import urlparse
 
-from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FOLLOW_REDIRECT,
-							   HEADER, HOST, MATCH_CODES, METHOD,
+from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
+							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+							   FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES,
+							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   STATUS_CODE, TECH, THREADS, TIME, TIMEOUT, URL,
 							   USER_AGENT)
 from secsy.output_types import Url
-from secsy.tasks._categories import HTTPCommand
+from secsy.tasks._categories import HttpCrawler
 
 
-class katana(HTTPCommand):
+class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana -silent -jc -js-crawl -known-files all'
 	file_flag = '-list'
@@ -19,8 +21,15 @@ class katana(HTTPCommand):
 		HEADER: 'headers',
 		DELAY: 'delay',
 		DEPTH: 'depth',
+		FILTER_CODES: OPT_NOT_SUPPORTED,
+		FILTER_REGEX: OPT_NOT_SUPPORTED,
+		FILTER_SIZE: OPT_NOT_SUPPORTED,
+		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
 		MATCH_CODES: OPT_NOT_SUPPORTED,
+		MATCH_REGEX: OPT_NOT_SUPPORTED,
+		MATCH_SIZE: OPT_NOT_SUPPORTED,
+		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: 'rate-limit',

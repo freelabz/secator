@@ -3,10 +3,10 @@ import validators
 from secsy.definitions import (CIDR_RANGE, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secsy.output_types import Ip
-from secsy.tasks._categories import ReconCommand
+from secsy.tasks._categories import ReconIp
 
 
-class mapcidr(ReconCommand):
+class mapcidr(ReconIp):
 	"""Utility program to perform multiple operations for a given subnet/cidr ranges."""
 	cmd = 'mapcidr -silent'
 	input_flag = '-cidr'

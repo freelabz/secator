@@ -1,9 +1,9 @@
 from secsy.definitions import OPT_PIPE_INPUT, URL
 from secsy.output_types import Tag
-from secsy.runners import Command
+from secsy.tasks._categories import Tagger
 
 
-class gf(Command):
+class gf(Tagger):
 	"""Wrapper around grep, to help you grep for things."""
 	cmd = 'gf'
 	file_flag = OPT_PIPE_INPUT

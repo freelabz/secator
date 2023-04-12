@@ -1,14 +1,16 @@
 from furl import furl
 
-from secsy.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FOLLOW_REDIRECT,
-							   HEADER, MATCH_CODES, METHOD, OPT_NOT_SUPPORTED,
-							   PROXY, RATE_LIMIT, RETRIES, STATUS_CODE,
-							   THREADS, TIMEOUT, URL, USER_AGENT)
+from secsy.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FILTER_CODES,
+							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
+							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
+							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+							   STATUS_CODE, THREADS, TIMEOUT, URL, USER_AGENT)
 from secsy.output_types import Url
-from secsy.tasks._categories import HTTPCommand
+from secsy.tasks._categories import HttpCrawler
 
 
-class gospider(HTTPCommand):
+class gospider(HttpCrawler):
 	"""Fast web spider written in Go."""
 	cmd = 'gospider --js'
 	file_flag = '-S'
@@ -19,8 +21,15 @@ class gospider(HTTPCommand):
 		HEADER: 'header',
 		DELAY: 'delay',
 		DEPTH: 'depth',
+		FILTER_CODES: OPT_NOT_SUPPORTED,
+		FILTER_REGEX: OPT_NOT_SUPPORTED,
+		FILTER_SIZE: OPT_NOT_SUPPORTED,
+		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: 'no-redirect',
 		MATCH_CODES: OPT_NOT_SUPPORTED,
+		MATCH_REGEX: OPT_NOT_SUPPORTED,
+		MATCH_SIZE: OPT_NOT_SUPPORTED,
+		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,

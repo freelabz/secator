@@ -5,6 +5,7 @@ import logging
 import mimetypes
 import operator
 import os
+import re
 import select
 import sys
 import warnings
@@ -307,7 +308,9 @@ def get_command_category(command):
 	Returns:
 		str: Command category.
 	"""
-	return command.__bases__[0].__name__.replace('Command', '').replace('Runner', 'misc').lower()
+	base_cls = command.__bases__[0].__name__.replace('Command', '').replace('Runner', 'misc')
+	category = re.sub(r'(?<!^)(?=[A-Z])', '/', base_cls).lower()
+	return category
 
 
 def merge_opts(*options):

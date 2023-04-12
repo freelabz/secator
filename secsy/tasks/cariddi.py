@@ -1,14 +1,16 @@
-from secsy.definitions import (DELAY, DEPTH, FOLLOW_REDIRECT, HEADER,
-							   MATCH_CODES, METHOD, OPT_NOT_SUPPORTED,
+import json
+
+from secsy.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
+							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
+							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, URL, USER_AGENT)
 from secsy.output_types import Tag, Url
-from secsy.tasks._categories import HTTPCommand
-
-import json
+from secsy.tasks._categories import HttpCrawler
 
 
-class cariddi(HTTPCommand):
+class cariddi(HttpCrawler):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
 	cmd = 'cariddi -info -s -err -e -ext 1'
 	input_type = URL
@@ -20,8 +22,15 @@ class cariddi(HTTPCommand):
 		HEADER: 'headers',
 		DELAY: 'd',
 		DEPTH: OPT_NOT_SUPPORTED,
+		FILTER_CODES: OPT_NOT_SUPPORTED,
+		FILTER_REGEX: OPT_NOT_SUPPORTED,
+		FILTER_SIZE: OPT_NOT_SUPPORTED,
+		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
 		MATCH_CODES: OPT_NOT_SUPPORTED,
+		MATCH_REGEX: OPT_NOT_SUPPORTED,
+		MATCH_SIZE: OPT_NOT_SUPPORTED,
+		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,

@@ -3,7 +3,7 @@ from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, USER_AGENT)
 from secsy.output_types import Vulnerability
-from secsy.tasks._categories import VulnCommand
+from secsy.tasks._categories import VulnCode
 
 
 def grype_item_loader(self, line):
@@ -30,18 +30,18 @@ def grype_item_loader(self, line):
 		data['provider'] = 'github.com'
 		data['references'] = [f'https://github.com/advisories/{vuln_id}']
 		data['tags'].extend(['cve', 'ghsa'])
-		vuln = VulnCommand.lookup_ghsa(vuln_id)
+		vuln = VulnCode.lookup_ghsa(vuln_id)
 		data.update(vuln)
 		extracted_results['ghsa_id'] = vuln_id
 	elif vuln_id.startswith('CVE'):
-		vuln = VulnCommand.lookup_cve(vuln_id)
+		vuln = VulnCode.lookup_cve(vuln_id)
 		vuln['tags'].append('cve')
 		data.update(vuln)
 	data['extracted_results'] = extracted_results
 	return data
 
 
-class grype(VulnCommand):
+class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
 	cmd = 'grype --quiet'
 	input_flag = ''

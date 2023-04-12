@@ -7,13 +7,13 @@ from secsy.definitions import (DELAY, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
 							   RETRIES, SITE_NAME, THREADS, TIMEOUT, URL,
 							   USERNAME)
 from secsy.output_types import UserAccount
-from secsy.tasks._categories import ReconCommand
+from secsy.tasks._categories import ReconUser
 
 
 logger = logging.getLogger(__name__)
 
 
-class maigret(ReconCommand):
+class maigret(ReconUser):
 	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
 	file_flag = None

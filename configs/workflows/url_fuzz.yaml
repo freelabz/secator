@@ -15,3 +15,12 @@ tasks:
       targets_:
         - type: target
           field: '{name}/FUZZ'
+  httpx:
+    description: Running HTTP probes on crawled URLs
+    targets_:
+      type: url
+      field: url
+results:
+  - type: url
+    condition: item._source == 'httpx'
+    # TODO: add deduplication based on the 'url' field

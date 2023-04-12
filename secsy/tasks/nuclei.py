@@ -6,10 +6,10 @@ from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
 							   VULN_REFERENCES, VULN_SEVERITY, VULN_TAGS, USER_AGENT)
 from secsy.output_types import Vulnerability, Progress
-from secsy.tasks._categories import VulnCommand
+from secsy.tasks._categories import VulnMulti
 
 
-class nuclei(VulnCommand):
+class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based
 	DSL.
 	"""
