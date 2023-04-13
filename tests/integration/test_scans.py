@@ -38,7 +38,7 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 
 	def test_all_scans(self):
 		opts = {
-			'fs': 1987,
+			'filter_size': 1987,
 			'follow_redirect': True,
 			'rate_limit': 1000
 		}
