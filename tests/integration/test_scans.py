@@ -44,7 +44,7 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 			'httpx.match_codes': False,
 			'httpx.filter_size': False,
 			'rate_limit': 1000,
-			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
+			# 'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 			'timeout': 7,
 			'depth': 2
 		}
