@@ -1,7 +1,6 @@
 from secsy.definitions import ROOT_FOLDER
-from secsy.output_types import (Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability, Ip)
-
+from secsy.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
+                                Vulnerability)
 
 OUTPUTS_TASKS = {
     'dirsearch': [

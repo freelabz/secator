@@ -20,19 +20,17 @@ class myfuzzer(HttpFuzzer):
 
 class feroxbuster(HttpFuzzer):
 	"""Simple, fast, recursive content discovery tool written in Rust"""
-	cmd = 'feroxbuster --collect-extensions --collect-backups --collect-words --extract-links'
+	cmd = 'feroxbuster'
 	input_flag = '--url'
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
 	opts = {
-		# 'auto_tune': {'is_flag': True, 'short': 'at', 'help': 'Automatically lower scan rate when too many errors
-		# are encountered'},
-		# 'extract_links': {'is_flag': True, 'short': 'el', 'default': True, 'help': 'Extract links from response
-		# body'},
-		# 'collect_backups': {'is_flag': True, 'help': 'Request likely backup extensions for found urls'},
-		# 'collect_extensions': {'is_flag': True, 'help': 'Discover extensions and add them to --extensions'},
-		# 'collect_words': {'is_flag': True, 'help': 'Discover important words and add them to the wordlist'},
+		'auto_tune': {'is_flag': True, 'default': False, 'help': 'Automatically lower scan rate when too many errors'},
+		'extract_links': {'is_flag': True, 'default': False, 'help': 'Extract links from response body'},
+		'collect_backups': {'is_flag': True, 'default': False, 'help': 'Request likely backup exts for urls'},
+		'collect_extensions': {'is_flag': True, 'default': False, 'help': 'Discover exts and add to --extensions'},
+		'collect_words': {'is_flag': True, 'default': False, 'help': 'Discover important words and add to wordlist'},
 	}
 	opt_key_map = {
 		HEADER: 'headers',
