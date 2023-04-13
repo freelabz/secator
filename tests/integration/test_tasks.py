@@ -9,7 +9,7 @@ from secsy.rich import console
 from secsy.runners import Command
 from secsy.utils import setup_logging
 from secsy.utils_test import (FIXTURES, META_OPTS, CommandOutputTester,
-							  load_fixture)
+                              load_fixture)
 from tests.integration.inputs import INPUTS
 from tests.integration.outputs import OUTPUTS_TASKS
 

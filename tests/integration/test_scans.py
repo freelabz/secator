@@ -4,15 +4,14 @@ import unittest
 import warnings
 from time import sleep
 
+from secsy.cli import ALL_SCANS
 from secsy.definitions import DEBUG
+from secsy.rich import console
+from secsy.runners import Command, Scan
 from secsy.utils import setup_logging
-from secsy.utils_test import CommandOutputTester
+from secsy.utils_test import CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_SCANS
 from tests.integration.outputs import OUTPUTS_SCANS
-
-from secsy.cli import ALL_SCANS
-from secsy.rich import console
-from secsy.runners import Scan, Command
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
 level = logging.DEBUG if DEBUG > 0 else logging.INFO
@@ -39,8 +38,15 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 	def test_all_scans(self):
 		opts = {
 			'filter_size': 1987,
+			# 'filter_regex': 'Unexpected path',
 			'follow_redirect': True,
-			'rate_limit': 1000
+			'match_codes': '200',
+			'httpx.match_codes': False,
+			'httpx.filter_size': False,
+			'rate_limit': 1000,
+			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
+			'timeout': 7,
+			'depth': 2
 		}
 		for conf in ALL_SCANS:
 			with self.subTest(name=conf.name):

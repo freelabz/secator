@@ -6,18 +6,18 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secsy.definitions import (CIDR_RANGE, DELAY, DEPTH, FILTER_CODES,
-							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-							   FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES,
-							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
-							   PROXY, RATE_LIMIT, RETRIES, TEMP_FOLDER,
-							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME,
-							   VULN_CONFIDENCE, VULN_CVSS_SCORE,
-							   VULN_DESCRIPTION, VULN_ID, VULN_NAME,
-							   VULN_PROVIDER, VULN_REFERENCES, VULN_SEVERITY,
-							   VULN_TAGS, WORDLIST, PATH)
-from secsy.output_types import (Ip, Port, Subdomain, Url, UserAccount,
-								Vulnerability, Tag)
+from secsy.definitions import (CIDR_RANGE, DEFAULT_WORDLIST, DELAY, DEPTH,
+							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
+							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   MATCH_WORDS, METHOD, PATH, PROXY, RATE_LIMIT,
+							   RETRIES, TEMP_FOLDER, THREADS, TIMEOUT, URL,
+							   USER_AGENT, USERNAME, VULN_CONFIDENCE,
+							   VULN_CVSS_SCORE, VULN_DESCRIPTION, VULN_ID,
+							   VULN_NAME, VULN_PROVIDER, VULN_REFERENCES,
+							   VULN_SEVERITY, VULN_TAGS, WORDLIST)
+from secsy.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
+								Vulnerability)
 from secsy.runners import Command
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'wl', 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'wl', 'default': DEFAULT_WORDLIST, 'help': 'Wordlist to use'}
 }
 
 OPTS_HTTP = [

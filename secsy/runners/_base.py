@@ -69,7 +69,7 @@ class Runner:
 
 	def log_header(self):
 		runner_name = self.__class__.__name__
-		opts = merge_opts(self.run_opts, self.config.options)
+		opts = merge_opts(self.config.options, self.run_opts)
 		console.print()
 
 		# Description

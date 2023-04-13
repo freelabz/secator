@@ -48,7 +48,7 @@ DEFAULT_STDIN_TIMEOUT = 1000  # seconds
 DEFAULT_PROXY_TIMEOUT = 1  # seconds
 
 # Constants
-DEFAULT_FFUF_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
+DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
 

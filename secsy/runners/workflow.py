@@ -148,7 +148,7 @@ class Workflow(Runner):
 				task = Task.get_task_class(task_name)
 
 				# Merge task options (order of priority with overrides)
-				opts = merge_opts(run_opts, workflow_opts, task_opts)
+				opts = merge_opts(workflow_opts, task_opts, run_opts)
 
 				# Create task signature
 				sig = task.s(targets, **opts)

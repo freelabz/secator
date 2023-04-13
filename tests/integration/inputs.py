@@ -17,9 +17,9 @@ INPUTS = {
 }
 
 INPUTS_WORKFLOWS = {
-	'cidr_recon': '127.0.0.1/24',
+	'cidr_recon': '127.0.0.1/30',
     'code_scan': ROOT_FOLDER,
-    'dir_finder': 'localhost:3000',  # TODO: add fixture with directories
+    # 'dir_finder': 'localhost:3000',  # TODO: add fixture with directories
     'host_recon': 'localhost',
 	'subdomain_recon': 'api.github.com',
     'url_crawl': 'localhost:3000',
