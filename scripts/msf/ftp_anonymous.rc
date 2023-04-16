@@ -1,5 +1,5 @@
-setg RHOST {rhost}
-setg RHOSTS {rhost}
+setg RHOST {RHOST}
+setg RHOSTS {RHOSTS}
 use auxiliary/scanner/ftp/anonymous
 run
 exit
