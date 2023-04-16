@@ -41,83 +41,14 @@ VALIDATORS = [
 ]
 
 
-class Command:
-	# Base cmd
-	cmd = None
+class RunnerBase:
+	category = False
 
 	# Meta options
 	meta_opts = {}
 
 	# Additional command options
 	opts = {}
-
-	# Option prefix char
-	opt_prefix = '-'
-
-	# Option key map to transform option names
-	opt_key_map = {}
-
-	# Option value map to transform option values
-	opt_value_map = {}
-
-	# Output map to transform JSON output keys
-	output_map = {}
-
-	# Output format in 'raw' mode
-	output_field = None
-
-	# Output schema
-	output_schema = []
-
-	# Output types
-	output_types = None
-
-	# Run in shell if True (not recommended)
-	shell = False
-
-	# Current working directory
-	cwd = None
-
-	# Output encoding
-	encoding = 'utf-8'
-
-	# Environment variables
-	env = {}
-
-	# Flag to take the input
-	input_flag = None
-
-	# Input field (mostly for tests and CLI)
-	input_type = None
-
-	# Input path (if a file is constructed)
-	input_path = None
-
-	# Input chunk size (default None)
-	input_chunk_size = None
-
-	# Flag to take a file as input
-	file_flag = None
-
-	# Flag to enable output JSON
-	json_flag = None
-
-	# Install command
-	install_cmd = None
-
-	# Dict return
-	# TODO: deprecate this
-	output_return_type = dict
-
-	# Table fields
-	output_table_fields = output_schema
-	output_table_sort_fields = ()
-
-	# Serializer
-	item_loader = JSONSerializer()
-
-	# Ignore return code
-	ignore_return_code = False
 
 	# Command output formatting options
 	_raw_output = False
@@ -134,19 +65,23 @@ class Command:
 	hooks = {}
 	validators = {}
 
-	@property
-	def name(self):
-		return f'{self.__class__.__name__}'
+	# Output types
+	output_types = None
+
+	# Dict return
+	output_return_type = dict  # TODO: deprecate this
 
 	def __init__(self, input=None, **cmd_opts):
 		self.cmd_opts = cmd_opts.copy()
 		self.results = []
 		self.sync = self.cmd_opts.pop('sync', True)
+		self.name = self.__class__.__name__
 
 		# Process input
 		self.input = input
 		if isinstance(self.input, list) and len(self.input) == 1:
 			self.input = self.input[0]
+		self.output = ''
 
 		# Yield dicts if CLI supports JSON
 		if self.output_return_type is dict or (self.json_flag is not None):
@@ -200,9 +135,6 @@ class Command:
 		# Output formatting
 		self.color = self.cmd_opts.pop('color', False)
 		self.quiet = self.cmd_opts.pop('quiet', False)
-		self.output_table_fields = self.cmd_opts.pop(
-			'table_fields',
-			self.output_table_fields)
 		self._raw_yield = self.cmd_opts.pop('raw_yield', False)
 
 		# Hooks
@@ -246,64 +178,65 @@ class Command:
 		# Callback before building the command line
 		self.run_hooks('on_init')
 
-		# Build command input
-		self._build_cmd_input()
-
-		# Build command
-		self._build_cmd()
+	def run(self):
+		return list(self.__iter__())
 
 	def __iter__(self):
 		if not self._input_validated:
 			return
-		yield from self._run_command()
+
+		for item in self.yielder():
+
+			if isinstance(item, dict):
+				item = self._process_item(item)
+				if not item:
+					continue
+				yield item
+
+			elif isinstance(item, str):
+				if self._print_line and not self.quiet:
+					self._print(item, out=sys.stderr, ignore_raw=True)
+
+				if self.output_return_type is not dict:
+					self.results.append(item)
+					yield item
+
+			self.output += str(item) + '\n'
+
 		self._process_results()
 
-	def run(self):
-		return list(self.__iter__())
+	def _convert_item_schema(self, item):
+		"""Convert dict item to a new structure using the class output schema.
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secsy.celery import run_command
+		Args:
+			item (dict): Item.
 
-		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
-		kwargs['sync'] = False
-		results = kwargs.get('results', [])
-		return run_command.delay(results, cls.__name__, *args, opts=kwargs)
+		Returns:
+			dict: Item with new schema.
+		"""
+		# Load item using available output types and get the first matching
+		# output type based on the schema
+		new_item = None
+		output_types = getattr(self, 'output_types', [])
+		for klass in output_types:
+			output_map = getattr(self, 'output_map', {})
+			output_map = output_map.get(klass, {})
+			try:
+				new_item = klass.load(item, output_map)
+				break  # found an item that fits
+			except (TypeError, KeyError):  # can't load using class
+				# logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
+				continue
 
-	@classmethod
-	def s(cls, *args, **kwargs):
-		from secsy.celery import run_command
-		return run_command.s(cls.__name__, *args, opts=kwargs)
+		# No output type was found, so make no conversion
+		if not new_item:
+			new_item = DotMap(item)
+			new_item._type = 'unknown'
 
-	@classmethod
-	def si(cls, results, *args, **kwargs):
-		from secsy.celery import run_command
-		return run_command.si(results, cls.__name__, *args, opts=kwargs)
+		# Add source to item
+		new_item._source = self.name
 
-	@classmethod
-	def poll(cls, result):
-		from time import sleep
-
-		while not result.ready():
-			data = AsyncResult(result.id).info
-			if DEBUG > 1 and isinstance(data, dict):
-				print(data)
-			sleep(1)
-		return result.get()
-
-	def first(self):
-		try:
-			self._stop_on_first_match = True
-			return self.run()[0]
-		except IndexError:
-			return None
-
-	def get_opt_value(self, opt_name):
-		return Command._get_opt_value(
-			self.cmd_opts,
-			opt_name,
-			dict(self.opts, **self.meta_opts),
-			opt_prefix=self.name)
+		return new_item
 
 	#-------#
 	# Hooks #
@@ -329,200 +262,65 @@ class Command:
 				return False
 		return True
 
-	#---------------#
-	# Class methods #
-	#---------------#
-	@classmethod
-	def install(cls):
-		"""Install command by running the content of cls.install_cmd."""
-		console.log(f':pill: Installing {cls.__name__}...', style='bold yellow')
-		if not cls.install_cmd:
-			console.log(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
-			return
-		ret = cls.run_command(
-			cls.install_cmd,
-			name=cls.__name__,
-			print_timestamp=True,
-			print_cmd=True,
-			print_line=True,
-			cls_attributes={'shell': True}
-		)
-		if ret.return_code != 0:
-			console.log(f'Failed to install {cls.__name__}.', style='bold red')
-		else:
-			console.log(f'{cls.__name__} installed successfully !', style='bold green')
-		return ret
-
-	@classmethod
-	def run_command(cls, cmd, name='helperClass', cls_attributes={}, **kwargs):
-		"""Run adhoc command. Can be used without defining an inherited class to run a command, while still enjoying
-		all the good stuff in this class.
-		"""
-		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
-		for k, v in cls_attributes.items():
-			setattr(cmd_instance, k, v)
-		cmd_instance._print_line = True
-		cmd_instance.run()
-		return cmd_instance
-
-	#----------#
-	# Internal #
-	#----------#
-	def _run_command(self):
-		"""Run command and yields its output in real-time. Also saves the command line, return code and output to the
-		database.
+	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
+		"""Print function.
 
 		Args:
-			cmd (str): Command to run.
-			cwd (str, Optional): Working directory to run from.
-			shell (bool, Optional): Run command in a shell.
-			history_file (str): History file path.
-			mapper_func (Callable, Optional): Function to map output before yielding.
-			encoding (str, Optional): Output encoding.
-			ctx (dict, Optional): Scan context.
-
-		Yields:
-			str: Command stdout / stderr.
-			dict: Parsed JSONLine object.
+			data (str or dict): Input data.
+			color (str, Optional): Termcolor color.
+			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
+			ignore_raw (bool, Optional): Ignore raw mode.
+			ignore_log (bool, Optional): Ignore log stamps.
 		"""
-		# TODO: this is rawuely for logging timestamp to show up properly !!!
-		if self._print_timestamp:
-			sleep(1)
+		# Choose rich console
+		_console = console_stdout if out == sys.stdout else console
+		log_json = console.print_json
+		log = console.log if self._print_timestamp else _console.print
 
-		# Callback before running command
-		self.run_hooks('on_start')
+		# Print a rich table
+		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
+			print_results_table(self.results)
 
-		# Log cmd
-		if self._print_cmd:
-			if self.sync and self.description:
-				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', ignore_log=True)
-			self._print(self.cmd, color='bold cyan', ignore_raw=True)
+		# Print a JSON item
+		elif isinstance(data, (OutputType, DotMap, dict)):
+			# If object has a 'toDict' method, use it
+			if getattr(data, 'toDict', None):
+				data = data.toDict()
 
-		# Prepare cmds
-		command = self.cmd if self.shell else shlex.split(self.cmd)
+			# JSON dumps data so that it's consumable by other commands
+			data = json.dumps(data)
 
-		# Output and results
-		self.output = ''
-		self.return_code = 0
-		self.killed = False
-		self.results = []
+			# Add prefix to output
+			data = f'{self.prefix:>15} {data}' if self.prefix and not self._print_item else data
 
-		# Run the command using subprocess
-		try:
-			env = os.environ
-			env.update(self.env)
-			process = subprocess.Popen(
-				command,
-				stdout=sys.stdout if self._no_capture else subprocess.PIPE,
-				stderr=sys.stderr if self._no_capture else subprocess.STDOUT,
-				universal_newlines=True,
-				shell=self.shell,
-				env=env,
-				cwd=self.cwd)
-		except FileNotFoundError as e:
-			if self.name in str(e):
-				error = f'{self.name} not installed.'
-				if self.install_cmd:
-					error += f' Install it with `secsy utils install {self.name}`.'
-			else:
-				error = str(e)
-			self.error = error
-			self.return_code = 1
-			if error:
-				self._print(error, color='bold red')
-			return
+			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
+			# user intent to use it for visualizing results.
+			log_json(data) if self.color and self._print_item else _console.print(data, highlight=False)
 
-		try:
-			# No capture mode, wait for command to finish and return
-			if self._no_capture:
-				self._wait_for_end(process)
-				return
-
-			# Process the output in real-time
-			for line in iter(lambda: process.stdout.readline(), b''):
-				if not line:
-					break
-
-				# Strip line
-				line = line.strip()
-
-				# Some commands output ANSI text, so we need to remove those ANSI chars
-				if self.encoding == 'ansi':
-					# ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
-					# line = re.sub(ansi_regex, '', line.strip())
-					ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-					line = ansi_escape.sub('', line)
-					line = line.replace('\\x0d\\x0a', '\n')
-
-				# Run on_line hooks
-				line = self.run_hooks('on_line', line)
-
-				# Run item_loader to try parsing as dict
-				items = None
-				if self._json_output:
-					if callable(self.item_loader):
-						items = self.item_loader(line)
-					else:
-						items = self.item_loader.run(line)
-
-				# Process dict item or line
-				if items:
-					if not isinstance(items, list):
-						items = [items]
-					for item in items:
-						item = self._process_item(item)
-						if not item:
-							continue
-						yield item
-				elif line:
-					if self._print_line and not (self.quiet and self._json_output):
-						self._print(line, out=sys.stderr)
-					if self.output_return_type is not dict:
-						self.results.append(line)
-						yield line
-
-				# Stop on first match
-				if self._stop_on_first_match and len(self.results) == 1:
-					process.kill()
-					self.killed = True
-					break
-
-				# Add the log line to the output
-				if line:
-					self.output += line + '\n'
-
-		except KeyboardInterrupt:
-			process.kill()
-			self._print('Process was killed manually (CTRL+C / CTRL+X)', color='bold red')
-			self.output = ''
-			self.error = 'Process killed manually'
-			self.killed = True
-
-		# Retrieve the return code and output
-		self._wait_for_end(process)
-
-	def _wait_for_end(self, process):
-		"""Wait for process to finish and process output and return code."""
-		process.wait()
-		self.return_code = process.returncode
-
-		if self._no_capture:
-			self.output = ''
+		# Print a line
 		else:
-			self.output = self.output.strip()
-			process.stdout.close()
+			# If orig mode (--orig) or raw mode (--raw), we might want to parse results with e.g pipe redirections, so
+			# we need a pure line with no logging info.
+			if ignore_log or (not ignore_raw and (self._orig_output or self._raw_output)):
+				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
+				_console.print(data, highlight=False, style=color)
+			else:
+				# data = escape(data)
+				# data = Text.from_ansi(data)
+				if color:
+					data = f'[{color}]{data}[/]'
+				data = f'{self.prefix} {data}' if self.prefix else data
+				try:
+					log(data)
+				except:  # noqa: E722
+					print(data)
 
-		if self.ignore_return_code:
-			self.return_code = 0
-
-		if self.return_code != 0 and not self.killed:
-			error = f'Command failed with return code {self.return_code}.'
-			if not self._print_line and self.output:
-				error += f' Output: {self.output}'
-			self.error = error
-			self._print(error, color='bold red')
-
-		self.run_hooks('on_end')
+	def _set_print_prefix(self):
+		self.prefix = ''
+		if self._print_cmd_prefix:
+			self.prefix = f'[bold gold3]({self.name})[/]'
+		if self.chunk and self.chunk_count:
+			self.prefix += f' [{self.chunk}/{self.chunk_count}]'
 
 	def _configure_proxy(self):
 		"""Configure proxy. Start with global settings like 'proxychains' or 'random', or fallback to tool-specific
@@ -531,7 +329,8 @@ class Command:
 		TODO: Move this to a subclass of Command, or to a configurable attribute to pass to derived classes as it's not
 		related to core functionality.
 		"""
-		proxy_opt = self.opt_key_map.get('proxy', False)
+		opt_key_map = getattr(self, 'opt_key_map', {})
+		proxy_opt = opt_key_map.get('proxy', False)
 		support_proxychains = getattr(self, 'proxychains', True)
 		proxychains_flavor = getattr(self, 'proxychains_flavor', 'proxychains')
 		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
@@ -641,11 +440,308 @@ class Command:
 				item = str(item)
 		return item
 
+
+class Command(RunnerBase):
+	# Base cmd
+	cmd = None
+
+	# Meta options
+	meta_opts = {}
+
+	# Additional command options
+	opts = {}
+
+	# Option prefix char
+	opt_prefix = '-'
+
+	# Option key map to transform option names
+	opt_key_map = {}
+
+	# Option value map to transform option values
+	opt_value_map = {}
+
+	# Output map to transform JSON output keys
+	output_map = {}
+
+	# Output schema
+	output_schema = []
+
+	# Run in shell if True (not recommended)
+	shell = False
+
+	# Current working directory
+	cwd = None
+
+	# Output encoding
+	encoding = 'utf-8'
+
+	# Environment variables
+	env = {}
+
+	# Flag to take the input
+	input_flag = None
+
+	# Input field (mostly for tests and CLI)
+	input_type = None
+
+	# Input path (if a file is constructed)
+	input_path = None
+
+	# Input chunk size (default None)
+	input_chunk_size = None
+
+	# Flag to take a file as input
+	file_flag = None
+
+	# Flag to enable output JSON
+	json_flag = None
+
+	# Install command
+	install_cmd = None
+
+	# Serializer
+	item_loader = JSONSerializer()
+
+	# Ignore return code
+	ignore_return_code = False
+
+	def __init__(self, input=None, **cmd_opts):
+		super().__init__(input, **cmd_opts)
+
+		# Build command input
+		self._build_cmd_input()
+
+		# Build command
+		self._build_cmd()
+
+	@classmethod
+	def delay(cls, *args, **kwargs):
+		# TODO: Move this to RunnerBase
+		from secsy.celery import run_command
+
+		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
+		kwargs['sync'] = False
+		results = kwargs.get('results', [])
+		return run_command.delay(results, cls.__name__, *args, opts=kwargs)
+
+	@classmethod
+	def s(cls, *args, **kwargs):
+		# TODO: Move this to RunnerBase
+		from secsy.celery import run_command
+		return run_command.s(cls.__name__, *args, opts=kwargs)
+
+	@classmethod
+	def si(cls, results, *args, **kwargs):
+		# TODO: Move this to RunnerBase
+		from secsy.celery import run_command
+		return run_command.si(results, cls.__name__, *args, opts=kwargs)
+
+	@classmethod
+	def poll(cls, result):
+		# TODO: Move this to RunnerBase
+		from time import sleep
+
+		while not result.ready():
+			data = AsyncResult(result.id).info
+			if DEBUG > 1 and isinstance(data, dict):
+				print(data)
+			sleep(1)
+		return result.get()
+
+	def get_opt_value(self, opt_name):
+		return Command._get_opt_value(
+			self.cmd_opts,
+			opt_name,
+			dict(self.opts, **self.meta_opts),
+			opt_prefix=self.name)
+
+	#---------------#
+	# Class methods #
+	#---------------#
+	@classmethod
+	def install(cls):
+		"""Install command by running the content of cls.install_cmd."""
+		console.log(f':pill: Installing {cls.__name__}...', style='bold yellow')
+		if not cls.install_cmd:
+			console.log(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
+			return
+		ret = cls.run_command(
+			cls.install_cmd,
+			name=cls.__name__,
+			print_timestamp=True,
+			print_cmd=True,
+			print_line=True,
+			cls_attributes={'shell': True}
+		)
+		if ret.return_code != 0:
+			console.log(f'Failed to install {cls.__name__}.', style='bold red')
+		else:
+			console.log(f'{cls.__name__} installed successfully !', style='bold green')
+		return ret
+
+	@classmethod
+	def run_command(cls, cmd, name='helperClass', cls_attributes={}, **kwargs):
+		"""Run adhoc command. Can be used without defining an inherited class to run a command, while still enjoying
+		all the good stuff in this class.
+		"""
+		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
+		for k, v in cls_attributes.items():
+			setattr(cmd_instance, k, v)
+		cmd_instance._print_line = True
+		cmd_instance.run()
+		return cmd_instance
+
+	#----------#
+	# Internal #
+	#----------#
+	def yielder(self):
+		"""Run command and yields its output in real-time. Also saves the command line, return code and output to the
+		database.
+
+		Args:
+			cmd (str): Command to run.
+			cwd (str, Optional): Working directory to run from.
+			shell (bool, Optional): Run command in a shell.
+			history_file (str): History file path.
+			mapper_func (Callable, Optional): Function to map output before yielding.
+			encoding (str, Optional): Output encoding.
+			ctx (dict, Optional): Scan context.
+
+		Yields:
+			str: Command stdout / stderr.
+			dict: Parsed JSONLine object.
+		"""
+		# TODO: this is rawuely for logging timestamp to show up properly !!!
+		if self._print_timestamp:
+			sleep(1)
+
+		# Callback before running command
+		self.run_hooks('on_start')
+
+		# Log cmd
+		if self._print_cmd:
+			if self.sync and self.description:
+				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', ignore_log=True)
+			self._print(self.cmd, color='bold cyan', ignore_raw=True)
+
+		# Prepare cmds
+		command = self.cmd if self.shell else shlex.split(self.cmd)
+
+		# Output and results
+		self.output = ''
+		self.return_code = 0
+		self.killed = False
+		self.results = []
+
+		# Run the command using subprocess
+		try:
+			env = os.environ
+			env.update(self.env)
+			process = subprocess.Popen(
+				command,
+				stdout=sys.stdout if self._no_capture else subprocess.PIPE,
+				stderr=sys.stderr if self._no_capture else subprocess.STDOUT,
+				universal_newlines=True,
+				shell=self.shell,
+				env=env,
+				cwd=self.cwd)
+
+		except FileNotFoundError as e:
+			if self.name in str(e):
+				error = f'{self.name} not installed.'
+				if self.install_cmd:
+					error += f' Install it with `secsy utils install {self.name}`.'
+			else:
+				error = str(e)
+			self.error = error
+			self.return_code = 1
+			if error:
+				self._print(error, color='bold red')
+			return
+
+		try:
+			# No capture mode, wait for command to finish and return
+			if self._no_capture:
+				self._wait_for_end(process)
+				return
+
+			# Process the output in real-time
+			for line in iter(lambda: process.stdout.readline(), b''):
+				if not line:
+					break
+
+				# Strip line
+				line = line.strip()
+
+				# Some commands output ANSI text, so we need to remove those ANSI chars
+				if self.encoding == 'ansi':
+					# ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
+					# line = re.sub(ansi_regex, '', line.strip())
+					ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+					line = ansi_escape.sub('', line)
+					line = line.replace('\\x0d\\x0a', '\n')
+
+				# Run on_line hooks
+				line = self.run_hooks('on_line', line)
+
+				# Run item_loader to try parsing as dict
+				items = None
+				if self._json_output:
+					if callable(self.item_loader):
+						items = self.item_loader(line)
+					else:
+						items = self.item_loader.run(line)
+
+				# Print line if no items parsed
+				if not items and not self.quiet:
+					yield line
+
+				# Turn results into list if not already a list
+				elif not isinstance(items, list):
+					items = [items]
+
+				# Yield items
+				if items:
+					yield from items
+
+		except KeyboardInterrupt:
+			process.kill()
+			self._print('Process was killed manually (CTRL+C / CTRL+X)', color='bold red')
+			self.output = ''
+			self.error = 'Process killed manually'
+			self.killed = True
+
+		# Retrieve the return code and output
+		self._wait_for_end(process)
+
+	def _wait_for_end(self, process):
+		"""Wait for process to finish and process output and return code."""
+		process.wait()
+		self.return_code = process.returncode
+
+		if self._no_capture:
+			self.output = ''
+		else:
+			self.output = self.output.strip()
+			process.stdout.close()
+
+		if self.ignore_return_code:
+			self.return_code = 0
+
+		if self.return_code != 0 and not self.killed:
+			error = f'Command failed with return code {self.return_code}.'
+			if not self._print_line and self.output:
+				error += f' Output: {self.output}'
+			self.error = error
+			self._print(error, color='bold red')
+
+		self.run_hooks('on_end')
+
 	@staticmethod
 	def _process_opts(
 			opts,
 			opts_conf,
-			opt_keys={},
+			opt_key_map={},
 			opt_value_map={},
 			opt_prefix='-',
 			command_name=None):
@@ -681,9 +777,9 @@ class Command:
 				opt_val = mapped_opt_val
 
 			# Convert opt name to expected command opt name
-			mapped_opt_name = opt_keys.get(opt_name)
+			mapped_opt_name = opt_key_map.get(opt_name)
 			if mapped_opt_name == OPT_NOT_SUPPORTED:
-				logger.debug(f'Option {opt_name} was passed but is unsupported. Skipping.')
+				# logger.debug(f'Option {opt_name} was passed but is unsupported. Skipping.')
 				continue
 			elif mapped_opt_name is not None:
 				opt_name = mapped_opt_name
@@ -798,95 +894,3 @@ class Command:
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
 		self.input = input
-
-	def _convert_item_schema(self, item):
-		"""Convert dict item to a new structure using the class output schema.
-
-		Args:
-			item (dict): Item.
-
-		Returns:
-			dict: Item with new schema.
-		"""
-		# Load item using available output types and get the first matching
-		# output type based on the schema
-		new_item = None
-		output_types = getattr(self, 'output_types', [])
-		for klass in output_types:
-			output_map = self.output_map.get(klass, {})
-			try:
-				new_item = klass.load(item, output_map)
-				break  # found an item that fits
-			except (TypeError, KeyError):  # can't load using class
-				# logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
-				continue
-
-		# No output type was found, so make no conversion
-		if not new_item:
-			new_item = DotMap(item)
-			new_item._type = 'unknown'
-
-		# Add source to item
-		new_item._source = self.name
-
-		return new_item
-
-	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
-		"""Print function.
-
-		Args:
-			data (str or dict): Input data.
-			color (str, Optional): Termcolor color.
-			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
-			ignore_raw (bool, Optional): Ignore raw mode.
-			ignore_log (bool, Optional): Ignore log stamps.
-		"""
-		# Choose rich console
-		_console = console_stdout if out == sys.stdout else console
-		log_json = console.print_json
-		log = console.log if self._print_timestamp else _console.print
-
-		# Print a rich table
-		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
-			print_results_table(self.results)
-
-		# Print a JSON item
-		elif isinstance(data, (OutputType, DotMap, dict)):
-			# If object has a 'toDict' method, use it
-			if getattr(data, 'toDict', None):
-				data = data.toDict()
-
-			# JSON dumps data so that it's consumable by other commands
-			data = json.dumps(data)
-
-			# Add prefix to output
-			data = f'{self.prefix:>15} {data}' if self.prefix and not self._print_item else data
-
-			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
-			# user intent to use it for visualizing results.
-			log_json(data) if self.color and self._print_item else _console.print(data, highlight=False)
-
-		# Print a line
-		else:
-			# If orig mode (--orig) ir raw mode (--raw), we might want to parse results with e.g pipe redirections, so
-			# we need a pure line with no logging info.
-			if ignore_log or (not ignore_raw and (self._orig_output or self._raw_output)):
-				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
-				_console.print(data, highlight=False, style=color)
-			else:
-				# data = escape(data)
-				# data = Text.from_ansi(data)
-				if color:
-					data = f'[{color}]{data}[/]'
-				data = f'{self.prefix} {data}' if self.prefix else data
-				try:
-					log(data)
-				except:  # noqa: E722
-					print(data)
-
-	def _set_print_prefix(self):
-		self.prefix = ''
-		if self._print_cmd_prefix:
-			self.prefix = f'[bold gold3]({self.name})[/]'
-		if self.chunk and self.chunk_count:
-			self.prefix += f' [{self.chunk}/{self.chunk_count}]'

@@ -50,7 +50,7 @@ class Runner:
 
 	def resolve_exporters(self):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.pop('output', None)
+		output = self.run_opts.get('output', None)
 		if not output:
 			return []
 		exporters = [
@@ -68,6 +68,7 @@ class Runner:
 			f':tada: [bold green]{runner_name}[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
 
 	def log_header(self):
+		"""Log runner header."""
 		runner_name = self.__class__.__name__
 		opts = merge_opts(self.config.options, self.run_opts)
 		console.print()
@@ -156,7 +157,7 @@ class Runner:
 			result (celery.result.AsyncResult): Result object.
 
 		Yields:
-			dict: Current task state and results.
+			dict: Subtasks state and results.
 		"""
 		res = AsyncResult(result.id)
 		while True:
@@ -176,6 +177,14 @@ class Runner:
 			sleep(1)
 
 	def process_live_tasks(self, result):
+		"""Rich progress indicator showing live tasks statuses.
+
+		Args:
+			result (AsyncResult | GroupResult): Celery result.
+
+		Yields:
+			dict: Subtasks state and results.
+		"""
 		tasks_progress = Progress(
 			TextColumn('  '),
 			SpinnerColumn('dots'),
@@ -236,7 +245,7 @@ class Runner:
 				progress.update(progress_id, advance=100)
 
 	def filter_results(self):
-		"""Filter results."""
+		"""Filter runner results using extractors defined in config."""
 		extractors = self.config.results
 		results = []
 		if extractors:

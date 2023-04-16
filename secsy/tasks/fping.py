@@ -1,11 +1,13 @@
 import validators
 
+from secsy.decorators import task
 from secsy.definitions import (DELAY, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
 							   RETRIES, THREADS, TIMEOUT)
 from secsy.output_types import Ip
 from secsy.tasks._categories import ReconIp
 
 
+@task()
 class fping(ReconIp):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
 	cmd = 'fping -a'

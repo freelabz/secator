@@ -1,3 +1,4 @@
+from secsy.decorators import task
 from secsy.definitions import (DELAY, HOST, OPT_NOT_SUPPORTED, PORT, PORTS,
 							   PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
 							   TOP_PORTS)
@@ -5,6 +6,7 @@ from secsy.output_types import Port
 from secsy.tasks._categories import ReconPort
 
 
+@task()
 class naabu(ReconPort):
 	"""Port scanning tool written in Go."""
 	cmd = 'naabu -Pn -silent'

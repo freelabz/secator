@@ -1,3 +1,4 @@
+from secsy.decorators import task
 from secsy.definitions import (DEFAULT_HTTPX_FLAGS, DEPTH, DELAY, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
@@ -8,6 +9,7 @@ from secsy.tasks._categories import Http
 from secsy.utils import sanitize_url
 
 
+@task()
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
 	cmd = f'httpx {DEFAULT_HTTPX_FLAGS}'

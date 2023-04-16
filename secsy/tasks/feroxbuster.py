@@ -1,6 +1,7 @@
 import shlex
 from pathlib import Path
 
+from secsy.decorators import task
 from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, LINES, MATCH_CODES,
@@ -13,11 +14,7 @@ from secsy.tasks._categories import HttpFuzzer
 from secsy.utils import get_file_timestamp
 
 
-class myfuzzer(HttpFuzzer):
-	def __iter__(self):
-		print(self.input)
-
-
+@task()
 class feroxbuster(HttpFuzzer):
 	"""Simple, fast, recursive content discovery tool written in Rust"""
 	cmd = 'feroxbuster'

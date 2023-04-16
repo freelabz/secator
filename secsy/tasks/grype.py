@@ -1,4 +1,5 @@
 
+from secsy.decorators import task
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, USER_AGENT)
@@ -41,6 +42,7 @@ def grype_item_loader(self, line):
 	return data
 
 
+@task()
 class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
 	cmd = 'grype --quiet'

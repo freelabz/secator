@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 
+from secsy.decorators import task
 from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES,
@@ -11,6 +12,7 @@ from secsy.output_types import Url
 from secsy.tasks._categories import HttpCrawler
 
 
+@task()
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana -silent -jc -js-crawl -known-files all'

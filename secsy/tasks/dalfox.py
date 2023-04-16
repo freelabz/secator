@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 
+from secsy.decorators import task
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, METHOD,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, THREADS,
 							   TIMEOUT, URL, USER_AGENT, VULN_CONFIDENCE,
@@ -17,6 +18,7 @@ DALFOX_TYPE_MAP = {
 }
 
 
+@task()
 class dalfox(VulnHttp):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox --silence'

@@ -2,6 +2,7 @@ import os
 
 import yaml
 
+from secsy.decorators import task
 from secsy.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
@@ -15,6 +16,7 @@ from secsy.tasks._categories import HttpFuzzer
 from secsy.utils import get_file_timestamp
 
 
+@task()
 class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
 	cmd = 'dirsearch -q'

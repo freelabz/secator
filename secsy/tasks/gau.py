@@ -1,3 +1,4 @@
+from secsy.decorators import task
 from secsy.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
 							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
@@ -7,6 +8,7 @@ from secsy.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 from secsy.tasks._categories import HttpCrawler
 
 
+@task()
 class gau(HttpCrawler):
 	"""Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan."""
 	cmd = 'gau'
