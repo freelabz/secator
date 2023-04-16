@@ -1,3 +1,4 @@
+from secsy.decorators import task
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, VULN_CONFIDENCE,
@@ -5,15 +6,16 @@ from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   VULN_EXTRACTED_RESULTS, VULN_ID,
 							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
 							   VULN_REFERENCES, VULN_SEVERITY, VULN_TAGS, USER_AGENT)
-from secsy.output_types import Vulnerability
-from secsy.tasks._categories import VulnCommand
+from secsy.output_types import Vulnerability, Progress
+from secsy.tasks._categories import VulnMulti
 
 
-class nuclei(VulnCommand):
+@task()
+class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based
 	DSL.
 	"""
-	cmd = 'nuclei -silent'
+	cmd = 'nuclei -silent -sj -si 20 -hm'
 	file_flag = '-l'
 	input_flag = '-u'
 	input_chunk_size = 3  # TODO: figure out which chunk size is appropriate
@@ -45,6 +47,7 @@ class nuclei(VulnCommand):
 		'templates': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
+	output_types = [Vulnerability, Progress]
 	output_map = {
 		Vulnerability: {
 			VULN_ID: lambda x: nuclei.id_extractor(x),
@@ -58,8 +61,12 @@ class nuclei(VulnCommand):
 			VULN_TAGS: lambda x: x['info']['tags'],
 			VULN_REFERENCES: lambda x: x['info']['reference'],
 			VULN_EXTRACTED_RESULTS: lambda x: {'data': x.get('extracted-results', [])}
+		},
+		Progress: {
+			'extra_data': lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
 		}
 	}
+	ignore_return_code = True
 	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest'
 
 	@staticmethod

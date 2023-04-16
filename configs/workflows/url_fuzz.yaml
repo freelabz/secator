@@ -2,6 +2,8 @@ name: url_fuzz
 alias: urlfuzz
 description: Find URLs by fuzzing (slow)
 tags: [http, fuzz]
+options:
+  match_codes: 200,204,301,302,307,401,403,405,500
 tasks:
   _group:
     dirsearch:
@@ -13,3 +15,12 @@ tasks:
       targets_:
         - type: target
           field: '{name}/FUZZ'
+  httpx:
+    description: Running HTTP probes on crawled URLs
+    targets_:
+      type: url
+      field: url
+results:
+  - type: url
+    condition: item._source == 'httpx'
+    # TODO: add deduplication based on the 'url' field

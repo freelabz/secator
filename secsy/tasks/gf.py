@@ -1,9 +1,11 @@
+from secsy.decorators import task
 from secsy.definitions import OPT_PIPE_INPUT, URL
 from secsy.output_types import Tag
-from secsy.runners import Command
+from secsy.tasks._categories import Tagger
 
 
-class gf(Command):
+@task()
+class gf(Tagger):
 	"""Wrapper around grep, to help you grep for things."""
 	cmd = 'gf'
 	file_flag = OPT_PIPE_INPUT
@@ -21,6 +23,7 @@ class gf(Command):
 	)
 	output_types = [Tag]
 	item_loader = lambda self, line: {'match': line, 'name': self.get_opt_value('pattern')}  # noqa: E731
+	proxychains = False
 
 	@staticmethod
 	def on_item_converted(self, item):

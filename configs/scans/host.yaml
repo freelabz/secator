@@ -6,6 +6,6 @@ workflows:
   url_crawl:
     targets_:
     - url.url
-  url_tag:
+  url_vuln:
     targets_:
     - url.url

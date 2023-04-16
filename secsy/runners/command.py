@@ -41,9 +41,8 @@ VALIDATORS = [
 ]
 
 
-class Command:
-	# Base cmd
-	cmd = None
+class RunnerBase:
+	category = False
 
 	# Meta options
 	meta_opts = {}
@@ -51,80 +50,13 @@ class Command:
 	# Additional command options
 	opts = {}
 
-	# Option prefix char
-	opt_prefix = '-'
-
-	# Option key map to transform option names
-	opt_key_map = {}
-
-	# Option value map to transform option values
-	opt_value_map = {}
-
-	# Output map to transform JSON output keys
-	output_map = {}
-
-	# Output format in 'raw' mode
-	output_field = None
-
-	# Output schema
-	output_schema = []
-
-	# Output types
-	output_types = None
-
-	# Run in shell if True (not recommended)
-	shell = False
-
-	# Current working directory
-	cwd = None
-
-	# Output encoding
-	encoding = 'utf-8'
-
-	# Environment variables
-	env = {}
-
-	# Flag to take the input
-	input_flag = None
-
-	# Input field (mostly for tests and CLI)
-	input_type = None
-
-	# Input path (if a file is constructed)
-	input_path = None
-
-	# Input chunk size (default None)
-	input_chunk_size = None
-
-	# Flag to take a file as input
-	file_flag = None
-
-	# Flag to enable output JSON
-	json_flag = None
-
-	# Install command
-	install_cmd = None
-
-	# Dict return
-	# TODO: deprecate this
-	output_return_type = dict
-
-	# Table fields
-	output_table_fields = output_schema
-	output_table_sort_fields = ()
-
-	# Serializer
-	item_loader = JSONSerializer()
-
-	# Ignore return code
-	ignore_return_code = False
-
 	# Command output formatting options
 	_raw_output = False
 	_orig_output = False
 	_table_output = False
 	_json_output = False
 	_print_item = True
+	_print_progress = True
 	_print_item_count = True
 	_stop_on_first_match = False
 	_no_capture = False
@@ -133,19 +65,23 @@ class Command:
 	hooks = {}
 	validators = {}
 
-	@property
-	def name(self):
-		return f'{self.__class__.__name__}'
+	# Output types
+	output_types = None
+
+	# Dict return
+	output_return_type = dict  # TODO: deprecate this
 
 	def __init__(self, input=None, **cmd_opts):
 		self.cmd_opts = cmd_opts.copy()
 		self.results = []
 		self.sync = self.cmd_opts.pop('sync', True)
+		self.name = self.__class__.__name__
 
 		# Process input
 		self.input = input
 		if isinstance(self.input, list) and len(self.input) == 1:
 			self.input = self.input[0]
+		self.output = ''
 
 		# Yield dicts if CLI supports JSON
 		if self.output_return_type is dict or (self.json_flag is not None):
@@ -179,6 +115,9 @@ class Command:
 		# Print cmd name
 		self._print_cmd = self.cmd_opts.pop('print_cmd', False)
 
+		# Print progress
+		self._print_progress = self.cmd_opts.pop('print_progress', True)
+
 		# Print task name before line output (useful for multiprocessed envs)
 		self._print_cmd_prefix = self.cmd_opts.pop('print_cmd_prefix', False)
 
@@ -196,9 +135,6 @@ class Command:
 		# Output formatting
 		self.color = self.cmd_opts.pop('color', False)
 		self.quiet = self.cmd_opts.pop('quiet', False)
-		self.output_table_fields = self.cmd_opts.pop(
-			'table_fields',
-			self.output_table_fields)
 		self._raw_yield = self.cmd_opts.pop('raw_yield', False)
 
 		# Hooks
@@ -242,64 +178,65 @@ class Command:
 		# Callback before building the command line
 		self.run_hooks('on_init')
 
-		# Build command input
-		self._build_cmd_input()
-
-		# Build command
-		self._build_cmd()
+	def run(self):
+		return list(self.__iter__())
 
 	def __iter__(self):
 		if not self._input_validated:
 			return
-		yield from self._run_command()
+
+		for item in self.yielder():
+
+			if isinstance(item, dict):
+				item = self._process_item(item)
+				if not item:
+					continue
+				yield item
+
+			elif isinstance(item, str):
+				if self._print_line and not self.quiet:
+					self._print(item, out=sys.stderr, ignore_raw=True)
+
+				if self.output_return_type is not dict:
+					self.results.append(item)
+					yield item
+
+			self.output += str(item) + '\n'
+
 		self._process_results()
 
-	def run(self):
-		return list(self.__iter__())
+	def _convert_item_schema(self, item):
+		"""Convert dict item to a new structure using the class output schema.
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secsy.celery import run_command
+		Args:
+			item (dict): Item.
 
-		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
-		kwargs['sync'] = False
-		results = kwargs.get('results', [])
-		return run_command.delay(results, cls.__name__, *args, opts=kwargs)
+		Returns:
+			dict: Item with new schema.
+		"""
+		# Load item using available output types and get the first matching
+		# output type based on the schema
+		new_item = None
+		output_types = getattr(self, 'output_types', [])
+		for klass in output_types:
+			output_map = getattr(self, 'output_map', {})
+			output_map = output_map.get(klass, {})
+			try:
+				new_item = klass.load(item, output_map)
+				break  # found an item that fits
+			except (TypeError, KeyError):  # can't load using class
+				# logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
+				continue
 
-	@classmethod
-	def s(cls, *args, **kwargs):
-		from secsy.celery import run_command
-		return run_command.s(cls.__name__, *args, opts=kwargs)
+		# No output type was found, so make no conversion
+		if not new_item:
+			new_item = DotMap(item)
+			new_item._type = 'unknown'
 
-	@classmethod
-	def si(cls, results, *args, **kwargs):
-		from secsy.celery import run_command
-		return run_command.si(results, cls.__name__, *args, opts=kwargs)
+		# Add source to item
+		new_item._source = self.name
 
-	@classmethod
-	def poll(cls, result):
-		from time import sleep
-
-		while not result.ready():
-			data = AsyncResult(result.id).info
-			if DEBUG > 1 and isinstance(data, dict):
-				print(data)
-			sleep(1)
-		return result.get()
-
-	def first(self):
-		try:
-			self._stop_on_first_match = True
-			return self.run()[0]
-		except IndexError:
-			return None
-
-	def get_opt_value(self, opt_name):
-		return Command._get_opt_value(
-			self.cmd_opts,
-			opt_name,
-			dict(self.opts, **self.meta_opts),
-			opt_prefix=self.name)
+		return new_item
 
 	#-------#
 	# Hooks #
@@ -324,6 +261,299 @@ class Command:
 					self._print(f'{validator.__doc__}', color='bold red')
 				return False
 		return True
+
+	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
+		"""Print function.
+
+		Args:
+			data (str or dict): Input data.
+			color (str, Optional): Termcolor color.
+			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
+			ignore_raw (bool, Optional): Ignore raw mode.
+			ignore_log (bool, Optional): Ignore log stamps.
+		"""
+		# Choose rich console
+		_console = console_stdout if out == sys.stdout else console
+		log_json = console.print_json
+		log = console.log if self._print_timestamp else _console.print
+
+		# Print a rich table
+		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
+			print_results_table(self.results)
+
+		# Print a JSON item
+		elif isinstance(data, (OutputType, DotMap, dict)):
+			# If object has a 'toDict' method, use it
+			if getattr(data, 'toDict', None):
+				data = data.toDict()
+
+			# JSON dumps data so that it's consumable by other commands
+			data = json.dumps(data)
+
+			# Add prefix to output
+			data = f'{self.prefix:>15} {data}' if self.prefix and not self._print_item else data
+
+			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
+			# user intent to use it for visualizing results.
+			log_json(data) if self.color and self._print_item else _console.print(data, highlight=False)
+
+		# Print a line
+		else:
+			# If orig mode (--orig) or raw mode (--raw), we might want to parse results with e.g pipe redirections, so
+			# we need a pure line with no logging info.
+			if ignore_log or (not ignore_raw and (self._orig_output or self._raw_output)):
+				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
+				_console.print(data, highlight=False, style=color)
+			else:
+				# data = escape(data)
+				# data = Text.from_ansi(data)
+				if color:
+					data = f'[{color}]{data}[/]'
+				data = f'{self.prefix} {data}' if self.prefix else data
+				try:
+					log(data)
+				except:  # noqa: E722
+					print(data)
+
+	def _set_print_prefix(self):
+		self.prefix = ''
+		if self._print_cmd_prefix:
+			self.prefix = f'[bold gold3]({self.name})[/]'
+		if self.chunk and self.chunk_count:
+			self.prefix += f' [{self.chunk}/{self.chunk_count}]'
+
+	def _configure_proxy(self):
+		"""Configure proxy. Start with global settings like 'proxychains' or 'random', or fallback to tool-specific
+		proxy settings.
+
+		TODO: Move this to a subclass of Command, or to a configurable attribute to pass to derived classes as it's not
+		related to core functionality.
+		"""
+		opt_key_map = getattr(self, 'opt_key_map', {})
+		proxy_opt = opt_key_map.get('proxy', False)
+		support_proxychains = getattr(self, 'proxychains', True)
+		proxychains_flavor = getattr(self, 'proxychains_flavor', 'proxychains')
+		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
+		if self.proxy == 'proxychains':
+			if not support_proxychains:
+				return
+			self.cmd = f'{proxychains_flavor} {self.cmd}'
+		elif self.proxy and support_proxy:
+			if self.proxy == 'random':
+				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
+			else:  # tool-specific proxy settings
+				self.cmd_opts['proxy'] = self.proxy
+
+	def _get_results_count(self):
+		count_map = {}
+		for output_type in self.output_types:
+			if output_type.__name__ == 'Progress':
+				continue
+			name = output_type.get_name()
+			count = len([r for r in self.results if r._type == name])
+			count_map[name] = count
+		return count_map
+
+	def _process_results(self):
+		# TODO: this is only for logging timestamp to show up properly !!!
+		if self._print_timestamp:
+			sleep(1)
+
+		# Log results count
+		if self._print_item_count and self._json_output and not self._raw_output and not self._orig_output:
+			count_map = self._get_results_count()
+			if all(count == 0 for count in count_map.values()):
+				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
+			else:
+				results_str = ':pill: Found ' + ' and '.join([
+					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
+					for name, count in count_map.items()
+				]) + '.'
+				self._print(results_str, color='bold green')
+
+		# Print table if in table mode
+		if self._table_output and self.results and len(self.results) > 0:
+			if isinstance(self.results[0], str):
+				self._print('\n'.join(self.results))
+			else:
+				self._print(self.results, out=sys.stdout)
+
+	def _process_item(self, item: dict):
+		# Run item validators
+		if not self.run_validators('item', item):
+			return None
+
+		# Run item hooks
+		item = self.run_hooks('on_item', item)
+		if not item:
+			return None
+
+		# Convert output dict to another schema
+		if not self._orig_output:
+			item = self._convert_item_schema(item)
+
+			# Run item convert hooks
+			item = self.run_hooks('on_item_converted', item)
+		else:
+			item = DotMap(item)
+
+		# Get item klass
+		item_klass = item.__class__.__name__
+
+		# Add item to result
+		if not item_klass == 'Progress':
+			self.results.append(item)
+
+		# Item to print
+		item_str = item
+
+		# In raw mode, print principal key or output format field.
+		if self._raw_output:
+			item_str = self._rawify(item)
+
+		# In raw yield mode, extract principal key from dict (default 'on' for library usage)
+		if self._raw_yield:
+			item = self._rawify(item)
+			item_str = item
+
+		# Print item to console or log
+		if item_klass == 'Progress' and self._print_progress:
+			self._print(str(item_str), out=sys.stderr, ignore_log=True, color='dim cyan')
+			item = None
+
+		elif self._print_item and self._json_output and not self._table_output:
+			self._print(item_str, out=sys.stdout)
+
+		# Return item
+		return item
+
+	def _rawify(self, item=None):
+		if not item:
+			return [
+				self._rawify(item)
+				for item in self.results
+			]
+		if self._raw_output:
+			if self._format_output:
+				item = self._format_output.format(**item)
+			elif isinstance(item, OutputType):
+				item = str(item)
+		return item
+
+
+class Command(RunnerBase):
+	# Base cmd
+	cmd = None
+
+	# Meta options
+	meta_opts = {}
+
+	# Additional command options
+	opts = {}
+
+	# Option prefix char
+	opt_prefix = '-'
+
+	# Option key map to transform option names
+	opt_key_map = {}
+
+	# Option value map to transform option values
+	opt_value_map = {}
+
+	# Output map to transform JSON output keys
+	output_map = {}
+
+	# Output schema
+	output_schema = []
+
+	# Run in shell if True (not recommended)
+	shell = False
+
+	# Current working directory
+	cwd = None
+
+	# Output encoding
+	encoding = 'utf-8'
+
+	# Environment variables
+	env = {}
+
+	# Flag to take the input
+	input_flag = None
+
+	# Input field (mostly for tests and CLI)
+	input_type = None
+
+	# Input path (if a file is constructed)
+	input_path = None
+
+	# Input chunk size (default None)
+	input_chunk_size = None
+
+	# Flag to take a file as input
+	file_flag = None
+
+	# Flag to enable output JSON
+	json_flag = None
+
+	# Install command
+	install_cmd = None
+
+	# Serializer
+	item_loader = JSONSerializer()
+
+	# Ignore return code
+	ignore_return_code = False
+
+	def __init__(self, input=None, **cmd_opts):
+		super().__init__(input, **cmd_opts)
+
+		# Build command input
+		self._build_cmd_input()
+
+		# Build command
+		self._build_cmd()
+
+	@classmethod
+	def delay(cls, *args, **kwargs):
+		# TODO: Move this to RunnerBase
+		from secsy.celery import run_command
+
+		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
+		kwargs['sync'] = False
+		results = kwargs.get('results', [])
+		return run_command.delay(results, cls.__name__, *args, opts=kwargs)
+
+	@classmethod
+	def s(cls, *args, **kwargs):
+		# TODO: Move this to RunnerBase
+		from secsy.celery import run_command
+		return run_command.s(cls.__name__, *args, opts=kwargs)
+
+	@classmethod
+	def si(cls, results, *args, **kwargs):
+		# TODO: Move this to RunnerBase
+		from secsy.celery import run_command
+		return run_command.si(results, cls.__name__, *args, opts=kwargs)
+
+	@classmethod
+	def poll(cls, result):
+		# TODO: Move this to RunnerBase
+		from time import sleep
+
+		while not result.ready():
+			data = AsyncResult(result.id).info
+			if DEBUG > 1 and isinstance(data, dict):
+				print(data)
+			sleep(1)
+		return result.get()
+
+	def get_opt_value(self, opt_name):
+		return Command._get_opt_value(
+			self.cmd_opts,
+			opt_name,
+			dict(self.opts, **self.meta_opts),
+			opt_prefix=self.name)
 
 	#---------------#
 	# Class methods #
@@ -364,7 +594,7 @@ class Command:
 	#----------#
 	# Internal #
 	#----------#
-	def _run_command(self):
+	def yielder(self):
 		"""Run command and yields its output in real-time. Also saves the command line, return code and output to the
 		database.
 
@@ -415,6 +645,7 @@ class Command:
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
+
 		except FileNotFoundError as e:
 			if self.name in str(e):
 				error = f'{self.name} not installed.'
@@ -461,31 +692,17 @@ class Command:
 					else:
 						items = self.item_loader.run(line)
 
-				# Process dict item or line
+				# Print line if no items parsed
+				if not items and not self.quiet:
+					yield line
+
+				# Turn results into list if not already a list
+				elif not isinstance(items, list):
+					items = [items]
+
+				# Yield items
 				if items:
-					if not isinstance(items, list):
-						items = [items]
-					for item in items:
-						item = self._process_item(item)
-						if not item:
-							continue
-						yield item
-				elif line:
-					if self._print_line and not (self.quiet and self._json_output):
-						self._print(line, out=sys.stderr)
-					if self.output_return_type is not dict:
-						self.results.append(line)
-						yield line
-
-				# Stop on first match
-				if self._stop_on_first_match and len(self.results) == 1:
-					process.kill()
-					self.killed = True
-					break
-
-				# Add the log line to the output
-				if line:
-					self.output += line + '\n'
+					yield from items
 
 		except KeyboardInterrupt:
 			process.kill()
@@ -520,118 +737,11 @@ class Command:
 
 		self.run_hooks('on_end')
 
-	def _configure_proxy(self):
-		"""Configure proxy. Start with global settings like 'proxychains' or 'random', or fallback to tool-specific
-		proxy settings.
-
-		TODO: Move this to a subclass of Command, or to a configurable attribute to pass to derived classes as it's not
-		related to core functionality.
-		"""
-		proxy_opt = self.opt_key_map.get('proxy', False)
-		support_proxychains = getattr(self, 'proxychains', True)
-		proxychains_flavor = getattr(self, 'proxychains_flavor', 'proxychains')
-		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
-		if self.proxy == 'proxychains':
-			if not support_proxychains:
-				return
-			self.cmd = f'{proxychains_flavor} {self.cmd}'
-		elif self.proxy and support_proxy:
-			if self.proxy == 'random':
-				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
-			else:  # tool-specific proxy settings
-				self.cmd_opts['proxy'] = self.proxy
-
-	def _get_results_count(self):
-		count_map = {}
-		for output_type in self.output_types:
-			name = output_type.get_name()
-			count = len([r for r in self.results if r._type == name])
-			count_map[name] = count
-		return count_map
-
-	def _process_results(self):
-		# TODO: this is only for logging timestamp to show up properly !!!
-		if self._print_timestamp:
-			sleep(1)
-
-		# Log results count
-		if self._print_item_count and self._json_output and not self._raw_output and not self._orig_output:
-			count_map = self._get_results_count()
-			if all(count == 0 for count in count_map.values()):
-				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
-			else:
-				results_str = ':pill: Found ' + ' and '.join([
-					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
-					for name, count in count_map.items()
-				]) + '.'
-				self._print(results_str, color='bold green')
-
-		# Print table if in table mode
-		if self._table_output and self.results and len(self.results) > 0:
-			if isinstance(self.results[0], str):
-				self._print('\n'.join(self.results))
-			else:
-				self._print(self.results, out=sys.stdout)
-
-	def _process_item(self, item: dict):
-		# Run item validators
-		if not self.run_validators('item', item):
-			return None
-
-		# Run item hooks
-		item = self.run_hooks('on_item', item)
-		if not item:
-			return None
-
-		# Convert output dict to another schema
-		if not self._orig_output:
-			item = self._convert_item_schema(item)
-
-			# Run item convert hooks
-			item = self.run_hooks('on_item_converted', item)
-		else:
-			item = DotMap(item)
-
-		# Add item to result
-		self.results.append(item)
-
-		# Item to print
-		item_str = item
-
-		# In raw mode, print principal key or output format field.
-		if self._raw_output:
-			item_str = self._rawify(item)
-
-		# In raw yield mode, extract principal key from dict (default 'on' for library usage)
-		if self._raw_yield:
-			item = self._rawify(item)
-			item_str = item
-
-		# Print item to console or log
-		if self._print_item and self._json_output and not self._table_output:
-			self._print(item_str, out=sys.stdout)
-
-		# Return item
-		return item
-
-	def _rawify(self, item=None):
-		if not item:
-			return [
-				self._rawify(item)
-				for item in self.results
-			]
-		if self._raw_output:
-			if self._format_output:
-				item = self._format_output.format(**item)
-			elif isinstance(item, OutputType):
-				item = str(item)
-		return item
-
 	@staticmethod
 	def _process_opts(
 			opts,
 			opts_conf,
-			opt_keys={},
+			opt_key_map={},
 			opt_value_map={},
 			opt_prefix='-',
 			command_name=None):
@@ -667,9 +777,9 @@ class Command:
 				opt_val = mapped_opt_val
 
 			# Convert opt name to expected command opt name
-			mapped_opt_name = opt_keys.get(opt_name)
+			mapped_opt_name = opt_key_map.get(opt_name)
 			if mapped_opt_name == OPT_NOT_SUPPORTED:
-				logger.debug(f'Option {opt_name} was passed but is unsupported. Skipping.')
+				# logger.debug(f'Option {opt_name} was passed but is unsupported. Skipping.')
 				continue
 			elif mapped_opt_name is not None:
 				opt_name = mapped_opt_name
@@ -784,95 +894,3 @@ class Command:
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
 		self.input = input
-
-	def _convert_item_schema(self, item):
-		"""Convert dict item to a new structure using the class output schema.
-
-		Args:
-			item (dict): Item.
-
-		Returns:
-			dict: Item with new schema.
-		"""
-		# Load item using available output types and get the first matching
-		# output type based on the schema
-		new_item = None
-		output_types = getattr(self, 'output_types', [])
-		for klass in output_types:
-			output_map = self.output_map.get(klass, {})
-			try:
-				new_item = klass.load(item, output_map)
-				break  # found an item that fits
-			except TypeError as e:  # can't load using class
-				logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
-				continue
-
-		# No output type was found, so make no conversion
-		if not new_item:
-			new_item = DotMap(item)
-			new_item._type = 'unknown'
-
-		# Add source to item
-		new_item._source = self.name
-
-		return new_item
-
-	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
-		"""Print function.
-
-		Args:
-			data (str or dict): Input data.
-			color (str, Optional): Termcolor color.
-			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
-			ignore_raw (bool, Optional): Ignore raw mode.
-			ignore_log (bool, Optional): Ignore log stamps.
-		"""
-		# Choose rich console
-		_console = console_stdout if out == sys.stdout else console
-		log_json = console.print_json
-		log = console.log if self._print_timestamp else _console.print
-
-		# Print a rich table
-		if self._table_output and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
-			print_results_table(self.results)
-
-		# Print a JSON item
-		elif isinstance(data, (OutputType, DotMap, dict)):
-			# If object has a 'toDict' method, use it
-			if getattr(data, 'toDict', None):
-				data = data.toDict()
-
-			# JSON dumps data so that it's consumable by other commands
-			data = json.dumps(data)
-
-			# Add prefix to output
-			data = f'{self.prefix:>15} {data}' if self.prefix and not self._print_item else data
-
-			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
-			# user intent to use it for visualizing results.
-			log_json(data) if self.color and self._print_item else _console.print(data, highlight=False)
-
-		# Print a line
-		else:
-			# If orig mode (--orig) ir raw mode (--raw), we might want to parse results with e.g pipe redirections, so
-			# we need a pure line with no logging info.
-			if ignore_log or (not ignore_raw and (self._orig_output or self._raw_output)):
-				data = f'{self.prefix} {data}' if self.prefix and not self._print_item else data
-				_console.print(data, highlight=False, style=color)
-			else:
-				# data = escape(data)
-				# data = Text.from_ansi(data)
-				if color:
-					data = f'[{color}]{data}[/]'
-				data = f'{self.prefix} {data}' if self.prefix else data
-				try:
-					log(data)
-				except:  # noqa: E722
-					print(data)
-
-	def _set_print_prefix(self):
-		self.prefix = ''
-		if self._print_cmd_prefix:
-			self.prefix = f'[bold gold3]({self.name})[/]'
-		if self.chunk and self.chunk_count:
-			self.prefix += f' [{self.chunk}/{self.chunk_count}]'

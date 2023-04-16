@@ -1,23 +1,23 @@
-from celery import chain, chord
+from celery import chain
 from secsy.celery import app
 from secsy.tasks import httpx
 import unittest
 import json
 from secsy.definitions import DEBUG
-from secsy.utils_test import mock_command, FIXTURES, TEST_COMMANDS
+from secsy.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS
 from secsy.celery import forward_results
 from secsy.rich import console
 
 TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
 
 
-class TestCommandWorkflow(unittest.TestCase):
+class TestAdHocWorkflow(unittest.TestCase):
 
 	def test_chain(self):
-		if not 'httpx' in TEST_COMMANDS:
+		if not httpx in TEST_TASKS:
 			return
 
-		with mock_command(httpx, fixture=[FIXTURES[httpx]] * len(TARGETS)):
+		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(TARGETS)):
 			sigs = [forward_results.si([])] + [httpx.s(target) for target in TARGETS]
 			workflow = chain(*sigs)
 			result = workflow.apply()
@@ -42,7 +42,7 @@ class TestCommandWorkflow(unittest.TestCase):
 	# 		"_source": "httpx",
 	# 		"_type": "url"
 	# 	}]
-	# 	with mock_command(httpx, fixture=[FIXTURES[httpx]] * len(TARGETS)):
+	# 	with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(TARGETS)):
 	# 		sigs = [httpx.s(target) for target in TARGETS]
 	# 		sigs = [forward_results.si(existing_results)] + sigs
 	# 		workflow = chain(*sigs)

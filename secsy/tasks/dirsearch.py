@@ -2,17 +2,22 @@ import os
 
 import yaml
 
+from secsy.decorators import task
 from secsy.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
-							   FOLLOW_REDIRECT, HEADER, MATCH_CODES, METHOD,
-							   PROXY, RATE_LIMIT, RETRIES, STATUS_CODE,
-							   TEMP_FOLDER, THREADS, TIMEOUT, USER_AGENT,
-							   WORDLIST)
+							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
+							   MATCH_CODES, MATCH_REGEX,
+							   MATCH_SIZE, MATCH_WORDS, METHOD,
+							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+							   STATUS_CODE, TEMP_FOLDER, THREADS, TIMEOUT,
+							   USER_AGENT, WORDLIST)
 from secsy.output_types import Url
-from secsy.tasks._categories import HTTPCommand
+from secsy.tasks._categories import HttpFuzzer
 from secsy.utils import get_file_timestamp
 
 
-class dirsearch(HTTPCommand):
+@task()
+class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
 	cmd = 'dirsearch -q'
 	input_flag = '-u'
@@ -20,17 +25,19 @@ class dirsearch(HTTPCommand):
 	json_flag = '--format json'
 	opt_prefix = '--'
 	encoding = 'ansi'
-	opts = {
-		'exclude_status': {'type': str, 'short': 'fc', 'help': 'Exclude responses by code'},
-		'exclude_regex': {'type': str, 'short': 'fr', 'help': 'Exclude responses by regular expression'},
-		WORDLIST: {'type': str, 'short': 'w', 'help': 'Dirsearch wordlist'}
-	}
 	opt_key_map = {
 		HEADER: 'header',
 		DELAY: 'delay',
 		DEPTH: 'max-recursion-depth',
+		FILTER_CODES: 'exclude-status',
+		FILTER_REGEX: 'exclude-regex',
+		FILTER_SIZE: 'exclude-sizes',
+		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: 'follow-redirects',
 		MATCH_CODES: 'include-status',
+		MATCH_REGEX: OPT_NOT_SUPPORTED,
+		MATCH_SIZE: OPT_NOT_SUPPORTED,
+		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		METHOD: 'http-method',
 		PROXY: 'proxy',
 		RATE_LIMIT: 'max-rate',
@@ -38,7 +45,7 @@ class dirsearch(HTTPCommand):
 		THREADS: 'threads',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent',
-		WORDLIST: 'wordlists'
+		WORDLIST: 'wordlists',
 	}
 	output_map = {
 		Url: {

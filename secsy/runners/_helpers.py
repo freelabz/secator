@@ -66,9 +66,8 @@ def process_extractor(results, extractor, ctx={}):
 	]
 	if _field:
 		_field = '{' + _field + '}' if not _field.startswith('{') else _field
-		return [_field.format(**item.toDict()) for item in items]
-	else:
-		return items
+		items = [_field.format(**item.toDict()) for item in items]
+	return items
 
 
 def get_task_ids(result, ids=[]):
@@ -97,6 +96,14 @@ def get_task_ids(result, ids=[]):
 
 
 def get_task_info(task_id):
+	"""Get task info.
+
+	Args:
+		task_id (str): Celery task id.
+
+	Returns:
+		dict: Task info (id, name, state, results, chunk_info, count, error, ready).
+	"""
 	res = AsyncResult(task_id)
 	if not (res and res.args and len(res.args) > 1):
 		return
@@ -124,6 +131,11 @@ def get_task_info(task_id):
 
 
 def confirm_exit(func):
+	"""Decorator asking user for confirmation to exit.
+
+	Args:
+		func (func): Decorated function.
+	"""
 	def inner_function(self, *args, **kwargs):
 		try:
 			func(self, *args, **kwargs)
