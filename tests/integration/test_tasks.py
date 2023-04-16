@@ -48,7 +48,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'dirsearch.filter_size': 1987,
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 			'match_codes': '200',
-			'maigret.sit': 'github',
+			'maigret.site': 'github',
 			'nmap.port': '3000,8080'
 		}
 
