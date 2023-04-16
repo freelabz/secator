@@ -1,5 +1,4 @@
 import os
-import sys
 from collections import OrderedDict
 
 import rich_click as click
@@ -10,7 +9,7 @@ from secsy.celery import is_celery_worker_alive
 from secsy.definitions import OPT_NOT_SUPPORTED
 from secsy.runners import Scan, Task, Workflow
 from secsy.utils import (expand_input, get_command_category,
-						 get_command_cls, import_dynamic)
+						 get_command_cls, deduplicate)
 
 RUNNER_OPTS = {
 	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
@@ -89,14 +88,17 @@ def get_command_options(*tasks):
 		opts = OrderedDict(RUNNER_GLOBAL_OPTS, **RUNNER_OPTS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
 
+			# Get opt key map if any
+			opt_key_map = getattr(cls, 'opt_key_map', {})
+
 			# Opt is not supported by this task
-			if opt not in cls.opt_key_map\
+			if opt not in opt_key_map\
 				and opt not in cls.opts\
 				and opt not in RUNNER_OPTS\
 				and opt not in RUNNER_GLOBAL_OPTS:
 				continue
 
-			if cls.opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
+			if opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
 				continue
 
 			# Get opt prefix
@@ -104,6 +106,9 @@ def get_command_options(*tasks):
 			if opt in cls.opts:
 				prefix = cls.__name__
 			elif opt in cls.meta_opts:
+				# TODO: Add options categories
+				# category = get_command_category(cls)
+				# prefix = category
 				prefix = 'Meta'
 			elif opt in RUNNER_OPTS:
 				prefix = 'Output'
@@ -144,6 +149,13 @@ def decorate_command_options(opts):
 			short = f'-{short}' if short else f'-{opt_name}'
 			f = click.option(long, short, **conf)(f)
 		return f
+	return decorator
+
+
+def task():
+	def decorator(cls):
+		cls.__task__ = True
+		return cls
 	return decorator
 
 
@@ -198,7 +210,7 @@ def register_runner(cli_endpoint, config):
 		task_category = get_command_category(task_cls)
 		input_type = task_cls.input_type or 'targets'
 		name = config.name
-		short_help = f'[dim italic magenta]{task_category:<10}[/]{task_cls.__doc__}'
+		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
 		fmt_opts['print_item'] = True
 		fmt_opts['print_line'] = True
 		runner_cls = Task
@@ -235,9 +247,6 @@ def register_runner(cli_endpoint, config):
 			opts['print_line'] = debug > 1
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
-		if input is None:
-			click.echo(ctx.get_help())
-			sys.exit(0)
 		if sync:
 			sync = True
 		elif worker:
@@ -248,14 +257,7 @@ def register_runner(cli_endpoint, config):
 			sync = True
 
 		# Build exporters
-		exporters = []
-		if opts['output']:
-			exporters = [
-				import_dynamic(f'secsy.exporters.{o.capitalize()}Exporter', 'Exporter')
-				for o in opts['output'].split(',')
-			]
-			exporters = [e for e in exporters if e]
-		runner = runner_cls(config, targets, workspace_name=ws, exporters=exporters, **opts)
+		runner = runner_cls(config, targets, workspace_name=ws, **opts)
 		runner.run(sync=sync)
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}
@@ -269,7 +271,6 @@ def register_runner(cli_endpoint, config):
 
 
 def generate_rich_click_opt_groups(cli_endpoint, name, input_type, options):
-	from secsy.utils import deduplicate
 	sortorder = {
 		'Execution': 0,
 		'Output': 1,

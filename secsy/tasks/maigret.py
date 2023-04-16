@@ -3,17 +3,19 @@ import logging
 import os
 import re
 
+from secsy.decorators import task
 from secsy.definitions import (DELAY, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
 							   RETRIES, SITE_NAME, THREADS, TIMEOUT, URL,
 							   USERNAME)
 from secsy.output_types import UserAccount
-from secsy.tasks._categories import ReconCommand
+from secsy.tasks._categories import ReconUser
 
 
 logger = logging.getLogger(__name__)
 
 
-class maigret(ReconCommand):
+@task()
+class maigret(ReconUser):
 	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
 	file_flag = None
@@ -49,7 +51,7 @@ class maigret(ReconCommand):
 			return
 		self.results = []
 		if not self.output_path:
-			match = re.search('JSON ndjson report for ocervell saved in (.*)', self.output)
+			match = re.search('JSON ndjson report for .* saved in (.*)', self.output)
 			if match is None:
 				logger.warning('JSON output file not found in command output.')
 				return

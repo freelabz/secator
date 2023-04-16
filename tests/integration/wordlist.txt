@@ -1,4 +1,14 @@
-ftp/
-video/
-api-docs/
 .well-known/security.txt
+api-docs/
+assets/public/favicon_js.ico
+ftp
+ftp/
+main.js
+polyfills.js
+robots.txt
+runtime.js
+sitemap.xml
+snippets
+styles.css
+video
+video/

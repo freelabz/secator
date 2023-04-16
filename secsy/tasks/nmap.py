@@ -4,6 +4,7 @@ import re
 
 import xmltodict
 
+from secsy.decorators import task
 from secsy.definitions import (DELAY, EXTRA_DATA, FOLLOW_REDIRECT, HEADER,
 							   HOST, IP, OPT_NOT_SUPPORTED, PORT, PORTS, PROXY,
 							   RATE_LIMIT, RETRIES, SCRIPT, TEMP_FOLDER,
@@ -13,13 +14,14 @@ from secsy.definitions import (DELAY, EXTRA_DATA, FOLLOW_REDIRECT, HEADER,
 							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
 							   VULN_REFERENCES, VULN_TAGS)
 from secsy.output_types import Port, Vulnerability
-from secsy.tasks._categories import VulnCommand
+from secsy.tasks._categories import VulnMulti
 from secsy.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
 
-class nmap(VulnCommand):
+@task()
+class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery
 	and security auditing."""
 	cmd = 'nmap -sT -sV -Pn'
@@ -145,7 +147,7 @@ class nmapData(dict):
 						VULN_EXTRACTED_RESULTS: extracted_results,
 					}
 					if not func:
-						logger.debug(f'Script output parser for "{script_id}" is not supported YET.')
+						# logger.debug(f'Script output parser for "{script_id}" is not supported YET.')
 						continue
 					for vuln in func(output, cpes=cpes):
 						vuln.update(metadata)
@@ -261,12 +263,12 @@ class nmapData(dict):
 				VULN_TAGS: [vuln_id, provider_name]
 			}
 			if provider_name == 'MITRE CVE':
-				vuln_data = VulnCommand.lookup_cve(vuln['id'], cpes=cpes)
+				vuln_data = VulnMulti.lookup_cve(vuln['id'], cpes=cpes)
 				if vuln_data:
 					vuln.update(vuln_data)
 				yield vuln
 			else:
-				logger.debug(f'Vulscan provider {provider_name} is not supported YET.')
+				# logger.debug(f'Vulscan provider {provider_name} is not supported YET.')
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
@@ -304,7 +306,7 @@ class nmapData(dict):
 				}
 				if vuln_type == 'CVE':
 					vuln[VULN_TAGS].append('cve')
-					vuln_data = VulnCommand.lookup_cve(vuln_id, cpes=[cpe])
+					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=[cpe])
 					if vuln_data:
 						vuln.update(vuln_data)
 					yield vuln

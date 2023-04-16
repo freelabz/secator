@@ -36,7 +36,7 @@ host_recon mydomain.com
 
 **Ad-hoc discovery:**
 
-```
+```sh
 # pipe naabu and httpx to find all alive HTTP servers available on the host
 secsy x naabu mydomain.com | secsy x httpx -mc 200 -table
 
@@ -58,7 +58,7 @@ secsy z default mydomain.com --worker
 ```
 
 **Callbacks (library mode):**
-```
+```py
 from secsy.runners import Workflow
 from secsy.config import ConfigLoader
 

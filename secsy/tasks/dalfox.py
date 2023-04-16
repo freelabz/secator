@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 
+from secsy.decorators import task
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, METHOD,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, THREADS,
 							   TIMEOUT, URL, USER_AGENT, VULN_CONFIDENCE,
@@ -7,7 +8,7 @@ from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, METHOD,
 							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
 							   VULN_SEVERITY, VULN_TAGS)
 from secsy.output_types import Vulnerability
-from secsy.tasks._categories import VulnCommand
+from secsy.tasks._categories import VulnHttp
 
 
 DALFOX_TYPE_MAP = {
@@ -17,7 +18,8 @@ DALFOX_TYPE_MAP = {
 }
 
 
-class dalfox(VulnCommand):
+@task()
+class dalfox(VulnHttp):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox --silence'
 	input_type = URL

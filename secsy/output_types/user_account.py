@@ -11,7 +11,7 @@ class UserAccount(OutputType):
 	url: str = ''
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='user_account', repr=True)
-	_uuid: str = field(default='', repr=True)
+	_uuid: str = field(default='', repr=True, compare=False)
 
 	_table_fields = [SITE_NAME, USERNAME, URL]
 	_sort_by = (URL, USERNAME)

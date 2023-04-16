@@ -1,8 +1,52 @@
 name: url_vuln
 alias: url_vuln
-description: Search URL vulnerabilities
+description: Search for URL vulnerabilities
 tags: [http, vulnerability]
 tasks:
-  nuclei:
-    description: Searching for vulnerabilities on alive HTTP services
-    exclude_tags: [network, ssl, file, dns, osint, token-spray]
+  _group:
+    gf/xss:
+      description: Hunting XSS params
+      pattern: xss
+    gf/lfi:
+      description: Hunting LFI params
+      pattern: lfi
+    gf/ssrf:
+      description: Hunting SSRF params
+      pattern: ssrf
+    gf/rce:
+      description: Hunting RCE params
+      pattern: rce
+    gf/interestingparams:
+      description: Hunting interesting params
+      pattern: interestingparams
+    gf/idor:
+      description: Hunting Idor params
+      pattern: idor
+    gf/debug_logic:
+      description: Hunting debug params
+      pattern: debug_logic
+
+  dalfox:
+    description: Attack XSS vulnerabilities
+    targets_:
+      - type: tag
+        field: match
+        condition: item.name in ['xss', 'lfi']
+
+  # TODO: Add support for SQLMap
+  # sqlmap:
+  #   description: Attack SQLI vulnerabilities
+  #   targets_:
+  #     - type: tag
+  #       field: match
+  #       condition: item.name in ['sqli']
+
+  # TODO: Make this work, need transform functions to replace a parameter fetched dynamically by the keyword 'FUZZ'
+  # ffuf:
+  #   description: Attack LFI vulnerabilities
+  #   targets_:
+  #     - type: tag
+  #       field: match
+  #       transform:
+  #         qsreplace: FUZZ
+  #       condition: item.name in ['lfi']

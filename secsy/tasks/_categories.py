@@ -6,14 +6,18 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secsy.definitions import (DELAY, DEPTH, FOLLOW_REDIRECT, HEADER, HOST,
-							   MATCH_CODES, METHOD, PROXY, RATE_LIMIT, RETRIES,
-							   TEMP_FOLDER, THREADS, TIMEOUT, URL, USER_AGENT,
-							   VULN_CONFIDENCE, VULN_CVSS_SCORE,
-							   VULN_DESCRIPTION, VULN_ID, VULN_NAME,
-							   VULN_PROVIDER, VULN_REFERENCES, VULN_SEVERITY,
-							   VULN_TAGS)
-from secsy.output_types import Url, Vulnerability
+from secsy.definitions import (CIDR_RANGE, DEFAULT_WORDLIST, DELAY, DEPTH,
+							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
+							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   MATCH_WORDS, METHOD, PATH, PROXY, RATE_LIMIT,
+							   RETRIES, TEMP_FOLDER, THREADS, TIMEOUT, URL,
+							   USER_AGENT, USERNAME, VULN_CONFIDENCE,
+							   VULN_CVSS_SCORE, VULN_DESCRIPTION, VULN_ID,
+							   VULN_NAME, VULN_PROVIDER, VULN_REFERENCES,
+							   VULN_SEVERITY, VULN_TAGS, WORDLIST)
+from secsy.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
+								Vulnerability)
 from secsy.runners import Command
 
 logger = logging.getLogger(__name__)
@@ -21,9 +25,16 @@ logger = logging.getLogger(__name__)
 OPTS = {
 	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
-	DEPTH: {'type': int, 'help': 'Scan / crawl depth'},
+	DEPTH: {'type': int, 'help': 'Scan depth'},
+	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
+	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
+	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
+	FILTER_WORDS: {'type': str, 'short': 'fw', 'help': 'Filter out responses with word count'},
 	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'fr', 'help': 'Follow HTTP redirects'},
 	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
+	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
+	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match respones with size'},
+	MATCH_WORDS: {'type': str, 'short': 'mw', 'help': 'Match responses with word count'},
 	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
@@ -31,53 +42,86 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
+	WORDLIST: {'type': str, 'short': 'wl', 'default': DEFAULT_WORDLIST, 'help': 'Wordlist to use'}
 }
 
+OPTS_HTTP = [
+	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
+]
 
-class HTTPCommand(Command):
-	meta_opts = {
-		HEADER: OPTS[HEADER],
-		DELAY: OPTS[DELAY],
-		DEPTH: OPTS[DEPTH],
-		FOLLOW_REDIRECT: OPTS[FOLLOW_REDIRECT],
-		MATCH_CODES: OPTS[MATCH_CODES],
-		METHOD: OPTS[METHOD],
-		PROXY: OPTS[PROXY],
-		RATE_LIMIT: OPTS[RATE_LIMIT],
-		RETRIES: OPTS[RETRIES],
-		THREADS: OPTS[THREADS],
-		TIMEOUT: OPTS[TIMEOUT],
-		USER_AGENT: OPTS[USER_AGENT],
-	}
+OPTS_HTTP_CRAWLERS = OPTS_HTTP + [
+	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
+	MATCH_CODES
+]
+
+OPTS_HTTP_FUZZERS = OPTS_HTTP_CRAWLERS + [WORDLIST]
+
+OPTS_RECON = [
+	DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
+]
+
+OPTS_VULN = [
+	HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
+]
+
+
+#---------------#
+# HTTP category #
+#---------------#
+
+class Http(Command):
+	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
 	input_type = URL
 	output_types = [Url]
 
 
-class ReconCommand(Command):
-	meta_opts = {
-		DELAY: OPTS[DELAY],
-		PROXY: OPTS[PROXY],
-		RATE_LIMIT: OPTS[RATE_LIMIT],
-		RETRIES: OPTS[RETRIES],
-		THREADS: OPTS[THREADS],
-		TIMEOUT: OPTS[TIMEOUT],
-	}
-	input_type = HOST
+class HttpCrawler(Command):
+	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
+	input_type = URL
+	output_types = [Url]
 
 
-class VulnCommand(Command):
-	meta_opts = {
-		HEADER: OPTS[HEADER],
-		DELAY: OPTS[DELAY],
-		FOLLOW_REDIRECT: OPTS[FOLLOW_REDIRECT],
-		PROXY: OPTS[PROXY],
-		RATE_LIMIT: OPTS[RATE_LIMIT],
-		RETRIES: OPTS[RETRIES],
-		THREADS: OPTS[THREADS],
-		TIMEOUT: OPTS[TIMEOUT],
-		USER_AGENT: OPTS[USER_AGENT]
-	}
+class HttpFuzzer(Command):
+	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
+	input_type = URL
+	output_types = [Url]
+
+
+#----------------#
+# Recon category #
+#----------------#
+
+class Recon(Command):
+	meta_opts = {k: OPTS[k] for k in OPTS_RECON}
+	output_types = [Subdomain, UserAccount, Ip, Port]
+
+
+class ReconDns(Recon):
 	input_type = HOST
+	output_types = [Subdomain]
+
+
+class ReconUser(Recon):
+	input_type = USERNAME
+	output_types = [UserAccount]
+
+
+class ReconIp(Recon):
+	input_type = CIDR_RANGE
+	output_types = [Ip]
+
+
+class ReconPort(Recon):
+	input_type = HOST
+	output_types = [Port]
+
+
+#---------------#
+# Vuln category #
+#---------------#
+
+class Vuln(Command):
+	meta_opts = {k: OPTS[k] for k in OPTS_VULN}
 	output_types = [Vulnerability]
 
 	@staticmethod
@@ -99,9 +143,9 @@ class VulnCommand(Command):
 		Returns:
 			dict: vulnerability data.
 		"""
-		cve_info = VulnCommand.lookup_local_cve(cve_id)
+		cve_info = Vuln.lookup_local_cve(cve_id)
 		if not cve_info:
-			logger.debug(f'{cve_id} not found locally. Use `secsy utils download-cves` to update the local database.')
+			# logger.debug(f'{cve_id} not found locally. Use `secsy utils download-cves` to update the local database.')
 			try:
 				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
 				if not cve_info:
@@ -126,7 +170,7 @@ class VulnCommand(Command):
 				cpe_fs = cpe_obj.as_fs()
 				# cpe_version = cpe_obj.get_version()[0]
 				vulnerable_fs = cve_info['vulnerable_product']
-				logger.debug(f'Matching CPE {cpe} against {len(vulnerable_fs)} vulnerable products for {cve_id}')
+				# logger.debug(f'Matching CPE {cpe} against {len(vulnerable_fs)} vulnerable products for {cve_id}')
 				for fs in vulnerable_fs:
 					if fs == cpe_fs:
 						# logger.debug(f'Found matching CPE FS {cpe_fs} ! The CPE is vulnerable to CVE {cve_id}')
@@ -209,6 +253,28 @@ class VulnCommand(Command):
 		soup = BeautifulSoup(response.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
-		data = VulnCommand.lookup_cve(cve_id)
+		data = Vuln.lookup_cve(cve_id)
 		data[VULN_TAGS].append('ghsa')
 		return data
+
+
+class VulnHttp(Vuln):
+	input_type = HOST
+
+
+class VulnCode(Vuln):
+	input_type = PATH
+
+
+class VulnMulti(Vuln):
+	input_type = HOST
+	output_types = [Vulnerability]
+
+
+#--------------#
+# Tag category #
+#--------------#
+
+class Tagger(Command):
+	input_type = URL
+	output_types = [Tag]

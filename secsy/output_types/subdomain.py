@@ -12,7 +12,7 @@ class Subdomain(OutputType):
 	sources: List[str] = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='subdomain', repr=True)
-	_uuid: str = field(default='', repr=True)
+	_uuid: str = field(default='', repr=True, compare=False)
 
 	_table_fields = [
 		HOST,

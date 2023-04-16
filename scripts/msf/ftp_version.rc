@@ -1,5 +1,5 @@
-setg RHOST {host}
-setg RHOSTS {host}
+setg RHOST {RHOST}
+setg RHOSTS {RHOSTS}
 use auxiliary/scanner/ftp/ftp_version
 run
 exit

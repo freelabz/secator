@@ -1,6 +1,6 @@
 from secsy.definitions import CIDR_RANGE, HOST, IP, ROOT_FOLDER, URL, USERNAME
 
-INPUTS = {
+INPUTS_TASKS = {
     URL: f'http://localhost:3000/',
     HOST: 'localhost',
     USERNAME: 'ocervell',
@@ -14,4 +14,24 @@ INPUTS = {
     'grype': ROOT_FOLDER,
     'nuclei': 'http://localhost:3000/',
     'subfinder': 'api.github.com'
+}
+
+INPUTS_WORKFLOWS = {
+	'cidr_recon': '127.0.0.1/30',
+    'code_scan': ROOT_FOLDER,
+    # 'dir_finder': 'localhost:3000',  # TODO: add fixture with directories
+    'host_recon': 'localhost',
+	'subdomain_recon': 'api.github.com',
+    'url_crawl': 'localhost:3000',
+    'url_fuzz': 'http://localhost:3000',
+    'url_nuclei': ['http://localhost:3000', 'http://localhost:8080'],
+    'url_vuln': ['http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff', 'https://www.hahwul.com/?q=123'],
+    'user_hunt': 'ocervell'
+}
+
+INPUTS_SCANS = {
+    'domain': 'testphp.vulnweb.com',
+    'host': 'localhost',
+    'network': '127.0.0.1/24',
+    'url': ['http://localhost:3000', 'http://localhost:8080']
 }

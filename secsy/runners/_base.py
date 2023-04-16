@@ -13,7 +13,7 @@ from secsy.report import Report
 from secsy.rich import console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
 									process_extractor)
-from secsy.utils import merge_opts
+from secsy.utils import merge_opts, import_dynamic
 
 
 class Runner:
@@ -24,7 +24,6 @@ class Runner:
 		targets (list): List of targets to run task on.
 		results (list): List of existing results to re-use.
 		workspace_name (str): Workspace name.
-		expoters (list): List of exporter classes to use.
 		run_opts (dict): Run options.
 
 	Yields:
@@ -36,18 +35,29 @@ class Runner:
 
 	DEFAULT_EXPORTERS = []
 
-	def __init__(self, config, targets, results=[], workspace_name=None, exporters=[], **run_opts):
+	def __init__(self, config, targets, results=[], workspace_name=None, **run_opts):
 		self.config = config
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
 		self.results = results
 		self.workspace_name = workspace_name
-		self.exporters = exporters or self.DEFAULT_EXPORTERS
 		self.run_opts = run_opts
+		self.exporters = self.resolve_exporters() or self.DEFAULT_EXPORTERS
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.errors = []
+
+	def resolve_exporters(self):
+		"""Resolve exporters from output options."""
+		output = self.run_opts.get('output', None)
+		if not output:
+			return []
+		exporters = [
+			import_dynamic(f'secsy.exporters.{o.capitalize()}Exporter', 'Exporter')
+			for o in output.split(',')
+		]
+		return [e for e in exporters if e]
 
 	def log_start(self):
 		"""Log runner start."""
@@ -58,8 +68,9 @@ class Runner:
 			f':tada: [bold green]{runner_name}[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
 
 	def log_header(self):
+		"""Log runner header."""
 		runner_name = self.__class__.__name__
-		opts = merge_opts(self.run_opts, self.config.options)
+		opts = merge_opts(self.config.options, self.run_opts)
 		console.print()
 
 		# Description
@@ -146,7 +157,7 @@ class Runner:
 			result (celery.result.AsyncResult): Result object.
 
 		Yields:
-			dict: Current task state and results.
+			dict: Subtasks state and results.
 		"""
 		res = AsyncResult(result.id)
 		while True:
@@ -166,6 +177,14 @@ class Runner:
 			sleep(1)
 
 	def process_live_tasks(self, result):
+		"""Rich progress indicator showing live tasks statuses.
+
+		Args:
+			result (AsyncResult | GroupResult): Celery result.
+
+		Yields:
+			dict: Subtasks state and results.
+		"""
 		tasks_progress = Progress(
 			TextColumn('  '),
 			SpinnerColumn('dots'),
@@ -226,7 +245,7 @@ class Runner:
 				progress.update(progress_id, advance=100)
 
 	def filter_results(self):
-		"""Filter results."""
+		"""Filter runner results using extractors defined in config."""
 		extractors = self.config.results
 		results = []
 		if extractors:

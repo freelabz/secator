@@ -58,7 +58,6 @@ class Scan(Runner):
 			workflow = Workflow(
 				ConfigLoader(name=f'workflows/{name}'),
 				targets,
-				exporters=self.exporters,
 				workspace_name=self.workspace_name,
 				**self.run_opts
 			)
