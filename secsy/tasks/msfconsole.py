@@ -2,6 +2,8 @@
 
 import logging
 
+from rich.panel import Panel
+
 from secsy.decorators import task
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
@@ -76,7 +78,7 @@ class msfconsole(VulnMulti):
 
 			# Read from original resource script
 			with open(script_path, 'r') as f:
-				content = f.read().replace('exit', '') + '\nexit\n'
+				content = f.read().replace('exit', '') + 'exit'
 
 			# Make a copy and replace vars inside by env vars passed on the CLI
 			timestr = get_file_timestamp()
@@ -88,7 +90,8 @@ class msfconsole(VulnMulti):
 				content = content.format(**env_vars)
 				f.write(content)
 
-			self._print(content)
+			script_name = script_path.split('/')[-1]
+			self._print(Panel(content, title=f'[bold magenta]{script_name}', expand=False))
 
 			# Override original command with new resource script
 			self.cmd_opts['msfconsole.resource'] = out_path
