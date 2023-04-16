@@ -1,6 +1,6 @@
 from secsy.definitions import CIDR_RANGE, HOST, IP, ROOT_FOLDER, URL, USERNAME
 
-INPUTS = {
+INPUTS_TASKS = {
     URL: f'http://localhost:3000/',
     HOST: 'localhost',
     USERNAME: 'ocervell',

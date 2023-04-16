@@ -145,7 +145,7 @@ class Vuln(Command):
 		"""
 		cve_info = Vuln.lookup_local_cve(cve_id)
 		if not cve_info:
-			logger.debug(f'{cve_id} not found locally. Use `secsy utils download-cves` to update the local database.')
+			# logger.debug(f'{cve_id} not found locally. Use `secsy utils download-cves` to update the local database.')
 			try:
 				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
 				if not cve_info:
@@ -170,7 +170,7 @@ class Vuln(Command):
 				cpe_fs = cpe_obj.as_fs()
 				# cpe_version = cpe_obj.get_version()[0]
 				vulnerable_fs = cve_info['vulnerable_product']
-				logger.debug(f'Matching CPE {cpe} against {len(vulnerable_fs)} vulnerable products for {cve_id}')
+				# logger.debug(f'Matching CPE {cpe} against {len(vulnerable_fs)} vulnerable products for {cve_id}')
 				for fs in vulnerable_fs:
 					if fs == cpe_fs:
 						# logger.debug(f'Found matching CPE FS {cpe_fs} ! The CPE is vulnerable to CVE {cve_id}')

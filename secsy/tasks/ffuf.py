@@ -1,3 +1,4 @@
+from secsy.decorators import task
 from secsy.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH, CONTENT_TYPE,
 							   DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
@@ -9,6 +10,7 @@ from secsy.output_types import Url
 from secsy.tasks._categories import HttpFuzzer
 
 
+@task()
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
 	cmd = 'ffuf -noninteractive -recursion'

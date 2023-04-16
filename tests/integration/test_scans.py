@@ -4,12 +4,11 @@ import unittest
 import warnings
 from time import sleep
 
-from secsy.cli import ALL_SCANS
 from secsy.definitions import DEBUG
 from secsy.rich import console
 from secsy.runners import Command, Scan
-from secsy.utils import setup_logging
-from secsy.utils_test import CommandOutputTester, load_fixture
+from secsy.utils import setup_logging, merge_opts
+from secsy.utils_test import TEST_SCANS, CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_SCANS
 from tests.integration.outputs import OUTPUTS_SCANS
 
@@ -35,20 +34,30 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 			cwd=INTEGRATION_DIR
 		)
 
-	def test_all_scans(self):
+	def test_scans(self):
+		fmt_opts = {
+			'print_item': DEBUG > 1,
+			'print_cmd': DEBUG > 0,
+			'print_line': DEBUG > 1,
+			'table': DEBUG > 1,
+			'output': 'table' if DEBUG > 0 else ''
+		}
 		opts = {
 			'filter_size': 1987,
-			# 'filter_regex': 'Unexpected path',
 			'follow_redirect': True,
 			'match_codes': '200',
 			'httpx.match_codes': False,
 			'httpx.filter_size': False,
+			'nuclei.retries': 5,
+			'nuclei.timeout': 15,
 			'rate_limit': 1000,
-			# 'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
+			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 			'timeout': 7,
 			'depth': 2
 		}
-		for conf in ALL_SCANS:
+		opts = merge_opts(opts, fmt_opts)
+
+		for conf in TEST_SCANS:
 			with self.subTest(name=conf.name):
 				console.print(f'Testing workflow {conf.name} ...')
 				inputs = INPUTS_SCANS.get(conf.name, [])

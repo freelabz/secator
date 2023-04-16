@@ -12,7 +12,7 @@ from secsy.rich import console
 from secsy.runners import Command
 from secsy.tasks import httpx
 from secsy.utils import setup_logging
-from secsy.utils_test import (FIXTURES, FIXTURES_DIR, INPUTS, META_OPTS,
+from secsy.utils_test import (FIXTURES_TASKS, FIXTURES_DIR, INPUTS_TASKS, META_OPTS,
 							  TEST_TASKS, CommandOutputTester, load_fixture,
 							  mock_command, mock_subprocess_popen)
 
@@ -151,7 +151,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(opt_value, None)
 
 	def test_httpx_build_cmd_defaults(self):
-		if not 'httpx' in TEST_TASKS:
+		if not httpx in TEST_TASKS:
 			return
 		cmd_opts = {}
 		host = 'test.synology.me'
@@ -168,7 +168,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls._json_output, True)
 
 	def test_httpx_build_cmd_with_opts(self):
-		if not 'httpx' in TEST_TASKS:
+		if not httpx in TEST_TASKS:
 			return
 		cmd_opts = {
 			FOLLOW_REDIRECT: False,
@@ -194,7 +194,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls._json_output, True)
 
 	def test_httpx_build_cmd_with_opts_with_prefix(self):
-		if not 'httpx' in TEST_TASKS:
+		if not httpx in TEST_TASKS:
 			return
 		cmd_opts = {
 			FOLLOW_REDIRECT: False,
@@ -230,7 +230,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 
 	def _valid_fixture(self, cls, fixture):
 		if not fixture:
-			if len(FIXTURES.keys()) == 1: # make test fail.
+			if len(FIXTURES_TASKS.keys()) == 1: # make test fail.
 				raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory (must not be an empty file / empty json / empty list).')
 			console.print(f'[dim gold3] skipped (no fixture)[/]')
 			return False
@@ -239,7 +239,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 	def test_cmd_converted_schema(self):
 		console.print('')
 
-		for cls, fixture in FIXTURES.items():
+		for cls, fixture in FIXTURES_TASKS.items():
 			console.print(f'\t[bold grey35]{cls.__name__} ...[/] ', end='')
 			with self.subTest(name=cls.__name__):
 
@@ -248,7 +248,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 					continue
 
 				# Run command
-				targets = INPUTS[cls.input_type]
+				targets = INPUTS_TASKS[cls.input_type]
 				with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
 					self._test_task_output(
 						results,
@@ -256,7 +256,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 
 	def test_cmd_original_schema(self):
 		console.print('')
-		for cls, fixture in FIXTURES.items():
+		for cls, fixture in FIXTURES_TASKS.items():
 
 			with self.subTest(name=cls.__name__):
 				console.print(f'\t[bold grey35]{cls.__name__} ...[/]', end='')
@@ -274,7 +274,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 						expected_output_keys = fixture.keys()
 
 				# Run command
-				targets = INPUTS[cls.input_type]
+				targets = INPUTS_TASKS[cls.input_type]
 				opts = copy.deepcopy(META_OPTS)
 				opts.update({
 					'orig': True,
@@ -292,7 +292,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 class TestCommandHooks(unittest.TestCase):
 
 	def test_cmd_hooks(self):
-		if not 'httpx' in TEST_TASKS:
+		if not httpx in TEST_TASKS:
 			return
 
 		def on_item(self, item):
@@ -323,17 +323,18 @@ class TestCommandHooks(unittest.TestCase):
 		}
 		fixture = load_fixture('httpx_output', FIXTURES_DIR)
 		with mock_subprocess_popen([json.dumps(fixture)]):
-			input = INPUTS[HOST]
+			input = INPUTS_TASKS[HOST]
 			cls = httpx(input, hooks=hooks)
 			self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_init')
-			item = cls.first()
+			items = cls.run()
+			item = items[0]
 			self.assertEqual(item.status_code, 500)
 			self.assertEqual(item.url, 'test_changed_url')
 			self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_start')
 			self.assertEqual(cls.results, [{'url': 'test_changed_result'}])
 
 	def test_cmd_failed_hook(self):
-		if not 'httpx' in TEST_TASKS:
+		if not httpx in TEST_TASKS:
 			return
 
 		def on_init(self):
@@ -342,8 +343,8 @@ class TestCommandHooks(unittest.TestCase):
 		hooks = {
 			'on_init': [on_init]
 		}
-		fixture = FIXTURES[httpx]
+		fixture = FIXTURES_TASKS[httpx]
 		with mock_subprocess_popen([json.dumps(fixture)]):
 			with self.assertRaises(Exception, msg='Test passed'):
-				input = INPUTS[HOST]
+				input = INPUTS_TASKS[HOST]
 				httpx(input, hooks=hooks)

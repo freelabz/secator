@@ -2,41 +2,64 @@
 
 import logging
 
-from secsy.definitions import HOST, TEMP_FOLDER
+from secsy.decorators import task
+from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST,
+							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+							   TEMP_FOLDER, THREADS, TIMEOUT, USER_AGENT)
 from secsy.tasks._categories import VulnMulti
 from secsy.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
 
+@task()
 class msfconsole(VulnMulti):
 	"""CLI to access and work with the Metasploit Framework."""
 	cmd = 'msfconsole --quiet'
 	input_type = HOST
+	input_chunk_size = 1
 	output_types = []
 	output_return_type = str
 	opt_prefix = '--'
 	opts = {
-		'resource': {'type': str, 'help': 'Metasploit commands.', 'short': 'r'},
-		'execute_command': {'type': str, 'help': 'Metasploit resource script.', 'short': 'x'},
-		# 'environment': {'type': str, 'default': '', 'help': 'Environment variables string KEY=VALUE.', 'short': 'env'}
+		'resource': {'type': str, 'help': 'Metasploit resource script.', 'short': 'r'},
+		'execute_command': {'type': str, 'help': 'Metasploit command.', 'short': 'x'},
+		'environment': {'type': str, 'help': 'Environment variables string KEY=VALUE.', 'short': 'e'}
 	}
 	opt_key_map = {
 		'x': 'execute_command',
 		'r': 'resource',
-		# 'e': 'environment'
+		HEADER: OPT_NOT_SUPPORTED,
+		DELAY: OPT_NOT_SUPPORTED,
+		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		PROXY: OPT_NOT_SUPPORTED,
+		RATE_LIMIT: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
+		THREADS: OPT_NOT_SUPPORTED,
+		TIMEOUT: OPT_NOT_SUPPORTED,
+		USER_AGENT: OPT_NOT_SUPPORTED,
+		THREADS: OPT_NOT_SUPPORTED,
 	}
 	encoding = 'ansi'
 	ignore_return_code = True
 
 	@staticmethod
+	def validate_input(self, input):
+		"""No list input supported for this command. Pass a single input instead."""
+		if isinstance(input, list):
+			return False
+		return True
+
+	@staticmethod
 	def on_init(self):
 		command = self.get_opt_value('execute_command')
 		script_path = self.get_opt_value('resource')
-		env_vars = {
-			k: v for k, v in (i.split('=') for i in self.cmd_opts.pop('env_vars', ()))
-		}
-		env_vars['host'] = self.input
+		environment = self.cmd_opts.pop('environment', '')
+		env_vars = {}
+		if environment:
+			env_vars = dict(map(lambda x: x.split('='), environment.strip().split(',')))
+		env_vars['RHOST'] = self.input
+		env_vars['RHOSTS'] = self.input
 
 		# Passing msfconsole command directly, simply add RHOST / RHOSTS from host input and run then exit
 		if command:
@@ -53,7 +76,7 @@ class msfconsole(VulnMulti):
 
 			# Read from original resource script
 			with open(script_path, 'r') as f:
-				content = f.read().rstrip('exit') + 'exit\n'
+				content = f.read().replace('exit', '') + '\nexit\n'
 
 			# Make a copy and replace vars inside by env vars passed on the CLI
 			timestr = get_file_timestamp()
@@ -64,6 +87,8 @@ class msfconsole(VulnMulti):
 			with open(out_path, 'w') as f:
 				content = content.format(**env_vars)
 				f.write(content)
+
+			self._print(content)
 
 			# Override original command with new resource script
 			self.cmd_opts['msfconsole.resource'] = out_path

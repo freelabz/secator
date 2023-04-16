@@ -1,5 +1,6 @@
 from furl import furl
 
+from secsy.decorators import task
 from secsy.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
@@ -10,6 +11,7 @@ from secsy.output_types import Url
 from secsy.tasks._categories import HttpCrawler
 
 
+@task()
 class gospider(HttpCrawler):
 	"""Fast web spider written in Go."""
 	cmd = 'gospider --js'

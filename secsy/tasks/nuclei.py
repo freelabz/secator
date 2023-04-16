@@ -1,3 +1,4 @@
+from secsy.decorators import task
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, VULN_CONFIDENCE,
@@ -9,6 +10,7 @@ from secsy.output_types import Vulnerability, Progress
 from secsy.tasks._categories import VulnMulti
 
 
+@task()
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based
 	DSL.

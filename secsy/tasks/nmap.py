@@ -4,6 +4,7 @@ import re
 
 import xmltodict
 
+from secsy.decorators import task
 from secsy.definitions import (DELAY, EXTRA_DATA, FOLLOW_REDIRECT, HEADER,
 							   HOST, IP, OPT_NOT_SUPPORTED, PORT, PORTS, PROXY,
 							   RATE_LIMIT, RETRIES, SCRIPT, TEMP_FOLDER,
@@ -19,6 +20,7 @@ from secsy.utils import get_file_timestamp
 logger = logging.getLogger(__name__)
 
 
+@task()
 class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery
 	and security auditing."""
@@ -145,7 +147,7 @@ class nmapData(dict):
 						VULN_EXTRACTED_RESULTS: extracted_results,
 					}
 					if not func:
-						logger.debug(f'Script output parser for "{script_id}" is not supported YET.')
+						# logger.debug(f'Script output parser for "{script_id}" is not supported YET.')
 						continue
 					for vuln in func(output, cpes=cpes):
 						vuln.update(metadata)
@@ -266,7 +268,7 @@ class nmapData(dict):
 					vuln.update(vuln_data)
 				yield vuln
 			else:
-				logger.debug(f'Vulscan provider {provider_name} is not supported YET.')
+				# logger.debug(f'Vulscan provider {provider_name} is not supported YET.')
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):

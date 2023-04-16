@@ -366,10 +366,9 @@ opts = {
 # Setup a logger to see command output in console
 setup_logger(level='debug', format='%(message)s')
 
-# Probe initial host and get only the first URL using `first()`
 # Since a host is considered alive no matter which status code it returns,
 # we override the match_codes global option using the prefixed version.
-url = httpx(host, raw=True, httpx_match_codes='', **opts).first()
+url = httpx(host, raw=True, httpx_match_codes='', **opts).run()[0]
 
 # Gather URLs
 all_urls = []
@@ -532,12 +531,6 @@ code with either of the following methods:
 >>> ... print(cat['name'] + '(' + cat['age'] + ')')
 garfield (14)
 tony (18)
-
-# Get only the result item, and kills the command upon receiving it. 
-# This can be useful for some commands where you don't want to wait for the full 
-# command to execute
->>> bigdog('loadsofcats.com').first()
-{"name": "garfield", "age": 14, "host": "loadsofcats.com", "position": "boss"}
 ```
 
 Okay, this is a good start.
@@ -692,15 +685,31 @@ $ eagle -l hosts.txt -timeexpires 1 -jsonl
 We want to uniformize all those tools options so that we can use them with the
 same options set and they would return an output with the same schema.
 
-To do so, we define a base class with the wanted interface and the meta options,
-i.e options that are common to all tools; the wanted output schema, and the
-conversion from the current output fields to the desired output schema.
+To do so, we define a base `Cat` dataclass to define the output schema and a `CatHunter` command as an interface, and 
+then we specify conversion options from the current output fields to the desired output schema in each `CatHunter` 
+children class.
 
-We take `bigdog`'s options and output schema as reference, and modify the two
-new commands to match those:
+We take `bigdog`'s options and output schema as reference to create the `Cat` output type:
 
 ```py
 from secsy.definitions import OPT_NOT_SUPPORTED
+from secsy.output_types import OutputType
+from dataclasses import dataclass, field
+
+@dataclass
+class Cat(OutputType):
+	name: str
+	age: int
+	alive: bool = False
+	_source: str = field(default='', repr=True)
+	_type: str = field(default='ip', repr=True)
+	_uuid: str = field(default='', repr=True, compare=False)
+
+	_table_fields = [name, age]
+	_sort_by = (name, age)
+
+	def __str__(self) -> str:
+		return self.ip
 
 
 class CatHunter(Command):
@@ -708,7 +717,7 @@ class CatHunter(Command):
         'timeout': {'type': int, 'default': 1, 'help': 'Timeout (in seconds)'},
         'rate': {'type': int, 'default': 1000, 'help': 'Max requests per minute'},
     }
-    output_schema = ['name', 'age', 'host', 'position']
+    output_types = [Cat]
 
 
 class bigdog(CatHunter):
@@ -734,11 +743,11 @@ class catkiller(CatHunter):
     # secsy x catkiller loadsofcats.com --max-wait 1000 --max-rate 10 --json
     # will become
     # secsy x catkiller loadsofcats.com -timeout 1 -rate 10 -json
-    opt_keys = {
+    opt_key_map = {
         'rate': 'max-rate'
         'timeout': 'max-wait'
     }
-    opt_values = {
+    opt_value_map = {
         'timeout': lambda x: x / 1000 # converting milliseconds to seconds
     }
 
@@ -750,7 +759,7 @@ class catkiller(CatHunter):
         'name': lambda x: x['_info']['name'], # note: you can use any function, we use
         'age': lambda x: x['_info']['age'],   #       lambdas for readability here
         'host': 'site',   # 1:1 mapping
-        'position': 'job' # 1:1 mapping
+        'job': 'job' # 1:1 mapping
     }
 
 
@@ -759,7 +768,7 @@ class eagle(CatHunter):
     json_flag = '-jsonl'
     input_flag = '-u'
     file_flag = '-l'
-    opt_keys = {
+    opt_key_map = {
         'rate': 'timeexpires',
         'timeout': OPT_NOT_SUPPORTED # explicitely state that this option not supported by the target tool
     }
@@ -776,7 +785,8 @@ class eagle(CatHunter):
 
     # Here we add the 'host' key dynamically after the item has been converted 
     # to the output schema, since `eagle` doesn't return the host systematically.
-    def on_item_convert(self, item):
+	@staticmethod
+    def on_item_converted(self, item):
         item['host'] = item.get('host') or self.input
         return item
 
@@ -798,15 +808,15 @@ Using those definitions, we can now use the commands with a common interface
 >>> meta_opts = {'timeout': 1, 'rate': 1000}
 >>> bigdog('loadsofcats.com', **meta_opts).run()
 [
-    {"name": "garfield", "age": 14, "host": "loadsofcats.com", "position": "boss", "_source": "bigdog"},
-    {"name": "tony", "age": 18, "host": "loadsofcats.com", "position": "admin", "_source": "bigdog"}
+    Cat(name="garfield", age=14, host="loadsofcats.com", position="boss", _source="bigdog"),
+    Cat(name="tony", age=18, host="loadsofcats.com", position="admin", _source="bigdog"),
 ]
->>> catkiller('catrunner.com', **meta_opts).run()
+>>> catkiller('catrunner.com', **meta_opts).run().toDict()
 [
     {"name": "fred", "age": 12, "host": "catrunner.com", "position": "minion", "_source": "catkiller"},
     {"name": "mark", "age": 20, "host": "catrunner.com", "position": "minion", "_source": "catkiller"}
 ]
->>> eagle('allthecats.com', **meta_opts).run()
+>>> eagle('allthecats.com', **meta_opts).run().toDict()
 [
     {"name": "marcus", "age": 4, "host": "allthecats.com", "position": "minion", "_source": "eagle"},
     {"name": "rafik", "age": 7, "host": "allthecats.com", "position": "minion", "_source": "eagle"}
@@ -818,14 +828,14 @@ them in a loop, calling them with the same options:
 
 ```py
 >>> from test import bigdog, catkiller, eagle
->>> from secsy.utils import fmt_table
+>>> from secsy.utils import print_results_table
 >>> data = []
 >>> for command in [bigdog, catkiller, eagle]:
 >>> ... items = command(host, **meta_opts).run()
 >>> ... data.extend(items)
->>> data
+>>> data.toDict()
 [{'name': 'garfield', 'age': 14, 'host': 'loadsofcats.com', 'position': 'boss', '_source': 'bigdog'}, {'name': 'tony', 'age': 18, 'host': 'loadsofcats.com', 'position': 'admin', '_source': 'bigdog'}, {'name': 'fred', 'age': 12, 'host': 'catrunner.com', 'position': 'minion', '_source': 'catkiller'}, {'name': 'mark', 'age': 20, 'host': 'catrunner.com', 'position': 'minion', '_source': 'catkiller'}, {'name': 'marcus', 'age': 4, 'host': 'allthecats.com', 'position': 'minion', '_source': 'eagle'}, {'name': 'rafik', 'age': 7, 'host': 'allthecats.com', 'position': 'minion', '_source': 'eagle'}]
->>> print(fmt_table(data, sort_by='age'))
+>>> print_results_table(data)
 ╒══════════╤═══════╤═════════════════╤════════════╤════════════╕
 │ Name     │   Age │ Host            │ Position   │  source    │
 ╞══════════╪═══════╪═════════════════╪════════════╪════════════╡
@@ -862,11 +872,6 @@ format:
 * `opts` (`dict`, `default: {}`):
 
     Command options.
-
-* `output_field` (`str`, `default: None`):
-
-    Return this field when specifying `--raw` to the CLI. 
-    Can be used to forward output to other tools.
 
 * `shell` (`bool`, `default: False`):
 

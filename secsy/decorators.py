@@ -88,14 +88,17 @@ def get_command_options(*tasks):
 		opts = OrderedDict(RUNNER_GLOBAL_OPTS, **RUNNER_OPTS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
 
+			# Get opt key map if any
+			opt_key_map = getattr(cls, 'opt_key_map', {})
+
 			# Opt is not supported by this task
-			if opt not in cls.opt_key_map\
+			if opt not in opt_key_map\
 				and opt not in cls.opts\
 				and opt not in RUNNER_OPTS\
 				and opt not in RUNNER_GLOBAL_OPTS:
 				continue
 
-			if cls.opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
+			if opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
 				continue
 
 			# Get opt prefix
@@ -146,6 +149,13 @@ def decorate_command_options(opts):
 			short = f'-{short}' if short else f'-{opt_name}'
 			f = click.option(long, short, **conf)(f)
 		return f
+	return decorator
+
+
+def task():
+	def decorator(cls):
+		cls.__task__ = True
+		return cls
 	return decorator
 
 

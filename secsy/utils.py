@@ -17,7 +17,6 @@ from pkgutil import iter_modules
 from urllib.parse import urlparse
 
 import netifaces
-import tabulate
 import yaml
 from furl import furl
 from rich.markdown import Markdown
@@ -152,39 +151,6 @@ def filter_urls(urls, **remove_parts):
 	]
 
 
-def fmt_table(data, output_table_fields=[], sort_by=None):
-	"""Format data as table.
-
-	Args:
-		data (list): List of dict items.
-		output_table_fields (list): List of output fields.
-		sort_by (str): Sort by field.
-
-	Returns:
-		str: Formatted table.
-	"""
-	if sort_by:
-		data = sorted(data, key=lambda x: x[sort_by])
-	keys = output_table_fields if output_table_fields else data[0].keys()
-	headers = [
-		' '.join(k.split('_')).capitalize()
-		for k in keys
-	]
-	fmt_data = []
-	for item in data:
-		new_item = {}
-		for k in keys:
-			value = item.get(k)
-			if isinstance(value, list):
-				value = ', '.join(sorted(value))
-			elif isinstance(value, dict):
-				value = '\n'.join(f'{k}:{v}' for k, v in value.items())
-			new_item[k] = value
-		fmt_data.append(new_item)
-	values = [d.values() for d in fmt_data]
-	return '\n' + tabulate.tabulate(values, headers=headers, tablefmt='fancy_grid') + '\n'
-
-
 def deduplicate(array, attr=None):
 	"""Deduplicate list of OutputType items.
 
@@ -219,18 +185,22 @@ def setup_logger(level='info', format='%(message)s'):
 
 def discover_internal_tasks():
 	"""Find internal secsy tasks."""
-	from secsy.runners import Command
+	from secsy.runners.command import RunnerBase
 	package_dir = Path(__file__).resolve().parent / 'tasks'
 	task_classes = []
 	for (_, module_name, _) in iter_modules([str(package_dir)]):
-		module = import_module(f"secsy.tasks.{module_name}")
+		if module_name.startswith('_'):
+			continue
+		try:
+			module = import_module(f'secsy.tasks.{module_name}')
+		except ImportError:
+			continue
 		for attribute_name in dir(module):
 			attribute = getattr(module, attribute_name)
 			if isclass(attribute):
 				bases = inspect.getmro(attribute)
-				for base in bases:
-					if base == Command and attribute.cmd:
-						task_classes.append(attribute)
+				if RunnerBase in bases and hasattr(attribute, '__task__'):
+					task_classes.append(attribute)
 
 	# Sort task_classes by category
 	task_classes = sorted(

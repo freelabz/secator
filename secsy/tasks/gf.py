@@ -1,8 +1,10 @@
+from secsy.decorators import task
 from secsy.definitions import OPT_PIPE_INPUT, URL
 from secsy.output_types import Tag
 from secsy.tasks._categories import Tagger
 
 
+@task()
 class gf(Tagger):
 	"""Wrapper around grep, to help you grep for things."""
 	cmd = 'gf'

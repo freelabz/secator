@@ -33,7 +33,7 @@ DEFAULT_CMD_OPTS = {
 	'print_cmd': True,
 	'print_timestamp': True
 }
-if DEBUG > 0:
+if DEBUG > 1:
 	console.print(f'Celery app configuration:\n{app.conf}')
 
 
@@ -511,13 +511,19 @@ def test():
 
 @test.command()
 @click.option('--tasks', type=str, default='', help='Secsy tasks to test (comma-separated)')
+@click.option('--workflows', type=str, default='', help='Secsy workflows to test (comma-separated)')
+@click.option('--scans', type=str, default='', help='Secsy scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secsy test to run')
 @click.option('--debug', '-d', type=int, default=0, help='Add debug information')
-def integration(tasks, test, debug):
+def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_TASKS'] = tasks or ''
+	os.environ['TEST_WORKFLOWS'] = workflows or ''
+	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
 	cmd = 'python -m unittest'
 	if test:
+		if not test.startswith('tests.integration'):
+			test = f'tests.integration.{test}'
 		cmd += f' {test}'
 	else:
 		cmd += ' discover -v tests.integration'
@@ -530,15 +536,21 @@ def integration(tasks, test, debug):
 
 @test.command()
 @click.option('--tasks', type=str, default='', help='Secsy tasks to test (comma-separated)')
+@click.option('--workflows', type=str, default='', help='Secsy workflows to test (comma-separated)')
+@click.option('--scans', type=str, default='', help='Secsy scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secsy test to run')
 @click.option('--coverage', '-x', is_flag=True, help='Run coverage on results')
 @click.option('--debug', '-d', type=int, default=0, help='Add debug information')
-def unit(tasks, test, coverage=False, debug=False):
+def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 	os.environ['TEST_TASKS'] = tasks or ''
+	os.environ['TEST_WORKFLOWS'] = workflows or ''
+	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
 
 	cmd = 'coverage run --omit="*test*" -m unittest'
 	if test:
+		if not test.startswith('tests.unit'):
+			test = f'tests.unit.{test}'
 		cmd += f' {test}'
 	else:
 		cmd += ' discover -v tests.unit'
