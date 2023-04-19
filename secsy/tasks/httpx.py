@@ -49,7 +49,7 @@ class httpx(Http):
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
 
 	@staticmethod
-	def on_item(self, item):
+	def on_item_pre_convert(self, item):
 		for k, v in item.items():
 			if k == 'time':
 				response_time = float(''.join(ch for ch in v if not ch.isalpha()))

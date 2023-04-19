@@ -9,10 +9,10 @@ from secsy.definitions import (DELAY, EXTRA_DATA, FOLLOW_REDIRECT, HEADER,
 							   HOST, IP, OPT_NOT_SUPPORTED, PORT, PORTS, PROXY,
 							   RATE_LIMIT, RETRIES, SCRIPT, TEMP_FOLDER,
 							   THREADS, TIMEOUT, USER_AGENT, VULN_CONFIDENCE,
-							   VULN_CVSS_SCORE, VULN_DESCRIPTION,
-							   VULN_EXTRACTED_RESULTS, VULN_ID,
-							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
-							   VULN_REFERENCES, VULN_TAGS)
+							   CVSS_SCORE, DESCRIPTION,
+							   VULN_EXTRACTED_RESULTS, ID,
+							   VULN_MATCHED_AT, NAME, PROVIDER,
+							   REFERENCES, TAGS)
 from secsy.output_types import Port, Vulnerability
 from secsy.tasks._categories import VulnMulti
 from secsy.utils import get_file_timestamp
@@ -32,7 +32,7 @@ class nmap(VulnMulti):
 	output_types = [Port, Vulnerability]
 	opts = {
 		PORTS: {'type': str, 'help': 'Ports to scan'},
-		SCRIPT: {'type': str, 'default': 'vulscan/,vulners', 'help': 'NSE scripts'},
+		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'}
 	}
 	opt_key_map = {
@@ -61,14 +61,14 @@ class nmap(VulnMulti):
 
 	def __iter__(self):
 		# TODO: deduplicate this and amass as it's the same function
-		prev = self._print_item_count
-		self._print_item_count = False
+		prev = self.print_item_count
+		self.print_item_count = False
 		list(super().__iter__())
 		if self.return_code != 0:
 			return
 		self.results = []
 		note = f'nmap XML results saved to {self.output_path}'
-		if self._print_line:
+		if self.print_line:
 			self._print(note)
 		if os.path.exists(self.output_path):
 			nmap_data = self.xml_to_json()
@@ -77,7 +77,7 @@ class nmap(VulnMulti):
 				if not item:
 					continue
 				yield item
-		self._print_item_count = prev
+		self.print_item_count = prev
 		self._process_results()
 
 	def xml_to_json(self):
@@ -256,17 +256,17 @@ class nmapData(dict):
 				continue
 			vuln_id, vuln_title = matches.groups()
 			vuln = {
-				VULN_ID: vuln_id,
-				VULN_NAME: vuln_id,
-				VULN_DESCRIPTION: vuln_title,
-				VULN_PROVIDER: provider_name,
-				VULN_TAGS: [vuln_id, provider_name]
+				ID: vuln_id,
+				NAME: vuln_id,
+				DESCRIPTION: vuln_title,
+				PROVIDER: provider_name,
+				TAGS: [vuln_id, provider_name]
 			}
 			if provider_name == 'MITRE CVE':
 				vuln_data = VulnMulti.lookup_cve(vuln['id'], cpes=cpes)
 				if vuln_data:
 					vuln.update(vuln_data)
-				yield vuln
+					yield vuln
 			else:
 				# logger.debug(f'Vulscan provider {provider_name} is not supported YET.')
 				continue
@@ -286,26 +286,26 @@ class nmapData(dict):
 				# TODO: Implement exploit processing
 				exploit_id, cvss_score, reference_url, exploit_str = elems
 				vuln = {
-					VULN_ID: exploit_id,
-					VULN_NAME: exploit_id,
-					VULN_PROVIDER: provider_name,
-					VULN_CVSS_SCORE: cvss_score,
-					VULN_REFERENCES: [reference_url],
-					VULN_TAGS: ['exploit', exploit_id, provider_name],
+					ID: exploit_id,
+					NAME: exploit_id,
+					PROVIDER: provider_name,
+					CVSS_SCORE: cvss_score,
+					REFERENCES: [reference_url],
+					TAGS: ['exploit', exploit_id, provider_name],
 					VULN_CONFIDENCE: 'low'
 				}
 			elif len(elems) == 3:  # vuln
 				vuln_id, vuln_description, _ = tuple(line.split('\t'))
 				vuln_type = vuln_id.split('-')[0]
 				vuln = {
-					VULN_ID: vuln_id,
-					VULN_NAME: vuln_id,
-					VULN_TAGS: [vuln_id, provider_name],
-					VULN_PROVIDER: provider_name,
-					VULN_DESCRIPTION: vuln_description,
+					ID: vuln_id,
+					NAME: vuln_id,
+					TAGS: [vuln_id, provider_name],
+					PROVIDER: provider_name,
+					DESCRIPTION: vuln_description,
 				}
 				if vuln_type == 'CVE':
-					vuln[VULN_TAGS].append('cve')
+					vuln[TAGS].append('cve')
 					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=[cpe])
 					if vuln_data:
 						vuln.update(vuln_data)

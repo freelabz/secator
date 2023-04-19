@@ -68,6 +68,6 @@ class ffuf(HttpFuzzer):
 		return True
 
 	@staticmethod
-	def on_item_converted(self, item):
+	def on_item(self, item):
 		item.method = self.cmd_opts.get(METHOD, 'GET')
 		return item

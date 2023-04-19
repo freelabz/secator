@@ -751,7 +751,7 @@ class catkiller(CatHunter):
         'timeout': lambda x: x / 1000 # converting milliseconds to seconds
     }
 
-    # Here we map the `catkiller` output schema to CatHunter.output_schema:
+    # Here we map the `catkiller` output schema to Cat schema:
     # {"_info": {"name": "tony", "years": 18}, "site": "loadsofcats.com", "job": "admin"}
     # will become
     # {"name": "tony", "age": 18, "host": "loadsofcats.com", "job": "admin"}
@@ -773,7 +773,7 @@ class eagle(CatHunter):
         'timeout': OPT_NOT_SUPPORTED # explicitely state that this option not supported by the target tool
     }
 
-    # Here we map the `eagle` output schema to CatHunter.output_schema:
+    # Here we map the `eagle` output schema to Cat schema:
     # {"alias": "tony", "occupation": "admin", "human_age": 88}
     # will become
     # {"name": "tony", "age": 18, "host": "loadsofcats.com", "job": "admin"}
@@ -786,7 +786,7 @@ class eagle(CatHunter):
     # Here we add the 'host' key dynamically after the item has been converted 
     # to the output schema, since `eagle` doesn't return the host systematically.
 	@staticmethod
-    def on_item_converted(self, item):
+    def on_item(self, item):
         item['host'] = item.get('host') or self.input
         return item
 
@@ -889,13 +889,13 @@ format:
 
     Support JSON output.
 
-* `def on_item(self, item)`:
+* `def on_item_pre_convert(self, item)`:
 
     Callback to modify item with original schema. Must return the item.
 
-* `def on_item_converted(self, item)`:
+* `def on_item(self, item)`:
 
-    Callback to modify item with the target schema defined by `self.output_schema`. Must return the item.
+    Callback to modify item after schema conversion. Must return the item.
 
 * `def on_line(self, line)`:
 
