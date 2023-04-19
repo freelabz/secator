@@ -44,8 +44,8 @@ class maigret(ReconUser):
 	install_cmd = 'pip3 install maigret'
 
 	def __iter__(self):
-		prev = self._print_item_count
-		self._print_item_count = False
+		prev = self.print_item_count
+		self.print_item_count = False
 		list(super().__iter__())
 		if self.return_code != 0:
 			return
@@ -57,7 +57,7 @@ class maigret(ReconUser):
 				return
 			self.output_path = match.group(1)
 		note = f'maigret JSON results saved to {self.output_path}'
-		if self._print_line:
+		if self.print_line:
 			self._print(note)
 		if os.path.exists(self.output_path):
 			with open(self.output_path, 'r') as f:
@@ -67,7 +67,7 @@ class maigret(ReconUser):
 				if not item:
 					continue
 				yield item
-		self._print_item_count = prev
+		self.print_item_count = prev
 		self._process_results()
 
 	@staticmethod

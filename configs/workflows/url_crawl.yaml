@@ -22,3 +22,5 @@ tasks:
 results:
   - type: url
     condition: item._source == 'httpx'
+
+  - type: tag

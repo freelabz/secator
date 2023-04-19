@@ -185,7 +185,7 @@ def setup_logger(level='info', format='%(message)s'):
 
 def discover_internal_tasks():
 	"""Find internal secsy tasks."""
-	from secsy.runners.command import RunnerBase
+	from secsy.runners.command import TaskBase
 	package_dir = Path(__file__).resolve().parent / 'tasks'
 	task_classes = []
 	for (_, module_name, _) in iter_modules([str(package_dir)]):
@@ -199,7 +199,7 @@ def discover_internal_tasks():
 			attribute = getattr(module, attribute_name)
 			if isclass(attribute):
 				bases = inspect.getmro(attribute)
-				if RunnerBase in bases and hasattr(attribute, '__task__'):
+				if TaskBase in bases and hasattr(attribute, '__task__'):
 					task_classes.append(attribute)
 
 	# Sort task_classes by category

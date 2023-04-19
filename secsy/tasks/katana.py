@@ -19,6 +19,10 @@ class katana(HttpCrawler):
 	file_flag = '-list'
 	input_flag = '-u'
 	json_flag = '-json'
+	opts = {
+		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
+		'system-chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'}
+	}
 	opt_key_map = {
 		HEADER: 'headers',
 		DELAY: 'delay',

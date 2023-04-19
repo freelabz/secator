@@ -51,7 +51,7 @@ class Task(Runner):
 		task_cls = Task.get_task_class(self.config.name)
 		if sync:
 			task = task_cls(self.targets, **opts)
-			print_status = not RECORD and not task._json_output and not task._raw_output and not task._orig_output
+			print_status = not RECORD and not task.output_json and not task.output_raw and not task.output_orig
 			status = f'[bold yellow]Running task [bold magenta]{self.config.name} ...'
 			with console.status(status) if print_status else nullcontext():
 				self.results = task.run()

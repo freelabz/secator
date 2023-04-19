@@ -159,13 +159,13 @@ class TestCommandProcessOpts(unittest.TestCase):
 		default_threads = cls.meta_opts[THREADS]['default']
 		expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -threads {default_threads}'
 		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls._print_timestamp, False)
-		self.assertEqual(cls._print_line, False)
-		self.assertEqual(cls._print_item, False)
-		self.assertEqual(cls._print_item_count, False)
-		self.assertEqual(cls._print_cmd, False)
-		self.assertEqual(cls._print_cmd_prefix, False)
-		self.assertEqual(cls._json_output, True)
+		self.assertEqual(cls.print_timestamp, False)
+		self.assertEqual(cls.print_line, False)
+		self.assertEqual(cls.print_item, False)
+		self.assertEqual(cls.print_item_count, False)
+		self.assertEqual(cls.print_cmd, False)
+		self.assertEqual(cls.print_cmd_prefix, False)
+		self.assertEqual(cls.output_json, True)
 
 	def test_httpx_build_cmd_with_opts(self):
 		if not httpx in TEST_TASKS:
@@ -185,13 +185,13 @@ class TestCommandProcessOpts(unittest.TestCase):
 		cls = httpx(host, **cmd_opts)
 		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls._print_timestamp, False)
-		self.assertEqual(cls._print_line, False)
-		self.assertEqual(cls._print_item, False)
-		self.assertEqual(cls._print_item_count, False)
-		self.assertEqual(cls._print_cmd, False)
-		self.assertEqual(cls._print_cmd_prefix, False)
-		self.assertEqual(cls._json_output, True)
+		self.assertEqual(cls.print_timestamp, False)
+		self.assertEqual(cls.print_line, False)
+		self.assertEqual(cls.print_item, False)
+		self.assertEqual(cls.print_item_count, False)
+		self.assertEqual(cls.print_cmd, False)
+		self.assertEqual(cls.print_cmd_prefix, False)
+		self.assertEqual(cls.output_json, True)
 
 	def test_httpx_build_cmd_with_opts_with_prefix(self):
 		if not httpx in TEST_TASKS:
@@ -213,13 +213,13 @@ class TestCommandProcessOpts(unittest.TestCase):
 		cls = httpx(host, **cmd_opts)
 		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls._print_timestamp, False)
-		self.assertEqual(cls._print_line, False)
-		self.assertEqual(cls._print_item, False)
-		self.assertEqual(cls._print_item_count, False)
-		self.assertEqual(cls._print_cmd, False)
-		self.assertEqual(cls._print_cmd_prefix, False)
-		self.assertEqual(cls._json_output, True)
+		self.assertEqual(cls.print_timestamp, False)
+		self.assertEqual(cls.print_line, False)
+		self.assertEqual(cls.print_item, False)
+		self.assertEqual(cls.print_item_count, False)
+		self.assertEqual(cls.print_cmd, False)
+		self.assertEqual(cls.print_cmd_prefix, False)
+		self.assertEqual(cls.output_json, True)
 
 
 class TestCommandRun(unittest.TestCase, CommandOutputTester):
@@ -295,11 +295,11 @@ class TestCommandHooks(unittest.TestCase):
 		if not httpx in TEST_TASKS:
 			return
 
-		def on_item(self, item):
+		def on_item_pre_convert(self, item):
 			item['url'] = 'test_changed_url'
 			return item
 
-		def on_item_converted(self, item):
+		def on_item(self, item):
 			item.status_code = 500
 			return item
 
@@ -317,8 +317,8 @@ class TestCommandHooks(unittest.TestCase):
 			'on_init': [on_init],
 			'on_start': [on_start],
 			'on_end': [on_end],
+			'on_item_pre_convert': [on_item_pre_convert],
 			'on_item': [on_item],
-			'on_item_converted': [on_item_converted],
 			'on_end': [on_end],
 		}
 		fixture = load_fixture('httpx_output', FIXTURES_DIR)

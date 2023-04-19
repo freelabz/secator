@@ -13,9 +13,9 @@ from secsy.definitions import (CIDR_RANGE, DEFAULT_WORDLIST, DELAY, DEPTH,
 							   MATCH_WORDS, METHOD, PATH, PROXY, RATE_LIMIT,
 							   RETRIES, TEMP_FOLDER, THREADS, TIMEOUT, URL,
 							   USER_AGENT, USERNAME, VULN_CONFIDENCE,
-							   VULN_CVSS_SCORE, VULN_DESCRIPTION, VULN_ID,
-							   VULN_NAME, VULN_PROVIDER, VULN_REFERENCES,
-							   VULN_SEVERITY, VULN_TAGS, WORDLIST)
+							   CVSS_SCORE, DESCRIPTION, ID,
+							   NAME, PROVIDER, REFERENCES,
+							   VULN_SEVERITY, TAGS, WORDLIST)
 from secsy.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
 								Vulnerability)
 from secsy.runners import Command
@@ -158,10 +158,6 @@ class Vuln(Command):
 		# and ensure we keep only right matches.
 		# The check is not executed if no CPE was passed (sometimes nmap cannot properly detect a CPE) or if the CPE
 		# version cannot be determined.
-		# TODO: Add info to Vulnerability model for the following things
-		# * CPE product found     - product_detected=True
-		# * CPE version was found - product_version_detected=True
-		# * CPE match was success - cpe_match=True
 		cpe_match = False
 		tags = []
 		if cpes:
@@ -176,6 +172,8 @@ class Vuln(Command):
 						# logger.debug(f'Found matching CPE FS {cpe_fs} ! The CPE is vulnerable to CVE {cve_id}')
 						cpe_match = True
 						tags.append('cpe-match')
+			if not cpe_match:
+				return None
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
@@ -189,7 +187,7 @@ class Vuln(Command):
 			description = description.replace(id, '').strip()
 
 		# Get references
-		references = cve_info.get(VULN_REFERENCES, [])
+		references = cve_info.get(REFERENCES, [])
 		cve_ref_url = f'https://cve.circl.lu/cve/{id}'
 		references.append(cve_ref_url)
 
@@ -226,14 +224,14 @@ class Vuln(Command):
 		# Set confidence
 		confidence = 'low' if not cpe_match else 'high'
 		vuln = {
-			VULN_ID: id,
-			VULN_NAME: name,
-			VULN_PROVIDER: 'cve.circl.lu',
+			ID: id,
+			NAME: name,
+			PROVIDER: 'cve.circl.lu',
 			VULN_SEVERITY: severity,
-			VULN_CVSS_SCORE: cvss,
-			VULN_TAGS: tags,
-			VULN_REFERENCES: [f'https://cve.circl.lu/cve/{id}'] + references,
-			VULN_DESCRIPTION: description,
+			CVSS_SCORE: cvss,
+			TAGS: tags,
+			REFERENCES: [f'https://cve.circl.lu/cve/{id}'] + references,
+			DESCRIPTION: description,
 			VULN_CONFIDENCE: confidence
 		}
 		return vuln
@@ -254,7 +252,7 @@ class Vuln(Command):
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
 		data = Vuln.lookup_cve(cve_id)
-		data[VULN_TAGS].append('ghsa')
+		data[TAGS].append('ghsa')
 		return data
 
 

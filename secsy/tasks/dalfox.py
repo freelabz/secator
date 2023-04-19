@@ -4,9 +4,9 @@ from secsy.decorators import task
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, METHOD,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, THREADS,
 							   TIMEOUT, URL, USER_AGENT, VULN_CONFIDENCE,
-							   VULN_EXTRACTED_RESULTS, VULN_ID,
-							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
-							   VULN_SEVERITY, VULN_TAGS)
+							   VULN_EXTRACTED_RESULTS, ID,
+							   VULN_MATCHED_AT, NAME, PROVIDER,
+							   VULN_SEVERITY, TAGS)
 from secsy.output_types import Vulnerability
 from secsy.tasks._categories import VulnHttp
 
@@ -40,10 +40,10 @@ class dalfox(VulnHttp):
 	}
 	output_map = {
 		Vulnerability: {
-			VULN_ID: lambda x: None,
-			VULN_NAME: lambda x: DALFOX_TYPE_MAP[x['type']],
-			VULN_PROVIDER: 'dalfox',
-			VULN_TAGS: lambda x: [x['cwe']] if x['cwe'] else [],
+			ID: lambda x: None,
+			NAME: lambda x: DALFOX_TYPE_MAP[x['type']],
+			PROVIDER: 'dalfox',
+			TAGS: lambda x: [x['cwe']] if x['cwe'] else [],
 			VULN_CONFIDENCE: lambda x: 'high',
 			VULN_MATCHED_AT: lambda x: urlparse(x['data'])._replace(query='').geturl(),
 			VULN_EXTRACTED_RESULTS: lambda x: {

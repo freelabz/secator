@@ -87,12 +87,13 @@ class Runner:
 				panel_str += f'\n   • {target}'
 
 		# Options
-		from secsy.decorators import DEFAULT_CLI_OPTIONS
+		DISPLAY_OPTS_EXCLUDE = [
+			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'color', 'table', 'quiet'
+		]
 		items = [
 			f'[italic]{k}[/]: {v}'
 			for k, v in opts.items()
-			if not k.startswith('print_')
-			and k not in DEFAULT_CLI_OPTIONS
+			if not k.startswith('print_') and k not in DISPLAY_OPTS_EXCLUDE
 			and v is not None
 		]
 		if items:
