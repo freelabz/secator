@@ -397,8 +397,8 @@ def print_results_table(results, title=None, exclude_fields=[], log=False):
 				exclude_fields=exclude_fields,
 				sort_by=output_type._sort_by)
 			tables.append(_table)
-			_type = pluralize(items[0]._type)
-			_print(_type.upper(), style='bold gold3', justify='left')
+			title = pluralize(items[0]._type).upper()
+			_print(f':wrench: {title}', style='bold gold3', justify='left')
 			_print(_table)
 			_print()
 	return tables

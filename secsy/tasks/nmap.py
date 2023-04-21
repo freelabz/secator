@@ -26,7 +26,7 @@ class nmap(VulnMulti):
 	and security auditing."""
 	cmd = 'nmap -sT -sV -Pn'
 	input_flag = None
-	input_chunk_size = 1
+	input_chunk_size = 10
 	file_flag = '-iL'
 	opt_prefix = '--'
 	output_types = [Port, Vulnerability]

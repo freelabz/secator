@@ -127,6 +127,8 @@ def get_task_info(task_id):
 			data['chunk_info'] = f'{chunk}/{chunk_count}'
 		data.update(res.info)
 		data['descr'] = data.pop('description', '')
+		# del data['results']
+		# del data['task_results']
 	return data
 
 

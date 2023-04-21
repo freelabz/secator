@@ -1,7 +1,7 @@
 import json
 
 from secsy.decorators import task
-from secsy.definitions import (COOKIES, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
+from secsy.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
 							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
@@ -22,7 +22,6 @@ class cariddi(HttpCrawler):
 	json_flag = '-json'
 	opt_key_map = {
 		HEADER: 'headers',
-		COOKIES: OPT_NOT_SUPPORTED,
 		DELAY: 'd',
 		DEPTH: OPT_NOT_SUPPORTED,
 		FILTER_CODES: OPT_NOT_SUPPORTED,
