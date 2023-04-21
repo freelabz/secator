@@ -1,4 +1,5 @@
 import logging
+import uuid
 
 from secsy.config import ConfigLoader
 from secsy.exporters import CsvExporter, JsonExporter, TableExporter
@@ -26,24 +27,30 @@ class Scan(Runner):
 		'raw_yield': False
 	}
 
-	def run(self, sync=True, results=[]):
+	def run(self):
+		return list(self.__iter__())
+
+	def __iter__(self):
 		"""Run scan.
 
 		Yields:
 			dict: Item yielded from individual workflow tasks.
 		"""
-		# Add target to results
-		self.sync = sync
-		self.results = results + [
-			Target(name=name, _source='scan', _type='target')
-			for name in self.targets
-		]
-		self.results = results
 		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
-		fmt_opts['sync'] = sync
+		fmt_opts['sync'] = self.sync
+		self.run_opts.update(fmt_opts)
 
 		# Log scan start
 		self.log_start()
+
+		# Add target to results and yield previous results
+		_uuid = str(uuid.uuid4())
+		self.results = self.results + [
+			Target(name=name, _source='scan', _type='target', _uuid=_uuid)
+			for name in self.targets
+		]
+		uuids = [i._uuid for i in self.results]
+		yield from self.results
 
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
@@ -59,11 +66,18 @@ class Scan(Runner):
 				ConfigLoader(name=f'workflows/{name}'),
 				targets,
 				workspace_name=self.workspace_name,
-				**self.run_opts
-			)
-			workflow_results = workflow.run(sync=sync)
-			self.results.extend(workflow_results)
+				**self.run_opts)
 
+			# Get results
+			for result in workflow:
+				if result._uuid in uuids:
+					continue
+				uuids.append(result._uuid)
+				self.results.append(result)
+				yield result
+
+		# Filter workflow results
+		self.results = self.filter_results()
 		self.done = True
 		self.log_results()
 		return self.results

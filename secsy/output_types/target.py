@@ -8,7 +8,7 @@ class Target(OutputType):
 	name: str
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='target', repr=True)
-	_uuid: str = field(default='', repr=True)
+	_uuid: str = field(default='', repr=True, compare=False)
 
 	_table_fields = [
 		'name',

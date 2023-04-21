@@ -30,7 +30,12 @@ class Workflow(Runner):
 		'raw_yield': False
 	}
 
-	def run(self, sync=True, results=[]):
+	DEFAULT_LIVE_DISPLAY_TYPES = ['vulnerability', 'tag']
+
+	def run(self):
+		return list(self.__iter__())
+
+	def __iter__(self):
 		"""Run workflow.
 
 		Args:
@@ -39,20 +44,18 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
-		self.sync = sync
-
 		# Overriding library defaults with CLI defaults
 		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
-		fmt_opts['sync'] = sync
+		fmt_opts['sync'] = self.sync
 
 		# Check if we can add a console status
 		print_line = self.run_opts.get('print_line', False)
 		print_item = self.run_opts.get('print_item', False)
 		print_metric = self.run_opts.get('print_metric', True)
-		live_status = sync and not (print_line or print_item or print_metric)
+		live_status = self.sync and not (print_line or print_item or print_metric)
 
 		# In async mode, display results back in client-side
-		if not sync:
+		if not self.sync:
 			fmt_opts['print_cmd_prefix'] = True
 			if not self.exporters:
 				self.exporters = self.DEFAULT_EXPORTERS
@@ -63,12 +66,14 @@ class Workflow(Runner):
 		# Log workflow start
 		self.log_start()
 
-		# Add target to results
+		# Add target to results and yield previous results
 		_uuid = str(uuid.uuid4())
-		self.results = results + [
+		self.results = self.results + [
 			Target(name=name, _source='workflow', _type='target', _uuid=_uuid)
 			for name in self.targets
 		]
+		uuids = [i._uuid for i in self.results]
+		yield from self.results
 
 		# Build Celery workflow
 		workflow = self.build_celery_workflow(results=self.results)
@@ -76,19 +81,37 @@ class Workflow(Runner):
 		# Run Celery workflow and get results
 		status = f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'
 		with console.status(status) if not RECORD and live_status else nullcontext():
-			if sync:
-				result = workflow.apply()
+			if self.sync:
+				# TODO: yield live results here: doesn't work with apply, we will need to run something like:
+				#  results = []
+				#  for task in self.get_tasks():
+				#	yield from Task(task, results=results)
+				#	for item in Task(task, results=results):
+				#		yield item
+				#		results.append(item)
+				results = workflow.apply().get()
 			else:
 				result = workflow()
-				list(self.process_live_tasks(result))
+				results = self.process_live_tasks(result, results_only=True)
 
 		# Get workflow results
-		results = result.get()
-		self.results = results
+		display_types = self.DEFAULT_LIVE_DISPLAY_TYPES
+		display_types_str = ', '.join(f'[bold yellow]{t}[/]' for t in display_types)
+		console.print()
+		console.print(f':tv: Findings of types {display_types_str}:')
+		for result in results:
+			if result._uuid in uuids:
+				continue
+			if result._type in display_types:
+				print(str(result))
+			uuids.append(result._uuid)
+			self.results.append(result)
+			yield result
+
+		# Filter workflow results
 		self.results = self.filter_results()
 		self.done = True
 		self.log_results()
-
 		return self.results
 
 	def build_celery_workflow(self, results=[]):

@@ -8,16 +8,16 @@ from secsy.output_types import OutputType
 class Url(OutputType):
 	url: str
 	host: str = field(default='', compare=False)
-	status_code: int = 0
-	title: str = ''
-	webserver: str = ''
-	tech: list = field(default_factory=list)
-	content_type: str = ''
-	content_length: int = field(default=0, repr=True, compare=False)
+	status_code: int = field(default=0, compare=False)
+	title: str = field(default='', compare=False)
+	webserver: str = field(default='', compare=False)
+	tech: list = field(default_factory=list, compare=False)
+	content_type: str = field(default='', compare=False)
+	content_length: int = field(default=0, compare=False)
 	time: str = field(default='', compare=False)
-	method: str = ''
-	words: int = 0
-	lines: int = 0
+	method: str = field(default='', compare=False)
+	words: int = field(default=0, compare=False)
+	lines: int = field(default=0, compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='url', repr=True)
 	_uuid: str = field(default='', repr=True, compare=False)

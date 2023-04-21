@@ -57,16 +57,16 @@ class dirsearch(HttpFuzzer):
 	install_cmd = 'pip3 install dirsearch'
 
 	def __iter__(self):
-		prev = self._print_item_count
-		self._print_item_count = False
+		prev = self.print_item_count
+		self.print_item_count = False
 		list(super().__iter__())
 		if self.return_code != 0:
 			return
 		self.results = []
-		if not self._json_output:
+		if not self.output_json:
 			return
 		note = f'dirsearch JSON results saved to {self.output_path}'
-		if self._print_line:
+		if self.print_line:
 			self._print(note)
 		if os.path.exists(self.output_path):
 			with open(self.output_path, 'r') as f:
@@ -76,7 +76,7 @@ class dirsearch(HttpFuzzer):
 				if not item:
 					continue
 				yield item
-		self._print_item_count = prev
+		self.print_item_count = prev
 		self._process_results()
 
 	@staticmethod

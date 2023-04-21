@@ -255,10 +255,11 @@ def register_runner(cli_endpoint, config):
 			sync = not is_celery_worker_alive()
 		else:
 			sync = True
+		opts['sync'] = sync
 
 		# Build exporters
 		runner = runner_cls(config, targets, workspace_name=ws, **opts)
-		runner.run(sync=sync)
+		runner.run()
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}
 	cli_endpoint.command(

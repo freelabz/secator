@@ -155,16 +155,6 @@ OUTPUTS_TASKS = {
     'nmap': [
         Port(port=3000, host='localhost', ip='127.0.0.1', service_name='ppp', _source='nmap'),
         Port(port=8080, host='localhost', ip='127.0.0.1', service_name='nagios-nsca',  _source='nmap'),
-        Vulnerability(
-            matched_at='localhost:8080',
-            name='OS Command Injection',
-            provider='cve.circl.lu',
-            id='CVE-2013-4781',
-            severity='critical',
-            confidence='low',
-            cvss_score=10.0,
-            _source='nmap'
-        )
     ],
     'nuclei': [
         Vulnerability(

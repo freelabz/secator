@@ -34,7 +34,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			cwd=INTEGRATION_DIR
 		)
 
-	def test_workflows(self):
+	def test_default_workflows(self):
 		fmt_opts = {
 			'print_item': DEBUG > 1,
 			'print_cmd': DEBUG > 0,
@@ -82,3 +82,39 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 				self._test_task_output(
 					results,
 					expected_results=outputs)
+
+	def test_adhoc_workflow(self):
+		from secsy.config import ConfigLoader
+		from secsy.output_types import Port, Url
+		config = {
+			'name': 'my_workflow',
+			'description': 'Test workflow',
+			'tasks': {
+				'naabu': {},
+				'httpx': {
+					'targets_': {'type': 'port', 'field': '{host}:{port}'}
+				}
+			}
+		}
+		config = ConfigLoader(config)
+		expected_results = [
+			Port(port=9999, host='localhost', service_name='fake', _source='unknown'),
+			Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
+			Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
+			Url(url='http://localhost:3000', status_code=200, title='OWASP Juice Shop', content_type='text/html', _source='httpx'),
+			Url(url='http://localhost:8080', status_code=400, title='', content_type='application/json', _source='httpx'),
+		]
+		workflow = Workflow(
+			config,
+			targets=['localhost'],
+			results=[Port(port=9999, host='localhost', service_name='fake', _source='unknown')]
+		)
+		uuids = []
+		results = []
+		for result in workflow:
+			self.assertNotIn(result._uuid, uuids)
+			uuids.append(result._uuid)
+			results.append(result)
+		self.assertEqual(results, workflow.results)
+		for res in expected_results:
+			self.assertIn(res, workflow.results)
