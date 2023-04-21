@@ -101,8 +101,8 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			Port(port=9999, host='localhost', service_name='fake', _source='unknown'),
 			Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
 			Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
-			Url(url='http://localhost:3000', status_code=200, title='OWASP Juice Shop', content_type='text/html', _source='httpx'),
-			Url(url='http://localhost:8080', status_code=400, title='', content_type='application/json', _source='httpx'),
+			Url(url='http://localhost:3000', host='127.0.0.1', status_code=200, title='OWASP Juice Shop', content_type='text/html', _source='httpx'),
+			Url(url='http://localhost:8080', host='127.0.0.1', status_code=400, title='', content_type='application/json', _source='httpx'),
 		]
 		workflow = Workflow(
 			config,
