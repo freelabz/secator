@@ -3,6 +3,7 @@ from time import sleep, time
 
 import humanize
 from celery.result import AsyncResult
+from rich.padding import Padding
 from rich.panel import Panel
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
 						   TimeElapsedColumn)
@@ -13,7 +14,7 @@ from secsy.report import Report
 from secsy.rich import console
 from secsy.runners._helpers import (get_task_ids, get_task_info,
 									process_extractor)
-from secsy.utils import merge_opts, import_dynamic
+from secsy.utils import import_dynamic, merge_opts
 
 
 class Runner:
@@ -43,6 +44,7 @@ class Runner:
 		self.results = results
 		self.workspace_name = workspace_name
 		self.run_opts = run_opts
+		self.sync = run_opts.get('sync', True)
 		self.exporters = self.resolve_exporters() or self.DEFAULT_EXPORTERS
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
@@ -61,11 +63,11 @@ class Runner:
 
 	def log_start(self):
 		"""Log runner start."""
-		remote_str = 'starting' if self.sync else 'sent to [bold gold3]Celery[/] worker'
+		remote_str = 'starting' if self.sync else 'sent to Celery worker'
 		runner_name = self.__class__.__name__
 		self.log_header()
 		console.print(
-			f':tada: [bold green]{runner_name}[/] [bold magenta]{self.config.name}[/] [bold green]{remote_str}...[/]')
+			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...')
 
 	def log_header(self):
 		"""Log runner header."""
@@ -87,12 +89,13 @@ class Runner:
 				panel_str += f'\n   • {target}'
 
 		# Options
-		from secsy.decorators import DEFAULT_CLI_OPTIONS
+		DISPLAY_OPTS_EXCLUDE = [
+			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'color', 'table', 'quiet', 'raw_yield'
+		]
 		items = [
 			f'[italic]{k}[/]: {v}'
 			for k, v in opts.items()
-			if not k.startswith('print_')
-			and k not in DEFAULT_CLI_OPTIONS
+			if not k.startswith('print_') and k not in DISPLAY_OPTS_EXCLUDE
 			and v is not None
 		]
 		if items:
@@ -176,19 +179,31 @@ class Runner:
 			# Sleep between updates
 			sleep(1)
 
-	def process_live_tasks(self, result):
+	def process_live_tasks(self, result, description=True, results_only=True):
 		"""Rich progress indicator showing live tasks statuses.
 
 		Args:
 			result (AsyncResult | GroupResult): Celery result.
+			results_only (bool): Yield only results, no task state.
 
 		Yields:
 			dict: Subtasks state and results.
 		"""
-		tasks_progress = Progress(
-			TextColumn('  '),
+		config_name = self.config.name
+		runner_name = self.__class__.__name__.capitalize()
+
+		class PanelProgress(Progress):
+			def get_renderables(self):
+				yield Padding(Panel(
+					self.make_tasks_table(self.tasks),
+					title=f'[bold gold3]{runner_name}[/] [bold magenta]{config_name}[/] tasks',
+					border_style='bold gold3',
+					expand=False,
+					highlight=True), pad=(2, 0, 0, 0))
+
+		tasks_progress = PanelProgress(
 			SpinnerColumn('dots'),
-			TextColumn('[bold gold3]{task.fields[descr]}[/]  '),
+			TextColumn('{task.fields[descr]}  ') if description else '',
 			TextColumn('[bold cyan]{task.fields[name]}[/]'),
 			TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
 			TextColumn('{task.fields[state]:<20}'),
@@ -212,7 +227,10 @@ class Runner:
 			for info in Runner.get_live_results(result):
 
 				# Re-yield so that we can consume it externally
-				yield info
+				if results_only:
+					yield from info['results']
+				else:
+					yield info
 
  				# Ignore partials in output unless DEBUG > 1
 				# TODO: weird to change behavior based on debug flag, could cause issues

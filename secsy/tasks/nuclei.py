@@ -2,10 +2,10 @@ from secsy.decorators import task
 from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, VULN_CONFIDENCE,
-							   VULN_CVSS_SCORE, VULN_DESCRIPTION,
-							   VULN_EXTRACTED_RESULTS, VULN_ID,
-							   VULN_MATCHED_AT, VULN_NAME, VULN_PROVIDER,
-							   VULN_REFERENCES, VULN_SEVERITY, VULN_TAGS, USER_AGENT)
+							   CVSS_SCORE, DESCRIPTION,
+							   VULN_EXTRACTED_RESULTS, ID,
+							   VULN_MATCHED_AT, NAME, PROVIDER,
+							   REFERENCES, VULN_SEVERITY, TAGS, USER_AGENT)
 from secsy.output_types import Vulnerability, Progress
 from secsy.tasks._categories import VulnMulti
 
@@ -18,7 +18,7 @@ class nuclei(VulnMulti):
 	cmd = 'nuclei -silent -sj -si 20 -hm'
 	file_flag = '-l'
 	input_flag = '-u'
-	input_chunk_size = 3  # TODO: figure out which chunk size is appropriate
+	input_chunk_size = 1000
 	json_flag = '-jsonl'
 	opts = {
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
@@ -50,16 +50,16 @@ class nuclei(VulnMulti):
 	output_types = [Vulnerability, Progress]
 	output_map = {
 		Vulnerability: {
-			VULN_ID: lambda x: nuclei.id_extractor(x),
-			VULN_PROVIDER: 'nuclei',
-			VULN_NAME: lambda x: x['info']['name'],
-			VULN_DESCRIPTION: lambda x: x['info'].get('description'),
+			ID: lambda x: nuclei.id_extractor(x),
+			PROVIDER: 'nuclei',
+			NAME: lambda x: x['info']['name'],
+			DESCRIPTION: lambda x: x['info'].get('description'),
 			VULN_SEVERITY: lambda x: x['info'][VULN_SEVERITY],
 			VULN_CONFIDENCE: lambda x: 'high',
-			VULN_CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
+			CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
 			VULN_MATCHED_AT:  'matched-at',
-			VULN_TAGS: lambda x: x['info']['tags'],
-			VULN_REFERENCES: lambda x: x['info']['reference'],
+			TAGS: lambda x: x['info']['tags'],
+			REFERENCES: lambda x: x['info']['reference'],
 			VULN_EXTRACTED_RESULTS: lambda x: {'data': x.get('extracted-results', [])}
 		},
 		Progress: {

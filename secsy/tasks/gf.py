@@ -26,6 +26,6 @@ class gf(Tagger):
 	proxychains = False
 
 	@staticmethod
-	def on_item_converted(self, item):
+	def on_item(self, item):
 		item.extra_data = {'source': 'url'}
 		return item

@@ -12,6 +12,7 @@ release_status = "Development Status :: 3 - Alpha"
 dependencies = [
     'bs4',
     'celery',
+    'colorama',
     'cpe',
     'dotmap',
     'free-proxy',

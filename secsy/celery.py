@@ -8,14 +8,12 @@ from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
-from kombu.serialization import register
 
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
 							   CELERY_RESULT_BACKEND)
 from secsy.rich import console
 from secsy.runners import Task
 from secsy.runners._helpers import run_extractors
-from secsy.serializers.dataclass import dumps_dataclass, loads_dataclass
 from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
 						 discover_internal_tasks, flatten)
 
@@ -27,13 +25,6 @@ Task %(name)s[%(id)s] succeeded in %(runtime)ss\
 """
 COMMANDS = discover_internal_tasks() + discover_external_tasks()
 
-register(
-	'dataclass',
-	dumps_dataclass,
-	loads_dataclass,
-	content_type='application/x-dataclass',
-	content_encoding='utf-8')
-
 app = celery.Celery(__name__)
 app.conf.update({
 	# Broker config
@@ -43,9 +34,11 @@ app.conf.update({
 		'data_folder_out': CELERY_DATA_FOLDER,
 	},
 
-	'accept_content': ['application/x-dataclass'],
-	'task_serializer': 'dataclass',
-	'result_serializer': 'dataclass',
+	# Serialization / compression
+	'accept_content': ['application/x-python-serialize'],
+	'task_compression': 'gzip',
+	'task_serializer': 'pickle',
+	'result_serializer': 'pickle',
 
 	# Backend config
 	'result_backend': CELERY_RESULT_BACKEND,

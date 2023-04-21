@@ -16,7 +16,10 @@ class Task(Runner):
 		'raw_yield': False
 	}
 
-	def run(self, sync=True):
+	def run(self):
+		return list(self.__iter__())
+
+	def __iter__(self):
 		"""Run task.
 
 		Args:
@@ -25,7 +28,10 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
-		self.sync = sync
+		# Default table exporter in non-sync mode
+		if not self.sync and not self.exporters:
+			self.run_opts['output'] = 'table'
+			self.exporters = self.resolve_exporters()
 
 		# Overriding library defaults with CLI defaults
 		table = self.run_opts.get('table', False)
@@ -34,37 +40,44 @@ class Task(Runner):
 		raw = self.run_opts.get('raw', False)
 		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
 		fmt_opts.update({
-			'sync': sync,
+			'sync': self.sync,
 			'raw': raw or not (json or table or orig),
 			'raw_yield': False
 		})
 
 		# In async mode, display results back in client-side
-		if not sync:
+		if not self.sync:
 			fmt_opts['json'] = True
 			fmt_opts['print_cmd_prefix'] = True
 
 		# Merge runtime options
 		opts = merge_opts(self.run_opts, fmt_opts)
 
-		# Run Celery workflow and get results
+		# Get Celery task result iterator
+		uuids = []
 		task_cls = Task.get_task_class(self.config.name)
-		if sync:
+		if self.sync:
 			task = task_cls(self.targets, **opts)
-			print_status = not RECORD and not task._json_output and not task._raw_output and not task._orig_output
-			status = f'[bold yellow]Running task [bold magenta]{self.config.name} ...'
-			with console.status(status) if print_status else nullcontext():
-				self.results = task.run()
 		else:
 			result = task_cls.delay(self.targets, **opts)
 			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
-			list(self.process_live_tasks(result))
-			self.results = result.get()
-			self.results = self.results['results']
+			task = self.process_live_tasks(result, description=False, results_only=True)
+
+		# Run task and yield results
+		status = f'[bold yellow]Running task [bold magenta]{self.config.name} ...'
+		print_status = self.sync and (not RECORD and not task.output_json and not task.output_raw and not task.output_orig)
+		with console.status(status) if print_status and self.sync else nullcontext():
+			for result in task:
+				if result._uuid in uuids:
+					continue
+				uuids.append(result._uuid)
+				self.results.append(result)
+				yield result
+
+		# Filter results and log info
 		self.results = self.filter_results()
 		self.done = True
 		self.log_results()
-		return self.results
 
 	@staticmethod
 	def get_task_class(name):
@@ -79,9 +92,7 @@ class Task(Runner):
 		for task_cls in tasks_classes:
 			if task_cls.__name__ == name:
 				return task_cls
-		raise ValueError(
-			f'Task {name} not found. Aborting.', style='bold red'
-		)
+		raise ValueError(f'Task {name} not found. Aborting.')
 
 	@staticmethod
 	def get_tasks_from_conf(config):
