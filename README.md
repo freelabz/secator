@@ -178,18 +178,18 @@ A scan is a set of workflows that run one after the other.
 You can run some pre-written scans using the `secsy z` subcommand:
 
 ```sh
-secsy z --help # list available scans
-secsy z <NAME> --help # list scan options
+secsy s --help # list available scans
+secsy s <NAME> --help # list scan options
 ```
 
 * **Domain scan**:
     ```sh
-    secsy z domain example.com
+    secsy s domain example.com
     ```
 
 * **Network scan**:
     ```sh
-    secsy z network 192.168.1.0/24
+    secsy s network 192.168.1.0/24
     ```
 
 ### Input options
@@ -292,14 +292,11 @@ from secsy.tasks.http import ffuf, gau, gospider, katana
 host = 'wikipedia.org'
 options = {
     'rate_limit': 1000, # reqs/mn
-    'ffuf_rate_limit': 100,
-    'katana_rate_limit': 30
+    'ffuf.rate_limit': 100,
+    'katana.rate_limit': 30
 }
 for tool in [ffuf, gau, gospider, katana]:
     tool(host, **options)
-
-for result in ffuf(host, wordlist='/usr/src/wordlist/dicc.txt'):
-    print(result)
 ```
 
 In the example above:
@@ -318,7 +315,7 @@ defaults. You can set the option to `False` in order to do this.
 ```py
 options = {
     'rate_limit': 1000, # reqs/mn
-    'ffuf_rate_limit': False, # explicitely disabling `rate_limit` option, will use ffuf defaults
+    'ffuf.rate_limit': False, # explicitely disabling `rate_limit` option, will use ffuf defaults
 }
 ```
 
@@ -360,7 +357,7 @@ opts = {
     'timeout': 3,
     'table': True,
     'quiet': True,
-    'ffuf_wordlist': '/usr/src/wordlist/dicc.txt' # ffuf wordlist
+    'ffuf.wordlist': '/usr/src/wordlist/dicc.txt' # ffuf wordlist
 }
 
 # Setup a logger to see command output in console
@@ -373,6 +370,8 @@ url = httpx(host, raw=True, httpx_match_codes='', **opts).run()[0]
 # Gather URLs
 all_urls = []
 for tool in [gospider, katana, ffuf, gau]
+    if tool == ffuf:
+       url = url + '/FUZZ'
     urls = tool(url, **opts)
     all_urls.extend(urls)
 print(f'Found {len(all_urls)} URLs while scraping {host} !')
@@ -433,7 +432,7 @@ for some reason, you can use the `--sync` flag to force it to run synchronously.
 from secsy.runners import Workflow
 from secsy.config import ConfigLoader
 
-config = ConfigLoader(name='host_scan')
+config = ConfigLoader(name='workflows/host_scan')
 workflow = Workflow(config)
 results = workflow.run()
 print(results)
