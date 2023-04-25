@@ -4,6 +4,9 @@ import unittest
 import warnings
 from time import sleep
 
+from secsy.config import ConfigLoader
+from secsy.runners import Task
+from secsy.output_types import Target, Port, Url
 from secsy.definitions import DEBUG
 from secsy.rich import console
 from secsy.runners import Command, Workflow
@@ -15,6 +18,19 @@ from tests.integration.outputs import OUTPUTS_WORKFLOWS
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
 level = logging.DEBUG if DEBUG > 0 else logging.INFO
 setup_logging(level)
+
+
+def hook_workflow_init(self):
+	self.context['workflow_id'] = 1
+
+
+def hook_task_init(self):
+	self.context['task_id'] = 1
+
+
+def hook_item(self, item):
+	print(item.toDict())
+	return item
 
 
 class TestWorkflows(unittest.TestCase, CommandOutputTester):
@@ -69,7 +85,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 						f'No inputs for workflow {conf.name} ! Skipping.', style='dim red'
 					)
 					continue
-				workflow = Workflow(conf, targets=inputs, **opts)
+				workflow = Workflow(conf, targets=inputs, run_opts=opts)
 				results = workflow.run()
 				if DEBUG > 0:
 					for result in results:
@@ -84,9 +100,22 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 					expected_results=outputs)
 
 	def test_adhoc_workflow(self):
-		from secsy.config import ConfigLoader
-		from secsy.output_types import Port, Url
-		config = {
+		# Expected results / context
+		expected_results = [
+			Port(port=9999, host='localhost', service_name='fake', _source='unknown'),
+    		Target(name='localhost', _source='workflow', _type='target'),
+			Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
+			Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
+			Url(url='http://localhost:3000', host='127.0.0.1', status_code=200, title='OWASP Juice Shop', content_type='text/html', _source='httpx'),
+			Url(url='http://localhost:8080', host='127.0.0.1', status_code=400, title='', content_type='application/json', _source='httpx'),
+		]
+		expected_context = {
+			'task_id': 1,
+			'workflow_id': 1
+		}
+
+		# Create ad-hoc workflow
+		conf = {
 			'name': 'my_workflow',
 			'description': 'Test workflow',
 			'tasks': {
@@ -96,25 +125,37 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 				}
 			}
 		}
-		config = ConfigLoader(config)
-		expected_results = [
-			Port(port=9999, host='localhost', service_name='fake', _source='unknown'),
-			Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
-			Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
-			Url(url='http://localhost:3000', host='127.0.0.1', status_code=200, title='OWASP Juice Shop', content_type='text/html', _source='httpx'),
-			Url(url='http://localhost:8080', host='127.0.0.1', status_code=400, title='', content_type='application/json', _source='httpx'),
-		]
+		config = ConfigLoader(conf)
 		workflow = Workflow(
 			config,
 			targets=['localhost'],
-			results=[Port(port=9999, host='localhost', service_name='fake', _source='unknown')]
+			results=[
+				Port(port=9999, host='localhost', service_name='fake', _source='unknown', _context=expected_context)
+			],
+			hooks = {
+				Workflow: {
+					'on_init': [hook_workflow_init],
+				},
+				Task: {
+					'on_init': [hook_task_init],
+					'on_item': [hook_item],
+				}
+			}
 		)
 		uuids = []
 		results = []
+
+		# Verify no duplicates and context added from hook is present in output
 		for result in workflow:
+			if not isinstance(result, Target):
+				self.assertEqual(result._context, expected_context)
 			self.assertNotIn(result._uuid, uuids)
 			uuids.append(result._uuid)
 			results.append(result)
+
+		# Verify results yielded from workflow and workflow.results are equal
 		self.assertEqual(results, workflow.results)
+
+		# Verify expected results are there
 		for res in expected_results:
 			self.assertIn(res, workflow.results)

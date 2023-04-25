@@ -12,6 +12,7 @@ class Progress(OutputType):
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='metric', repr=True)
 	_uuid: str = field(default='', repr=True, compare=False)
+	_context: dict = field(default_factory=dict, repr=True, compare=False)
 
 	_table_fields = ['percent', 'duration']
 	_sort_by = ('percent',)

@@ -12,6 +12,7 @@ class UserAccount(OutputType):
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='user_account', repr=True)
 	_uuid: str = field(default='', repr=True, compare=False)
+	_context: dict = field(default_factory=dict, repr=True, compare=False)
 
 	_table_fields = [SITE_NAME, USERNAME, URL]
 	_sort_by = (URL, USERNAME)

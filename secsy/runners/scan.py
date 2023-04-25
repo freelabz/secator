@@ -27,6 +27,11 @@ class Scan(Runner):
 		'raw_yield': False
 	}
 
+	@classmethod
+	def delay(cls, *args, **kwargs):
+		from secsy.celery import run_scan
+		return run_scan.delay(args=args, kwargs=kwargs)
+
 	def run(self):
 		return list(self.__iter__())
 
@@ -66,7 +71,9 @@ class Scan(Runner):
 				ConfigLoader(name=f'workflows/{name}'),
 				targets,
 				workspace_name=self.workspace_name,
-				**self.run_opts)
+				run_opts=self.run_opts,
+				hooks=self.hooks,
+				context=self.context)
 
 			# Get results
 			for result in workflow:
