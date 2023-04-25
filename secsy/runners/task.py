@@ -52,6 +52,8 @@ class Task(Runner):
 
 		# Merge runtime options
 		opts = merge_opts(self.run_opts, fmt_opts)
+		opts['context'] = self.context
+		opts['hooks'] = self.hooks.get(Task, {})
 
 		# Get Celery task result iterator
 		uuids = []

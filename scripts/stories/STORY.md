@@ -63,13 +63,15 @@ from secsy.runners import Workflow
 from secsy.config import ConfigLoader
 
 config = ConfigLoader(name='workflows/host_recon')
-callbacks = {
-    'output': {
-        Port: [save_port_to_db],
-        Vulnerability: [save_vulnerability_to_db, send_vulnerability_to_discord],
-    }
+hooks = {
+	Task: {
+		'on_item': {
+			Port: [save_port_to_db],
+			Vulnerability: [save_vulnerability_to_db, send_vulnerability_to_discord],
+		}
+	}
 }
-workflow = Workflow(config, callbacks=callbacks)
+workflow = Workflow(config, hooks=hooks)
 result = workflow.delay()
 while not result.ready():
     nports = db.session.query(Vulnerability).count()

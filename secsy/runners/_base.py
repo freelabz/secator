@@ -36,7 +36,7 @@ class Runner:
 
 	DEFAULT_EXPORTERS = []
 
-	def __init__(self, config, targets, results=[], workspace_name=None, **run_opts):
+	def __init__(self, config, targets, results=[], workspace_name=None, run_opts={}, hooks={}, context={}):
 		self.config = config
 		if not isinstance(targets, list):
 			targets = [targets]
@@ -45,19 +45,47 @@ class Runner:
 		self.workspace_name = workspace_name
 		self.run_opts = run_opts
 		self.sync = run_opts.get('sync', True)
-		self.exporters = self.resolve_exporters() or self.DEFAULT_EXPORTERS
+		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.errors = []
+		self.context = context
+		self.hooks = hooks
+		self.delay = run_opts.get('delay', False)
+		self.run_hooks('on_init')
+
+	def toDict(self):
+		return {
+			'config': self.config.toDict(),
+			'targets': self.targets,
+			'workspace_name': self.workspace_name,
+			'run_opts': self.run_opts,
+			'sync': self.sync,
+			'done': self.done,
+			'start_time': self.start_time,
+			'errors': self.errors,
+			'context': self.context,
+		}
+
+	def run_hooks(self, hook_type, *args):
+		# logger.debug(f'Running hooks of type {hook_type}')
+		result = args[0] if len(args) > 0 else None
+		for hook in self.hooks.get(self.__class__, {}).get(hook_type, []):
+			# logger.debug(hook)
+			result = hook(self, *args)
+		return result
 
 	def resolve_exporters(self):
 		"""Resolve exporters from output options."""
 		output = self.run_opts.get('output', None)
-		if not output:
+		if output is None:
+			return self.DEFAULT_EXPORTERS
+		elif output is False:
 			return []
 		exporters = [
 			import_dynamic(f'secsy.exporters.{o.capitalize()}Exporter', 'Exporter')
 			for o in output.split(',')
+			if o
 		]
 		return [e for e in exporters if e]
 
@@ -151,6 +179,7 @@ class Runner:
 			f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
 			f'[bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
 		console.print()
+		self.run_hooks('on_end')
 
 	@staticmethod
 	def get_live_results(result):

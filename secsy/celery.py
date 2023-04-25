@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from secsy.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
 							   CELERY_RESULT_BACKEND)
 from secsy.rich import console
-from secsy.runners import Task
+from secsy.runners import Task, Workflow, Scan
 from secsy.runners._helpers import run_extractors
 from secsy.utils import (TaskError, deduplicate, discover_external_tasks,
 						 discover_internal_tasks, flatten)
@@ -93,6 +93,24 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 		)
 	)
 	return workflow
+
+
+@app.task(bind=True)
+def run_scan(self, args=[], kwargs={}):
+	if not 'context' in kwargs:
+		kwargs['context'] = {}
+	kwargs['context']['celery_id'] = self.request.id
+	scan = Scan(*args, **kwargs)
+	scan.run()
+
+
+@app.task(bind=True)
+def run_workflow(self, args=[], kwargs={}):
+	if not 'context' in kwargs:
+		kwargs['context'] = {}
+	kwargs['context']['celery_id'] = self.request.id
+	workflow = Workflow(*args, **kwargs)
+	workflow.run()
 
 
 @app.task(bind=True)

@@ -31,7 +31,7 @@ HOOKS = [
 	'on_item_pre_convert',
 	'on_item',
 	'on_line',
-	'on_end',
+	'on_iter',
 	'on_error'
 ]
 
@@ -55,9 +55,11 @@ class TaskBase:
 		self.cmd_opts = cmd_opts.copy()
 		self.results = []
 		self.sync = self.cmd_opts.pop('sync', True)
+		self.context = self.cmd_opts.pop('context', {})
 		self.description = self.cmd_opts.pop('description', None)
 		self.name = self.__class__.__name__
 		self.output = ''
+		self.done = False
 
 		# Proxy config (global)
 		self.proxy = self.cmd_opts.pop('proxy', False)
@@ -154,8 +156,11 @@ class TaskBase:
 					yield item
 
 			self.output += str(item) + '\n'
+			self.run_hooks('on_iter')
 
 		self._process_results()
+		self.done = True
+		self.run_hooks('on_end')
 
 	def _convert_item_schema(self, item):
 		"""Convert dict item to a new structure using the class output schema.
@@ -187,6 +192,9 @@ class TaskBase:
 
 		# Add source to item
 		new_item._source = self.name
+
+		# Add context to item
+		new_item._context = self.context
 
 		return new_item
 
@@ -452,6 +460,15 @@ class Command(TaskBase):
 	# Ignore return code
 	ignore_return_code = False
 
+	# Return code
+	return_code = -1
+
+	# Error
+	error = ''
+
+	# Output
+	output = ''
+
 	def __init__(self, input=None, **cmd_opts):
 		super().__init__(input, **cmd_opts)
 
@@ -466,6 +483,17 @@ class Command(TaskBase):
 
 		# Build command
 		self._build_cmd()
+
+	def toDict(self):
+		return {
+			'cmd': self.cmd,
+			'name': self.name,
+			'output': self.output,
+			'return_code': self.return_code,
+			'error': self.error,
+			'context': self.context,
+			'done': self.done
+		}
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
@@ -687,8 +715,6 @@ class Command(TaskBase):
 				error += f' Output: {self.output}'
 			self.error = error
 			self._print(error, color='bold red')
-
-		self.run_hooks('on_end')
 
 	@staticmethod
 	def _process_opts(
