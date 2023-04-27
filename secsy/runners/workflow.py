@@ -55,7 +55,7 @@ class Workflow(Runner):
 		print_line = self.run_opts.get('print_line', False)
 		print_item = self.run_opts.get('print_item', False)
 		print_metric = self.run_opts.get('print_metric', True)
-		live_status = self.sync and not (print_line or print_item or print_metric)
+		print_live_status = self.run_opts.get('print_live_status', True) or (self.sync and not (print_line or print_item or print_metric))
 
 		# In async mode, display results back in client-side
 		if not self.sync:
@@ -83,7 +83,7 @@ class Workflow(Runner):
 
 		# Run Celery workflow and get results
 		status = f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'
-		with console.status(status) if not RECORD and live_status else nullcontext():
+		with console.status(status) if not RECORD and print_live_status else nullcontext():
 			if self.sync:
 				# TODO: yield live results here: doesn't work with apply, we will need to run something like:
 				#  results = []
@@ -95,17 +95,18 @@ class Workflow(Runner):
 				results = workflow.apply().get()
 			else:
 				result = workflow()
-				results = self.process_live_tasks(result, results_only=True)
+				results = self.process_live_tasks(result, results_only=True, print_live_status=print_live_status)
 
 		# Get workflow results
 		display_types = self.DEFAULT_LIVE_DISPLAY_TYPES
 		display_types_str = ', '.join(f'[bold yellow]{t}[/]' for t in display_types)
 		console.print()
-		console.print(f':tv: Monitoring {display_types_str}:')
+		if print_live_status:
+			console.print(f':tv: Monitoring {display_types_str}:')
 		for result in results:
 			if result._uuid in uuids:
 				continue
-			if result._type in display_types:
+			if print_live_status and result._type in display_types:
 				print(str(result))
 			uuids.append(result._uuid)
 			self.results.append(result)

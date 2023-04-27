@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import datetime
 from time import sleep, time
 
@@ -208,7 +209,7 @@ class Runner:
 			# Sleep between updates
 			sleep(1)
 
-	def process_live_tasks(self, result, description=True, results_only=True):
+	def process_live_tasks(self, result, description=True, results_only=True, print_live_status=True):
 		"""Rich progress indicator showing live tasks statuses.
 
 		Args:
@@ -221,32 +222,37 @@ class Runner:
 		config_name = self.config.name
 		runner_name = self.__class__.__name__.capitalize()
 
-		class PanelProgress(Progress):
-			def get_renderables(self):
-				yield Padding(Panel(
-					self.make_tasks_table(self.tasks),
-					title=f'[bold gold3]{runner_name}[/] [bold magenta]{config_name}[/] tasks',
-					border_style='bold gold3',
-					expand=False,
-					highlight=True), pad=(2, 0, 0, 0))
+		# Display live results if print_live_status is set
+		if print_live_status:
+			class PanelProgress(Progress):
+				def get_renderables(self):
+					yield Padding(Panel(
+						self.make_tasks_table(self.tasks),
+						title=f'[bold gold3]{runner_name}[/] [bold magenta]{config_name}[/] tasks',
+						border_style='bold gold3',
+						expand=False,
+						highlight=True), pad=(2, 0, 0, 0))
 
-		tasks_progress = PanelProgress(
-			SpinnerColumn('dots'),
-			TextColumn('{task.fields[descr]}  ') if description else '',
-			TextColumn('[bold cyan]{task.fields[name]}[/]'),
-			TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
-			TextColumn('{task.fields[state]:<20}'),
-			TimeElapsedColumn(),
-			TextColumn('{task.fields[count]}'),
-			# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
-			refresh_per_second=1
-		)
-		state_colors = {
-			'RUNNING': 'bold yellow',
-			'SUCCESS': 'bold green',
-			'FAILURE': 'bold red',
-			'REVOKED': 'bold magenta'
-		}
+			tasks_progress = PanelProgress(
+				SpinnerColumn('dots'),
+				TextColumn('{task.fields[descr]}  ') if description else '',
+				TextColumn('[bold cyan]{task.fields[name]}[/]'),
+				TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
+				TextColumn('{task.fields[state]:<20}'),
+				TimeElapsedColumn(),
+				TextColumn('{task.fields[count]}'),
+				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
+				refresh_per_second=1
+			)
+			state_colors = {
+				'RUNNING': 'bold yellow',
+				'SUCCESS': 'bold green',
+				'FAILURE': 'bold red',
+				'REVOKED': 'bold magenta'
+			}
+		else:
+			tasks_progress = nullcontext()
+
 		with tasks_progress as progress:
 
 			# Make progress tasks
@@ -260,6 +266,9 @@ class Runner:
 					yield from info['results']
 				else:
 					yield info
+
+				if not print_live_status:
+					continue
 
  				# Ignore partials in output unless DEBUG > 1
 				# TODO: weird to change behavior based on debug flag, could cause issues
