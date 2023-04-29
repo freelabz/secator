@@ -31,6 +31,7 @@ HOOKS = [
 	'on_item_pre_convert',
 	'on_item',
 	'on_line',
+	'on_iter',
 	'on_error'
 ]
 
@@ -60,6 +61,9 @@ class TaskBase:
 		self.output = ''
 		self.done = False
 		self.status = 'RUNNING'
+		self.progress = 0
+		self.error = ''
+		self.results_count = 0
 
 		# Proxy config (global)
 		self.proxy = self.cmd_opts.pop('proxy', False)
@@ -139,6 +143,8 @@ class TaskBase:
 			'targets': self.input,
 			'run_opts': self.cmd_opts,
 			'status': self.status,
+			'progress': self.progress,
+			'results_count': self.results_count,
 			'output': self.output,
 			'error': self.error,
 			'context': self.context,
@@ -158,6 +164,7 @@ class TaskBase:
 				item = self._process_item(item)
 				if not item:
 					continue
+				self.results_count += 1
 				yield item
 
 			elif isinstance(item, str):
@@ -171,9 +178,12 @@ class TaskBase:
 			if item:
 				self.output += str(item) + '\n'
 
+			self.run_hooks('on_iter')
+
 		self._process_results()
 		self.status = 'SUCCESS' if not self.error else 'FAILED'
 		self.done = True
+		self.progress = 100
 		self.run_hooks('on_end')
 
 	def _convert_item_schema(self, item):
@@ -209,6 +219,10 @@ class TaskBase:
 
 		# Add context to item
 		new_item._context = self.context
+
+		# If progress item, update task progress
+		if new_item._type == 'progress':
+			self.progress = new_item.percent
 
 		return new_item
 
