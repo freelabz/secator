@@ -52,6 +52,8 @@ class Task(Runner):
 
 		# Merge runtime options
 		opts = merge_opts(self.run_opts, fmt_opts)
+		opts['context'] = self.context
+		opts['hooks'] = self.hooks.get(Task, {})
 
 		# Get Celery task result iterator
 		uuids = []
@@ -72,11 +74,12 @@ class Task(Runner):
 					continue
 				uuids.append(result._uuid)
 				self.results.append(result)
+				self.results_count += 1
+				self.run_hooks('on_iter')
 				yield result
 
 		# Filter results and log info
 		self.results = self.filter_results()
-		self.done = True
 		self.log_results()
 
 	@staticmethod

@@ -12,7 +12,7 @@ from secsy.utils import (expand_input, get_command_category,
 						 get_command_cls, deduplicate)
 
 RUNNER_OPTS = {
-	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
+	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
@@ -258,7 +258,7 @@ def register_runner(cli_endpoint, config):
 		opts['sync'] = sync
 
 		# Build exporters
-		runner = runner_cls(config, targets, workspace_name=ws, **opts)
+		runner = runner_cls(config, targets, workspace_name=ws, run_opts=opts)
 		runner.run()
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}

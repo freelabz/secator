@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import datetime
 from time import sleep, time
 
@@ -36,28 +37,75 @@ class Runner:
 
 	DEFAULT_EXPORTERS = []
 
-	def __init__(self, config, targets, results=[], workspace_name=None, **run_opts):
+	def __init__(self, config, targets, results=[], workspace_name=None, run_opts={}, hooks={}, context={}):
 		self.config = config
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
 		self.results = results
+		self.results_count = 0
 		self.workspace_name = workspace_name
 		self.run_opts = run_opts
 		self.sync = run_opts.get('sync', True)
-		self.exporters = self.resolve_exporters() or self.DEFAULT_EXPORTERS
+		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
+		self.end_time = None
 		self.errors = []
+		self.status = 'RUNNING'
+		self.progress = 0
+		self.context = context
+		self.hooks = hooks
+		self.delay = run_opts.get('delay', False)
+		self.run_hooks('on_init')
+
+	@property
+	def elapsed(self):
+		if self.done:
+			return self.end_time - self.start_time
+		return datetime.fromtimestamp(time()) - self.start_time
+
+	@property
+	def elapsed_human(self):
+		return humanize.naturaldelta(self.elapsed)
+
+	def toDict(self):
+		return {
+			'config': self.config.toDict(),
+			'targets': self.targets,
+			'run_opts': self.run_opts,
+			'workspace_name': self.workspace_name,
+			'results_count': self.results_count,
+			'sync': self.sync,
+			'done': self.done,
+			'status': self.status,
+			'progress': self.progress,
+			'start_time': self.start_time,
+			'end_time': self.end_time,
+			'elapsed_human': self.elapsed_human,
+			'errors': self.errors,
+			'context': self.context
+		}
+
+	def run_hooks(self, hook_type, *args):
+		# logger.debug(f'Running hooks of type {hook_type}')
+		result = args[0] if len(args) > 0 else None
+		for hook in self.hooks.get(self.__class__, {}).get(hook_type, []):
+			# logger.debug(hook)
+			result = hook(self, *args)
+		return result
 
 	def resolve_exporters(self):
 		"""Resolve exporters from output options."""
 		output = self.run_opts.get('output', None)
-		if not output:
+		if output is None:
+			return self.DEFAULT_EXPORTERS
+		elif output is False:
 			return []
 		exporters = [
 			import_dynamic(f'secsy.exporters.{o.capitalize()}Exporter', 'Exporter')
 			for o in output.split(',')
+			if o
 		]
 		return [e for e in exporters if e]
 
@@ -125,30 +173,29 @@ class Runner:
 			results (list): List of results.
 			output_types (list): List of result types to add to report.
 		"""
+		self.done = True
+		self.progress = 100
+		self.results_count = len(self.results)
+		self.status = 'SUCCESS' if not self.errors else 'FAILED'
+		self.end_time = datetime.fromtimestamp(time())
+		self.run_hooks('on_end')
+
+		# Log runner errors
 		for error in self.errors:
 			console.log(error, style='bold red')
 
-		if not self.done:
-			return
-
-		if not self.results:
-			console.log('No results found.', style='bold red')
-			return
-
-		self.end_time = datetime.fromtimestamp(time())
-		self.elapsed = self.end_time - self.start_time
-		self.elapsed_human = humanize.naturaldelta(self.elapsed)
-		console.print()
-
 		# Build and send report
-		report = Report(self, exporters=self.exporters)
-		report.build()
-		report.send()
-		self.report = report
+		if self.results:
+			report = Report(self, exporters=self.exporters)
+			report.build()
+			report.send()
+			self.report = report
+		else:
+			console.log('No results found.', style='bold red')
 
 		# Log execution results
 		console.print(
-			f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
+			f'\n:tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
 			f'[bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
 		console.print()
 
@@ -179,7 +226,7 @@ class Runner:
 			# Sleep between updates
 			sleep(1)
 
-	def process_live_tasks(self, result, description=True, results_only=True):
+	def process_live_tasks(self, result, description=True, results_only=True, print_live_status=True):
 		"""Rich progress indicator showing live tasks statuses.
 
 		Args:
@@ -192,32 +239,37 @@ class Runner:
 		config_name = self.config.name
 		runner_name = self.__class__.__name__.capitalize()
 
-		class PanelProgress(Progress):
-			def get_renderables(self):
-				yield Padding(Panel(
-					self.make_tasks_table(self.tasks),
-					title=f'[bold gold3]{runner_name}[/] [bold magenta]{config_name}[/] tasks',
-					border_style='bold gold3',
-					expand=False,
-					highlight=True), pad=(2, 0, 0, 0))
+		# Display live results if print_live_status is set
+		if print_live_status:
+			class PanelProgress(Progress):
+				def get_renderables(self):
+					yield Padding(Panel(
+						self.make_tasks_table(self.tasks),
+						title=f'[bold gold3]{runner_name}[/] [bold magenta]{config_name}[/] tasks',
+						border_style='bold gold3',
+						expand=False,
+						highlight=True), pad=(2, 0, 0, 0))
 
-		tasks_progress = PanelProgress(
-			SpinnerColumn('dots'),
-			TextColumn('{task.fields[descr]}  ') if description else '',
-			TextColumn('[bold cyan]{task.fields[name]}[/]'),
-			TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
-			TextColumn('{task.fields[state]:<20}'),
-			TimeElapsedColumn(),
-			TextColumn('{task.fields[count]}'),
-			# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
-			refresh_per_second=1
-		)
-		state_colors = {
-			'RUNNING': 'bold yellow',
-			'SUCCESS': 'bold green',
-			'FAILURE': 'bold red',
-			'REVOKED': 'bold magenta'
-		}
+			tasks_progress = PanelProgress(
+				SpinnerColumn('dots'),
+				TextColumn('{task.fields[descr]}  ') if description else '',
+				TextColumn('[bold cyan]{task.fields[name]}[/]'),
+				TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
+				TextColumn('{task.fields[state]:<20}'),
+				TimeElapsedColumn(),
+				TextColumn('{task.fields[count]}'),
+				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
+				refresh_per_second=1
+			)
+			state_colors = {
+				'RUNNING': 'bold yellow',
+				'SUCCESS': 'bold green',
+				'FAILURE': 'bold red',
+				'REVOKED': 'bold magenta'
+			}
+		else:
+			tasks_progress = nullcontext()
+
 		with tasks_progress as progress:
 
 			# Make progress tasks
@@ -231,6 +283,9 @@ class Runner:
 					yield from info['results']
 				else:
 					yield info
+
+				if not print_live_status:
+					continue
 
  				# Ignore partials in output unless DEBUG > 1
 				# TODO: weird to change behavior based on debug flag, could cause issues

@@ -5,6 +5,7 @@ from pathlib import Path
 from secsy.definitions import REPORTS_FOLDER
 from secsy.output_types import OUTPUT_TYPES, OutputType
 from secsy.utils import merge_opts, pluralize, get_file_timestamp, print_results_table
+from secsy.rich import console
 
 
 # TODO: initialize from data, not from runner
@@ -29,7 +30,10 @@ class Report:
 
 	def send(self):
 		for report_cls in self.exporters:
-			report_cls(self).send()
+			try:
+				report_cls(self).send()
+			except Exception as e:
+				console.print(f'Could not create exporter for {self.__class__.__name__}: {str(e)}', style='bold red')
 
 	def build(self):
 		# Trim options
