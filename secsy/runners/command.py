@@ -722,11 +722,8 @@ class Command(TaskBase):
 			self.return_code = 0
 
 		if self.return_code != 0 and not self.killed:
-			error = f'Command failed with return code {self.return_code}.'
-			if not self.print_line and self.output:
-				error += f' Output: {self.output}'
-			self.error = error
-			self._print(error, color='bold red')
+			self.error = f'Command failed with return code {self.return_code}.'
+			self._print(self.error, color='bold red')
 
 	@staticmethod
 	def _process_opts(
