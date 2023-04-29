@@ -77,6 +77,7 @@ class Workflow(Runner):
 		]
 		uuids = [i._uuid for i in self.results]
 		yield from self.results
+		self.results_count = len(self.results)
 
 		# Build Celery workflow
 		workflow = self.build_celery_workflow(results=self.results)
@@ -110,13 +111,14 @@ class Workflow(Runner):
 				print(str(result))
 			uuids.append(result._uuid)
 			self.results.append(result)
+			self.results_count += 1
+			self.run_hooks('on_iter')
 			yield result
 
 		# Filter workflow results
 		self.results = self.filter_results()
-		self.done = True
 		self.log_results()
-		return self.results
+
 
 	def build_celery_workflow(self, results=[]):
 		""""Build Celery workflow.
@@ -125,19 +127,18 @@ class Workflow(Runner):
 			celery.chain: Celery task chain.
 		"""
 		from secsy.celery import forward_results
-		sigs = Workflow.get_tasks(
+		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
 			self.targets,
 			self.config.options,
 			self.run_opts,
 			self.hooks,
-			self.context)
+			self.context) 
 		sigs = [forward_results.si(results)] + sigs + [forward_results.s()]
 		workflow = chain(*sigs)
 		return workflow
 
-	@staticmethod
-	def get_tasks(obj, targets, workflow_opts, run_opts, hooks={}, context={}):
+	def get_tasks(self, obj, targets, workflow_opts, run_opts, hooks={}, context={}):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
@@ -158,7 +159,7 @@ class Workflow(Runner):
 
 			# If it's a group, process the sublevel tasks as a Celery chord.
 			if task_name == '_group':
-				tasks = Workflow.get_tasks(
+				tasks = self.get_tasks(
 					task_opts,
 					targets,
 					workflow_opts,
@@ -168,7 +169,7 @@ class Workflow(Runner):
 				)
 				sig = chord((tasks), forward_results.s())
 			elif task_name == '_chain':
-				tasks = Workflow.get_tasks(
+				tasks = self.get_tasks(
 					task_opts,
 					targets,
 					workflow_opts,

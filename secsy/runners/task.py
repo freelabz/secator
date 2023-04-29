@@ -74,11 +74,12 @@ class Task(Runner):
 					continue
 				uuids.append(result._uuid)
 				self.results.append(result)
+				self.results_count += 1
+				self.run_hooks('on_iter')
 				yield result
 
 		# Filter results and log info
 		self.results = self.filter_results()
-		self.done = True
 		self.log_results()
 
 	@staticmethod

@@ -56,6 +56,11 @@ class Scan(Runner):
 		]
 		uuids = [i._uuid for i in self.results]
 		yield from self.results
+		self.results_count = len(self.results)
+
+		# Init progress
+		nworkflows = len(self.config.workflows)
+		count = 1
 
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
@@ -81,10 +86,14 @@ class Scan(Runner):
 					continue
 				uuids.append(result._uuid)
 				self.results.append(result)
+				self.results_count += 1
+				self.run_hooks('on_iter')
 				yield result
+
+			# Update scan progress
+			self.progress = (count / nworkflows) * 100
+			count += 1
 
 		# Filter workflow results
 		self.results = self.filter_results()
-		self.done = True
 		self.log_results()
-		return self.results
