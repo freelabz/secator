@@ -43,29 +43,48 @@ class Runner:
 			targets = [targets]
 		self.targets = targets
 		self.results = results
+		self.results_count = 0
 		self.workspace_name = workspace_name
 		self.run_opts = run_opts
 		self.sync = run_opts.get('sync', True)
 		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
+		self.end_time = None
 		self.errors = []
+		self.status = 'RUNNING'
+		self.progress = 0
 		self.context = context
 		self.hooks = hooks
 		self.delay = run_opts.get('delay', False)
 		self.run_hooks('on_init')
 
+	@property
+	def elapsed(self):
+		if self.done:
+			return self.end_time - self.start_time
+		return datetime.fromtimestamp(time()) - self.start_time
+
+	@property
+	def elapsed_human(self):
+		return humanize.naturaldelta(self.elapsed)
+
 	def toDict(self):
 		return {
 			'config': self.config.toDict(),
 			'targets': self.targets,
-			'workspace_name': self.workspace_name,
 			'run_opts': self.run_opts,
+			'workspace_name': self.workspace_name,
+			'results_count': self.results_count,
 			'sync': self.sync,
 			'done': self.done,
+			'status': self.status,
+			'progress': self.progress,
 			'start_time': self.start_time,
+			'end_time': self.end_time,
+			'elapsed_human': self.elapsed_human,
 			'errors': self.errors,
-			'context': self.context,
+			'context': self.context
 		}
 
 	def run_hooks(self, hook_type, *args):
@@ -154,33 +173,31 @@ class Runner:
 			results (list): List of results.
 			output_types (list): List of result types to add to report.
 		"""
+		self.done = True
+		self.progress = 100
+		self.results_count = len(self.results)
+		self.status = 'SUCCESS' if not self.errors else 'FAILED'
+		self.end_time = datetime.fromtimestamp(time())
+		self.run_hooks('on_end')
+
+		# Log runner errors
 		for error in self.errors:
 			console.log(error, style='bold red')
 
-		if not self.done:
-			return
-
-		if not self.results:
-			console.log('No results found.', style='bold red')
-			return
-
-		self.end_time = datetime.fromtimestamp(time())
-		self.elapsed = self.end_time - self.start_time
-		self.elapsed_human = humanize.naturaldelta(self.elapsed)
-		console.print()
-
 		# Build and send report
-		report = Report(self, exporters=self.exporters)
-		report.build()
-		report.send()
-		self.report = report
+		if self.results:
+			report = Report(self, exporters=self.exporters)
+			report.build()
+			report.send()
+			self.report = report
+		else:
+			console.log('No results found.', style='bold red')
 
 		# Log execution results
 		console.print(
-			f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
+			f'\n:tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
 			f'[bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
 		console.print()
-		self.run_hooks('on_end')
 
 	@staticmethod
 	def get_live_results(result):

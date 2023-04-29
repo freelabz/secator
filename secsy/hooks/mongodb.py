@@ -13,7 +13,7 @@ def update_scan(self):
 	client = MongoClient('mongodb://localhost')
 	db = client.main
 	scan_id = self.context['scan_id']
-	db['scans'].update_one({'_id': scan_id}, {'$set': self.toDict()})
+	db['scans'].update_one({'_id': ObjectId(scan_id)}, {'$set': self.toDict()})
 
 
 def save_workflow(self):
@@ -27,7 +27,7 @@ def update_workflow(self):
 	client = MongoClient('mongodb://localhost')
 	db = client.main
 	workflow_id = self.context['workflow_id']
-	db['workflows'].update_one({'_id': workflow_id}, {'$set': self.toDict()})
+	db['workflows'].update_one({'_id': ObjectId(workflow_id)}, {'$set': self.toDict()})
 
 
 def save_task(self):

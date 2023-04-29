@@ -31,7 +31,6 @@ HOOKS = [
 	'on_item_pre_convert',
 	'on_item',
 	'on_line',
-	'on_iter',
 	'on_error'
 ]
 
@@ -60,6 +59,7 @@ class TaskBase:
 		self.name = self.__class__.__name__
 		self.output = ''
 		self.done = False
+		self.status = 'RUNNING'
 
 		# Proxy config (global)
 		self.proxy = self.cmd_opts.pop('proxy', False)
@@ -132,6 +132,18 @@ class TaskBase:
 		# Callback before building the command line
 		self.run_hooks('on_init')
 
+	def toDict(self):
+		return {
+			'targets': self.input,
+			'name': self.name,
+			'status': self.status,
+			'output': self.output,
+			'run_opts': self.cmd_opts,
+			'error': self.error,
+			'context': self.context,
+			'done': self.done
+		}
+
 	def run(self):
 		return list(self.__iter__())
 
@@ -156,9 +168,9 @@ class TaskBase:
 					yield item
 
 			self.output += str(item) + '\n'
-			self.run_hooks('on_iter')
 
 		self._process_results()
+		self.status = 'SUCCESS' if not self.error else 'FAILED'
 		self.done = True
 		self.run_hooks('on_end')
 
@@ -485,15 +497,13 @@ class Command(TaskBase):
 		self._build_cmd()
 
 	def toDict(self):
-		return {
+		res = super().toDict()
+		res.update({
 			'cmd': self.cmd,
-			'name': self.name,
-			'output': self.output,
-			'return_code': self.return_code,
-			'error': self.error,
-			'context': self.context,
-			'done': self.done
-		}
+			'cwd': self.cwd,
+			'return_code': self.return_code
+		})
+		return res
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
