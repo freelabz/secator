@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM kalilinux/kali-rolling
 
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
@@ -8,49 +8,36 @@ ENV PATH="${PATH}:${GOROOT}/bin:${GOPATH}/bin"
 
 # Install Python
 RUN apt update -y && \
-    apt install -y software-properties-common && \
-    add-apt-repository -y ppa:deadsnakes/ppa && \
-    apt update -y && \
     apt install -y \
-    libpcap-dev \
-    python3.10 \
-    python3-dev \
-    python3-pip \
+	software-properties-common \
     curl \
+	gcc \
     git \
-    sudo \
-    wget
+    make \
+	sudo \
+    wget \
+    zlib1g \
+    zlib1g-dev \
+	libc6-dev \
+	libgdbm-dev \
+	libbz2-dev \
+	libffi-dev \
+	libreadline-dev \
+	libncursesw5-dev \
+	libsqlite3-dev \
+	libssl-dev \
+	tk-dev
+RUN wget https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz
+RUN tar xvf Python-3.10.2.tgz && cd Python-3.10.2/ && ./configure --enable-optimizations && make && make install
 
 # Install metasploit
 RUN apt install -y \
-    gcc \
-    gpgv2 \
-    autoconf \
-    bison \
-    build-essential \
     jq \
-    postgresql \
-    libaprutil1 \
-    libgmp3-dev \
-    libpcap-dev \
     openssl \
-    libpq-dev \
-    libreadline6-dev \
-    libsqlite3-dev \
-    libssl-dev \
-    locate \
-    libsvn1 \
-    libtool \
-    libxml2 \
-    libxml2-dev \
-    libxslt-dev \
-    wget \
-    libyaml-dev \
-    ncurses-dev \
-    postgresql-contrib \
-    xsel \
-    zlib1g \
-    zlib1g-dev
+	proxychains \
+	proxychains-ng
+
+# Install Metasploit framework
 RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
 RUN chmod 755 msfinstall
 RUN ./msfinstall
@@ -59,12 +46,13 @@ RUN ./msfinstall
 WORKDIR /code
 
 # Download CVEs
-COPY scripts/download_cves.sh .
-RUN ./download_cves.sh
+# COPY scripts/download_cves.sh .
+# RUN ./download_cves.sh
 
 # Download and install go 1.19
 COPY scripts/install_go.sh .
 RUN ./install_go.sh
+ENV PATH="$PATH:/root/go/bin"
 
 # Install secsy tasks
 COPY scripts/install_commands.sh .
@@ -72,13 +60,15 @@ RUN ./install_commands.sh
 
 # Install Python package and CLI
 COPY requirements.txt .
+RUN pip3 install wheel
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy rest of the code
 COPY . /code/
 
 # Install secsy
-RUN pip3 install --no-deps .
+RUN pip3 uninstall httpx
+RUN pip3 install --no-deps -e .
 
 # Set entrypoint
 ENTRYPOINT ["secsy"]
