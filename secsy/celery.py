@@ -96,12 +96,12 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 
 
 @app.task(bind=True)
-def run_scan(self, args=[], kwargs={}):
+def run_task(self, args=[], kwargs={}):
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
-	scan = Scan(*args, **kwargs)
-	scan.run()
+	task = Task(*args, **kwargs)
+	task.run()
 
 
 @app.task(bind=True)
@@ -111,6 +111,15 @@ def run_workflow(self, args=[], kwargs={}):
 	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)
 	workflow.run()
+
+
+@app.task(bind=True)
+def run_scan(self, args=[], kwargs={}):
+	if 'context' not in kwargs:
+		kwargs['context'] = {}
+	kwargs['context']['celery_id'] = self.request.id
+	scan = Scan(*args, **kwargs)
+	scan.run()
 
 
 @app.task(bind=True)

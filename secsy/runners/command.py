@@ -134,11 +134,12 @@ class TaskBase:
 
 	def toDict(self):
 		return {
-			'targets': self.input,
 			'name': self.name,
+			'description': self.description,
+			'targets': self.input,
+			'run_opts': self.cmd_opts,
 			'status': self.status,
 			'output': self.output,
-			'run_opts': self.cmd_opts,
 			'error': self.error,
 			'context': self.context,
 			'done': self.done
@@ -167,7 +168,8 @@ class TaskBase:
 					self.results.append(item)
 					yield item
 
-			self.output += str(item) + '\n'
+			if item:
+				self.output += str(item) + '\n'
 
 		self._process_results()
 		self.status = 'SUCCESS' if not self.error else 'FAILED'

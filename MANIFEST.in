@@ -1,0 +1,3 @@
+include secsy/configs/workflows/*.yaml
+include secsy/configs/scans/*.yaml
+include secsy/configs/profiles/*.yaml

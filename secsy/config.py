@@ -7,7 +7,7 @@ from dotmap import DotMap
 
 from secsy.rich import console
 
-DEFAULT_CONFIGS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/configs'
+DEFAULT_CONFIGS_DIR = os.path.dirname(os.path.abspath(__file__)) + '/configs'
 CONFIGS_DIR_KEYS = ['workflows', 'scans', 'profiles']
 
 
