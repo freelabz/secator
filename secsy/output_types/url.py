@@ -21,6 +21,7 @@ class Url(OutputType):
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='url', repr=True)
 	_uuid: str = field(default='', repr=True, compare=False)
+	_context: dict = field(default_factory=dict, repr=True, compare=False)
 
 	_table_fields = [
 		URL,

@@ -27,6 +27,11 @@ class Scan(Runner):
 		'raw_yield': False
 	}
 
+	@classmethod
+	def delay(cls, *args, **kwargs):
+		from secsy.celery import run_scan
+		return run_scan.delay(args=args, kwargs=kwargs)
+
 	def run(self):
 		return list(self.__iter__())
 
@@ -51,6 +56,11 @@ class Scan(Runner):
 		]
 		uuids = [i._uuid for i in self.results]
 		yield from self.results
+		self.results_count = len(self.results)
+
+		# Init progress
+		nworkflows = len(self.config.workflows)
+		count = 1
 
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
@@ -66,7 +76,9 @@ class Scan(Runner):
 				ConfigLoader(name=f'workflows/{name}'),
 				targets,
 				workspace_name=self.workspace_name,
-				**self.run_opts)
+				run_opts=self.run_opts,
+				hooks=self.hooks,
+				context=self.context)
 
 			# Get results
 			for result in workflow:
@@ -74,10 +86,14 @@ class Scan(Runner):
 					continue
 				uuids.append(result._uuid)
 				self.results.append(result)
+				self.results_count += 1
+				self.run_hooks('on_iter')
 				yield result
+
+			# Update scan progress
+			self.progress = (count / nworkflows) * 100
+			count += 1
 
 		# Filter workflow results
 		self.results = self.filter_results()
-		self.done = True
 		self.log_results()
-		return self.results

@@ -120,19 +120,21 @@ def report_show(json_path, exclude_fields):
 
 
 @cli.command()
+@click.option('-n', '--name', type=str, default='runner', help='Celery worker name (unique).')
 @click.option('-c', '--concurrency', type=int, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
-@click.option('--check', is_flag=True, help='Check if Celery git sworker is alive')
-def worker(concurrency, reload, check):
+@click.option('--check', is_flag=True, help='Check if Celery git sworker is alive.')
+def worker(name, concurrency, reload, check):
 	"""Celery worker."""
 	if check:
 		is_celery_worker_alive()
 		return
-	cmd = 'celery -A secsy.celery.app worker -n runner'
+	cmd = f'celery -A secsy.celery.app worker -n {name}'
 	if concurrency:
 		cmd += f' -c {concurrency}'
 	if reload:
-		cmd = f'watchmedo auto-restart --directory=./ --patterns="celery.py;tasks/*.py" --recursive -- {cmd}'
+		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
+		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
 	Command.run_command(
 		cmd,
 		**DEFAULT_CMD_OPTS
