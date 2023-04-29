@@ -86,6 +86,7 @@ pycparser==2.21
 Pygments==2.14.0
 pyHanko==0.17.2
 pyhanko-certvalidator==0.20.1
+pymongo==4.3.3
 pyOpenSSL==23.0.0
 pyparsing==3.0.9
 PyPDF2==2.10.4

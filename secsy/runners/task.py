@@ -16,6 +16,10 @@ class Task(Runner):
 		'raw_yield': False
 	}
 
+	def delay(cls, *args, **kwargs):
+		from secsy.celery import run_task
+		return run_task.delay(args=args, kwargs=kwargs)
+
 	def run(self):
 		return list(self.__iter__())
 
@@ -53,7 +57,7 @@ class Task(Runner):
 		# Merge runtime options
 		opts = merge_opts(self.run_opts, fmt_opts)
 		opts['context'] = self.context
-		opts['hooks'] = self.hooks.get(Task, {})
+		opts['hooks'] = self.hooks.get('task', {})
 
 		# Get Celery task result iterator
 		uuids = []

@@ -58,6 +58,7 @@ setup(name=name,
       ],
       keywords='recon framework vulnerability pentest automation',
       install_requires=dependencies,
+      include_package_data=True,
       extras_require=extras,
       entry_points={
           'console_scripts': ['secsy=secsy.cli:cli'],
