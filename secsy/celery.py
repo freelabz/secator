@@ -49,12 +49,12 @@ app.conf.update({
 })
 
 
-# @signals.setup_logging.connect
-# def void(*args, **kwargs):
-# 	"""Override celery's logging setup to prevent it from altering our settings.
-# 	github.com/celery/celery/issues/1867
-# 	"""
-# 	pass
+@signals.setup_logging.connect
+def void(*args, **kwargs):
+	"""Override celery's logging setup to prevent it from altering our settings.
+	github.com/celery/celery/issues/1867
+	"""
+	pass
 
 #--------------#
 # Celery tasks #
@@ -97,7 +97,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
-	if not 'context' in kwargs:
+	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
 	scan = Scan(*args, **kwargs)
@@ -106,7 +106,7 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
-	if not 'context' in kwargs:
+	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)

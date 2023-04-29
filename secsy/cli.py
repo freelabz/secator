@@ -133,7 +133,8 @@ def worker(name, concurrency, reload, check):
 	if concurrency:
 		cmd += f' -c {concurrency}'
 	if reload:
-		cmd = f'watchmedo auto-restart --directory=./ --patterns="celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py" --recursive -- {cmd}'
+		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
+		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
 	Command.run_command(
 		cmd,
 		**DEFAULT_CMD_OPTS
