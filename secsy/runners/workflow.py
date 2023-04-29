@@ -55,7 +55,8 @@ class Workflow(Runner):
 		print_line = self.run_opts.get('print_line', False)
 		print_item = self.run_opts.get('print_item', False)
 		print_metric = self.run_opts.get('print_metric', True)
-		print_live_status = self.run_opts.get('print_live_status', True) or (self.sync and not (print_line or print_item or print_metric))
+		print_live_status = self.run_opts.get('print_live_status', True) \
+			or (self.sync and not (print_line or print_item or print_metric))
 
 		# In async mode, display results back in client-side
 		if not self.sync:
@@ -119,7 +120,6 @@ class Workflow(Runner):
 		self.results = self.filter_results()
 		self.log_results()
 
-
 	def build_celery_workflow(self, results=[]):
 		""""Build Celery workflow.
 
@@ -133,7 +133,7 @@ class Workflow(Runner):
 			self.config.options,
 			self.run_opts,
 			self.hooks,
-			self.context) 
+			self.context)
 		sigs = [forward_results.si(results)] + sigs + [forward_results.s()]
 		workflow = chain(*sigs)
 		return workflow
