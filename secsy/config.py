@@ -20,7 +20,7 @@ def load_config(name):
 	Returns:
 		dict: Loaded config.
 	"""
-	configs_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/configs'
+	configs_path = DEFAULT_CONFIGS_DIR + '/configs'
 	path = Path(configs_path) / f'{name}.yaml'
 	if not path.exists():
 		console.log(f'Config "{name}" could not be loaded.')
