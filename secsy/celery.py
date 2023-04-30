@@ -49,12 +49,12 @@ app.conf.update({
 })
 
 
-@signals.setup_logging.connect
-def void(*args, **kwargs):
-	"""Override celery's logging setup to prevent it from altering our settings.
-	github.com/celery/celery/issues/1867
-	"""
-	pass
+# @signals.setup_logging.connect
+# def void(*args, **kwargs):
+# 	"""Override celery's logging setup to prevent it from altering our settings.
+# 	github.com/celery/celery/issues/1867
+# 	"""
+# 	pass
 
 #--------------#
 # Celery tasks #

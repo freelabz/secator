@@ -35,32 +35,18 @@ class Scan(Runner):
 	def run(self):
 		return list(self.__iter__())
 
-	def __iter__(self):
+	def yielder(self):
 		"""Run scan.
 
 		Yields:
 			dict: Item yielded from individual workflow tasks.
 		"""
-		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
-		fmt_opts['sync'] = self.sync
-		self.run_opts.update(fmt_opts)
-
-		# Log scan start
-		self.log_start()
-
 		# Add target to results and yield previous results
-		_uuid = str(uuid.uuid4())
 		self.results = self.results + [
-			Target(name=name, _source='scan', _type='target', _uuid=_uuid)
+			Target(name=name, _source='scan', _type='target', _uuid=str(uuid.uuid4()))
 			for name in self.targets
 		]
-		uuids = [i._uuid for i in self.results]
 		yield from self.results
-		self.results_count = len(self.results)
-
-		# Init progress
-		nworkflows = len(self.config.workflows)
-		count = 1
 
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
@@ -81,19 +67,4 @@ class Scan(Runner):
 				context=self.context)
 
 			# Get results
-			for result in workflow:
-				if result._uuid in uuids:
-					continue
-				uuids.append(result._uuid)
-				self.results.append(result)
-				self.results_count += 1
-				self.run_hooks('on_iter')
-				yield result
-
-			# Update scan progress
-			self.progress = (count / nworkflows) * 100
-			count += 1
-
-		# Filter workflow results
-		self.results = self.filter_results()
-		self.log_results()
+			yield from workflow
