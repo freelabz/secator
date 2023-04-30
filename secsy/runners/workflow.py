@@ -35,10 +35,7 @@ class Workflow(Runner):
 		from secsy.celery import run_workflow
 		return run_workflow.delay(args=args, kwargs=kwargs)
 
-	def run(self):
-		return list(self.__iter__())
-
-	def __iter__(self):
+	def yielder(self):
 		"""Run workflow.
 
 		Args:
@@ -47,36 +44,11 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
-		# Overriding library defaults with CLI defaults
-		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
-		fmt_opts['sync'] = self.sync
-
-		# Check if we can add a console status
-		print_line = self.run_opts.get('print_line', False)
-		print_item = self.run_opts.get('print_item', False)
-		print_metric = self.run_opts.get('print_metric', True)
-		print_live_status = self.run_opts.get('print_live_status', True) \
-			or (self.sync and not (print_line or print_item or print_metric))
-
-		# In async mode, display results back in client-side
-		if not self.sync:
-			fmt_opts['print_cmd_prefix'] = True
-			if not self.exporters:
-				self.exporters = self.DEFAULT_EXPORTERS
-
-		# Merge runtime options
-		self.run_opts = merge_opts(self.run_opts, fmt_opts)
-
-		# Log workflow start
-		self.log_start()
-
 		# Add target to results and yield previous results
-		_uuid = str(uuid.uuid4())
 		self.results = self.results + [
-			Target(name=name, _source='workflow', _type='target', _uuid=_uuid, _context=self.context)
+			Target(name=name, _source='workflow', _type='target', _uuid=str(uuid.uuid4()), _context=self.context)
 			for name in self.targets
 		]
-		uuids = [i._uuid for i in self.results]
 		yield from self.results
 		self.results_count = len(self.results)
 
@@ -85,40 +57,16 @@ class Workflow(Runner):
 
 		# Run Celery workflow and get results
 		status = f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'
-		with console.status(status) if not RECORD and print_live_status else nullcontext():
+		with console.status(status) if not RECORD and self.print_live_status else nullcontext():
 			if self.sync:
-				# TODO: yield live results here: doesn't work with apply, we will need to run something like:
-				#  results = []
-				#  for task in self.get_tasks():
-				#	yield from Task(task, results=results)
-				#	for item in Task(task, results=results):
-				#		yield item
-				#		results.append(item)
 				results = workflow.apply().get()
 			else:
 				result = workflow()
-				results = self.process_live_tasks(result, results_only=True, print_live_status=print_live_status)
+				self.print_live_status = True
+				results = self.process_live_tasks(result, results_only=True, print_live_status=self.print_live_status)
 
 		# Get workflow results
-		display_types = self.DEFAULT_LIVE_DISPLAY_TYPES
-		display_types_str = ', '.join(f'[bold yellow]{t}[/]' for t in display_types)
-		console.print()
-		if print_live_status:
-			console.print(f':tv: Monitoring {display_types_str}:')
-		for result in results:
-			if result._uuid in uuids:
-				continue
-			if print_live_status and result._type in display_types:
-				print(str(result))
-			uuids.append(result._uuid)
-			self.results.append(result)
-			self.results_count += 1
-			self.run_hooks('on_iter')
-			yield result
-
-		# Filter workflow results
-		self.results = self.filter_results()
-		self.log_results()
+		yield from results
 
 	def build_celery_workflow(self, results=[]):
 		""""Build Celery workflow.
@@ -191,5 +139,6 @@ class Workflow(Runner):
 
 				# Create task signature
 				sig = task.s(targets, **opts)
+				self.output_types.extend(task.output_types)
 			sigs.append(sig)
 		return sigs

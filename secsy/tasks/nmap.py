@@ -59,11 +59,11 @@ class nmap(VulnMulti):
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
 	)
 
-	def __iter__(self):
+	def yielder(self):
 		# TODO: deduplicate this and amass as it's the same function
 		prev = self.print_item_count
 		self.print_item_count = False
-		list(super().__iter__())
+		list(super().yielder())
 		if self.return_code != 0:
 			return
 		self.results = []

@@ -15,8 +15,10 @@ from secsy.definitions import (DEBUG, DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.output_types import OutputType
 from secsy.rich import console, console_stdout
+from secsy.config import ConfigLoader
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp, pluralize, print_results_table
+from secsy.runners import Runner
 
 # from rich.markup import escape
 # from rich.text import Text
@@ -24,412 +26,25 @@ from secsy.utils import get_file_timestamp, pluralize, print_results_table
 
 logger = logging.getLogger(__name__)
 
-HOOKS = [
-	'on_init',
-	'on_start',
-	'on_end',
-	'on_item_pre_convert',
-	'on_item',
-	'on_line',
-	'on_iter',
-	'on_error'
-]
-
-VALIDATORS = [
-	'input',
-	'item'
-]
-
-
-class TaskBase:
-	# Input field (mostly for tests and CLI)
-	input_type = None
-
-	# Output types
-	output_types = None
-
-	# Dict return
-	output_return_type = dict  # TODO: deprecate this
-
-	def __init__(self, input=None, **cmd_opts):
-		self.cmd_opts = cmd_opts.copy()
-		self.results = []
-		self.sync = self.cmd_opts.pop('sync', True)
-		self.context = self.cmd_opts.pop('context', {})
-		self.description = self.cmd_opts.pop('description', None)
-		self.name = self.__class__.__name__
-		self.output = ''
-		self.done = False
-		self.status = 'RUNNING'
-		self.progress = 0
-		self.error = ''
-		self.results_count = 0
-
-		# Proxy config (global)
-		self.proxy = self.cmd_opts.pop('proxy', False)
-		self.configure_proxy()
-
-		# Process input
-		self.input = input
-		if isinstance(self.input, list) and len(self.input) == 1:
-			self.input = self.input[0]
-
-		# Yield dicts if CLI supports JSON
-		if self.output_return_type is dict or (self.json_flag is not None):
-			self.output_return_type = dict
-
-		# Print options
-		self.print_timestamp = self.cmd_opts.pop('print_timestamp', False)
-		self.print_item = self.cmd_opts.pop('print_item', False)
-		self.print_line = self.cmd_opts.pop('print_line', False)
-		self.print_item_count = self.cmd_opts.pop('print_item_count', False)
-		self.print_cmd = self.cmd_opts.pop('print_cmd', False)
-		self.print_progress = self.cmd_opts.pop('print_progress', True)
-		self.print_cmd_prefix = self.cmd_opts.pop('print_cmd_prefix', False)
-
-		# Output options
-		self.output_raw = self.cmd_opts.pop('raw', False)
-		self.output_fmt = self.cmd_opts.pop('format', False)
-		self.output_table = self.cmd_opts.pop('table', False)
-		self.output_orig = self.cmd_opts.pop('orig', False)
-		self.output_color = self.cmd_opts.pop('color', False)
-		self.output_quiet = self.cmd_opts.pop('quiet', False)
-		_json = self.cmd_opts.pop('json', True) or self.output_table or self.output_raw
-
-		# Library output
-		self.raw_yield = self.cmd_opts.pop('raw_yield', False)
-
-		# Determine if JSON output or not
-		self.output_json = self.output_return_type == dict
-		if self.print_timestamp and not _json:
-			self.output_json = False
-
-		# Hooks
-		self.hooks = {name: [] for name in HOOKS}
-		hooks = self.cmd_opts.pop('hooks', {})
-		for key in self.hooks:
-			instance_func = getattr(self, key, None)
-			if instance_func:
-				self.hooks[key].append(instance_func)
-			self.hooks[key].extend(hooks.get(key, []))
-
-		# Validators
-		self.validators = {name: [] for name in VALIDATORS}
-		validators = self.cmd_opts.pop('validators', {})
-		for key in self.validators:
-			instance_func = getattr(self, f'validate_{key}', None)
-			if instance_func:
-				self.validators[key].append(instance_func)
-			self.validators[key].extend(validators.get(key, []))
-
-		# Chunks
-		self.chunk = self.cmd_opts.pop('chunk', None)
-		self.chunk_count = self.cmd_opts.pop('chunk_count', None)
-		self._set_print_prefix()
-
-		# Abort if inputs are invalid
-		self.input_valid = True
-		if not self.run_validators('input', self.input):
-			self.run_hooks('on_end')
-			self.input_valid = False
-
-		# Callback before building the command line
-		self.run_hooks('on_init')
-
-	def toDict(self):
-		return {
-			'name': self.name,
-			'description': self.description,
-			'targets': self.input,
-			'run_opts': self.cmd_opts,
-			'status': self.status,
-			'progress': self.progress,
-			'results_count': self.results_count,
-			'output': self.output,
-			'error': self.error,
-			'context': self.context,
-			'done': self.done
-		}
-
-	def run(self):
-		return list(self.__iter__())
-
-	def __iter__(self):
-		if not self.input_valid:
-			return
-
-		for item in self.yielder():
-
-			if isinstance(item, dict):
-				item = self._process_item(item)
-				if not item:
-					continue
-				self.results_count += 1
-				yield item
-
-			elif isinstance(item, str):
-				if self.print_line and not self.output_quiet:
-					self._print(item, out=sys.stderr, ignore_raw=True)
-
-				if self.output_return_type is not dict:
-					self.results.append(item)
-					yield item
-
-			if item:
-				self.output += str(item) + '\n'
-
-			self.run_hooks('on_iter')
-
-		self._process_results()
-		self.status = 'SUCCESS' if not self.error else 'FAILED'
-		self.done = True
-		self.progress = 100
-		self.run_hooks('on_end')
-
-	def _convert_item_schema(self, item):
-		"""Convert dict item to a new structure using the class output schema.
-
-		Args:
-			item (dict): Item.
-
-		Returns:
-			dict: Item with new schema.
-		"""
-		# Load item using available output types and get the first matching
-		# output type based on the schema
-		new_item = None
-		output_types = getattr(self, 'output_types', [])
-		for klass in output_types:
-			output_map = getattr(self, 'output_map', {})
-			output_map = output_map.get(klass, {})
-			try:
-				new_item = klass.load(item, output_map)
-				break  # found an item that fits
-			except (TypeError, KeyError):  # can't load using class
-				# logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
-				continue
-
-		# No output type was found, so make no conversion
-		if not new_item:
-			new_item = DotMap(item)
-			new_item._type = 'unknown'
-
-		# Add source to item
-		new_item._source = self.name
-
-		# Add context to item
-		new_item._context = self.context
-
-		# If progress item, update task progress
-		if new_item._type == 'progress':
-			self.progress = new_item.percent
-
-		return new_item
-
-	#-------#
-	# Hooks #
-	#-------#
-	def run_hooks(self, hook_type, *args):
-		# logger.debug(f'Running hooks of type {hook_type}')
-		result = args[0] if len(args) > 0 else None
-		for hook in self.hooks[hook_type]:
-			# logger.debug(hook)
-			result = hook(self, *args)
-		return result
-
-	#------------#
-	# Validators #
-	#------------#
-	def run_validators(self, validator_type, *args):
-		# logger.debug(f'Running validators of type {validator_type}')
-		for validator in self.validators[validator_type]:
-			# logger.debug(validator)
-			if not validator(self, *args):
-				if validator_type == 'input':
-					self._print(f'{validator.__doc__}', color='bold red')
-				return False
-		return True
-
-	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
-		"""Print function.
-
-		Args:
-			data (str or dict): Input data.
-			color (str, Optional): Termcolor color.
-			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
-			ignore_raw (bool, Optional): Ignore raw mode.
-			ignore_log (bool, Optional): Ignore log stamps.
-		"""
-		# Choose rich console
-		_console = console_stdout if out == sys.stdout else console
-		log_json = console.print_json
-		log = console.log if self.print_timestamp else _console.print
-
-		# Print a rich table
-		if self.output_table and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
-			print_results_table(self.results)
-
-		# Print a JSON item
-		elif isinstance(data, (OutputType, DotMap, dict)):
-			# If object has a 'toDict' method, use it
-			if getattr(data, 'toDict', None):
-				data = data.toDict()
-
-			# JSON dumps data so that it's consumable by other commands
-			data = json.dumps(data)
-
-			# Add prefix to output
-			data = f'{self.prefix:>15} {data}' if self.prefix and not self.print_item else data
-
-			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
-			# user intent to use it for visualizing results.
-			log_json(data) if self.output_color and self.print_item else _console.print(data, highlight=False)
-
-		# Print a line
-		else:
-			# If orig mode (--orig) or raw mode (--raw), we might want to parse results with e.g pipe redirections, so
-			# we need a pure line with no logging info.
-			if ignore_log or (not ignore_raw and (self.output_orig or self.output_raw)):
-				data = f'{self.prefix} {data}' if self.prefix and not self.print_item else data
-				_console.print(data, highlight=False, style=color)
-			else:
-				# data = escape(data)
-				# data = Text.from_ansi(data)
-				if color:
-					data = f'[{color}]{data}[/]'
-				data = f'{self.prefix} {data}' if self.prefix else data
-				try:
-					log(data)
-				except:  # noqa: E722
-					print(data)
-
-	def _set_print_prefix(self):
-		self.prefix = ''
-		if self.print_cmd_prefix:
-			self.prefix = f'[bold gold3]({self.name})[/]'
-		if self.chunk and self.chunk_count:
-			self.prefix += f' [{self.chunk}/{self.chunk_count}]'
-
-	def configure_proxy(self):
-		"""Configure proxy. Start with global settings like 'proxychains' or 'random', or fallback to tool-specific
-		proxy settings.
-
-		TODO: Move this to a subclass of Command, or to a configurable attribute to pass to derived classes as it's not
-		related to core functionality.
-		"""
-		opt_key_map = getattr(self, 'opt_key_map', {})
-		proxy_opt = opt_key_map.get('proxy', False)
-		support_proxychains = getattr(self, 'proxychains', True)
-		proxychains_flavor = getattr(self, 'proxychains_flavor', 'proxychains')
-		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
-		if self.proxy == 'proxychains':
-			if not support_proxychains:
-				return
-			self.cmd = f'{proxychains_flavor} {self.cmd}'
-		elif self.proxy and support_proxy:
-			if self.proxy == 'random':
-				self.cmd_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
-			else:  # tool-specific proxy settings
-				self.cmd_opts['proxy'] = self.proxy
-
-	def _get_results_count(self):
-		count_map = {}
-		for output_type in self.output_types:
-			if output_type.__name__ == 'Progress':
-				continue
-			name = output_type.get_name()
-			count = len([r for r in self.results if r._type == name])
-			count_map[name] = count
-		return count_map
-
-	def _process_results(self):
-		# TODO: this is only for logging timestamp to show up properly !!!
-		if self.print_timestamp:
-			sleep(1)
-
-		# Log results count
-		if self.print_item_count and self.output_json and not self.output_raw and not self.output_orig:
-			count_map = self._get_results_count()
-			if all(count == 0 for count in count_map.values()):
-				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
-			else:
-				results_str = ':pill: Found ' + ' and '.join([
-					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
-					for name, count in count_map.items()
-				]) + '.'
-				self._print(results_str, color='bold green')
-
-		# Print table if in table mode
-		if self.output_table and self.results and len(self.results) > 0:
-			if isinstance(self.results[0], str):
-				self._print('\n'.join(self.results))
-			else:
-				self._print(self.results, out=sys.stdout)
-
-	def _process_item(self, item: dict):
-		# Run item validators
-		if not self.run_validators('item', item):
-			return None
-
-		# Run item hooks
-		item = self.run_hooks('on_item_pre_convert', item)
-		if not item:
-			return None
-
-		# Convert output dict to another schema
-		if not self.output_orig:
-			item = self._convert_item_schema(item)
-
-			# Run item convert hooks
-			item = self.run_hooks('on_item', item)
-		else:
-			item = DotMap(item)
-
-		# Get item klass
-		item_klass = item.__class__.__name__
-
-		# Add item to result
-		if not item_klass == 'Progress':
-			self.results.append(item)
-
-		# Item to print
-		item_str = item
-
-		# In raw mode, print principal key or output format field.
-		if self.output_raw:
-			item_str = self._rawify(item)
-
-		# In raw yield mode, extract principal key from dict (default 'on' for library usage)
-		if self.raw_yield:
-			item = self._rawify(item)
-			item_str = item
-
-		# Print item to console or log
-		if item_klass == 'Progress' and self.print_progress:
-			self._print(str(item_str), out=sys.stderr, ignore_log=True, color='dim cyan')
-			item = None
-
-		elif self.print_item and self.output_json and not self.output_table:
-			self._print(item_str, out=sys.stdout)
-
-		# Return item
-		return item
-
-	def _rawify(self, item=None):
-		if not item:
-			return [
-				self._rawify(item)
-				for item in self.results
-			]
-		if self.output_raw:
-			if self.output_fmt:
-				item = self.output_fmt.format(**item)
-			elif isinstance(item, OutputType):
-				item = str(item)
-		return item
-
-
-class Command(TaskBase):
+# class TaskBase(Runner):
+
+	# def toDict(self):
+	# 	return {
+	# 		'name': self.name,
+	# 		'description': self.description,
+	# 		'targets': self.input,
+	# 		'run_opts': self.run_opts,
+	# 		'status': self.status,
+	# 		'progress': self.progress,
+	# 		'results_count': self.results_count,
+	# 		'output': self.output,
+	# 		'error': self.error,
+	# 		'context': self.context,
+	# 		'done': self.done
+	# 	}
+
+
+class Command(Runner):
 	"""Base class to execute an external command."""
 	# Base cmd
 	cmd = None
@@ -497,14 +112,46 @@ class Command(TaskBase):
 	# Output
 	output = ''
 
-	def __init__(self, input=None, **cmd_opts):
-		super().__init__(input, **cmd_opts)
+	def __init__(self, input=None, **run_opts):
+		# Build config on-the-fly
+		config = ConfigLoader(input={
+			'name': self.__class__.__name__,
+			'options': run_opts,
+			'results': [],
+			'description': run_opts.get('description', None)
+		})
+
+		# Run parent init
+		workspace_name = run_opts.get('workspace_name', None)
+		results = run_opts.get('results', [])
+		hooks = run_opts.get('hooks', {})
+		context = run_opts.get('context', {})
+		super().__init__(
+			config=config,
+			targets=input,
+			results=results,
+			workspace_name=workspace_name,
+			run_opts=run_opts,
+			hooks=hooks,
+			context=context)
+		
+		# Input is targets
+		self.input = input
+
+		# Name is config name
+		self.name = self.config.name
+
+		# Description is config description
+		self.description = self.config.description
+
+		# Cmd opts is run opts
+		self.run_opts = self.run_opts
 
 		# Current working directory for cmd
-		self.cwd = self.cmd_opts.pop('cwd', None)
+		self.cwd = self.run_opts.get('cwd', None)
 
 		# No capturing of stdout / stderr.
-		self.no_capture = self.cmd_opts.pop('no_capture', False)
+		self.no_capture = self.run_opts.get('no_capture', False)
 
 		# Build command input
 		self._build_cmd_input()
@@ -557,10 +204,10 @@ class Command(TaskBase):
 
 	def get_opt_value(self, opt_name):
 		return Command._get_opt_value(
-			self.cmd_opts,
+			self.run_opts,
 			opt_name,
 			dict(self.opts, **self.meta_opts),
-			opt_prefix=self.name)
+			opt_prefix=self.config.name)
 
 	#---------------#
 	# Class methods #
@@ -635,10 +282,8 @@ class Command(TaskBase):
 		command = self.cmd if self.shell else shlex.split(self.cmd)
 
 		# Output and results
-		self.output = ''
 		self.return_code = 0
 		self.killed = False
-		self.results = []
 
 		# Run the command using subprocess
 		try:
@@ -654,10 +299,10 @@ class Command(TaskBase):
 				cwd=self.cwd)
 
 		except FileNotFoundError as e:
-			if self.name in str(e):
-				error = f'{self.name} not installed.'
+			if self.config.name in str(e):
+				error = f'{self.config.name} not installed.'
 				if self.install_cmd:
-					error += f' Install it with `secsy utils install {self.name}`.'
+					error += f' Install it with `secsy utils install {self.config.name}`.'
 			else:
 				error = str(e)
 			self.error = error
@@ -714,7 +359,6 @@ class Command(TaskBase):
 		except KeyboardInterrupt:
 			process.kill()
 			self._print('Process was killed manually (CTRL+C / CTRL+X)', color='bold red')
-			self.output = ''
 			self.error = 'Process killed manually'
 			self.killed = True
 
@@ -828,23 +472,23 @@ class Command(TaskBase):
 
 		# Add options to cmd
 		opts_str = Command._process_opts(
-			self.cmd_opts,
+			self.run_opts,
 			self.opts,
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.name)
+			command_name=self.config.name)
 		if opts_str:
 			self.cmd += f' {opts_str}'
 
 		# Add meta options to cmd
 		meta_opts_str = Command._process_opts(
-			self.cmd_opts,
+			self.run_opts,
 			self.meta_opts,
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.name)
+			command_name=self.config.name)
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
 
