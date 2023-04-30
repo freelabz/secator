@@ -56,10 +56,10 @@ class dirsearch(HttpFuzzer):
 	}
 	install_cmd = 'pip3 install dirsearch'
 
-	def __iter__(self):
+	def yielder(self):
 		prev = self.print_item_count
 		self.print_item_count = False
-		list(super().__iter__())
+		list(super().yielder())
 		if self.return_code != 0:
 			return
 		self.results = []
@@ -77,7 +77,6 @@ class dirsearch(HttpFuzzer):
 					continue
 				yield item
 		self.print_item_count = prev
-		self._process_results()
 
 	@staticmethod
 	def on_init(self):

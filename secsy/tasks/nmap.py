@@ -78,7 +78,6 @@ class nmap(VulnMulti):
 					continue
 				yield item
 		self.print_item_count = prev
-		self._process_results()
 
 	def xml_to_json(self):
 		results = []

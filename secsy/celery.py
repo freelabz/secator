@@ -33,6 +33,7 @@ app.conf.update({
 		'data_folder_in': CELERY_DATA_FOLDER,
 		'data_folder_out': CELERY_DATA_FOLDER,
 	},
+	'broker_connection_retry_on_startup': True,
 
 	# Serialization / compression
 	'accept_content': ['application/x-python-serialize'],
@@ -156,7 +157,7 @@ def run_command(self, results, name, targets, opts={}):
 		if not chunk:
 			targets, opts = run_extractors(results, opts, targets)
 			if not targets:
-				raise ValueError('No targets were specified as input.')
+				raise ValueError(f'{name}: No targets were specified as input.')
 
 		# Get task class
 		task_cls = Task.get_task_class(name)

@@ -112,6 +112,9 @@ class Command(Runner):
 	# Output
 	output = ''
 
+	# Default run opts
+	default_run_opts = {}
+
 	def __init__(self, input=None, **run_opts):
 		# Build config on-the-fly
 		config = ConfigLoader(input={

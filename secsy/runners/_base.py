@@ -107,15 +107,17 @@ class Runner:
 			self.output_return_type = dict
 
 		# Print options
-		self.print_timestamp = self.run_opts.get('print_timestamp', False)
-		self.print_item = self.run_opts.get('print_item', False)
-		self.print_line = self.run_opts.get('print_line', False)
-		self.print_item_count = self.run_opts.get('print_item_count', False)
-		self.print_cmd = self.run_opts.get('print_cmd', False)
-		self.print_progress = self.run_opts.get('print_progress', True)
-		self.print_cmd_prefix = self.run_opts.get('print_cmd_prefix', False)
-		self.print_live_status = self.run_opts.get('print_live_status', False)
-		self.print_results = self.run_opts.get('print_results', False)
+		self.print_start = self.run_opts.pop('print_start', False)
+		self.print_results = self.run_opts.pop('print_results', False)
+		self.print_timestamp = self.run_opts.pop('print_timestamp', False)
+		self.print_item = self.run_opts.pop('print_item', False)
+		self.print_line = self.run_opts.pop('print_line', False)
+		self.print_item_count = self.run_opts.pop('print_item_count', False)
+		self.print_cmd = self.run_opts.pop('print_cmd', False)
+		self.print_progress = self.run_opts.pop('print_progress', False)
+		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
+		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
+		self.print_summary = self.run_opts.pop('print_summary', False)
 
 		# Output options
 		self.output_raw = self.run_opts.get('raw', False)
@@ -181,7 +183,7 @@ class Runner:
 		return list(self.__iter__())
 
 	def __iter__(self):
-		if self.__class__.__name__ in ['Runner', 'Scan']:
+		if self.print_start:
 			self.log_start()
 
 		if not self.input_valid:
@@ -218,8 +220,7 @@ class Runner:
 
 		# Filter results and log info
 		self.results = self.filter_results()
-		if self.print_results:
-			self.log_results()
+		self.log_results()
 		self.run_hooks('on_end')
 
 	def yielder(self):
@@ -303,12 +304,11 @@ class Runner:
 		runner_name = self.__class__.__name__
 		self.log_header()
 		self._print(
-			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...')
+			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', ignore_log=True)
 
 	def log_header(self):
 		"""Log runner header."""
 		runner_name = self.__class__.__name__
-		opts = merge_opts(self.config.options, self.run_opts)
 
 		# Description
 		panel_str = f':scroll: [bold gold3]Description:[/] {self.config.description}'
@@ -329,8 +329,8 @@ class Runner:
 		]
 		items = [
 			f'[italic]{k}[/]: {v}'
-			for k, v in opts.items()
-			if not k.startswith('print_') and k not in DISPLAY_OPTS_EXCLUDE
+			for k, v in self.run_opts.items()
+			if k not in DISPLAY_OPTS_EXCLUDE
 			and v is not None
 		]
 		if items:
@@ -351,7 +351,7 @@ class Runner:
 			expand=False,
 			highlight=True
 		)
-		self._print(panel)
+		self._print(panel, ignore_log=True)
 
 	def log_results(self):
 		"""Log results.
@@ -365,7 +365,6 @@ class Runner:
 		self.results_count = len(self.results)
 		self.status = 'SUCCESS' if not self.errors else 'FAILED'
 		self.end_time = datetime.fromtimestamp(time())
-		self._process_results()
 		self.run_hooks('on_end')
 
 		# Log runner errors
@@ -378,13 +377,24 @@ class Runner:
 			report.build()
 			report.send()
 			self.report = report
-		else:
-			self._print('No results found.', color='bold red')
+
+		# Log results count
+		if self.print_item_count and self.output_json and not self.output_raw and not self.output_orig:
+			count_map = self._get_results_count()
+			if all(count == 0 for count in count_map.values()):
+				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
+			else:
+				results_str = ':pill: Found ' + ' and '.join([
+					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
+					for name, count in count_map.items()
+				]) + '.'
+				self._print(results_str, color='bold green')
 
 		# Log execution results
-		self._print(
-			f'\n:tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
-			f'[bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].')
+		if self.print_summary:
+			self._print(
+				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
+				f'[bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].', ignore_log=self.sync)
 
 	@staticmethod
 	def get_live_results(result):
@@ -413,7 +423,7 @@ class Runner:
 			# Sleep between updates
 			sleep(1)
 
-	def process_live_tasks(self, result, description=True, results_only=True, print_live_status=True):
+	def process_live_tasks(self, result, description=True, results_only=True, print_remote_status=True):
 		"""Rich progress indicator showing live tasks statuses.
 
 		Args:
@@ -426,13 +436,13 @@ class Runner:
 		config_name = self.config.name
 		runner_name = self.__class__.__name__.capitalize()
 
-		# Display live results if print_live_status is set
-		if print_live_status:
+		# Display live results if print_remote_status is set
+		if print_remote_status:
 			class PanelProgress(Progress):
 				def get_renderables(self):
 					yield Padding(Panel(
 						self.make_tasks_table(self.tasks),
-						title=f'[bold gold3]{runner_name}[/] [bold magenta]{config_name}[/] tasks',
+						title=f'[bold gold3]{runner_name}[/] [bold magenta]{config_name}[/] results',
 						border_style='bold gold3',
 						expand=False,
 						highlight=True), pad=(2, 0, 0, 0))
@@ -471,7 +481,7 @@ class Runner:
 				else:
 					yield info
 
-				if not print_live_status:
+				if not print_remote_status:
 					continue
 
  				# Ignore partials in output unless DEBUG > 1
@@ -626,7 +636,7 @@ class Runner:
 	def _set_print_prefix(self):
 		self.prefix = ''
 		if self.print_cmd_prefix:
-			self.prefix = f'[bold gold3]({self.name})[/]'
+			self.prefix = f'[bold gold3]({self.config.name})[/]'
 		if self.chunk and self.chunk_count:
 			self.prefix += f' [{self.chunk}/{self.chunk_count}]'
 
@@ -639,30 +649,6 @@ class Runner:
 			count = len([r for r in self.results if r._type == name])
 			count_map[name] = count
 		return count_map
-
-	def _process_results(self):
-		# TODO: this is only for logging timestamp to show up properly !!!
-		if self.print_timestamp:
-			sleep(1)
-
-		# Log results count
-		if self.print_item_count and self.output_json and not self.output_raw and not self.output_orig:
-			count_map = self._get_results_count()
-			if all(count == 0 for count in count_map.values()):
-				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
-			else:
-				results_str = ':pill: Found ' + ' and '.join([
-					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
-					for name, count in count_map.items()
-				]) + '.'
-				self._print(results_str, color='bold green')
-
-		# Print table if in table mode
-		if self.output_table and self.results and len(self.results) > 0:
-			if isinstance(self.results[0], str):
-				self._print('\n'.join(self.results))
-			else:
-				self._print(self.results, out=sys.stdout)
 
 	def _process_item(self, item: dict):
 		# Run item validators

@@ -14,21 +14,12 @@ from secsy.utils import merge_opts
 
 class Workflow(Runner):
 
-	DEFAULT_EXPORTERS = [
+	default_exporters = [
 		TableExporter,
 		JsonExporter,
 		CsvExporter
 	]
-	DEFAULT_FORMAT_OPTIONS = {
-		'print_timestamp': True,
-		'print_cmd': True,
-		'print_line': False,
-		'print_item': False,
-		'print_metric': True,
-		'print_item_count': True,
-		'raw_yield': False
-	}
-	DEFAULT_LIVE_DISPLAY_TYPES = ['vulnerability', 'tag']
+	default_live_display_types = ['vulnerability', 'tag']
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
@@ -52,23 +43,33 @@ class Workflow(Runner):
 		yield from self.results
 		self.results_count = len(self.results)
 
+		# Task fmt opts
+		task_fmt_opts = {
+			'print_item_count': True,
+			'print_cmd': True,
+			'print_description': self.sync,
+			'print_cmd_prefix': not self.sync,
+			'print_timestamp': self.sync
+		}
+
+		# Construct run opts
+		run_opts = self.run_opts.copy()
+		run_opts.update(task_fmt_opts)
+
 		# Build Celery workflow
-		workflow = self.build_celery_workflow(results=self.results)
+		workflow = self.build_celery_workflow(run_opts=run_opts, results=self.results)
 
 		# Run Celery workflow and get results
-		status = f'[bold yellow]Running workflow [bold magenta]{self.config.name} ...'
-		with console.status(status) if not RECORD and self.print_live_status else nullcontext():
-			if self.sync:
-				results = workflow.apply().get()
-			else:
-				result = workflow()
-				self.print_live_status = True
-				results = self.process_live_tasks(result, results_only=True, print_live_status=self.print_live_status)
+		if self.sync:
+			results = workflow.apply().get()
+		else:
+			result = workflow()
+			results = self.process_live_tasks(result, results_only=True, print_remote_status=self.print_remote_status)
 
 		# Get workflow results
 		yield from results
 
-	def build_celery_workflow(self, results=[]):
+	def build_celery_workflow(self, run_opts={}, results=[]):
 		""""Build Celery workflow.
 
 		Returns:
@@ -79,7 +80,7 @@ class Workflow(Runner):
 			self.config.tasks.toDict(),
 			self.targets,
 			self.config.options,
-			self.run_opts,
+			run_opts,
 			self.hooks,
 			self.context)
 		sigs = [forward_results.si(results)] + sigs + [forward_results.s()]
@@ -135,7 +136,7 @@ class Workflow(Runner):
 
 				# Add task context and hooks to options
 				opts['context'] = context
-				opts['hooks'] = hooks.get(Task, {})
+				opts['hooks'] = {task: hooks.get(Task, {})}
 
 				# Create task signature
 				sig = task.s(targets, **opts)

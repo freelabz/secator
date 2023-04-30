@@ -14,26 +14,16 @@ logger = logging.getLogger(__name__)
 
 class Scan(Runner):
 
-	DEFAULT_EXPORTERS = [
+	default_exporters = [
 		TableExporter,
 		JsonExporter,
 		CsvExporter
 	]
-	DEFAULT_FORMAT_OPTIONS = {
-		'print_timestamp': True,
-		'print_cmd': True,
-		'print_line': True,
-		'print_item_count': True,
-		'raw_yield': False
-	}
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		from secsy.celery import run_scan
 		return run_scan.delay(args=args, kwargs=kwargs)
-
-	def run(self):
-		return list(self.__iter__())
 
 	def yielder(self):
 		"""Run scan.

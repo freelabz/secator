@@ -163,7 +163,6 @@ def register_runner(cli_endpoint, config):
 	fmt_opts = {
 		'print_cmd': True,
 		'print_timestamp': True,
-		'print_item_count': True,
 	}
 	short_help = ''
 	input_type = 'targets'
@@ -187,6 +186,9 @@ def register_runner(cli_endpoint, config):
 		if config.alias:
 			short_help += f' [dim]alias: {config.alias}'
 		fmt_opts['json'] = True
+		fmt_opts['print_results'] = True
+		fmt_opts['print_start'] = True
+		fmt_opts['print_summary'] = True
 		runner_cls = Scan
 
 	elif cli_endpoint.name == 'workflow':
@@ -200,6 +202,9 @@ def register_runner(cli_endpoint, config):
 		if config.alias:
 			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
 		fmt_opts['json'] = True
+		fmt_opts['print_results'] = True
+		fmt_opts['print_start'] = True
+		fmt_opts['print_summary'] = True
 		runner_cls = Workflow
 
 	elif cli_endpoint.name == 'task':
@@ -213,6 +218,7 @@ def register_runner(cli_endpoint, config):
 		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
 		fmt_opts['print_item'] = True
 		fmt_opts['print_line'] = True
+		fmt_opts['print_item_count'] = True
 		runner_cls = Task
 		no_args_is_help = False
 		input_required = False
@@ -242,9 +248,6 @@ def register_runner(cli_endpoint, config):
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
-		if cli_endpoint.name in ['scan', 'workflow']:
-			opts['print_item'] = debug > 1
-			opts['print_line'] = debug > 1
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
 		if sync:
@@ -256,6 +259,11 @@ def register_runner(cli_endpoint, config):
 		else:
 			sync = True
 		opts['sync'] = sync
+		if cli_endpoint.name in ['scan', 'workflow']:
+			opts['print_item'] = debug > 1
+			opts['print_line'] = debug > 1
+			opts['print_remote_status'] = not sync
+			opts['print_timestamp'] = not sync
 
 		# Build exporters
 		runner = runner_cls(config, targets, workspace_name=ws, run_opts=opts)
