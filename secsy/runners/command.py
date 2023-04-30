@@ -157,7 +157,7 @@ class Command(Runner):
 		self.no_capture = self.run_opts.get('no_capture', False)
 
 		# Proxy config (global)
-		self.proxy = self.run_opts.get('proxy', False)
+		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
 
 		# Build command input
