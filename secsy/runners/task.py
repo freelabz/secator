@@ -7,19 +7,13 @@ from secsy.runners import Runner
 
 
 class Task(Runner):
-	DEFAULT_EXPORTERS = []
-	DEFAULT_FORMAT_OPTIONS = {
-		'print_timestamp': True,
-		'print_cmd': True,
-		'print_line': True,
-		'raw_yield': False
-	}
+	default_exporters = []
 
 	def delay(cls, *args, **kwargs):
 		from secsy.celery import run_task
 		return run_task.delay(args=args, kwargs=kwargs)
 
-	def __iter__(self):
+	def yielder(self):
 		"""Run task.
 
 		Args:
@@ -28,20 +22,34 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
-		# Get Celery task result iterator
+		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
+
+		# Extract hooks
+		hooks = { task_cls: self.run_opts.pop('hooks', {}).pop(Task, []) }
+
+		# Task fmt opts
+		task_fmt_opts = {
+			'print_cmd': True,
+			'print_cmd_prefix': not self.sync,
+			'print_timestamp': self.sync
+		}
+		run_opts = self.run_opts.copy()
+		run_opts.update(task_fmt_opts)
+
+		# Set task output types
+		self.output_types = task_cls.output_types
+
+		# Run task
 		if self.sync:
-			task = task_cls(self.targets, **self.run_opts)
+			task = task_cls(self.targets, hooks=hooks, **run_opts)
 		else:
-			result = task_cls.delay(self.targets, **self.run_opts)
+			result = task_cls.delay(self.targets, hooks=hooks, **run_opts)
 			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
 			task = self.process_live_tasks(result, description=False, results_only=True)
 
-		# Run task and yield results
-		status = f'[bold yellow]Running task [bold magenta]{self.config.name} ...'
-		print_status = self.sync and (not RECORD and not task.output_json and not task.output_raw and not task.output_orig)
-		with console.status(status) if print_status and self.sync else nullcontext():
-			yield from task
+		# Yield task results
+		yield from task
 
 	@staticmethod
 	def get_task_class(name):
