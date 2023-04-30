@@ -12,7 +12,7 @@ from secsy.utils import (expand_input, get_command_category,
 						 get_command_cls, deduplicate)
 
 RUNNER_OPTS = {
-	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
+	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
@@ -185,7 +185,6 @@ def register_runner(cli_endpoint, config):
 		short_help = config.description or ''
 		if config.alias:
 			short_help += f' [dim]alias: {config.alias}'
-		fmt_opts['json'] = True
 		fmt_opts['print_results'] = True
 		fmt_opts['print_start'] = True
 		fmt_opts['print_summary'] = True
@@ -201,7 +200,6 @@ def register_runner(cli_endpoint, config):
 		short_help = config.description or ''
 		if config.alias:
 			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
-		fmt_opts['json'] = True
 		fmt_opts['print_results'] = True
 		fmt_opts['print_start'] = True
 		fmt_opts['print_summary'] = True
@@ -260,10 +258,12 @@ def register_runner(cli_endpoint, config):
 			sync = True
 		opts['sync'] = sync
 		if cli_endpoint.name in ['scan', 'workflow']:
-			opts['print_item'] = debug > 1
-			opts['print_line'] = debug > 1
-			opts['print_remote_status'] = not sync
-			opts['print_timestamp'] = not sync
+			opts.update({
+				'print_item': sync,
+				'print_line': sync,
+				'print_remote_status': not sync,
+				'print_timestamp': not sync
+			})
 
 		# Build exporters
 		runner = runner_cls(config, targets, workspace_name=ws, run_opts=opts)

@@ -1,8 +1,5 @@
-from contextlib import nullcontext
-
-from secsy.definitions import RECORD
 from secsy.rich import console
-from secsy.utils import discover_tasks, merge_opts
+from secsy.utils import discover_tasks
 from secsy.runners import Runner
 
 
@@ -32,9 +29,10 @@ class Task(Runner):
 		task_fmt_opts = {
 			'print_cmd': True,
 			'print_cmd_prefix': not self.sync,
-			'print_timestamp': self.sync
+			'print_timestamp': self.sync,
 		}
 		run_opts = self.run_opts.copy()
+		run_opts.pop('output')
 		run_opts.update(task_fmt_opts)
 
 		# Set task output types
