@@ -94,10 +94,6 @@ class Runner:
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
 
-		# Proxy config (global)
-		self.proxy = self.run_opts.get('proxy', False)
-		self.configure_proxy()
-
 		# Process input
 		self.input = input
 		if isinstance(self.input, list) and len(self.input) == 1:
@@ -254,28 +250,6 @@ class Runner:
 			'errors': self.errors,
 			'context': self.context
 		}
-
-	def configure_proxy(self):
-		"""Configure proxy. Start with global settings like 'proxychains' or 'random', or fallback to tool-specific
-		proxy settings.
-
-		TODO: Move this to a subclass of Command, or to a configurable attribute to pass to derived classes as it's not
-		related to core functionality.
-		"""
-		opt_key_map = getattr(self, 'opt_key_map', {})
-		proxy_opt = opt_key_map.get('proxy', False)
-		support_proxychains = getattr(self, 'proxychains', True)
-		proxychains_flavor = getattr(self, 'proxychains_flavor', 'proxychains')
-		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
-		if self.proxy == 'proxychains':
-			if not support_proxychains:
-				return
-			self.cmd = f'{proxychains_flavor} {self.cmd}'
-		elif self.proxy and support_proxy:
-			if self.proxy == 'random':
-				self.run_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
-			else:  # tool-specific proxy settings
-				self.run_opts['proxy'] = self.proxy
 
 	def run_hooks(self, hook_type, *args):
 		# logger.debug(f'Running hooks of type {hook_type}')
