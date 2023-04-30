@@ -21,6 +21,7 @@ from dotmap import DotMap
 import json
 import sys
 import logging
+import uuid
 
 
 logger = logging.getLogger(__name__)
@@ -122,11 +123,10 @@ class Runner:
 		# Output options
 		self.output_raw = self.run_opts.get('raw', False)
 		self.output_fmt = self.run_opts.get('format', False)
-		self.output_table = self.run_opts.get('table', False)
 		self.output_orig = self.run_opts.get('orig', False)
 		self.output_color = self.run_opts.get('color', False)
 		self.output_quiet = self.run_opts.get('quiet', False)
-		_json = self.run_opts.get('json', True) or self.output_table or self.output_raw
+		_json = self.run_opts.get('json', True) or 'table' in self.run_opts.get('output', '') or self.output_raw
 
 		# Library output
 		self.raw_yield = self.run_opts.get('raw_yield', False)
@@ -191,24 +191,35 @@ class Runner:
 
 		for item in self.yielder():
 
+			if isinstance(item, dict):
+				item = self._process_item(item)
+
 			if isinstance(item, OutputType):
+				# Discard item if needed
 				if item._uuid in self.uuids:
 					continue
-				self.results.append(item)
-				self.uuids.append(item._uuid)
-				self.results_count += 1
-				yield item
-
-			elif isinstance(item, dict):
-				item = self._process_item(item)
-				if not item or item._uuid in self.uuids:
+				if item._type == 'progress':
+					if self.print_progress:
+						self._print(str(item), out=sys.stderr, ignore_log=True, color='dim cyan')
 					continue
+
+				# Add item to results
+				self.results.append(item)
+				self.results_count += 1
+				self.uuids.append(item._uuid)
+
+				# Print JSON / Raw item
+				if self.print_item and self.output_json:
+					self._print(item, out=sys.stdout)
+				elif self.output_raw:
+					self._print(self._rawify(item), out=sys.stdout, ignore_log=True)
+
+				# Yield item
 				yield item
 
 			elif isinstance(item, str):
 				if self.print_line and not self.output_quiet:
-					self._print(item, out=sys.stderr, ignore_raw=True)
-
+					self._print(item, out=sys.stderr, ignore_raw=True, ignore_log=True)
 				if self.output_return_type is not dict:
 					self.results.append(item)
 					yield item
@@ -286,8 +297,8 @@ class Runner:
 
 	def resolve_exporters(self):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.get('output', None)
-		if output is None:
+		output = self.run_opts.get('output', '')
+		if output == '':
 			return self.default_exporters
 		elif output is False:
 			return []
@@ -573,6 +584,10 @@ class Runner:
 		# Add context to item
 		new_item._context = self.context
 
+		# Add uuid to item
+		if not new_item._uuid:
+			new_item._uuid = str(uuid.uuid4())
+
 		# If progress item, update task progress
 		if new_item._type == 'progress':
 			self.progress = new_item.percent
@@ -595,12 +610,8 @@ class Runner:
 		log_json = console.print_json
 		log = console.log if self.print_timestamp else _console.print
 
-		# Print a rich table
-		if self.output_table and isinstance(data, list) and isinstance(data[0], (OutputType, DotMap, dict)):
-			print_results_table(self.results)
-
 		# Print a JSON item
-		elif isinstance(data, (OutputType, DotMap, dict)):
+		if isinstance(data, (OutputType, DotMap, dict)):
 			# If object has a 'toDict' method, use it
 			if getattr(data, 'toDict', None):
 				data = data.toDict()
@@ -663,39 +674,11 @@ class Runner:
 		# Convert output dict to another schema
 		if not self.output_orig:
 			item = self._convert_item_schema(item)
-
-			# Run item convert hooks
-			item = self.run_hooks('on_item', item)
 		else:
 			item = DotMap(item)
 
-		# Get item klass
-		item_klass = item.__class__.__name__
-
-		# Add item to result
-		if not item_klass == 'Progress':
-			self.results.append(item)
-			self.results_count += 1
-
-		# Item to print
-		item_str = item
-
-		# In raw mode, print principal key or output format field.
-		if self.output_raw:
-			item_str = self._rawify(item)
-
-		# In raw yield mode, extract principal key from dict (default 'on' for library usage)
-		if self.raw_yield:
-			item = self._rawify(item)
-			item_str = item
-
-		# Print item to console or log
-		if item_klass == 'Progress' and self.print_progress:
-			self._print(str(item_str), out=sys.stderr, ignore_log=True, color='dim cyan')
-			item = None
-
-		elif self.print_item and self.output_json and not self.output_table:
-			self._print(item_str, out=sys.stdout)
+		# Run item convert hooks
+		item = self.run_hooks('on_item', item)
 
 		# Return item
 		return item

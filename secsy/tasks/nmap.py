@@ -60,9 +60,6 @@ class nmap(VulnMulti):
 	)
 
 	def yielder(self):
-		# TODO: deduplicate this and amass as it's the same function
-		prev = self.print_item_count
-		self.print_item_count = False
 		list(super().yielder())
 		if self.return_code != 0:
 			return
@@ -72,12 +69,7 @@ class nmap(VulnMulti):
 			self._print(note)
 		if os.path.exists(self.output_path):
 			nmap_data = self.xml_to_json()
-			for item in nmap_data:
-				item = self._process_item(item)
-				if not item:
-					continue
-				yield item
-		self.print_item_count = prev
+			yield from nmap_data
 
 	def xml_to_json(self):
 		results = []

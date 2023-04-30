@@ -31,13 +31,6 @@ class Scan(Runner):
 		Yields:
 			dict: Item yielded from individual workflow tasks.
 		"""
-		# Add target to results and yield previous results
-		self.results = self.results + [
-			Target(name=name, _source='scan', _type='target', _uuid=str(uuid.uuid4()))
-			for name in self.targets
-		]
-		yield from self.results
-
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
 
@@ -47,12 +40,23 @@ class Scan(Runner):
 				console.log(f'No targets were specified for workflow {name}. Skipping.')
 				continue
 
+			# Workflow fmt options
+			fmt_opts = {
+				'print_item': False,
+				'print_start': True,
+				'print_summary': True,
+				'print_timestamp': False,
+				'print_remote_status': not self.sync
+			}
+			run_opts = self.run_opts.copy()
+			run_opts.update(fmt_opts)
+
 			# Run workflow
 			workflow = Workflow(
 				ConfigLoader(name=f'workflows/{name}'),
 				targets,
 				workspace_name=self.workspace_name,
-				run_opts=self.run_opts,
+				run_opts=run_opts,
 				hooks=self.hooks,
 				context=self.context)
 

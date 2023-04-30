@@ -19,7 +19,6 @@ class Workflow(Runner):
 		JsonExporter,
 		CsvExporter
 	]
-	default_live_display_types = ['vulnerability', 'tag']
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
@@ -35,26 +34,19 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
-		# Add target to results and yield previous results
-		self.results = self.results + [
-			Target(name=name, _source='workflow', _type='target', _uuid=str(uuid.uuid4()), _context=self.context)
-			for name in self.targets
-		]
-		yield from self.results
-		self.results_count = len(self.results)
-
 		# Task fmt opts
-		task_fmt_opts = {
+		fmt_opts = {
 			'print_item_count': True,
 			'print_cmd': True,
 			'print_description': self.sync,
 			'print_cmd_prefix': not self.sync,
-			'print_timestamp': self.sync
+			'print_timestamp': self.sync,
+			'json': True
 		}
 
 		# Construct run opts
 		run_opts = self.run_opts.copy()
-		run_opts.update(task_fmt_opts)
+		run_opts.update(fmt_opts)
 
 		# Build Celery workflow
 		workflow = self.build_celery_workflow(run_opts=run_opts, results=self.results)
