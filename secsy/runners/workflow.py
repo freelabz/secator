@@ -46,6 +46,7 @@ class Workflow(Runner):
 
 		# Construct run opts
 		run_opts = self.run_opts.copy()
+		run_opts['hooks'] = self._hooks.get(Task, {})
 		run_opts.update(fmt_opts)
 
 		# Build Celery workflow
@@ -72,14 +73,12 @@ class Workflow(Runner):
 			self.config.tasks.toDict(),
 			self.targets,
 			self.config.options,
-			run_opts,
-			self.hooks,
-			self.context)
+			run_opts)
 		sigs = [forward_results.si(results)] + sigs + [forward_results.s()]
 		workflow = chain(*sigs)
 		return workflow
 
-	def get_tasks(self, obj, targets, workflow_opts, run_opts, hooks={}, context={}):
+	def get_tasks(self, obj, targets, workflow_opts, run_opts):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
@@ -104,9 +103,7 @@ class Workflow(Runner):
 					task_opts,
 					targets,
 					workflow_opts,
-					run_opts,
-					hooks,
-					context
+					run_opts
 				)
 				sig = chord((tasks), forward_results.s())
 			elif task_name == '_chain':
@@ -114,9 +111,7 @@ class Workflow(Runner):
 					task_opts,
 					targets,
 					workflow_opts,
-					run_opts,
-					hooks,
-					context
+					run_opts
 				)
 				sig = chain(*tasks)
 			else:
@@ -127,8 +122,8 @@ class Workflow(Runner):
 				opts = merge_opts(workflow_opts, task_opts, run_opts)
 
 				# Add task context and hooks to options
-				opts['context'] = context
-				opts['hooks'] = {task: hooks.get(Task, {})}
+				opts['hooks'] = {task: self._hooks.get(Task, {})}
+				opts['context'] = self.context
 
 				# Create task signature
 				sig = task.s(targets, **opts)

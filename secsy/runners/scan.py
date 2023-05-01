@@ -57,7 +57,7 @@ class Scan(Runner):
 				targets,
 				workspace_name=self.workspace_name,
 				run_opts=run_opts,
-				hooks=self.hooks,
+				hooks=self._hooks,
 				context=self.context)
 
 			# Get results

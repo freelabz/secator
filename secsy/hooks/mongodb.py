@@ -44,12 +44,14 @@ def save_task(self):
 	self.context['task_id'] = str(task.inserted_id)
 	print(f'saved task {task.inserted_id}')
 
+
 def update_task(self):
 	client = MongoClient(MONGODB_URL)
 	db = client.main
 	task_id = self.context['task_id']
 	db['tasks'].update_one({'_id': ObjectId(task_id)}, {'$set': self.toDict()})
 	print(f'updated task {task_id}')
+
 
 def save_finding(self, item):
 	client = MongoClient(MONGODB_URL)
