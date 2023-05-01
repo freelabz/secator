@@ -33,10 +33,10 @@ class httpx(Http):
 		FOLLOW_REDIRECT: 'follow-redirects',
 		MATCH_CODES: 'match-code',
 		MATCH_REGEX: 'match-regex',
-		MATCH_SIZE: 'm,atch-length',
+		MATCH_SIZE: 'match-length',
 		MATCH_WORDS: 'match-word-count',
 		METHOD: 'x',
-		PROXY: OPT_NOT_SUPPORTED,  # TODO: httpx supports only HTTP -proxy https://github.com/yt-dlp/yt-dlp/pull/3668
+		PROXY: 'proxy',
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retries',
 		THREADS: 'threads',
