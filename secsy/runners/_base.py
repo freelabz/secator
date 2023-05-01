@@ -4,19 +4,18 @@ from time import sleep, time
 
 import humanize
 from celery.result import AsyncResult
-from fp.fp import FreeProxy
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.progress import (Progress, SpinnerColumn, TextColumn,
 						   TimeElapsedColumn)
 
-from secsy.definitions import DEBUG, DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED
+from secsy.definitions import DEBUG
 from secsy.output_types import OUTPUT_TYPES, OutputType
 from secsy.report import Report
 from secsy.rich import console, console_stdout
 from secsy.runners._helpers import (get_task_ids, get_task_info,
 									process_extractor)
-from secsy.utils import import_dynamic, merge_opts, get_file_timestamp, pluralize, print_results_table
+from secsy.utils import import_dynamic, merge_opts, pluralize
 from dotmap import DotMap
 import json
 import sys
@@ -41,6 +40,7 @@ VALIDATORS = [
 	'input',
 	'item'
 ]
+
 
 class Runner:
 	"""Runner class.
@@ -71,6 +71,9 @@ class Runner:
 	# Default exporters
 	default_exporters = []
 
+	# Run hooks
+	enable_hooks = True
+
 	def __init__(self, config, targets, results=[], workspace_name=None, run_opts={}, hooks={}, context={}):
 		self.config = config
 		if not isinstance(targets, list):
@@ -85,6 +88,7 @@ class Runner:
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.end_time = None
+		self._hooks = hooks
 		self.errors = []
 		self.output = ''
 		self.status = 'RUNNING'
@@ -92,9 +96,6 @@ class Runner:
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
-		self.run_opts.pop('hooks', None)
-		print(f'RUN OPTS: {run_opts}')
-		print(f'INPUT HOOKS FOR {self.__class__.__name__}: {hooks}')
 
 		# Process input
 		self.input = input
@@ -141,7 +142,6 @@ class Runner:
 			if instance_func:
 				self.hooks[key].append(instance_func)
 			self.hooks[key].extend(hooks.get(self.__class__, {}).get(key, []))
-		print(f'FINAL HOOKS FOR {self.__class__.__name__}: {self.hooks}')
 
 		# Validators
 		self.validators = {name: [] for name in VALIDATORS}
@@ -159,7 +159,6 @@ class Runner:
 		# Abort if inputs are invalid
 		self.input_valid = True
 		if not self.run_validators('input', self.input):
-			self.run_hooks('on_end')
 			self.input_valid = False
 
 		self.run_hooks('on_init')
@@ -227,6 +226,7 @@ class Runner:
 		# Filter results and log info
 		self.results = self.filter_results()
 		self.log_results()
+		print(f'RUNNING {self.__class__.__name__} on_end HOOK')
 		self.run_hooks('on_end')
 
 	def yielder(self):
@@ -235,6 +235,7 @@ class Runner:
 	def toDict(self):
 		return {
 			'config': self.config.toDict(),
+			'name': self.config.name,
 			'targets': self.targets,
 			'run_opts': self.run_opts,
 			'workspace_name': self.workspace_name,
@@ -254,6 +255,8 @@ class Runner:
 	def run_hooks(self, hook_type, *args):
 		# logger.debug(f'Running hooks of type {hook_type}')
 		result = args[0] if len(args) > 0 else None
+		if not self.enable_hooks:
+			return result
 		for hook in self.hooks[hook_type]:
 			# logger.debug(hook)
 			result = hook(self, *args)
@@ -350,7 +353,6 @@ class Runner:
 		self.results_count = len(self.results)
 		self.status = 'SUCCESS' if not self.errors else 'FAILED'
 		self.end_time = datetime.fromtimestamp(time())
-		self.run_hooks('on_end')
 
 		# Log runner errors
 		for error in self.errors:
@@ -567,7 +569,6 @@ class Runner:
 			self.progress = new_item.percent
 
 		return new_item
-	
 
 	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
 		"""Print function.

@@ -12,12 +12,11 @@ from dotmap import DotMap
 from fp.fp import FreeProxy
 
 from secsy.definitions import (DEBUG, DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, TEMP_FOLDER)
-from secsy.output_types import OutputType
-from secsy.rich import console, console_stdout
+							   OPT_PIPE_INPUT, TEMP_FOLDER, DEFAULT_PROXYCHAINS_COMMAND)
+from secsy.rich import console
 from secsy.config import ConfigLoader
 from secsy.serializers import JSONSerializer
-from secsy.utils import get_file_timestamp, pluralize, print_results_table
+from secsy.utils import get_file_timestamp
 from secsy.runners import Runner
 
 # from rich.markup import escape
@@ -25,23 +24,6 @@ from secsy.runners import Runner
 
 
 logger = logging.getLogger(__name__)
-
-# class TaskBase(Runner):
-
-	# def toDict(self):
-	# 	return {
-	# 		'name': self.name,
-	# 		'description': self.description,
-	# 		'targets': self.input,
-	# 		'run_opts': self.run_opts,
-	# 		'status': self.status,
-	# 		'progress': self.progress,
-	# 		'results_count': self.results_count,
-	# 		'output': self.output,
-	# 		'error': self.error,
-	# 		'context': self.context,
-	# 		'done': self.done
-	# 	}
 
 
 class Command(Runner):
@@ -116,19 +98,17 @@ class Command(Runner):
 	default_run_opts = {}
 
 	def __init__(self, input=None, **run_opts):
-		# Build config on-the-fly
+		# Build runnerconfig on-the-fly
 		config = ConfigLoader(input={
 			'name': self.__class__.__name__,
-			# 'options': run_opts,
-			'results': [],
 			'description': run_opts.get('description', None)
 		})
 
 		# Run parent init
-		workspace_name = run_opts.get('workspace_name', None)
-		results = run_opts.get('results', [])
-		hooks = run_opts.get('hooks', {})
-		context = run_opts.get('context', {})
+		hooks = run_opts.pop('hooks', {})
+		workspace_name = run_opts.pop('workspace_name', None)
+		results = run_opts.pop('results', [])
+		context = run_opts.pop('context', {})
 		super().__init__(
 			config=config,
 			targets=input,
@@ -262,7 +242,7 @@ class Command(Runner):
 		opt_key_map = getattr(self, 'opt_key_map', {})
 		proxy_opt = opt_key_map.get('proxy', False)
 		support_proxychains = getattr(self, 'proxychains', True)
-		proxychains_flavor = getattr(self, 'proxychains_flavor', 'proxychains')
+		proxychains_flavor = getattr(self, 'proxychains_flavor', DEFAULT_PROXYCHAINS_COMMAND)
 		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
 		if self.proxy == 'proxychains':
 			if not support_proxychains:

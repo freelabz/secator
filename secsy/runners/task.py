@@ -5,6 +5,7 @@ from secsy.runners import Runner
 
 class Task(Runner):
 	default_exporters = []
+	enable_hooks = False
 
 	def delay(cls, *args, **kwargs):
 		from secsy.celery import run_task
@@ -22,27 +23,30 @@ class Task(Runner):
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 
-		# Task fmt opts
-		task_fmt_opts = {
+		# Task opts
+		fmt_opts = {
 			'print_cmd': True,
 			'print_cmd_prefix': not self.sync,
 			'print_timestamp': self.sync,
+			'print_line': not self.output_quiet
 		}
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output')
-		run_opts.update(task_fmt_opts)
+		run_opts.update(fmt_opts)
 
 		# Set task output types
 		self.output_types = task_cls.output_types
 
 		# Get hooks
 		hooks = {task_cls: self.hooks}
+		run_opts['hooks'] = hooks
+		run_opts['context'] = self.context
 
 		# Run task
 		if self.sync:
-			task = task_cls(self.targets, hooks=hooks, **run_opts)
+			task = task_cls(self.targets, **run_opts)
 		else:
-			result = task_cls.delay(self.targets, hooks=hooks, **run_opts)
+			result = task_cls.delay(self.targets, **run_opts)
 			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
 			task = self.process_live_tasks(result, description=False, results_only=True)
 
