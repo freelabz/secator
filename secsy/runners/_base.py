@@ -90,9 +90,11 @@ class Runner:
 		self.status = 'RUNNING'
 		self.progress = 0
 		self.context = context
-		self.hooks = hooks
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
+		self.run_opts.pop('hooks', None)
+		print(f'RUN OPTS: {run_opts}')
+		print(f'INPUT HOOKS FOR {self.__class__.__name__}: {hooks}')
 
 		# Process input
 		self.input = input
@@ -134,22 +136,19 @@ class Runner:
 
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS}
-		hooks = self.run_opts.get('hooks', {})
 		for key in self.hooks:
 			instance_func = getattr(self, key, None)
 			if instance_func:
 				self.hooks[key].append(instance_func)
-			self.hooks[key].extend(hooks.get(key, []))
-			self.hooks[key].extend(self.hooks.get(self.__class__, {}).get(key, []))
+			self.hooks[key].extend(hooks.get(self.__class__, {}).get(key, []))
+		print(f'FINAL HOOKS FOR {self.__class__.__name__}: {self.hooks}')
 
 		# Validators
 		self.validators = {name: [] for name in VALIDATORS}
-		validators = self.run_opts.get('validators', {})
 		for key in self.validators:
 			instance_func = getattr(self, f'validate_{key}', None)
 			if instance_func:
 				self.validators[key].append(instance_func)
-			self.validators[key].extend(validators.get(key, []))
 			self.validators[key].extend(self.validators.get(self.__class__, {}).get(key, []))
 
 		# Chunks
@@ -242,6 +241,7 @@ class Runner:
 			'results_count': self.results_count,
 			'sync': self.sync,
 			'done': self.done,
+			'output': self.output,
 			'status': self.status,
 			'progress': self.progress,
 			'start_time': self.start_time,
