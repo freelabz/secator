@@ -226,7 +226,6 @@ class Runner:
 		# Filter results and log info
 		self.results = self.filter_results()
 		self.log_results()
-		print(f'RUNNING {self.__class__.__name__} on_end HOOK')
 		self.run_hooks('on_end')
 
 	def yielder(self):
