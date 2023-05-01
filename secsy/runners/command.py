@@ -119,7 +119,7 @@ class Command(Runner):
 		# Build config on-the-fly
 		config = ConfigLoader(input={
 			'name': self.__class__.__name__,
-			'options': run_opts,
+			# 'options': run_opts,
 			'results': [],
 			'description': run_opts.get('description', None)
 		})

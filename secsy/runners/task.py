@@ -22,9 +22,6 @@ class Task(Runner):
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 
-		# Extract hooks
-		hooks = { task_cls: self.run_opts.pop('hooks', {}).pop(Task, []) }
-
 		# Task fmt opts
 		task_fmt_opts = {
 			'print_cmd': True,
@@ -37,6 +34,9 @@ class Task(Runner):
 
 		# Set task output types
 		self.output_types = task_cls.output_types
+
+		# Get hooks
+		hooks = {task_cls: self.hooks}
 
 		# Run task
 		if self.sync:

@@ -7,5 +7,4 @@ __all__ = [
     for cls in ALL_TASKS
 ]
 for cls in INTERNAL_TASKS:
-    print(cls.__name__)
     exec(f'from .{cls.__name__} import {cls.__name__}')
