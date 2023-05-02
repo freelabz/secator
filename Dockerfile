@@ -15,6 +15,7 @@ RUN apt update -y && \
     git \
     make \
 	sudo \
+	vim \
     wget \
     zlib1g \
     zlib1g-dev \
@@ -30,12 +31,14 @@ RUN apt update -y && \
 RUN wget https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz
 RUN tar xvf Python-3.10.2.tgz && cd Python-3.10.2/ && ./configure --enable-optimizations && make && make install
 
-# Install metasploit
+# Install additional tools
 RUN apt install -y \
     jq \
     openssl \
 	proxychains \
-	proxychains-ng
+	proxychains-ng \
+	tor
+RUN service enable tor
 
 # Install Metasploit framework
 RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
