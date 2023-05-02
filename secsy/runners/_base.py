@@ -188,10 +188,12 @@ class Runner:
 			if isinstance(item, dict):
 				item = self._process_item(item)
 
-			if isinstance(item, OutputType):
+			if isinstance(item, (OutputType, DotMap)):
 				# Discard item if needed
 				if item._uuid in self.uuids:
 					continue
+
+				# Treat progress item
 				if item._type == 'progress':
 					if self.print_progress:
 						self._print(str(item), out=sys.stderr, ignore_log=True, color='dim cyan')
@@ -201,15 +203,14 @@ class Runner:
 				self.results.append(item)
 				self.results_count += 1
 				self.uuids.append(item._uuid)
-
-				# Print JSON / Raw item
-				if self.print_item and self.output_json:
-					self._print(item, out=sys.stdout)
-				elif self.output_raw:
-					self._print(self._rawify(item), out=sys.stdout, ignore_log=True)
-
-				# Yield item
 				yield item
+
+				# Print JSON or raw item
+				if self.print_item:
+					if self.output_json:
+						self._print(item, out=sys.stdout)
+					elif self.output_raw:
+						self._print(self._rawify(item), out=sys.stdout, ignore_log=True)
 
 			elif isinstance(item, str):
 				if self.print_line and not self.output_quiet:
@@ -553,20 +554,6 @@ class Runner:
 			new_item = DotMap(item)
 			new_item._type = 'unknown'
 
-		# Add source to item
-		new_item._source = self.config.name
-
-		# Add context to item
-		new_item._context = self.context
-
-		# Add uuid to item
-		if not new_item._uuid:
-			new_item._uuid = str(uuid.uuid4())
-
-		# If progress item, update task progress
-		if new_item._type == 'progress':
-			self.progress = new_item.percent
-
 		return new_item
 
 	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
@@ -651,8 +638,17 @@ class Runner:
 		else:
 			item = DotMap(item)
 
+		# Add context to item
+		item._source = self.config.name
+		item._context = self.context
+		if not item._uuid:
+			item._uuid = str(uuid.uuid4())
+		if item._type == 'progress':
+			self.progress = item.percent
+
 		# Run item convert hooks
-		item = self.run_hooks('on_item', item)
+		if not self.output_orig:
+			item = self.run_hooks('on_item', item)
 
 		# Return item
 		return item

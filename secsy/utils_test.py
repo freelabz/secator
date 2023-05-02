@@ -163,8 +163,9 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 					self.assertIn(type(item), expected_output_types)
 
 				if expected_output_keys:
+					keys = [k for k in list(item.keys()) if not k.startswith('_')]
 					self.assertEqual(
-						set(item.keys()).difference(set(expected_output_keys)),
+						set(keys).difference(set(expected_output_keys)),
 						set())
 
 			if expected_results:
