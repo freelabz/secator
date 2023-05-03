@@ -33,7 +33,8 @@ HOOKS = [
 	'on_item',
 	'on_line',
 	'on_iter',
-	'on_error'
+	'on_error',
+	'on_init'
 ]
 
 VALIDATORS = [
@@ -239,6 +240,8 @@ class Runner:
 			'targets': self.targets,
 			'run_opts': self.run_opts,
 			'workspace_name': self.workspace_name,
+			'chunk': self.chunk,
+			'chunk_count': self.chunk_count,
 			'results_count': self.results_count,
 			'sync': self.sync,
 			'done': self.done,

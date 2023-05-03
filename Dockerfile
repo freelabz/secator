@@ -38,7 +38,6 @@ RUN apt install -y \
 	proxychains \
 	proxychains-ng \
 	tor
-RUN service enable tor
 
 # Install Metasploit framework
 RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
