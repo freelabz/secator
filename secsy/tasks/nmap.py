@@ -5,14 +5,13 @@ import re
 import xmltodict
 
 from secsy.decorators import task
-from secsy.definitions import (DELAY, EXTRA_DATA, FOLLOW_REDIRECT, HEADER,
-							   HOST, IP, OPT_NOT_SUPPORTED, PORT, PORTS, PROXY,
-							   RATE_LIMIT, RETRIES, SCRIPT, TEMP_FOLDER,
-							   THREADS, TIMEOUT, USER_AGENT, VULN_CONFIDENCE,
-							   CVSS_SCORE, DESCRIPTION,
-							   VULN_EXTRACTED_RESULTS, ID,
-							   VULN_MATCHED_AT, NAME, PROVIDER,
-							   REFERENCES, TAGS)
+from secsy.definitions import (CVSS_SCORE, DELAY, DESCRIPTION, EXTRA_DATA,
+							   FOLLOW_REDIRECT, HEADER, HOST, ID, IP, NAME,
+							   OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER, PROXY,
+							   RATE_LIMIT, REFERENCES, RETRIES, SCRIPT,
+							   SERVICE_NAME, TAGS, TEMP_FOLDER, THREADS,
+							   TIMEOUT, USER_AGENT, VULN_CONFIDENCE,
+							   VULN_EXTRACTED_RESULTS, VULN_MATCHED_AT)
 from secsy.output_types import Port, Vulnerability
 from secsy.tasks._categories import VulnMulti
 from secsy.utils import get_file_timestamp
@@ -112,6 +111,16 @@ class nmapData(dict):
 				# Grab CPEs
 				cpes = extracted_results.get('cpe', [])
 
+				# Grab service name
+				service_name = ''
+				if 'product' in extracted_results:
+					service_name = extracted_results['product']
+				elif 'name' in extracted_results:
+					service_name = extracted_results['name']
+				if 'version' in extracted_results:
+					version = extracted_results['version']
+					service_name += f'/{version}'
+
 				# Get script output
 				scripts = self._get_scripts(port)
 
@@ -119,6 +128,7 @@ class nmapData(dict):
 				yield {
 					PORT: port_number,
 					HOST: hostname,
+					SERVICE_NAME: service_name,
 					IP: ip,
 					EXTRA_DATA: extracted_results
 				}

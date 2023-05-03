@@ -69,5 +69,5 @@ class ffuf(HttpFuzzer):
 
 	@staticmethod
 	def on_item(self, item):
-		item.method = self.run_opts.get(METHOD, 'GET')
+		item.method = self.get_opt_value(METHOD) or 'GET'
 		return item

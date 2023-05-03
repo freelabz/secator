@@ -47,7 +47,7 @@ DATABASE_URI = os.environ.get('DATABASE_URI', 'mongo://localhost')
 DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-silent -td -asn -cdn')
 DEFAULT_STDIN_TIMEOUT = 1000  # seconds
 DEFAULT_PROXY_TIMEOUT = 1  # seconds
-DEFAULT_PROXYCHAINS_COMMAND = "proxychains4 -q"
+DEFAULT_PROXYCHAINS_COMMAND = "proxychains"
 
 # Constants
 DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
@@ -101,6 +101,7 @@ URL = 'url'
 USER_AGENT = 'user_agent'
 USERNAME = 'username'
 SCRIPT = 'script'
+SERVICE_NAME = 'service_name'
 SOURCES = 'sources'
 STATUS_CODE = 'status_code'
 SUBDOMAIN = 'subdomain'

@@ -1,9 +1,7 @@
 import logging
-import uuid
 
 from secsy.config import ConfigLoader
 from secsy.exporters import CsvExporter, JsonExporter, TableExporter
-from secsy.output_types import Target
 from secsy.runners._base import Runner
 from secsy.runners._helpers import run_extractors
 from secsy.runners.workflow import Workflow

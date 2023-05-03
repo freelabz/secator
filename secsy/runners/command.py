@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import re
@@ -8,7 +7,6 @@ import sys
 from time import sleep
 
 from celery.result import AsyncResult
-from dotmap import DotMap
 from fp.fp import FreeProxy
 
 from secsy.definitions import (DEBUG, DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
@@ -117,7 +115,7 @@ class Command(Runner):
 			run_opts=run_opts,
 			hooks=hooks,
 			context=context)
-		
+
 		# Input is targets
 		self.input = input
 
@@ -314,7 +312,7 @@ class Command(Runner):
 					error += f' Install it with `secsy utils install {self.config.name}`.'
 			else:
 				error = str(e)
-			self.error = error
+			self.errors.append(error)
 			self.return_code = 1
 			if error:
 				self._print(error, color='bold red')
@@ -368,7 +366,7 @@ class Command(Runner):
 		except KeyboardInterrupt:
 			process.kill()
 			self._print('Process was killed manually (CTRL+C / CTRL+X)', color='bold red')
-			self.error = 'Process killed manually'
+			self.errors.append('Process killed manually')
 			self.killed = True
 
 		# Retrieve the return code and output
@@ -389,8 +387,9 @@ class Command(Runner):
 			self.return_code = 0
 
 		if self.return_code != 0 and not self.killed:
-			self.error = f'Command failed with return code {self.return_code}.'
-			self._print(self.error, color='bold red')
+			error = f'Command failed with return code {self.return_code}.'
+			self.errors.append(error)
+			self._print(error, color='bold red')
 
 	@staticmethod
 	def _process_opts(
