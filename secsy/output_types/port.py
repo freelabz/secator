@@ -22,8 +22,3 @@ class Port(OutputType):
 
 	def __str__(self) -> str:
 		return f'{self.host}:{self.port}'
-
-	def __post_init__(self):
-		super().__post_init__()
-		self.cpes = self.extra_data.get('cpe', [])
-		self.service_name = self.extra_data.get('service_name', '')
