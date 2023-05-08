@@ -39,7 +39,7 @@ class dalfox(VulnHttp):
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: None,
-			NAME: lambda x: DALFOX_TYPE_MAP[x['type']].capitalize(),
+			NAME: lambda x: DALFOX_TYPE_MAP[x['type']],
 			PROVIDER: 'dalfox',
 			TAGS: lambda x: [x['cwe']] if x['cwe'] else [],
 			CONFIDENCE: lambda x: 'high',
