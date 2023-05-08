@@ -1,3 +1,4 @@
+type: profile
 name: aggressive
 options:
   rate_limit: 100000

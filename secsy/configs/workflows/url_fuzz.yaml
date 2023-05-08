@@ -1,3 +1,4 @@
+type: workflow
 name: url_fuzz
 alias: urlfuzz
 description: Find URLs by fuzzing (slow)
