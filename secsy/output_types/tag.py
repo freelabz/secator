@@ -24,7 +24,7 @@ class Tag(OutputType):
 		return self.match
 
 	def __repr__(self) -> str:
-		white = Fore.WHITE
+		green = Fore.GREEN
 		reset = Style.RESET_ALL
-		s = f'{white}{self.name}{reset} -> {self.match}'
+		s = f'[{green}{self.name}{reset}] {self.match}'
 		return s
