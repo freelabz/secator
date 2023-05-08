@@ -100,10 +100,13 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 					expected_results=outputs)
 
 	def test_adhoc_workflow(self):
+		# Ignore if TEST_WORKFLOWS are defined
+		if TEST_WORKFLOWS:
+			return
+
 		# Expected results / context
 		expected_results = [
 			Port(port=9999, host='localhost', service_name='fake', _source='unknown'),
-    		Target(name='localhost', _source='workflow', _type='target'),
 			Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
 			Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
 			Url(url='http://localhost:3000', host='127.0.0.1', status_code=200, title='OWASP Juice Shop', content_type='text/html', _source='httpx'),
@@ -147,8 +150,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 		# Verify no duplicates and context added from hook is present in output
 		for result in workflow:
-			if not isinstance(result, Target):
-				self.assertEqual(result._context, expected_context)
+			self.assertEqual(result._context, expected_context)
 			self.assertNotIn(result._uuid, uuids)
 			uuids.append(result._uuid)
 			results.append(result)
