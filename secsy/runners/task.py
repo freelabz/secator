@@ -31,7 +31,7 @@ class Task(Runner):
 			'print_line': not self.output_quiet
 		}
 		run_opts = self.run_opts.copy()
-		run_opts.pop('output')
+		run_opts.pop('output', None)
 		run_opts.update(fmt_opts)
 
 		# Set task output types

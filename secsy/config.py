@@ -70,7 +70,59 @@ class ConfigLoader(DotMap):
 	@classmethod
 	def load_all(cls):
 		configs = find_configs()
-		return DotMap({
+		return ConfigLoader({
 			key: [ConfigLoader(path) for path in configs[key]]
 			for key in CONFIGS_DIR_KEYS
 		})
+
+	def get_tasks_class(self):
+		from secsy.runners import Task
+		tasks = []
+		for name, conf in self.tasks.items():
+			if name == '_group':
+				group_conf = ConfigLoader(input={'tasks': conf})
+				tasks.extend(group_conf.get_tasks_class())
+			else:
+				tasks.append(Task.get_task_class(name))
+		return tasks
+
+	def get_workflows(self):
+		return [ConfigLoader(name=f'workflows/{name}') for name, _ in self.workflows.items()]
+
+	def get_workflow_supported_opts(self):
+		opts = {}
+		tasks = self.get_tasks_class()
+		for task_cls in tasks:
+			task_opts = task_cls.get_supported_opts()
+			for name, conf in task_opts.items():
+				supported = opts.get(name, {}).get('supported', False)
+				opts[name] = conf
+				opts[name]['supported'] = conf['supported'] or supported
+		return opts
+
+	def get_scan_supported_opts(self):
+		opts = {}
+		workflows = self.get_workflows()
+		for workflow in workflows:
+			workflow_opts = workflow.get_workflow_supported_opts()
+			for name, conf in workflow_opts.items():
+				supported = opts.get(name, {}).get('supported', False)
+				opts[name] = conf
+				opts[name]['supported'] = conf['supported'] or supported
+		return opts
+
+	@property
+	def supported_opts(self):
+		return self.get_supported_opts()
+
+	def get_supported_opts(self):
+		opts = {}
+		if self.type == 'workflow':
+			opts = self.get_workflow_supported_opts()
+		elif self.type == 'scan':
+			opts = self.get_scan_supported_opts()
+		elif self.type == 'task':
+			tasks = self.get_tasks_class()
+			if tasks:
+				opts = tasks[0].get_supported_opts()
+		return dict(sorted(opts.items()))

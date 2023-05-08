@@ -10,7 +10,6 @@ from secsy.definitions import (DELAY, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
 from secsy.output_types import UserAccount
 from secsy.tasks._categories import ReconUser
 
-
 logger = logging.getLogger(__name__)
 
 

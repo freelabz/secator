@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from secsy.definitions import ALIVE, IP
 from secsy.output_types import OutputType
+from colorama import Fore, Style
 
 
 @dataclass
@@ -19,3 +20,10 @@ class Ip(OutputType):
 
 	def __str__(self) -> str:
 		return self.ip
+
+	def __repr__(self) -> str:
+		white = Fore.WHITE
+		reset = Style.RESET_ALL
+		bright = Style.BRIGHT
+		magenta = Fore.MAGENTA
+		return f'{bright}{white}{self.ip}{reset} [{magenta}{self.host}{reset}]'
