@@ -5,14 +5,12 @@ import re
 import xmltodict
 
 from secsy.decorators import task
-from secsy.definitions import (DELAY, EXTRA_DATA, FOLLOW_REDIRECT, HEADER,
-							   HOST, IP, OPT_NOT_SUPPORTED, PORT, PORTS, PROXY,
-							   RATE_LIMIT, RETRIES, SCRIPT, TEMP_FOLDER,
-							   THREADS, TIMEOUT, USER_AGENT, VULN_CONFIDENCE,
-							   CVSS_SCORE, DESCRIPTION,
-							   VULN_EXTRACTED_RESULTS, ID,
-							   VULN_MATCHED_AT, NAME, PROVIDER,
-							   REFERENCES, TAGS)
+from secsy.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
+							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, ID,
+							   IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
+							   PORTS, PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
+							   RETRIES, SCRIPT, SERVICE_NAME, TAGS,
+							   TEMP_FOLDER, THREADS, TIMEOUT, USER_AGENT)
 from secsy.output_types import Port, Vulnerability
 from secsy.tasks._categories import VulnMulti
 from secsy.utils import get_file_timestamp
@@ -22,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 @task()
 class nmap(VulnMulti):
-	"""Network Mapper is a free and open source utility for network discovery
-	and security auditing."""
+	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap -sT -sV -Pn'
 	input_flag = None
 	input_chunk_size = 10
@@ -59,11 +56,8 @@ class nmap(VulnMulti):
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
 	)
 
-	def __iter__(self):
-		# TODO: deduplicate this and amass as it's the same function
-		prev = self.print_item_count
-		self.print_item_count = False
-		list(super().__iter__())
+	def yielder(self):
+		yield from super().yielder()
 		if self.return_code != 0:
 			return
 		self.results = []
@@ -72,13 +66,7 @@ class nmap(VulnMulti):
 			self._print(note)
 		if os.path.exists(self.output_path):
 			nmap_data = self.xml_to_json()
-			for item in nmap_data:
-				item = self._process_item(item)
-				if not item:
-					continue
-				yield item
-		self.print_item_count = prev
-		self._process_results()
+			yield from nmap_data
 
 	def xml_to_json(self):
 		results = []
@@ -115,36 +103,48 @@ class nmapData(dict):
 					continue
 				port_number = int(port_number)
 
-				# Get extracted results
-				extracted_results = self._get_extracted_results(port)
+				# Get extra data
+				extra_data = self._get_extra_data(port)
 
 				# Grab CPEs
-				cpes = extracted_results.get('cpe', [])
+				cpes = extra_data.get('cpe', [])
+
+				# Grab service name
+				service_name = ''
+				if 'product' in extra_data:
+					service_name = extra_data['product']
+				elif 'name' in extra_data:
+					service_name = extra_data['name']
+				if 'version' in extra_data:
+					version = extra_data['version']
+					service_name += f'/{version}'
 
 				# Get script output
 				scripts = self._get_scripts(port)
 
 				# Yield port data
-				yield {
+				port = {
 					PORT: port_number,
 					HOST: hostname,
+					SERVICE_NAME: service_name,
 					IP: ip,
-					EXTRA_DATA: extracted_results
+					EXTRA_DATA: extra_data
 				}
+				yield port
 
 				# Parse each script output to get vulns
 				for script in scripts:
 					script_id = script['id']
 					output = script['output']
-					extracted_results['nmap_script'] = script_id
+					extra_data['nmap_script'] = script_id
 					funcmap = {
 						'vulscan': self._parse_vulscan_output,
 						'vulners': self._parse_vulners_output,
 					}
 					func = funcmap.get(script_id)
 					metadata = {
-						VULN_MATCHED_AT: f'{hostname}:{port_number}',
-						VULN_EXTRACTED_RESULTS: extracted_results,
+						MATCHED_AT: f'{hostname}:{port_number}',
+						EXTRA_DATA: extra_data,
 					}
 					if not func:
 						# logger.debug(f'Script output parser for "{script_id}" is not supported YET.')
@@ -184,18 +184,18 @@ class nmapData(dict):
 	def _get_ip(self, host_cfg):
 		return host_cfg.get('address', {}).get('@addr', None)
 
-	def _get_extracted_results(self, port_cfg):
-		extracted_results = {
+	def _get_extra_data(self, port_cfg):
+		extra_datas = {
 			k.lstrip('@'): v
 			for k, v in port_cfg.get('service', {}).items()
 		}
 
 		# Strip product / version strings
-		if 'product' in extracted_results:
-			extracted_results['product'] = extracted_results['product'].lower()
+		if 'product' in extra_datas:
+			extra_datas['product'] = extra_datas['product'].lower()
 
-		if 'version' in extracted_results:
-			version_split = extracted_results['version'].split(' ')
+		if 'version' in extra_datas:
+			version_split = extra_datas['version'].split(' ')
 			version = None
 			os = None
 			if len(version_split) == 3:
@@ -206,19 +206,19 @@ class nmapData(dict):
 			elif len(version_split) == 1:
 				version = version_split[0]
 			else:
-				version = extracted_results['version']
+				version = extra_datas['version']
 			if os:
-				extracted_results['os'] = os
+				extra_datas['os'] = os
 			if version:
-				extracted_results['version'] = version
+				extra_datas['version'] = version
 
 		# Grab CPEs
-		cpes = extracted_results.get('cpe', [])
+		cpes = extra_datas.get('cpe', [])
 		if not isinstance(cpes, list):
 			cpes = [cpes]
-			extracted_results['cpe'] = cpes
+			extra_datas['cpe'] = cpes
 
-		return extracted_results
+		return extra_datas
 
 	def _get_scripts(self, port_cfg):
 		scripts = port_cfg.get('script', [])
@@ -272,14 +272,14 @@ class nmapData(dict):
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
-		cpe = None
+		cpes = []
 		provider_name = 'vulners'
 		for line in out.splitlines():
 			if not line:
 				continue
 			line = line.strip()
 			if line.startswith('cpe:'):
-				cpe = line
+				cpes.append(line)
 				continue
 			elems = tuple(line.split('\t'))
 			if len(elems) == 4:  # exploit
@@ -292,24 +292,25 @@ class nmapData(dict):
 					CVSS_SCORE: cvss_score,
 					REFERENCES: [reference_url],
 					TAGS: ['exploit', exploit_id, provider_name],
-					VULN_CONFIDENCE: 'low'
+					CONFIDENCE: 'low'
 				}
 			elif len(elems) == 3:  # vuln
-				vuln_id, vuln_description, _ = tuple(line.split('\t'))
+				vuln_id, vuln_cvss, _ = tuple(line.split('\t'))
 				vuln_type = vuln_id.split('-')[0]
 				vuln = {
 					ID: vuln_id,
 					NAME: vuln_id,
-					TAGS: [vuln_id, provider_name],
 					PROVIDER: provider_name,
-					DESCRIPTION: vuln_description,
+					CVSS_SCORE: vuln_cvss,
+					TAGS: [vuln_id, provider_name],
+					CONFIDENCE: 'low'
 				}
 				if vuln_type == 'CVE':
 					vuln[TAGS].append('cve')
-					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=[cpe])
+					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=cpes)
 					if vuln_data:
 						vuln.update(vuln_data)
-					yield vuln
+						yield vuln
 				else:
 					logger.debug(f'Vulners parser for "{vuln_type}" is not implemented YET.')
 			else:

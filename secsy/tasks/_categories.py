@@ -6,16 +6,15 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secsy.definitions import (CIDR_RANGE, DEFAULT_WORDLIST, DELAY, DEPTH,
+from secsy.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE,
+							   DEFAULT_WORDLIST, DELAY, DEPTH, DESCRIPTION,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
-							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
+							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-							   MATCH_WORDS, METHOD, PATH, PROXY, RATE_LIMIT,
-							   RETRIES, TEMP_FOLDER, THREADS, TIMEOUT, URL,
-							   USER_AGENT, USERNAME, VULN_CONFIDENCE,
-							   CVSS_SCORE, DESCRIPTION, ID,
-							   NAME, PROVIDER, REFERENCES,
-							   VULN_SEVERITY, TAGS, WORDLIST)
+							   MATCH_WORDS, METHOD, NAME, PATH, PROVIDER,
+							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
+							   SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
+							   URL, USER_AGENT, USERNAME, WORDLIST)
 from secsy.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
 								Vulnerability)
 from secsy.runners import Command
@@ -36,7 +35,7 @@ OPTS = {
 	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match respones with size'},
 	MATCH_WORDS: {'type': str, 'short': 'mw', 'help': 'Match responses with word count'},
 	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
-	PROXY: {'type': str, 'help': 'HTTP(s) proxy'},
+	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
 	RETRIES: {'type': int, 'help': 'Retries'},
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
@@ -227,12 +226,12 @@ class Vuln(Command):
 			ID: id,
 			NAME: name,
 			PROVIDER: 'cve.circl.lu',
-			VULN_SEVERITY: severity,
+			SEVERITY: severity,
 			CVSS_SCORE: cvss,
 			TAGS: tags,
 			REFERENCES: [f'https://cve.circl.lu/cve/{id}'] + references,
 			DESCRIPTION: description,
-			VULN_CONFIDENCE: confidence
+			CONFIDENCE: confidence
 		}
 		return vuln
 

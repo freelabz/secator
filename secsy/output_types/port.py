@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from secsy.definitions import PORT, HOST, IP, EXTRA_DATA, CPES
 from secsy.output_types import OutputType
+from colorama import Fore, Style
 
 
 @dataclass
@@ -18,12 +19,15 @@ class Port(OutputType):
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
 
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
-	_sort_by = (IP, PORT)
+	_sort_by = (PORT, IP)
 
 	def __str__(self) -> str:
 		return f'{self.host}:{self.port}'
 
-	def __post_init__(self):
-		super().__post_init__()
-		self.cpes = self.extra_data.get('cpe', [])
-		self.service_name = self.extra_data.get('service_name', '')
+	def __repr__(self) -> str:
+		white = Fore.WHITE
+		reset = Style.RESET_ALL
+		s = f'{white}{self.host}:{self.port}{reset}'
+		if self.service_name:
+			s += f' [{self.service_name}]'
+		return s

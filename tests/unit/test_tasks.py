@@ -44,36 +44,36 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.maxDiff = None
 
 	def test_process_opts_defaults(self):
-		cmd_opts = {}
+		run_opts = {}
 		opts_str = FakeCmd._process_opts(
-			cmd_opts,
+			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map)
 		self.assertEqual(opts_str, '-opt1 10.0 -opt2 1,2,3')
 
 	def test_process_opts(self):
-		cmd_opts = {
+		run_opts = {
 			'opt1': 41,
 			'opt2': False, # intentionally omit arg, overriding default value
 			'opt3': True
 		}
 		opts_str = FakeCmd._process_opts(
-			cmd_opts,
+			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map)
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3')
 
 	def test_process_opts_with_prefix(self):
-		cmd_opts = {
+		run_opts = {
 			'fakecmd_opt1': 41, # should override opt1 below
 			'opt1': 45,
 			'opt2': False, # intentionally omit arg, overriding default value
 			'opt3': True
 		}
 		opts_str = FakeCmd._process_opts(
-			cmd_opts,
+			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
@@ -81,7 +81,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3')
 
 	def test_process_opts_with_unsupported(self):
-		cmd_opts = {
+		run_opts = {
 			'fakecmd_opt1': 41, # should override opt1 below
 			'opt1': 45,
 			'opt2': False, # intentionally omit arg, overriding default value
@@ -89,7 +89,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 			'opt4': 'test_unsupported'
 		}
 		opts_str = FakeCmd._process_opts(
-			cmd_opts,
+			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
@@ -97,7 +97,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3')
 
 	def test_process_opts_with_convert_underscore(self):
-		cmd_opts = {
+		run_opts = {
 			'fakecmd_opt1': 41, # should override opt1 below
 			'opt1': 45,
 			'opt2': False, # intentionally omit arg, overriding default value
@@ -106,7 +106,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 			'opt_with_underscore': 'test'
 		}
 		opts_str = FakeCmd._process_opts(
-			cmd_opts,
+			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
@@ -114,37 +114,37 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3 -opt-with-underscore test')
 
 	def test_get_opt_value(self):
-		cmd_opts = {
+		run_opts = {
 			'fakecmd_opt1': 41,
 			'opt1': 45
 		}
 		opt_value = FakeCmd._get_opt_value(
-			cmd_opts,
+			run_opts,
 			opt_name='opt1',
 			opt_prefix='fakecmd',
 			default=10)
 		self.assertEqual(opt_value, 41)
 
 	def test_get_opt_value_false(self):
-		cmd_opts = {
+		run_opts = {
 			'fakecmd_opt1': False,
 			'opt1': 45
 		}
 		opt_value = FakeCmd._get_opt_value(
-			cmd_opts,
+			run_opts,
 			opt_name='opt1',
 			opt_prefix='fakecmd',
 			default=10)
 		self.assertEqual(opt_value, False)
 
 	def test_get_opt_value_not_supported(self):
-		cmd_opts = {
+		run_opts = {
 			'fakecmd_opt1': False,
 			'opt1': 45,
 			'opt4': OPT_NOT_SUPPORTED
 		}
 		opt_value = FakeCmd._get_opt_value(
-			cmd_opts,
+			run_opts,
 			opt_name='opt4',
 			opt_prefix='fakecmd',
 			default=10)
@@ -153,9 +153,9 @@ class TestCommandProcessOpts(unittest.TestCase):
 	def test_httpx_build_cmd_defaults(self):
 		if not httpx in TEST_TASKS:
 			return
-		cmd_opts = {}
+		run_opts = {}
 		host = 'test.synology.me'
-		cls = httpx(host, **cmd_opts)
+		cls = httpx(host, **run_opts)
 		default_threads = cls.meta_opts[THREADS]['default']
 		expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -threads {default_threads}'
 		self.assertEqual(cls.cmd, expected_cmd)
@@ -170,7 +170,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 	def test_httpx_build_cmd_with_opts(self):
 		if not httpx in TEST_TASKS:
 			return
-		cmd_opts = {
+		run_opts = {
 			FOLLOW_REDIRECT: False,
 			DELAY: 1,
 			RATE_LIMIT: 120,
@@ -182,7 +182,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 			'filter_size': '23,33'
 		}
 		host = 'test.synology.me'
-		cls = httpx(host, **cmd_opts)
+		cls = httpx(host, **run_opts)
 		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_timestamp, False)
@@ -196,7 +196,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 	def test_httpx_build_cmd_with_opts_with_prefix(self):
 		if not httpx in TEST_TASKS:
 			return
-		cmd_opts = {
+		run_opts = {
 			FOLLOW_REDIRECT: False,
 			DELAY: 1,
 			RATE_LIMIT: 120,
@@ -210,7 +210,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 			'httpx_filter_size': '23,33' # prefixed option keys should override
 		}
 		host = 'test.synology.me'
-		cls = httpx(host, **cmd_opts)
+		cls = httpx(host, **run_opts)
 		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_timestamp, False)
@@ -308,7 +308,7 @@ class TestCommandHooks(unittest.TestCase):
 
 		def on_init(self):
 			self.cmd = 'test_changed_cmd_init'
-			self.cmd_opts = {}
+			self.run_opts = {}
 
 		def on_start(self):
 			self.cmd = 'test_changed_cmd_start'

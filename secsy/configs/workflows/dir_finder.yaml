@@ -1,3 +1,4 @@
+type: workflow
 name: dir_find
 alias: dirfind
 description: Find HTTP directories

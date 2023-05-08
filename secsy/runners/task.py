@@ -1,29 +1,17 @@
-from contextlib import nullcontext
-
-from secsy.definitions import RECORD
 from secsy.rich import console
-from secsy.runners._base import Runner
-from secsy.utils import discover_tasks, merge_opts
+from secsy.utils import discover_tasks
+from secsy.runners import Runner
 
 
 class Task(Runner):
-
-	DEFAULT_EXPORTERS = []
-	DEFAULT_FORMAT_OPTIONS = {
-		'print_timestamp': True,
-		'print_cmd': True,
-		'print_line': True,
-		'raw_yield': False
-	}
+	default_exporters = []
+	enable_hooks = False
 
 	def delay(cls, *args, **kwargs):
 		from secsy.celery import run_task
 		return run_task.delay(args=args, kwargs=kwargs)
 
-	def run(self):
-		return list(self.__iter__())
-
-	def __iter__(self):
+	def yielder(self):
 		"""Run task.
 
 		Args:
@@ -32,59 +20,38 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
-		# Default table exporter in non-sync mode
-		if not self.sync and not self.exporters:
-			self.run_opts['output'] = 'table'
-			self.exporters = self.resolve_exporters()
-
-		# Overriding library defaults with CLI defaults
-		table = self.run_opts.get('table', False)
-		json = self.run_opts.get('json', False)
-		orig = self.run_opts.get('orig', False)
-		raw = self.run_opts.get('raw', False)
-		fmt_opts = self.DEFAULT_FORMAT_OPTIONS.copy()
-		fmt_opts.update({
-			'sync': self.sync,
-			'raw': raw or not (json or table or orig),
-			'raw_yield': False
-		})
-
-		# In async mode, display results back in client-side
-		if not self.sync:
-			fmt_opts['json'] = True
-			fmt_opts['print_cmd_prefix'] = True
-
-		# Merge runtime options
-		opts = merge_opts(self.run_opts, fmt_opts)
-		opts['context'] = self.context
-		opts['hooks'] = self.hooks.get('task', {})
-
-		# Get Celery task result iterator
-		uuids = []
+		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
+
+		# Task opts
+		fmt_opts = {
+			'print_cmd': True,
+			'print_cmd_prefix': not self.sync,
+			'print_timestamp': self.sync,
+			'print_line': not self.output_quiet
+		}
+		run_opts = self.run_opts.copy()
+		run_opts.pop('output', None)
+		run_opts.update(fmt_opts)
+
+		# Set task output types
+		self.output_types = task_cls.output_types
+
+		# Get hooks
+		hooks = {task_cls: self.hooks}
+		run_opts['hooks'] = hooks
+		run_opts['context'] = self.context
+
+		# Run task
 		if self.sync:
-			task = task_cls(self.targets, **opts)
+			task = task_cls(self.targets, **run_opts)
 		else:
-			result = task_cls.delay(self.targets, **opts)
+			result = task_cls.delay(self.targets, **run_opts)
 			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
 			task = self.process_live_tasks(result, description=False, results_only=True)
 
-		# Run task and yield results
-		status = f'[bold yellow]Running task [bold magenta]{self.config.name} ...'
-		print_status = self.sync and (not RECORD and not task.output_json and not task.output_raw and not task.output_orig)
-		with console.status(status) if print_status and self.sync else nullcontext():
-			for result in task:
-				if result._uuid in uuids:
-					continue
-				uuids.append(result._uuid)
-				self.results.append(result)
-				self.results_count += 1
-				self.run_hooks('on_iter')
-				yield result
-
-		# Filter results and log info
-		self.results = self.filter_results()
-		self.log_results()
+		# Yield task results
+		yield from task
 
 	@staticmethod
 	def get_task_class(name):

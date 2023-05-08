@@ -1,7 +1,7 @@
 from secsy.decorators import task
 from secsy.definitions import (DELAY, HOST, OPT_NOT_SUPPORTED, PORT, PORTS,
 							   PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
-							   TOP_PORTS)
+							   TOP_PORTS, DEFAULT_SOCKS5_PROXY)
 from secsy.output_types import Port
 from secsy.tasks._categories import ReconPort
 
@@ -15,7 +15,9 @@ class naabu(ReconPort):
 	json_flag = '-json'
 	opts = {
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports'},
-		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'}
+		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'},
+		'scan_type': {'type': str, 'help': 'Scan type (SYN (s)/CONNECT(c))'},
+		'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
 	}
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,
@@ -27,6 +29,8 @@ class naabu(ReconPort):
 
 		# naabu opts
 		PORTS: 'port',
+		'scan_type': 's',
+		'health_check': 'hc'
 	}
 	opt_value_map = {
 		TIMEOUT: lambda x: x*1000 if x and x > 0 else None,  # convert to milliseconds
@@ -40,3 +44,15 @@ class naabu(ReconPort):
 	}
 	output_types = [Port]
 	install_cmd = 'sudo apt install -y libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'
+	proxychains = False
+	proxy_socks5 = False
+	proxy_http = False
+
+	@staticmethod
+	def on_init(self):
+		proxy = self.get_opt_value('proxy')
+		if proxy == 'proxychains':
+			proxy = DEFAULT_SOCKS5_PROXY
+		if proxy:
+			self.run_opts['proxy'] = proxy.replace('http://', '').replace('socks5://', '')
+			self.run_opts['health_check'] = True

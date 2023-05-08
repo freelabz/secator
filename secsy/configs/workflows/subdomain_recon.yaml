@@ -1,3 +1,4 @@
+type: workflow
 name: subdomain_recon
 alias: subrec
 description: Find subdomains and takeovers

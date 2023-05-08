@@ -1,3 +1,4 @@
+type: workflow
 name: url_vuln
 alias: url_vuln
 description: Search for URL vulnerabilities

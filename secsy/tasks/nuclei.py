@@ -1,20 +1,17 @@
 from secsy.decorators import task
-from secsy.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
-							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, VULN_CONFIDENCE,
-							   CVSS_SCORE, DESCRIPTION,
-							   VULN_EXTRACTED_RESULTS, ID,
-							   VULN_MATCHED_AT, NAME, PROVIDER,
-							   REFERENCES, VULN_SEVERITY, TAGS, USER_AGENT)
-from secsy.output_types import Vulnerability, Progress
+from secsy.definitions import (CONFIDENCE, CVSS_SCORE, DEFAULT_SOCKS5_PROXY,
+							   DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
+							   HEADER, ID, MATCHED_AT, NAME, OPT_NOT_SUPPORTED,
+							   PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
+							   RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
+							   USER_AGENT)
+from secsy.output_types import Progress, Vulnerability
 from secsy.tasks._categories import VulnMulti
 
 
 @task()
 class nuclei(VulnMulti):
-	"""Fast and customisable vulnerability scanner based on simple YAML based
-	DSL.
-	"""
+	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
 	cmd = 'nuclei -silent -sj -si 20 -hm'
 	file_flag = '-l'
 	input_flag = '-u'
@@ -51,16 +48,16 @@ class nuclei(VulnMulti):
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: nuclei.id_extractor(x),
-			PROVIDER: 'nuclei',
-			NAME: lambda x: x['info']['name'],
+			NAME: lambda x: nuclei.name_extractor(x),
 			DESCRIPTION: lambda x: x['info'].get('description'),
-			VULN_SEVERITY: lambda x: x['info'][VULN_SEVERITY],
-			VULN_CONFIDENCE: lambda x: 'high',
+			SEVERITY: lambda x: x['info'][SEVERITY],
+			CONFIDENCE: lambda x: 'high',
 			CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
-			VULN_MATCHED_AT:  'matched-at',
+			MATCHED_AT:  'matched-at',
 			TAGS: lambda x: x['info']['tags'],
 			REFERENCES: lambda x: x['info']['reference'],
-			VULN_EXTRACTED_RESULTS: lambda x: {'data': x.get('extracted-results', [])}
+			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
+			PROVIDER: 'nuclei',
 		},
 		Progress: {
 			'extra_data': lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
@@ -68,6 +65,9 @@ class nuclei(VulnMulti):
 	}
 	ignore_return_code = True
 	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest'
+	proxychains = False
+	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
+	proxy_http = True  # same
 
 	@staticmethod
 	def id_extractor(item):
@@ -75,3 +75,25 @@ class nuclei(VulnMulti):
 		if len(cve_ids) > 0:
 			return cve_ids[0]
 		return None
+
+	@staticmethod
+	def extra_data_extractor(item):
+		data = {}
+		data['data'] = item.get('extracted-results', [])
+		data['template_id'] = item['template-id']
+		data['template_url'] = item['template-url']
+		return data
+
+	@staticmethod
+	def name_extractor(item):
+		name = item['info']['name']
+		matcher_name = item.get('matcher-name', '')
+		if matcher_name:
+			name += f' - {matcher_name}'
+		return name
+
+	@staticmethod
+	def on_init(self):
+		proxy = self.get_opt_value('proxy')
+		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
+			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY

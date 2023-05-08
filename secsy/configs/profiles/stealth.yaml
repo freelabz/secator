@@ -1,3 +1,4 @@
+type: profile
 name: stealth
 options:
   rate_limit: 100
