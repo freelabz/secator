@@ -4,7 +4,7 @@ from secsy.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, USER_AGENT)
+							   THREADS, TIMEOUT, USER_AGENT, DEFAULT_SOCKS5_PROXY)
 from secsy.tasks._categories import HttpCrawler
 
 
@@ -37,6 +37,15 @@ class gau(HttpCrawler):
 		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
 	install_cmd = 'go install -v github.com/lc/gau/v2/cmd/gau@latest'
+	proxychains = False
+	proxy_socks5 = True
+	proxy_http = True
+
+	@staticmethod
+	def on_init(self):
+		proxy = self.get_opt_value('proxy')
+		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
+			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY
 
 	# @staticmethod
 	# def validate_item(self, item):

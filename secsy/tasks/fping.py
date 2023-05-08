@@ -17,7 +17,7 @@ class fping(ReconIp):
 	opt_prefix = '--'
 	opt_key_map = {
 		DELAY: 'period',
-		PROXY: 'proxy',
+		PROXY: OPT_NOT_SUPPORTED,
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: 'retry',
 		TIMEOUT: 'timeout',
@@ -30,6 +30,7 @@ class fping(ReconIp):
 	input_type = IP
 	output_types = [Ip]
 	install_cmd = 'sudo apt install -y fping'
+	proxychains = False
 
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):

@@ -236,6 +236,7 @@ class Runner:
 	def toDict(self):
 		return {
 			'config': self.config.toDict(),
+			'opts': self.config.supported_opts,
 			'name': self.config.name,
 			'targets': self.targets,
 			'run_opts': self.run_opts,

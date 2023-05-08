@@ -19,4 +19,7 @@ class UserAccount(OutputType):
 	_raw_field = URL
 
 	def __str__(self) -> str:
-		return f'{self.site_name} -> {self.username}'
+		return self.url
+
+	def __repr__(self) -> str:
+		return self.url

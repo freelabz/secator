@@ -36,8 +36,6 @@ class OutputType:
 				new_item[key] = mapped_val
 			elif key in item:
 				new_item[key] = item[key]
-			else:
-				new_item[key] = None
 
 		# All values None, raise an error
 		if all(val is None for val in new_item.values()):

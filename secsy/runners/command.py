@@ -125,9 +125,6 @@ class Command(Runner):
 		# Description is config description
 		self.description = self.config.description
 
-		# Cmd opts is run opts
-		self.run_opts = self.run_opts
-
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
 
@@ -159,7 +156,6 @@ class Command(Runner):
 		from secsy.celery import run_command
 
 		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
-		kwargs['sync'] = False
 		results = kwargs.get('results', [])
 		return run_command.delay(results, cls.__name__, *args, opts=kwargs)
 
@@ -194,9 +190,34 @@ class Command(Runner):
 			dict(self.opts, **self.meta_opts),
 			opt_prefix=self.config.name)
 
+	@classmethod
+	def get_supported_opts(cls):
+		def convert(d):
+			for k, v in d.items():
+				if hasattr(v, '__name__') and v.__name__ in ['str', 'int', 'float']:
+					d[k] = v.__name__
+			return d
+
+		opts = {k: convert(v) for k, v in cls.opts.items()}
+		for k, v in opts.items():
+			v['meta'] = cls.__name__
+			v['supported'] = True
+
+		meta_opts = {k: convert(v) for k, v in cls.meta_opts.items() if cls.opt_key_map.get(k) is not OPT_NOT_SUPPORTED}
+		for k, v in meta_opts.items():
+			v['meta'] = 'meta'
+			if cls.opt_key_map.get(k) is OPT_NOT_SUPPORTED:
+				v['supported'] = False
+			else:
+				v['supported'] = True
+		opts = dict(opts)
+		opts.update(meta_opts)
+		return opts
+
 	#---------------#
 	# Class methods #
 	#---------------#
+
 	@classmethod
 	def install(cls):
 		"""Install command by running the content of cls.install_cmd."""
@@ -365,8 +386,6 @@ class Command(Runner):
 
 		except KeyboardInterrupt:
 			process.kill()
-			self._print('Process was killed manually (CTRL+C / CTRL+X)', color='bold red')
-			self.errors.append('Process killed manually')
 			self.killed = True
 
 		# Retrieve the return code and output
@@ -386,10 +405,14 @@ class Command(Runner):
 		if self.ignore_return_code:
 			self.return_code = 0
 
-		if self.return_code != 0 and not self.killed:
-			error = f'Command failed with return code {self.return_code}.'
-			self.errors.append(error)
+		if self.return_code == -2 or self.killed:
+			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			self._print(error, color='bold red')
+			self.errors.append(error)
+		elif self.return_code != 0:
+			error = f'Command failed with return code {self.return_code}.'
+			self._print(error, color='bold red')
+			self.errors.append(error)
 
 	@staticmethod
 	def _process_opts(

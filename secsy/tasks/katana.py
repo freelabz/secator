@@ -1,13 +1,13 @@
 from urllib.parse import urlparse
 
 from secsy.decorators import task
-from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
-							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-							   FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES,
-							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
-							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   STATUS_CODE, TECH, THREADS, TIME, TIMEOUT, URL,
-							   USER_AGENT)
+from secsy.definitions import (CONTENT_TYPE, DEFAULT_SOCKS5_PROXY, DELAY,
+							   DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
+							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
+							   RATE_LIMIT, RETRIES, STATUS_CODE, TECH, THREADS,
+							   TIME, TIMEOUT, URL, USER_AGENT)
 from secsy.output_types import Url
 from secsy.tasks._categories import HttpCrawler
 
@@ -60,3 +60,11 @@ class katana(HttpCrawler):
 		}
 	}
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
+	proxychains = False
+	proxy_socks5 = True
+
+	@staticmethod
+	def on_init(self):
+		proxy = self.get_opt_value('proxy')
+		if proxy == 'proxychains':
+			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY  # partial support, leaks data

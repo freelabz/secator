@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from secsy.definitions import URL, STATUS_CODE, TITLE, WEBSERVER, TECH, CONTENT_TYPE, CONTENT_LENGTH, TIME
 from secsy.output_types import OutputType
+from colorama import Fore, Style
 
 
 @dataclass
@@ -39,16 +40,26 @@ class Url(OutputType):
 	def __str__(self):
 		return self.url
 
-	# def __str__(self):
-	# 	s = f'{self.url}'
-	# 	if self.status_code and self.status_code != 0:
-	# 		s += f' [{self.status_code}]'
-	# 	if self.title:
-	# 		s += f' [{self.title}]'
-	# 	if self.webserver:
-	# 		s += f' [{self.webserver}]'
-	# 	if self.tech:
-	# 		s += f' {self.tech}'
-	# 	if self.content_type:
-	# 		s += f' [{self.content_type}]'
-	# 	return s
+	def __repr__(self):
+		white = Fore.WHITE
+		green = Fore.GREEN
+		red = Fore.RED
+		cyan = Fore.CYAN
+		magenta = Fore.MAGENTA
+		reset = Style.RESET_ALL
+		s = f'{white}{self.url}'
+		if self.status_code and self.status_code != 0:
+			if self.status_code < 400:
+				s += f' [{green}{self.status_code}{reset}]'
+			else:
+				s += f' [{red}{self.status_code}{reset}]'
+		if self.title:
+			s += f' [{green}{self.title}{reset}]'
+		if self.webserver:
+			s += f' [{cyan}{self.webserver}{reset}]'
+		if self.tech:
+			techs_str = ', '.join([f'{magenta}{tech}{reset}' for tech in self.tech])
+			s += f' [{techs_str}]'
+		if self.content_type:
+			s += f' [{cyan}{self.content_type}{reset}]'
+		return s

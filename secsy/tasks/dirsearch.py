@@ -6,11 +6,10 @@ from secsy.decorators import task
 from secsy.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
-							   MATCH_CODES, MATCH_REGEX,
-							   MATCH_SIZE, MATCH_WORDS, METHOD,
-							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   STATUS_CODE, TEMP_FOLDER, THREADS, TIMEOUT,
-							   USER_AGENT, WORDLIST)
+							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
+							   RATE_LIMIT, RETRIES, STATUS_CODE, TEMP_FOLDER,
+							   THREADS, TIMEOUT, USER_AGENT, WORDLIST)
 from secsy.output_types import Url
 from secsy.tasks._categories import HttpFuzzer
 from secsy.utils import get_file_timestamp
@@ -55,6 +54,9 @@ class dirsearch(HttpFuzzer):
 		}
 	}
 	install_cmd = 'pip3 install dirsearch'
+	proxychains = True
+	proxy_socks5 = True
+	proxy_http = True
 
 	def yielder(self):
 		prev = self.print_item_count

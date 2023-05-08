@@ -1,5 +1,5 @@
 from secsy.decorators import task
-from secsy.definitions import (DEFAULT_HTTPX_FLAGS, DEPTH, DELAY, FILTER_CODES,
+from secsy.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
@@ -21,6 +21,7 @@ class httpx(Http):
 		# 'td': {'is_flag': True, 'default': True, 'help': 'Tech detection'},
 		# 'asn': {'is_flag': True, 'default': False, 'help': 'ASN detection'},
 		# 'cdn': {'is_flag': True, 'default': True, 'help': 'CDN detection'},
+		'debug_resp': {'is_flag': True, 'default': False, 'help': 'Debug response'}
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -47,6 +48,9 @@ class httpx(Http):
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
+	proxychains = False
+	proxy_socks5 = False
+	proxy_http = True
 
 	@staticmethod
 	def on_item_pre_convert(self, item):
@@ -60,3 +64,12 @@ class httpx(Http):
 				item[k] = sanitize_url(v)
 		item[URL] = item.get('final_url') or item[URL]
 		return item
+
+	@staticmethod
+	def on_init(self):
+		proxy = self.get_opt_value('proxy')
+		if proxy == 'proxychains':
+			self.run_opts['proxy'] = 'http://127.0.0.1:9080'
+		debug_resp = self.get_opt_value('debug_resp')
+		if debug_resp:
+			self.cmd = self.cmd.replace('-silent', '')
