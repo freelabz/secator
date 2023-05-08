@@ -4,7 +4,7 @@ import uuid
 from time import sleep
 
 import celery
-from celery import chain, chord, signals
+from celery import chain, chord
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
@@ -33,6 +33,7 @@ app.conf.update({
 		'data_folder_in': CELERY_DATA_FOLDER,
 		'data_folder_out': CELERY_DATA_FOLDER,
 	},
+	'broker_connection_retry_on_startup': True,
 
 	# Serialization / compression
 	'accept_content': ['application/x-python-serialize'],
@@ -48,13 +49,13 @@ app.conf.update({
 	'task_eager_propagates': False
 })
 
-
-@signals.setup_logging.connect
-def void(*args, **kwargs):
-	"""Override celery's logging setup to prevent it from altering our settings.
-	github.com/celery/celery/issues/1867
-	"""
-	pass
+# from celery import signals
+# @signals.setup_logging.connect
+# def void(*args, **kwargs):
+# 	"""Override celery's logging setup to prevent it from altering our settings.
+# 	github.com/celery/celery/issues/1867
+# 	"""
+# 	pass
 
 #--------------#
 # Celery tasks #
@@ -156,7 +157,7 @@ def run_command(self, results, name, targets, opts={}):
 		if not chunk:
 			targets, opts = run_extractors(results, opts, targets)
 			if not targets:
-				raise ValueError('No targets were specified as input.')
+				raise ValueError(f'{name}: No targets were specified as input.')
 
 		# Get task class
 		task_cls = Task.get_task_class(name)
@@ -237,7 +238,7 @@ def run_command(self, results, name, targets, opts={}):
 			task_exc = None
 		else:
 			task_state = 'FAILURE'
-			task_exc = TaskError(task.error)
+			task_exc = TaskError('\n'.join(task.errors))
 
 	except BaseException as exc:
 		task_state = 'FAILURE'

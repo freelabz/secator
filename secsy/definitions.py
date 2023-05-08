@@ -42,11 +42,15 @@ CVES_FOLDER = f'{TEMP_FOLDER}/cves'
 GOOGLE_DRIVE_PARENT_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_PARENT_FOLDER_ID')
 GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
 DATABASE_URI = os.environ.get('DATABASE_URI', 'mongo://localhost')
+DEFAULT_SOCKS5_PROXY = os.environ.get('SOCKS5_PROXY', "socks5://127.0.0.1:9050")
+DEFAULT_HTTP_PROXY = os.environ.get('HTTP_PROXY', "https://127.0.0.1:9080")
+DEFAULT_HTTPS_PROXY = os.environ.get('HTTPS_PROXY', "https://127.0.0.1:9080")
 
 # Defaults
 DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-silent -td -asn -cdn')
 DEFAULT_STDIN_TIMEOUT = 1000  # seconds
 DEFAULT_PROXY_TIMEOUT = 1  # seconds
+DEFAULT_PROXYCHAINS_COMMAND = "proxychains"
 
 # Constants
 DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
@@ -100,6 +104,7 @@ URL = 'url'
 USER_AGENT = 'user_agent'
 USERNAME = 'username'
 SCRIPT = 'script'
+SERVICE_NAME = 'service_name'
 SOURCES = 'sources'
 STATUS_CODE = 'status_code'
 SUBDOMAIN = 'subdomain'
@@ -108,17 +113,16 @@ TITLE = 'title'
 SITE_NAME = 'site_name'
 SERVICE_NAME = 'service_name'
 VULN = 'vulnerability'
-VULN_CONFIDENCE = 'confidence'
+CONFIDENCE = 'confidence'
 CVSS_SCORE = 'cvss_score'
 DESCRIPTION = 'description'
-VULN_EXTRACTED_RESULTS = 'extracted_results'
 ID = 'id'
-VULN_MATCHED_AT = 'matched_at'
+MATCHED_AT = 'matched_at'
 NAME = 'name'
 PROVIDER = 'provider'
-VULN_REFERENCE = 'reference'
+REFERENCE = 'reference'
 REFERENCES = 'references'
-VULN_SEVERITY = 'severity'
+SEVERITY = 'severity'
 TAGS = 'tags'
 VULN_TYPE = 'type'
 WEBSERVER = 'webserver'

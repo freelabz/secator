@@ -1,3 +1,4 @@
+type: scan
 name: network
 description: Internal network scan (cidr_recon, url_crawl)
 profile: default

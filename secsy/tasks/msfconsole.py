@@ -56,7 +56,7 @@ class msfconsole(VulnMulti):
 	def on_init(self):
 		command = self.get_opt_value('execute_command')
 		script_path = self.get_opt_value('resource')
-		environment = self.cmd_opts.pop('environment', '')
+		environment = self.run_opts.pop('environment', '')
 		env_vars = {}
 		if environment:
 			env_vars = dict(map(lambda x: x.split('='), environment.strip().split(',')))
@@ -65,7 +65,7 @@ class msfconsole(VulnMulti):
 
 		# Passing msfconsole command directly, simply add RHOST / RHOSTS from host input and run then exit
 		if command:
-			self.cmd_opts['msfconsole.execute_command'] = (
+			self.run_opts['msfconsole.execute_command'] = (
 				f'setg RHOST {self.input}; '
 				f'setg RHOSTS {self.input}; '
 				f'{command.format(**env_vars)}; '
@@ -94,7 +94,7 @@ class msfconsole(VulnMulti):
 			self._print(Panel(content, title=f'[bold magenta]{script_name}', expand=False))
 
 			# Override original command with new resource script
-			self.cmd_opts['msfconsole.resource'] = out_path
+			self.run_opts['msfconsole.resource'] = out_path
 
 		# Nothing passed, error out
 		else:
@@ -122,16 +122,16 @@ class msfconsole(VulnMulti):
 #         'module': {'type': str, 'required': True, 'help': 'Metasploit module to run'}
 #     }
 #
-#     def __init__(self, input, ctx={}, **cmd_opts):
-#         self.module = cmd_opts.pop('module')
+#     def __init__(self, input, ctx={}, **run_opts):
+#         self.module = run_opts.pop('module')
 #         self.print_timestamp = ctx.get('print_timestamp', False)
-#         pw = cmd_opts.pop('password')
-#         self.cmd_opts = cmd_opts
+#         pw = run_opts.pop('password')
+#         self.run_opts = run_opts
 #         self.RHOST = input
 #         self.RHOSTS = input
 #         self.LHOST = self.get_lhost()
 #         # self.start_msgrpc()
-#         self.client = MsfRpcClient(pw, ssl=True, **cmd_opts)
+#         self.client = MsfRpcClient(pw, ssl=True, **run_opts)
 #
 #     # def start_msgrpc(self):
 #     #     code, out = run_command(f'msfrpcd -P {self.password}')

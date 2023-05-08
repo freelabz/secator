@@ -30,6 +30,7 @@ class subfinder(ReconDns):
 	}
 	output_types = [Subdomain]
 	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
+	proxychains = False
 
 	@staticmethod
 	def validate_item(self, item):

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from secsy.output_types import OutputType
+from colorama import Fore, Style
 
 
 @dataclass
@@ -21,3 +22,9 @@ class Tag(OutputType):
 
 	def __str__(self) -> str:
 		return self.match
+
+	def __repr__(self) -> str:
+		green = Fore.GREEN
+		reset = Style.RESET_ALL
+		s = f'[{green}{self.name}{reset}] {self.match}'
+		return s

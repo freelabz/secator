@@ -6,7 +6,7 @@ from secsy.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, URL, USER_AGENT)
+							   THREADS, TIMEOUT, URL, USER_AGENT, DEFAULT_HTTP_PROXY)
 from secsy.output_types import Tag, Url
 from secsy.tasks._categories import HttpCrawler
 
@@ -43,6 +43,9 @@ class cariddi(HttpCrawler):
 	}
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@latest'
 	encoding = 'ansi'
+	proxychains = False
+	proxy_socks5 = False
+	proxy_http = False
 
 	def item_loader(self, line):
 		items = []
@@ -91,3 +94,9 @@ class cariddi(HttpCrawler):
 			pass
 
 		return items
+
+	@staticmethod
+	def on_init(self):
+		proxy = self.get_opt_value('proxy')
+		if proxy == 'proxychains' and DEFAULT_HTTP_PROXY:
+			self.run_opts['proxy'] = DEFAULT_HTTP_PROXY

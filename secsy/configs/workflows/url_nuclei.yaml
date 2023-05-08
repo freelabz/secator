@@ -1,3 +1,4 @@
+type: workflow
 name: url_nuclei
 alias: url_nuclei
 description: Search for URL vulnerabilities using Nuclei

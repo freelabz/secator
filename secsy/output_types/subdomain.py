@@ -3,6 +3,7 @@ from typing import List
 
 from secsy.definitions import DOMAIN, HOST, SOURCES
 from secsy.output_types import OutputType
+from colorama import Fore, Style
 
 
 @dataclass
@@ -24,3 +25,10 @@ class Subdomain(OutputType):
 
 	def __str__(self):
 		return self.host
+
+	def __repr__(self):
+		white = Fore.WHITE
+		magenta = Fore.MAGENTA
+		reset = Style.RESET_ALL
+		sources_str = ', '.join([f'{magenta}{source}{reset}' for source in self.sources])
+		return f'{white}{self.host} [{sources_str}]'

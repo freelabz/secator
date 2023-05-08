@@ -10,7 +10,6 @@ from secsy.definitions import (DELAY, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
 from secsy.output_types import UserAccount
 from secsy.tasks._categories import ReconUser
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -43,10 +42,10 @@ class maigret(ReconUser):
 	}
 	install_cmd = 'pip3 install maigret'
 
-	def __iter__(self):
+	def yielder(self):
 		prev = self.print_item_count
 		self.print_item_count = False
-		list(super().__iter__())
+		yield from super().yielder()
 		if self.return_code != 0:
 			return
 		self.results = []
@@ -63,12 +62,8 @@ class maigret(ReconUser):
 			with open(self.output_path, 'r') as f:
 				data = [json.loads(line) for line in f.read().splitlines()]
 			for item in data:
-				item = self._process_item(item)
-				if not item:
-					continue
 				yield item
 		self.print_item_count = prev
-		self._process_results()
 
 	@staticmethod
 	def on_init(self):

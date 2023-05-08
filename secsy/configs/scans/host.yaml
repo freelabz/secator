@@ -1,3 +1,4 @@
+type: scan
 name: host
 description: Default host scan (host_recon, url_crawl, url_tag)
 profile: default

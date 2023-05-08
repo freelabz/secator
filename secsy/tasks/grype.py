@@ -13,7 +13,7 @@ def grype_item_loader(self, line):
 	if not len(split) == 6 or split[0] == 'NAME':
 		return None
 	product, version_vuln, version, product_type, vuln_id, severity = tuple(split)
-	extracted_results = {
+	extra_data = {
 		'product': product,
 		'version': version,
 		'product_type': product_type
@@ -33,12 +33,12 @@ def grype_item_loader(self, line):
 		data['tags'].extend(['cve', 'ghsa'])
 		vuln = VulnCode.lookup_ghsa(vuln_id)
 		data.update(vuln)
-		extracted_results['ghsa_id'] = vuln_id
+		extra_data['ghsa_id'] = vuln_id
 	elif vuln_id.startswith('CVE'):
 		vuln = VulnCode.lookup_cve(vuln_id)
 		vuln['tags'].append('cve')
 		data.update(vuln)
-	data['extracted_results'] = extracted_results
+	data['extra_data'] = extra_data
 	return data
 
 
