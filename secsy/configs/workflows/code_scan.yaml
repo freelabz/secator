@@ -1,3 +1,4 @@
+type: workflow
 name: code_scan
 alias: codescan
 description: Run vulnerability scan on code repositories

@@ -1,3 +1,4 @@
+type: workflow
 name: host_recon
 alias: hostrec
 description: Run vulnerability scan on network and HTTP services

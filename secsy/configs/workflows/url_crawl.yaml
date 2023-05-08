@@ -1,3 +1,4 @@
+type: workflow
 name: url_crawl
 alias: urlcrawl
 description: Find URLs by crawling (fast)

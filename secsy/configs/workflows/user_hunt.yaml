@@ -1,3 +1,4 @@
+type: workflow
 name: user_hunt
 alias: userhunt
 description: Find user accounts

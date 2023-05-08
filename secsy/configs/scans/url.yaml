@@ -1,3 +1,4 @@
+type: scan
 name: url
 description: Default URL scan (url_nuclei, url_crawl, url_tag)
 profile: default
