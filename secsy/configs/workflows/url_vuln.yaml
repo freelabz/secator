@@ -6,25 +6,25 @@ tags: [http, vulnerability]
 tasks:
   _group:
     gf/xss:
-      description: Hunting XSS params
+      description: Hunt XSS params
       pattern: xss
     gf/lfi:
-      description: Hunting LFI params
+      description: Hunt LFI params
       pattern: lfi
     gf/ssrf:
-      description: Hunting SSRF params
+      description: Hunt SSRF params
       pattern: ssrf
     gf/rce:
-      description: Hunting RCE params
+      description: Hunt RCE params
       pattern: rce
     gf/interestingparams:
-      description: Hunting interesting params
+      description: Hunt interest params
       pattern: interestingparams
     gf/idor:
-      description: Hunting Idor params
+      description: Hunt Idor params
       pattern: idor
     gf/debug_logic:
-      description: Hunting debug params
+      description: Hunt debug params
       pattern: debug_logic
 
   dalfox:
