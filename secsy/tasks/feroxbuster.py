@@ -77,9 +77,6 @@ class feroxbuster(HttpFuzzer):
 			self.output_path = f'{TEMP_FOLDER}/feroxbuster_{timestr}.json'
 		Path(self.output_path).touch()
 		self.cmd += f' --output {self.output_path}'
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY
 
 	@staticmethod
 	def on_start(self):

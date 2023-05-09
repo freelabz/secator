@@ -54,9 +54,9 @@ class gospider(HttpCrawler):
 	}
 	install_cmd = 'go install -v github.com/jaeles-project/gospider@latest'
 	ignore_return_code = True
-	proxychains = True
-	proxy_socks5 = False
-	proxy_http = False
+	proxychains = False
+	proxy_socks5 = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61
+	proxy_http = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61
 
 	@staticmethod
 	def validate_item(self, item):
@@ -70,8 +70,3 @@ class gospider(HttpCrawler):
 			return False
 		return True
 
-	@staticmethod
-	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY  # partial support, leaks data
