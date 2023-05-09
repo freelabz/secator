@@ -34,7 +34,8 @@ class naabu(ReconPort):
 	}
 	opt_value_map = {
 		TIMEOUT: lambda x: x*1000 if x and x > 0 else None,  # convert to milliseconds
-		RETRIES: lambda x: 1 if x == 0 else x
+		RETRIES: lambda x: 1 if x == 0 else x,
+		PROXY: lambda x: x.replace('socks5://', '')
 	}
 	output_map = {
 		Port: {
@@ -45,14 +46,5 @@ class naabu(ReconPort):
 	output_types = [Port]
 	install_cmd = 'sudo apt install -y libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'
 	proxychains = False
-	proxy_socks5 = False
+	proxy_socks5 = True
 	proxy_http = False
-
-	@staticmethod
-	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains':
-			proxy = DEFAULT_SOCKS5_PROXY
-		if proxy:
-			self.run_opts['proxy'] = proxy.replace('http://', '').replace('socks5://', '')
-			self.run_opts['health_check'] = True

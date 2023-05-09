@@ -62,9 +62,4 @@ class katana(HttpCrawler):
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
 	proxychains = False
 	proxy_socks5 = True
-
-	@staticmethod
-	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains':
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY  # partial support, leaks data
+	proxy_http = True

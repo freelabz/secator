@@ -91,9 +91,3 @@ class nuclei(VulnMulti):
 		if matcher_name:
 			name += f' - {matcher_name}'
 		return name
-
-	@staticmethod
-	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY

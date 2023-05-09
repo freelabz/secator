@@ -53,14 +53,10 @@ class dalfox(VulnHttp):
 	}
 	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
 	encoding = 'ansi'
-	proxychains = True
+	proxychains = False
 	proxychains_flavor = 'proxychains4'
-
-	@staticmethod
-	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY
+	proxy_socks5 = True
+	proxy_http = True
 
 	@staticmethod
 	def on_line(self, line):

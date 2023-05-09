@@ -50,11 +50,14 @@ class nmap(VulnMulti):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
-	proxychains_flavor = 'proxychains4'
 	install_cmd = (
 		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
 	)
+	proxychains = True
+	proxychains_flavor = 'proxychains4'
+	proxy_socks5 = False
+	proxy_http = False
 
 	def yielder(self):
 		yield from super().yielder()
