@@ -6,22 +6,22 @@ tags: [subdomain, url, vulnerability]
 tasks:
   _group:
     naabu:
-      description: Finding open ports
+      description: Find open ports
     nuclei:
-      description: Scanning network and SSL vulnerabilities
+      description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
   nmap:
-    description: Searching for vulnerabilities on open ports
+    description: Search for vulnerabilities on open ports
     targets_: port.host
     ports_: port.port
   httpx:
-    description: Probing HTTP services on open ports
+    description: Prob HTTP services on open ports
     targets_:
       - type: port
         field: '{host}:{port}'
         condition: item._source == 'nmap'
   nuclei:
-    description: Searching for vulnerabilities on alive HTTP services
+    description: Search for vulnerabilities on alive HTTP services
     exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
     targets_:
       - type: url

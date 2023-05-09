@@ -5,4 +5,4 @@ description: Run vulnerability scan on code repositories
 tags: [vulnerability, code]
 tasks:
   grype:
-    description: Running code vulnerability scan
+    description: Run code vulnerability scan

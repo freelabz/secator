@@ -1,23 +1,23 @@
 type: workflow
 name: url_fuzz
 alias: urlfuzz
-description: Find URLs by fuzzing (slow)
+description: Find URLs by fuzz (slow)
 tags: [http, fuzz]
 options:
   match_codes: 200,204,301,302,307,401,403,405,500
 tasks:
   _group:
     dirsearch:
-      description: Fuzzing URLs
+      description: Fuzz URLs
     feroxbuster:
-      description: Fuzzing URLs
+      description: Fuzz URLs
     ffuf:
-      description: Fuzzing URLs
+      description: Fuzz URLs
       targets_:
         - type: target
           field: '{name}/FUZZ'
   httpx:
-    description: Running HTTP probes on crawled URLs
+    description: Run HTTP probes on crawled URLs
     targets_:
       type: url
       field: url
