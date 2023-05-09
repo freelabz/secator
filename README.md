@@ -59,7 +59,7 @@ vulnerability assessments, with the following feature set:
 * [feroxbuster](https://github.com/epi052/feroxbuster) - Simple, fast, recursive
 content discovery tool written in Rust.
 * [ffuf](https://github.com/ffuf/ffuf) - Fast web fuzzer written in Go.
-* [gau](https://github.com/lc/gau): Offline URL crawler (Alien Vault, The
+* [gau](https://github.com/lc/gau) - Offline URL crawler (Alien Vault, The
 Wayback Machine, Common Crawl, URLScan).
 * [gospider](https://github.com/jaeles-project/gospider) - Fast web spider
 written in Go.
