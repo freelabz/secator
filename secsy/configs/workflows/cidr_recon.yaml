@@ -15,7 +15,7 @@ tasks:
       field: ip
       condition: item.alive
   httpx:
-    description: Prob HTTP services on open ports
+    description: Probe HTTP services on open ports
     targets_:
     - type: port
       field: '{ip}:{port}'

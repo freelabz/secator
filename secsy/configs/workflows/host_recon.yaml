@@ -15,7 +15,7 @@ tasks:
     targets_: port.host
     ports_: port.port
   httpx:
-    description: Prob HTTP services on open ports
+    description: Probe HTTP services on open ports
     targets_:
       - type: port
         field: '{host}:{port}'
