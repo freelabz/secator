@@ -4,7 +4,7 @@ from secsy.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH, FILTER_CODES,
 							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, URL, USER_AGENT)
+							   THREADS, TIMEOUT, URL, USER_AGENT, DEFAULT_HTTP_PROXY)
 from secsy.tasks._categories import Http
 from secsy.utils import sanitize_url
 
@@ -69,7 +69,7 @@ class httpx(Http):
 	def on_init(self):
 		proxy = self.get_opt_value('proxy')
 		if proxy == 'proxychains':
-			self.run_opts['proxy'] = 'http://127.0.0.1:9080'
+			self.run_opts['proxy'] = DEFAULT_HTTP_PROXY
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')

@@ -17,7 +17,7 @@ class naabu(ReconPort):
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports'},
 		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'},
 		'scan_type': {'type': str, 'help': 'Scan type (SYN (s)/CONNECT(c))'},
-		'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
+		# 'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
 	}
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,
@@ -30,7 +30,7 @@ class naabu(ReconPort):
 		# naabu opts
 		PORTS: 'port',
 		'scan_type': 's',
-		'health_check': 'hc'
+		# 'health_check': 'hc'
 	}
 	opt_value_map = {
 		TIMEOUT: lambda x: x*1000 if x and x > 0 else None,  # convert to milliseconds
