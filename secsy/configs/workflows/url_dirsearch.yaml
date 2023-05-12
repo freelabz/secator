@@ -1,8 +1,8 @@
 type: workflow
-name: dir_find
+name: url_dirsearch
 alias: dirfind
-description: Find HTTP directories
-tags: [http]
+description: URL directory search
+tags: [http, dir]
 tasks:
   ffuf:
     description: Search for HTTP directories

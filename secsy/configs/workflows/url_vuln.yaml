@@ -1,7 +1,7 @@
 type: workflow
 name: url_vuln
 alias: url_vuln
-description: Search for URL vulnerabilities
+description: URL vulnerability scan (gf, dalfox)
 tags: [http, vulnerability]
 tasks:
   _group:

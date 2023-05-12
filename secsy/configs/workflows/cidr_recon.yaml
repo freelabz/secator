@@ -1,7 +1,7 @@
 name: cidr_recon
 alias: cidrrec
-description: Discover network IPs and HTTP servers
-tags: [cidr, network]
+description: Local network recon
+tags: [recon, cidr, network]
 tasks:
   mapcidr:
     description: Find CIDR range IPs

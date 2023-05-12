@@ -1,8 +1,8 @@
 type: workflow
 name: url_nuclei
 alias: url_nuclei
-description: Search for URL vulnerabilities us Nuclei
-tags: [http, vulnerability, nuclei]
+description: URL vulnerability scan (nuclei)
+tags: [http, nuclei]
 tasks:
   nuclei:
     description: Search for HTTP vulns

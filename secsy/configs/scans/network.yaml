@@ -1,6 +1,6 @@
 type: scan
 name: network
-description: Internal network scan (cidr_recon, url_crawl)
+description: Internal network scan
 profile: default
 workflows:
   cidr_recon:
