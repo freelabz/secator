@@ -118,6 +118,7 @@ class Workflow(Runner):
 				# Add task context and hooks to options
 				opts['hooks'] = {task: self._hooks.get(Task, {})}
 				opts['context'] = self.context
+				opts['name'] = task_name
 
 				# Create task signature
 				sig = task.s(targets, **opts)
