@@ -1,8 +1,8 @@
 type: workflow
 name: code_scan
 alias: codescan
-description: Run vulnerability scan on code repositories
-tags: [vulnerability, code]
+description: Code vulnerability scan
+tags: [vuln, code]
 tasks:
   grype:
     description: Run code vulnerability scan

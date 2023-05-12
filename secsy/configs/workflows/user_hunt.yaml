@@ -1,7 +1,7 @@
 type: workflow
 name: user_hunt
 alias: userhunt
-description: Find user accounts
+description: User account search
 tags: [user_account]
 tasks:
   maigret:

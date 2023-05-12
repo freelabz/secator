@@ -1,8 +1,8 @@
 type: workflow
 name: subdomain_recon
 alias: subrec
-description: Find subdomains and takeovers
-tags: [subdomain, url, vulnerability, tech, subdomain_takeover]
+description: Subdomain discovery
+tags: [recon, dns, takeovers]
 tasks:
   subfinder:
     description: List subdomains (passive)

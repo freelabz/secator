@@ -1,7 +1,7 @@
 type: workflow
 name: url_crawl
 alias: urlcrawl
-description: Find URLs by crawl (fast)
+description: URL crawl (fast)
 tags: [http, crawl]
 options:
   match_codes: 200,204,301,302,307,401,403,405,500

@@ -1,8 +1,8 @@
 type: workflow
 name: host_recon
 alias: hostrec
-description: Run vulnerability scan on network and HTTP services
-tags: [subdomain, url, vulnerability]
+description: Host recon
+tags: [recon, network, http]
 tasks:
   _group:
     naabu:
