@@ -127,12 +127,6 @@ class Command(Runner):
 		# Input is targets
 		self.input = input
 
-		# Name is config name
-		self.name = self.config.name
-
-		# Description is config description
-		self.description = self.config.description
-
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
 
