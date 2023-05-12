@@ -77,6 +77,8 @@ class Runner:
 
 	def __init__(self, config, targets, results=[], workspace_name=None, run_opts={}, hooks={}, context={}):
 		self.config = config
+		self.name = run_opts.get('name', config.name)
+		self.description = run_opts.get('description', config.description)
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
@@ -237,7 +239,7 @@ class Runner:
 		return {
 			'config': self.config.toDict(),
 			'opts': self.config.supported_opts,
-			'name': self.config.name,
+			'name': self.name,
 			'targets': self.targets,
 			'run_opts': self.run_opts,
 			'workspace_name': self.workspace_name,

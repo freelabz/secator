@@ -7,7 +7,7 @@ tasks:
   _group:
     naabu:
       description: Find open ports
-    nuclei:
+    nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
   nmap:
@@ -20,7 +20,7 @@ tasks:
       - type: port
         field: '{host}:{port}'
         condition: item._source == 'nmap'
-  nuclei:
+  nuclei/url:
     description: Search for vulnerabilities on alive HTTP services
     exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
     targets_:
