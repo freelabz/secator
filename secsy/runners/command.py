@@ -309,7 +309,7 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
-		# TODO: this is rawuely for logging timestamp to show up properly !!!
+		# TODO: this is needed for logging timestamp to show up properly !!!
 		if self.print_timestamp:
 			sleep(1)
 
@@ -321,6 +321,10 @@ class Command(Runner):
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', ignore_log=True)
 			self._print(self.cmd, color='bold cyan', ignore_raw=True)
+
+		if self.print_input_file and self.input_path:
+			input_str = '\n '.join(self.input)
+			self._print(f'[bold gold3]File input:[/]\n {input_str}\n')
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
