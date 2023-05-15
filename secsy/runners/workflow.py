@@ -32,6 +32,8 @@ class Workflow(Runner):
 		fmt_opts = {
 			'print_item_count': True,
 			'print_cmd': True,
+			'print_line': not self.sync,
+			'print_input_file': True,
 			'print_description': self.sync,
 			'print_cmd_prefix': not self.sync,
 			'print_timestamp': self.sync,

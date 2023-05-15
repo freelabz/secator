@@ -1,13 +1,13 @@
 from urllib.parse import urlparse
 
 from secsy.decorators import task
-from secsy.definitions import (CONTENT_TYPE, DEFAULT_SOCKS5_PROXY, DELAY,
-							   DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
-							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
-							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
-							   RATE_LIMIT, RETRIES, STATUS_CODE, TECH, THREADS,
-							   TIME, TIMEOUT, URL, USER_AGENT)
+from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
+                               FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+                               FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES,
+                               MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
+                               OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+                               STATUS_CODE, TECH, THREADS, TIME, TIMEOUT, URL,
+                               USER_AGENT)
 from secsy.output_types import Url
 from secsy.tasks._categories import HttpCrawler
 
@@ -21,7 +21,7 @@ class katana(HttpCrawler):
 	json_flag = '-json'
 	opts = {
 		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
-		'system-chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'}
+		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'}
 	}
 	opt_key_map = {
 		HEADER: 'headers',
