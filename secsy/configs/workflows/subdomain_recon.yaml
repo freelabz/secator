@@ -25,7 +25,7 @@ tasks:
       - subdomain.host
       tags: [takeover, dns]
     httpx:
-      description: Run HTTP probes on subdomain root hosts
+      description: Run HTTP probes on subdomains
       targets_:
       - target.name
       - subdomain.host
