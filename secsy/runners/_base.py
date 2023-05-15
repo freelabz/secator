@@ -592,7 +592,10 @@ class Runner:
 
 			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
 			# user intent to use it for visualizing results.
-			log_json(data) if self.output_color and self.print_item else _console.print(data, highlight=False)
+			try:
+				log_json(data) if self.output_color and self.print_item else _console.print(data, highlight=False)
+			except:
+				print(data)
 
 		# Print a line
 		else:
