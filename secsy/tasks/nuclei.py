@@ -1,10 +1,9 @@
 from secsy.decorators import task
-from secsy.definitions import (CONFIDENCE, CVSS_SCORE, DEFAULT_SOCKS5_PROXY,
-							   DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
-							   HEADER, ID, MATCHED_AT, NAME, OPT_NOT_SUPPORTED,
-							   PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-							   RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
-							   USER_AGENT)
+from secsy.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
+							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
+							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PROVIDER,
+							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
+							   SEVERITY, TAGS, THREADS, TIMEOUT, USER_AGENT)
 from secsy.output_types import Progress, Vulnerability
 from secsy.tasks._categories import VulnMulti
 

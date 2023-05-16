@@ -11,10 +11,10 @@ from fp.fp import FreeProxy
 
 from secsy.config import ConfigLoader
 from secsy.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
-                               DEFAULT_PROXY_TIMEOUT,
-                               DEFAULT_PROXYCHAINS_COMMAND,
-                               DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
-                               OPT_PIPE_INPUT, TEMP_FOLDER)
+							   DEFAULT_PROXY_TIMEOUT,
+							   DEFAULT_PROXYCHAINS_COMMAND,
+							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
+							   OPT_PIPE_INPUT, TEMP_FOLDER)
 from secsy.rich import console
 from secsy.runners import Runner
 from secsy.serializers import JSONSerializer

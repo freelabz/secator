@@ -285,9 +285,11 @@ class nmapData(dict):
 				cpes.append(line)
 				continue
 			elems = tuple(line.split('\t'))
+			vuln = {}
+
 			if len(elems) == 4:  # exploit
 				# TODO: Implement exploit processing
-				exploit_id, cvss_score, reference_url, exploit_str = elems
+				exploit_id, cvss_score, reference_url, _ = elems
 				vuln = {
 					ID: exploit_id,
 					NAME: exploit_id,
@@ -297,14 +299,17 @@ class nmapData(dict):
 					TAGS: ['exploit', exploit_id, provider_name],
 					CONFIDENCE: 'low'
 				}
+				yield vuln
+
 			elif len(elems) == 3:  # vuln
-				vuln_id, vuln_cvss, _ = tuple(line.split('\t'))
+				vuln_id, vuln_cvss, reference_url = tuple(line.split('\t'))
 				vuln_type = vuln_id.split('-')[0]
 				vuln = {
 					ID: vuln_id,
 					NAME: vuln_id,
 					PROVIDER: provider_name,
 					CVSS_SCORE: vuln_cvss,
+					REFERENCES: [reference_url],
 					TAGS: [vuln_id, provider_name],
 					CONFIDENCE: 'low'
 				}
