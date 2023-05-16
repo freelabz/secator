@@ -1,3 +1,4 @@
+type: workflow
 name: cidr_recon
 alias: cidrrec
 description: Local network recon
