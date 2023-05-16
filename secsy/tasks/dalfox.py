@@ -5,7 +5,7 @@ from secsy.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   HEADER, ID, MATCHED_AT, METHOD, NAME,
 							   OPT_NOT_SUPPORTED, PROVIDER, PROXY, RATE_LIMIT,
 							   SEVERITY, TAGS, THREADS, TIMEOUT, URL,
-							   USER_AGENT, DEFAULT_SOCKS5_PROXY)
+							   USER_AGENT)
 from secsy.output_types import Vulnerability
 from secsy.tasks._categories import VulnHttp
 

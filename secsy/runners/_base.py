@@ -594,7 +594,7 @@ class Runner:
 			# user intent to use it for visualizing results.
 			try:
 				log_json(data) if self.output_color and self.print_item else _console.print(data, highlight=False)
-			except:
+			except:  # noqa: E72
 				print(data)
 
 		# Print a line
@@ -605,7 +605,7 @@ class Runner:
 				data = f'{self.prefix} {data}' if self.prefix and not self.print_item else data
 				try:
 					_console.print(data, highlight=False, style=color)
-				except: # noqa: E72
+				except:  # noqa: E72
 					print(data)
 			else:
 				# data = escape(data)

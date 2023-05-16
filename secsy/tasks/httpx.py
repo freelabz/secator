@@ -4,7 +4,7 @@ from secsy.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH, FILTER_CODES,
 							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, URL, USER_AGENT, DEFAULT_HTTP_PROXY)
+							   THREADS, TIMEOUT, URL, USER_AGENT)
 from secsy.tasks._categories import Http
 from secsy.utils import sanitize_url
 

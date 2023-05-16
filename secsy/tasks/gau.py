@@ -4,7 +4,7 @@ from secsy.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, USER_AGENT, DEFAULT_SOCKS5_PROXY)
+							   THREADS, TIMEOUT, USER_AGENT)
 from secsy.tasks._categories import HttpCrawler
 
 
