@@ -77,6 +77,8 @@ class Runner:
 
 	def __init__(self, config, targets, results=[], workspace_name=None, run_opts={}, hooks={}, context={}):
 		self.config = config
+		self.name = run_opts.get('name', config.name)
+		self.description = run_opts.get('description', config.description)
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
@@ -115,6 +117,7 @@ class Runner:
 		self.print_line = self.run_opts.pop('print_line', False)
 		self.print_item_count = self.run_opts.pop('print_item_count', False)
 		self.print_cmd = self.run_opts.pop('print_cmd', False)
+		self.print_input_file = self.run_opts.pop('print_input_file', False)
 		self.print_progress = self.run_opts.pop('print_progress', False)
 		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
 		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
@@ -237,7 +240,7 @@ class Runner:
 		return {
 			'config': self.config.toDict(),
 			'opts': self.config.supported_opts,
-			'name': self.config.name,
+			'name': self.name,
 			'targets': self.targets,
 			'run_opts': self.run_opts,
 			'workspace_name': self.workspace_name,
@@ -589,7 +592,10 @@ class Runner:
 
 			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
 			# user intent to use it for visualizing results.
-			log_json(data) if self.output_color and self.print_item else _console.print(data, highlight=False)
+			try:
+				log_json(data) if self.output_color and self.print_item else _console.print(data, highlight=False)
+			except:  # noqa: E72
+				print(data)
 
 		# Print a line
 		else:
@@ -597,7 +603,10 @@ class Runner:
 			# we need a pure line with no logging info.
 			if ignore_log or (not ignore_raw and (self.output_orig or self.output_raw)):
 				data = f'{self.prefix} {data}' if self.prefix and not self.print_item else data
-				_console.print(data, highlight=False, style=color)
+				try:
+					_console.print(data, highlight=False, style=color)
+				except:  # noqa: E72
+					print(data)
 			else:
 				# data = escape(data)
 				# data = Text.from_ansi(data)

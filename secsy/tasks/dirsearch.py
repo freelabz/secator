@@ -18,7 +18,7 @@ from secsy.utils import get_file_timestamp
 @task()
 class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
-	cmd = 'dirsearch -q'
+	cmd = 'dirsearch'
 	input_flag = '-u'
 	file_flag = '-l'
 	json_flag = '--format json'

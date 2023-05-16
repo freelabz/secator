@@ -1,6 +1,6 @@
 type: scan
 name: url
-description: Default URL scan (url_nuclei, url_crawl, url_tag)
+description: URL scan
 profile: default
 workflows:
   url_nuclei:

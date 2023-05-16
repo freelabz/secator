@@ -1,0 +1,24 @@
+type: workflow
+name: port_scan
+alias: pscan
+description: Port scan
+tags: [recon, network, http, vuln]
+tasks:
+  naabu:
+    description: Find open ports
+  nmap:
+    description: Search for vulnerabilities on open ports
+    targets_: port.host
+    ports_: port.port
+  httpx:
+    description: Probe HTTP services on open ports
+    targets_:
+      - type: port
+        field: '{host}:{port}'
+        condition: item._source == 'nmap'
+results:
+  - type: port
+    condition: item._source == 'nmap'
+
+  - type: url
+    condition: item.status_code != 0

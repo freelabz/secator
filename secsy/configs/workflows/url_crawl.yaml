@@ -1,22 +1,22 @@
 type: workflow
 name: url_crawl
 alias: urlcrawl
-description: Find URLs by crawling (fast)
+description: URL crawl (fast)
 tags: [http, crawl]
 options:
   match_codes: 200,204,301,302,307,401,403,405,500
 tasks:
   _group:
     # gau:
-    #   description: Searching for passive URLs
+    #   description: Search for passive URLs
     # gospider:
-    #   description: Crawling URLs
+    #   description: Crawl URLs
     cariddi:
-      description: Hunting URLs patterns
+      description: Hunt URLs patterns
     katana:
-      description: Crawling URLs
+      description: Crawl URLs
   httpx:
-    description: Running HTTP probes on crawled URLs
+    description: Run HTTP probes on crawled URLs
     targets_:
       type: url
       field: url

@@ -2,14 +2,13 @@ import shlex
 from pathlib import Path
 
 from secsy.decorators import task
-from secsy.definitions import (CONTENT_TYPE, DEFAULT_SOCKS5_PROXY, DELAY,
-							   DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
-							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, LINES,
-							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
-							   STATUS_CODE, TEMP_FOLDER, THREADS, TIMEOUT,
-							   USER_AGENT, WORDLIST, WORDS)
+from secsy.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
+							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+							   FOLLOW_REDIRECT, HEADER, LINES, MATCH_CODES,
+							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
+							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
+							   RATE_LIMIT, RETRIES, STATUS_CODE, TEMP_FOLDER,
+							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS)
 from secsy.output_types import Url
 from secsy.tasks._categories import HttpFuzzer
 from secsy.utils import get_file_timestamp
@@ -77,9 +76,6 @@ class feroxbuster(HttpFuzzer):
 			self.output_path = f'{TEMP_FOLDER}/feroxbuster_{timestr}.json'
 		Path(self.output_path).touch()
 		self.cmd += f' --output {self.output_path}'
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY
 
 	@staticmethod
 	def on_start(self):

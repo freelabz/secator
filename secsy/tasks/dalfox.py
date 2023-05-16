@@ -5,7 +5,7 @@ from secsy.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   HEADER, ID, MATCHED_AT, METHOD, NAME,
 							   OPT_NOT_SUPPORTED, PROVIDER, PROXY, RATE_LIMIT,
 							   SEVERITY, TAGS, THREADS, TIMEOUT, URL,
-							   USER_AGENT, DEFAULT_SOCKS5_PROXY)
+							   USER_AGENT)
 from secsy.output_types import Vulnerability
 from secsy.tasks._categories import VulnHttp
 
@@ -53,14 +53,10 @@ class dalfox(VulnHttp):
 	}
 	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
 	encoding = 'ansi'
-	proxychains = True
+	proxychains = False
 	proxychains_flavor = 'proxychains4'
-
-	@staticmethod
-	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY
+	proxy_socks5 = True
+	proxy_http = True
 
 	@staticmethod
 	def on_line(self, line):

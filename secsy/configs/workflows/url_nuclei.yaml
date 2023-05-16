@@ -1,9 +1,9 @@
 type: workflow
 name: url_nuclei
 alias: url_nuclei
-description: Search for URL vulnerabilities using Nuclei
-tags: [http, vulnerability, nuclei]
+description: URL vulnerability scan (nuclei)
+tags: [http, nuclei]
 tasks:
   nuclei:
-    description: Searching for HTTP vulns
+    description: Search for HTTP vulns
     exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]

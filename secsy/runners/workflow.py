@@ -32,6 +32,8 @@ class Workflow(Runner):
 		fmt_opts = {
 			'print_item_count': True,
 			'print_cmd': True,
+			'print_line': not self.sync,
+			'print_input_file': True,
 			'print_description': self.sync,
 			'print_cmd_prefix': not self.sync,
 			'print_timestamp': self.sync,
@@ -118,6 +120,7 @@ class Workflow(Runner):
 				# Add task context and hooks to options
 				opts['hooks'] = {task: self._hooks.get(Task, {})}
 				opts['context'] = self.context
+				opts['name'] = task_name
 
 				# Create task signature
 				sig = task.s(targets, **opts)

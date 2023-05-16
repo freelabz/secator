@@ -1,10 +1,9 @@
 from secsy.decorators import task
-from secsy.definitions import (CONFIDENCE, CVSS_SCORE, DEFAULT_SOCKS5_PROXY,
-							   DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
-							   HEADER, ID, MATCHED_AT, NAME, OPT_NOT_SUPPORTED,
-							   PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-							   RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
-							   USER_AGENT)
+from secsy.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
+							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
+							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PROVIDER,
+							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
+							   SEVERITY, TAGS, THREADS, TIMEOUT, USER_AGENT)
 from secsy.output_types import Progress, Vulnerability
 from secsy.tasks._categories import VulnMulti
 
@@ -91,9 +90,3 @@ class nuclei(VulnMulti):
 		if matcher_name:
 			name += f' - {matcher_name}'
 		return name
-
-	@staticmethod
-	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY
