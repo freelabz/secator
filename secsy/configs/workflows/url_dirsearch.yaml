@@ -1,22 +1,22 @@
 type: workflow
-name: dir_find
+name: url_dirsearch
 alias: dirfind
-description: Find HTTP directories
-tags: [http]
+description: URL directory search
+tags: [http, dir]
 tasks:
   ffuf:
-    description: Searching for HTTP directories
+    description: Search for HTTP directories
     wordlist: /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt
     targets_:
       - type: target
         field: '{name}/FUZZ'
   cariddi:
-    description: Crawling HTTP directories for content
+    description: Crawl HTTP directories for content
     targets_:
       - target.name
       - url.url
   httpx:
-    description: Running HTTP probes on crawled URLs
+    description: Run HTTP probes on crawled URLs
     follow_redirects: True
     targets_:
       - type: url

@@ -1,6 +1,6 @@
 type: scan
 name: domain
-description: Default domain scan (subdomain_recon, host_recon, url_crawl)
+description: Domain scan
 profile: default
 workflows:
   subdomain_recon:

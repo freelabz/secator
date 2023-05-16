@@ -49,7 +49,7 @@ class httpx(Http):
 	}
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
 	proxychains = False
-	proxy_socks5 = False
+	proxy_socks5 = True
 	proxy_http = True
 
 	@staticmethod
@@ -67,9 +67,6 @@ class httpx(Http):
 
 	@staticmethod
 	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains':
-			self.run_opts['proxy'] = 'http://127.0.0.1:9080'
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')

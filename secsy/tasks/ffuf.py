@@ -1,9 +1,8 @@
 from secsy.decorators import task
 from secsy.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH, CONTENT_TYPE,
-							   DEFAULT_SOCKS5_PROXY, DELAY, DEPTH,
-							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
-							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
-							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
+							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
+							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE, THREADS, TIME,
 							   TIMEOUT, USER_AGENT, WORDLIST)
@@ -75,9 +74,3 @@ class ffuf(HttpFuzzer):
 	def on_item(self, item):
 		item.method = self.get_opt_value(METHOD) or 'GET'
 		return item
-
-	@staticmethod
-	def on_init(self):
-		proxy = self.get_opt_value('proxy')
-		if proxy == 'proxychains' and DEFAULT_SOCKS5_PROXY:
-			self.run_opts['proxy'] = DEFAULT_SOCKS5_PROXY

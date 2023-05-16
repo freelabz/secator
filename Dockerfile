@@ -32,12 +32,13 @@ RUN wget https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz
 RUN tar xvf Python-3.10.2.tgz && cd Python-3.10.2/ && ./configure --enable-optimizations && make && make install
 
 # Install additional tools
-RUN apt install -y \
+RUN apt update -y && \
+	apt install -y \
+	chromium \
     jq \
     openssl \
 	proxychains \
-	proxychains-ng \
-	tor
+	proxychains-ng
 
 # Install Metasploit framework
 RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall

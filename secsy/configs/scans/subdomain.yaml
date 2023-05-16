@@ -1,0 +1,6 @@
+type: scan
+name: subdomain
+description: Subdomain scan
+profile: default
+workflows:
+  subdomain_recon:

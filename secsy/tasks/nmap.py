@@ -50,11 +50,14 @@ class nmap(VulnMulti):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
-	proxychains_flavor = 'proxychains4'
 	install_cmd = (
 		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
 	)
+	proxychains = True
+	proxychains_flavor = 'proxychains4'
+	proxy_socks5 = False
+	proxy_http = False
 
 	def yielder(self):
 		yield from super().yielder()
@@ -282,9 +285,11 @@ class nmapData(dict):
 				cpes.append(line)
 				continue
 			elems = tuple(line.split('\t'))
+			vuln = {}
+
 			if len(elems) == 4:  # exploit
 				# TODO: Implement exploit processing
-				exploit_id, cvss_score, reference_url, exploit_str = elems
+				exploit_id, cvss_score, reference_url, _ = elems
 				vuln = {
 					ID: exploit_id,
 					NAME: exploit_id,
@@ -294,14 +299,17 @@ class nmapData(dict):
 					TAGS: ['exploit', exploit_id, provider_name],
 					CONFIDENCE: 'low'
 				}
+				yield vuln
+
 			elif len(elems) == 3:  # vuln
-				vuln_id, vuln_cvss, _ = tuple(line.split('\t'))
+				vuln_id, vuln_cvss, reference_url = tuple(line.split('\t'))
 				vuln_type = vuln_id.split('-')[0]
 				vuln = {
 					ID: vuln_id,
 					NAME: vuln_id,
 					PROVIDER: provider_name,
 					CVSS_SCORE: vuln_cvss,
+					REFERENCES: [reference_url],
 					TAGS: [vuln_id, provider_name],
 					CONFIDENCE: 'low'
 				}

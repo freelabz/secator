@@ -23,7 +23,6 @@ class gf(Tagger):
 	)
 	output_types = [Tag]
 	item_loader = lambda self, line: {'match': line, 'name': self.get_opt_value('pattern')}  # noqa: E731
-	proxychains = False
 
 	@staticmethod
 	def on_item(self, item):

@@ -9,13 +9,16 @@ from time import sleep
 from celery.result import AsyncResult
 from fp.fp import FreeProxy
 
-from secsy.definitions import (DEBUG, DEFAULT_PROXY_TIMEOUT, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, TEMP_FOLDER, DEFAULT_PROXYCHAINS_COMMAND)
-from secsy.rich import console
 from secsy.config import ConfigLoader
+from secsy.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
+							   DEFAULT_PROXY_TIMEOUT,
+							   DEFAULT_PROXYCHAINS_COMMAND,
+							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
+							   OPT_PIPE_INPUT, TEMP_FOLDER)
+from secsy.rich import console
+from secsy.runners import Runner
 from secsy.serializers import JSONSerializer
 from secsy.utils import get_file_timestamp
-from secsy.runners import Runner
 
 # from rich.markup import escape
 # from rich.text import Text
@@ -95,6 +98,11 @@ class Command(Runner):
 	# Default run opts
 	default_run_opts = {}
 
+	# Proxy options
+	proxychains = False
+	proxy_socks5 = False
+	proxy_http = False
+
 	def __init__(self, input=None, **run_opts):
 		# Build runnerconfig on-the-fly
 		config = ConfigLoader(input={
@@ -118,12 +126,6 @@ class Command(Runner):
 
 		# Input is targets
 		self.input = input
-
-		# Name is config name
-		self.name = self.config.name
-
-		# Description is config description
-		self.description = self.config.description
 
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
@@ -258,20 +260,34 @@ class Command(Runner):
 		TODO: Move this to a subclass of Command, or to a configurable attribute to pass to derived classes as it's not
 		related to core functionality.
 		"""
-		opt_key_map = getattr(self, 'opt_key_map', {})
+		opt_key_map = self.opt_key_map
 		proxy_opt = opt_key_map.get('proxy', False)
-		support_proxychains = getattr(self, 'proxychains', True)
+		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
 		proxychains_flavor = getattr(self, 'proxychains_flavor', DEFAULT_PROXYCHAINS_COMMAND)
-		support_proxy = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
-		if self.proxy == 'proxychains':
-			if not support_proxychains:
-				return
+		proxy = False
+
+		if self.proxy in ['auto', 'proxychains'] and self.proxychains:
 			self.cmd = f'{proxychains_flavor} {self.cmd}'
-		elif self.proxy and support_proxy:
-			if self.proxy == 'random':
-				self.run_opts['proxy'] = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
-			else:  # tool-specific proxy settings
-				self.run_opts['proxy'] = self.proxy
+			proxy = 'proxychains'
+
+		elif self.proxy and support_proxy_opt:
+			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and DEFAULT_SOCKS5_PROXY:
+				proxy = DEFAULT_SOCKS5_PROXY
+			elif self.proxy in ['auto', 'http'] and self.proxy_http and DEFAULT_HTTP_PROXY:
+				proxy = DEFAULT_HTTP_PROXY
+			elif self.proxy == 'random':
+				proxy = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
+			elif self.proxy.startswith(('http://', 'socks5://')):
+				proxy = self.proxy
+
+		if proxy != 'proxychains':
+			self.run_opts['proxy'] = proxy
+
+		if proxy != 'proxychains' and self.proxy and not proxy:
+			self._print(f'{self.__class__.__name__}: Could not set up valid proxy for {self.__class__.__name__}.')
+			self._print(f'Proxy: {self.proxy}')
+			self._print(
+				f'Supports: proxychains [{self.proxychains}], http [{self.proxy_http}], socks5 [{self.proxy_socks5}]')
 
 	#----------#
 	# Internal #
@@ -293,7 +309,7 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
-		# TODO: this is rawuely for logging timestamp to show up properly !!!
+		# TODO: this is needed for logging timestamp to show up properly !!!
 		if self.print_timestamp:
 			sleep(1)
 
@@ -305,6 +321,10 @@ class Command(Runner):
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', ignore_log=True)
 			self._print(self.cmd, color='bold cyan', ignore_raw=True)
+
+		if self.print_input_file and self.input_path:
+			input_str = '\n '.join(self.input)
+			self._print(f'[bold gold3]File input:[/]\n {input_str}\n')
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
