@@ -61,6 +61,9 @@ ENV PATH="$PATH:/root/go/bin"
 COPY scripts/install_commands.sh .
 RUN ./install_commands.sh
 
+# Install nuclei templates
+RUN nuclei update-templates
+
 # Install Python package and CLI
 COPY requirements.txt .
 RUN pip3 install wheel
