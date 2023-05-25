@@ -44,7 +44,6 @@ GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
 DATABASE_URI = os.environ.get('DATABASE_URI', 'mongo://localhost')
 DEFAULT_SOCKS5_PROXY = os.environ.get('SOCKS5_PROXY', "socks5://127.0.0.1:9050")
 DEFAULT_HTTP_PROXY = os.environ.get('HTTP_PROXY', "https://127.0.0.1:9080")
-DEFAULT_HTTPS_PROXY = os.environ.get('HTTPS_PROXY', "https://127.0.0.1:9080")
 
 # Defaults
 DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-silent -td -asn -cdn')

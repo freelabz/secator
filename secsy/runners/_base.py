@@ -189,10 +189,11 @@ class Runner:
 
 		for item in self.yielder():
 
-			if isinstance(item, dict):
+			if isinstance(item, (OutputType, DotMap, dict)):
+
+				# Handle direct yield of item
 				item = self._process_item(item)
 
-			if isinstance(item, (OutputType, DotMap)):
 				# Discard item if needed
 				if item._uuid in self.uuids:
 					continue
@@ -552,8 +553,10 @@ class Runner:
 			try:
 				new_item = klass.load(item, output_map)
 				break  # found an item that fits
-			except (TypeError, KeyError):  # can't load using class
-				# logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
+			except (TypeError, KeyError) as e:  # can't load using class
+				if DEBUG > 2:
+					logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
+					raise e
 				continue
 
 		# No output type was found, so make no conversion
@@ -646,8 +649,10 @@ class Runner:
 			return None
 
 		# Convert output dict to another schema
-		if not self.output_orig:
+		if isinstance(item, dict) and not self.output_orig:
 			item = self._convert_item_schema(item)
+		elif isinstance(item, OutputType):
+			pass
 		else:
 			item = DotMap(item)
 
