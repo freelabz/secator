@@ -3,6 +3,9 @@ name: code_scan
 alias: codescan
 description: Code vulnerability scan
 tags: [vuln, code]
+input_types:
+  - path
+  - docker_image_name
 tasks:
   grype:
     description: Run code vulnerability scan

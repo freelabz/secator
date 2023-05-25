@@ -3,6 +3,8 @@ name: subdomain_recon
 alias: subrec
 description: Subdomain discovery
 tags: [recon, dns, takeovers]
+input_types:
+  - host
 tasks:
   subfinder:
     description: List subdomains (passive)

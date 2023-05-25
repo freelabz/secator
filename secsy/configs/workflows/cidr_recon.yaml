@@ -3,6 +3,8 @@ name: cidr_recon
 alias: cidrrec
 description: Local network recon
 tags: [recon, cidr, network]
+input_types:
+  - cidr_range
 tasks:
   mapcidr:
     description: Find CIDR range IPs

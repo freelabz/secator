@@ -3,6 +3,8 @@ name: port_scan
 alias: pscan
 description: Port scan
 tags: [recon, network, http, vuln]
+input_types:
+  - host
 tasks:
   naabu:
     description: Find open ports

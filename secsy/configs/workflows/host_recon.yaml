@@ -3,6 +3,9 @@ name: host_recon
 alias: hostrec
 description: Host recon
 tags: [recon, network, http]
+input_types:
+  - host
+  - cidr_range
 tasks:
   _group:
     naabu:

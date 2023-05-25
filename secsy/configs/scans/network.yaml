@@ -2,6 +2,8 @@ type: scan
 name: network
 description: Internal network scan
 profile: default
+input_types:
+  - cidr_range
 workflows:
   cidr_recon:
   url_nuclei:

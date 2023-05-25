@@ -3,6 +3,8 @@ name: url_fuzz
 alias: urlfuzz
 description: URL fuzz (slow)
 tags: [http, fuzz]
+input_types:
+  - url
 options:
   match_codes: 200,204,301,302,307,401,403,405,500
 tasks:
