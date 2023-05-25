@@ -2,5 +2,7 @@ type: scan
 name: subdomain
 description: Subdomain scan
 profile: default
+input_types:
+  - host
 workflows:
   subdomain_recon:

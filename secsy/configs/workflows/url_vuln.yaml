@@ -3,6 +3,8 @@ name: url_vuln
 alias: url_vuln
 description: URL vulnerability scan (gf, dalfox)
 tags: [http, vulnerability]
+input_types:
+  - url
 tasks:
   _group:
     gf/xss:
