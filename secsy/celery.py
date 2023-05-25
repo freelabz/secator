@@ -57,6 +57,9 @@ app.conf.update({
 # 	"""
 # 	pass
 
+def revoke_task(task_id):
+	return app.control.revoke(task_id, terminate=True, signal='SIGKILL')
+
 #--------------#
 # Celery tasks #
 #--------------#
@@ -129,6 +132,11 @@ def run_command(self, results, name, targets, opts={}):
 	chunk_count = opts.get('chunk_count')
 	description = opts.get('description')
 	sync = opts.get('sync', True)
+
+	# Set Celery request id in context
+	context = opts.get('context', {})
+	context['celery_id'] = self.request.id
+	opts['context'] = context
 
 	# Update task state in backend
 	count = 0
