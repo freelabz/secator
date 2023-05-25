@@ -23,7 +23,7 @@ class wpscan(VulnHttp):
 	json_flag = '-f json'
 	opt_prefix = '--'
 	opts = {
-		'cookie_string': {'type': str, 'short': 'cookie', 'help': 'Cookie string to use in requests, format: cookie1=value1;...'},
+		'cookie_string': {'type': str, 'short': 'cookie', 'help': 'Cookie string, format: cookie1=value1;...'},
 		'api_token': {'type': str, 'short': 'token', 'help': 'WPScan API Token to display vulnerability data'},
 		'wp_content_dir': {'type': str, 'short': 'wcd', 'help': 'wp-content directory if custom or not detected'},
 		'wp_plugins_dir': {'type': str, 'short': 'wpd', 'help': 'wp-plugins directory if custom or not detected'},
@@ -58,7 +58,12 @@ class wpscan(VulnHttp):
 			MATCHED_AT: lambda x: x['url'],
 			TAGS: lambda x: [x['type']],
 			REFERENCES: lambda x: x.get('references', {}).get('url', []),
-			EXTRA_DATA: lambda x: {'data': x.get('interesting_entries', []), 'found_by': x.get('found_by', ''), 'confirmed_by': x.get('confirmed_by', {}), 'metasploit': x.get('references', {}).get('metasploit', [])},
+			EXTRA_DATA: lambda x: {
+				'data': x.get('interesting_entries', []),
+				'found_by': x.get('found_by', ''),
+				'confirmed_by': x.get('confirmed_by', {}),
+				'metasploit': x.get('references', {}).get('metasploit', [])
+			},
 			PROVIDER: 'wpscan',
 		},
 	}
@@ -99,7 +104,7 @@ class wpscan(VulnHttp):
 			if self.output_orig:
 				yield data
 				return
-			
+
 			# Get URL
 			target = data['target_url']
 
