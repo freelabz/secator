@@ -32,7 +32,6 @@ class wpscan(VulnHttp):
 		'login_uri': {'type': str, 'short': 'lu', 'help': 'URI of the login page if different from /wp-login.php'},
 		'detection_mode': {'type': str, 'short': 'dm', 'help': 'Detection mode between mixed, passive, and aggressive'}
 	}
-	HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: 'throttle',
