@@ -193,6 +193,8 @@ class Runner:
 
 				# Handle direct yield of item
 				item = self._process_item(item)
+				if not item:
+					continue
 
 				# Discard item if needed
 				if item._uuid in self.uuids:

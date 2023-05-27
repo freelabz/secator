@@ -1,6 +1,5 @@
-import os
-
 import json
+import os
 
 from secsy.decorators import task
 from secsy.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
@@ -8,7 +7,7 @@ from secsy.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
 							   SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
-							   USER_AGENT)
+							   URL, USER_AGENT)
 from secsy.output_types import Tag, Vulnerability
 from secsy.tasks._categories import VulnHttp
 from secsy.utils import get_file_timestamp
@@ -20,6 +19,7 @@ class wpscan(VulnHttp):
 	cmd = 'wpscan'
 	file_flag = None
 	input_flag = '--url'
+	input_type = URL
 	json_flag = '-f json'
 	opt_prefix = '--'
 	opts = {
@@ -71,6 +71,7 @@ class wpscan(VulnHttp):
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
+	ignore_return_code = True
 
 	@staticmethod
 	def on_init(self):
@@ -147,7 +148,7 @@ class wpscan(VulnHttp):
 						)
 
 			# Interesting findings
-			interesting_findings = data['interesting_findings']
+			interesting_findings = data.get('interesting_findings', [])
 			for item in interesting_findings:
 				yield item
 

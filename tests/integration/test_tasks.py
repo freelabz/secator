@@ -59,6 +59,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['nmap.output_path']
 		del opts['maigret.output_path']
 		del opts['dirsearch.output_path']
+		del opts['wpscan.output_path']
 		del opts['timeout']
 
 		for cls in TEST_TASKS:
