@@ -171,6 +171,45 @@ OUTPUTS_TASKS = {
     'subfinder': [
         Subdomain(host='virusscan.api.github.com', domain='api.github.com', _source='subfinder')
     ],
+    'wpscan': [
+        Tag(
+            name='Wordpress theme - twentytwentythree 1.1',
+            match='http://localhost:8000/',
+            _source='wpscan'),
+        Vulnerability(
+			matched_at='http://localhost:8000/',
+			name='Headers',
+			confidence='high',
+			severity='info',
+			cvss_score=0,
+			tags=['headers'],
+			_source='wpscan'),
+        Vulnerability(
+			matched_at='http://localhost:8000/robots.txt',
+			name='robots.txt found',
+			confidence='high',
+			severity='info',
+			cvss_score=0,
+			tags=['robots_txt'],
+			_source='wpscan'),
+        Vulnerability(
+			matched_at='http://localhost:8000/xmlrpc.php',
+			name='XML-RPC seems to be enabled',
+			confidence='high',
+			severity='info',
+			cvss_score=0,
+			tags=['xmlrpc'],
+			_source='wpscan'),
+        Vulnerability(
+			matched_at='http://localhost:8000/readme.html',
+			name='WordPress readme found',
+			confidence='high',
+			severity='info',
+			cvss_score=0,
+			tags=['readme'],
+			_source='wpscan'),
+        
+	]
 }
 
 OUTPUTS_WORKFLOWS = {

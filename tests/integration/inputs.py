@@ -13,7 +13,8 @@ INPUTS_TASKS = {
     'gospider': 'https://danielmiessler.com/',
     'grype': ROOT_FOLDER,
     'nuclei': 'http://localhost:3000/',
-    'subfinder': 'api.github.com'
+    'subfinder': 'api.github.com',
+    'wpscan': 'http://localhost:8000/'
 }
 
 INPUTS_WORKFLOWS = {
