@@ -90,7 +90,8 @@ META_OPTS = {
 	'nmap.output_path': load_fixture('nmap_output', FIXTURES_DIR, only_path=True, ext='.xml'),  # nmap XML fixture
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
 	'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
-	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True)
+	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True),
+	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True)
 }
 
 
