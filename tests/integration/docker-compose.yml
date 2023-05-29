@@ -1,12 +1,66 @@
 version: "3.9"
+
 services:
+
+  # Juice shop
   juice_shop:
-    restart: always
     image: "bkimminich/juice-shop"
+    restart: always
     ports:
       - "127.0.0.1:3000:3000"
+
+  # Log4Shell
   cve_2021_44228:
     restart: always
     image: "ghcr.io/christophetd/log4shell-vulnerable-app@sha256:6f88430688108e512f7405ac3c73d47f5c370780b94182854ea2cddc6bd59929"
     ports:
       - "127.0.0.1:8080:8080"
+
+  # Wordpress
+  wordpress:
+    image: wordpress:latest
+    restart: always
+    depends_on:
+      - wordpress_db
+    ports:
+      - "127.0.0.1:8000:80"
+    volumes:
+      - wordpress_data:/var/www/html
+    environment:
+      WORDPRESS_DB_HOST: wordpress_db:3306
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_USER: wordpress
+
+  wordpress_db:
+     image: mysql:5.7
+     restart: always
+     environment:
+       MYSQL_ROOT_PASSWORD: wordpress
+       MYSQL_DATABASE: wordpress
+       MYSQL_USER: wordpress
+       MYSQL_PASSWORD: wordpress
+
+  wordpress_toolbox:
+    build: ./wordpress_toolbox/
+    working_dir: /wordpress
+    volumes:
+      - wordpress_data:/wordpress
+    depends_on:
+      - wordpress
+      - wordpress_db
+    environment:
+      WORDPRESS_LOCALE: fr_FR
+      WORDPRESS_INSTALL_PATH: /wordpress
+      WORDPRESS_DB_HOST: wordpress_db
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_WEBSITE_TITLE: 'My blog'
+      WORDPRESS_WEBSITE_URL: 'http://localhost:8000'
+      WORDPRESS_WEBSITE_URL_WITHOUT_HTTP: 'localhost:8000'
+      WORDPRESS_WEBSITE_POST_URL_STRUCTURE: '/%year%/%monthnum%/%day%/%postname%/'
+      WORDPRESS_ADMIN_USER: 'admin'
+      WORDPRESS_ADMIN_PASSWORD: 'admin'
+      WORDPRESS_ADMIN_EMAIL: 'admin@example.com'
+volumes:
+  wordpress_data: {}

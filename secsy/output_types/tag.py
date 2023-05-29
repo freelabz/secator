@@ -21,10 +21,11 @@ class Tag(OutputType):
 		super().__post_init__()
 
 	def __str__(self) -> str:
-		return self.match
+		cyan = Fore.CYAN
+		reset = Style.RESET_ALL
+		bright = Style.BRIGHT
+		s = f'[{bright}{cyan}{self.name}{reset}] {self.match}'
+		return s
 
 	def __repr__(self) -> str:
-		green = Fore.GREEN
-		reset = Style.RESET_ALL
-		s = f'[{green}{self.name}{reset}] {self.match}'
-		return s
+		return str(self)

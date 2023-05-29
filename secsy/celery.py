@@ -57,8 +57,10 @@ app.conf.update({
 # 	"""
 # 	pass
 
+
 def revoke_task(task_id):
 	return app.control.revoke(task_id, terminate=True, signal='SIGKILL')
+
 
 #--------------#
 # Celery tasks #

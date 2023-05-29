@@ -1,0 +1,160 @@
+{
+    "banner": {
+        "description": "WordPress Security Scanner by the WPScan Team",
+        "version": "3.8.22",
+        "authors": [
+            "@_WPScan_",
+            "@ethicalhack3r",
+            "@erwan_lr",
+            "@firefart"
+        ],
+        "sponsor": "Sponsored by Automattic - https://automattic.com/"
+    },
+    "start_time": 1685362147,
+    "start_memory": 56578048,
+    "target_url": "http://localhost:8000/",
+    "target_ip": "127.0.0.1",
+    "effective_url": "http://localhost:8000/",
+    "interesting_findings": [
+        {
+            "url": "http://localhost:8000/",
+            "to_s": "Headers",
+            "type": "headers",
+            "found_by": "Headers (Passive Detection)",
+            "confidence": 100,
+            "confirmed_by": {},
+            "references": {},
+            "interesting_entries": [
+                "Server: Apache/2.4.56 (Debian)",
+                "X-Powered-By: PHP/8.0.28"
+            ]
+        },
+        {
+            "url": "http://localhost:8000/robots.txt",
+            "to_s": "robots.txt found: http://localhost:8000/robots.txt",
+            "type": "robots_txt",
+            "found_by": "Robots Txt (Aggressive Detection)",
+            "confidence": 100,
+            "confirmed_by": {},
+            "references": {},
+            "interesting_entries": [
+                "/wp-admin/",
+                "/wp-admin/admin-ajax.php"
+            ]
+        },
+        {
+            "url": "http://localhost:8000/xmlrpc.php",
+            "to_s": "XML-RPC seems to be enabled: http://localhost:8000/xmlrpc.php",
+            "type": "xmlrpc",
+            "found_by": "Direct Access (Aggressive Detection)",
+            "confidence": 100,
+            "confirmed_by": {},
+            "references": {
+                "url": [
+                    "http://codex.wordpress.org/XML-RPC_Pingback_API"
+                ],
+                "metasploit": [
+                    "auxiliary/scanner/http/wordpress_ghost_scanner",
+                    "auxiliary/dos/http/wordpress_xmlrpc_dos",
+                    "auxiliary/scanner/http/wordpress_xmlrpc_login",
+                    "auxiliary/scanner/http/wordpress_pingback_access"
+                ]
+            },
+            "interesting_entries": []
+        },
+        {
+            "url": "http://localhost:8000/readme.html",
+            "to_s": "WordPress readme found: http://localhost:8000/readme.html",
+            "type": "readme",
+            "found_by": "Direct Access (Aggressive Detection)",
+            "confidence": 100,
+            "confirmed_by": {},
+            "references": {},
+            "interesting_entries": []
+        },
+        {
+            "url": "http://localhost:8000/wp-cron.php",
+            "to_s": "The external WP-Cron seems to be enabled: http://localhost:8000/wp-cron.php",
+            "type": "wp_cron",
+            "found_by": "Direct Access (Aggressive Detection)",
+            "confidence": 60,
+            "confirmed_by": {},
+            "references": {
+                "url": [
+                    "https://www.iplocation.net/defend-wordpress-from-ddos",
+                    "https://github.com/wpscanteam/wpscan/issues/1299"
+                ]
+            },
+            "interesting_entries": []
+        }
+    ],
+    "version": {
+        "number": "6.2.2",
+        "release_date": "2022-05-20",
+        "status": "latest",
+        "found_by": "Rss Generator (Passive Detection)",
+        "confidence": 100,
+        "interesting_entries": [
+            "http://localhost:8000/feed/, <generator>https://wordpress.org/?v=6.2.2</generator>",
+            "http://localhost:8000/comments/feed/, <generator>https://wordpress.org/?v=6.2.2</generator>"
+        ],
+        "confirmed_by": {},
+        "vulnerabilities": []
+    },
+    "main_theme": {
+        "slug": "twentytwentythree",
+        "location": "http://localhost:8000/wp-content/themes/twentytwentythree/",
+        "latest_version": "1.1",
+        "last_updated": "2023-03-29T00:00:00.000Z",
+        "outdated": false,
+        "readme_url": "http://localhost:8000/wp-content/themes/twentytwentythree/readme.txt",
+        "directory_listing": false,
+        "error_log_url": null,
+        "style_url": "http://localhost:8000/wp-content/themes/twentytwentythree/style.css",
+        "style_name": "Twenty Twenty-Three",
+        "style_uri": "https://wordpress.org/themes/twentytwentythree",
+        "description": "Twenty Twenty-Three is designed to take advantage of the new design tools introduced in WordPress 6.1. With a clean, blank base as a starting point, this default theme includes ten diverse style variations created by members of the WordPress community. Whether you want to build a complex or incredibly simple website, you can do it quickly and intuitively through the bundled styles or dive into creation and full customization yourself.",
+        "author": "the WordPress team",
+        "author_uri": "https://wordpress.org",
+        "template": null,
+        "license": "GNU General Public License v2 or later",
+        "license_uri": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html",
+        "tags": "one-column, custom-colors, custom-menu, custom-logo, editor-style, featured-images, full-site-editing, block-patterns, rtl-language-support, sticky-post, threaded-comments, translation-ready, wide-blocks, block-styles, accessibility-ready, blog, portfolio, news",
+        "text_domain": "twentytwentythree",
+        "found_by": "Urls In Homepage (Passive Detection)",
+        "confidence": 4,
+        "interesting_entries": [],
+        "confirmed_by": {
+            "Urls In 404 Page (Passive Detection)": {
+                "confidence": 2,
+                "interesting_entries": []
+            }
+        },
+        "vulnerabilities": [],
+        "version": {
+            "number": "1.1",
+            "confidence": 80,
+            "found_by": "Style (Passive Detection)",
+            "interesting_entries": [
+                "http://localhost:8000/wp-content/themes/twentytwentythree/style.css, Match: 'Version: 1.1'"
+            ],
+            "confirmed_by": {}
+        },
+        "parents": []
+    },
+    "plugins": {},
+    "config_backups": {},
+    "vuln_api": {
+        "error": "No WPScan API Token given, as a result vulnerability data has not been output.\nYou can get a free API token with 25 daily requests by registering at https://wpscan.com/register"
+    },
+    "stop_time": 1685362156,
+    "elapsed": 9,
+    "requests_done": 152,
+    "cached_requests": 26,
+    "data_sent": 39958,
+    "data_sent_humanised": "39.021 KB",
+    "data_received": 147396,
+    "data_received_humanised": "143.941 KB",
+    "used_memory": 282292224,
+    "used_memory_humanised": "269.215 MB"
+}
