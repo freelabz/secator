@@ -1,0 +1,15 @@
+{
+  "banner": {
+    "description": "WordPress Security Scanner by the WPScan Team",
+    "version": "3.8.22",
+    "authors": [
+      "@_WPScan_",
+      "@ethicalhack3r",
+      "@erwan_lr",
+      "@firefart"
+    ],
+    "sponsor": "Sponsored by Automattic - https://automattic.com/"
+  },
+  "scan_aborted": "The remote website is up, but does not seem to be running WordPress.",
+  "target_url": "http://localhost:3000/"
+}
