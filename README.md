@@ -693,6 +693,7 @@ We take `bigdog`'s options and output schema as reference to create the `Cat` ou
 ```py
 from secsy.definitions import OPT_NOT_SUPPORTED
 from secsy.output_types import OutputType
+from secsy.decorators import task
 from dataclasses import dataclass, field
 
 @dataclass
@@ -719,6 +720,7 @@ class CatHunter(Command):
     output_types = [Cat]
 
 
+@task
 class bigdog(CatHunter):
     cmd = 'bigdog'
     json_flag = '-json'
@@ -727,6 +729,7 @@ class bigdog(CatHunter):
     opt_prefix = '-'
 
 
+@task
 class catkiller(CatHunter):
     cmd = 'catkiller'
     json_flag = '--json'
@@ -755,13 +758,16 @@ class catkiller(CatHunter):
     # will become
     # {"name": "tony", "age": 18, "host": "loadsofcats.com", "job": "admin"}
     output_map = {
-        'name': lambda x: x['_info']['name'], # note: you can use any function, we use
-        'age': lambda x: x['_info']['age'],   #       lambdas for readability here
-        'host': 'site',   # 1:1 mapping
-        'job': 'job' # 1:1 mapping
+		Cat: {
+			'name': lambda x: x['_info']['name'], # note: you can use any function, we use
+			'age': lambda x: x['_info']['age'],   #       lambdas for readability here
+			'host': 'site',   # 1:1 mapping
+			'job': 'job' # 1:1 mapping
+		}
     }
 
 
+@task
 class eagle(CatHunter):
     cmd = 'eagle'
     json_flag = '-jsonl'
@@ -777,9 +783,11 @@ class eagle(CatHunter):
     # will become
     # {"name": "tony", "age": 18, "host": "loadsofcats.com", "job": "admin"}
     output_map = {
-        'name': 'alias',
-        'age': lambda x: human_to_cat_age(x['human_age']),
-        'job': 'occupation',
+		Cat: {
+			'name': 'alias',
+			'age': lambda x: human_to_cat_age(x['human_age']),
+			'job': 'occupation',
+		}
     }
 
     # Here we add the 'host' key dynamically after the item has been converted 
