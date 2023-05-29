@@ -3,6 +3,7 @@
 git clone https://github.com/freelabz/secsy-cli
 cd secsy-cli
 ./scripts/install_go.sh
+./scripts/install_ruby.sh
 ./scripts/install_commands.sh
 pip3 install virtualenv
 virtualenv ~/.secsy/venv
