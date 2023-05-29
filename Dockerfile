@@ -57,6 +57,10 @@ COPY scripts/install_go.sh .
 RUN ./install_go.sh
 ENV PATH="$PATH:/root/go/bin"
 
+# Download an install Ruby
+COPY scripts/install_ruby.sh .
+RUN ./install_ruby.sh
+
 # Install secsy tasks
 COPY scripts/install_commands.sh .
 RUN ./install_commands.sh
