@@ -168,7 +168,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 					self.assertEqual(
 						set(keys).difference(set(expected_output_keys)),
 						set())
-
+			
 			if expected_results:
 				for result in expected_results:
 					self.assertIn(result, results)
