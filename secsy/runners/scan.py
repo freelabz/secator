@@ -54,7 +54,6 @@ class Scan(Runner):
 				ConfigLoader(name=f'workflows/{name}'),
 				targets,
 				results=[],
-				workspace_name=self.workspace_name,
 				run_opts=run_opts,
 				hooks=self._hooks,
 				context=self.context)

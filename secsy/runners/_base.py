@@ -75,7 +75,7 @@ class Runner:
 	# Run hooks
 	enable_hooks = True
 
-	def __init__(self, config, targets, results=[], workspace_name=None, run_opts={}, hooks={}, context={}):
+	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
@@ -84,7 +84,7 @@ class Runner:
 		self.targets = targets
 		self.results = results
 		self.results_count = 0
-		self.workspace_name = workspace_name
+		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.exporters = self.resolve_exporters()
@@ -246,7 +246,6 @@ class Runner:
 			'name': self.name,
 			'targets': self.targets,
 			'run_opts': self.run_opts,
-			'workspace_name': self.workspace_name,
 			'chunk': self.chunk,
 			'chunk_count': self.chunk_count,
 			'results_count': self.results_count,
