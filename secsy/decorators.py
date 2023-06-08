@@ -241,6 +241,7 @@ def register_runner(cli_endpoint, config):
 		worker = opts['worker']
 		debug = opts['debug']
 		ws = opts.pop('workspace')
+		context = {'workspace_name': ws}
 		if debug:
 			os.environ['DEBUG'] = str(debug)
 		# TODO: maybe allow this in the future
@@ -266,7 +267,7 @@ def register_runner(cli_endpoint, config):
 			})
 
 		# Build exporters
-		runner = runner_cls(config, targets, workspace_name=ws, run_opts=opts)
+		runner = runner_cls(config, targets, run_opts=opts, context=context)
 		runner.run()
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}

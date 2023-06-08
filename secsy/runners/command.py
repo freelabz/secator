@@ -113,14 +113,12 @@ class Command(Runner):
 
 		# Run parent init
 		hooks = run_opts.pop('hooks', {})
-		workspace_name = run_opts.pop('workspace_name', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
 		super().__init__(
 			config=config,
 			targets=input,
 			results=results,
-			workspace_name=workspace_name,
 			run_opts=run_opts,
 			hooks=hooks,
 			context=context)
