@@ -4,6 +4,7 @@ from secsy.exporters import CsvExporter, JsonExporter, TableExporter
 from secsy.runners._base import Runner
 from secsy.runners.task import Task
 from secsy.utils import merge_opts
+from secsy.output_types import Target
 
 
 class Workflow(Runner):
@@ -28,6 +29,10 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
+
 		# Task fmt opts
 		fmt_opts = {
 			'print_item_count': True,
@@ -119,7 +124,7 @@ class Workflow(Runner):
 
 				# Add task context and hooks to options
 				opts['hooks'] = {task: self._hooks.get(Task, {})}
-				opts['context'] = self.context
+				opts['context'] = self.context.copy()
 				opts['name'] = task_name
 
 				# Create task signature

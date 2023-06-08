@@ -101,7 +101,7 @@ class Runner:
 		self.uuids = []
 
 		# Process input
-		self.input = input
+		self.input = targets
 		if isinstance(self.input, list) and len(self.input) == 1:
 			self.input = self.input[0]
 
