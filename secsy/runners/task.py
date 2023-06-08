@@ -1,6 +1,7 @@
 from secsy.rich import console
 from secsy.utils import discover_tasks
 from secsy.runners import Runner
+from secsy.output_types import Target
 
 
 class Task(Runner):
@@ -20,6 +21,10 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
+
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 

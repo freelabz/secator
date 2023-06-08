@@ -6,6 +6,7 @@ from secsy.runners._base import Runner
 from secsy.runners._helpers import run_extractors
 from secsy.runners.workflow import Workflow
 from secsy.rich import console
+from secsy.output_types import Target
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,13 @@ class Scan(Runner):
 		Yields:
 			dict: Item yielded from individual workflow tasks.
 		"""
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
+
+		# Get context
+		context = self.context.copy()
+
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
 
@@ -56,7 +64,7 @@ class Scan(Runner):
 				results=[],
 				run_opts=run_opts,
 				hooks=self._hooks,
-				context=self.context)
+				context=context)
 
 			# Get results
 			yield from workflow
