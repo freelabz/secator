@@ -107,6 +107,7 @@ class Command(Runner):
 		# Build runnerconfig on-the-fly
 		config = ConfigLoader(input={
 			'name': self.__class__.__name__,
+			'type': 'task',
 			'description': run_opts.get('description', None)
 		})
 
