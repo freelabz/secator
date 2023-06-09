@@ -34,9 +34,6 @@ class Scan(Runner):
 		for target in self.targets:
 			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
-		# Get context
-		context = self.context.copy()
-
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
 
@@ -64,7 +61,7 @@ class Scan(Runner):
 				results=[],
 				run_opts=run_opts,
 				hooks=self._hooks,
-				context=context)
+				context=self.context.copy())
 
 			# Get results
 			yield from workflow
