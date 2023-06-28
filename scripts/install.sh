@@ -1,7 +1,7 @@
 #!/bin/bash
 
-git clone https://github.com/freelabz/secator-cli
-cd secator-cli
+git clone https://github.com/freelabz/secator
+cd secator
 ./scripts/install_go.sh
 ./scripts/install_ruby.sh
 ./scripts/install_commands.sh
