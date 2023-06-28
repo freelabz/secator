@@ -17,12 +17,12 @@ ASCII = f"""
 """  # noqa: W605,W291
 
 # Celery local fs folders
-CONFIG_FOLDER = os.environ.get('SECSY_CONFIG_FOLDER', f'{os.path.expanduser("~")}/.secator')
-TEMP_FOLDER = os.environ.get('SECSY_TEMP_FOLDER', '/tmp')
+CONFIG_FOLDER = os.environ.get('SECATOR_CONFIG_FOLDER', f'{os.path.expanduser("~")}/.secator')
+TEMP_FOLDER = os.environ.get('SECATOR_TEMP_FOLDER', '/tmp')
 CELERY_DATA_FOLDER = f'{TEMP_FOLDER}/celery/data'
 CELERY_RESULTS_FOLDER = f'{TEMP_FOLDER}/celery/results'
 PAYLOADS_FOLDER = f'{TEMP_FOLDER}/payloads'
-REPORTS_FOLDER = os.environ.get('SECSY_REPORTS_FOLDER', f'{CONFIG_FOLDER}/reports')
+REPORTS_FOLDER = os.environ.get('SECATOR_REPORTS_FOLDER', f'{CONFIG_FOLDER}/reports')
 ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 SCRIPTS_FOLDER = f'{ROOT_FOLDER}/scripts'
 REVSHELLS_FOLDER = f'{TEMP_FOLDER}/revshells'
