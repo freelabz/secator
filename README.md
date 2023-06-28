@@ -108,7 +108,7 @@ curl https://raw.githubusercontent.com/freelabz/secator-cli/main/scripts/install
 ```sh
 git clone https://github.com/ocervell/secator-cli
 cd secator-cli
-python3 -m virtualenv -p python3 ~/.virtualenv/secator
+python3 -m virtualenv -p python3 ~/.virtualenvs/secator
 pip3 install -e .
 ```
 
