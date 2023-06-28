@@ -1,12 +1,12 @@
 from celery import chain
-from secsy.celery import app
-from secsy.tasks import httpx
+from secator.celery import app
+from secator.tasks import httpx
 import unittest
 import json
-from secsy.definitions import DEBUG
-from secsy.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS
-from secsy.celery import forward_results
-from secsy.rich import console
+from secator.definitions import DEBUG
+from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS
+from secator.celery import forward_results
+from secator.rich import console
 
 TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
 

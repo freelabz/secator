@@ -18,8 +18,8 @@
 
 ### Worker demo
 ```sh
-secsy worker & # run worker in background
-secsy w url_fuzz mydomain.com # workflow will be run in background
+secator worker & # run worker in background
+secator w url_fuzz mydomain.com # workflow will be run in background
 ```
 
 ### Proxy usage demo
@@ -27,8 +27,8 @@ secsy w url_fuzz mydomain.com # workflow will be run in background
 
 ### Demo aliases
 ```sh
-secsy u enable-aliases
-source ~/.secsy/.aliases
+secator u enable-aliases
+source ~/.secator/.aliases
 host_recon mydomain.com
 ```
 
@@ -38,29 +38,29 @@ host_recon mydomain.com
 
 ```sh
 # pipe naabu and httpx to find all alive HTTP servers available on the host
-secsy x naabu mydomain.com | secsy x httpx -mc 200 -table
+secator x naabu mydomain.com | secator x httpx -mc 200 -table
 
 # run a basic URL crawler workflow on the host to see which URLs are up
-secsy w url_crawl mydomain.com
+secator w url_crawl mydomain.com
 
 # fuzz one of the URLs to find more URLs 
-secsy x ffuf https://mydomain.com/FUZZ -mc 200,301,400,500 -table | secsy x httpx -mc 200 -table
+secator x ffuf https://mydomain.com/FUZZ -mc 200,301,400,500 -table | secator x httpx -mc 200 -table
 
 **Host scan:**
-secsy w host_recon mydomain.com
+secator w host_recon mydomain.com
 
 **Subdomain mapping:**
-secsy w subdomain_recon mydomain.com
-secsy x subfinder mydomain.com | secsy x httpx -json -table | httpx -mc 200 -json -table
+secator w subdomain_recon mydomain.com
+secator x subfinder mydomain.com | secator x httpx -json -table | httpx -mc 200 -json -table
 
 **Run in distributed mode:**
-secsy z default mydomain.com --worker
+secator z default mydomain.com --worker
 ```
 
 **Callbacks (library mode):**
 ```py
-from secsy.runners import Workflow
-from secsy.config import ConfigLoader
+from secator.runners import Workflow
+from secator.config import ConfigLoader
 
 config = ConfigLoader(name='workflows/host_recon')
 hooks = {
