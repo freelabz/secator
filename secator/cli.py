@@ -45,7 +45,7 @@ if DEBUG > 1:
 @click.group(cls=OrderedGroup)
 @click.option('--no-banner', '-nb', is_flag=True, default=False)
 def cli(no_banner):
-	"""Secsy CLI."""
+	"""Secator CLI."""
 	if not no_banner:
 		print(ASCII, file=sys.stderr)
 	pass
@@ -512,10 +512,10 @@ def test():
 
 
 @test.command()
-@click.option('--tasks', type=str, default='', help='Secsy tasks to test (comma-separated)')
-@click.option('--workflows', type=str, default='', help='Secsy workflows to test (comma-separated)')
-@click.option('--scans', type=str, default='', help='Secsy scans to test (comma-separated)')
-@click.option('--test', '-t', type=str, help='Secsy test to run')
+@click.option('--tasks', type=str, default='', help='Secator tasks to test (comma-separated)')
+@click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
+@click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
+@click.option('--test', '-t', type=str, help='Secator test to run')
 @click.option('--debug', '-d', type=int, default=0, help='Add debug information')
 def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_TASKS'] = tasks or ''
@@ -537,10 +537,10 @@ def integration(tasks, workflows, scans, test, debug):
 
 
 @test.command()
-@click.option('--tasks', type=str, default='', help='Secsy tasks to test (comma-separated)')
-@click.option('--workflows', type=str, default='', help='Secsy workflows to test (comma-separated)')
-@click.option('--scans', type=str, default='', help='Secsy scans to test (comma-separated)')
-@click.option('--test', '-t', type=str, help='Secsy test to run')
+@click.option('--tasks', type=str, default='', help='Secator tasks to test (comma-separated)')
+@click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
+@click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
+@click.option('--test', '-t', type=str, help='Secator test to run')
 @click.option('--coverage', '-x', is_flag=True, help='Run coverage on results')
 @click.option('--debug', '-d', type=int, default=0, help='Add debug information')
 def unit(tasks, workflows, scans, test, coverage=False, debug=False):
