@@ -99,15 +99,15 @@ check that the command complies with our selection criterias before doing so. If
 ### One-line install
 
 ```
-curl https://raw.githubusercontent.com/freelabz/secator-cli/main/scripts/install.sh?token=GHSAT0AAAAAACAUB3MIMTYB5SWVYSN5BPUKZBBTICQ | sh
+curl https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh?token=GHSAT0AAAAAACAUB3MIMTYB5SWVYSN5BPUKZBBTICQ | sh
 ```
 
 ### Development build
 
 <!-- `pip3 install secator` -->
 ```sh
-git clone https://github.com/ocervell/secator-cli
-cd secator-cli
+git clone https://github.com/ocervell/secator
+cd secator
 python3 -m virtualenv -p python3 ~/.virtualenvs/secator
 pip3 install -e .
 ```
