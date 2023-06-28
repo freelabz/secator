@@ -1,6 +1,6 @@
 # `secator` - Sexy security swiss-knife
 
-`secator` is a sexy security **security swiss-knife** that wraps common
+`secator` is a security **security swiss-knife** that wraps common
 security-oriented commands in a single CLI.
 
 ![](images/short_demo.gif)
