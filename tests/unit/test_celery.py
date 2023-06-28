@@ -1,4 +1,4 @@
-from secsy.celery import *
+from secator.celery import *
 import unittest
 
 
