@@ -33,7 +33,7 @@ jobs:
 
     - name: Run unit tests
       run: |
-        secsy test unit
+        secator test unit
 
   lint:
     runs-on: ubuntu-latest
@@ -58,7 +58,7 @@ jobs:
 
     - name: Run lint tests
       run: |
-        secsy test lint
+        secator test lint
 
   integration:
     runs-on: ubuntu-latest
@@ -98,4 +98,4 @@ jobs:
 
     - name: Run integration tests (${{ matrix.test_type }})
       run: |
-        secsy test integration --test tests.integration.test_${{ matrix.test_type }}
+        secator test integration --test tests.integration.test_${{ matrix.test_type }}

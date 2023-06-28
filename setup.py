@@ -5,7 +5,7 @@ import sys
 from setuptools import find_packages, setup
 
 here = path.abspath(path.dirname(__file__))
-name = "secsy"
+name = "secator"
 description = "Sexy security tools command runner"
 version = "0.0.1"
 release_status = "Development Status :: 3 - Alpha"
@@ -61,6 +61,6 @@ setup(name=name,
       include_package_data=True,
       extras_require=extras,
       entry_points={
-          'console_scripts': ['secsy=secsy.cli:cli'],
+          'console_scripts': ['secator=secator.cli:cli'],
       },
       python_requires='>=3.8')

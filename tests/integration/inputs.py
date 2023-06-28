@@ -1,4 +1,4 @@
-from secsy.definitions import CIDR_RANGE, HOST, IP, ROOT_FOLDER, URL, USERNAME
+from secator.definitions import CIDR_RANGE, HOST, IP, ROOT_FOLDER, URL, USERNAME
 
 INPUTS_TASKS = {
     URL: f'http://localhost:3000/',

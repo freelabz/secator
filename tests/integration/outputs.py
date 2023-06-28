@@ -1,5 +1,5 @@
-from secsy.definitions import ROOT_FOLDER
-from secsy.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
+from secator.definitions import ROOT_FOLDER
+from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability)
 
 OUTPUTS_TASKS = {

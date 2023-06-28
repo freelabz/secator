@@ -1,3 +1,3 @@
-include secsy/configs/workflows/*.yaml
-include secsy/configs/scans/*.yaml
-include secsy/configs/profiles/*.yaml
+include secator/configs/workflows/*.yaml
+include secator/configs/scans/*.yaml
+include secator/configs/profiles/*.yaml

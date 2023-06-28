@@ -4,14 +4,14 @@ import unittest
 import warnings
 from time import sleep
 
-from secsy.config import ConfigLoader
-from secsy.runners import Task
-from secsy.output_types import Target, Port, Url
-from secsy.definitions import DEBUG
-from secsy.rich import console
-from secsy.runners import Command, Workflow
-from secsy.utils import setup_logging, merge_opts
-from secsy.utils_test import TEST_WORKFLOWS, CommandOutputTester, load_fixture
+from secator.config import ConfigLoader
+from secator.runners import Task
+from secator.output_types import Target, Port, Url
+from secator.definitions import DEBUG
+from secator.rich import console
+from secator.runners import Command, Workflow
+from secator.utils import setup_logging, merge_opts
+from secator.utils_test import TEST_WORKFLOWS, CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_WORKFLOWS
 from tests.integration.outputs import OUTPUTS_WORKFLOWS
 

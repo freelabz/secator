@@ -4,11 +4,11 @@ import unittest
 import warnings
 from time import sleep
 
-from secsy.definitions import DEBUG
-from secsy.rich import console
-from secsy.runners import Command, Scan
-from secsy.utils import setup_logging, merge_opts
-from secsy.utils_test import TEST_SCANS, CommandOutputTester, load_fixture
+from secator.definitions import DEBUG
+from secator.rich import console
+from secator.runners import Command, Scan
+from secator.utils import setup_logging, merge_opts
+from secator.utils_test import TEST_SCANS, CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_SCANS
 from tests.integration.outputs import OUTPUTS_SCANS
 

@@ -2,8 +2,8 @@ version: "3.7"
 
 services:
 
-  secsy:
-    image: secsy
+  secator:
+    image: secator
     restart: unless-stopped
     entrypoint: ""
     command: tail -F anything
@@ -14,7 +14,7 @@ services:
       - redis
 
   worker:
-    image: secsy
+    image: secator
     restart: unless-stopped
     command: worker
     environment:
