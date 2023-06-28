@@ -61,7 +61,7 @@ ENV PATH="$PATH:/root/go/bin"
 COPY scripts/install_ruby.sh .
 RUN ./install_ruby.sh
 
-# Install secsy tasks
+# Install secator tasks
 COPY scripts/install_commands.sh .
 RUN ./install_commands.sh
 
@@ -76,9 +76,9 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # Copy rest of the code
 COPY . /code/
 
-# Install secsy
+# Install secator
 RUN pip3 uninstall httpx
 RUN pip3 install --no-deps -e .
 
 # Set entrypoint
-ENTRYPOINT ["secsy"]
+ENTRYPOINT ["secator"]

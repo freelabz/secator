@@ -1,8 +1,8 @@
-from secsy.celery import *
+from secator.celery import *
 import unittest
 import json
-from secsy.serializers.dataclass import dumps_dataclass, loads_dataclass
-from secsy.output_types import Port, Vulnerability
+from secator.serializers.dataclass import dumps_dataclass, loads_dataclass
+from secator.output_types import Port, Vulnerability
 
 
 class TestCeleryCommand(unittest.TestCase):

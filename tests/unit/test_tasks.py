@@ -5,14 +5,14 @@ import unittest
 import unittest.mock
 import warnings
 
-from secsy.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
+from secator.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   MATCH_CODES, OPT_NOT_SUPPORTED, RATE_LIMIT,
 							   THREADS, TIMEOUT, DEFAULT_HTTPX_FLAGS)
-from secsy.rich import console
-from secsy.runners import Command
-from secsy.tasks import httpx
-from secsy.utils import setup_logging
-from secsy.utils_test import (FIXTURES_TASKS, FIXTURES_DIR, INPUTS_TASKS, META_OPTS,
+from secator.rich import console
+from secator.runners import Command
+from secator.tasks import httpx
+from secator.utils import setup_logging
+from secator.utils_test import (FIXTURES_TASKS, FIXTURES_DIR, INPUTS_TASKS, META_OPTS,
 							  TEST_TASKS, CommandOutputTester, load_fixture,
 							  mock_command, mock_subprocess_popen)
 
