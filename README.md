@@ -1,14 +1,14 @@
-# `secsy` - Sexy security swiss-knife
+# `secator` - Sexy security swiss-knife
 
-`secsy` is a sexy security **security swiss-knife** that wraps common
+`secator` is a sexy security **security swiss-knife** that wraps common
 security-oriented commands in a single CLI.
 
 ![](images/short_demo.gif)
 
-`secsy` is designed to not waste your time and make you efficient at
+`secator` is designed to not waste your time and make you efficient at
 vulnerability assessments, with the following feature set:
 
-* **Curated list of commands**: commands integrated to `secsy` are carefully 
+* **Curated list of commands**: commands integrated to `secator` are carefully 
     chosen to be **fast**, **efficient**, **well-maintained**, and for the vast
     majority have **structured output** (either `JSON`, `JSON lines`, `CSV`, or
     `XML`) making it easier to build complex workflows (we do make exceptions
@@ -23,25 +23,25 @@ vulnerability assessments, with the following feature set:
     results quickly.
 
 * **CLI and library usage**:
-    * When `secsy` is called as a library from other Python code, the output is
+    * When `secator` is called as a library from other Python code, the output is
     always structured (list of dicts). Results are also yielded in realtime.
-    * When `secsy` is called as a CLI, various output formats are available,
+    * When `secator` is called as a CLI, various output formats are available,
     such as `plaintext` (default), `json` (`jq` compatible), `raw` (pipeable
     to other commands) or `table` (nice to look at).
 
 * **Distributed options**:
-    * By default, `secsy` will work in synchronous mode in both CLI and library
+    * By default, `secator` will work in synchronous mode in both CLI and library
     modes.
     * When you want to increase the scanning speed you can run in distributed
     mode, where you can easily configure task queues with Celery by configuring
     your broker and results backend.
 
 * **From simple tasks to complex workflows**:
-    * You can use `secsy` to run simple tasks like in CTFs, bug-bounties or 
+    * You can use `secator` to run simple tasks like in CTFs, bug-bounties or 
     hackathon, or to automate your whole recon and pentesting workflows.
 
 * **Customizable**:
-    * You can add more supported commands to `secsy` in a breeze (ad-hoc 
+    * You can add more supported commands to `secator` in a breeze (ad-hoc 
     plugins), and contribute them back to the repo if they can serve the greater
     good.
     * You can create endless workflows with pretty much as much complexity as 
@@ -50,7 +50,7 @@ vulnerability assessments, with the following feature set:
 
 ## Supported commands
 
-`secsy` integrates the following commands: 
+`secator` integrates the following commands: 
 
 **HTTP:**
 * [cariddi](https://github.com/edoardottt/cariddi) - Fast crawler and endpoint
@@ -86,7 +86,7 @@ and work with the Metasploit Framework.
 * [nuclei](https://github.com/projectdiscovery/nuclei) - Fast and customisable vulnerability scanner based on simple YAML based DSL.
 
 Feel free to request new commands to be added by opening an issue, but please 
-check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secsy`, you can plug it in (see the [dev guide](#Developer-guide)).
+check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](#Developer-guide)).
 
 ## Requirements
 
@@ -99,16 +99,16 @@ check that the command complies with our selection criterias before doing so. If
 ### One-line install
 
 ```
-curl https://raw.githubusercontent.com/freelabz/secsy-cli/main/scripts/install.sh?token=***REMOVED*** | sh
+curl https://raw.githubusercontent.com/freelabz/secator-cli/main/scripts/install.sh?token=***REMOVED*** | sh
 ```
 
 ### Development build
 
-<!-- `pip3 install secsy` -->
+<!-- `pip3 install secator` -->
 ```sh
-git clone https://github.com/ocervell/secsy-cli
-cd secsy-cli
-python3 -m virtualenv -p python3 ~/.virtualenv/secsy
+git clone https://github.com/ocervell/secator-cli
+cd secator-cli
+python3 -m virtualenv -p python3 ~/.virtualenv/secator
 pip3 install -e .
 ```
 
@@ -117,57 +117,57 @@ pip3 install -e .
 ### Usage
 
 ```sh
-secsy --help
+secator --help
 ```
 
 #### Tasks
 
-Run any of the supported commands out-of-the box using the `secsy x` (execute) subcommand:
+Run any of the supported commands out-of-the box using the `secator x` (execute) subcommand:
 
 ```sh
-secsy x --help # list available commands
-secsy x <COMMAND> --help # list command options
+secator x --help # list available commands
+secator x <COMMAND> --help # list command options
 ```
 
 #### Workflows
 
 A workflow is a set of pre-defined tasks.
 
-You can run some pre-written workflows using the `secsy w` (workflow) subcommand:
+You can run some pre-written workflows using the `secator w` (workflow) subcommand:
 
 ```sh
-secsy w --help # list available workflows
-secsy w <NAME> --help # list workflow options
+secator w --help # list available workflows
+secator w <NAME> --help # list workflow options
 ```
 
 * **Basic host recon** (open ports, network + HTTP vulnerabilities):
     ```sh
-    secsy w host_recon 192.168.1.18
+    secator w host_recon 192.168.1.18
     ```
 
 * **Basic subdomain recon** (subdomains, root URLs):
     ```sh
-    secsy w subdomain_recon mydomain.com
+    secator w subdomain_recon mydomain.com
     ```
 
 * **Basic URL crawler:**
     ```sh
-    secsy w url_crawler https://mydomain.com/start/crawling/from/here/
+    secator w url_crawler https://mydomain.com/start/crawling/from/here/
     ```
 
 * **Basic URL fuzzer:**
     ```sh
-    secsy w url_fuzzer https://mydomain.com/start/fuzzing/from/here/
+    secator w url_fuzzer https://mydomain.com/start/fuzzing/from/here/
     ```
 
 * **Internal CIDR recon:**
     ```sh
-    secsy w cidr_recon 192.168.0.1/24
+    secator w cidr_recon 192.168.0.1/24
     ```
 
 * **Code scan:**
     ```sh
-    secsy w code_scan /path/to/code/repo
+    secator w code_scan /path/to/code/repo
     ```
 
 
@@ -175,26 +175,26 @@ secsy w <NAME> --help # list workflow options
 
 A scan is a set of workflows that run one after the other.
 
-You can run some pre-written scans using the `secsy z` subcommand:
+You can run some pre-written scans using the `secator z` subcommand:
 
 ```sh
-secsy s --help # list available scans
-secsy s <NAME> --help # list scan options
+secator s --help # list available scans
+secator s <NAME> --help # list scan options
 ```
 
 * **Domain scan**:
     ```sh
-    secsy s domain example.com
+    secator s domain example.com
     ```
 
 * **Network scan**:
     ```sh
-    secsy s network 192.168.1.0/24
+    secator s network 192.168.1.0/24
     ```
 
 ### Input options
 
-The `secsy` CLI is built to be flexible in terms of inputs:
+The `secator` CLI is built to be flexible in terms of inputs:
 
 ![](images/input.gif)
 
@@ -204,8 +204,8 @@ Input can be passed directly as an argument to the command / workflow / scan you
 wish to run:
 
 ```sh
-secsy x httpx example.com # single input
-secsy x httpx example.com,example2.com,example3.com # multiple inputs
+secator x httpx example.com # single input
+secator x httpx example.com,example2.com,example3.com # multiple inputs
 ```
 
 **File input**
@@ -213,7 +213,7 @@ secsy x httpx example.com,example2.com,example3.com # multiple inputs
 Input can also be passed from a file containing one item per line:
 
 ```sh
-secsy x httpx urls.txt
+secator x httpx urls.txt
 ```
 
 **Stdin input**
@@ -221,19 +221,19 @@ secsy x httpx urls.txt
 Input can also be passed directly from `stdin`:
 
 ```sh
-cat urls.txt | secsy x httpx
+cat urls.txt | secator x httpx
 ```
 
 You can thus chain commands with piping from `stdin`:
 
 - Common **ProjectDiscovery** pipe:
     ```sh
-    secsy x subfinder example.com | secsy x httpx | secsy x nuclei
+    secator x subfinder example.com | secator x httpx | secator x nuclei
     ```
 
 - HTTP URL crawling:
     ```sh
-    secsy x katana https://example.com | secsy x httpx -orig
+    secator x katana https://example.com | secator x httpx -orig
     ```
 
 ***Note:*** *for more complex workflows, we highly recommend using the YAML-based
@@ -241,7 +241,7 @@ workflow definitions or the code-based workflow definitions.*
 
 ### Output options
 
-The `secsy` CLI is built to be very flexible in terms of output formats:
+The `secator` CLI is built to be very flexible in terms of output formats:
 - `-json` for JSONLines output
 - `-json -color` for nicely formatted JSONLines output (`jq` style)
 - `-table` for nicely formatted table output
@@ -262,7 +262,7 @@ simply calling them in a `for` loop like, and consume results lazily with e.g a
 Celery task.
 
 ```py
-from secsy.tasks.http import ffuf
+from secator.tasks.http import ffuf
 from .models import Urls
 
 app = Celery(__name__)
@@ -288,7 +288,7 @@ For instance, if you want a global rate limit of `1000` (reqs/s), but for ffuf y
 to be `100` you can do so:
 
 ```py
-from secsy.tasks.http import ffuf, gau, gospider, katana
+from secator.tasks.http import ffuf, gau, gospider, katana
 host = 'wikipedia.org'
 options = {
     'rate_limit': 1000, # reqs/mn
@@ -323,8 +323,8 @@ options = {
 
 ***Find subdomains using `subfinder` and run HTTP probe using `httpx` on found subdomains***
 ```py
-from secsy.tasks.recon import subfinder
-from secsy.tasks.http import httpx
+from secator.tasks.recon import subfinder
+from secator.tasks.http import httpx
 
 host = 'alibaba.com'
 subdomains = subfinder(host, threads=30, raw=True).run()
@@ -336,8 +336,8 @@ for probe in probes:
 ***Find open ports and run `nmap`'s `vulscan` NSE script on results***
 
 ```py
-from secsy.tasks.recon import naabu
-from secsy.tasks.vuln import nmap
+from secator.tasks.recon import naabu
+from secator.tasks.vuln import nmap
 
 host = 'cnn.com'
 ports_data = naabu(host).run()
@@ -349,8 +349,8 @@ vulns = nmap(host, ports=ports, script='vulscan').run()
 ***Finding URLs***
 
 ```py
-from secsy.utils import setup_logger
-from secsy.tasks.http import httpx, ffuf, gau, gospider, katana
+from secator.utils import setup_logger
+from secator.tasks.http import httpx, ffuf, gau, gospider, katana
 host = 'example.com'
 opts = {
     'match_codes': '200, 302',
@@ -384,7 +384,7 @@ print(f'Found {len(probed_urls)} alive URLs while scraping {host} !')
 
 ## Distributed runs
 
-By default, `secsy` runs all tasks synchronously. You can set up a task queue 
+By default, `secator` runs all tasks synchronously. You can set up a task queue 
 using Celery with the broker and a results backend of your choice, and run 
 Celery workers to execute tasks from the broker queue.
 
@@ -403,9 +403,9 @@ sudo systemctl enable redis
 sudo systemctl start redis
 ```
 
-**Configure `secsy` to use Redis:**
+**Configure `secator` to use Redis:**
 
-Create a `.env` file in the directory where you run `secsy`, and fill it like so:
+Create a `.env` file in the directory where you run `secator`, and fill it like so:
 ```sh
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
@@ -414,13 +414,13 @@ CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 **Start a Celery worker:**
 
 ```sh
-secsy worker
+secator worker
 ```
 
 **Run a built-in workflow:**
 
 ```sh
-secsy w host_scan wikipedia.org
+secator w host_scan wikipedia.org
 ```
 
 **Note:** If you want to run a workflow synchronously (bypassing the broker) 
@@ -429,8 +429,8 @@ for some reason, you can use the `--sync` flag to force it to run synchronously.
 **Run a built-in workflow from Python:**
 
 ```py
-from secsy.runners import Workflow
-from secsy.config import ConfigLoader
+from secator.runners import Workflow
+from secator.config import ConfigLoader
 
 config = ConfigLoader(name='workflows/host_scan')
 workflow = Workflow(config)
@@ -441,8 +441,8 @@ print(results)
 **Run a custom workflow from Python:**
 
 ```py
-from secsy.runners import Workflow
-from secsy.config import COnfigLoader
+from secator.runners import Workflow
+from secator.config import COnfigLoader
 
 config = ConfigLoader(path='/path/to/my/custom/workflow.yaml')
 workflow = Workflow(config)
@@ -452,8 +452,8 @@ print(results)
 
 ## Developer guide
 
-If you wish to integrate a new command with `secsy`, you can define a new class
-inherited from `secsy.runners.Command`.
+If you wish to integrate a new command with `secator`, you can define a new class
+inherited from `secator.runners.Command`.
 
 ### Example
 
@@ -500,10 +500,10 @@ $ bigdog -list sites.txt -json
 ```
 
 
-A basic definition of `bigdog` using basic `secsy` concepts will be:
+A basic definition of `bigdog` using basic `secator` concepts will be:
 
 ```py
-from secsy.runners import Command
+from secator.runners import Command
 
 class bigdog(Command):
     cmd = 'bigdog'
@@ -545,7 +545,7 @@ You can add the `opts` parameter to your `Command` object to define the
 cmd options:
 
 ```py
-from secsy.runners import Command
+from secator.runners import Command
 
 class bigdog(Command):
     cmd = 'bigdog'
@@ -560,12 +560,12 @@ class bigdog(Command):
 ```
 
 You can register this command with Click by adding it to the list 
-`secsy.cli.ALL_CMDS`, and then use it from the CLI:
+`secator.cli.ALL_CMDS`, and then use it from the CLI:
 
 ```
-secsy x bigdog --help
-secsy x bigdog loadsofcats.com
-secsy x bigdog loadsofcats.com -timeout 1 -rate 100 -json
+secator x bigdog --help
+secator x bigdog loadsofcats.com
+secator x bigdog loadsofcats.com -timeout 1 -rate 100 -json
 ```
 
 Note that as CLI options defined in the class are automatically added to the 
@@ -573,7 +573,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **Table output** (`-table`)
     ```sh
-    $ secsy x bigdog loadsofcats.com -table
+    $ secator x bigdog loadsofcats.com -table
         / \__
        (    @\___  =============
       /         O  BIGDOG v1.0.0
@@ -590,7 +590,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **JSON Lines output** (`-json`)
     ```sh
-    $ secsy x bigdog loadsofcats.com -json
+    $ secator x bigdog loadsofcats.com -json
         / \__
        (    @\___  =============
       /         O  BIGDOG v1.0.0
@@ -602,7 +602,7 @@ corresponding CLI command, as well as some useful formatting options:
 
 * **Quiet mode** (`-quiet`)
     ```sh
-    $ secsy x bigdog loadsofcats.com -quiet
+    $ secator x bigdog loadsofcats.com -quiet
     ```
 
 ### Advanced example
@@ -691,9 +691,9 @@ children class.
 We take `bigdog`'s options and output schema as reference to create the `Cat` output type:
 
 ```py
-from secsy.definitions import OPT_NOT_SUPPORTED
-from secsy.output_types import OutputType
-from secsy.decorators import task
+from secator.definitions import OPT_NOT_SUPPORTED
+from secator.output_types import OutputType
+from secator.decorators import task
 from dataclasses import dataclass, field
 
 @dataclass
@@ -742,9 +742,9 @@ class catkiller(CatHunter):
     opt_prefix = '--' 
 
     # Map `catkiller` options to CatHunter.meta_opts
-    # secsy x catkiller loadsofcats.com --max-wait 1000 --max-rate 10 --json
+    # secator x catkiller loadsofcats.com --max-wait 1000 --max-rate 10 --json
     # will become
-    # secsy x catkiller loadsofcats.com -timeout 1 -rate 10 -json
+    # secator x catkiller loadsofcats.com -timeout 1 -rate 10 -json
     opt_key_map = {
         'rate': 'max-rate'
         'timeout': 'max-wait'
@@ -835,7 +835,7 @@ them in a loop, calling them with the same options:
 
 ```py
 >>> from test import bigdog, catkiller, eagle
->>> from secsy.utils import print_results_table
+>>> from secator.utils import print_results_table
 >>> data = []
 >>> for command in [bigdog, catkiller, eagle]:
 >>> ... items = command(host, **meta_opts).run()
@@ -861,12 +861,12 @@ them in a loop, calling them with the same options:
 ```
 
 If you register these commands in the CLI, you can now call these commands using
-`secsy`:
+`secator`:
 
 ```sh
-$ secsy x bigdog loadsofcats.com -rate 1000 -timeout 1 -json
-$ secsy x eagle loadsofcats.com -rate 1000 -timeout 1 -json
-$ secsy x catkiller loadsofcats.com -rate 1000 -timeout 1 -json
+$ secator x bigdog loadsofcats.com -rate 1000 -timeout 1 -json
+$ secator x eagle loadsofcats.com -rate 1000 -timeout 1 -json
+$ secator x catkiller loadsofcats.com -rate 1000 -timeout 1 -json
 ```
 
 
