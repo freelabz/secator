@@ -19,8 +19,6 @@ RUNNER_OPTS = {
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
 	'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
-	'color': {'is_flag': True, 'default': False, 'help': 'Enable output coloring'},
-	'table': {'is_flag': True, 'default': False, 'help': 'Enable Table mode'},
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
 
@@ -185,7 +183,6 @@ def register_runner(cli_endpoint, config):
 		short_help = config.description or ''
 		if config.alias:
 			short_help += f' [dim]alias: {config.alias}'
-		fmt_opts['print_results'] = True
 		fmt_opts['print_start'] = True
 		fmt_opts['print_summary'] = True
 		runner_cls = Scan
@@ -200,7 +197,6 @@ def register_runner(cli_endpoint, config):
 		short_help = config.description or ''
 		if config.alias:
 			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
-		fmt_opts['print_results'] = True
 		fmt_opts['print_start'] = True
 		fmt_opts['print_summary'] = True
 		runner_cls = Workflow
@@ -260,10 +256,17 @@ def register_runner(cli_endpoint, config):
 		opts['sync'] = sync
 		if cli_endpoint.name in ['scan', 'workflow']:
 			opts.update({
-				'print_item': sync,
+				'print_item': not sync,
+				'raw': not opts['json'],
 				'print_line': sync,
 				'print_remote_status': not sync,
-				'print_timestamp': not sync
+				'print_timestamp': not sync,
+				'print_results': not sync,
+			})
+		else:  # task
+			opts.update({
+				'raw': not opts['json'],
+				'print_start': not sync,
 			})
 
 		# Build exporters

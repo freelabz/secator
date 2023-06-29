@@ -7,11 +7,11 @@ from pkg_resources import get_distribution
 # Globals
 VERSION = get_distribution('secator').version
 ASCII = f"""
-   ________  ____________  __
-  / ___/ _ \/ ___/ ___/ / / /
- (__  /  __/ /__(__  / /_/ / 
-/____/\___/\___/____/\__, /  
-                    /____/     v{VERSION}
+                         __            
+   ________  _________ _/ /_____  _____
+  / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/
+ (__  /  __/ /__/ /_/ / /_/ /_/ / /    
+/____/\___/\___/\__,_/\__/\____/_/     v{VERSION}
 
                     freelabz.com
 """  # noqa: W605,W291

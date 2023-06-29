@@ -243,9 +243,8 @@ workflow definitions or the code-based workflow definitions.*
 
 The `secator` CLI is built to be very flexible in terms of output formats:
 - `-json` for JSONLines output
-- `-json -color` for nicely formatted JSONLines output (`jq` style)
-- `-table` for nicely formatted table output
 - `-raw` for plaintext output (used for piping into other tools)
+- `-o` to use exporters, comma-separated, e.g: `-o table,gdrive,csv`
 
 If none of these options are passed, the command output will be the original 
 output.
@@ -571,9 +570,9 @@ secator x bigdog loadsofcats.com -timeout 1 -rate 100 -json
 Note that as CLI options defined in the class are automatically added to the 
 corresponding CLI command, as well as some useful formatting options:
 
-* **Table output** (`-table`)
+* **Table output** (`-o table`)
     ```sh
-    $ secator x bigdog loadsofcats.com -table
+    $ secator x bigdog loadsofcats.com -o table
         / \__
        (    @\___  =============
       /         O  BIGDOG v1.0.0

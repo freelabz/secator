@@ -1,6 +1,6 @@
 from celery import chain, chord
 
-from secator.exporters import CsvExporter, JsonExporter, TableExporter
+from secator.exporters import CsvExporter, JsonExporter
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
@@ -10,7 +10,6 @@ from secator.output_types import Target
 class Workflow(Runner):
 
 	default_exporters = [
-		TableExporter,
 		JsonExporter,
 		CsvExporter
 	]
@@ -29,12 +28,12 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
-
 		# Task fmt opts
+		run_opts = self.run_opts.copy()
 		fmt_opts = {
+			'json': True,
+			'raw': not run_opts.get('json', False),
+			'print_item': True,
 			'print_item_count': True,
 			'print_cmd': True,
 			'print_line': not self.sync,
@@ -42,11 +41,9 @@ class Workflow(Runner):
 			'print_description': self.sync,
 			'print_cmd_prefix': not self.sync,
 			'print_timestamp': self.sync,
-			'json': True
 		}
 
 		# Construct run opts
-		run_opts = self.run_opts.copy()
 		run_opts['hooks'] = self._hooks.get(Task, {})
 		run_opts.update(fmt_opts)
 
@@ -62,6 +59,10 @@ class Workflow(Runner):
 
 		# Get workflow results
 		yield from results
+
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
 	def build_celery_workflow(self, run_opts={}, results=[]):
 		""""Build Celery workflow.

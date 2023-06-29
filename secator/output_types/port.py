@@ -27,7 +27,7 @@ class Port(OutputType):
 	def __repr__(self) -> str:
 		white = Fore.WHITE
 		reset = Style.RESET_ALL
-		s = f'{white}{self.host}:{self.port}{reset}'
+		s = f'🔓 {white}{self.host}:{self.port}{reset}'
 		if self.service_name:
 			s += f' [{self.service_name}]'
 		return s

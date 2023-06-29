@@ -127,12 +127,8 @@ class Runner:
 		self.output_raw = self.run_opts.get('raw', False)
 		self.output_fmt = self.run_opts.get('format', False)
 		self.output_orig = self.run_opts.get('orig', False)
-		self.output_color = self.run_opts.get('color', False)
 		self.output_quiet = self.run_opts.get('quiet', False)
 		_json = self.run_opts.get('json', True) or 'table' in self.run_opts.get('output', '') or self.output_raw
-
-		# Library output
-		self.raw_yield = self.run_opts.get('raw_yield', False)
 
 		# Determine if JSON output or not
 		self.output_json = self.output_return_type == dict
@@ -203,7 +199,7 @@ class Runner:
 				# Treat progress item
 				if item._type == 'progress':
 					if self.print_progress:
-						self._print(str(item), out=sys.stderr, ignore_log=True, color='dim cyan')
+						self._print(str(item), out=sys.stderr, color='dim cyan')
 					continue
 
 				# Add item to results
@@ -213,15 +209,15 @@ class Runner:
 				yield item
 
 				# Print JSON or raw item
-				if self.print_item:
-					if self.output_json:
+				if self.print_item and item._type != 'target':
+					if self.output_raw:
+						self._print(self._rawify(item), out=sys.stdout)
+					elif self.output_json:
 						self._print(item, out=sys.stdout)
-					elif self.output_raw:
-						self._print(self._rawify(item), out=sys.stdout, ignore_log=True)
 
 			elif isinstance(item, str):
-				if self.print_line and not self.output_quiet:
-					self._print(item, out=sys.stderr, ignore_raw=True, ignore_log=True)
+				if self.print_line:
+					self._print(item, out=sys.stderr)
 				if self.output_return_type is not dict:
 					self.results.append(item)
 					yield item
@@ -301,7 +297,9 @@ class Runner:
 		runner_name = self.__class__.__name__
 		self.log_header()
 		self._print(
-			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', ignore_log=True)
+			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True, with_timestamp=True)
+		if not self.sync and self.__class__.__name__ != 'Scan':
+			self._print('🏆 [bold gold3]Live results:[/]', rich=True)
 
 	def log_header(self):
 		"""Log runner header."""
@@ -322,7 +320,7 @@ class Runner:
 
 		# Options
 		DISPLAY_OPTS_EXCLUDE = [
-			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'color', 'table', 'quiet', 'raw_yield'
+			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'color', 'quiet'
 		]
 		items = [
 			f'[italic]{k}[/]: {v}'
@@ -348,7 +346,7 @@ class Runner:
 			expand=False,
 			highlight=True
 		)
-		self._print(panel, ignore_log=True)
+		self._print(panel, rich=True)
 
 	def log_results(self):
 		"""Log results.
@@ -362,6 +360,14 @@ class Runner:
 		self.results_count = len(self.results)
 		self.status = 'SUCCESS' if not self.errors else 'FAILED'
 		self.end_time = datetime.fromtimestamp(time())
+
+		# Log execution results
+		status = 'succeeded' if not self.errors else '[bold red]failed[/]'
+		if self.print_summary:
+			self._print('\n')
+			self._print(
+				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
+				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True, with_timestamp=True)
 
 		# Log runner errors
 		for error in self.errors:
@@ -378,19 +384,13 @@ class Runner:
 		if self.print_item_count and self.output_json and not self.output_raw and not self.output_orig:
 			count_map = self._get_results_count()
 			if all(count == 0 for count in count_map.values()):
-				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
+				self._print(':adhesive_bandage: Found 0 results.', color='bold red', rich=True)
 			else:
 				results_str = ':pill: Found ' + ' and '.join([
 					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
 					for name, count in count_map.items()
 				]) + '.'
-				self._print(results_str, color='bold green')
-
-		# Log execution results
-		if self.print_summary:
-			self._print(
-				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
-				f'[bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].', ignore_log=self.sync)
+				self._print(results_str, color='bold green', rich=True)
 
 	@staticmethod
 	def get_live_results(result):
@@ -567,60 +567,33 @@ class Runner:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
+	def _print(self, data, color=None, out=sys.stderr, rich=False, with_timestamp=False):
 		"""Print function.
 
 		Args:
 			data (str or dict): Input data.
 			color (str, Optional): Termcolor color.
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
-			ignore_raw (bool, Optional): Ignore raw mode.
-			ignore_log (bool, Optional): Ignore log stamps.
+			rich (bool, Optional): Force rich output.
 		"""
 		# Choose rich console
 		_console = console_stdout if out == sys.stdout else console
-		log_json = console.print_json
-		log = console.log if self.print_timestamp else _console.print
 
 		# Print a JSON item
 		if isinstance(data, (OutputType, DotMap, dict)):
-			# If object has a 'toDict' method, use it
 			if getattr(data, 'toDict', None):
 				data = data.toDict()
-
-			# JSON dumps data so that it's consumable by other commands
 			data = json.dumps(data)
-
-			# Add prefix to output
 			data = f'{self.prefix:>15} {data}' if self.prefix and not self.print_item else data
+			print(data)
 
-			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
-			# user intent to use it for visualizing results.
-			try:
-				log_json(data) if self.output_color and self.print_item else _console.print(data, highlight=False)
-			except:  # noqa: E72
-				print(data)
+		# Print a line with timestamp
+		elif with_timestamp:
+			_console.log(data, highlight=False, style=color)
 
 		# Print a line
 		else:
-			# If orig mode (--orig) or raw mode (--raw), we might want to parse results with e.g pipe redirections, so
-			# we need a pure line with no logging info.
-			if ignore_log or (not ignore_raw and (self.output_orig or self.output_raw)):
-				data = f'{self.prefix} {data}' if self.prefix and not self.print_item else data
-				try:
-					_console.print(data, highlight=False, style=color)
-				except:  # noqa: E72
-					print(data)
-			else:
-				# data = escape(data)
-				# data = Text.from_ansi(data)
-				if color:
-					data = f'[{color}]{data}[/]'
-				data = f'{self.prefix} {data}' if self.prefix else data
-				try:
-					log(data)
-				except:  # noqa: E722
-					print(data)
+			_console.print(data, highlight=False, style=color) if self.sync or rich else print(data)
 
 	def _set_print_prefix(self):
 		self.prefix = ''
@@ -682,5 +655,5 @@ class Runner:
 			if self.output_fmt:
 				item = self.output_fmt.format(**item)
 			elif isinstance(item, OutputType):
-				item = str(item)
+				item = repr(item)
 		return item

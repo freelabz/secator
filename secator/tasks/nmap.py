@@ -28,7 +28,7 @@ class nmap(VulnMulti):
 	opt_prefix = '--'
 	output_types = [Port, Vulnerability]
 	opts = {
-		PORTS: {'type': str, 'help': 'Ports to scan'},
+		PORTS: {'type': str, 'help': 'Ports to scan', 'short': 'p'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'}
 	}

@@ -38,20 +38,20 @@ host_recon mydomain.com
 
 ```sh
 # pipe naabu and httpx to find all alive HTTP servers available on the host
-secator x naabu mydomain.com | secator x httpx -mc 200 -table
+secator x naabu mydomain.com | secator x httpx -mc 200 -o table
 
 # run a basic URL crawler workflow on the host to see which URLs are up
 secator w url_crawl mydomain.com
 
 # fuzz one of the URLs to find more URLs 
-secator x ffuf https://mydomain.com/FUZZ -mc 200,301,400,500 -table | secator x httpx -mc 200 -table
+secator x ffuf https://mydomain.com/FUZZ -mc 200,301,400,500 -o table | secator x httpx -mc 200 -o table
 
 **Host scan:**
 secator w host_recon mydomain.com
 
 **Subdomain mapping:**
 secator w subdomain_recon mydomain.com
-secator x subfinder mydomain.com | secator x httpx -json -table | httpx -mc 200 -json -table
+secator x subfinder mydomain.com | secator x httpx -json -o table | httpx -mc 200 -json -o table
 
 **Run in distributed mode:**
 secator z default mydomain.com --worker
