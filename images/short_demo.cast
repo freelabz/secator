@@ -1,4 +1,4 @@
-{"version": 2, "width": 80, "height": 24, "timestamp": 1688040485, "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"}}
+{"version": 2, "width": 225, "height": 30, "timestamp": 1688040485, "env": {"SHELL": "/bin/sh", "TERM": "xterm-256color"}}
 [0.001738, "o", "$ "]
 [3.216696, "o", "s"]
 [3.349824, "o", "e"]
@@ -390,3 +390,13 @@
 [177.115903, "o", "\r\n"]
 [212.313283, "o", "🚨 [\u001b[32mx-recruiting-header\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:3000 [\u001b[36mmisc,hiring,jobs,employment\u001b[0m] [\u001b[33m/#/jobs\u001b[0m]\r\n"]
 [220.489984, "o", "🚨 [\u001b[32mwordpress-detect\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:8000 [\u001b[36mtech,wordpress,cms,wp\u001b[0m] [\u001b[33m6.2.2\u001b[0m]\r\n"]
+[230.209537, "o", "🚨 [\u001b[32mCVE-2021-44228\u001b[0m] [\u001b[1m\u001b[31mcritical\u001b[0m] http://mydomain.com:8080/ [\u001b[36mcve,cve2021,rce,oast,log4j,injection,kev\u001b[0m] [\u001b[33m8.0.26.137,xapiversion,3fe5235127bf\u001b[0m]\r\n"]
+[230.232882, "o", "🚨 [\u001b[32mCVE-2021-44228\u001b[0m] [\u001b[1m\u001b[31mcritical\u001b[0m] http://mydomain.com:8080/ [\u001b[36mcve,cve2021,rce,oast,log4j,injection,kev\u001b[0m] [\u001b[33m8.0.26.137,xapiversion,3fe5235127bf\u001b[0m]\r\n"]
+[240.406307, "o", "🚨 [\u001b[32mwordpress-login\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:8000/wp-login.php [\u001b[36mpanel,wordpress\u001b[0m]\r\n"]
+[245.685108, "o", "🚨 [\u001b[32moob-header-based-interaction:dns\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:8000 [\u001b[36moast,ssrf,generic\u001b[0m]\r\n"]
+[245.68959, "o", "🚨 [\u001b[32moob-header-based-interaction:dns\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:8000 [\u001b[36moast,ssrf,generic\u001b[0m]\r\n"]
+[260.243125, "o", "🚨 [\u001b[32mwordpress-xmlrpc-listmethods\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:8000/xmlrpc.php [\u001b[36mwordpress\u001b[0m]\r\n"]
+[273.05996, "o", "🚨 [\u001b[32mspring-detect\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:8080/error [\u001b[36mtech,java,spring\u001b[0m]\r\n"]
+[275.327569, "o", "🚨 [\u001b[32mwordpress-rdf-user-enum\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:8000/feed/rdf [\u001b[36mwordpress,enum\u001b[0m] [\u001b[33madmin\u001b[0m]\r\n"]
+[282.054534, "o", "🚨 [\u001b[32moptions-method\u001b[0m] [\u001b[35minfo\u001b[0m] http://mydomain.com:8080 [\u001b[36mmisc,generic\u001b[0m] [\u001b[33mGET,HEAD,OPTIONS\u001b[0m]"]
+[282.055373, "o", "\r\n"]
