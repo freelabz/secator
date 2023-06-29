@@ -65,7 +65,7 @@ class ffuf(HttpFuzzer):
 
 	@staticmethod
 	def validate_input(self, input):
-		"""No list input supported for this command. Pass a single input instead."""
+		"""No list input supported for this command. Pass a single input instead or run in worker mode."""
 		if isinstance(input, list):
 			return False
 		return True
