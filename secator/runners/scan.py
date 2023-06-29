@@ -1,7 +1,7 @@
 import logging
 
 from secator.config import ConfigLoader
-from secator.exporters import CsvExporter, JsonExporter, TableExporter
+from secator.exporters import CsvExporter, JsonExporter
 from secator.runners._base import Runner
 from secator.runners._helpers import run_extractors
 from secator.runners.workflow import Workflow
@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 class Scan(Runner):
 
 	default_exporters = [
-		TableExporter,
 		JsonExporter,
 		CsvExporter
 	]
@@ -30,10 +29,6 @@ class Scan(Runner):
 		Yields:
 			dict: Item yielded from individual workflow tasks.
 		"""
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
-
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
 
@@ -65,3 +60,7 @@ class Scan(Runner):
 
 			# Get results
 			yield from workflow
+
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)

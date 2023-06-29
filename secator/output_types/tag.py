@@ -24,7 +24,7 @@ class Tag(OutputType):
 		cyan = Fore.CYAN
 		reset = Style.RESET_ALL
 		bright = Style.BRIGHT
-		s = f'[{bright}{cyan}{self.name}{reset}] {self.match}'
+		s = f'🏷️  [{bright}{cyan}{self.name}{reset}] {self.match}'
 		return s
 
 	def __repr__(self) -> str:

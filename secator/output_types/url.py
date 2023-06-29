@@ -47,7 +47,7 @@ class Url(OutputType):
 		cyan = Fore.CYAN
 		magenta = Fore.MAGENTA
 		reset = Style.RESET_ALL
-		s = f'{white}{self.url}'
+		s = f'🔗 {white}{self.url}'
 		if self.status_code and self.status_code != 0:
 			if self.status_code < 400:
 				s += f' [{green}{self.status_code}{reset}]'

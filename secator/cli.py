@@ -443,7 +443,7 @@ def record(record_name, script, interactive, width, height, output_dir):
 
 		with console.status('[bold gold3]Recording with asciinema ...[/]'):
 			Command.run_command(
-				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 100',
+				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
 				cls_attributes=attrs,
 				raw=True,
 				**DEFAULT_CMD_OPTS,

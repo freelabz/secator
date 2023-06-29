@@ -41,7 +41,7 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'wl', 'default': DEFAULT_WORDLIST, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_WORDLIST, 'help': 'Wordlist to use'}
 }
 
 OPTS_HTTP = [

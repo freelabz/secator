@@ -283,10 +283,8 @@ class Command(Runner):
 			self.run_opts['proxy'] = proxy
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
-			self._print(f'{self.__class__.__name__}: Could not set up valid proxy for {self.__class__.__name__}.')
-			self._print(f'Proxy: {self.proxy}')
 			self._print(
-				f'Supports: proxychains [{self.proxychains}], http [{self.proxy_http}], socks5 [{self.proxy_socks5}]')
+				f'[bold red]Ignoring proxy "{self.proxy}" for {self.__class__.__name__} (not supported).[/]')
 
 	#----------#
 	# Internal #
@@ -318,12 +316,12 @@ class Command(Runner):
 		# Log cmd
 		if self.print_cmd:
 			if self.sync and self.description:
-				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', ignore_log=True)
-			self._print(self.cmd, color='bold cyan', ignore_raw=True)
+				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
+			self._print(self.cmd, color='bold cyan', rich=True, with_timestamp=True)
 
 		if self.print_input_file and self.input_path:
 			input_str = '\n '.join(self.input)
-			self._print(f'[bold gold3]File input:[/]\n {input_str}\n')
+			self._print(f'[bold magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]\n', rich=True)
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -391,7 +389,7 @@ class Command(Runner):
 					else:
 						items = self.item_loader.run(line)
 
-				# Print line if no items parsed
+				# Yield line if no items parsed
 				if not items and not self.output_quiet:
 					yield line
 

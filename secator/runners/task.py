@@ -1,4 +1,3 @@
-from secator.rich import console
 from secator.utils import discover_tasks
 from secator.runners import Runner
 from secator.output_types import Target
@@ -21,22 +20,23 @@ class Task(Runner):
 		Returns:
 			list: List of results.
 		"""
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
-
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 
 		# Task opts
+		run_opts = self.run_opts.copy()
+		run_opts['json'] = True
+		run_opts.pop('output', None)
+
+		# Fmt opts
 		fmt_opts = {
 			'print_cmd': True,
 			'print_cmd_prefix': not self.sync,
 			'print_timestamp': self.sync,
-			'print_line': not self.output_quiet
+			'print_line': not self.output_quiet,
+			'print_item_count': not self.sync,
+			'print_input_file': True
 		}
-		run_opts = self.run_opts.copy()
-		run_opts.pop('output', None)
 		run_opts.update(fmt_opts)
 
 		# Set task output types
@@ -52,11 +52,14 @@ class Task(Runner):
 			task = task_cls(self.targets, **run_opts)
 		else:
 			result = task_cls.delay(self.targets, **run_opts)
-			console.log(f'Celery task [bold magenta]{str(result)}[/] sent to broker.')
 			task = self.process_live_tasks(result, description=False, results_only=True)
 
 		# Yield task results
 		yield from task
+
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
 	@staticmethod
 	def get_task_class(name):

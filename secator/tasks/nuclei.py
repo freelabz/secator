@@ -85,8 +85,8 @@ class nuclei(VulnMulti):
 
 	@staticmethod
 	def name_extractor(item):
-		name = item['info']['name']
+		name = item['template-id']
 		matcher_name = item.get('matcher-name', '')
 		if matcher_name:
-			name += f' - {matcher_name}'
+			name += f':{matcher_name}'
 		return name
