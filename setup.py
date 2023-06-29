@@ -33,8 +33,7 @@ dependencies = [
     'xmltodict'
 ]
 extras = {
-    'dev': ['coverage', 'flake8', 'watchdog'],
-    'devops': ['asciinema-automation'],
+    'dev': ['coverage', 'flake8', 'watchdog', 'asciinema-automation'],
     'google': ['google-api-python-client', 'google-auth', 'gspread']
 }
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
