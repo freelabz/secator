@@ -5,8 +5,8 @@ import re
 
 from secator.decorators import task
 from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, PROXY,
-                                 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
-                                 TIMEOUT, URL, USERNAME)
+								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
+								 TIMEOUT, URL, USERNAME)
 from secator.output_types import UserAccount
 from secator.tasks._categories import ReconUser
 

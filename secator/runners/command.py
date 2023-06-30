@@ -4,7 +4,6 @@ import re
 import shlex
 import subprocess
 import sys
-from time import sleep
 
 from celery.result import AsyncResult
 from fp.fp import FreeProxy
