@@ -1,5 +1,6 @@
 <h1 align="center">
 	secator
+	<br>
 </h1>
 
 <h4 align="center">Security swiss-knife to speed up vulnerability assessments.</h4>
@@ -9,10 +10,10 @@
 <a href="https://github.com/freelabz/secator/issues"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
 <a href="https://github.com/freelabz/secator/releases"><img src="https://img.shields.io/github/release/freelabz/secator"></a>
 <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache-blue.svg"></a>
-
-<a href="https://twitter.com/freelabz"><img src="https://img.shields.io/twitter/follow/pdiscoveryio.svg?logo=twitter"></a>
+<a href="https://twitter.com/freelabz"><img src="https://img.shields.io/twitter/follow/freelabz.svg?logo=twitter"></a>
 <!-- <a href="https://discord.gg/freelabz"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a> -->
 </p>
+
 
 <p align="center">
   <a href="#features">Features</a> •
@@ -25,12 +26,12 @@
   <a href="#developer-guide">Developer guide</a>
 </p>
 
+`secator` is a task and workflow runner used for security assessments. It supports dozens of well-known security tools and 
+is designed to improve productivity for pentesters and security researchers.
+
+# Features
+
 ![](images/short_demo.gif)
-
-`secator` is designed to not waste your time and make you efficient at
-vulnerability assessments, with the following feature set:
-
-## Features
 
 * **Curated list of commands**: commands integrated to `secator` are carefully 
     chosen to be **fast**, **efficient**, **well-maintained**, and for the vast
@@ -71,7 +72,7 @@ vulnerability assessments, with the following feature set:
     * You can create endless workflows with pretty much as much complexity as 
     you like.
 
-## Supported commands
+### Supported commands
 
 `secator` integrates the following commands: 
 
