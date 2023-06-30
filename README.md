@@ -1,12 +1,36 @@
-# `secator` - Security swiss-knife
+<h1 align="center">
+	secator
+</h1>
 
-`secator` is a **security swiss-knife** that wraps common
-security-oriented commands in a single CLI.
+<h4 align="center">Security swiss-knife to speed up vulnerability assessments.</h4>
+
+<p align="center">
+<!-- <a href="https://goreportcard.com/report/github.com/freelabz/secator"><img src="https://goreportcard.com/badge/github.com/freelabz/secator"></a> -->
+<a href="https://github.com/freelabz/secator/issues"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
+<a href="https://github.com/freelabz/secator/releases"><img src="https://img.shields.io/github/release/freelabz/secator"></a>
+<a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache-blue.svg"></a>
+
+<a href="https://twitter.com/freelabz"><img src="https://img.shields.io/twitter/follow/pdiscoveryio.svg?logo=twitter"></a>
+<!-- <a href="https://discord.gg/freelabz"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a> -->
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#supported-commands">Supported commands</a> •
+  <a href="#requirements">Requirements</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#cli-usage">CLI Usage</a> •
+  <a href="#library-usage">Library usage</a> •
+  <a href="#distributed-runs">Distributed runs</a> •
+  <a href="#developer-guide">Developer guide</a>
+</p>
 
 ![](images/short_demo.gif)
 
 `secator` is designed to not waste your time and make you efficient at
 vulnerability assessments, with the following feature set:
+
+## Features
 
 * **Curated list of commands**: commands integrated to `secator` are carefully 
     chosen to be **fast**, **efficient**, **well-maintained**, and for the vast
@@ -47,7 +71,6 @@ vulnerability assessments, with the following feature set:
     * You can create endless workflows with pretty much as much complexity as 
     you like.
 
-
 ## Supported commands
 
 `secator` integrates the following commands: 
@@ -64,7 +87,7 @@ Wayback Machine, Common Crawl, URLScan).
 * [gospider](https://github.com/jaeles-project/gospider) - Fast web spider
 written in Go.
 * [httpx](https://github.com/projectdiscovery/httpx) - Fast HTTP prober.
-* [katana](https://github.com/projectdiscovery/katana) - Next-generation
+* [katana](https://github.com/freelabz/secator) - Next-generation
 crawling and spidering framework.
 
 **Misc:**
@@ -187,10 +210,21 @@ secator s <NAME> --help # list scan options
     secator s domain example.com
     ```
 
+* **Subdomain scan**:
+	```sh
+	secator s subdomain sub.example.com
+	```
+
 * **Network scan**:
     ```sh
     secator s network 192.168.1.0/24
     ```
+
+* **URL scan**:
+	```sh
+	secator s url http://testphp.vulnweb.com
+	```
+
 
 ### Input options
 
@@ -226,15 +260,8 @@ cat urls.txt | secator x httpx
 
 You can thus chain commands with piping from `stdin`:
 
-- Common **ProjectDiscovery** pipe:
-    ```sh
-    secator x subfinder example.com | secator x httpx | secator x nuclei
-    ```
+![](images/pipe.gif)
 
-- HTTP URL crawling:
-    ```sh
-    secator x katana https://example.com | secator x httpx -orig
-    ```
 
 ***Note:*** *for more complex workflows, we highly recommend using the YAML-based
 workflow definitions or the code-based workflow definitions.*

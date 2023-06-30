@@ -42,8 +42,7 @@ class Scan(Runner):
 			fmt_opts = {
 				'print_item': False,
 				'print_start': True,
-				'print_summary': True,
-				'print_timestamp': False,
+				'print_run_summary': True,
 				'print_remote_status': not self.sync
 			}
 			run_opts = self.run_opts.copy()

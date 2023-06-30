@@ -160,7 +160,6 @@ def task():
 def register_runner(cli_endpoint, config):
 	fmt_opts = {
 		'print_cmd': True,
-		'print_timestamp': True,
 	}
 	short_help = ''
 	input_type = 'targets'
@@ -184,7 +183,7 @@ def register_runner(cli_endpoint, config):
 		if config.alias:
 			short_help += f' [dim]alias: {config.alias}'
 		fmt_opts['print_start'] = True
-		fmt_opts['print_summary'] = True
+		fmt_opts['print_run_summary'] = True
 		runner_cls = Scan
 
 	elif cli_endpoint.name == 'workflow':
@@ -198,7 +197,7 @@ def register_runner(cli_endpoint, config):
 		if config.alias:
 			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
 		fmt_opts['print_start'] = True
-		fmt_opts['print_summary'] = True
+		fmt_opts['print_run_summary'] = True
 		runner_cls = Workflow
 
 	elif cli_endpoint.name == 'task':
@@ -257,15 +256,12 @@ def register_runner(cli_endpoint, config):
 		if cli_endpoint.name in ['scan', 'workflow']:
 			opts.update({
 				'print_item': not sync,
-				'raw': not opts['json'],
 				'print_line': sync,
 				'print_remote_status': not sync,
-				'print_timestamp': not sync,
 				'print_results': not sync,
 			})
 		else:  # task
 			opts.update({
-				'raw': not opts['json'],
 				'print_start': not sync,
 			})
 

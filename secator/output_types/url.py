@@ -62,4 +62,6 @@ class Url(OutputType):
 			s += f' [{techs_str}]'
 		if self.content_type:
 			s += f' [{cyan}{self.content_type}{reset}]'
+		if self.content_length:
+			s += f' [{cyan}{self.content_length}{reset}]'
 		return s
