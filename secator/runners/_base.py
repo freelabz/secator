@@ -99,6 +99,7 @@ class Runner:
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
+		self.result = None
 
 		# Process input
 		self.input = targets
@@ -178,51 +179,58 @@ class Runner:
 		if not self.input_valid:
 			return
 
-		for item in self.yielder():
+		try:
+			for item in self.yielder():
 
-			if isinstance(item, (OutputType, DotMap, dict)):
+				if isinstance(item, (OutputType, DotMap, dict)):
 
-				# Handle direct yield of item
-				item = self._process_item(item)
-				if not item:
-					continue
+					# Handle direct yield of item
+					item = self._process_item(item)
+					if not item:
+						continue
 
-				# Discard item if needed
-				if item._uuid in self.uuids:
-					continue
+					# Discard item if needed
+					if item._uuid in self.uuids:
+						continue
 
-				# Treat progress item
-				if item._type == 'progress':
-					if self.print_progress:
-						self._print(str(item), out=sys.stderr, color='dim cyan')
-					continue
+					# Treat progress item
+					if item._type == 'progress':
+						if self.print_progress:
+							self._print(str(item), out=sys.stderr, color='dim cyan')
+						continue
 
-				# Add item to results
-				self.results.append(item)
-				self.results_count += 1
-				self.uuids.append(item._uuid)
-				yield item
-
-				# Print JSON or raw item
-				if self.print_item and item._type != 'target':
-					if self.print_json:
-						self._print(item, out=sys.stdout)
-					elif self.print_raw:
-						self._print(str(item), out=sys.stdout)
-					else:
-						self._print(self.get_repr(item), out=sys.stdout)
-
-			elif isinstance(item, str):
-				if self.print_line:
-					self._print(item, out=sys.stderr)
-				if not self.output_json:
+					# Add item to results
 					self.results.append(item)
+					self.results_count += 1
+					self.uuids.append(item._uuid)
 					yield item
 
-			if item:
-				self.output += str(item) + '\n'
+					# Print JSON or raw item
+					if self.print_item and item._type != 'target':
+						if self.print_json:
+							self._print(item, out=sys.stdout)
+						elif self.print_raw:
+							self._print(str(item), out=sys.stdout)
+						else:
+							self._print(self.get_repr(item), out=sys.stdout)
 
-			self.run_hooks('on_iter')
+				elif isinstance(item, str):
+					if self.print_line:
+						self._print(item, out=sys.stderr)
+					if not self.output_json:
+						self.results.append(item)
+						yield item
+
+				if item:
+					self.output += str(item) + '\n'
+
+				self.run_hooks('on_iter')
+
+		except KeyboardInterrupt:
+			self._print('Process was killed manually (CTRL+C / CTRL+X).', color='bold red', rich=True)
+			if self.result:
+				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
+				self.stop_live_tasks(self.result)
 
 		# Filter results and log info
 		self.results = self.filter_results()
@@ -416,6 +424,18 @@ class Runner:
 
 			# Sleep between updates
 			sleep(1)
+
+	def stop_live_tasks(self, result):
+		"""Stop live tasks running in Celery worker.
+
+		Args:
+			result (AsyncResult | GroupResult): Celery result.
+		"""
+		task_ids = []
+		get_task_ids(result, ids=task_ids)
+		for task_id in task_ids:
+			from secator.celery import revoke_task
+			revoke_task(task_id)
 
 	def process_live_tasks(self, result, description=True, results_only=True, print_remote_status=True):
 		"""Rich progress indicator showing live tasks statuses.

@@ -59,6 +59,7 @@ def void(*args, **kwargs):
 
 
 def revoke_task(task_id):
+	console.print(f'Revoking task {task_id}')
 	return app.control.revoke(task_id, terminate=True, signal='SIGKILL')
 
 

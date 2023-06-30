@@ -28,6 +28,10 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
+
 		# Task fmt opts
 		run_opts = self.run_opts.copy()
 		fmt_opts = {
@@ -52,14 +56,11 @@ class Workflow(Runner):
 			results = workflow.apply().get()
 		else:
 			result = workflow()
+			self.result = result
 			results = self.process_live_tasks(result, results_only=True, print_remote_status=self.print_remote_status)
 
 		# Get workflow results
 		yield from results
-
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
 	def build_celery_workflow(self, run_opts={}, results=[]):
 		""""Build Celery workflow.

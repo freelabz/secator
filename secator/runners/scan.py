@@ -29,6 +29,10 @@ class Scan(Runner):
 		Yields:
 			dict: Item yielded from individual workflow tasks.
 		"""
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
+
 		# Run workflows
 		for name, workflow_opts in self.config.workflows.items():
 
@@ -59,7 +63,3 @@ class Scan(Runner):
 
 			# Get results
 			yield from workflow
-
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
