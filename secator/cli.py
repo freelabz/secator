@@ -31,7 +31,6 @@ ALL_SCANS = ALL_CONFIGS.scans
 DEFAULT_CMD_OPTS = {
 	'no_capture': True,
 	'print_cmd': True,
-	'print_timestamp': True
 }
 if DEBUG > 1:
 	console.print(f'Celery app configuration:\n{app.conf}')

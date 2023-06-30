@@ -4,9 +4,9 @@ import os
 import re
 
 from secator.decorators import task
-from secator.definitions import (DELAY, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
-							   RETRIES, SITE_NAME, THREADS, TIMEOUT, URL,
-							   USERNAME)
+from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, PROXY,
+                                 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
+                                 TIMEOUT, URL, USERNAME)
 from secator.output_types import UserAccount
 from secator.tasks._categories import ReconUser
 
@@ -37,7 +37,8 @@ class maigret(ReconUser):
 	output_map = {
 		UserAccount: {
 			SITE_NAME: 'sitename',
-			URL: lambda x: x['status']['url']
+			URL: lambda x: x['status']['url'],
+			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
 	}
 	install_cmd = 'pip3 install maigret'

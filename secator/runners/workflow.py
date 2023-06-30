@@ -31,8 +31,6 @@ class Workflow(Runner):
 		# Task fmt opts
 		run_opts = self.run_opts.copy()
 		fmt_opts = {
-			'json': True,
-			'raw': not run_opts.get('json', False),
 			'print_item': True,
 			'print_item_count': True,
 			'print_cmd': True,
@@ -40,7 +38,6 @@ class Workflow(Runner):
 			'print_input_file': True,
 			'print_description': self.sync,
 			'print_cmd_prefix': not self.sync,
-			'print_timestamp': self.sync,
 		}
 
 		# Construct run opts

@@ -25,14 +25,12 @@ class Task(Runner):
 
 		# Task opts
 		run_opts = self.run_opts.copy()
-		run_opts['json'] = True
 		run_opts.pop('output', None)
 
 		# Fmt opts
 		fmt_opts = {
 			'print_cmd': True,
 			'print_cmd_prefix': not self.sync,
-			'print_timestamp': self.sync,
 			'print_line': not self.output_quiet,
 			'print_item_count': not self.sync,
 			'print_input_file': True

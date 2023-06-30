@@ -229,7 +229,6 @@ class Command(Runner):
 		ret = cls.run_command(
 			cls.install_cmd,
 			name=cls.__name__,
-			print_timestamp=True,
 			print_cmd=True,
 			print_line=True,
 			cls_attributes={'shell': True}
@@ -306,10 +305,6 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
-		# TODO: this is needed for logging timestamp to show up properly !!!
-		if self.print_timestamp:
-			sleep(1)
-
 		# Callback before running command
 		self.run_hooks('on_start')
 

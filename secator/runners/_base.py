@@ -112,7 +112,6 @@ class Runner:
 		# Print options
 		self.print_start = self.run_opts.pop('print_start', False)
 		self.print_results = self.run_opts.pop('print_results', False)
-		self.print_timestamp = self.run_opts.pop('print_timestamp', False)
 		self.print_item = self.run_opts.pop('print_item', False)
 		self.print_line = self.run_opts.pop('print_line', False)
 		self.print_item_count = self.run_opts.pop('print_item_count', False)
@@ -121,19 +120,15 @@ class Runner:
 		self.print_progress = self.run_opts.pop('print_progress', False)
 		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
 		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
-		self.print_summary = self.run_opts.pop('print_summary', False)
+		self.print_run_summary = self.run_opts.pop('print_run_summary', False)
+		self.print_json = self.run_opts.get('json', True)
+		self.print_raw = self.run_opts.get('raw', False)
+		self.print_orig = self.run_opts.get('orig', False)
 
 		# Output options
-		self.output_raw = self.run_opts.get('raw', False)
 		self.output_fmt = self.run_opts.get('format', False)
-		self.output_orig = self.run_opts.get('orig', False)
 		self.output_quiet = self.run_opts.get('quiet', False)
-		_json = self.run_opts.get('json', True) or 'table' in self.run_opts.get('output', '') or self.output_raw
-
-		# Determine if JSON output or not
 		self.output_json = self.output_return_type == dict
-		if self.print_timestamp and not _json:
-			self.output_json = False
 
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS}
@@ -210,15 +205,17 @@ class Runner:
 
 				# Print JSON or raw item
 				if self.print_item and item._type != 'target':
-					if self.output_raw:
-						self._print(self._rawify(item), out=sys.stdout)
-					elif self.output_json:
+					if self.print_json:
 						self._print(item, out=sys.stdout)
+					elif self.print_raw:
+						self._print(str(item), out=sys.stdout)
+					else:
+						self._print(self.get_repr(item), out=sys.stdout)
 
 			elif isinstance(item, str):
 				if self.print_line:
 					self._print(item, out=sys.stderr)
-				if self.output_return_type is not dict:
+				if not self.output_json:
 					self.results.append(item)
 					yield item
 
@@ -298,6 +295,7 @@ class Runner:
 		self.log_header()
 		self._print(
 			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True, with_timestamp=True)
+		sleep(1)  # needed to show timestamp
 		if not self.sync and self.__class__.__name__ != 'Scan':
 			self._print('🏆 [bold gold3]Live results:[/]', rich=True)
 
@@ -320,7 +318,7 @@ class Runner:
 
 		# Options
 		DISPLAY_OPTS_EXCLUDE = [
-			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'color', 'quiet'
+			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'quiet'
 		]
 		items = [
 			f'[italic]{k}[/]: {v}'
@@ -363,7 +361,7 @@ class Runner:
 
 		# Log execution results
 		status = 'succeeded' if not self.errors else '[bold red]failed[/]'
-		if self.print_summary:
+		if self.print_run_summary:
 			self._print('\n')
 			self._print(
 				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
@@ -381,7 +379,7 @@ class Runner:
 			self.report = report
 
 		# Log results count
-		if self.print_item_count and self.output_json and not self.output_raw and not self.output_orig:
+		if self.print_item_count and self.print_json and not self.print_raw and not self.print_orig:
 			count_map = self._get_results_count()
 			if all(count == 0 for count in count_map.values()):
 				self._print(':adhesive_bandage: Found 0 results.', color='bold red', rich=True)
@@ -452,7 +450,11 @@ class Runner:
 				TimeElapsedColumn(),
 				TextColumn('{task.fields[count]}'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
-				refresh_per_second=1
+				refresh_per_second=1,
+				transient=True,
+				# console=console,
+				# redirect_stderr=True,
+				# redirect_stdout=False
 			)
 			state_colors = {
 				'RUNNING': 'bold yellow',
@@ -585,7 +587,7 @@ class Runner:
 				data = data.toDict()
 			data = json.dumps(data)
 			data = f'{self.prefix:>15} {data}' if self.prefix and not self.print_item else data
-			print(data)
+			print(data, file=out)
 
 		# Print a line with timestamp
 		elif with_timestamp:
@@ -593,7 +595,7 @@ class Runner:
 
 		# Print a line
 		else:
-			_console.print(data, highlight=False, style=color) if self.sync or rich else print(data)
+			_console.print(data, highlight=False, style=color) if self.sync or rich else print(data, file=out)
 
 	def _set_print_prefix(self):
 		self.prefix = ''
@@ -623,7 +625,7 @@ class Runner:
 			return None
 
 		# Convert output dict to another schema
-		if isinstance(item, dict) and not self.output_orig:
+		if isinstance(item, dict) and not self.print_orig:
 			item = self._convert_item_schema(item)
 		elif isinstance(item, OutputType):
 			pass
@@ -639,21 +641,20 @@ class Runner:
 			self.progress = item.percent
 
 		# Run item convert hooks
-		if not self.output_orig:
+		if not self.print_orig:
 			item = self.run_hooks('on_item', item)
 
 		# Return item
 		return item
 
-	def _rawify(self, item=None):
+	def get_repr(self, item=None):
 		if not item:
 			return [
-				self._rawify(item)
+				self.get_repr(item)
 				for item in self.results
 			]
-		if self.output_raw:
-			if self.output_fmt:
-				item = self.output_fmt.format(**item)
-			elif isinstance(item, OutputType):
-				item = repr(item)
+		if self.output_fmt:
+			item = self.output_fmt.format(**item.toDict())
+		elif isinstance(item, OutputType):
+			item = repr(item)
 		return item
