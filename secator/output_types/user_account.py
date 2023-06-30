@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import USERNAME, URL, SITE_NAME
 from secator.output_types import OutputType
-from colorama import Fore, Style
+from colorama import Fore
 
 
 @dataclass
