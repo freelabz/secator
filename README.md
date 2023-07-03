@@ -88,7 +88,7 @@ pip3 install secator
 	<summary>Bash one-liner</summary>
 
 	```sh
-	curl https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh?token=***REMOVED*** | sh
+	curl https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh?token=<GITHUB_TOKEN> | sh
 	```
 
 </details>
