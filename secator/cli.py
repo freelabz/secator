@@ -31,7 +31,6 @@ ALL_SCANS = ALL_CONFIGS.scans
 DEFAULT_CMD_OPTS = {
 	'no_capture': True,
 	'print_cmd': True,
-	'print_timestamp': True
 }
 if DEBUG > 1:
 	console.print(f'Celery app configuration:\n{app.conf}')
@@ -419,8 +418,9 @@ def serve(directory, host, port, interface):
 @click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
 def record(record_name, script, interactive, width, height, output_dir):
 	"""Record secator session using asciinema."""
-	height = height or console.size.height
+	# 120 x 30 is a good ratio for GitHub
 	width = width or console.size.width
+	height = height or console.size.height
 	attrs = {
 		'shell': False,
 		'env': {
@@ -443,7 +443,7 @@ def record(record_name, script, interactive, width, height, output_dir):
 
 		with console.status('[bold gold3]Recording with asciinema ...[/]'):
 			Command.run_command(
-				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 100',
+				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
 				cls_attributes=attrs,
 				raw=True,
 				**DEFAULT_CMD_OPTS,
@@ -481,7 +481,7 @@ def record(record_name, script, interactive, width, height, output_dir):
 		# Edit cast file to reduce long timeouts
 		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
 			Command.run_command(
-				f'asciinema-edit quantize --range 4 {output_cast_path} --out {output_cast_path}.tmp',
+				f'asciinema-edit quantize --range 1 {output_cast_path} --out {output_cast_path}.tmp',
 				cls_attributes=attrs,
 				raw=True,
 				**DEFAULT_CMD_OPTS,
@@ -505,9 +505,9 @@ def record(record_name, script, interactive, width, height, output_dir):
 #------#
 
 
-@cli.group(aliases=['t', 'tests'])
+@cli.group()
 def test():
-	"""Tests."""
+	"""Run tests."""
 	pass
 
 

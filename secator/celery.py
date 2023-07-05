@@ -4,18 +4,18 @@ import uuid
 from time import sleep
 
 import celery
-from celery import chain, chord
+from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 from dotenv import load_dotenv
 
 from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
-							   CELERY_RESULT_BACKEND)
+								 CELERY_RESULT_BACKEND)
 from secator.rich import console
-from secator.runners import Task, Workflow, Scan
+from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, deduplicate, discover_external_tasks,
-						 discover_internal_tasks, flatten)
+						   discover_internal_tasks, flatten)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -49,16 +49,17 @@ app.conf.update({
 	'task_eager_propagates': False
 })
 
-# from celery import signals
-# @signals.setup_logging.connect
-# def void(*args, **kwargs):
-# 	"""Override celery's logging setup to prevent it from altering our settings.
-# 	github.com/celery/celery/issues/1867
-# 	"""
-# 	pass
+
+@signals.setup_logging.connect
+def void(*args, **kwargs):
+	"""Override celery's logging setup to prevent it from altering our settings.
+	github.com/celery/celery/issues/1867
+	"""
+	pass
 
 
 def revoke_task(task_id):
+	console.print(f'Revoking task {task_id}')
 	return app.control.revoke(task_id, terminate=True, signal='SIGKILL')
 
 

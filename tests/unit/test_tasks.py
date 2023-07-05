@@ -159,7 +159,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		default_threads = cls.meta_opts[THREADS]['default']
 		expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -threads {default_threads}'
 		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls.print_timestamp, False)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
 		self.assertEqual(cls.print_item_count, False)
@@ -185,7 +184,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		cls = httpx(host, **run_opts)
 		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls.print_timestamp, False)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
 		self.assertEqual(cls.print_item_count, False)
@@ -213,7 +211,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		cls = httpx(host, **run_opts)
 		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls.print_timestamp, False)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
 		self.assertEqual(cls.print_item_count, False)

@@ -8,8 +8,8 @@ from rich_click.rich_group import RichGroup
 from secator.celery import is_celery_worker_alive
 from secator.definitions import OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
-from secator.utils import (expand_input, get_command_category,
-						 get_command_cls, deduplicate)
+from secator.utils import (deduplicate, expand_input, get_command_category,
+                           get_command_cls)
 
 RUNNER_OPTS = {
 	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
@@ -19,8 +19,6 @@ RUNNER_OPTS = {
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
 	'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
-	'color': {'is_flag': True, 'default': False, 'help': 'Enable output coloring'},
-	'table': {'is_flag': True, 'default': False, 'help': 'Enable Table mode'},
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
 
@@ -162,7 +160,6 @@ def task():
 def register_runner(cli_endpoint, config):
 	fmt_opts = {
 		'print_cmd': True,
-		'print_timestamp': True,
 	}
 	short_help = ''
 	input_type = 'targets'
@@ -185,9 +182,8 @@ def register_runner(cli_endpoint, config):
 		short_help = config.description or ''
 		if config.alias:
 			short_help += f' [dim]alias: {config.alias}'
-		fmt_opts['print_results'] = True
 		fmt_opts['print_start'] = True
-		fmt_opts['print_summary'] = True
+		fmt_opts['print_run_summary'] = True
 		runner_cls = Scan
 
 	elif cli_endpoint.name == 'workflow':
@@ -200,9 +196,8 @@ def register_runner(cli_endpoint, config):
 		short_help = config.description or ''
 		if config.alias:
 			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
-		fmt_opts['print_results'] = True
 		fmt_opts['print_start'] = True
-		fmt_opts['print_summary'] = True
+		fmt_opts['print_run_summary'] = True
 		runner_cls = Workflow
 
 	elif cli_endpoint.name == 'task':
@@ -260,10 +255,14 @@ def register_runner(cli_endpoint, config):
 		opts['sync'] = sync
 		if cli_endpoint.name in ['scan', 'workflow']:
 			opts.update({
-				'print_item': sync,
+				'print_item': not sync,
 				'print_line': sync,
 				'print_remote_status': not sync,
-				'print_timestamp': not sync
+				'print_results': not sync,
+			})
+		else:  # task
+			opts.update({
+				'print_start': not sync,
 			})
 
 		# Build exporters

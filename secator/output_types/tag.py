@@ -21,11 +21,13 @@ class Tag(OutputType):
 		super().__post_init__()
 
 	def __str__(self) -> str:
+		return self.match + ' -> ' + ' '.join([v for k, v in self.extra_data.items() if k != 'source'])
+
+	def __repr__(self) -> str:
 		cyan = Fore.CYAN
 		reset = Style.RESET_ALL
 		bright = Style.BRIGHT
-		s = f'[{bright}{cyan}{self.name}{reset}] {self.match}'
+		s = f'🏷️  [{bright}{cyan}{self.name}{reset}] {self.match}'
+		if self.extra_data:
+			s += ' [' + ' '.join([v for k, v in self.extra_data.items() if k != 'source']) + ']'
 		return s
-
-	def __repr__(self) -> str:
-		return str(self)

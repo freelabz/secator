@@ -6,11 +6,12 @@ import xmltodict
 
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
-							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, ID,
-							   IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
-							   PORTS, PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-							   RETRIES, SCRIPT, SERVICE_NAME, TAGS,
-							   TEMP_FOLDER, THREADS, TIMEOUT, USER_AGENT)
+                                 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, ID,
+                                 IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
+                                 PORTS, PROVIDER, PROXY, RATE_LIMIT,
+                                 REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
+                                 SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
+                                 USER_AGENT)
 from secator.output_types import Port, Vulnerability
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
@@ -28,7 +29,7 @@ class nmap(VulnMulti):
 	opt_prefix = '--'
 	output_types = [Port, Vulnerability]
 	opts = {
-		PORTS: {'type': str, 'help': 'Ports to scan'},
+		PORTS: {'type': str, 'help': 'Ports to scan', 'short': 'p'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'}
 	}
@@ -296,6 +297,7 @@ class nmapData(dict):
 					PROVIDER: provider_name,
 					CVSS_SCORE: cvss_score,
 					REFERENCES: [reference_url],
+					SEVERITY: 'critical',
 					TAGS: ['exploit', exploit_id, provider_name],
 					CONFIDENCE: 'low'
 				}
