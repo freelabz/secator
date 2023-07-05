@@ -8,8 +8,8 @@ from rich_click.rich_group import RichGroup
 from secator.celery import is_celery_worker_alive
 from secator.definitions import OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
-from secator.utils import (expand_input, get_command_category,
-						 get_command_cls, deduplicate)
+from secator.utils import (deduplicate, expand_input, get_command_category,
+                           get_command_cls)
 
 RUNNER_OPTS = {
 	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},

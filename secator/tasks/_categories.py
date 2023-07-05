@@ -29,7 +29,7 @@ OPTS = {
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
 	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
 	FILTER_WORDS: {'type': str, 'short': 'fw', 'help': 'Filter out responses with word count'},
-	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'fr', 'help': 'Follow HTTP redirects'},
+	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'frd', 'help': 'Follow HTTP redirects'},
 	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
 	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
 	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match respones with size'},

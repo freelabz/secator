@@ -315,7 +315,7 @@ class Command(Runner):
 
 		if self.print_input_file and self.input_path:
 			input_str = '\n '.join(self.input)
-			self._print(f'[bold magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]\n', rich=True)
+			self._print(f'[bold magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', rich=True)
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
