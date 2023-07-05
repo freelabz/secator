@@ -1,10 +1,11 @@
 from celery import chain, chord
 
+from secator.definitions import DEBUG
 from secator.exporters import CsvExporter, JsonExporter
+from secator.output_types import Target
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
-from secator.output_types import Target
 
 
 class Workflow(Runner):
@@ -39,7 +40,7 @@ class Workflow(Runner):
 			'print_item_count': True,
 			'print_cmd': True,
 			'print_line': not self.sync,
-			'print_input_file': True,
+			'print_input_file': DEBUG,
 			'print_description': self.sync,
 			'print_cmd_prefix': not self.sync,
 		}

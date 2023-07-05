@@ -1,6 +1,7 @@
-from secator.utils import discover_tasks
-from secator.runners import Runner
+from secator.definitions import DEBUG
 from secator.output_types import Target
+from secator.runners import Runner
+from secator.utils import discover_tasks
 
 
 class Task(Runner):
@@ -33,7 +34,7 @@ class Task(Runner):
 			'print_cmd_prefix': not self.sync,
 			'print_line': not self.output_quiet,
 			'print_item_count': not self.sync,
-			'print_input_file': True
+			'print_input_file': DEBUG
 		}
 		run_opts.update(fmt_opts)
 
