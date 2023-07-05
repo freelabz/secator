@@ -124,7 +124,6 @@ class msfconsole(VulnMulti):
 #
 #     def __init__(self, input, ctx={}, **run_opts):
 #         self.module = run_opts.pop('module')
-#         self.print_timestamp = ctx.get('print_timestamp', False)
 #         pw = run_opts.pop('password')
 #         self.run_opts = run_opts
 #         self.RHOST = input
@@ -171,6 +170,5 @@ class msfconsole(VulnMulti):
 #         while (job_info['status'] in ['running', 'ready']):
 #             job_info = self.client.jobs.info_by_uuid(job['uuid'])
 #         job_info.update(job)
-#         print(job_info) if self.print_timestamp else logger.debug(job_info)
 #         print(type(job_info['result']['127.0.0.1']))
 #         return job_info

@@ -31,4 +31,4 @@ class Subdomain(OutputType):
 		magenta = Fore.MAGENTA
 		reset = Style.RESET_ALL
 		sources_str = ', '.join([f'{magenta}{source}{reset}' for source in self.sources])
-		return f'{white}{self.host} [{sources_str}]'
+		return f'🏰 {white}{self.host} [{sources_str}]'

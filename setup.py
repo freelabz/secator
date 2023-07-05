@@ -6,7 +6,7 @@ from setuptools import find_packages, setup
 
 here = path.abspath(path.dirname(__file__))
 name = "secator"
-description = "Sexy security tools command runner"
+description = "Security tools command runner"
 version = "0.0.1"
 release_status = "Development Status :: 3 - Alpha"
 dependencies = [
@@ -17,9 +17,6 @@ dependencies = [
     'dotmap',
     'free-proxy',
     'furl',
-    'google-api-python-client',
-    'google-auth',
-    'gspread',
     'jinja2',
     'humanize',
     'netifaces',
@@ -36,7 +33,8 @@ dependencies = [
     'xmltodict'
 ]
 extras = {
-    'test': ['coverage', 'flake8']
+    'dev': ['coverage', 'flake8', 'watchdog', 'asciinema-automation'],
+    'google': ['google-api-python-client', 'google-auth', 'gspread']
 }
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()

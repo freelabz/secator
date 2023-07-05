@@ -1,7 +1,7 @@
 import logging
 
 from secator.config import ConfigLoader
-from secator.exporters import CsvExporter, JsonExporter, TableExporter
+from secator.exporters import CsvExporter, JsonExporter
 from secator.runners._base import Runner
 from secator.runners._helpers import run_extractors
 from secator.runners.workflow import Workflow
@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 class Scan(Runner):
 
 	default_exporters = [
-		TableExporter,
 		JsonExporter,
 		CsvExporter
 	]
@@ -47,8 +46,7 @@ class Scan(Runner):
 			fmt_opts = {
 				'print_item': False,
 				'print_start': True,
-				'print_summary': True,
-				'print_timestamp': False,
+				'print_run_summary': True,
 				'print_remote_status': not self.sync
 			}
 			run_opts = self.run_opts.copy()

@@ -1,16 +1,16 @@
 from celery import chain, chord
 
-from secator.exporters import CsvExporter, JsonExporter, TableExporter
+from secator.definitions import DEBUG
+from secator.exporters import CsvExporter, JsonExporter
+from secator.output_types import Target
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
-from secator.output_types import Target
 
 
 class Workflow(Runner):
 
 	default_exporters = [
-		TableExporter,
 		JsonExporter,
 		CsvExporter
 	]
@@ -34,19 +34,18 @@ class Workflow(Runner):
 			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
 		# Task fmt opts
+		run_opts = self.run_opts.copy()
 		fmt_opts = {
+			'print_item': True,
 			'print_item_count': True,
 			'print_cmd': True,
 			'print_line': not self.sync,
-			'print_input_file': True,
+			'print_input_file': DEBUG,
 			'print_description': self.sync,
 			'print_cmd_prefix': not self.sync,
-			'print_timestamp': self.sync,
-			'json': True
 		}
 
 		# Construct run opts
-		run_opts = self.run_opts.copy()
 		run_opts['hooks'] = self._hooks.get(Task, {})
 		run_opts.update(fmt_opts)
 
@@ -58,6 +57,7 @@ class Workflow(Runner):
 			results = workflow.apply().get()
 		else:
 			result = workflow()
+			self.result = result
 			results = self.process_live_tasks(result, results_only=True, print_remote_status=self.print_remote_status)
 
 		# Get workflow results

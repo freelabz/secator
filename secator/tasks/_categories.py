@@ -29,7 +29,7 @@ OPTS = {
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
 	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
 	FILTER_WORDS: {'type': str, 'short': 'fw', 'help': 'Filter out responses with word count'},
-	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'fr', 'help': 'Follow HTTP redirects'},
+	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'frd', 'help': 'Follow HTTP redirects'},
 	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
 	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
 	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match respones with size'},
@@ -41,7 +41,7 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'wl', 'default': DEFAULT_WORDLIST, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_WORDLIST, 'help': 'Wordlist to use'}
 }
 
 OPTS_HTTP = [

@@ -99,6 +99,7 @@ class Runner:
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
+		self.result = None
 
 		# Process input
 		self.input = targets
@@ -112,7 +113,6 @@ class Runner:
 		# Print options
 		self.print_start = self.run_opts.pop('print_start', False)
 		self.print_results = self.run_opts.pop('print_results', False)
-		self.print_timestamp = self.run_opts.pop('print_timestamp', False)
 		self.print_item = self.run_opts.pop('print_item', False)
 		self.print_line = self.run_opts.pop('print_line', False)
 		self.print_item_count = self.run_opts.pop('print_item_count', False)
@@ -121,23 +121,15 @@ class Runner:
 		self.print_progress = self.run_opts.pop('print_progress', False)
 		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
 		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
-		self.print_summary = self.run_opts.pop('print_summary', False)
+		self.print_run_summary = self.run_opts.pop('print_run_summary', False)
+		self.print_json = self.run_opts.get('json', True)
+		self.print_raw = self.run_opts.get('raw', False)
+		self.print_orig = self.run_opts.get('orig', False)
 
 		# Output options
-		self.output_raw = self.run_opts.get('raw', False)
 		self.output_fmt = self.run_opts.get('format', False)
-		self.output_orig = self.run_opts.get('orig', False)
-		self.output_color = self.run_opts.get('color', False)
 		self.output_quiet = self.run_opts.get('quiet', False)
-		_json = self.run_opts.get('json', True) or 'table' in self.run_opts.get('output', '') or self.output_raw
-
-		# Library output
-		self.raw_yield = self.run_opts.get('raw_yield', False)
-
-		# Determine if JSON output or not
 		self.output_json = self.output_return_type == dict
-		if self.print_timestamp and not _json:
-			self.output_json = False
 
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS}
@@ -187,49 +179,58 @@ class Runner:
 		if not self.input_valid:
 			return
 
-		for item in self.yielder():
+		try:
+			for item in self.yielder():
 
-			if isinstance(item, (OutputType, DotMap, dict)):
+				if isinstance(item, (OutputType, DotMap, dict)):
 
-				# Handle direct yield of item
-				item = self._process_item(item)
-				if not item:
-					continue
+					# Handle direct yield of item
+					item = self._process_item(item)
+					if not item:
+						continue
 
-				# Discard item if needed
-				if item._uuid in self.uuids:
-					continue
+					# Discard item if needed
+					if item._uuid in self.uuids:
+						continue
 
-				# Treat progress item
-				if item._type == 'progress':
-					if self.print_progress:
-						self._print(str(item), out=sys.stderr, ignore_log=True, color='dim cyan')
-					continue
+					# Treat progress item
+					if item._type == 'progress':
+						if self.print_progress:
+							self._print(str(item), out=sys.stderr, color='dim cyan')
+						continue
 
-				# Add item to results
-				self.results.append(item)
-				self.results_count += 1
-				self.uuids.append(item._uuid)
-				yield item
-
-				# Print JSON or raw item
-				if self.print_item:
-					if self.output_json:
-						self._print(item, out=sys.stdout)
-					elif self.output_raw:
-						self._print(self._rawify(item), out=sys.stdout, ignore_log=True)
-
-			elif isinstance(item, str):
-				if self.print_line and not self.output_quiet:
-					self._print(item, out=sys.stderr, ignore_raw=True, ignore_log=True)
-				if self.output_return_type is not dict:
+					# Add item to results
 					self.results.append(item)
+					self.results_count += 1
+					self.uuids.append(item._uuid)
 					yield item
 
-			if item:
-				self.output += str(item) + '\n'
+					# Print JSON or raw item
+					if self.print_item and item._type != 'target':
+						if self.print_json:
+							self._print(item, out=sys.stdout)
+						elif self.print_raw:
+							self._print(str(item), out=sys.stdout)
+						else:
+							self._print(self.get_repr(item), out=sys.stdout)
 
-			self.run_hooks('on_iter')
+				elif isinstance(item, str):
+					if self.print_line:
+						self._print(item, out=sys.stderr)
+					if not self.output_json:
+						self.results.append(item)
+						yield item
+
+				if item:
+					self.output += str(item) + '\n'
+
+				self.run_hooks('on_iter')
+
+		except KeyboardInterrupt:
+			self._print('Process was killed manually (CTRL+C / CTRL+X).', color='bold red', rich=True)
+			if self.result:
+				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
+				self.stop_live_tasks(self.result)
 
 		# Filter results and log info
 		self.results = self.filter_results()
@@ -301,7 +302,10 @@ class Runner:
 		runner_name = self.__class__.__name__
 		self.log_header()
 		self._print(
-			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', ignore_log=True)
+			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True, with_timestamp=True)
+		sleep(1)  # needed to show timestamp
+		if not self.sync and self.__class__.__name__ != 'Scan':
+			self._print('🏆 [bold gold3]Live results:[/]', rich=True)
 
 	def log_header(self):
 		"""Log runner header."""
@@ -322,7 +326,7 @@ class Runner:
 
 		# Options
 		DISPLAY_OPTS_EXCLUDE = [
-			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'color', 'table', 'quiet', 'raw_yield'
+			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'quiet'
 		]
 		items = [
 			f'[italic]{k}[/]: {v}'
@@ -348,7 +352,7 @@ class Runner:
 			expand=False,
 			highlight=True
 		)
-		self._print(panel, ignore_log=True)
+		self._print(panel, rich=True)
 
 	def log_results(self):
 		"""Log results.
@@ -363,6 +367,14 @@ class Runner:
 		self.status = 'SUCCESS' if not self.errors else 'FAILED'
 		self.end_time = datetime.fromtimestamp(time())
 
+		# Log execution results
+		status = 'succeeded' if not self.errors else '[bold red]failed[/]'
+		if self.print_run_summary:
+			self._print('\n')
+			self._print(
+				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
+				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True, with_timestamp=True)
+
 		# Log runner errors
 		for error in self.errors:
 			self._print(error, color='bold red')
@@ -375,22 +387,16 @@ class Runner:
 			self.report = report
 
 		# Log results count
-		if self.print_item_count and self.output_json and not self.output_raw and not self.output_orig:
+		if self.print_item_count and self.print_json and not self.print_raw and not self.print_orig:
 			count_map = self._get_results_count()
 			if all(count == 0 for count in count_map.values()):
-				self._print(':adhesive_bandage: Found 0 results.', color='bold red')
+				self._print(':adhesive_bandage: Found 0 results.', color='bold red', rich=True)
 			else:
 				results_str = ':pill: Found ' + ' and '.join([
 					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
 					for name, count in count_map.items()
 				]) + '.'
-				self._print(results_str, color='bold green')
-
-		# Log execution results
-		if self.print_summary:
-			self._print(
-				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
-				f'[bold green]finished successfully in[/] [bold gold3]{self.elapsed_human}[/].', ignore_log=self.sync)
+				self._print(results_str, color='bold green', rich=True)
 
 	@staticmethod
 	def get_live_results(result):
@@ -418,6 +424,18 @@ class Runner:
 
 			# Sleep between updates
 			sleep(1)
+
+	def stop_live_tasks(self, result):
+		"""Stop live tasks running in Celery worker.
+
+		Args:
+			result (AsyncResult | GroupResult): Celery result.
+		"""
+		task_ids = []
+		get_task_ids(result, ids=task_ids)
+		for task_id in task_ids:
+			from secator.celery import revoke_task
+			revoke_task(task_id)
 
 	def process_live_tasks(self, result, description=True, results_only=True, print_remote_status=True):
 		"""Rich progress indicator showing live tasks statuses.
@@ -452,7 +470,11 @@ class Runner:
 				TimeElapsedColumn(),
 				TextColumn('{task.fields[count]}'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
-				refresh_per_second=1
+				refresh_per_second=1,
+				transient=True,
+				# console=console,
+				# redirect_stderr=True,
+				# redirect_stdout=False
 			)
 			state_colors = {
 				'RUNNING': 'bold yellow',
@@ -567,60 +589,33 @@ class Runner:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, ignore_raw=False, ignore_log=False):
+	def _print(self, data, color=None, out=sys.stderr, rich=False, with_timestamp=False):
 		"""Print function.
 
 		Args:
 			data (str or dict): Input data.
 			color (str, Optional): Termcolor color.
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
-			ignore_raw (bool, Optional): Ignore raw mode.
-			ignore_log (bool, Optional): Ignore log stamps.
+			rich (bool, Optional): Force rich output.
 		"""
 		# Choose rich console
 		_console = console_stdout if out == sys.stdout else console
-		log_json = console.print_json
-		log = console.log if self.print_timestamp else _console.print
 
 		# Print a JSON item
 		if isinstance(data, (OutputType, DotMap, dict)):
-			# If object has a 'toDict' method, use it
 			if getattr(data, 'toDict', None):
 				data = data.toDict()
-
-			# JSON dumps data so that it's consumable by other commands
 			data = json.dumps(data)
-
-			# Add prefix to output
 			data = f'{self.prefix:>15} {data}' if self.prefix and not self.print_item else data
+			print(data, file=out)
 
-			# We might want to parse results with e.g 'jq' so we need pure JSON line with no logging info clarifies the
-			# user intent to use it for visualizing results.
-			try:
-				log_json(data) if self.output_color and self.print_item else _console.print(data, highlight=False)
-			except:  # noqa: E72
-				print(data)
+		# Print a line with timestamp
+		elif with_timestamp:
+			_console.log(data, highlight=False, style=color)
 
 		# Print a line
 		else:
-			# If orig mode (--orig) or raw mode (--raw), we might want to parse results with e.g pipe redirections, so
-			# we need a pure line with no logging info.
-			if ignore_log or (not ignore_raw and (self.output_orig or self.output_raw)):
-				data = f'{self.prefix} {data}' if self.prefix and not self.print_item else data
-				try:
-					_console.print(data, highlight=False, style=color)
-				except:  # noqa: E72
-					print(data)
-			else:
-				# data = escape(data)
-				# data = Text.from_ansi(data)
-				if color:
-					data = f'[{color}]{data}[/]'
-				data = f'{self.prefix} {data}' if self.prefix else data
-				try:
-					log(data)
-				except:  # noqa: E722
-					print(data)
+			_console.print(data, highlight=False, style=color) if self.sync or rich else print(data, file=out)
 
 	def _set_print_prefix(self):
 		self.prefix = ''
@@ -650,7 +645,7 @@ class Runner:
 			return None
 
 		# Convert output dict to another schema
-		if isinstance(item, dict) and not self.output_orig:
+		if isinstance(item, dict) and not self.print_orig:
 			item = self._convert_item_schema(item)
 		elif isinstance(item, OutputType):
 			pass
@@ -666,21 +661,20 @@ class Runner:
 			self.progress = item.percent
 
 		# Run item convert hooks
-		if not self.output_orig:
+		if not self.print_orig:
 			item = self.run_hooks('on_item', item)
 
 		# Return item
 		return item
 
-	def _rawify(self, item=None):
+	def get_repr(self, item=None):
 		if not item:
 			return [
-				self._rawify(item)
+				self.get_repr(item)
 				for item in self.results
 			]
-		if self.output_raw:
-			if self.output_fmt:
-				item = self.output_fmt.format(**item)
-			elif isinstance(item, OutputType):
-				item = str(item)
+		if self.output_fmt:
+			item = self.output_fmt.format(**item.toDict())
+		elif isinstance(item, OutputType):
+			item = repr(item)
 		return item
