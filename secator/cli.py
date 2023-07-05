@@ -505,9 +505,9 @@ def record(record_name, script, interactive, width, height, output_dir):
 #------#
 
 
-@cli.group(aliases=['t', 'tests'])
+@cli.group()
 def test():
-	"""Tests."""
+	"""Run tests."""
 	pass
 
 
