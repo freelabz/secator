@@ -87,31 +87,25 @@ pip3 install git+https://github.com/freelabz/secator.git
 <details>
 	<summary>Bash one-liner</summary>
 
-	```sh
 	git clone https://github.com/freelabz/secator && sh ./scripts/install.sh
-	```
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	```sh
 	docker build -t secator
-	```
 
 </details>
 
 <details>
 	<summary>Development build</summary>
 
-	```sh
 	git clone https://github.com/freelabz/secator
 	cd secator
 	python3 -m virtualenv -p python3 ~/.virtualenvs/secator
 	source ~/.virtualenvs/secator/bin/activate
 	pip3 install -e .
-	```
 
 </details>
 
