@@ -18,8 +18,7 @@
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#supported-commands">Supported commands</a> •
-  <a href="#requirements">Requirements</a> •
-  <a href="#installation">Installation</a> •
+  <a href="#install-secator">Installation</a> •
   <a href="#usage">Usage</a> •
   <a href="https://docs.freelabz.com">Documentation</a>
 </p>
@@ -81,37 +80,31 @@ check that the command complies with our selection criterias before doing so. If
 Secator requires **python >= 3.8** to install successfully. Run the following command to install the latest version:
 
 ```sh
-pip3 install secator
+pip3 install git+https://github.com/freelabz/secator.git
 ```
 
 <details>
 	<summary>Bash one-liner</summary>
 
-	```sh
-	curl https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh?token=<GITHUB_TOKEN> | sh
-	```
+	git clone https://github.com/freelabz/secator && sh ./scripts/install.sh
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	```sh
 	docker build -t secator
-	```
 
 </details>
 
 <details>
 	<summary>Development build</summary>
 
-	```sh
 	git clone https://github.com/freelabz/secator
 	cd secator
 	python3 -m virtualenv -p python3 ~/.virtualenvs/secator
 	source ~/.virtualenvs/secator/bin/activate
 	pip3 install -e .
-	```
 
 </details>
 
