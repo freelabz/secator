@@ -7,7 +7,7 @@ cd secator
 ./scripts/install_commands.sh
 pip3 install virtualenv
 virtualenv ~/.secator/venv
-echo "export PATH=$PATH:~/go/bin" >> ~/.bashrc
+echo "export PATH=$PATH:~/go/bin:~/.local/bin" >> ~/.bashrc
 echo "source ~/.secator/venv/bin/activate" >> ~/.bashrc
 source ~/.bashrc
 pip3 install -r requirements.txt

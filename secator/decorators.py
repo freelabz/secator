@@ -9,7 +9,7 @@ from secator.celery import is_celery_worker_alive
 from secator.definitions import OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
-                           get_command_cls)
+						   get_command_cls)
 
 RUNNER_OPTS = {
 	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
@@ -248,10 +248,8 @@ def register_runner(cli_endpoint, config):
 			sync = True
 		elif worker:
 			sync = False
-		elif cli_endpoint.name in ['scan', 'workflow']:  # automatically run in worker if it's alive
+		else:  # automatically run in worker if it's alive
 			sync = not is_celery_worker_alive()
-		else:
-			sync = True
 		opts['sync'] = sync
 		if cli_endpoint.name in ['scan', 'workflow']:
 			opts.update({

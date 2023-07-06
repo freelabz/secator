@@ -6,12 +6,12 @@ import xmltodict
 
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
-                                 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, ID,
-                                 IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
-                                 PORTS, PROVIDER, PROXY, RATE_LIMIT,
-                                 REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
-                                 SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
-                                 USER_AGENT)
+								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, ID,
+								 IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
+								 PORTS, PROVIDER, PROXY, RATE_LIMIT,
+								 REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
+								 SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
+								 USER_AGENT)
 from secator.output_types import Port, Vulnerability
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp

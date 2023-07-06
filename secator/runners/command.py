@@ -246,7 +246,8 @@ class Command(Runner):
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
-		cmd_instance.print_line = True
+		cmd_instance.print_line = not kwargs.get('quiet', False)
+		cmd_instance.print_item = not kwargs.get('quiet', False)
 		cmd_instance.run()
 		return cmd_instance
 
