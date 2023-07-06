@@ -81,7 +81,7 @@ check that the command complies with our selection criterias before doing so. If
 Secator requires **python >= 3.8** to install successfully. Run the following command to install the latest version:
 
 ```sh
-pip3 install secator
+pip3 install git+https://github.com/freelabz/secator.git
 ```
 
 <details>
