@@ -7,7 +7,6 @@ import celery
 from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
-from dotenv import load_dotenv
 
 from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
 								 CELERY_RESULT_BACKEND)
@@ -17,7 +16,6 @@ from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, deduplicate, discover_external_tasks,
 						   discover_internal_tasks, flatten)
 
-load_dotenv()
 logger = logging.getLogger(__name__)
 
 trace.LOG_SUCCESS = """\

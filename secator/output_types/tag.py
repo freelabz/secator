@@ -21,7 +21,7 @@ class Tag(OutputType):
 		super().__post_init__()
 
 	def __str__(self) -> str:
-		return self.match + ' -> ' + ' '.join([v for k, v in self.extra_data.items() if k != 'source'])
+		return self.match
 
 	def __repr__(self) -> str:
 		cyan = Fore.CYAN
