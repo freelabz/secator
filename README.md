@@ -18,7 +18,7 @@
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#supported-commands">Supported commands</a> •
-  <a href="#installation">Installation</a> •
+  <a href="#install-secator">Installation</a> •
   <a href="#usage">Usage</a> •
   <a href="https://docs.freelabz.com">Documentation</a>
 </p>
