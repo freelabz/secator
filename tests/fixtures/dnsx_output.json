@@ -1,11 +1,9 @@
 {
-    "host": "example.com",
-    "name": "12.15.16.17",
-    "type": "A",
-    "_source": "dnsx",
-    "_context": {
-        "workspace_name": "default"
-    },
-    "_uuid": "4038e497-ee9e-4d50-beaa-172bc20ec906",
-    "_type": {}
+  "host": "***REMOVED***",
+  "name": "***REMOVED***",
+  "type": "A",
+  "_source": "dnsx",
+  "_context": { "workspace_name": "default" },
+  "_uuid": "0a17b933-f8a0-4e5a-b7bd-7c6b0d7a66ba",
+  "_type": {}
 }
