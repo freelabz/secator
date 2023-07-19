@@ -397,11 +397,10 @@ def get_nested_results(result, results=[]):
 
 def is_celery_worker_alive():
 	"""Check if a Celery worker is available."""
-	"""result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
+	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
 	result = bool(result)
 	if result:
 		console.print('Celery worker is alive !', style='bold green')
 	else:
 		console.print('No Celery worker alive.', style='bold red')
 	return result
-"""

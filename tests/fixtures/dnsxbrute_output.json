@@ -8,7 +8,7 @@
         "16.15.14.17"
     ],
     "all": [
-        "007huangjiaduchangkuaibo.***REMOVED***.\t240\tIN\tA\t***REMOVED***",
+        "example.com.\t240\tIN\tA\t***REMOVED***",
         "\n;; OPT PSEUDOSECTION:\n; EDNS: version 0; flags:; udp: 512"
     ],
     "status_code": "NOERROR",
