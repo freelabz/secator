@@ -123,7 +123,6 @@ def mock_command(cls, targets=[], opts={}, fixture=None, method=''):
 	else:
 		mocks.append(fixture)
 
-
 	with mock_subprocess_popen(mocks):
 		command = cls(targets, **opts)
 		if method == 'run':
