@@ -1,26 +1,22 @@
 {
-    "host": "15.example.com",
-    "ttl": 21600,
+    "host": "example.com",
+    "ttl": 240,
     "resolver": [
         "8.8.8.8:53"
     ],
     "a": [
-        "185.15.58.224"
-    ],
-    "cname": [
-        "dyna.example.com"
+        "16.15.14.17"
     ],
     "all": [
-        "15.example.com.\t21600\tIN\tCNAME\tdyna.example.com.",
-        "dyna.example.com.\t600\tIN\tA\t185.15.58.224",
+        "007huangjiaduchangkuaibo.jahmyst.synology.me.\t240\tIN\tA\t82.66.157.114",
         "\n;; OPT PSEUDOSECTION:\n; EDNS: version 0; flags:; udp: 512"
     ],
     "status_code": "NOERROR",
-    "timestamp": "2023-07-12T17:02:17.233769799+02:00",
+    "timestamp": "2023-07-19T12:46:45.993003494Z",
     "_source": "dnsxbrute",
     "_context": {
         "workspace_name": "default"
     },
-    "_uuid": "ba4081b4-0ed5-46f5-91e1-4337fe093c07",
+    "_uuid": "2a7089cf-e13a-41c1-b5dc-50d664e6f8f8",
     "_type": {}
 }
