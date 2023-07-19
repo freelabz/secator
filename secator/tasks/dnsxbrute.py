@@ -3,9 +3,10 @@ from secator.definitions import (DEFAULT_DNS_WORDLIST, DOMAIN, HOST, RATE_LIMIT,
 from secator.output_types import Subdomain
 from secator.tasks._categories import ReconDns
 
+
 @task()
 class dnsxbrute(ReconDns):
-    """dnsx is a fast and multi-purpose DNS toolkit designed for running various probes through the retryabledns library."""
+    """dnsx is a fast and multi-purpose DNS toolkit designed for running various library."""
     cmd = 'dnsx'
     json_flag = '-json'
     input_flag = '-domain'
@@ -16,7 +17,7 @@ class dnsxbrute(ReconDns):
         THREADS: 'threads',
     }
     opts = {
-        WORDLIST: {'type': str, 'short': 'w','default': DEFAULT_DNS_WORDLIST, 'help': 'Wordlist'},
+        WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_DNS_WORDLIST, 'help': 'Wordlist'},
     }
     output_map = {
         Subdomain: {

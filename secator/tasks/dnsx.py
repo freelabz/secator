@@ -1,12 +1,13 @@
 from secator.decorators import task
-from secator.definitions import (DEFAULT_DNS_WORDLIST, DOMAIN, HOST,NAME ,OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS,TYPE ,WORDLIST)
+from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
 from secator.output_types import Record
 from secator.tasks._categories import ReconDns
 import json
 
+
 @task()
 class dnsx(ReconDns):
-	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various probes through the retryabledns library."""
+	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -resp -a -aaaa -cname -mx -ns -txt -srv -ptr -soa -axfr -caa'
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
@@ -20,7 +21,7 @@ class dnsx(ReconDns):
 	opts = {
 
 	}
-	
+
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
 
 	def item_loader(self, line):
@@ -28,7 +29,7 @@ class dnsx(ReconDns):
 		try:
 			item = json.loads(line)
 			host = item['host']
-			record_types = ['a', 'aaaa', 'cname','mx','ns','txt','srv','ptr','soa','axfr','caa']
+			record_types = ['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'srv', 'ptr', 'soa', 'axfr', 'caa']
 			for _type in record_types:
 				values = item.get(_type, [])
 				for value in values:
