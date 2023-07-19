@@ -1,59 +1,11 @@
 {
     "host": "example.com",
-    "ttl": 7,
-    "resolver": [
-        "1.0.0.1:53"
-    ],
-    "a": [
-        "185.15.58.224"
-    ],
-    "aaaa": [
-        "2a02:ec80:600:ed1a::1"
-    ],
-    "mx": [
-        "mx1001.example.com",
-        "mx2001.example.com"
-    ],
-    "soa": [
-        "ns0.example.com",
-        "hostmaster.example.com"
-    ],
-    "ns": [
-        "ns0.example.com",
-        "ns1.example.com",
-        "ns2.example.com"
-    ],
-    "txt": [
-        "google-site-verification=AMHkgs-4ViEvIJf5znZle-BSE2EPNFqM1nDJGRyn2qk",
-        "yandex-verification: 35c08d23099dc863",
-        "v=spf1 include:example.com ~all"
-    ],
-    "caa": [
-        "mailto:dns-admin@example.com",
-        "digicert.com",
-        "letsencrypt.org"
-    ],
-    "all": [
-        "example.com.\t7\tIN\tA\t185.15.58.224",
-        "\n;; OPT PSEUDOSECTION:\n; EDNS: version 0; flags:; udp: 1232",
-        "example.com.\t45\tIN\tAAAA\t2a02:ec80:600:ed1a::1",
-        "example.com.\t3550\tIN\tSOA\tns0.example.com. hostmaster.example.com. 2022030414 43200 7200 1209600 3600",
-        "example.com.\t3600\tIN\tSOA\tns0.example.com. hostmaster.example.com. 2022030414 43200 7200 1209600 3600",
-        "example.com.\t600\tIN\tTXT\t\"google-site-verification=AMHkgs-4ViEvIJf5znZle-BSE2EPNFqM1nDJGRyn2qk\"",
-        "example.com.\t600\tIN\tTXT\t\"yandex-verification: 35c08d23099dc863\"",
-        "example.com.\t600\tIN\tTXT\t\"v=spf1 include:example.com ~all\"",
-        "example.com.\t3600\tIN\tMX\t10 mx1001.example.com.",
-        "example.com.\t3600\tIN\tMX\t10 mx2001.example.com.",
-        "example.com.\t86400\tIN\tNS\tns0.example.com.",
-        "example.com.\t86400\tIN\tNS\tns1.example.com.",
-        "example.com.\t86400\tIN\tNS\tns2.example.com.",
-        "example.com.\t600\tIN\tCAA\t0 iodef \"mailto:dns-admin@example.com\"",
-        "example.com.\t600\tIN\tCAA\t0 issue \"digicert.com\"",
-        "example.com.\t600\tIN\tCAA\t0 issue \"letsencrypt.org\""
-    ],
-    "status_code": "NOERROR",
-    "axfr": {
-        "host": "example.com"
+    "name": "12.15.16.17",
+    "type": "A",
+    "_source": "dnsx",
+    "_context": {
+        "workspace_name": "default"
     },
-    "timestamp": "2023-07-12T16:58:51.592486995+02:00"
+    "_uuid": "4038e497-ee9e-4d50-beaa-172bc20ec906",
+    "_type": {}
 }
