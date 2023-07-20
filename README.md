@@ -70,6 +70,7 @@ and it is designed to improve productivity for pentesters and security researche
 | [wpscan](https://github.com/wpscanteam/wpscan)                | WordPress Security Scanner                                                     | `vuln/multi`   |
 | [nmap](https://github.com/nmap/nmap)                          | Vulnerability scanner using NSE scripts.                                       | `vuln/multi`   |
 | [nuclei](https://github.com/projectdiscovery/nuclei)          | Fast and customisable vulnerability scanner based on simple YAML based DSL.    | `vuln/multi`   |
+| [dnsx](https://github.com/projectdiscovery/dnsx)              | A fast and multi-purpose DNS toolkit designed for running DNS queries.         | `recon/dns`    |
 
 Feel free to request new commands to be added by opening an issue, but please 
 check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
