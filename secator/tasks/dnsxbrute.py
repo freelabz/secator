@@ -18,6 +18,7 @@ class dnsxbrute(ReconDns):
     }
     opts = {
         WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_DNS_WORDLIST, 'help': 'Wordlist'},
+        'trace': {'is_flag': True, 'default': False, 'help': 'perfomr dns tracing'},
     }
     output_map = {
         Subdomain: {
