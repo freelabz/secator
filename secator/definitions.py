@@ -71,6 +71,7 @@ DELAY = 'delay'
 DOMAIN = 'domain'
 DEPTH = 'depth'
 EXTRA_DATA = 'extra_data'
+EMAIL = 'email'
 FAILED_HTTP_STATUS = -1
 FILTER_CODES = 'filter_codes'
 FILTER_WORDS = 'filter_words'
