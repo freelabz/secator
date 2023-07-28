@@ -3,6 +3,27 @@ from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability)
 
 OUTPUTS_TASKS = {
+    'cariddi': [
+        Url(
+            url='http://localhost:3000/robots.txt',
+            status_code=200,
+            content_length=28,
+            content_type='text/plain',
+            method='GET',
+            words=4,
+            lines=2,
+            _source='cariddi'
+        ),
+        Url(
+            url='http://localhost:3000/main.js',
+            status_code=200,
+            content_type='application/javascript',
+            method='GET',
+            words=6048,
+            lines=1,
+            _source='cariddi'
+        )
+    ],
     'dirsearch': [
         Url(
             url='http://localhost:3000/.well-known/security.txt',
@@ -31,27 +52,6 @@ OUTPUTS_TASKS = {
             },
             _source='dalfox'
         ),
-    ],
-    'cariddi': [
-        Url(
-            url='http://localhost:3000/robots.txt',
-            status_code=200,
-            content_length=28,
-            content_type='text/plain',
-            method='GET',
-            words=4,
-            lines=2,
-            _source='cariddi'
-        ),
-        Url(
-            url='http://localhost:3000/main.js',
-            status_code=200,
-            content_type='application/javascript',
-            method='GET',
-            words=6048,
-            lines=1,
-            _source='cariddi'
-        )
     ],
     'feroxbuster': [
         Url(
@@ -116,6 +116,13 @@ OUTPUTS_TASKS = {
                 'ghsa_id': 'GHSA-43fp-rhv2-5gv8'
             },
             _source='grype',
+        )
+    ],
+    'h8mail': [
+        UserAccount(
+            username='test',
+            email='test@test.com',
+            _source='h8mail',
         )
     ],
     'httpx': [
