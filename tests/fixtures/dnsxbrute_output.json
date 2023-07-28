@@ -5,10 +5,10 @@
         "8.8.8.8:53"
     ],
     "a": [
-        "16.15.14.17"
+        "92.26.117.110"
     ],
     "all": [
-        "example.com.\t240\tIN\tA\t***REMOVED***",
+        "example.com.\t240\tIN\tA\t92.26.117.110",
         "\n;; OPT PSEUDOSECTION:\n; EDNS: version 0; flags:; udp: 512"
     ],
     "status_code": "NOERROR",
