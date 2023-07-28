@@ -19,9 +19,9 @@ class dnsx(ReconDns):
 		THREADS: 'threads',
 	}
 	opts = {
-        'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
+		'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
 		'resolver': {'type': str, 'short': 'r', 'help': 'List of resolvers to use (file or comma separated)'},
-		'wildcard_domain': {'type': str, 'short': 'wd', 'help':'Domain name for wildcard filtering (other flags will be ignored)'},
+		'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Domain name for wildcard filtering'},
 	}
 
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
@@ -30,7 +30,7 @@ class dnsx(ReconDns):
 		items = []
 		try:
 			item = json.loads(line)
-			if self.print_orig: # original dnsx output
+			if self.print_orig:  # original dnsx output
 				return item
 			host = item['host']
 			record_types = ['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'srv', 'ptr', 'soa', 'axfr', 'caa']
