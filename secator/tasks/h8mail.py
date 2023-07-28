@@ -21,7 +21,8 @@ class h8mail(OSInt):
 
 	}
 	opts = {
-		'config': {'type': str, 'help': 'Configuration file for API keys'}
+		'config': {'type': str, 'help': 'Configuration file for API keys'},
+		'local_breach': {'type': str, 'short': 'lb', 'help': 'Local breach file'}
 	}
 	output_map = {
 	}
@@ -53,19 +54,28 @@ class h8mail(OSInt):
 			targets = data['targets']
 			for target in targets:
 				email = target['target']
-				target_data = target['data']
-				if not len(target_data) > 0:
+				target_data = target.get('data', [])
+				pwn_num = target['pwn_num']
+				if not pwn_num > 0:
 					continue
-				entries = target_data[0]
-				for entry in entries:
-					source, site_name = tuple(entry.split(':'))
+				if len(target_data) > 0:
+					entries = target_data[0]
+					for entry in entries:
+						source, site_name = tuple(entry.split(':'))
+						yield UserAccount(**{
+							"site_name": site_name,
+							"username": email.split('@')[0],
+							"email": email,
+							"extra_data": {
+								'source': source
+							},
+						})
+				else:
 					yield UserAccount(**{
-						"site_name": site_name,
 						"username": email.split('@')[0],
 						"email": email,
 						"extra_data": {
-							'source': source
+							'source': self.get_opt_value('local_breach')
 						},
 					})
-
 		self.print_item_count = prev
