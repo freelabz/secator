@@ -17,12 +17,11 @@ class dnsx(ReconDns):
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retry',
 		THREADS: 'threads',
-		
 	}
 	opts = {
-        'trace': {'is_flag': True, 'default': False, 'help': 'perfomr dns tracing'},
-		'resolver': {'type': str, 'short': 'r', 'default': False, 'help': 'list of resolvers to use (file or comma separated)'},
-		'wildcard_domain': {'type': str, 'short': 'wd', 'default': False, 'help':'domain name for wildcard filtering (other flags will be ignored)'},
+        'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
+		'resolver': {'type': str, 'short': 'r', 'help': 'List of resolvers to use (file or comma separated)'},
+		'wildcard_domain': {'type': str, 'short': 'wd', 'help':'Domain name for wildcard filtering (other flags will be ignored)'},
 	}
 
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'

@@ -1,37 +1,8 @@
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability)
+                                Vulnerability, Record)
 
 OUTPUTS_TASKS = {
-    'dirsearch': [
-        Url(
-            url='http://localhost:3000/.well-known/security.txt',
-            status_code=200,
-            content_type='text/plain',
-            content_length=403,
-            _source='dirsearch'
-        ),
-    ],
-    'dalfox': [
-        Vulnerability(
-            matched_at='http://testphp.vulnweb.com/listproducts.php',
-            name='Verified XSS',
-            confidence='high',
-            severity='high',
-            cvss_score=0,
-            tags=['CWE-79'],
-            extra_data={
-                'inject_type': 'inHTML-URL',
-                'poc_type': 'plain',
-                'method': 'GET',
-                'data': 'http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%3C%2FScriPt%3E%3CsCripT+class%3Ddalfox%3Ealert%281%29%3C%2FsCriPt%3E',
-                'param': 'cat',
-                'payload': '</ScriPt><sCripT class=dalfox>alert(1)</sCriPt>',
-                'evidence': ''
-            },
-            _source='dalfox'
-        ),
-    ],
     'cariddi': [
         Url(
             url='http://localhost:3000/robots.txt',
@@ -52,6 +23,72 @@ OUTPUTS_TASKS = {
             lines=1,
             _source='cariddi'
         )
+    ],
+    'dirsearch': [
+        Url(
+            url='http://localhost:3000/.well-known/security.txt',
+            status_code=200,
+            content_type='text/plain',
+            content_length=403,
+            _source='dirsearch'
+        ),
+    ],
+    'dnsx': [
+        Record(
+            name='ns0.wikimedia.org',
+            type='NS',
+            host='wikipedia.org',
+            _source='dnsx'
+		),
+        Record(
+            name='185.15.58.224',
+            type='A',
+            host='wikipedia.org',
+            _source='dnsx'
+		),
+        Record(
+            name= "hostmaster.wikimedia.org",
+            type= "SOA",
+            host= "wikipedia.org",
+            _source= "dnsx"
+		),
+        Record(
+            name='digicert.com',
+            type='CAA',
+            host='wikipedia.org',
+            _source='dnsx'
+		),
+        Record(
+            name='v=spf1 include:wikimedia.org ~all',
+            type='TXT',
+            host='wikipedia.org',
+            _source='dnsx'
+		)
+	],
+    'dnsxbrute': [
+        Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+        Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+	],
+    'dalfox': [
+        Vulnerability(
+            matched_at='http://testphp.vulnweb.com/listproducts.php',
+            name='Verified XSS',
+            confidence='high',
+            severity='high',
+            cvss_score=0,
+            tags=['CWE-79'],
+            extra_data={
+                'inject_type': 'inHTML-URL',
+                'poc_type': 'plain',
+                'method': 'GET',
+                'data': 'http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%3C%2FScriPt%3E%3CsCripT+class%3Ddalfox%3Ealert%281%29%3C%2FsCriPt%3E',
+                'param': 'cat',
+                'payload': '</ScriPt><sCripT class=dalfox>alert(1)</sCriPt>',
+                'evidence': ''
+            },
+            _source='dalfox'
+        ),
     ],
     'feroxbuster': [
         Url(
@@ -208,7 +245,6 @@ OUTPUTS_TASKS = {
 			cvss_score=0,
 			tags=['readme'],
 			_source='wpscan'),
-        
 	]
 }
 
