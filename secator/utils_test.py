@@ -164,7 +164,6 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 					print(repr(item))
 
 				if expected_output_types:
-					print(item)
 					self.assertIn(type(item), expected_output_types)
 
 				if expected_output_keys:
