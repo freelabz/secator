@@ -1,6 +1,6 @@
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability)
+                                Vulnerability, Record)
 
 OUTPUTS_TASKS = {
     'cariddi': [
@@ -33,6 +33,46 @@ OUTPUTS_TASKS = {
             _source='dirsearch'
         ),
     ],
+<<<<<<< HEAD
+=======
+    'dnsx': [
+        Record(
+            name='ns0.wikimedia.org',
+            type='NS',
+            host='wikipedia.org',
+            _source='dnsx'
+		),
+        Record(
+            name='185.15.58.224',
+            type='A',
+            host='wikipedia.org',
+            _source='dnsx'
+		),
+        Record(
+            name= "hostmaster.wikimedia.org",
+            type= "SOA",
+            host= "wikipedia.org",
+            _source= "dnsx"
+		),
+        Record(
+            name='digicert.com',
+            type='CAA',
+            host='wikipedia.org',
+            _source='dnsx'
+		),
+        Record(
+            name='v=spf1 include:wikimedia.org ~all',
+            type='TXT',
+            host='wikipedia.org',
+            _source='dnsx'
+		)
+	],
+    'dnsxbrute': [
+        Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+        Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+	],
+>>>>>>> main
     'dalfox': [
         Vulnerability(
             matched_at='http://testphp.vulnweb.com/listproducts.php',
@@ -215,7 +255,6 @@ OUTPUTS_TASKS = {
 			cvss_score=0,
 			tags=['readme'],
 			_source='wpscan'),
-        
 	]
 }
 
