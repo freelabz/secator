@@ -15,12 +15,9 @@ INPUTS_TASKS = {
     'nuclei': 'http://localhost:3000/',
     'subfinder': 'api.github.com',
     'wpscan': 'http://localhost:8000/',
-<<<<<<< HEAD
-    'h8mail': 'test@test.com'
-=======
+    'h8mail': 'test@test.com',
     'dnsx': 'wikipedia.org',
     'dnsxbrute': 'wikipedia.org'
->>>>>>> main
 }
 
 INPUTS_WORKFLOWS = {
