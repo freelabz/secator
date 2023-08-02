@@ -7,9 +7,10 @@ from colorama import Fore
 
 @dataclass
 class UserAccount(OutputType):
-	site_name: str
 	username: str
 	url: str = ''
+	email: str = ''
+	site_name: str = ''
 	extra_data: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='user_account', repr=True)
@@ -24,7 +25,13 @@ class UserAccount(OutputType):
 		return self.url
 
 	def __repr__(self) -> str:
-		s = f'👤 {Fore.GREEN}{self.site_name}{Fore.RESET} ({self.url})'
+		s = f'👤 {Fore.GREEN}{self.username}{Fore.RESET}'
+		if self.email:
+			s += f' [{self.email}]'
+		if self.site_name:
+			s += f' [{self.site_name}]'
+		if self.url:
+			s += f' [{self.url}]'
 		if self.extra_data:
 			s += f' [{Fore.YELLOW}' + ', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + f'{Fore.RESET}]'
 		return s

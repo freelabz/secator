@@ -155,6 +155,13 @@ OUTPUTS_TASKS = {
             _source='grype',
         )
     ],
+    'h8mail': [
+        UserAccount(
+            username='test',
+            email='test@test.com',
+            _source='h8mail',
+        )
+    ],
     'httpx': [
         Url(
             url='http://localhost:3000',
