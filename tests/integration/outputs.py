@@ -33,8 +33,6 @@ OUTPUTS_TASKS = {
             _source='dirsearch'
         ),
     ],
-<<<<<<< HEAD
-=======
     'dnsx': [
         Record(
             name='ns0.wikimedia.org',
@@ -72,7 +70,6 @@ OUTPUTS_TASKS = {
         Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
 		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
 	],
->>>>>>> main
     'dalfox': [
         Vulnerability(
             matched_at='http://testphp.vulnweb.com/listproducts.php',
