@@ -14,7 +14,9 @@ INPUTS_TASKS = {
     'grype': ROOT_FOLDER,
     'nuclei': 'http://localhost:3000/',
     'subfinder': 'api.github.com',
-    'wpscan': 'http://localhost:8000/'
+    'wpscan': 'http://localhost:8000/',
+    'dnsx': 'wikipedia.org',
+    'dnsxbrute': 'wikipedia.org'
 }
 
 INPUTS_WORKFLOWS = {

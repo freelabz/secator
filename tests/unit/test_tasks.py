@@ -246,6 +246,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 
 				# Run command
 				targets = INPUTS_TASKS[cls.input_type]
+
 				with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
 					self._test_task_output(
 						results,
