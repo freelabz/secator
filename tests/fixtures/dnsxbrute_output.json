@@ -1,0 +1,22 @@
+{
+    "host": "example.com",
+    "ttl": 240,
+    "resolver": [
+        "8.8.8.8:53"
+    ],
+    "a": [
+        "92.26.117.110"
+    ],
+    "all": [
+        "example.com.\t240\tIN\tA\t92.26.117.110",
+        "\n;; OPT PSEUDOSECTION:\n; EDNS: version 0; flags:; udp: 512"
+    ],
+    "status_code": "NOERROR",
+    "timestamp": "2023-07-19T12:46:45.993003494Z",
+    "_source": "dnsxbrute",
+    "_context": {
+        "workspace_name": "default"
+    },
+    "_uuid": "2a7089cf-e13a-41c1-b5dc-50d664e6f8f8",
+    "_type": {}
+}

@@ -55,6 +55,7 @@ DEFAULT_PROXYCHAINS_COMMAND = "proxychains"
 
 # Constants
 DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
+DEFAULT_DNS_WORDLIST = '/usr/share/seclists/Discovery/DNS/combined_subdomains.txt'
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
 
@@ -101,6 +102,7 @@ THREADS = 'threads'
 TIME = 'time'
 TIMEOUT = 'timeout'
 TOP_PORTS = 'top_ports'
+TYPE = 'type'
 URL = 'url'
 USER_AGENT = 'user_agent'
 USERNAME = 'username'

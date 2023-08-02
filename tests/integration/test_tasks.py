@@ -49,7 +49,8 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 			'match_codes': '200',
 			'maigret.site': 'github',
-			'nmap.port': '3000,8080'
+			'nmap.port': '3000,8080',
+			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True)
 		}
 
 		# Merge opts
