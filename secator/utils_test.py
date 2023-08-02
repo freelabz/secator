@@ -5,7 +5,7 @@ import unittest.mock
 
 from fp.fp import FreeProxy
 
-from secator.definitions import (CIDR_RANGE, DEBUG, DELAY, DEPTH,
+from secator.definitions import (CIDR_RANGE, DEBUG, DELAY, DEPTH, EMAIL,
 							   FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
 							   METHOD, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
@@ -57,7 +57,8 @@ INPUTS_TASKS = {
 	HOST: 'fake.com',
 	USERNAME: 'test',
 	IP: '192.168.1.23',
-	CIDR_RANGE: '192.168.1.0/24'
+	CIDR_RANGE: '192.168.1.0/24',
+	EMAIL: 'fake@fake.com'
 }
 
 #---------------------#
@@ -91,7 +92,9 @@ META_OPTS = {
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
 	'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
 	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True),
-	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True)
+	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
+	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
+	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True)
 }
 
 

@@ -63,6 +63,10 @@ OPTS_VULN = [
 	HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
 ]
 
+OPTS_OSINT = [
+
+]
+
 
 #---------------#
 # HTTP category #
@@ -275,3 +279,11 @@ class VulnMulti(Vuln):
 class Tagger(Command):
 	input_type = URL
 	output_types = [Tag]
+
+#----------------#
+# osint category #
+#----------------#
+
+
+class OSInt(Command):
+	output_types = [UserAccount]
