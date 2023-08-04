@@ -20,6 +20,7 @@ def grype_item_loader(self, line):
 	}
 	data = {
 		'id': vuln_id,
+		'name': vuln_id,
 		'matched_at': self.input,
 		'confidence': 'medium',
 		'severity': severity.lower(),
@@ -32,12 +33,14 @@ def grype_item_loader(self, line):
 		data['references'] = [f'https://github.com/advisories/{vuln_id}']
 		data['tags'].extend(['cve', 'ghsa'])
 		vuln = VulnCode.lookup_ghsa(vuln_id)
-		data.update(vuln)
-		extra_data['ghsa_id'] = vuln_id
+		if vuln:
+			data.update(vuln)
+			extra_data['ghsa_id'] = vuln_id
 	elif vuln_id.startswith('CVE'):
 		vuln = VulnCode.lookup_cve(vuln_id)
-		vuln['tags'].append('cve')
-		data.update(vuln)
+		if vuln:
+			vuln['tags'].append('cve')
+			data.update(vuln)
 	data['extra_data'] = extra_data
 	return data
 
