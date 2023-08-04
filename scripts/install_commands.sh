@@ -24,6 +24,15 @@ sudo apt install -y unzip && curl -sL https://raw.githubusercontent.com/epi052/f
 # ffuf
 go install -v github.com/ffuf/ffuf@latest && sudo git clone https://github.com/danielmiessler/SecLists /usr/share/seclists || true
 
+# h8mail
+pip3 install h8mail || true
+
+# dnsx
+go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest || true
+
+# dnsxbrute
+go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest || true
+
 # subfinder
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest || true
 
@@ -49,7 +58,7 @@ curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sud
 go install -v github.com/hahwul/dalfox/v2@latest || true
 
 # wpscan
-gem install wpscan || true
+sudo gem install wpscan || true
 
 # nmap
 sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true
