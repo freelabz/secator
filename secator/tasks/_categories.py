@@ -153,7 +153,7 @@ class Vuln(Command):
 				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
 				if not cve_info:
 					logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
-				return
+					return
 			except requests.exceptions.ConnectionError:
 				return None
 
