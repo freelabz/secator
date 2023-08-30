@@ -29,5 +29,5 @@ class Tag(OutputType):
 		bright = Style.BRIGHT
 		s = f'🏷️  [{bright}{cyan}{self.name}{reset}] {self.match}'
 		if self.extra_data:
-			s += ' [' + ' '.join([v for k, v in self.extra_data.items() if k != 'source']) + ']'
+			s += ' [' + ' '.join([v for k, v in self.extra_data.items() if k != 'source' and v]) + ']'
 		return s
