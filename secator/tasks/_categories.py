@@ -258,7 +258,8 @@ class Vuln(Command):
 		data = Vuln.lookup_cve(cve_id)
 		if data:
 			data[TAGS].append('ghsa')
-		return data
+			return data
+		return None
 
 
 class VulnHttp(Vuln):

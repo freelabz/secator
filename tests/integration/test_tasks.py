@@ -43,14 +43,15 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'table': DEBUG > 0,
 		}
 		extra_opts = {
+			'dirsearch.filter_size': 1987,
+			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
-			'dirsearch.filter_size': 1987,
-			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
+			'h8mail.local_breach': load_fixture('h8mail_breach', INTEGRATION_DIR, only_path=True),
+			'nmap.port': '3000,8080',
 			'match_codes': '200',
 			'maigret.site': 'github',
-			'nmap.port': '3000,8080',
-			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True)
+			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 		}
 
 		# Merge opts
