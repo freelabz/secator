@@ -10,14 +10,20 @@ from secator.tasks._categories import VulnCode
 def grype_item_loader(self, line):
 	"""Load vulnerabilty dicts from grype line output."""
 	split = [i for i in line.split(' ') if i]
-	if not len(split) == 6 or split[0] == 'NAME':
+	if not len(split) in [5, 6] or split[0] == 'NAME':
 		return None
-	product, version_vuln, version, product_type, vuln_id, severity = tuple(split)
+	version_fixed = None
+	if len(split) == 5: # no version fixed
+		product, version, product_type, vuln_id, severity = tuple(split)
+	elif len(split) == 6:
+		product, version, version_fixed, product_type, vuln_id, severity = tuple(split)
 	extra_data = {
+		'lang': product_type,
 		'product': product,
 		'version': version,
-		'product_type': product_type
 	}
+	if version_fixed:
+		extra_data['version_fixed'] = version_fixed
 	data = {
 		'id': vuln_id,
 		'name': vuln_id,
@@ -35,12 +41,14 @@ def grype_item_loader(self, line):
 		vuln = VulnCode.lookup_ghsa(vuln_id)
 		if vuln:
 			data.update(vuln)
+			data['severity'] = data['severity'] or severity.lower()
 			extra_data['ghsa_id'] = vuln_id
 	elif vuln_id.startswith('CVE'):
 		vuln = VulnCode.lookup_cve(vuln_id)
 		if vuln:
 			vuln['tags'].append('cve')
 			data.update(vuln)
+			data['severity'] = data['severity'] or severity.lower()
 	data['extra_data'] = extra_data
 	return data
 
