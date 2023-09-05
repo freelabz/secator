@@ -24,3 +24,5 @@ results:
 
   - type: url
     condition: item.status_code != 0
+
+  - type: vulnerability

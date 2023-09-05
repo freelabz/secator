@@ -652,11 +652,14 @@ class Runner:
 		else:
 			item = DotMap(item)
 
-		# Add context to item
-		item._source = self.config.name
+		# Add context, uuid, progress to item
 		item._context = self.context
+		if not item._source:
+			item._source = self.config.name
+
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
+
 		if item._type == 'progress':
 			self.progress = item.percent
 
