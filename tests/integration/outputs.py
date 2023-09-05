@@ -134,7 +134,7 @@ OUTPUTS_TASKS = {
         Tag(name='xss', match='http://localhost:3000?q=test', _source='gf')
     ],
     'gospider': [
-        Url(url='https://danielmiessler.com/technology/', status_code=200, content_length=48, _source='gospider')
+        Url(url='https://danielmiessler.com/t/Newsletter', status_code=200, content_length=92, _source='gospider')
     ],
     'grype': [
         Vulnerability(
@@ -143,7 +143,7 @@ OUTPUTS_TASKS = {
             provider='cve.circl.lu',
             id='CVE-2022-23491',
             confidence='low',
-            severity='unknown',
+            severity='medium',
             cvss_score=0,
             tags=['ghsa'],
             extra_data={
@@ -203,7 +203,7 @@ OUTPUTS_TASKS = {
     'nuclei': [
         Vulnerability(
             matched_at='http://localhost:3000/metrics',
-            name='Prometheus Metrics - Detect',
+            name='prometheus-metrics',
             confidence='high',
             severity='medium',
             cvss_score=5.3,

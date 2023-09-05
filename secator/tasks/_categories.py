@@ -153,6 +153,7 @@ class Vuln(Command):
 				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
 				if not cve_info:
 					logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
+					return
 			except requests.exceptions.ConnectionError:
 				return None
 
@@ -255,8 +256,10 @@ class Vuln(Command):
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
 		data = Vuln.lookup_cve(cve_id)
-		data[TAGS].append('ghsa')
-		return data
+		if data:
+			data[TAGS].append('ghsa')
+			return data
+		return None
 
 
 class VulnHttp(Vuln):
