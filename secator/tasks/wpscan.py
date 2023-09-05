@@ -16,7 +16,7 @@ from secator.utils import get_file_timestamp
 @task()
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
-	cmd = 'wpscan'
+	cmd = 'wpscan --random-user-agent --force --verbose'
 	file_flag = None
 	input_flag = '--url'
 	input_type = URL

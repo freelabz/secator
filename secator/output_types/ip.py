@@ -26,4 +26,7 @@ class Ip(OutputType):
 		reset = Style.RESET_ALL
 		bright = Style.BRIGHT
 		magenta = Fore.MAGENTA
-		return f'💻 {bright}{white}{self.ip}{reset} [{magenta}{self.host}{reset}]'
+		s = f'💻 {bright}{white}{self.ip}{reset}'
+		if self.host:
+			s += f' [{magenta}{self.host}{reset}]'
+		return s
