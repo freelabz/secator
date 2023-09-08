@@ -41,8 +41,8 @@ OUTPUTS_TASKS = {
             _source='dnsx'
 		),
         Record(
-            name='185.15.58.224',
-            type='A',
+            name='host',
+            type='AXFR',
             host='wikipedia.org',
             _source='dnsx'
 		),
@@ -63,7 +63,7 @@ OUTPUTS_TASKS = {
             type='TXT',
             host='wikipedia.org',
             _source='dnsx'
-		)
+		),
 	],
     'dnsxbrute': [
         Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
@@ -217,7 +217,7 @@ OUTPUTS_TASKS = {
     ],
     'wpscan': [
         Tag(
-            name='Wordpress theme - twentytwentythree 1.1',
+            name='Wordpress theme - twentytwentythree 1.2',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(
