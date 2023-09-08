@@ -4,7 +4,7 @@ import os
 
 from pkg_resources import get_distribution
 from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv(usecwd=True), override=True)
+load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # Globals
 VERSION = get_distribution('secator').version

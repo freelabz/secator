@@ -13,7 +13,7 @@ def grype_item_loader(self, line):
 	if not len(split) in [5, 6] or split[0] == 'NAME':
 		return None
 	version_fixed = None
-	if len(split) == 5: # no version fixed
+	if len(split) == 5:  # no version fixed
 		product, version, product_type, vuln_id, severity = tuple(split)
 	elif len(split) == 6:
 		product, version, version_fixed, product_type, vuln_id, severity = tuple(split)
