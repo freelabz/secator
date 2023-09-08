@@ -578,8 +578,8 @@ class Runner:
 				break  # found an item that fits
 			except (TypeError, KeyError) as e:  # can't load using class
 				if DEBUG > 2:
-					logger.debug(f'Failed loading item with {klass}: {str(e)}. Continuing')
-					raise e
+					console.print_exception(show_locals=True)
+					console.print(f'Failed loading item with {klass}: {str(e)}. Continuing')
 				continue
 
 		# No output type was found, so make no conversion

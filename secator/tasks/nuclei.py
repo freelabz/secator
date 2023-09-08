@@ -54,7 +54,7 @@ class nuclei(VulnMulti):
 			CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
 			MATCHED_AT:  'matched-at',
 			TAGS: lambda x: x['info']['tags'],
-			REFERENCES: lambda x: x['info']['reference'],
+			REFERENCES: lambda x: x['info'].get('reference', []),
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 			PROVIDER: 'nuclei',
 		},
