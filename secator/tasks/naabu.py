@@ -39,7 +39,7 @@ class naabu(ReconPort):
 	}
 	output_map = {
 		Port: {
-			PORT: lambda x: x['port']['Port'],
+			PORT: lambda x: x['port'],
 			HOST: lambda x: x['host'] if 'host' in x else x['ip']
 		}
 	}

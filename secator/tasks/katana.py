@@ -18,7 +18,7 @@ class katana(HttpCrawler):
 	cmd = 'katana -silent -jc -js-crawl -known-files all'
 	file_flag = '-list'
 	input_flag = '-u'
-	json_flag = '-json'
+	json_flag = '-jsonl'
 	opts = {
 		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
 		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'}
