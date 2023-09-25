@@ -157,19 +157,19 @@ class Command(Runner):
 
 		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
 		results = kwargs.get('results', [])
-		return run_command.delay(results, cls.__name__, *args, opts=kwargs)
+		return run_command.apply_async(args=[results, cls.__name__] + list(args), kwargs={'opts': kwargs}, queue='fast')
 
 	@classmethod
 	def s(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.s(cls.__name__, *args, opts=kwargs)
+		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue='fast')
 
 	@classmethod
 	def si(cls, results, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.si(results, cls.__name__, *args, opts=kwargs)
+		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue='fast')
 
 	@classmethod
 	def poll(cls, result):
