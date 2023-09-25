@@ -10,7 +10,7 @@ class Task(Runner):
 
 	def delay(cls, *args, **kwargs):
 		from secator.celery import run_task
-		return run_task.apply_async(args=args, kwargs=kwargs, queue='fast')
+		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='fast')
 
 	def yielder(self):
 		"""Run task.
