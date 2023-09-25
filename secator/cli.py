@@ -26,8 +26,8 @@ click.rich_click.USE_RICH_MARKUP = True
 
 ALL_TASKS = discover_tasks()
 ALL_CONFIGS = ConfigLoader.load_all()
-ALL_WORKFLOWS = ALL_CONFIGS.workflows
-ALL_SCANS = ALL_CONFIGS.scans
+ALL_WORKFLOWS = ALL_CONFIGS.workflow
+ALL_SCANS = ALL_CONFIGS.scan
 DEFAULT_CMD_OPTS = {
 	'no_capture': True,
 	'print_cmd': True,
@@ -122,13 +122,15 @@ def report_show(json_path, exclude_fields):
 @click.option('-n', '--name', type=str, default='runner', help='Celery worker name (unique).')
 @click.option('-c', '--concurrency', type=int, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
-@click.option('--check', is_flag=True, help='Check if Celery git sworker is alive.')
-def worker(name, concurrency, reload, check):
+@click.option('-Q', '--queue', type=str, default='celery', help='Listen to a specific queue.')
+@click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
+@click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
+def worker(name, concurrency, reload, queue, pool, check):
 	"""Celery worker."""
 	if check:
 		is_celery_worker_alive()
 		return
-	cmd = f'celery -A secator.celery.app worker -n {name}'
+	cmd = f'celery -A secator.celery.app worker -P {pool} -n {name} -Q {queue}'
 	if concurrency:
 		cmd += f' -c {concurrency}'
 	if reload:
