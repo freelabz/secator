@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (DEFAULT_DNS_WORDLIST, DOMAIN, HOST, RATE_LIMIT, RETRIES, THREADS, WORDLIST)
+from secator.definitions import (DEFAULT_DNS_WORDLIST, DOMAIN, HOST, RATE_LIMIT, RETRIES, THREADS, WORDLIST, EXTRA_DATA)
 from secator.output_types import Subdomain
 from secator.tasks._categories import ReconDns
 
@@ -18,12 +18,17 @@ class dnsxbrute(ReconDns):
     }
     opts = {
         WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_DNS_WORDLIST, 'help': 'Wordlist'},
-        'trace': {'is_flag': True, 'default': False, 'help': 'perfomr dns tracing'},
+        'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
     }
     output_map = {
         Subdomain: {
             HOST: 'host',
-            DOMAIN: lambda x: ".".join(x['host'].split('.')[1:])
+            DOMAIN: lambda x: ".".join(x['host'].split('.')[1:]),
+            EXTRA_DATA: lambda x: {
+                'resolver': x['resolver'],
+                'status_code': x['status_code']
+			}
         }
     }
     install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
+    profile = 'cpu'

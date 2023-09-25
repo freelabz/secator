@@ -1,4 +1,3 @@
-import os
 from collections import OrderedDict
 
 import rich_click as click
@@ -17,6 +16,7 @@ RUNNER_OPTS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
+	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
 	'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
@@ -25,8 +25,9 @@ RUNNER_OPTS = {
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
 	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
-	'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
+	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
+	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 }
 
 DEFAULT_CLI_OPTIONS = list(RUNNER_OPTS.keys()) + list(RUNNER_GLOBAL_OPTS.keys())
@@ -160,6 +161,7 @@ def task():
 def register_runner(cli_endpoint, config):
 	fmt_opts = {
 		'print_cmd': True,
+		'print_progress': True
 	}
 	short_help = ''
 	input_type = 'targets'
@@ -234,17 +236,17 @@ def register_runner(cli_endpoint, config):
 		opts.update(fmt_opts)
 		sync = opts['sync']
 		worker = opts['worker']
-		debug = opts['debug']
+		# debug = opts['debug']
 		ws = opts.pop('workspace')
+		driver = opts.pop('driver', '')
+		show = opts['show']
 		context = {'workspace_name': ws}
-		if debug:
-			os.environ['DEBUG'] = str(debug)
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
-		if sync:
+		if sync or show:
 			sync = True
 		elif worker:
 			sync = False
@@ -256,15 +258,20 @@ def register_runner(cli_endpoint, config):
 				'print_item': not sync,
 				'print_line': sync,
 				'print_remote_status': not sync,
-				'print_results': not sync,
 			})
 		else:  # task
 			opts.update({
 				'print_start': not sync,
 			})
 
+		# Build hooks from driver name
+		hooks = {}
+		if driver == 'mongodb':
+			from secator.hooks.mongodb import MONGODB_HOOKS
+			hooks = MONGODB_HOOKS
+
 		# Build exporters
-		runner = runner_cls(config, targets, run_opts=opts, context=context)
+		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}

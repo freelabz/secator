@@ -46,6 +46,7 @@ class cariddi(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
 	proxy_http = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
+	profile = 'cpu'
 
 	def item_loader(self, line):
 		items = []
@@ -65,7 +66,7 @@ class cariddi(HttpCrawler):
 				for attack in param['attacks']:
 					extra_data = {'param': param_name, 'source': 'url'}
 					item = {
-						'name': attack.lower(),
+						'name': attack + ' param',
 						'match': url,
 						'extra_data': extra_data
 					}
@@ -73,7 +74,7 @@ class cariddi(HttpCrawler):
 
 			for error in errors:
 				match = error['match']
-				match = (match[:75] + '..') if len(match) > 75 else match  # truncate as this can be a very long match
+				match = (match[:1000] + '...TRUNCATED') if len(match) > 1000 else match  # truncate as this can be a very long match
 				error['extra_data'] = {'error': match, 'source': 'body'}
 				error['match'] = url
 				items.append(error)
@@ -85,6 +86,9 @@ class cariddi(HttpCrawler):
 				items.append(secret)
 
 			for info in infos:
+				CARIDDI_IGNORE_LIST = ['BTC address']
+				if info['name'] in CARIDDI_IGNORE_LIST:
+					continue
 				match = info['match']
 				info['extra_data'] = {'info': match, 'source': 'body'}
 				info['match'] = url

@@ -1,3 +1,4 @@
+import gc
 import logging
 import traceback
 import uuid
@@ -7,16 +8,34 @@ import celery
 from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
+# from pyinstrument import Profiler
+from rich.logging import RichHandler
 
-from kombu import Queue
-
-from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
-								 CELERY_RESULT_BACKEND)
+from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
+								 CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_URL,
+								 CELERY_BROKER_VISIBILITY_TIMEOUT,
+								 CELERY_DATA_FOLDER,
+								 CELERY_OVERRIDE_DEFAULT_LOGGING,
+								 CELERY_RESULT_BACKEND, DEBUG)
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, deduplicate, discover_external_tasks,
 						   discover_internal_tasks, flatten)
+
+# from pathlib import Path
+# import memray
+
+rich_handler = RichHandler(rich_tracebacks=True)
+rich_handler.setLevel(logging.INFO)
+logging.basicConfig(
+	level='NOTSET',
+	format="%(threadName)s:%(message)s",
+	datefmt="[%X]",
+	handlers=[rich_handler],
+	force=True)
+logging.getLogger('kombu').setLevel(logging.ERROR)
+logging.getLogger('celery').setLevel(logging.INFO if DEBUG > 2 else logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -27,44 +46,64 @@ COMMANDS = discover_internal_tasks() + discover_external_tasks()
 
 app = celery.Celery(__name__)
 app.conf.update({
+	# Worker config
+	'worker_send_task_events': True,
+	'worker_prefetch_multiplier': 1,
+	'worker_max_tasks_per_child': 10,
+
 	# Broker config
 	'broker_url': CELERY_BROKER_URL,
 	'broker_transport_options': {
 		'data_folder_in': CELERY_DATA_FOLDER,
 		'data_folder_out': CELERY_DATA_FOLDER,
+		'visibility_timeout': CELERY_BROKER_VISIBILITY_TIMEOUT,
 	},
 	'broker_connection_retry_on_startup': True,
-
-	# Serialization / compression
-	'accept_content': ['application/x-python-serialize'],
-	'task_compression': 'gzip',
-	'task_serializer': 'pickle',
-	'result_serializer': 'pickle',
+	'broker_pool_limit': CELERY_BROKER_POOL_LIMIT,
+	'broker_connection_timeout': CELERY_BROKER_CONNECTION_TIMEOUT,
 
 	# Backend config
 	'result_backend': CELERY_RESULT_BACKEND,
 	'result_extended': True,
+	'result_backend_thread_safe': True,
+	# 'result_backend_transport_options': {'master_name': 'mymaster'}, # for Redis HA backend
 
-	# Celery config
+	# Task config
 	'task_eager_propagates': False,
 	'task_routes': {
 		'secator.celery.run_workflow': {'queue': 'celery'},
 		'secator.celery.run_scan': {'queue': 'celery'},
-		'secator.celery.run_task': {'queue': 'fast'},
-		'secator.celery.run_command': {'queue': 'fast'},
+		'secator.celery.run_task': {'queue': 'celery'},
 	},
+	'task_reject_on_worker_lost': True,
+	'task_acks_late': True,
 	'task_create_missing_queues': True,
 	'task_send_sent_event': True,
-	'worker_send_task_events': True,
-	'worker_prefetch_multiplier': 1
-})
 
-# @signals.setup_logging.connect
-# def void(*args, **kwargs):
-# 	"""Override celery's logging setup to prevent it from altering our settings.
-# 	github.com/celery/celery/issues/1867
-# 	"""
-# 	pass
+	# Serialization / compression
+	'accept_content': ['application/x-python-serialize', 'application/json'],
+	'task_compression': 'gzip',
+	'task_serializer': 'pickle',
+	'result_serializer': 'pickle'
+})
+app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
+
+
+def maybe_override_logging():
+	def decorator(func):
+		if CELERY_OVERRIDE_DEFAULT_LOGGING:
+			return signals.setup_logging.connect(func)
+		else:
+			return func
+	return decorator
+
+
+@maybe_override_logging()
+def void(*args, **kwargs):
+	"""Override celery's logging setup to prevent it from altering our settings.
+	github.com/celery/celery/issues/1867
+	"""
+	pass
 
 
 def revoke_task(task_id):
@@ -97,15 +136,15 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 			opts['chunked'] = True
-		sig = task_cls.s(chunk, **opts).set(queue='fast')
+		sig = task_cls.s(chunk, **opts).set(queue=task_cls.profile)
 		sigs.append(sig)
 
 	# Build Celery workflow
 	workflow = chain(
-		forward_results.s(results).set(queue='fast'),
+		forward_results.s(results).set(queue='io'),
 		chord(
 			tuple(sigs),
-			forward_results.s().set(queue='fast'),
+			forward_results.s().set(queue='io'),
 		)
 	)
 	return workflow
@@ -113,6 +152,8 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
+	if DEBUG > 1:
+		logger.info(f'Received task with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -122,6 +163,8 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
+	if DEBUG > 1:
+		logger.info(f'Received workflow with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -131,6 +174,8 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
+	if DEBUG > 1:
+		logger.info(f'Received scan with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -140,6 +185,8 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
+	# profiler = Profiler(interval=0.0001)
+	# profiler.start()
 	chunk = opts.get('chunk')
 	chunk_count = opts.get('chunk_count')
 	description = opts.get('description')
@@ -167,7 +214,10 @@ def run_command(self, results, name, targets, opts={}):
 		}
 	}
 	self.update_state(**state)
-
+	# profile_root = Path('/code/.profiles')
+	# profile_root.mkdir(exist_ok=True)
+	# profile_path = f'/code/.profiles/{self.request.id}.bin'
+	# with memray.Tracker(profile_path):
 	try:
 		# Flatten + dedupe results
 		results = flatten(results)
@@ -189,45 +239,19 @@ def run_command(self, results, name, targets, opts={}):
 
 		if single_target_only or (not sync and break_size_threshold):
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
+			if DEBUG > 0:
+				console.print(f'[dim red]\[debug] Breaking task by chunks of size {chunk_size}.[/]')
 			workflow = break_task(
 				task_cls,
 				opts,
 				targets,
 				results=results,
 				chunk_size=chunk_size)
-
-			result = workflow.apply() if sync else workflow()
-			# self.update_state(**state)
-
-			# TODO: here we want to update the parent task state with the
-			# children info as they are executing, to update the run count etc...
-			# but we cannot call `self.update_state` after the previous line
-			# for (once again) some obscure Celery reason, thus preventing us to
-			# do this ... Try to refactor this in a much cleaner way by using a
-			# dispatcher task, maybe it could work ...
-			# if not sync:
-			# 	from secator.runners._base import Runner
-			# 	from secator.runners._helpers import get_task_ids
-			# 	ntasks = len(targets) // chunk_size
-			# 	state['meta']['chunk_info'] = f'0/{ntasks}'
-			# 	state['meta']['error'] = None
-			# 	print(state)
-			# 	subtasks = {}
-			# 	task_ids = []
-			# 	get_task_ids(result, ids=task_ids)
-			# 	for info in Runner.get_live_results(result):
-			# 		print(info)
-			# 		subtasks[info['id']] = info
-			# 		ready_count = sum(subtasks.get(id, {}).get('count', 0) for id in task_ids)
-			# 		error = '\n\n'.join([subtasks.get(id, {}).get('error') or '' for id in task_ids])
-			# 		print(ready_count)
-			# 		print(error)
-			# 		state['meta']['chunk_info'] = f'{ready_count}/{chunk_size}'
-			# 		state['meta']['error'] = error.strip()
-			# 		self.update_state(**state)
-			# 		sleep(1)
+			result = workflow.apply() if sync else workflow.apply_async()
+			# TODO: Replace task with group of chunked tasks using raise replace(workflow)
 			with allow_join_result():
 				task_results = result.get()
+				console.print('Chunked workflow has finished running, updating parent task with results', style='bold')
 				results.extend(task_results)
 				state['state'] = 'SUCCESS'
 				state['meta']['results'] = results
@@ -284,6 +308,19 @@ def run_command(self, results, name, targets, opts={}):
 
 		# Update task state with final status
 		self.update_state(**state)
+
+		# profiler.stop()
+		# from pathlib import Path
+		# logger.info('Stopped profiling')
+		# profile_root = Path('/code/.profiles')
+		# profile_root.mkdir(exist_ok=True)
+		# profile_path = f'/code/.profiles/{self.request.id}.html'
+		# logger.info(f'Saving profile to {profile_path}')
+		# with open(profile_path, 'w', encoding='utf-8') as f_html:
+		# 	f_html.write(profiler.output_html())
+
+		# TODO: fix memory leak instead of running a garbage collector
+		gc.collect()
 
 		# If running in chunk mode, only return chunk result, not all results
 		return task_results if chunk else results

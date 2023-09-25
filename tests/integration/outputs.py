@@ -47,7 +47,7 @@ OUTPUTS_TASKS = {
             _source='dnsx'
 		),
         Record(
-            name= "hostmaster.wikimedia.org",
+            name= "wikipedia.org",
             type= "SOA",
             host= "wikipedia.org",
             _source= "dnsx"
@@ -117,10 +117,10 @@ OUTPUTS_TASKS = {
             status_code=200,
             tech=[],
             content_type='text/html; charset=utf-8',
-            content_length=3103,
+            content_length=3106,
             method='GET',
-            words=420,
-            lines=81,
+            words=422,
+            lines=82,
             _source='ffuf'
         )
     ],
@@ -131,26 +131,25 @@ OUTPUTS_TASKS = {
         Url(url='http://www.danielmiessler.com/wp-content/uploads/2010/03/self_discipline.jpeg', _source='gau')
     ],
     'gf': [
-        Tag(name='xss', match='http://localhost:3000?q=test', _source='gf')
+        Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
     'gospider': [
         Url(url='https://danielmiessler.com/t/Newsletter', status_code=200, content_length=92, _source='gospider')
     ],
     'grype': [
-        Vulnerability(
+		Vulnerability(
             matched_at=ROOT_FOLDER,
-            name='Navigation Remapping To Propagate Malicious Content',
+            name='Owner Footprinting',
             provider='cve.circl.lu',
-            id='CVE-2022-23491',
-            confidence='low',
             severity='medium',
-            cvss_score=0,
             tags=['ghsa'],
+			id='CVE-2023-43804',
             extra_data={
-                'product': 'certifi',
-                'version': '2022.12.07',
-                'product_type': 'python',
-                'ghsa_id': 'GHSA-43fp-rhv2-5gv8'
+                'product': 'urllib3',
+				'product_type': 'python',
+                'version': '2.0.5',
+				'version_fixed': '2.0.6',
+                'ghsa_id': 'GHSA-v845-jxx5-vc9f'
             },
             _source='grype',
         )
@@ -168,7 +167,7 @@ OUTPUTS_TASKS = {
             status_code=200,
             title='OWASP Juice Shop',
             content_type='text/html',
-            content_length=1987,
+            content_length=3748,
             method='GET',
             words=207,
             lines=30,
@@ -193,12 +192,12 @@ OUTPUTS_TASKS = {
     ],
     'msfconsole': [],
     'naabu': [
-        Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
+        Port(port=3000, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
+        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
     ],
     'nmap': [
-        Port(port=3000, host='localhost', ip='127.0.0.1', service_name='ppp', _source='nmap'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', service_name='nagios nsca',  _source='nmap'),
+        Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
+        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca',  _source='nmap'),
     ],
     'nuclei': [
         Vulnerability(
@@ -262,11 +261,12 @@ OUTPUTS_WORKFLOWS = {
     'code_scan': [
     	Vulnerability(matched_at=ROOT_FOLDER, name='CVE-2023-28859', provider='cve.circl.lu', id='CVE-2023-28859', confidence='low', severity='unknown', cvss_score=0, tags=['ghsa'], extra_data={'product': 'redis', 'version': '4.5.4', 'product_type': 'python', 'ghsa_id': 'GHSA-8fww-64cx-x8p5'}, description='redis-py before 4.4.4 and 4.5.x before 4.5.4 leaves a connection open after canceling an async Redis command at an inopportune time, and can send response data to the client of an unrelated request. (This could, for example, happen for a non-pipeline operation.) NOTE: the solutions for  address data leakage across AsyncIO connections in general.', references=['https://cve.circl.lu/cve/CVE-2023-28859', 'https://github.com/redis/redis-py/pull/2641', 'https://github.com/redis/redis-py/issues/2665', 'https://github.com/redis/redis-py/releases/tag/v4.4.4', 'https://github.com/redis/redis-py/releases/tag/v4.5.4', 'https://github.com/redis/redis-py/pull/2666', 'https://cve.circl.lu/cve/CVE-2023-28859'], reference='https://cve.circl.lu/cve/CVE-2023-28859', confidence_nb=3, severity_nb=5, _source='grype', _type='vulnerability', _uuid='34788a02-98fc-45c9-845e-b8bec556730e'),
 		Vulnerability(matched_at=ROOT_FOLDER, name='CVE-2023-28858', provider='cve.circl.lu', id='CVE-2023-28858', confidence='low', severity='unknown', cvss_score=0, tags=['ghsa'], extra_data={'product': 'redis', 'version': '4.5.3', 'product_type': 'python', 'ghsa_id': 'GHSA-24wv-mv5m-xv4h'}, description='redis-py before 4.5.3 leaves a connection open after canceling an async Redis command at an inopportune time, and can send response data to the client of an unrelated request in an off-by-one manner. NOTE: this CVE Record was initially created in response to reports about ChatGPT, and 4.3.6, 4.4.3, and 4.5.3 were released (changing the behavior for pipeline operations); however, please see CVE-2023-28859 about addressing data leakage across AsyncIO connections in general.', references=['https://cve.circl.lu/cve/CVE-2023-28858', 'https://github.com/redis/redis-py/compare/v4.3.5...v4.3.6', 'https://github.com/redis/redis-py/pull/2641', 'https://openai.com/blog/march-20-chatgpt-outage', 'https://github.com/redis/redis-py/issues/2624', 'https://github.com/redis/redis-py/compare/v4.4.2...v4.4.3', 'https://github.com/redis/redis-py/compare/v4.5.2...v4.5.3', 'https://cve.circl.lu/cve/CVE-2023-28858'], reference='https://cve.circl.lu/cve/CVE-2023-28858', confidence_nb=3, severity_nb=5, _source='grype', _type='vulnerability', _uuid='7d00bd81-ffea-4512-94a5-c504c7867d30'),
+		Vulnerability(matched_at=ROOT_FOLDER, name='Owner Footprinting', provider='cve.circl.lu', severity='medium', tags=['ghsa'], id='CVE-2023-43804', extra_data={'product': 'urllib3', 'product_type': 'python', 'version': '2.0.5', 'version_fixed': '2.0.6', 'ghsa_id': 'GHSA-v845-jxx5-vc9f'}, _source='grype'),
 		Vulnerability(matched_at=ROOT_FOLDER, name='Navigation Remapping To Propagate Malicious Content', provider='cve.circl.lu', id='CVE-2022-23491', confidence='low', severity='unknown', cvss_score=0, tags=['ghsa'], extra_data={'product': 'certifi', 'version': '2022.12.07', 'product_type': 'python', 'ghsa_id': 'GHSA-43fp-rhv2-5gv8'}, description='Certifi is a curated collection of Root Certificates for validating the trustworthiness of SSL certificates while verifying the identity of TLS hosts. Certifi 2022.12.07 removes root certificates from "TrustCor" from the root store. These are in the process of being removed from Mozilla\'s trust store. TrustCor\'s root certificates are being removed pursuant to an investigation prompted by media reporting that TrustCor\'s ownership also operated a business that produced spyware. Conclusions of Mozilla\'s investigation can be found in the linked google group discussion.', references=['https://cve.circl.lu/cve/CVE-2022-23491', 'https://groups.google.com/a/mozilla.org/g/dev-security-policy/c/oxX69KFvsm4/m/yLohoVqtCgAJ', 'https://github.com/certifi/python-certifi/security/advisories/GHSA-43fp-rhv2-5gv8', 'https://cve.circl.lu/cve/CVE-2022-23491'], reference='https://cve.circl.lu/cve/CVE-2022-23491', confidence_nb=3, severity_nb=5, _source='grype', _type='vulnerability', _uuid='e38db120-c0fd-42e0-b393-297522e852d4')
 	],
     'host_recon': [
-		Port(port=8080, host='localhost', ip='127.0.0.1', service_name='nagios nsca', cpes=[], extra_data={'name': 'nagios-nsca', 'product': 'nagios nsca', 'method': 'probed', 'conf': '10', 'nmap_script': 'vulscan'}, _source='nmap', _type='port', _uuid='69d71843-798a-4934-a01c-7073955ac485'),
-		Port(port=3000, host='localhost', ip='127.0.0.1', service_name='ppp', cpes=[], extra_data={'name': 'ppp', 'conf': '3', 'nmap_script': 'fingerprint-strings'}, _source='nmap', _type='port', _uuid='cbc2bc2d-2cf8-4922-84e2-6a6cea9149dd'),
+		Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca', cpes=[], extra_data={'name': 'nagios-nsca', 'product': 'nagios nsca', 'method': 'probed', 'conf': '10', 'nmap_script': 'vulscan'}, _source='nmap', _type='port', _uuid='69d71843-798a-4934-a01c-7073955ac485'),
+		Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', cpes=[], extra_data={'name': 'ppp', 'conf': '3', 'nmap_script': 'fingerprint-strings'}, _source='nmap', _type='port', _uuid='cbc2bc2d-2cf8-4922-84e2-6a6cea9149dd'),
 		Vulnerability(matched_at='http://localhost:8080/', name='Spring Boot - Remote Code Execution (Apache Log4j)', provider='', id='cve-2021-44228', confidence='high', severity='critical', cvss_score=10, tags=['cve', 'cve2021', 'springboot', 'rce', 'oast', 'log4j', 'kev'], extra_data={'data': ['192.221.154.139', 'f978d7010c8a']}, description='Spring Boot is susceptible to remote code execution via Apache Log4j.', references=['https://logging.apache.org/log4j/2.x/security.html', 'https://www.lunasec.io/docs/blog/log4j-zero-day/', 'https://github.com/twseptian/spring-boot-log4j-cve-2021-44228-docker-lab', 'https://nvd.nist.gov/vuln/detail/cve-2021-44228'], reference='https://logging.apache.org/log4j/2.x/security.html', confidence_nb=1, severity_nb=0, _source='nuclei', _type='vulnerability', _uuid='3cec387f-ef54-401d-915e-5f361de7896c'),
 		Vulnerability(matched_at='http://localhost:3000', name='FingerprintHub Technology Fingerprint - qm-system', provider='', id='', confidence='high', severity='info', cvss_score=0, tags=['tech'], extra_data={'data': []}, description='FingerprintHub Technology Fingerprint tests run in nuclei.', references=['https://github.com/0x727/fingerprinthub'], reference='https://github.com/0x727/fingerprinthub', confidence_nb=1, severity_nb=4, _source='nuclei', _type='vulnerability', _uuid='32862d58-fe0b-4552-8422-f8980da7cd94'),
 		Vulnerability(matched_at='http://localhost:3000/.well-known/security.txt', name='Security.txt File', provider='', id='', confidence='high', severity='info', cvss_score=0, tags=['misc', 'generic'], extra_data={'data': [' mailto:donotreply@owasp-juice.shop']}, description='The website defines a security policy.', references=[], reference='', confidence_nb=1, severity_nb=4, _source='nuclei', _type='vulnerability', _uuid='35489dd0-28b1-4259-b756-6241d0ba8925'),
@@ -326,7 +326,7 @@ OUTPUTS_SCANS = {
     'domain': [
 		Url(url='http://testphp.vulnweb.com', host='44.228.249.3', status_code=200, title='Home of Acunetix Art', webserver='nginx/1.19.0', tech=['DreamWeaver', 'Nginx:1.19.0', 'PHP:5.6.40', 'Ubuntu'], content_type='text/html', content_length=4958, time=0.33789056, method='GET', words=514, lines=110, _source='httpx', _type='url', _uuid='173bf5b2-19a5-4410-9872-ab338ec7e1dd'),
 		Subdomain(host='www.testphp.vulnweb.com', domain='testphp.vulnweb.com', sources=['alienvault'], _source='subfinder', _type='subdomain', _uuid='a6477202-95b2-4973-9665-58b6699672d6'),
-		Port(port=80, host='testphp.vulnweb.com', ip='44.228.249.3', service_name='nginx/1.19.0', cpes=['cpe:/a:igor_sysoev:nginx:1.19.0'], extra_data={'name': 'http', 'product': 'nginx', 'version': '1.19.0', 'method': 'probed', 'conf': '10', 'cpe': ['cpe:/a:igor_sysoev:nginx:1.19.0'], 'nmap_script': 'vulscan'}, _source='nmap', _type='port', _uuid='a898ae30-377b-4c94-b51d-2727efec24f5'),
+		Port(port=80, host='testphp.vulnweb.com', ip='44.228.249.3', state='open', service_name='nginx/1.19.0', cpes=['cpe:/a:igor_sysoev:nginx:1.19.0'], extra_data={'name': 'http', 'product': 'nginx', 'version': '1.19.0', 'method': 'probed', 'conf': '10', 'cpe': ['cpe:/a:igor_sysoev:nginx:1.19.0'], 'nmap_script': 'vulscan'}, _source='nmap', _type='port', _uuid='a898ae30-377b-4c94-b51d-2727efec24f5'),
 		Url(url='http://testphp.vulnweb.com', host='44.228.249.3', status_code=200, title='Home of Acunetix Art', webserver='nginx/1.19.0', tech=['DreamWeaver', 'Nginx:1.19.0', 'PHP:5.6.40', 'Ubuntu'], content_type='text/html', content_length=4958, time=0.33146840099999997, method='GET', words=514, lines=110, _source='httpx', _type='url', _uuid='9cee44f4-aef3-4fd2-8ff9-348c47a2fe5e'),
 		Url(url='http://testphp.vulnweb.com/artists.php?artist=1', host='44.228.249.3', status_code=200, title='artists', webserver='nginx/1.19.0', tech=['DreamWeaver', 'Nginx:1.19.0', 'PHP:5.6.40', 'Ubuntu'], content_type='text/html', content_length=6251, time=0.343856073, method='GET', words=701, lines=124, _source='httpx', _type='url', _uuid='18437ced-f48f-4f9f-bdc7-bd94425a0d91'),
 		Url(url='http://testphp.vulnweb.com/cart.php', host='44.228.249.3', status_code=200, title='you cart', webserver='nginx/1.19.0', tech=['DreamWeaver', 'Nginx:1.19.0', 'PHP:5.6.40', 'Ubuntu'], content_type='text/html', content_length=4903, time=0.328803742, method='GET', words=502, lines=109, _source='httpx', _type='url', _uuid='80b7ff4e-857d-481f-b274-92de90d7ea31'),
@@ -375,8 +375,8 @@ OUTPUTS_SCANS = {
 		Tag(name='xss', match='http://testphp.vulnweb.com/hpp/params.php?p=valid&pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='bbdcce78-c36a-43ef-8e34-f6e628455c6a'),
 	],
     'host': [
-		Port(port=3000, host='localhost', ip='127.0.0.1', service_name='ppp', cpes=[], extra_data={'name': 'ppp', 'servicefp': 'SF-Port3000-TCP:V=7.80%I=7%D=4/13%Time=6438299D%P=x86_64-pc-linux-gnu%r(GetRequest,979,"HTTP/1\\.1\\x20200\\x20OK\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nX-Content-Type-Options:\\x20nosniff\\r\\nX-Frame-Options:\\x20SAMEORIGIN\\r\\nFeature-Policy:\\x20payment\\x20\'self\'\\r\\nX-Recruiting:\\x20/#/jobs\\r\\nAccept-Ranges:\\x20bytes\\r\\nCache-Control:\\x20public,\\x20max-age=0\\r\\nLast-Modified:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:09:42\\x20GMT\\r\\nETag:\\x20W/\\"7c3-1877b613b94\\"\\r\\nContent-Type:\\x20text/html;\\x20charset=UTF-8\\r\\nContent-Length:\\x201987\\r\\nVary:\\x20Accept-Encoding\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n<!--\\n\\x20\\x20~\\x20Copyright\\x20\\(c\\)\\x202014-2023\\x20Bjoern\\x20Kimminich\\x20&\\x20the\\x20OWASP\\x20Juice\\x20Shop\\x20contributors\\.\\n\\x20\\x20~\\x20SPDX-License-Identifier:\\x20MIT\\n\\x20\\x20--><!DOCTYPE\\x20html><html\\x20lang=\\"en\\"><head>\\n\\x20\\x20<meta\\x20charset=\\"utf-8\\">\\n\\x20\\x20<title>OWASP\\x20Juice\\x20Shop</title>\\n\\x20\\x20<meta\\x20name=\\"description\\"\\x20content=\\"Probably\\x20the\\x20most\\x20modern\\x20and\\x20sophisticated\\x20insecure\\x20web\\x20application\\">\\n\\x20\\x20<meta\\x20name=\\"viewport\\"\\x20content=\\"width=device-width,\\x20initial-scale=1\\">\\n\\x20\\x20<link\\x20id=\\"favicon\\"\\x20rel=\\"icon\\"\\x20type=\\"image/x-icon\\"\\x20href=\\"asset")%r(Help,2F,"HTTP/1\\.1\\x20400\\x20Bad\\x20Request\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(NCP,2F,"HTTP/1\\.1\\x20400\\x20Bad\\x20Request\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(HTTPOptions,EA,"HTTP/1\\.1\\x20204\\x20No\\x20Content\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nAccess-Control-Allow-Methods:\\x20GET,HEAD,PUT,PATCH,POST,DELETE\\r\\nVary:\\x20Access-Control-Request-Headers\\r\\nContent-Length:\\x200\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(RTSPRequest,EA,"HTTP/1\\.1\\x20204\\x20No\\x20Content\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nAccess-Control-Allow-Methods:\\x20GET,HEAD,PUT,PATCH,POST,DELETE\\r\\nVary:\\x20Access-Control-Request-Headers\\r\\nContent-Length:\\x200\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n");', 'method': 'table', 'conf': '3', 'nmap_script': 'fingerprint-strings'}, _source='nmap', _type='port', _uuid='7b2e6827-aea5-4e53-85e6-b7d6702ebdd9'),
-		Port(port=8080, host='localhost', ip='127.0.0.1', service_name='', cpes=[], extra_data={'name': 'nagios-nsca', 'product': 'nagios nsca', 'method': 'probed', 'conf': '10', 'nmap_script': 'vulscan'}, _source='nmap', _type='port', _uuid='af8d76b4-19c7-4bc2-8985-ec0194adfec8'),
+		Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', cpes=[], extra_data={'name': 'ppp', 'servicefp': 'SF-Port3000-TCP:V=7.80%I=7%D=4/13%Time=6438299D%P=x86_64-pc-linux-gnu%r(GetRequest,979,"HTTP/1\\.1\\x20200\\x20OK\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nX-Content-Type-Options:\\x20nosniff\\r\\nX-Frame-Options:\\x20SAMEORIGIN\\r\\nFeature-Policy:\\x20payment\\x20\'self\'\\r\\nX-Recruiting:\\x20/#/jobs\\r\\nAccept-Ranges:\\x20bytes\\r\\nCache-Control:\\x20public,\\x20max-age=0\\r\\nLast-Modified:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:09:42\\x20GMT\\r\\nETag:\\x20W/\\"7c3-1877b613b94\\"\\r\\nContent-Type:\\x20text/html;\\x20charset=UTF-8\\r\\nContent-Length:\\x201987\\r\\nVary:\\x20Accept-Encoding\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n<!--\\n\\x20\\x20~\\x20Copyright\\x20\\(c\\)\\x202014-2023\\x20Bjoern\\x20Kimminich\\x20&\\x20the\\x20OWASP\\x20Juice\\x20Shop\\x20contributors\\.\\n\\x20\\x20~\\x20SPDX-License-Identifier:\\x20MIT\\n\\x20\\x20--><!DOCTYPE\\x20html><html\\x20lang=\\"en\\"><head>\\n\\x20\\x20<meta\\x20charset=\\"utf-8\\">\\n\\x20\\x20<title>OWASP\\x20Juice\\x20Shop</title>\\n\\x20\\x20<meta\\x20name=\\"description\\"\\x20content=\\"Probably\\x20the\\x20most\\x20modern\\x20and\\x20sophisticated\\x20insecure\\x20web\\x20application\\">\\n\\x20\\x20<meta\\x20name=\\"viewport\\"\\x20content=\\"width=device-width,\\x20initial-scale=1\\">\\n\\x20\\x20<link\\x20id=\\"favicon\\"\\x20rel=\\"icon\\"\\x20type=\\"image/x-icon\\"\\x20href=\\"asset")%r(Help,2F,"HTTP/1\\.1\\x20400\\x20Bad\\x20Request\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(NCP,2F,"HTTP/1\\.1\\x20400\\x20Bad\\x20Request\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(HTTPOptions,EA,"HTTP/1\\.1\\x20204\\x20No\\x20Content\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nAccess-Control-Allow-Methods:\\x20GET,HEAD,PUT,PATCH,POST,DELETE\\r\\nVary:\\x20Access-Control-Request-Headers\\r\\nContent-Length:\\x200\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(RTSPRequest,EA,"HTTP/1\\.1\\x20204\\x20No\\x20Content\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nAccess-Control-Allow-Methods:\\x20GET,HEAD,PUT,PATCH,POST,DELETE\\r\\nVary:\\x20Access-Control-Request-Headers\\r\\nContent-Length:\\x200\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n");', 'method': 'table', 'conf': '3', 'nmap_script': 'fingerprint-strings'}, _source='nmap', _type='port', _uuid='7b2e6827-aea5-4e53-85e6-b7d6702ebdd9'),
+		Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='', cpes=[], extra_data={'name': 'nagios-nsca', 'product': 'nagios nsca', 'method': 'probed', 'conf': '10', 'nmap_script': 'vulscan'}, _source='nmap', _type='port', _uuid='af8d76b4-19c7-4bc2-8985-ec0194adfec8'),
 		Vulnerability(matched_at='http://localhost:3000', name='FingerprintHub Technology Fingerprint - qm-system', provider='', id='', confidence='high', severity='info', cvss_score=0, tags=['tech'], extra_data={'data': []}, description='FingerprintHub Technology Fingerprint tests run in nuclei.', references=['https://github.com/0x727/fingerprinthub'], reference='https://github.com/0x727/fingerprinthub', confidence_nb=1, severity_nb=4, _source='nuclei', _type='vulnerability', _uuid='62cb72b7-30b7-4212-a8f9-30325832b39b'),
 		Vulnerability(matched_at='http://localhost:3000/api-docs/swagger.json', name='Public Swagger API - Detect', provider='', id='', confidence='high', severity='info', cvss_score=0, tags=['exposure', 'api', 'swagger'], extra_data={'data': []}, description='Public Swagger API was detected.', references=['https://swagger.io/'], reference='https://swagger.io/', confidence_nb=1, severity_nb=4, _source='nuclei', _type='vulnerability', _uuid='822a1503-f68d-4931-94fb-798565bdcff5'),
 		Vulnerability(matched_at='http://localhost:3000/metrics', name='Prometheus Metrics - Detect', provider='', id='', confidence='high', severity='medium', cvss_score=5.3, tags=['exposure', 'prometheus', 'hackerone', 'config'], extra_data={'data': []}, description='Prometheus metrics page was detected.', references=['https://github.com/prometheus/prometheus', 'https://hackerone.com/reports/1026196'], reference='https://github.com/prometheus/prometheus', confidence_nb=1, severity_nb=2, _source='nuclei', _type='vulnerability', _uuid='ac9c66f9-2d48-4d11-ade4-07a882bc300c'),

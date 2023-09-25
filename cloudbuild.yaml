@@ -1,0 +1,12 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args: ['-c', 'docker pull ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator:latest || exit 0']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', '${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator', '--cache-from', 'europe-west1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator:latest', '.']
+substitutions:
+  _REPOSITORY: secator
+  _LOCATION: europe-west1
+
+images:
+- '${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator'

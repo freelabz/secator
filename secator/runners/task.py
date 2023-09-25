@@ -10,7 +10,7 @@ class Task(Runner):
 
 	def delay(cls, *args, **kwargs):
 		from secator.celery import run_task
-		return run_task.apply_async(args=args, kwargs=kwargs, queue='fast')
+		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='celery')
 
 	def yielder(self):
 		"""Run task.
@@ -27,15 +27,22 @@ class Task(Runner):
 		# Task opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
+		dry_run = run_opts.get('show', False)
+		if dry_run:
+			self.print_item_count = False
 
 		# Fmt opts
 		fmt_opts = {
+			'json': run_opts.get('json', False) and self.sync,
 			'print_cmd': True,
 			'print_cmd_prefix': not self.sync,
+			'print_input_file': DEBUG > 0,
+			'print_item': True,
+			'print_item_count': not self.sync and not dry_run,
 			'print_line': not self.output_quiet,
-			'print_item_count': not self.sync,
-			'print_input_file': DEBUG
+			'print_progress': True,
 		}
+		self.print_item = not self.sync  # enable print_item for base Task only if running remote
 		run_opts.update(fmt_opts)
 
 		# Set task output types
@@ -49,9 +56,15 @@ class Task(Runner):
 		# Run task
 		if self.sync:
 			task = task_cls(self.targets, **run_opts)
+			if dry_run:  # don't run
+				return
 		else:
 			result = task_cls.delay(self.targets, **run_opts)
-			task = self.process_live_tasks(result, description=False, results_only=True)
+			task = self.process_live_tasks(
+				result,
+				description=False,
+				results_only=True,
+				print_remote_status=self.print_remote_status)
 
 		# Yield task results
 		yield from task

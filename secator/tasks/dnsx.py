@@ -25,22 +25,29 @@ class dnsx(ReconDns):
 	}
 
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
+	profile = 'io'
 
 	def item_loader(self, line):
 		items = []
 		try:
 			item = json.loads(line)
-			if self.print_orig:  # original dnsx output
+			if self.orig:  # original dnsx output
 				return item
 			host = item['host']
 			record_types = ['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'srv', 'ptr', 'soa', 'axfr', 'caa']
 			for _type in record_types:
 				values = item.get(_type, [])
 				for value in values:
+					name = value
+					extra_data = {}
+					if isinstance(value, dict):
+						name = value['name']
+						extra_data = {k: v for k, v in value.items() if k != 'name'}
 					items.append({
 						'host': host,
-						'name': value,
+						'name': name,
 						'type': _type.upper(),
+						'extra_data': extra_data
 					})
 		except json.decoder.JSONDecodeError:
 			pass

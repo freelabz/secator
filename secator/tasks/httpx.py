@@ -1,10 +1,15 @@
+import os
+import uuid
+
 from secator.decorators import task
-from secator.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH, FILTER_CODES,
-							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
-							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
-							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, URL, USER_AGENT)
+from secator.definitions import (DEFAULT_HTTPX_FLAGS,
+								 DEFAULT_STORE_HTTP_RESPONSES, DELAY, DEPTH,
+								 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
+								 RATE_LIMIT, RETRIES, TASKS_FOLDER, THREADS,
+								 TIMEOUT, URL, USER_AGENT)
 from secator.tasks._categories import Http
 from secator.utils import sanitize_url
 
@@ -19,9 +24,14 @@ class httpx(Http):
 	opts = {
 		# 'silent': {'is_flag': True, 'default': False, 'help': 'Silent mode'},
 		# 'td': {'is_flag': True, 'default': True, 'help': 'Tech detection'},
-		# 'asn': {'is_flag': True, 'default': False, 'help': 'ASN detection'},
-		# 'cdn': {'is_flag': True, 'default': True, 'help': 'CDN detection'},
-		'debug_resp': {'is_flag': True, 'default': False, 'help': 'Debug response'}
+		'irr': {'is_flag': True, 'default': False, 'help': 'Include http request / response'},
+		'fep': {'is_flag': True, 'default': False, 'help': 'Error Page Classifier and Filtering'},
+		'favicon': {'is_flag': True, 'default': False, 'help': 'Favicon hash'},
+		'jarm': {'is_flag': True, 'default': False, 'help': 'Jarm fingerprint'},
+		'asn': {'is_flag': True, 'default': False, 'help': 'ASN detection'},
+		'cdn': {'is_flag': True, 'default': False, 'help': 'CDN detection'},
+		'debug_resp': {'is_flag': True, 'default': False, 'help': 'Debug response'},
+		'screenshot': {'is_flag': True, 'default': False, 'help': 'Screenshot response'}
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -51,6 +61,7 @@ class httpx(Http):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'cpu'
 
 	@staticmethod
 	def on_item_pre_convert(self, item):
@@ -70,3 +81,19 @@ class httpx(Http):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
+		if DEFAULT_STORE_HTTP_RESPONSES:
+			_id = uuid.uuid4()
+			output_path = f'{TASKS_FOLDER}/{_id}'
+			self.output_response_path = f'{output_path}/response'
+			self.output_screenshot_path = f'{output_path}/screenshot'
+			os.makedirs(self.output_response_path, exist_ok=True)
+			os.makedirs(self.output_screenshot_path, exist_ok=True)
+			self.cmd += f' -sr -srd {output_path}'
+
+	@staticmethod
+	def on_end(self):
+		if DEFAULT_STORE_HTTP_RESPONSES:
+			if os.path.exists(self.output_response_path + '/index.txt'):
+				os.remove(self.output_response_path + '/index.txt')
+			if os.path.exists(self.output_screenshot_path + '/index.txt'):
+				os.remove(self.output_screenshot_path + '/index_screenshot.txt')

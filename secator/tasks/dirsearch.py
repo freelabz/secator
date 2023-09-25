@@ -8,7 +8,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
-							   RATE_LIMIT, RETRIES, STATUS_CODE, TEMP_FOLDER,
+							   RATE_LIMIT, RETRIES, STATUS_CODE, DATA_FOLDER,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST)
 from secator.output_types import Url
 from secator.tasks._categories import HttpFuzzer
@@ -57,6 +57,7 @@ class dirsearch(HttpFuzzer):
 	proxychains = True
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'io'
 
 	def yielder(self):
 		prev = self.print_item_count
@@ -85,5 +86,5 @@ class dirsearch(HttpFuzzer):
 		self.output_path = self.get_opt_value('output_path')
 		if not self.output_path:
 			timestr = get_file_timestamp()
-			self.output_path = f'{TEMP_FOLDER}/dirsearch_{timestr}.json'
+			self.output_path = f'{DATA_FOLDER}/dirsearch_{timestr}.json'
 		self.cmd += f' -o {self.output_path}'

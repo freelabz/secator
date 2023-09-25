@@ -9,7 +9,7 @@ import unittest
 #             args=[
 #                 [],
 #                 'ffuf',
-#                 ['https://***REMOVED***', 'https://media.***REMOVED***']
+#                 ['https://mydomain.com', 'https://media.mydomain.com']
 #             ]
 #         )
 #         results = result.get()
@@ -19,7 +19,7 @@ import unittest
     #     result = run_command.delay(
     #         [],
     #         'ffuf',
-    #         ['https://***REMOVED***', 'https://media.***REMOVED***'],
+    #         ['https://mydomain.com', 'https://media.mydomain.com'],
     #         opts={
     #             'sync': False
     #         }
@@ -30,7 +30,7 @@ import unittest
 
     # def test_chunked_command_delay(self):
     #     result = ffuf.delay(
-    #         ['https://***REMOVED***', 'https://media.***REMOVED***'],
+    #         ['https://mydomain.com', 'https://media.mydomain.com'],
     #         print_cmd=True,
     #         print_item=True,
     #     )

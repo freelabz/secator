@@ -7,13 +7,13 @@ from bs4 import BeautifulSoup
 from cpe import CPE
 
 from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE,
-							   DEFAULT_WORDLIST, DELAY, DEPTH, DESCRIPTION,
+							   DEFAULT_HTTP_WORDLIST, DELAY, DEPTH, DESCRIPTION,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, NAME, PATH, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
-							   SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
+							   SEVERITY, TAGS, DATA_FOLDER, THREADS, TIMEOUT,
 							   URL, USER_AGENT, USERNAME, WORDLIST)
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
 								Vulnerability)
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 OPTS = {
 	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
-	DEPTH: {'type': int, 'help': 'Scan depth'},
+	DEPTH: {'type': int, 'help': 'Scan depth', 'default': 2},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
 	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
@@ -41,7 +41,7 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_WORDLIST, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_HTTP_WORDLIST, 'help': 'Wordlist to use'}
 }
 
 OPTS_HTTP = [
@@ -129,7 +129,7 @@ class Vuln(Command):
 
 	@staticmethod
 	def lookup_local_cve(cve_id):
-		cve_path = f'{TEMP_FOLDER}/cves/{cve_id}.json'
+		cve_path = f'{DATA_FOLDER}/cves/{cve_id}.json'
 		if os.path.exists(cve_path):
 			with open(cve_path, 'r') as f:
 				return json.load(f)
@@ -150,11 +150,12 @@ class Vuln(Command):
 		if not cve_info:
 			# logger.debug(f'{cve_id} not found locally. Use `secator utils download-cves` to update the local database.')
 			try:
-				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
+				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5).json()
 				if not cve_info:
 					logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
 					return
-			except requests.exceptions.ConnectionError:
+			except Exception:
+				logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
 				return None
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.

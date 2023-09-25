@@ -43,6 +43,7 @@ class maigret(ReconUser):
 	}
 	install_cmd = 'pip3 install maigret'
 	socks5_proxy = True
+	profile = 'io'
 
 	def yielder(self):
 		prev = self.print_item_count

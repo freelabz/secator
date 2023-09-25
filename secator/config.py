@@ -6,9 +6,8 @@ import yaml
 from dotmap import DotMap
 
 from secator.rich import console
+from secator.definitions import CONFIGS_FOLDER, EXTRA_CONFIGS_FOLDER
 
-DEFAULT_CONFIGS_DIR = os.path.dirname(os.path.abspath(__file__)) + '/configs'
-EXTRA_CONFIGS_DIR = os.environ.get('SECATOR_EXTRA_CONFIGS_FOLDER')
 CONFIGS_DIR_KEYS = ['workflow', 'scan', 'profile']
 
 
@@ -21,7 +20,7 @@ def load_config(name):
 	Returns:
 		dict: Loaded config.
 	"""
-	path = Path(DEFAULT_CONFIGS_DIR) / f'{name}.yaml'
+	path = Path(CONFIGS_FOLDER) / f'{name}.yaml'
 	if not path.exists():
 		console.log(f'Config "{name}" could not be loaded.')
 		return
@@ -31,9 +30,9 @@ def load_config(name):
 
 def find_configs():
 	results = {'scan': [], 'workflow': [], 'profile': []}
-	dirs_type = [DEFAULT_CONFIGS_DIR]
-	if EXTRA_CONFIGS_DIR:
-		dirs_type.append(EXTRA_CONFIGS_DIR)
+	dirs_type = [CONFIGS_FOLDER]
+	if EXTRA_CONFIGS_FOLDER:
+		dirs_type.append(EXTRA_CONFIGS_FOLDER)
 	paths = []
 	for dir in dirs_type:
 		dir_paths = [

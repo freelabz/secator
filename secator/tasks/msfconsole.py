@@ -7,7 +7,7 @@ from rich.panel import Panel
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   TEMP_FOLDER, THREADS, TIMEOUT, USER_AGENT)
+							   DATA_FOLDER, THREADS, TIMEOUT, USER_AGENT)
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
 
@@ -82,7 +82,7 @@ class msfconsole(VulnMulti):
 
 			# Make a copy and replace vars inside by env vars passed on the CLI
 			timestr = get_file_timestamp()
-			out_path = f'{TEMP_FOLDER}/msfconsole_{timestr}.rc'
+			out_path = f'{DATA_FOLDER}/msfconsole_{timestr}.rc'
 			logger.debug(
 				f'Writing formatted resource script to new temp file {out_path}'
 			)

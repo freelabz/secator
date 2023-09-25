@@ -5,15 +5,17 @@ import shlex
 import subprocess
 import sys
 
+from time import sleep
+
 from celery.result import AsyncResult
 from fp.fp import FreeProxy
 
 from secator.config import ConfigLoader
 from secator.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
-							   DEFAULT_PROXY_TIMEOUT,
+							   DEFAULT_FREEPROXY_TIMEOUT,
 							   DEFAULT_PROXYCHAINS_COMMAND,
 							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, TEMP_FOLDER)
+							   OPT_PIPE_INPUT, DATA_FOLDER, DEFAULT_INPUT_CHUNK_SIZE)
 from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
@@ -68,7 +70,7 @@ class Command(Runner):
 	input_path = None
 
 	# Input chunk size (default None)
-	input_chunk_size = None
+	input_chunk_size = DEFAULT_INPUT_CHUNK_SIZE
 
 	# Flag to take a file as input
 	file_flag = None
@@ -101,6 +103,9 @@ class Command(Runner):
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
+
+	# Profile
+	profile = 'cpu'
 
 	def __init__(self, input=None, **run_opts):
 		# Build runnerconfig on-the-fly
@@ -141,6 +146,44 @@ class Command(Runner):
 		# Build command
 		self._build_cmd()
 
+		# Print built cmd
+		if self.print_cmd:
+			if self.sync and self.description:
+				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
+			self._print(self.cmd, color='bold cyan', rich=True)
+
+		# Print built input
+		if self.print_input_file and self.input_path:
+			input_str = '\n '.join(self.input)
+			if input_str.strip():
+				self._print(
+					f'[dim red]\[debug][/] [bold magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]\n',
+					rich=True)
+
+		# Print run options
+		if self.print_run_opts:
+			input_str = '\n '.join([
+				f'[bold blue]{k}[/]=[bold green]{v}[/]' for k, v in self.run_opts.items() if v is not None])
+			if input_str.strip():
+				self._print(f'[dim red]\[debug][/] [bold magenta]Run opts:[/]\n {input_str}\n', rich=True)
+
+		# Print format options
+		if self.print_fmt_opts:
+			input_str = '\n '.join([
+				f'[bold blue]{k}[/]=[bold green]{v}[/]' for k, v in self.print_opts.items() if v is not None])
+			if input_str.strip():
+				self._print(f'[dim red]\[debug][/] [bold magenta]Print opts:[/]\n {input_str}\n', rich=True)
+
+		# Print hooks
+		if self.print_hooks:
+			input_str = ''
+			for hook_name, hook_funcs in self.hooks.items():
+				hook_funcs_str = ', '.join([f'[bold green]{h.__module__}.{h.__qualname__}[/]' for h in hook_funcs])
+				if hook_funcs:
+					input_str += f'[bold blue]{hook_name} -> {hook_funcs_str}\n '
+			if input_str.strip():
+				self._print(f'[dim red]\[debug][/] [bold magenta]Hooks:[/]\n {input_str}\n', rich=True)
+
 	def toDict(self):
 		res = super().toDict()
 		res.update({
@@ -154,28 +197,25 @@ class Command(Runner):
 	def delay(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-
-		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
 		results = kwargs.get('results', [])
-		return run_command.apply_async(args=[results, cls.__name__] + list(args), kwargs={'opts': kwargs}, queue='fast')
+		name = cls.__name__
+		return run_command.apply_async(args=[results, name] + list(args), kwargs={'opts': kwargs}, queue=cls.profile)
 
 	@classmethod
 	def s(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue='fast')
+		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
 
 	@classmethod
 	def si(cls, results, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue='fast')
+		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
 
 	@classmethod
 	def poll(cls, result):
 		# TODO: Move this to TaskBase
-		from time import sleep
-
 		while not result.ready():
 			data = AsyncResult(result.id).info
 			if DEBUG > 1 and isinstance(data, dict):
@@ -274,7 +314,7 @@ class Command(Runner):
 			elif self.proxy in ['auto', 'http'] and self.proxy_http and DEFAULT_HTTP_PROXY:
 				proxy = DEFAULT_HTTP_PROXY
 			elif self.proxy == 'random':
-				proxy = FreeProxy(timeout=DEFAULT_PROXY_TIMEOUT, rand=True, anonym=True).get()
+				proxy = FreeProxy(timeout=DEFAULT_FREEPROXY_TIMEOUT, rand=True, anonym=True).get()
 			elif self.proxy.startswith(('http://', 'socks5://')):
 				proxy = self.proxy
 
@@ -305,18 +345,11 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
+		# Set status to 'RUNNING'
+		self.status = 'RUNNING'
+
 		# Callback before running command
 		self.run_hooks('on_start')
-
-		# Log cmd
-		if self.print_cmd:
-			if self.sync and self.description:
-				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-			self._print(self.cmd, color='bold cyan', rich=True, with_timestamp=True)
-
-		if self.print_input_file and self.input_path:
-			input_str = '\n '.join(self.input)
-			self._print(f'[bold magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', rich=True)
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -359,6 +392,7 @@ class Command(Runner):
 
 			# Process the output in real-time
 			for line in iter(lambda: process.stdout.readline(), b''):
+				sleep(0)  # for async to give up control
 				if not line:
 					break
 
@@ -555,7 +589,7 @@ class Command(Runner):
 		if isinstance(input, list):
 			timestr = get_file_timestamp()
 			cmd_name = cmd.split(' ')[0].split('/')[-1]
-			fpath = f'{TEMP_FOLDER}/{cmd_name}_{timestr}.txt'
+			fpath = f'{DATA_FOLDER}/{cmd_name}_{timestr}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:

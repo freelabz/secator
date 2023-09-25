@@ -62,6 +62,7 @@ class ffuf(HttpFuzzer):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'io'
 
 	@staticmethod
 	def validate_input(self, input):
@@ -74,3 +75,5 @@ class ffuf(HttpFuzzer):
 	def on_item(self, item):
 		item.method = self.get_opt_value(METHOD) or 'GET'
 		return item
+
+	# TODO: write custom item_loader to pick up Progress items too
