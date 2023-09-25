@@ -25,8 +25,8 @@ def dataclass_decoder(obj):
     return obj
 
 
-def dumps_dataclass(obj):
-    return json.dumps(obj, cls=DataclassEncoder)
+def dumps_dataclass(obj, indent=None):
+    return json.dumps(obj, cls=DataclassEncoder, indent=indent)
 
 
 def loads_dataclass(obj):

@@ -5,13 +5,13 @@ import re
 import xmltodict
 
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
-								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, ID,
-								 IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
-								 PORTS, PROVIDER, PROXY, RATE_LIMIT,
-								 REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
-								 SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
-								 USER_AGENT)
+from secator.definitions import (CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DELAY,
+								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
+								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
+								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
+								 PROXY, RATE_LIMIT, REFERENCES, RETRIES,
+								 SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
+								 THREADS, TIMEOUT, USER_AGENT)
 from secator.output_types import Port, Vulnerability
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
@@ -53,12 +53,13 @@ class nmap(VulnMulti):
 	}
 	install_cmd = (
 		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
-		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
+		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
 	proxychains = True
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = False
 	proxy_http = False
+	profile = 'io'
 
 	def yielder(self):
 		yield from super().yielder()
@@ -90,7 +91,7 @@ class nmap(VulnMulti):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
 			timestr = get_file_timestamp()
-			output_path = f'{TEMP_FOLDER}/nmap_{timestr}.xml'
+			output_path = f'{DATA_FOLDER}/nmap_{timestr}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
 
@@ -102,10 +103,14 @@ class nmapData(dict):
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
 			for port in self._get_ports(host):
+				# Get port number
 				port_number = port['@portid']
 				if not port_number or not port_number.isdigit():
 					continue
 				port_number = int(port_number)
+
+				# Get port state
+				state = port.get('state', {}).get('@state', '')
 
 				# Get extra data
 				extra_data = self._get_extra_data(port)
@@ -130,6 +135,7 @@ class nmapData(dict):
 				port = {
 					PORT: port_number,
 					HOST: hostname,
+					STATE: state,
 					SERVICE_NAME: service_name,
 					IP: ip,
 					EXTRA_DATA: extra_data

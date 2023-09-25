@@ -40,6 +40,7 @@ class gau(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'io'
 
 	# @staticmethod
 	# def validate_item(self, item):

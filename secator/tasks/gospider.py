@@ -56,6 +56,7 @@ class gospider(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61
 	proxy_http = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61
+	profile = 'cpu'
 
 	@staticmethod
 	def validate_item(self, item):

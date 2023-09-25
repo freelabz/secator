@@ -11,10 +11,9 @@ from secator.tasks._categories import VulnMulti
 @task()
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
-	cmd = 'nuclei -silent -sj -si 20 -hm'
+	cmd = 'nuclei -silent -stats -sj -si 20 -hm'
 	file_flag = '-l'
 	input_flag = '-u'
-	input_chunk_size = 1000
 	json_flag = '-jsonl'
 	opts = {
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
@@ -59,6 +58,7 @@ class nuclei(VulnMulti):
 			PROVIDER: 'nuclei',
 		},
 		Progress: {
+			'percent': lambda x: int(x['percent']),
 			'extra_data': lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
 		}
 	}
@@ -67,6 +67,7 @@ class nuclei(VulnMulti):
 	proxychains = False
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
+	profile = 'cpu'
 
 	@staticmethod
 	def id_extractor(item):

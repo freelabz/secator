@@ -18,44 +18,65 @@ ASCII = f"""
                     freelabz.com
 """  # noqa: W605,W291
 
-# Celery local fs folders
-CONFIG_FOLDER = os.environ.get('SECATOR_CONFIG_FOLDER', f'{os.path.expanduser("~")}/.secator')
-TEMP_FOLDER = os.environ.get('SECATOR_TEMP_FOLDER', '/tmp')
-CELERY_DATA_FOLDER = f'{TEMP_FOLDER}/celery/data'
-CELERY_RESULTS_FOLDER = f'{TEMP_FOLDER}/celery/results'
-PAYLOADS_FOLDER = f'{TEMP_FOLDER}/payloads'
-REPORTS_FOLDER = os.environ.get('SECATOR_REPORTS_FOLDER', f'{CONFIG_FOLDER}/reports')
+# Secator folders
 ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+CONFIGS_FOLDER = ROOT_FOLDER + '/secator/configs'
+EXTRA_CONFIGS_FOLDER = os.environ.get('SECATOR_EXTRA_CONFIGS_FOLDER')
+DATA_FOLDER = os.environ.get('SECATOR_DATA_FOLDER', f'{os.path.expanduser("~")}/.secator')
+TASKS_FOLDER = os.environ.get('SECATOR_TASKS_FOLDER', f'{DATA_FOLDER}/tasks')
+REPORTS_FOLDER = os.environ.get('SECATOR_REPORTS_FOLDER', f'{DATA_FOLDER}/reports')
+WORDLISTS_FOLDER = os.environ.get('SECATOR_WORDLISTS_FOLDER', '/usr/share/seclists')
 SCRIPTS_FOLDER = f'{ROOT_FOLDER}/scripts'
-REVSHELLS_FOLDER = f'{TEMP_FOLDER}/revshells'
-os.makedirs(TEMP_FOLDER, exist_ok=True)
+CVES_FOLDER = f'{DATA_FOLDER}/cves'
+PAYLOADS_FOLDER = f'{DATA_FOLDER}/payloads'
+REVSHELLS_FOLDER = f'{DATA_FOLDER}/revshells'
+os.makedirs(DATA_FOLDER, exist_ok=True)
+os.makedirs(TASKS_FOLDER, exist_ok=True)
+os.makedirs(REPORTS_FOLDER, exist_ok=True)
+os.makedirs(WORDLISTS_FOLDER, exist_ok=True)
+os.makedirs(SCRIPTS_FOLDER, exist_ok=True)
+os.makedirs(CVES_FOLDER, exist_ok=True)
+os.makedirs(PAYLOADS_FOLDER, exist_ok=True)
+os.makedirs(REVSHELLS_FOLDER, exist_ok=True)
+
+# Celery local fs folders
+CELERY_DATA_FOLDER = f'{DATA_FOLDER}/celery/data'
+CELERY_RESULTS_FOLDER = f'{DATA_FOLDER}/celery/results'
 os.makedirs(CELERY_DATA_FOLDER, exist_ok=True)
 os.makedirs(CELERY_RESULTS_FOLDER, exist_ok=True)
-os.makedirs(REPORTS_FOLDER, exist_ok=True)
-os.makedirs(PAYLOADS_FOLDER, exist_ok=True)
-os.makedirs(CONFIG_FOLDER, exist_ok=True)
 
 # Environment variables
-RECORD = bool(int(os.environ.get('RECORD', '0')))
+DEBUG = int(os.environ.get('DEBUG', '0'))
+RECORD = bool(int(os.environ.get('RECORD', 0)))
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{CELERY_RESULTS_FOLDER}')
-DEBUG = int(os.environ.get('DEBUG', '0'))
-CVES_FOLDER = f'{TEMP_FOLDER}/cves'
+CELERY_BROKER_POOL_LIMIT = int(os.environ.get('CELERY_BROKER_POOL_LIMIT', 10))
+CELERY_BROKER_CONNECTION_TIMEOUT = float(os.environ.get('CELERY_BROKER_CONNECTION_TIMEOUT', 4.0))
+CELERY_BROKER_VISIBILITY_TIMEOUT = int(os.environ.get('CELERY_BROKER_VISIBILITY_TIMEOUT', 3600))
+CELERY_OVERRIDE_DEFAULT_LOGGING = bool(int(os.environ.get('CELERY_OVERRIDE_DEFAULT_LOGGING', 1)))
 GOOGLE_DRIVE_PARENT_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_PARENT_FOLDER_ID')
 GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
-DATABASE_URI = os.environ.get('DATABASE_URI', 'mongo://localhost')
+
+# Defaults HTTP and Proxy settings
 DEFAULT_SOCKS5_PROXY = os.environ.get('SOCKS5_PROXY', "socks5://127.0.0.1:9050")
 DEFAULT_HTTP_PROXY = os.environ.get('HTTP_PROXY', "https://127.0.0.1:9080")
-
-# Defaults
-DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-silent -td -asn -cdn')
-DEFAULT_STDIN_TIMEOUT = 1000  # seconds
-DEFAULT_PROXY_TIMEOUT = 1  # seconds
+DEFAULT_STORE_HTTP_RESPONSES = bool(int(os.environ.get('STORE_HTTP_RESPONSES', 1)))
 DEFAULT_PROXYCHAINS_COMMAND = "proxychains"
+DEFAULT_FREEPROXY_TIMEOUT = 1  # seconds
+
+# Default worker settings
+DEFAULT_INPUT_CHUNK_SIZE = int(os.environ.get('DEFAULT_INPUT_CHUNK_SIZE', 1000))
+DEFAULT_STDIN_TIMEOUT = 1000  # seconds
+
+# Default tasks settings
+DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-silent -td')
+DEFAULT_KATANA_FLAGS = os.environ.get('DEFAULT_KATANA_FLAGS', '-silent -jc -js-crawl -known-files all -or -ob')
+
+# Default wordlists
+DEFAULT_HTTP_WORDLIST = os.environ.get('DEFAULT_HTTP_WORDLIST', f'{WORDLISTS_FOLDER}/Fuzzing/fuzz-Bo0oM.txt')
+DEFAULT_DNS_WORDLIST = os.environ.get('DEFAULT_DNS_WORDLIST', f'{WORDLISTS_FOLDER}/Discovery/DNS/combined_subdomains.txt')  # noqa:E501
 
 # Constants
-DEFAULT_WORDLIST = '/usr/share/seclists/Fuzzing/fuzz-Bo0oM.txt'
-DEFAULT_DNS_WORDLIST = '/usr/share/seclists/Discovery/DNS/combined_subdomains.txt'
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
 
@@ -107,9 +128,12 @@ TYPE = 'type'
 URL = 'url'
 USER_AGENT = 'user_agent'
 USERNAME = 'username'
+SCREENSHOT_PATH = 'screenshot_path'
+STORED_RESPONSE_PATH = 'stored_response_path'
 SCRIPT = 'script'
 SERVICE_NAME = 'service_name'
 SOURCES = 'sources'
+STATE = 'state'
 STATUS_CODE = 'status_code'
 SUBDOMAIN = 'subdomain'
 TECH = 'tech'

@@ -1,7 +1,6 @@
-import re
-from dataclasses import dataclass, fields, _MISSING_TYPE
-
 import logging
+import re
+from dataclasses import _MISSING_TYPE, dataclass, fields
 
 logger = logging.getLogger(__name__)
 

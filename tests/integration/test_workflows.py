@@ -52,11 +52,11 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 	def test_default_workflows(self):
 		fmt_opts = {
-			'print_item': DEBUG > 1,
 			'print_cmd': DEBUG > 0,
-			'print_line': DEBUG > 1,
+			'print_item': DEBUG > 1,
+			'print_line': DEBUG > 2,
 			'table': DEBUG > 1,
-			'output': 'table' if DEBUG > 0 else ''
+			'output': 'table' if DEBUG > 1 else ''
 		}
 		opts = {
 			'ffuf.filter_size': 1987,

@@ -22,7 +22,7 @@ class gf(Tagger):
 		'git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true'
 	)
 	output_types = [Tag]
-	item_loader = lambda self, line: {'match': line, 'name': self.get_opt_value('pattern')}  # noqa: E731
+	item_loader = lambda self, line: {'match': line, 'name': self.get_opt_value('pattern').rstrip() + ' pattern'}  # noqa: E731,E501
 
 	@staticmethod
 	def on_item(self, item):
