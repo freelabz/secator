@@ -173,7 +173,7 @@ def register_runner(cli_endpoint, config):
 		from secator.cli import ALL_CONFIGS
 		tasks = [
 			get_command_cls(task)
-			for workflow in ALL_CONFIGS.workflows
+			for workflow in ALL_CONFIGS.workflow
 			for task in Task.get_tasks_from_conf(workflow.tasks)
 			if workflow.name in list(config.workflows.keys())
 		]

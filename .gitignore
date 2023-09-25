@@ -2,8 +2,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.txt
-*.sh
+#*.txt
+#*.sh
 
 # Others
 *.json

@@ -15,6 +15,7 @@ dependencies = [
     'colorama',
     'cpe',
     'dotmap',
+    'eventlet',
     'free-proxy',
     'furl',
     'jinja2',
