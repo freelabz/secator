@@ -27,6 +27,7 @@ RUNNER_GLOBAL_OPTS = {
 	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
 	'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
+	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
 }
 
 DEFAULT_CLI_OPTIONS = list(RUNNER_OPTS.keys()) + list(RUNNER_GLOBAL_OPTS.keys())
@@ -236,6 +237,7 @@ def register_runner(cli_endpoint, config):
 		worker = opts['worker']
 		debug = opts['debug']
 		ws = opts.pop('workspace')
+		driver = opts.pop('driver', '')
 		context = {'workspace_name': ws}
 		if debug:
 			os.environ['DEBUG'] = str(debug)
@@ -263,8 +265,33 @@ def register_runner(cli_endpoint, config):
 				'print_start': not sync,
 			})
 
+		# Build hooks
+		hooks = {}
+		if driver == 'mongodb':
+			from secator.hooks.mongodb import update_runner, save_finding
+			hooks = {
+				Scan: {
+					'on_init': [update_runner],
+					'on_start': [update_runner],
+					'on_iter': [update_runner],
+					'on_end': [update_runner],
+				},
+				Workflow: {
+					'on_init': [update_runner],
+					'on_start': [update_runner],
+					'on_iter': [update_runner],
+					'on_end': [update_runner],
+				},
+				Task: {
+					'on_init': [update_runner],
+					'on_item': [save_finding],
+					'on_iter': [update_runner],
+					'on_end': [update_runner]
+				}
+			}
+
 		# Build exporters
-		runner = runner_cls(config, targets, run_opts=opts, context=context)
+		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}
