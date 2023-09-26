@@ -8,8 +8,6 @@ from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 
-from kombu import Queue
-
 from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
 								 CELERY_RESULT_BACKEND)
 from secator.rich import console
@@ -47,22 +45,25 @@ app.conf.update({
 
 	# Celery config
 	'task_eager_propagates': False,
-	# 'task_routes': {
-		# 'secator.celery.run_*': {'queue': 'runners'},
-		# 'secator.tasks.*': {'queue': 'celery'}
-	# },
+	'task_routes': {
+		'secator.celery.run_workflow': {'queue': 'celery'},
+		'secator.celery.run_scan': {'queue': 'celery'},
+		'secator.celery.run_task': {'queue': 'fast'},
+		'secator.celery.run_command': {'queue': 'fast'},
+	},
 	'task_create_missing_queues': True,
 	'task_send_sent_event': True,
 	'worker_send_task_events': True,
 	'worker_prefetch_multiplier': 1
 })
 
-# @signals.setup_logging.connect
-# def void(*args, **kwargs):
-# 	"""Override celery's logging setup to prevent it from altering our settings.
-# 	github.com/celery/celery/issues/1867
-# 	"""
-# 	pass
+
+@signals.setup_logging.connect
+def void(*args, **kwargs):
+	"""Override celery's logging setup to prevent it from altering our settings.
+	github.com/celery/celery/issues/1867
+	"""
+	pass
 
 
 def revoke_task(task_id):
@@ -95,15 +96,15 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 			opts['chunked'] = True
-		sig = task_cls.s(chunk, **opts)
+		sig = task_cls.s(chunk, **opts).set(queue='fast')
 		sigs.append(sig)
 
 	# Build Celery workflow
 	workflow = chain(
-		forward_results.s(results),
+		forward_results.s(results).set(queue='fast'),
 		chord(
 			tuple(sigs),
-			forward_results.s(),
+			forward_results.s().set(queue='fast'),
 		)
 	)
 	return workflow
