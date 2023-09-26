@@ -8,8 +8,6 @@ from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 
-from kombu import Queue
-
 from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
 								 CELERY_RESULT_BACKEND)
 from secator.rich import console
@@ -59,12 +57,13 @@ app.conf.update({
 	'worker_prefetch_multiplier': 1
 })
 
-# @signals.setup_logging.connect
-# def void(*args, **kwargs):
-# 	"""Override celery's logging setup to prevent it from altering our settings.
-# 	github.com/celery/celery/issues/1867
-# 	"""
-# 	pass
+
+@signals.setup_logging.connect
+def void(*args, **kwargs):
+	"""Override celery's logging setup to prevent it from altering our settings.
+	github.com/celery/celery/issues/1867
+	"""
+	pass
 
 
 def revoke_task(task_id):
