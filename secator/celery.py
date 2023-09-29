@@ -200,39 +200,6 @@ def run_command(self, results, name, targets, opts={}):
 				chunk_size=chunk_size)
 
 			result = workflow.apply() if sync else workflow()
-			# self.update_state(**state)
-
-			# TODO: here we want to update the parent task state with the
-			# children info as they are executing, to update the run count etc...
-			# but we cannot call `self.update_state` after the previous line
-			# for (once again) some obscure Celery reason, thus preventing us to
-			# do this ... Try to refactor this in a much cleaner way by using a
-			# dispatcher task, maybe it could work ...
-			# if not sync:
-			# 	from secator.runners._base import Runner
-			# 	from secator.runners._helpers import get_task_ids
-			# 	ntasks = len(targets) // chunk_size
-			# 	state['meta']['chunk_info'] = f'0/{ntasks}'
-			# 	state['meta']['error'] = None
-			# 	print(state)
-			# 	subtasks = {}
-			# 	task_ids = []
-			# 	get_task_ids(result, ids=task_ids)
-			# 	for info in Runner.get_live_results(result):
-			# 		print(info)
-			# 		subtasks[info['id']] = info
-			# 		ready_count = sum(subtasks.get(id, {}).get('count', 0) for id in task_ids)
-			# 		error = '\n\n'.join([subtasks.get(id, {}).get('error') or '' for id in task_ids])
-			# 		print(ready_count)
-			# 		print(error)
-			# 		state['meta']['chunk_info'] = f'{ready_count}/{chunk_size}'
-			# 		state['meta']['error'] = error.strip()
-			# 		self.update_state(**state)
-			# 		sleep(1)
-			# state['state'] = 'SUCCESS'
-			# state['meta']['results'] = results
-			# state['meta']['count'] = len(task_results)
-			# return []
 			with allow_join_result():
 				task_results = result.get()
 				results.extend(task_results)
