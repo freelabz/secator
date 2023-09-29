@@ -118,7 +118,7 @@ def run_task(self, args=[], kwargs={}):
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
-	kwargs['sync'] = True
+	kwargs['run_opts']['sync'] = True
 	task = Task(*args, **kwargs)
 	print('DEBUG: Running task.run()')
 	task.run()
