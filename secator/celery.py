@@ -99,15 +99,15 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 			opts['chunked'] = True
-		sig = task_cls.s(chunk, **opts).set(queue='fast')
+		sig = task_cls.s(chunk, **opts).set(queue='chunks')
 		sigs.append(sig)
 
 	# Build Celery workflow
 	workflow = chain(
-		forward_results.s(results).set(queue='fast'),
+		forward_results.s(results).set(queue='chunks'),
 		chord(
 			tuple(sigs),
-			forward_results.s().set(queue='fast'),
+			forward_results.s().set(queue='chunks'),
 		)
 	)
 	return workflow
@@ -199,7 +199,6 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 
-			print(f'CHUNK TASK APPLY SYNC: {sync}')
 			result = workflow.apply() if sync else workflow()
 			# self.update_state(**state)
 
@@ -230,10 +229,10 @@ def run_command(self, results, name, targets, opts={}):
 			# 		state['meta']['error'] = error.strip()
 			# 		self.update_state(**state)
 			# 		sleep(1)
-			state['state'] = 'SUCCESS'
-			state['meta']['results'] = results
-			state['meta']['count'] = len(task_results)
-			return []
+			# state['state'] = 'SUCCESS'
+			# state['meta']['results'] = results
+			# state['meta']['count'] = len(task_results)
+			# return []
 			with allow_join_result():
 				task_results = result.get()
 				results.extend(task_results)
