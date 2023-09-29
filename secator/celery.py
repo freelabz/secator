@@ -229,10 +229,10 @@ def run_command(self, results, name, targets, opts={}):
 			# 		state['meta']['error'] = error.strip()
 			# 		self.update_state(**state)
 			# 		sleep(1)
-			# state['state'] = 'SUCCESS'
-			# state['meta']['results'] = results
-			# state['meta']['count'] = len(task_results)
-			# return []
+			state['state'] = 'SUCCESS'
+			state['meta']['results'] = results
+			state['meta']['count'] = len(task_results)
+			return []
 			with allow_join_result():
 				task_results = result.get()
 				results.extend(task_results)
