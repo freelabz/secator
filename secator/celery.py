@@ -117,12 +117,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 def run_task(self, args=[], kwargs={}):
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
-	print(args)
-	print(kwargs)
 	kwargs['context']['celery_id'] = self.request.id
-	if not 'run_opts' in kwargs:
-		kwargs['run_opts'] = {}
-	kwargs['run_opts']['sync'] = True
 	task = Task(*args, **kwargs)
 	print('DEBUG: Running task.run()')
 	task.run()
