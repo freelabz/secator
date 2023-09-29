@@ -99,15 +99,15 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 			opts['chunked'] = True
-		sig = task_cls.s(chunk, **opts).set(queue='chunks')
+		sig = task_cls.s(chunk, **opts).set(queue='fast')
 		sigs.append(sig)
 
 	# Build Celery workflow
 	workflow = chain(
-		forward_results.s(results).set(queue='chunks'),
+		forward_results.s(results).set(queue='fast'),
 		chord(
 			tuple(sigs),
-			forward_results.s().set(queue='chunks'),
+			forward_results.s().set(queue='fast'),
 		)
 	)
 	return workflow
