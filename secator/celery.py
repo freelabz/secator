@@ -199,6 +199,7 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 
+			print(f'CHUNK TASK APPLY SYNC: {sync}')
 			result = workflow.apply() if sync else workflow()
 			# self.update_state(**state)
 
@@ -229,6 +230,10 @@ def run_command(self, results, name, targets, opts={}):
 			# 		state['meta']['error'] = error.strip()
 			# 		self.update_state(**state)
 			# 		sleep(1)
+			state['state'] = 'SUCCESS'
+			state['meta']['results'] = results
+			state['meta']['count'] = len(task_results)
+			return []
 			with allow_join_result():
 				task_results = result.get()
 				results.extend(task_results)
