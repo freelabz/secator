@@ -50,7 +50,7 @@ app.conf.update({
 	'task_routes': {
 		'secator.celery.run_workflow': {'queue': 'celery'},
 		'secator.celery.run_scan': {'queue': 'celery'},
-		'secator.celery.run_task': {'queue': 'fast'},
+		'secator.celery.run_task': {'queue': 'celery'},
 		'secator.celery.run_command': {'queue': 'fast'},
 	},
 	'task_acks_late': True,
@@ -119,6 +119,7 @@ def run_task(self, args=[], kwargs={}):
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
 	task = Task(*args, **kwargs)
+	print('DEBUG: Running task.run()')
 	task.run()
 
 

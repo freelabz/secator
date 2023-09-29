@@ -153,9 +153,8 @@ class Command(Runner):
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
+		print('DEBUG: Launching run_command in queue fast')
 		from secator.celery import run_command
-
-		# TODO: running chunked group .apply() in run_command doesn't work if this isn't set explicitely to False
 		results = kwargs.get('results', [])
 		return run_command.apply_async(args=[results, cls.__name__] + list(args), kwargs={'opts': kwargs}, queue='fast')
 

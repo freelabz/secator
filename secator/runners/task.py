@@ -10,7 +10,8 @@ class Task(Runner):
 
 	def delay(cls, *args, **kwargs):
 		from secator.celery import run_task
-		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='fast')
+		print('DEBUG: Launching run_task in queue celery')
+		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='celery')
 
 	def yielder(self):
 		"""Run task.
@@ -48,6 +49,7 @@ class Task(Runner):
 
 		# Run task
 		if self.sync:
+			print(f'DEBUG: Running task in sync mode')
 			task = task_cls(self.targets, **run_opts)
 		else:
 			result = task_cls.delay(self.targets, **run_opts)
