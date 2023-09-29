@@ -19,6 +19,7 @@ dependencies = [
     'flower',
     'free-proxy',
     'furl',
+    'gevent',
     'jinja2',
     'humanize',
     'netifaces',

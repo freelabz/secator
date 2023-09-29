@@ -9,7 +9,7 @@ from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 
 from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
-								 CELERY_RESULT_BACKEND)
+								 CELERY_RESULT_BACKEND, CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_CONNECTION_TIMEOUT)
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
@@ -32,9 +32,11 @@ app.conf.update({
 		'data_folder_out': CELERY_DATA_FOLDER,
 	},
 	'broker_connection_retry_on_startup': True,
+	'broker_pool_limit': CELERY_BROKER_POOL_LIMIT,
+	'broker_connection_timeout': CELERY_BROKER_CONNECTION_TIMEOUT,
 
 	# Serialization / compression
-	'accept_content': ['application/x-python-serialize'],
+	'accept_content': ['application/x-python-serialize', 'application/json'],
 	'task_compression': 'gzip',
 	'task_serializer': 'pickle',
 	'result_serializer': 'pickle',
@@ -51,6 +53,7 @@ app.conf.update({
 		'secator.celery.run_task': {'queue': 'fast'},
 		'secator.celery.run_command': {'queue': 'fast'},
 	},
+	'task_acks_late': True,
 	'task_create_missing_queues': True,
 	'task_send_sent_event': True,
 	'worker_send_task_events': True,
@@ -58,12 +61,12 @@ app.conf.update({
 })
 
 
-@signals.setup_logging.connect
-def void(*args, **kwargs):
-	"""Override celery's logging setup to prevent it from altering our settings.
-	github.com/celery/celery/issues/1867
-	"""
-	pass
+# @signals.setup_logging.connect
+# def void(*args, **kwargs):
+# 	"""Override celery's logging setup to prevent it from altering our settings.
+# 	github.com/celery/celery/issues/1867
+# 	"""
+# 	pass
 
 
 def revoke_task(task_id):
