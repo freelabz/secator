@@ -3,6 +3,8 @@ import os
 import logging
 import time
 
+from celery import shared_task
+
 from secator.rich import console
 from secator.definitions import DEBUG
 
@@ -23,12 +25,8 @@ def update_runner(self):
 	update = self.toDict()
 	start_time = time.time()
 	if existing_id:
-		db[collection].update_one({'_id': ObjectId(existing_id)}, {'$set': update})
-		if DEBUG:
-			end_time = time.time()
-			elapsed_time = end_time - start_time
-			console.log(f'mongodb: Updated {type} {existing_id} in {elapsed_time:.4f}s', style='dim yellow')
-	else:
+		update_runner_lazy.apply_async(args=(collection, existing_id, update), queue='db')
+	else: # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
 		self.context[f'{type}_id'] = str(runner.inserted_id)
 		if DEBUG > 0:
@@ -38,14 +36,30 @@ def update_runner(self):
 
 
 def save_finding(self, item):
-	from secator.celery import save_finding_to_db
-	save_finding_to_db.apply_async(args=(item.toDict(),), queue='db')
-	# start_time = time.time()
-	# db = client.main
-	# finding = db['findings'].insert_one(item.toDict())
-	# item._uuid = str(finding.inserted_id)
-	# if DEBUG > 0:
-	# 	end_time = time.time()
-	# 	elapsed_time = end_time - start_time
-	# 	console.log(f'mongodb: Created finding {finding.inserted_id} in {elapsed_time:.4f}s', style='dim yellow')
-	# return item
+	save_finding_lazy.apply_async(args=(item.toDict(),), queue='db')
+	return item
+
+
+@shared_task
+def save_finding_lazy(item):
+	from secator.hooks.mongodb import client
+	import time
+	start_time = time.time()
+	db = client.main
+	finding = db['findings'].insert_one(item)
+	end_time = time.time()
+	elapsed_time = end_time - start_time
+	console.log(f'mongodb: Created finding {finding.inserted_id} in {elapsed_time:.4f}s', style='dim yellow')
+
+
+@shared_task
+def update_runner_lazy(collection, id, update):
+	from secator.hooks.mongodb import client
+	import time
+	db = client.main
+	start_time = time.time()
+	db[collection].update_one({'_id': ObjectId(id)}, {'$set': update})
+	if DEBUG:
+		end_time = time.time()
+		elapsed_time = end_time - start_time
+		console.log(f'mongodb: Updated {type} {id} in {elapsed_time:.4f}s', style='dim yellow')

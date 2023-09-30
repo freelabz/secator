@@ -59,6 +59,7 @@ app.conf.update({
 	'worker_send_task_events': True,
 	'worker_prefetch_multiplier': 1
 })
+app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 
 
 # @signals.setup_logging.connect
@@ -111,18 +112,6 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 		)
 	)
 	return workflow
-
-
-@app.task()
-def save_finding_to_db(item):
-	from secator.hooks.mongodb import client
-	import time
-	start_time = time.time()
-	db = client.main
-	finding = db['findings'].insert_one(item)
-	end_time = time.time()
-	elapsed_time = end_time - start_time
-	console.log(f'mongodb: Created finding {finding.inserted_id} in {elapsed_time:.4f}s', style='dim yellow')
 
 
 @app.task(bind=True)
