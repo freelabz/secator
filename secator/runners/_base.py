@@ -665,7 +665,7 @@ class Runner:
 
 		# Run item convert hooks
 		if not self.print_orig:
-			item = self.run_hooks('on_item', item)
+			self.run_hooks('on_item', item)
 
 		# Return item
 		return item

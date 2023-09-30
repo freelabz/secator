@@ -48,7 +48,6 @@ class Task(Runner):
 
 		# Run task
 		if self.sync:
-			print(f'DEBUG: Running task in sync mode')
 			task = task_cls(self.targets, **run_opts)
 		else:
 			result = task_cls.delay(self.targets, **run_opts)
