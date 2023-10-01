@@ -49,7 +49,8 @@ def save_finding_lazy(item):
 	finding = db['findings'].insert_one(item)
 	end_time = time.time()
 	elapsed_time = end_time - start_time
-	console.log(f'mongodb: Created finding {finding.inserted_id} in {elapsed_time:.4f}s', style='dim yellow')
+	if DEBUG > 0:
+		console.log(f'mongodb: Created finding {finding.inserted_id} in {elapsed_time:.4f}s', style='dim yellow')
 
 
 @shared_task
@@ -59,7 +60,7 @@ def update_runner_lazy(collection, id, update):
 	db = client.main
 	start_time = time.time()
 	db[collection].update_one({'_id': ObjectId(id)}, {'$set': update})
-	if DEBUG:
-		end_time = time.time()
-		elapsed_time = end_time - start_time
-		console.log(f'mongodb: Updated {type} {id} in {elapsed_time:.4f}s', style='dim yellow')
+	end_time = time.time()
+	elapsed_time = end_time - start_time
+	if DEBUG > 0:
+		console.log(f'mongodb: Updated {collection} {id} in {elapsed_time:.4f}s', style='dim yellow')
