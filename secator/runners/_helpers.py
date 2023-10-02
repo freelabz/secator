@@ -87,12 +87,13 @@ def get_task_ids(result, ids=[]):
 		if result.id not in ids:
 			ids.append(result.id)
 
-	if result.children:
+	if hasattr(result, 'children') and result.children:
 		for child in result.children:
 			get_task_ids(child, ids=ids)
 
 	# Browse parent
-	get_task_ids(result.parent, ids=ids)
+	if hasattr(result, 'parent') and result.parent:
+		get_task_ids(result.parent, ids=ids)
 
 
 def get_task_info(task_id):
@@ -116,6 +117,7 @@ def get_task_info(task_id):
 	data['count'] = 0
 	data['error'] = None
 	data['ready'] = False
+	data['results'] = []
 	if res.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
 		data['ready'] = True
 	if res.info and not isinstance(res.info, list):

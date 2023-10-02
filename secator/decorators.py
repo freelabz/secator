@@ -6,7 +6,7 @@ from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
 from secator.celery import is_celery_worker_alive
-from secator.definitions import OPT_NOT_SUPPORTED
+from secator.definitions import OPT_NOT_SUPPORTED, DEBUG
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
@@ -258,7 +258,6 @@ def register_runner(cli_endpoint, config):
 				'print_item': not sync,
 				'print_line': sync,
 				'print_remote_status': not sync,
-				'print_results': not sync,
 			})
 		else:  # task
 			opts.update({
@@ -291,6 +290,8 @@ def register_runner(cli_endpoint, config):
 			}
 
 		# Build exporters
+		if DEBUG > 1:
+			print(opts)
 		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 

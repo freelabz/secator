@@ -62,12 +62,12 @@ app.conf.update({
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 
 
-# @signals.setup_logging.connect
-# def void(*args, **kwargs):
-# 	"""Override celery's logging setup to prevent it from altering our settings.
-# 	github.com/celery/celery/issues/1867
-# 	"""
-# 	pass
+@signals.setup_logging.connect
+def void(*args, **kwargs):
+	"""Override celery's logging setup to prevent it from altering our settings.
+	github.com/celery/celery/issues/1867
+	"""
+	pass
 
 
 def revoke_task(task_id):

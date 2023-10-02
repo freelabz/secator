@@ -12,6 +12,7 @@ import eventlet
 pymongo = eventlet.import_patched('pymongo')
 
 MONGODB_URL = os.environ.get('MONGODB_URL', 'mongodb://localhost')
+UPDATE_FREQUENCY_SECONDS = 10
 client = pymongo.MongoClient(MONGODB_URL)
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,13 @@ def update_runner(self):
 	existing_id = self.context.get(f'{type}_id')
 	update = self.toDict()
 	start_time = time.time()
+	delta = start_time - self.last_updated
 	if existing_id:
-		update_runner_lazy.apply_async(args=(collection, existing_id, update), queue='db')
+		if delta < UPDATE_FREQUENCY_SECONDS and self.status == 'RUNNING':
+			# console.log(f'mongodb: skipping update for performance as last update too close ({delta}s < {UPDATE_FREQUENCY_SECONDS}s)')
+			return
+		self.last_updated = start_time
+		update_runner_lazy.apply(args=(collection, existing_id, update), queue='db')
 	else: # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
 		self.context[f'{type}_id'] = str(runner.inserted_id)
@@ -36,14 +42,12 @@ def update_runner(self):
 
 
 def save_finding(self, item):
-	save_finding_lazy.apply_async(args=(item.toDict(),), queue='db')
+	save_finding_lazy.apply(args=(item.toDict(),), queue='db')
 	return item
 
 
 @shared_task
 def save_finding_lazy(item):
-	from secator.hooks.mongodb import client
-	import time
 	start_time = time.time()
 	db = client.main
 	finding = db['findings'].insert_one(item)
@@ -55,12 +59,11 @@ def save_finding_lazy(item):
 
 @shared_task
 def update_runner_lazy(collection, id, update):
-	from secator.hooks.mongodb import client
-	import time
 	db = client.main
 	start_time = time.time()
 	db[collection].update_one({'_id': ObjectId(id)}, {'$set': update})
+	status = update['status']
 	end_time = time.time()
 	elapsed_time = end_time - start_time
 	if DEBUG > 0:
-		console.log(f'mongodb: Updated {collection} {id} in {elapsed_time:.4f}s', style='dim yellow')
+		console.log(f'mongodb: Updated {collection} {id} in {elapsed_time:.4f}s with status {status}', style='dim yellow')

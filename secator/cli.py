@@ -120,7 +120,7 @@ def report_show(json_path, exclude_fields):
 
 @cli.command()
 @click.option('-n', '--name', type=str, default='runner', help='Celery worker name (unique).')
-@click.option('-c', '--concurrency', type=int, help='Number of child processes processing the queue.')
+@click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='celery,fast,chunked,db', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')

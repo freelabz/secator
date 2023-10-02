@@ -90,6 +90,7 @@ class Runner:
 		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
+		self.last_updated = time()
 		self.end_time = None
 		self._hooks = hooks
 		self.errors = []
@@ -112,7 +113,6 @@ class Runner:
 
 		# Print options
 		self.print_start = self.run_opts.pop('print_start', False)
-		self.print_results = self.run_opts.pop('print_results', False)
 		self.print_item = self.run_opts.pop('print_item', False)
 		self.print_line = self.run_opts.pop('print_line', False)
 		self.print_item_count = self.run_opts.pop('print_item_count', False)
@@ -257,6 +257,7 @@ class Runner:
 			'progress': self.progress,
 			'start_time': self.start_time,
 			'end_time': self.end_time,
+			'last_updated': self.last_updated,
 			'elapsed_human': self.elapsed_human,
 			'errors': self.errors,
 			'context': self.context
