@@ -51,7 +51,11 @@ class Task(Runner):
 			task = task_cls(self.targets, **run_opts)
 		else:
 			result = task_cls.delay(self.targets, **run_opts)
-			task = self.process_live_tasks(result, description=False, results_only=True, print_remote_status=self.print_remote_status)
+			task = self.process_live_tasks(
+				result,
+				description=False,
+				results_only=True,
+				print_remote_status=self.print_remote_status)
 
 		# Yield task results
 		yield from task

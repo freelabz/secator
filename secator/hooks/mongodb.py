@@ -29,11 +29,11 @@ def update_runner(self):
 	delta = start_time - self.last_updated
 	if existing_id:
 		if delta < UPDATE_FREQUENCY_SECONDS and self.status == 'RUNNING':
-			# console.log(f'mongodb: skipping update for performance as last update too close ({delta}s < {UPDATE_FREQUENCY_SECONDS}s)')
+			# console.log(f'mongodb: skipping update for performance ({delta}s < {UPDATE_FREQUENCY_SECONDS}s)')
 			return
 		self.last_updated = start_time
 		update_runner_lazy.apply(args=(collection, existing_id, update), queue='db')
-	else: # sync update and save result to runner object
+	else:  # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
 		self.context[f'{type}_id'] = str(runner.inserted_id)
 		if DEBUG > 0:

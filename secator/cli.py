@@ -133,7 +133,7 @@ def report_show(json_path, exclude_fields):
 # def k8s():
 # 	"""Deploy secator on Kubernetes."""
 # 	pass
-	
+
 
 #--------#
 # WORKER #
@@ -154,11 +154,15 @@ def worker(name, concurrency, reload, queue, pool, check, dev, stop):
 	if check:
 		is_celery_worker_alive()
 		return
+	app = 'secator.celery.app'
 	if dev:
 		subcmd = 'stop' if stop else 'start'
-		cmd = f'celery -A secator.celery.app multi {subcmd} 3 -P {pool} -Q:1 celery -Q:2 fast -Q:3 chunked -c 50 --logfile=secator-worker-%n%I.log --pidfile=secator-worker-%n.pid'
+		logfile = 'secator-worker-%n%I.log'
+		pidfile = 'secator-worker-%n.pid'
+		queues = '-Q:1 celery -Q:2 fast -Q:3 chunked'
+		cmd = f'celery -A {app} multi {subcmd} 3 -P {pool} {queues} -c 50 --logfile={logfile} --pidfile={pidfile}'
 	else:
-		cmd = f'celery -A secator.celery.app worker -P {pool} -n {name} -Q {queue}'
+		cmd = f'celery -A {app} worker -P {pool} -n {name} -Q {queue}'
 	if concurrency:
 		cmd += f' -c {concurrency}'
 	if reload:
