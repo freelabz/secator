@@ -114,6 +114,28 @@ def report_show(json_path, exclude_fields):
 
 
 #--------#
+# DEPLOY #
+#--------#
+
+# TODO: work on this
+# @cli.group(aliases=['d'])
+# def deploy():
+# 	"""Deploy secator."""
+# 	pass
+
+# @deploy.command()
+# def docker_compose():
+# 	"""Deploy secator on docker-compose."""
+# 	pass
+
+# @deploy.command()
+# @click.option('-t', '--target', type=str, default='minikube', help='Deployment target amongst minikube, gke')
+# def k8s():
+# 	"""Deploy secator on Kubernetes."""
+# 	pass
+	
+
+#--------#
 # WORKER #
 #--------#
 
@@ -125,12 +147,18 @@ def report_show(json_path, exclude_fields):
 @click.option('-Q', '--queue', type=str, default='celery,fast,chunked,db', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
-def worker(name, concurrency, reload, queue, pool, check):
+@click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
+@click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
+def worker(name, concurrency, reload, queue, pool, check, dev, stop):
 	"""Celery worker."""
 	if check:
 		is_celery_worker_alive()
 		return
-	cmd = f'celery -A secator.celery.app worker -P {pool} -n {name} -Q {queue}'
+	if dev:
+		subcmd = 'stop' if stop else 'start'
+		cmd = f'celery -A secator.celery.app multi {subcmd} 3 -P {pool} -Q:1 celery -Q:2 fast -Q:3 chunked -c 50 --logfile=secator-worker-%n%I.log --pidfile=secator-worker-%n.pid'
+	else:
+		cmd = f'celery -A secator.celery.app worker -P {pool} -n {name} -Q {queue}'
 	if concurrency:
 		cmd += f' -c {concurrency}'
 	if reload:

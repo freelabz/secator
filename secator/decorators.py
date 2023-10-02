@@ -264,30 +264,11 @@ def register_runner(cli_endpoint, config):
 				'print_start': not sync,
 			})
 
-		# Build hooks
+		# Build hooks from driver name
 		hooks = {}
 		if driver == 'mongodb':
-			from secator.hooks.mongodb import update_runner, save_finding
-			hooks = {
-				Scan: {
-					'on_init': [update_runner],
-					'on_start': [update_runner],
-					'on_iter': [update_runner],
-					'on_end': [update_runner],
-				},
-				Workflow: {
-					'on_init': [update_runner],
-					'on_start': [update_runner],
-					'on_iter': [update_runner],
-					'on_end': [update_runner],
-				},
-				Task: {
-					'on_init': [update_runner],
-					'on_item': [save_finding],
-					'on_iter': [update_runner],
-					'on_end': [update_runner]
-				}
-			}
+			from secator.hooks.mongodb import MONGODB_HOOKS
+			hooks = MONGODB_HOOKS
 
 		# Build exporters
 		if DEBUG > 1:

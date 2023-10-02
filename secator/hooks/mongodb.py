@@ -7,6 +7,7 @@ from celery import shared_task
 
 from secator.rich import console
 from secator.definitions import DEBUG
+from secator.runners import Task, Workflow, Scan
 
 import eventlet
 pymongo = eventlet.import_patched('pymongo')
@@ -67,3 +68,25 @@ def update_runner_lazy(collection, id, update):
 	elapsed_time = end_time - start_time
 	if DEBUG > 0:
 		console.log(f'mongodb: Updated {collection} {id} in {elapsed_time:.4f}s with status {status}', style='dim yellow')
+
+
+MONGODB_HOOKS = {
+	Scan: {
+		'on_init': [update_runner],
+		'on_start': [update_runner],
+		'on_iter': [update_runner],
+		'on_end': [update_runner],
+	},
+	Workflow: {
+		'on_init': [update_runner],
+		'on_start': [update_runner],
+		'on_iter': [update_runner],
+		'on_end': [update_runner],
+	},
+	Task: {
+		'on_init': [update_runner],
+		'on_item': [save_finding],
+		'on_iter': [update_runner],
+		'on_end': [update_runner]
+	}
+}
