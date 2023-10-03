@@ -187,11 +187,11 @@ def run_command(self, results, name, targets, opts={}):
 		}
 	}
 	# self.update_state(**state)
-
-	try:
-		profile_root = Path('/code/.profiles')
-		profile_root.mkdir(exist_ok=True)
-		with memray.Tracker(''):
+	profile_root = Path('/code/.profiles')
+	profile_root.mkdir(exist_ok=True)
+	profile_path = f'/code/.profiles/{self.request.id}.bin'
+	with memray.Tracker(profile_path):
+		try:
 			# Flatten + dedupe results
 			results = flatten(results)
 			results = deduplicate(results, attr='_uuid')
