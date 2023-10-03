@@ -10,7 +10,7 @@ from secator.definitions import DEBUG
 from secator.runners import Task, Workflow, Scan
 
 import pymongo
-import gevent
+import gevent.monkey
 gevent.monkey.patch_all()
 
 MONGODB_URL = os.environ.get('MONGODB_URL', 'mongodb://localhost')
