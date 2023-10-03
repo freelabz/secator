@@ -34,6 +34,7 @@ orderedmultidict==1.0.1
 prometheus-client==0.17.1
 prompt-toolkit==3.0.39
 Pygments==2.16.1
+pyinstrument==4.5.3
 pymongo==4.5.0
 python-dateutil==2.8.2
 python-dotenv==1.0.0

@@ -9,8 +9,9 @@ from secator.rich import console
 from secator.definitions import DEBUG
 from secator.runners import Task, Workflow, Scan
 
-import eventlet
-pymongo = eventlet.import_patched('pymongo')
+import pymongo
+import gevent
+gevent.monkey.patch_all()
 
 MONGODB_URL = os.environ.get('MONGODB_URL', 'mongodb://localhost')
 UPDATE_FREQUENCY_SECONDS = 10

@@ -7,6 +7,8 @@ import celery
 from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
+from pyinstrument import Profiler
+from rich.logging import RichHandler
 
 from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
 								 CELERY_RESULT_BACKEND, CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_CONNECTION_TIMEOUT)
@@ -14,8 +16,18 @@ from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, deduplicate, discover_external_tasks,
-						   discover_internal_tasks, flatten)
+						   discover_internal_tasks, flatten)	   
 
+rich_handler = RichHandler(rich_tracebacks=True)
+rich_handler.setLevel(logging.INFO)
+logging.basicConfig(
+    level='NOTSET',
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[rich_handler],
+	force=True
+)
+# logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 trace.LOG_SUCCESS = """\
@@ -43,6 +55,7 @@ app.conf.update({
 
 	# Backend config
 	'result_backend': CELERY_RESULT_BACKEND,
+	'result_backend_transport_options': {'master_name': 'mymaster'},
 	'result_extended': True,
 
 	# Celery config
@@ -143,6 +156,8 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
+	profiler = Profiler(interval=0.0001)
+	profiler.start()
 	chunk = opts.get('chunk')
 	chunk_count = opts.get('chunk_count')
 	description = opts.get('description')
@@ -260,6 +275,15 @@ def run_command(self, results, name, targets, opts={}):
 		self.update_state(**state)
 
 		# If running in chunk mode, only return chunk result, not all results
+		profiler.stop()
+		from pathlib import Path
+		logger.info('Stopped profiling')
+		profile_root = Path('/code/.profiles')
+		profile_root.mkdir(exist_ok=True)
+		profile_path = f'/code/.profiles/{self.request.id}.html'
+		logger.info(f'Saving profile to {profile_path}')
+		with open(profile_path, 'w', encoding='utf-8') as f_html:
+			f_html.write(profiler.output_html())
 		return task_results if chunk else results
 
 
