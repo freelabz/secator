@@ -5,6 +5,8 @@ import shlex
 import subprocess
 import sys
 
+from time import sleep
+
 from celery.result import AsyncResult
 from fp.fp import FreeProxy
 
@@ -173,8 +175,6 @@ class Command(Runner):
 	@classmethod
 	def poll(cls, result):
 		# TODO: Move this to TaskBase
-		from time import sleep
-
 		while not result.ready():
 			data = AsyncResult(result.id).info
 			if DEBUG > 1 and isinstance(data, dict):
@@ -358,6 +358,7 @@ class Command(Runner):
 
 			# Process the output in real-time
 			for line in iter(lambda: process.stdout.readline(), b''):
+				sleep(0)
 				if not line:
 					break
 

@@ -15,7 +15,8 @@ import pymongo
 
 MONGODB_URL = os.environ.get('MONGODB_URL', 'mongodb://localhost')
 UPDATE_FREQUENCY_SECONDS = 10
-client = pymongo.MongoClient(MONGODB_URL)
+MAX_POOL_SIZE = 100
+client = pymongo.MongoClient(MONGODB_URL, maxPoolSize=MAX_POOL_SIZE)
 
 logger = logging.getLogger(__name__)
 

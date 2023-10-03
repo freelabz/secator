@@ -184,7 +184,7 @@ def run_command(self, results, name, targets, opts={}):
 			'description': description
 		}
 	}
-	self.update_state(**state)
+	# self.update_state(**state)
 
 	try:
 		# Flatten + dedupe results
