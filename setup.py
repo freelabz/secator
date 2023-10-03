@@ -22,6 +22,7 @@ dependencies = [
     'gevent',
     'jinja2',
     'humanize',
+    'memray',
     'netifaces',
     'pygments',
     'pyinstrument',

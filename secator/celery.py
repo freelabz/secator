@@ -2,6 +2,8 @@ import logging
 import traceback
 import uuid
 from time import sleep
+from pathlib import Path
+import memray
 
 import celery
 from celery import chain, chord, signals
@@ -156,8 +158,8 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
-	profiler = Profiler(interval=0.0001)
-	profiler.start()
+	# profiler = Profiler(interval=0.0001)
+	# profiler.start()
 	chunk = opts.get('chunk')
 	chunk_count = opts.get('chunk_count')
 	description = opts.get('description')
@@ -187,103 +189,106 @@ def run_command(self, results, name, targets, opts={}):
 	# self.update_state(**state)
 
 	try:
-		# Flatten + dedupe results
-		results = flatten(results)
-		results = deduplicate(results, attr='_uuid')
+		profile_root = Path('/code/.profiles')
+		profile_root.mkdir(exist_ok=True)
+		with memray.Tracker(''):
+			# Flatten + dedupe results
+			results = flatten(results)
+			results = deduplicate(results, attr='_uuid')
 
-		# Get expanded targets
-		if not chunk:
-			targets, opts = run_extractors(results, opts, targets)
-			if not targets:
-				raise ValueError(f'{name}: No targets were specified as input.')
+			# Get expanded targets
+			if not chunk:
+				targets, opts = run_extractors(results, opts, targets)
+				if not targets:
+					raise ValueError(f'{name}: No targets were specified as input.')
 
-		# Get task class
-		task_cls = Task.get_task_class(name)
+			# Get task class
+			task_cls = Task.get_task_class(name)
 
-		# If task doesn't support multiple targets, or if the number of targets is too big, split into multiple tasks
-		multiple_targets = isinstance(targets, list) and len(targets) > 1
-		single_target_only = multiple_targets and task_cls.file_flag is None
-		break_size_threshold = multiple_targets and task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
+			# If task doesn't support multiple targets, or if the number of targets is too big, split into multiple tasks
+			multiple_targets = isinstance(targets, list) and len(targets) > 1
+			single_target_only = multiple_targets and task_cls.file_flag is None
+			break_size_threshold = multiple_targets and task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
 
-		if single_target_only or (not sync and break_size_threshold):
-			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
-			workflow = break_task(
-				task_cls,
-				opts,
-				targets,
-				results=results,
-				chunk_size=chunk_size)
+			if single_target_only or (not sync and break_size_threshold):
+				chunk_size = 1 if single_target_only else task_cls.input_chunk_size
+				workflow = break_task(
+					task_cls,
+					opts,
+					targets,
+					results=results,
+					chunk_size=chunk_size)
 
-			result = workflow.apply() if sync else workflow()
-			with allow_join_result():
-				task_results = result.get()
-				results.extend(task_results)
-				state['state'] = 'SUCCESS'
+				result = workflow.apply() if sync else workflow()
+				with allow_join_result():
+					task_results = result.get()
+					results.extend(task_results)
+					state['state'] = 'SUCCESS'
+					state['meta']['results'] = results
+					state['meta']['count'] = len(task_results)
+					self.update_state(**state)
+					return results
+
+			# If list with 1 element
+			if isinstance(targets, list) and len(targets) == 1:
+				targets = targets[0]
+
+			# Run task
+			task = task_cls(targets, **opts)
+			for item in task:
+				result_uuid = str(uuid.uuid4())
+				item._uuid = result_uuid
+				task_results.append(item)
+				results.append(item)
+				count += 1
+				state['meta']['task_results'] = task_results
 				state['meta']['results'] = results
 				state['meta']['count'] = len(task_results)
 				self.update_state(**state)
-				return results
 
-		# If list with 1 element
-		if isinstance(targets, list) and len(targets) == 1:
-			targets = targets[0]
+			# Update task state based on task return code
+			if task.return_code == 0:
+				task_state = 'SUCCESS'
+				task_exc = None
+			else:
+				task_state = 'FAILURE'
+				task_exc = TaskError('\n'.join(task.errors))
 
-		# Run task
-		task = task_cls(targets, **opts)
-		for item in task:
-			result_uuid = str(uuid.uuid4())
-			item._uuid = result_uuid
-			task_results.append(item)
-			results.append(item)
-			count += 1
-			state['meta']['task_results'] = task_results
+		except BaseException as exc:
+			task_state = 'FAILURE'
+			task_exc = exc
+
+		finally:
+			# Set task state and exception
+			state['state'] = 'SUCCESS'
 			state['meta']['results'] = results
-			state['meta']['count'] = len(task_results)
+			state['meta']['task_results'] = task_results
+
+			# Handle task failure
+			if task_state == 'FAILURE':
+				exc_str = ' '.join(traceback.format_exception(
+					task_exc,
+					value=task_exc,
+					tb=task_exc.__traceback__))
+				state['meta']['error'] = exc_str
+				if task:
+					task._print(exc_str, color='bold red')
+				else:
+					console.log(exc_str)
+
+			# Update task state with final status
 			self.update_state(**state)
 
-		# Update task state based on task return code
-		if task.return_code == 0:
-			task_state = 'SUCCESS'
-			task_exc = None
-		else:
-			task_state = 'FAILURE'
-			task_exc = TaskError('\n'.join(task.errors))
-
-	except BaseException as exc:
-		task_state = 'FAILURE'
-		task_exc = exc
-
-	finally:
-		# Set task state and exception
-		state['state'] = 'SUCCESS'
-		state['meta']['results'] = results
-		state['meta']['task_results'] = task_results
-
-		# Handle task failure
-		if task_state == 'FAILURE':
-			exc_str = ' '.join(traceback.format_exception(
-				task_exc,
-				value=task_exc,
-				tb=task_exc.__traceback__))
-			state['meta']['error'] = exc_str
-			if task:
-				task._print(exc_str, color='bold red')
-			else:
-				console.log(exc_str)
-
-		# Update task state with final status
-		self.update_state(**state)
-
-		# If running in chunk mode, only return chunk result, not all results
-		profiler.stop()
-		from pathlib import Path
-		logger.info('Stopped profiling')
-		profile_root = Path('/code/.profiles')
-		profile_root.mkdir(exist_ok=True)
-		profile_path = f'/code/.profiles/{self.request.id}.html'
-		logger.info(f'Saving profile to {profile_path}')
-		with open(profile_path, 'w', encoding='utf-8') as f_html:
-			f_html.write(profiler.output_html())
+			# If running in chunk mode, only return chunk result, not all results
+			# profiler.stop()
+			# from pathlib import Path
+			# logger.info('Stopped profiling')
+			# profile_root = Path('/code/.profiles')
+			# profile_root.mkdir(exist_ok=True)
+			# profile_path = f'/code/.profiles/{self.request.id}.html'
+			# logger.info(f'Saving profile to {profile_path}')
+			# with open(profile_path, 'w', encoding='utf-8') as f_html:
+			# 	f_html.write(profiler.output_html())
 		return task_results if chunk else results
 
 

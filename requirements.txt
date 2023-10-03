@@ -29,6 +29,7 @@ lxml==4.9.3
 markdown-it-py==3.0.0
 MarkupSafe==2.1.3
 mdurl==0.1.2
+memray==1.9.1
 netifaces==0.11.0
 orderedmultidict==1.0.1
 prometheus-client==0.17.1
