@@ -24,6 +24,7 @@ dependencies = [
     'humanize',
     'netifaces',
     'pygments',
+    'pyinstrument',
     'python-dotenv',
     'pyyaml',
     'pymongo',
