@@ -185,7 +185,7 @@ def run_command(self, results, name, targets, opts={}):
 			'description': description
 		}
 	}
-	# self.update_state(**state)
+	self.update_state(**state)
 	# profile_root = Path('/code/.profiles')
 	# profile_root.mkdir(exist_ok=True)
 	# profile_path = f'/code/.profiles/{self.request.id}.bin'
