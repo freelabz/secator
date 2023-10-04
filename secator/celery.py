@@ -2,15 +2,15 @@ import logging
 import traceback
 import uuid
 from time import sleep
-from pathlib import Path
-import memray
+# from pathlib import Path
+# import memray
 
 import celery
 import gc
 from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
-from pyinstrument import Profiler
+# from pyinstrument import Profiler
 from rich.logging import RichHandler
 
 from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
@@ -19,18 +19,16 @@ from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, deduplicate, discover_external_tasks,
-						   discover_internal_tasks, flatten)	   
+						   discover_internal_tasks, flatten)
 
 rich_handler = RichHandler(rich_tracebacks=True)
 rich_handler.setLevel(logging.INFO)
 logging.basicConfig(
-    level='NOTSET',
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[rich_handler],
-	force=True
-)
-# logging.getLogger().setLevel(logging.INFO)
+	level='NOTSET',
+	format="%(message)s",
+	datefmt="[%X]",
+	handlers=[rich_handler],
+	force=True)
 logger = logging.getLogger(__name__)
 
 trace.LOG_SUCCESS = """\
