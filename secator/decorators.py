@@ -161,6 +161,7 @@ def task():
 def register_runner(cli_endpoint, config):
 	fmt_opts = {
 		'print_cmd': True,
+		'print_progress': True
 	}
 	short_help = ''
 	input_type = 'targets'

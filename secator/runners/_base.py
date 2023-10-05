@@ -197,6 +197,7 @@ class Runner:
 					if item._type == 'progress':
 						if self.print_progress:
 							self._print(str(item), out=sys.stderr, color='dim cyan')
+						self.output += str(item) + '\n'
 						continue
 
 					# Add item to results

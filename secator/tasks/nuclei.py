@@ -11,7 +11,7 @@ from secator.tasks._categories import VulnMulti
 @task()
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
-	cmd = 'nuclei -silent -sj -si 20 -hm'
+	cmd = 'nuclei -silent -stats -sj -si 20 -hm'
 	file_flag = '-l'
 	input_flag = '-u'
 	input_chunk_size = 10
@@ -59,6 +59,7 @@ class nuclei(VulnMulti):
 			PROVIDER: 'nuclei',
 		},
 		Progress: {
+			'percent': lambda x: int(x['percent']),
 			'extra_data': lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
 		}
 	}

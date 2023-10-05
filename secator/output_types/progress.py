@@ -19,3 +19,6 @@ class Progress(OutputType):
 
 	def __str__(self) -> str:
 		return f'{self.percent}%'
+
+	def __repr__(self) -> str:
+		return f'█' * self.percent + f' {self.percent}%'
