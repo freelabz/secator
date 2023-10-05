@@ -17,13 +17,14 @@ from secator.utils import get_file_timestamp
 @task()
 class feroxbuster(HttpFuzzer):
 	"""Simple, fast, recursive content discovery tool written in Rust"""
-	cmd = 'feroxbuster'
+	cmd = 'feroxbuster --silent --auto-bail --no-state'
 	input_flag = '--url'
+	input_chunk_size = 1
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
 	opts = {
-		'auto_tune': {'is_flag': True, 'default': False, 'help': 'Automatically lower scan rate when too many errors'},
+		# 'auto_tune': {'is_flag': True, 'default': False, 'help': 'Automatically lower scan rate when too many errors'},
 		'extract_links': {'is_flag': True, 'default': False, 'help': 'Extract links from response body'},
 		'collect_backups': {'is_flag': True, 'default': False, 'help': 'Request likely backup exts for urls'},
 		'collect_extensions': {'is_flag': True, 'default': False, 'help': 'Discover exts and add to --extensions'},

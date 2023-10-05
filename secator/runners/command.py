@@ -304,6 +304,9 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
+		# Set status to 'RUNNING'
+		self.status = 'RUNNING'
+
 		# Callback before running command
 		self.run_hooks('on_start')
 

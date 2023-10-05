@@ -90,7 +90,7 @@ class Runner:
 		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
-		self.last_updated = time()
+		self.last_updated = None
 		self.end_time = None
 		self._hooks = hooks
 		self.errors = []
@@ -222,7 +222,10 @@ class Runner:
 						yield item
 
 				if item:
-					self.output += str(item) + '\n'
+					if isinstance(item, OutputType):
+						self.output += self.get_repr(item) + '\n'
+					else:
+						self.output += str(item) + '\n'
 
 				self.run_hooks('on_iter')
 

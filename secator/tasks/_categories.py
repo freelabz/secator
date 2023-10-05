@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 OPTS = {
 	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
-	DEPTH: {'type': int, 'help': 'Scan depth'},
+	DEPTH: {'type': int, 'help': 'Scan depth', 'default': 2},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
 	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},

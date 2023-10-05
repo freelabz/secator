@@ -28,13 +28,13 @@ def update_runner(self):
 	existing_id = self.context.get(f'{type}_id')
 	update = self.toDict()
 	start_time = time.time()
-	delta = start_time - self.last_updated
 	if existing_id:
-		if delta < UPDATE_FREQUENCY_SECONDS and self.status == 'RUNNING':
+		delta = start_time - self.last_updated if self.last_updated else UPDATE_FREQUENCY_SECONDS
+		if self.last_updated and  delta < UPDATE_FREQUENCY_SECONDS and self.status == 'RUNNING':
 			# console.log(f'mongodb: skipping update for performance ({delta}s < {UPDATE_FREQUENCY_SECONDS}s)')
 			return
-		self.last_updated = start_time
 		update_runner_lazy.apply(args=(collection, existing_id, update), queue='db')
+		self.last_updated = start_time
 	else:  # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
 		self.context[f'{type}_id'] = str(runner.inserted_id)
@@ -74,19 +74,19 @@ def update_runner_lazy(collection, id, update):
 
 MONGODB_HOOKS = {
 	Scan: {
-		'on_init': [update_runner],
+		# 'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_iter': [update_runner],
 		'on_end': [update_runner],
 	},
 	Workflow: {
-		'on_init': [update_runner],
+		# 'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_iter': [update_runner],
 		'on_end': [update_runner],
 	},
 	Task: {
-		'on_init': [update_runner],
+		# 'on_init': [update_runner],
 		'on_item': [save_finding],
 		'on_iter': [update_runner],
 		'on_end': [update_runner]
