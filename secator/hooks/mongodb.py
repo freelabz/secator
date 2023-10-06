@@ -29,10 +29,10 @@ def update_runner(self):
 	update = self.toDict()
 	start_time = time.time()
 	if existing_id:
-		# delta = start_time - self.last_updated if self.last_updated else UPDATE_FREQUENCY_SECONDS
-		# if self.last_updated and  delta < UPDATE_FREQUENCY_SECONDS and self.status == 'RUNNING':
-		# 	# console.log(f'mongodb: skipping update for performance ({delta}s < {UPDATE_FREQUENCY_SECONDS}s)')
-		# 	return
+		delta = start_time - self.last_updated if self.last_updated else UPDATE_FREQUENCY_SECONDS
+		if self.last_updated and delta < UPDATE_FREQUENCY_SECONDS and self.status == 'RUNNING':
+			# console.log(f'mongodb: skipping update for performance ({delta}s < {UPDATE_FREQUENCY_SECONDS}s)')
+			return
 		update_runner_lazy.apply(args=(collection, existing_id, update), queue='db')
 		self.last_updated = start_time
 	else:  # sync update and save result to runner object

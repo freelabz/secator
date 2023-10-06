@@ -150,11 +150,12 @@ class Vuln(Command):
 		if not cve_info:
 			# logger.debug(f'{cve_id} not found locally. Use `secator utils download-cves` to update the local database.')
 			try:
-				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}').json()
+				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5).json()
 				if not cve_info:
 					logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
 					return
-			except requests.exceptions.ConnectionError:
+			except Exception:
+				logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
 				return None
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.

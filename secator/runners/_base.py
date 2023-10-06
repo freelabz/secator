@@ -196,8 +196,8 @@ class Runner:
 					# Treat progress item
 					if item._type == 'progress':
 						if self.print_progress:
-							self._print(str(item), out=sys.stderr, color='dim cyan')
-						self.output += str(item) + '\n'
+							self._print(self.get_repr(item), out=sys.stderr, color='dim cyan')
+						self.output += self.get_repr(item) + '\n'
 						continue
 
 					# Add item to results
@@ -262,6 +262,7 @@ class Runner:
 			'start_time': self.start_time,
 			'end_time': self.end_time,
 			'last_updated': self.last_updated,
+			'elapsed': self.elapsed.total_seconds(),
 			'elapsed_human': self.elapsed_human,
 			'errors': self.errors,
 			'context': self.context
