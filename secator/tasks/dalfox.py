@@ -57,6 +57,7 @@ class dalfox(VulnHttp):
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'cpu'
 
 	@staticmethod
 	def on_line(self, line):

@@ -33,7 +33,8 @@ DEFAULT_CMD_OPTS = {
 	'print_cmd': True,
 }
 if DEBUG > 1:
-	console.print(f'Celery app configuration:\n{app.conf}')
+	console.print(f'CELERY CONFIGURATION:', style='bold blue')
+	console.print(app.conf.humanize(with_defaults=False, censored=True), style='blue')
 
 
 #--------#
@@ -142,10 +143,10 @@ def report_show(json_path, exclude_fields):
 
 @cli.command()
 @click.option('-n', '--name', type=str, default='runner', help='Celery worker name (unique).')
-@click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
+@click.option('-c', '--concurrency', type=int, default=None, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='celery,fast,chunked,db', help='Listen to a specific queue.')
-@click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
+@click.option('-P', '--pool', type=str, default=None, help='Pool implementation.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
@@ -159,10 +160,12 @@ def worker(name, concurrency, reload, queue, pool, check, dev, stop):
 		subcmd = 'stop' if stop else 'start'
 		logfile = 'secator-worker-%n%I.log'
 		pidfile = 'secator-worker-%n.pid'
-		queues = '-Q:1 celery -Q:2 fast -Q:3 chunked'
-		cmd = f'celery -A {app} multi {subcmd} 3 -P {pool} {queues} -c 50 --logfile={logfile} --pidfile={pidfile}'
+		queues = '-Q:1 celery -Q:2 io -Q:3 cpu'
+		cmd = f'celery -A {app} multi {subcmd} 3 {queues} -c 50 --logfile={logfile} --pidfile={pidfile}'
 	else:
-		cmd = f'celery -A {app} worker -P {pool} -n {name} -Q {queue}'
+		cmd = f'celery -A {app} worker -n {name} -Q {queue}'
+	if pool:
+		cmd += f' -P {pool}'
 	if concurrency:
 		cmd += f' -c {concurrency}'
 	if reload:

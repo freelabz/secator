@@ -62,6 +62,7 @@ class ffuf(HttpFuzzer):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'io'
 
 	@staticmethod
 	def validate_input(self, input):

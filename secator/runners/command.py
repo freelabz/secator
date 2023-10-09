@@ -155,22 +155,23 @@ class Command(Runner):
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
-		print('DEBUG: Launching run_command in queue fast')
+		print(f'DEBUG: Launching run_command in queue {cls.profile}')
 		from secator.celery import run_command
 		results = kwargs.get('results', [])
-		return run_command.apply_async(args=[results, cls.__name__] + list(args), kwargs={'opts': kwargs}, queue='fast')
+		name = cls.__name__
+		return run_command.apply_async(args=[results, name] + list(args), kwargs={'opts': kwargs}, queue=cls.profile)
 
 	@classmethod
 	def s(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue='fast')
+		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
 
 	@classmethod
 	def si(cls, results, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue='fast')
+		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
 
 	@classmethod
 	def poll(cls, result):

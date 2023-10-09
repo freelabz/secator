@@ -72,6 +72,7 @@ class wpscan(VulnHttp):
 	proxy_http = True
 	proxy_socks5 = False
 	ignore_return_code = True
+	profile = 'io'
 
 	@staticmethod
 	def on_init(self):

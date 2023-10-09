@@ -75,6 +75,9 @@ class Runner:
 	# Run hooks
 	enable_hooks = True
 
+	# Task profile
+	profile = 'cpu'
+
 	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)

@@ -1,25 +1,29 @@
+import gc
 import logging
 import traceback
 import uuid
 from time import sleep
-# from pathlib import Path
-# import memray
 
 import celery
-import gc
 from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
 # from pyinstrument import Profiler
 from rich.logging import RichHandler
 
-from secator.definitions import (CELERY_BROKER_URL, CELERY_DATA_FOLDER,
-								 CELERY_RESULT_BACKEND, CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_CONNECTION_TIMEOUT)
+from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
+                                 CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_URL,
+                                 CELERY_BROKER_VISIBILITY_TIMEOUT,
+                                 CELERY_DATA_FOLDER, CELERY_RESULT_BACKEND)
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, deduplicate, discover_external_tasks,
-						   discover_internal_tasks, flatten)
+                           discover_internal_tasks, flatten)
+
+# from pathlib import Path
+# import memray
+
 
 rich_handler = RichHandler(rich_tracebacks=True)
 rich_handler.setLevel(logging.INFO)
@@ -38,41 +42,44 @@ COMMANDS = discover_internal_tasks() + discover_external_tasks()
 
 app = celery.Celery(__name__)
 app.conf.update({
+	# Worker config
+	'worker_send_task_events': True,
+	'worker_prefetch_multiplier': 1,
+	'worker_max_tasks_per_child': 10,
+
 	# Broker config
 	'broker_url': CELERY_BROKER_URL,
 	'broker_transport_options': {
 		'data_folder_in': CELERY_DATA_FOLDER,
 		'data_folder_out': CELERY_DATA_FOLDER,
+		'visibility_timeout': CELERY_BROKER_VISIBILITY_TIMEOUT,
 	},
 	'broker_connection_retry_on_startup': True,
 	'broker_pool_limit': CELERY_BROKER_POOL_LIMIT,
 	'broker_connection_timeout': CELERY_BROKER_CONNECTION_TIMEOUT,
 
-	# Serialization / compression
-	'accept_content': ['application/x-python-serialize', 'application/json'],
-	'task_compression': 'gzip',
-	'task_serializer': 'pickle',
-	'result_serializer': 'pickle',
-
 	# Backend config
 	'result_backend': CELERY_RESULT_BACKEND,
-	'result_backend_transport_options': {'master_name': 'mymaster'},
 	'result_extended': True,
+	# 'result_backend_transport_options': {'master_name': 'mymaster'}, # for Redis HA backend
 
-	# Celery config
+	# Task config
 	'task_eager_propagates': False,
 	'task_routes': {
 		'secator.celery.run_workflow': {'queue': 'celery'},
 		'secator.celery.run_scan': {'queue': 'celery'},
 		'secator.celery.run_task': {'queue': 'celery'},
-		'secator.celery.run_command': {'queue': 'fast'},
 	},
 	'task_reject_on_worker_lost': True,
-	'task_acks_late': False,
+	'task_acks_late': True,
 	'task_create_missing_queues': True,
 	'task_send_sent_event': True,
-	'worker_send_task_events': True,
-	'worker_prefetch_multiplier': 1
+
+	# Serialization / compression
+	'accept_content': ['application/x-python-serialize', 'application/json'],
+	'task_compression': 'gzip',
+	'task_serializer': 'pickle',
+	'result_serializer': 'pickle'
 })
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 
@@ -115,15 +122,15 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 			opts['chunked'] = True
-		sig = task_cls.s(chunk, **opts).set(queue='chunked')
+		sig = task_cls.s(chunk, **opts).set(queue=task_cls.profile)
 		sigs.append(sig)
 
 	# Build Celery workflow
 	workflow = chain(
-		forward_results.s(results).set(queue='chunked'),
+		forward_results.s(results).set(queue='io'),
 		chord(
 			tuple(sigs),
-			forward_results.s().set(queue='chunked'),
+			forward_results.s().set(queue='io'),
 		)
 	)
 	return workflow

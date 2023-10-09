@@ -27,3 +27,4 @@ class dnsxbrute(ReconDns):
         }
     }
     install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
+    profile = 'cpu'

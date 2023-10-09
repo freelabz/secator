@@ -59,6 +59,7 @@ class nmap(VulnMulti):
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = False
 	proxy_http = False
+	profile = 'io'
 
 	def yielder(self):
 		yield from super().yielder()

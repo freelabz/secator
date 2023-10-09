@@ -51,6 +51,7 @@ class httpx(Http):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'cpu'
 
 	@staticmethod
 	def on_item_pre_convert(self, item):

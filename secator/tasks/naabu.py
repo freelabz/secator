@@ -48,3 +48,4 @@ class naabu(ReconPort):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = False
+	profile = 'io'

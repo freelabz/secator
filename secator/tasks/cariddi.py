@@ -46,6 +46,7 @@ class cariddi(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
 	proxy_http = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
+	profile = 'cpu'
 
 	def item_loader(self, line):
 		items = []

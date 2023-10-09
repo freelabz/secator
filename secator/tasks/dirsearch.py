@@ -57,6 +57,7 @@ class dirsearch(HttpFuzzer):
 	proxychains = True
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'io'
 
 	def yielder(self):
 		prev = self.print_item_count

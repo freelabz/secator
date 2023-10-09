@@ -75,7 +75,7 @@ class Workflow(Runner):
 			self.targets,
 			self.config.options,
 			run_opts)
-		sigs = [forward_results.si(results).set(queue='fast')] + sigs + [forward_results.s().set(queue='fast')]
+		sigs = [forward_results.si(results).set(queue='io')] + sigs + [forward_results.s().set(queue='io')]
 		workflow = chain(*sigs)
 		return workflow
 
@@ -106,7 +106,7 @@ class Workflow(Runner):
 					workflow_opts,
 					run_opts
 				)
-				sig = chord((tasks), forward_results.s().set(queue='fast'))
+				sig = chord((tasks), forward_results.s().set(queue='io'))
 			elif task_name == '_chain':
 				tasks = self.get_tasks(
 					task_opts,
@@ -128,7 +128,7 @@ class Workflow(Runner):
 				opts['name'] = task_name
 
 				# Create task signature
-				sig = task.s(targets, **opts).set(queue='fast')
+				sig = task.s(targets, **opts).set(queue=task.profile)
 				self.output_types.extend(task.output_types)
 			sigs.append(sig)
 		return sigs

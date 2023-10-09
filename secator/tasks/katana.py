@@ -63,3 +63,4 @@ class katana(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'io'
