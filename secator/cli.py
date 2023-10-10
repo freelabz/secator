@@ -33,7 +33,7 @@ DEFAULT_CMD_OPTS = {
 	'print_cmd': True,
 }
 if DEBUG > 1:
-	console.print(f'CELERY CONFIGURATION:', style='bold blue')
+	console.print('CELERY CONFIGURATION:', style='bold blue')
 	console.print(app.conf.humanize(with_defaults=False, censored=True), style='blue')
 
 
@@ -140,28 +140,30 @@ def report_show(json_path, exclude_fields):
 # WORKER #
 #--------#
 
-
 @cli.command()
 @click.option('-n', '--name', type=str, default='runner', help='Celery worker name (unique).')
 @click.option('-c', '--concurrency', type=int, default=None, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
-@click.option('-Q', '--queue', type=str, default='celery,fast,chunked,db', help='Listen to a specific queue.')
+@click.option('-Q', '--queue', type=str, default='celery,io,cpu', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default=None, help='Pool implementation.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
-def worker(name, concurrency, reload, queue, pool, check, dev, stop):
+@click.option('--show', is_flag=True, help='Show command (celery multi).')
+def worker(name, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Celery worker."""
 	if check:
 		is_celery_worker_alive()
 		return
 	app = 'secator.celery.app'
 	if dev:
-		subcmd = 'stop' if stop else 'start'
-		logfile = 'secator-worker-%n%I.log'
-		pidfile = 'secator-worker-%n.pid'
+		subcmd = 'stop' if stop else 'show' if show else 'start'
+		logfile = '%n.log'
+		pidfile = '%n.pid'
 		queues = '-Q:1 celery -Q:2 io -Q:3 cpu'
-		cmd = f'celery -A {app} multi {subcmd} 3 {queues} -c 50 --logfile={logfile} --pidfile={pidfile}'
+		concur = '-c:1 10 -c:2 100 -c:3 4'
+		pool = 'eventlet'
+		cmd = f'celery -A {app} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
 		cmd = f'celery -A {app} worker -n {name} -Q {queue}'
 	if pool:

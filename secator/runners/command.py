@@ -15,7 +15,7 @@ from secator.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
 							   DEFAULT_PROXY_TIMEOUT,
 							   DEFAULT_PROXYCHAINS_COMMAND,
 							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, TEMP_FOLDER)
+							   OPT_PIPE_INPUT, TEMP_FOLDER, DEFAULT_INPUT_CHUNK_SIZE)
 from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
@@ -70,7 +70,7 @@ class Command(Runner):
 	input_path = None
 
 	# Input chunk size (default None)
-	input_chunk_size = None
+	input_chunk_size = DEFAULT_INPUT_CHUNK_SIZE
 
 	# Flag to take a file as input
 	file_flag = None
@@ -103,6 +103,9 @@ class Command(Runner):
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
+
+	# Profile
+	profile = 'cpu'
 
 	def __init__(self, input=None, **run_opts):
 		# Build runnerconfig on-the-fly
@@ -155,10 +158,10 @@ class Command(Runner):
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
-		print(f'DEBUG: Launching run_command in queue {cls.profile}')
 		from secator.celery import run_command
 		results = kwargs.get('results', [])
 		name = cls.__name__
+		print(f'DEBUG: Launching {name} in queue {cls.profile}')
 		return run_command.apply_async(args=[results, name] + list(args), kwargs={'opts': kwargs}, queue=cls.profile)
 
 	@classmethod

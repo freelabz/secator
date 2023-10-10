@@ -36,21 +36,23 @@ os.makedirs(PAYLOADS_FOLDER, exist_ok=True)
 os.makedirs(CONFIG_FOLDER, exist_ok=True)
 
 # Environment variables
-RECORD = bool(int(os.environ.get('RECORD', '0')))
+RECORD = bool(int(os.environ.get('RECORD', 0)))
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{CELERY_RESULTS_FOLDER}')
 CELERY_BROKER_POOL_LIMIT = int(os.environ.get('CELERY_BROKER_POOL_LIMIT', 10))
 CELERY_BROKER_CONNECTION_TIMEOUT = float(os.environ.get('CELERY_BROKER_CONNECTION_TIMEOUT', 4.0))
 CELERY_BROKER_VISIBILITY_TIMEOUT = int(os.environ.get('CELERY_BROKER_VISIBILITY_TIMEOUT', 3600))
+CELERY_OVERRIDE_DEFAULT_LOGGING = bool(int(os.environ.get('CELERY_OVERRIDE_DEFAULT_LOGGING', 1)))
 DEBUG = int(os.environ.get('DEBUG', '0'))
 CVES_FOLDER = f'{TEMP_FOLDER}/cves'
 GOOGLE_DRIVE_PARENT_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_PARENT_FOLDER_ID')
 GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
 DATABASE_URI = os.environ.get('DATABASE_URI', 'mongo://localhost')
-DEFAULT_SOCKS5_PROXY = os.environ.get('SOCKS5_PROXY', "socks5://127.0.0.1:9050")
-DEFAULT_HTTP_PROXY = os.environ.get('HTTP_PROXY', "https://127.0.0.1:9080")
 
 # Defaults
+DEFAULT_SOCKS5_PROXY = os.environ.get('SOCKS5_PROXY', "socks5://127.0.0.1:9050")
+DEFAULT_HTTP_PROXY = os.environ.get('HTTP_PROXY', "https://127.0.0.1:9080")
+DEFAULT_INPUT_CHUNK_SIZE = int(os.environ.get('DEFAULT_INPUT_CHUNK_SIZE', 1000))
 DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-silent -td -asn -cdn')
 DEFAULT_STDIN_TIMEOUT = 1000  # seconds
 DEFAULT_PROXY_TIMEOUT = 1  # seconds

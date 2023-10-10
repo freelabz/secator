@@ -12,14 +12,14 @@ from celery.result import AsyncResult, allow_join_result
 from rich.logging import RichHandler
 
 from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
-                                 CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_URL,
-                                 CELERY_BROKER_VISIBILITY_TIMEOUT,
-                                 CELERY_DATA_FOLDER, CELERY_RESULT_BACKEND)
+								 CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_URL,
+								 CELERY_BROKER_VISIBILITY_TIMEOUT,
+								 CELERY_DATA_FOLDER, CELERY_OVERRIDE_DEFAULT_LOGGING, CELERY_RESULT_BACKEND, DEBUG)
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, deduplicate, discover_external_tasks,
-                           discover_internal_tasks, flatten)
+						   discover_internal_tasks, flatten)
 
 # from pathlib import Path
 # import memray
@@ -61,6 +61,7 @@ app.conf.update({
 	# Backend config
 	'result_backend': CELERY_RESULT_BACKEND,
 	'result_extended': True,
+	'result_backend_thread_safe': True,
 	# 'result_backend_transport_options': {'master_name': 'mymaster'}, # for Redis HA backend
 
 	# Task config
@@ -84,7 +85,16 @@ app.conf.update({
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 
 
-@signals.setup_logging.connect
+def maybe_override_logging():
+	def decorator(func):
+		if CELERY_OVERRIDE_DEFAULT_LOGGING:
+			return signals.setup_logging.connect(func)
+		else:
+			return func
+	return decorator
+
+
+@maybe_override_logging()
 def void(*args, **kwargs):
 	"""Override celery's logging setup to prevent it from altering our settings.
 	github.com/celery/celery/issues/1867
@@ -138,6 +148,8 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
+	if DEBUG > 1:
+		logger.info(f'Received task with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -147,6 +159,8 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
+	if DEBUG > 1:
+		logger.info(f'Received workflow with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -156,6 +170,8 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
+	if DEBUG > 1:
+		logger.info(f'Received scan with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -226,7 +242,7 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 
-			result = workflow.apply() if sync else workflow()
+			result = workflow.apply() if sync else workflow.apply_async()
 			with allow_join_result():
 				task_results = result.get()
 				results.extend(task_results)

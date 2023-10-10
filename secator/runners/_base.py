@@ -75,9 +75,6 @@ class Runner:
 	# Run hooks
 	enable_hooks = True
 
-	# Task profile
-	profile = 'cpu'
-
 	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
@@ -181,7 +178,6 @@ class Runner:
 
 		if not self.input_valid:
 			return
-
 		try:
 			for item in self.yielder():
 
@@ -421,13 +417,17 @@ class Runner:
 		while True:
 			task_ids = []
 			get_task_ids(result, ids=task_ids)
+			# results = [res] # TODO: replace task with group of tasks
 			for task_id in task_ids:
+				# TODO: replace task with group of tasks
+				# results.append(AsyncResult(task_id))
 				info = get_task_info(task_id)
 				if not info:
 					continue
 				yield info
 
 			# Break out of while loop
+			# if all(res.ready() for res in results): # TODO: replace task with group of tasks
 			if res.ready():
 				break
 
