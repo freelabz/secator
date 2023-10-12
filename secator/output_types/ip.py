@@ -1,8 +1,6 @@
 import time
 from dataclasses import dataclass, field
 
-from colorama import Fore, Style
-
 from secator.definitions import ALIVE, IP
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi

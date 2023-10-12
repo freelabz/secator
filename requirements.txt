@@ -11,7 +11,6 @@ click==8.1.7
 click-didyoumean==0.3.0
 click-plugins==1.1.1
 click-repl==0.3.0
-colorama==0.4.6
 cpe==1.2.1
 dnspython==2.4.2
 dotmap==1.3.30
