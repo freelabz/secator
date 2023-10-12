@@ -19,6 +19,8 @@ from secator.tasks._categories import HttpCrawler
 @task()
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
+	# TODO: add -fx for form detection and extract 'forms' from the output with custom item_loader
+	# TODO: add -jsluice for JS parsing
 	cmd = f'katana {DEFAULT_KATANA_FLAGS}'
 	file_flag = '-list'
 	input_flag = '-u'

@@ -5,6 +5,7 @@ from colorama import Fore, Style
 
 from secator.definitions import ALIVE, IP
 from secator.output_types import OutputType
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -25,11 +26,7 @@ class Ip(OutputType):
 		return self.ip
 
 	def __repr__(self) -> str:
-		white = Fore.WHITE
-		reset = Style.RESET_ALL
-		bright = Style.BRIGHT
-		magenta = Fore.MAGENTA
-		s = f'💻 {bright}{white}{self.ip}{reset}'
+		s = f'💻 [bold white]{self.ip}[/]'
 		if self.host:
-			s += f' [{magenta}{self.host}{reset}]'
-		return s
+			s += f' \[[bold magenta]{self.host}[/]]'
+		return rich_to_ansi(s)

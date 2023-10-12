@@ -1,9 +1,8 @@
+import time
 from dataclasses import dataclass, field
 
-import time
-
 from secator.output_types import OutputType
-from colorama import Fore, Style
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -27,10 +26,15 @@ class Tag(OutputType):
 		return self.match
 
 	def __repr__(self) -> str:
-		cyan = Fore.CYAN
-		reset = Style.RESET_ALL
-		bright = Style.BRIGHT
-		s = f'🏷️  [{bright}{cyan}{self.name}{reset}] {self.match}'
+		s = f'🏷️  [bold magenta]{self.name}[/]'
+		ed = ''
 		if self.extra_data:
-			s += ' [' + ' '.join([v for k, v in self.extra_data.items() if k != 'source' and v]) + ']'
-		return s
+			ed = ' '.join([v for k, v in self.extra_data.items() if k != 'source' and v])
+		if len(ed) < 80:
+			s += f' [bold yellow]{ed}[/]'
+		s += f' found @ [bold]{self.match}[/]'
+		if len(ed) >= 80:
+			s += (
+				':' + '\n' + f'[dim yellow]{ed}[/]'
+			).replace('\n', '\n' + '  ').replace('...TRUNCATED', '\n[italic bold red]...truncated to 1000 chars[/]')
+		return rich_to_ansi(s)

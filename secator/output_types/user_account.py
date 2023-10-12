@@ -1,10 +1,9 @@
 import time
 from dataclasses import dataclass, field
 
-from colorama import Fore
-
 from secator.definitions import SITE_NAME, URL, USERNAME
 from secator.output_types import OutputType
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -28,13 +27,13 @@ class UserAccount(OutputType):
 		return self.url
 
 	def __repr__(self) -> str:
-		s = f'👤 {Fore.GREEN}{self.username}{Fore.RESET}'
+		s = f'👤 [green]{self.username}[/]'
 		if self.email:
-			s += f' [{self.email}]'
+			s += f' \[[bold yellow]{self.email}[/]]'
 		if self.site_name:
-			s += f' [{self.site_name}]'
+			s += f' \[[bold blue]{self.site_name}[/]]'
 		if self.url:
-			s += f' [{self.url}]'
+			s += f' \[[white]{self.url}[/]]'
 		if self.extra_data:
-			s += f' [{Fore.YELLOW}' + ', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + f'{Fore.RESET}]'
-		return s
+			s += f' \[[bold yellow]' + ', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + f'[/]]'
+		return rich_to_ansi(s)

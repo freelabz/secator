@@ -1,10 +1,9 @@
 import time
 from dataclasses import dataclass, field
 
-from colorama import Fore, Style
-
 from secator.definitions import CPES, EXTRA_DATA, HOST, IP, PORT
 from secator.output_types import OutputType
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -27,9 +26,7 @@ class Port(OutputType):
 		return f'{self.host}:{self.port}'
 
 	def __repr__(self) -> str:
-		white = Fore.WHITE
-		reset = Style.RESET_ALL
-		s = f'🔓 {white}{self.host}:{self.port}{reset}'
+		s = f'🔓 {self.host}:[red]{self.port}[/]'
 		if self.service_name:
-			s += f' [{self.service_name}]'
-		return s
+			s += f' [[bold purple]{self.service_name}[/]]'
+		return rich_to_ansi(s)

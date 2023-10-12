@@ -1,11 +1,10 @@
 import time
 from dataclasses import dataclass, field
 
-from colorama import Fore, Style
-
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TIME, TITLE, URL, WEBSERVER)
 from secator.output_types import OutputType
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -47,29 +46,23 @@ class Url(OutputType):
 		return self.url
 
 	def __repr__(self):
-		white = Fore.WHITE
-		green = Fore.GREEN
-		red = Fore.RED
-		cyan = Fore.CYAN
-		magenta = Fore.MAGENTA
-		reset = Style.RESET_ALL
-		s = f'🔗 {white}{self.url}'
+		s = f'🔗 [white]{self.url}'
 		if self.status_code and self.status_code != 0:
 			if self.status_code < 400:
-				s += f' [{green}{self.status_code}{reset}]'
+				s += f' \[[green]{self.status_code}[/]]'
 			else:
-				s += f' [{red}{self.status_code}{reset}]'
+				s += f' \[[red]{self.status_code}[/]]'
 		if self.title:
-			s += f' [{green}{self.title}{reset}]'
+			s += f' \[[green]{self.title}[/]]'
 		if self.webserver:
-			s += f' [{cyan}{self.webserver}{reset}]'
+			s += f' \[[cyan]{self.webserver}[/]]'
 		if self.tech:
-			techs_str = ', '.join([f'{magenta}{tech}{reset}' for tech in self.tech])
+			techs_str = ', '.join([f'[magenta]{tech}[/]' for tech in self.tech])
 			s += f' [{techs_str}]'
 		if self.content_type:
-			s += f' [{cyan}{self.content_type}{reset}]'
+			s += f' \[[cyan]{self.content_type}[/]]'
 		if self.content_length:
-			s += f' [{cyan}{self.content_length}{reset}]'
+			s += f' \[[cyan]{self.content_length}[/]]'
 		if self.screenshot_path:
-			s += f' [{cyan}{self.screenshot_path}{reset}]'
-		return s
+			s += f' \[[cyan]{self.screenshot_path}[/]]'
+		return rich_to_ansi(s)

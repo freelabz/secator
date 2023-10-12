@@ -38,10 +38,16 @@ class dnsx(ReconDns):
 			for _type in record_types:
 				values = item.get(_type, [])
 				for value in values:
+					name = value
+					extra_data = {}
+					if isinstance(value, dict):
+						name = value['name']
+						extra_data = {k: v for k, v in value.items() if k != 'name'}
 					items.append({
 						'host': host,
-						'name': value,
+						'name': name,
 						'type': _type.upper(),
+						'extra_data': extra_data
 					})
 		except json.decoder.JSONDecodeError:
 			pass

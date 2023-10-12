@@ -38,7 +38,9 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		opts = META_OPTS.copy()
 		fmt_opts = {
 			'print_cmd': True,
+			'print_item': True,
 			'print_item_count': True,
+			'json': False
 		}
 		extra_opts = {
 			'dirsearch.filter_size': 1987,

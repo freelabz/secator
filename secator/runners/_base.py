@@ -371,6 +371,7 @@ class Runner:
 			expand=False,
 			highlight=True
 		)
+		self._print('\n')
 		self._print(panel, rich=True)
 
 	def log_results(self):

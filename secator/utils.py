@@ -402,3 +402,12 @@ def print_results_table(results, title=None, exclude_fields=[], log=False):
 			_print(_table)
 			_print()
 	return tables
+
+
+def rich_to_ansi(text):
+	"""Convert text formatted with rich markup to standard string."""
+	from rich.console import Console
+	tmp_console = Console(file=None, highlight=False)
+	with tmp_console.capture() as capture:
+		tmp_console.print(text, end='')
+	return capture.get()

@@ -27,6 +27,9 @@ class Task(Runner):
 		# Task opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
+		dry_run = run_opts.get('show', False)
+		if dry_run:
+			self.print_item_count = False
 
 		# Fmt opts
 		fmt_opts = {
@@ -35,11 +38,11 @@ class Task(Runner):
 			'print_cmd_prefix': not self.sync,
 			'print_input_file': DEBUG > 0,
 			'print_item': True,
-			'print_item_count': not self.sync,
+			'print_item_count': not self.sync and not dry_run,
 			'print_line': not self.output_quiet,
 			'print_progress': True,
 		}
-		# self.print_item = not self.sync  # enable print_item for base Task only if running remote
+		self.print_item = not self.sync  # enable print_item for base Task only if running remote
 		run_opts.update(fmt_opts)
 
 		# Set task output types
@@ -53,9 +56,9 @@ class Task(Runner):
 		# Run task
 		if self.sync:
 			task = task_cls(self.targets, **run_opts)
+			if dry_run:  # don't run
+				return
 		else:
-			print('Running task in worker with opts')
-			print(run_opts)
 			result = task_cls.delay(self.targets, **run_opts)
 			task = self.process_live_tasks(
 				result,

@@ -16,6 +16,7 @@ RUNNER_OPTS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
+	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
 	'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
@@ -238,13 +239,14 @@ def register_runner(cli_endpoint, config):
 		# debug = opts['debug']
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
+		show = opts['show']
 		context = {'workspace_name': ws}
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
-		if sync:
+		if sync or show:
 			sync = True
 		elif worker:
 			sync = False
