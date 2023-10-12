@@ -1,8 +1,10 @@
+import time
 from dataclasses import dataclass, field
 
-from secator.definitions import NAME, HOST, TYPE
-from secator.output_types import OutputType
 from colorama import Fore, Style
+
+from secator.definitions import HOST, NAME, TYPE
+from secator.output_types import OutputType
 
 
 @dataclass
@@ -12,6 +14,7 @@ class Record(OutputType):
 	host: str = ''
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='record', repr=True)
+	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
 

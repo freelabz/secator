@@ -14,7 +14,9 @@ from rich.logging import RichHandler
 from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
 								 CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_URL,
 								 CELERY_BROKER_VISIBILITY_TIMEOUT,
-								 CELERY_DATA_FOLDER, CELERY_OVERRIDE_DEFAULT_LOGGING, CELERY_RESULT_BACKEND, DEBUG)
+								 CELERY_DATA_FOLDER,
+								 CELERY_OVERRIDE_DEFAULT_LOGGING,
+								 CELERY_RESULT_BACKEND, DEBUG)
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
@@ -24,15 +26,17 @@ from secator.utils import (TaskError, deduplicate, discover_external_tasks,
 # from pathlib import Path
 # import memray
 
-
 rich_handler = RichHandler(rich_tracebacks=True)
 rich_handler.setLevel(logging.INFO)
 logging.basicConfig(
 	level='NOTSET',
-	format="%(message)s",
+	format="%(threadName)s:%(message)s",
 	datefmt="[%X]",
 	handlers=[rich_handler],
 	force=True)
+logging.getLogger('kombu').setLevel(logging.ERROR)
+logging.getLogger('celery').setLevel(logging.INFO if DEBUG > 2 else logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 trace.LOG_SUCCESS = """\
@@ -235,16 +239,19 @@ def run_command(self, results, name, targets, opts={}):
 
 		if single_target_only or (not sync and break_size_threshold):
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
+			if DEBUG > 0:
+				console.print(f'[dim red]\[debug] Breaking task by chunks of size {chunk_size}.[/]')
 			workflow = break_task(
 				task_cls,
 				opts,
 				targets,
 				results=results,
 				chunk_size=chunk_size)
-
 			result = workflow.apply() if sync else workflow.apply_async()
+			# TODO: Replace task with group of chunked tasks using raise replace(workflow)
 			with allow_join_result():
 				task_results = result.get()
+				console.print('Chunked workflow has finished running, updating parent task with results', style='bold')
 				results.extend(task_results)
 				state['state'] = 'SUCCESS'
 				state['meta']['results'] = results

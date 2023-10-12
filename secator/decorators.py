@@ -1,4 +1,3 @@
-import os
 from collections import OrderedDict
 
 import rich_click as click
@@ -6,7 +5,7 @@ from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
 from secator.celery import is_celery_worker_alive
-from secator.definitions import OPT_NOT_SUPPORTED, DEBUG
+from secator.definitions import OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
@@ -25,9 +24,9 @@ RUNNER_OPTS = {
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
 	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
-	'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
+	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 }
 
 DEFAULT_CLI_OPTIONS = list(RUNNER_OPTS.keys()) + list(RUNNER_GLOBAL_OPTS.keys())
@@ -236,12 +235,10 @@ def register_runner(cli_endpoint, config):
 		opts.update(fmt_opts)
 		sync = opts['sync']
 		worker = opts['worker']
-		debug = opts['debug']
+		# debug = opts['debug']
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
 		context = {'workspace_name': ws}
-		if debug:
-			os.environ['DEBUG'] = str(debug)
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
@@ -272,8 +269,6 @@ def register_runner(cli_endpoint, config):
 			hooks = MONGODB_HOOKS
 
 		# Build exporters
-		if DEBUG > 1:
-			print(opts)
 		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 

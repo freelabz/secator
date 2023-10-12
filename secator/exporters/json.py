@@ -10,6 +10,6 @@ class JsonExporter(Exporter):
 
 		# Save JSON report to file
 		with open(json_path, 'w') as f:
-			f.write(dumps_dataclass(self.report.data))
+			f.write(dumps_dataclass(self.report.data, indent=2))
 
 		console.print(f':file_cabinet: Saved JSON report to {json_path}')

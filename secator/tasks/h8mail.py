@@ -2,7 +2,7 @@ import os
 import json
 
 from secator.decorators import task
-from secator.definitions import (EMAIL, TEMP_FOLDER)
+from secator.definitions import (EMAIL, DATA_FOLDER)
 from secator.tasks._categories import OSInt
 from secator.utils import get_file_timestamp
 from secator.output_types import UserAccount
@@ -34,7 +34,7 @@ class h8mail(OSInt):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
 			timestr = get_file_timestamp()
-			output_path = f'{TEMP_FOLDER}/h8mail_{timestr}.json'
+			output_path = f'{DATA_FOLDER}/h8mail_{timestr}.json'
 		self.output_path = output_path
 		self.cmd = self.cmd.replace('--json', f'--json {self.output_path}')
 

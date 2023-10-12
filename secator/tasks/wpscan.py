@@ -6,7 +6,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
 							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
-							   SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
+							   SEVERITY, TAGS, DATA_FOLDER, THREADS, TIMEOUT,
 							   URL, USER_AGENT)
 from secator.output_types import Tag, Vulnerability
 from secator.tasks._categories import VulnHttp
@@ -79,7 +79,7 @@ class wpscan(VulnHttp):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
 			timestr = get_file_timestamp()
-			output_path = f'{TEMP_FOLDER}/wpscan_{timestr}.json'
+			output_path = f'{DATA_FOLDER}/wpscan_{timestr}.json'
 		self.output_path = output_path
 		self.cmd += f' -o {self.output_path}'
 

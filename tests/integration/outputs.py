@@ -117,10 +117,10 @@ OUTPUTS_TASKS = {
             status_code=200,
             tech=[],
             content_type='text/html; charset=utf-8',
-            content_length=3103,
+            content_length=3106,
             method='GET',
-            words=420,
-            lines=81,
+            words=422,
+            lines=82,
             _source='ffuf'
         )
     ],
@@ -168,7 +168,7 @@ OUTPUTS_TASKS = {
             status_code=200,
             title='OWASP Juice Shop',
             content_type='text/html',
-            content_length=1987,
+            content_length=3748,
             method='GET',
             words=207,
             lines=30,

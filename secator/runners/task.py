@@ -30,13 +30,16 @@ class Task(Runner):
 
 		# Fmt opts
 		fmt_opts = {
+			'json': run_opts.get('json', False) and self.sync,
 			'print_cmd': True,
 			'print_cmd_prefix': not self.sync,
-			'print_line': not self.output_quiet,
+			'print_input_file': DEBUG > 0,
+			'print_item': True,
 			'print_item_count': not self.sync,
-			# 'print_progress': self.sync,
-			'print_input_file': DEBUG
+			'print_line': not self.output_quiet,
+			'print_progress': True,
 		}
+		# self.print_item = not self.sync  # enable print_item for base Task only if running remote
 		run_opts.update(fmt_opts)
 
 		# Set task output types
@@ -51,6 +54,8 @@ class Task(Runner):
 		if self.sync:
 			task = task_cls(self.targets, **run_opts)
 		else:
+			print('Running task in worker with opts')
+			print(run_opts)
 			result = task_cls.delay(self.targets, **run_opts)
 			task = self.process_live_tasks(
 				result,

@@ -7,7 +7,7 @@ from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
 							   FOLLOW_REDIRECT, HEADER, LINES, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
 							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
-							   RATE_LIMIT, RETRIES, STATUS_CODE, TEMP_FOLDER,
+							   RATE_LIMIT, RETRIES, STATUS_CODE, DATA_FOLDER,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS)
 from secator.output_types import Url
 from secator.tasks._categories import HttpFuzzer
@@ -75,7 +75,7 @@ class feroxbuster(HttpFuzzer):
 		self.output_path = self.get_opt_value('output_path')
 		if not self.output_path:
 			timestr = get_file_timestamp()
-			self.output_path = f'{TEMP_FOLDER}/feroxbuster_{timestr}.json'
+			self.output_path = f'{DATA_FOLDER}/feroxbuster_{timestr}.json'
 		Path(self.output_path).touch()
 		self.cmd += f' --output {self.output_path}'
 

@@ -1,8 +1,10 @@
+import time
 from dataclasses import dataclass, field
 
-from secator.definitions import USERNAME, URL, SITE_NAME
-from secator.output_types import OutputType
 from colorama import Fore
+
+from secator.definitions import SITE_NAME, URL, USERNAME
+from secator.output_types import OutputType
 
 
 @dataclass
@@ -14,6 +16,7 @@ class UserAccount(OutputType):
 	extra_data: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='user_account', repr=True)
+	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
 

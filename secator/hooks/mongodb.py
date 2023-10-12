@@ -3,9 +3,6 @@ import os
 import logging
 import time
 
-from celery import shared_task
-
-from secator.rich import console
 from secator.definitions import DEBUG
 from secator.runners import Task, Workflow, Scan
 
@@ -14,7 +11,7 @@ import pymongo
 # gevent.monkey.patch_all()
 
 MONGODB_URL = os.environ.get('MONGODB_URL', 'mongodb://localhost')
-UPDATE_FREQUENCY_SECONDS = 10
+UPDATE_FREQUENCY_SECONDS = int(os.environ.get('MONGODB_UPDATE_FREQUENCY', 10))
 MAX_POOL_SIZE = 100
 client = pymongo.MongoClient(MONGODB_URL, maxPoolSize=MAX_POOL_SIZE)
 
@@ -31,9 +28,20 @@ def update_runner(self):
 	if existing_id:
 		delta = start_time - self.last_updated if self.last_updated else UPDATE_FREQUENCY_SECONDS
 		if self.last_updated and delta < UPDATE_FREQUENCY_SECONDS and self.status == 'RUNNING':
-			# console.log(f'mongodb: skipping update for performance ({delta}s < {UPDATE_FREQUENCY_SECONDS}s)')
+			if DEBUG > 1:
+				self._print(
+					f'[dim red]\[debug][/] [dim yellow]hooks.mongodb: {type[0]} {self.name} {existing_id} -> '
+					f'{self.status}[/] [dim purple]skipped ({delta:>.2f}s < {UPDATE_FREQUENCY_SECONDS}s)[/]', markup=True)
 			return
-		update_runner_lazy.apply(args=(collection, existing_id, update), queue='db')
+		db = client.main
+		start_time = time.time()
+		db[collection].update_one({'_id': ObjectId(existing_id)}, {'$set': update})
+		end_time = time.time()
+		elapsed_time = end_time - start_time
+		if DEBUG > 0:
+			self._print(
+				f'[dim red]\[debug][/] [dim yellow]hooks.mongodb: {type[0]} {self.name} {existing_id} -> '
+				f'{self.status}[/] [dim green]updated in {elapsed_time:.4f}s[/]', markup=True)
 		self.last_updated = start_time
 	else:  # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
@@ -41,35 +49,23 @@ def update_runner(self):
 		if DEBUG > 0:
 			end_time = time.time()
 			elapsed_time = end_time - start_time
-			console.log(f'mongodb: Created {type} {runner.inserted_id} in {elapsed_time:.4f}s', style='dim yellow')
+			self._print(
+				f'[dim red]\[debug][/] [dim yellow]hooks.mongodb: {type[0]} {self.name} {runner.inserted_id} -> '
+				f'{self.status}[/] [dim green]created in {elapsed_time:.4f}s[/]', markup=True)
 
 
 def save_finding(self, item):
-	save_finding_lazy.apply(args=(item.toDict(),), queue='db')
+	start_time = time.time()
+	db = client.main
+	finding = db['findings'].insert_one(item.toDict())
+	item._uid = str(finding.inserted_id)
+	end_time = time.time()
+	elapsed_time = end_time - start_time
+	if DEBUG > 0:
+		self._print(
+			f'[dim red]\[debug][/] [dim yellow]hooks.mongodb: f {finding.inserted_id}[/] [dim green]created in '
+			f'{elapsed_time:.4f}s[/]', markup=True)
 	return item
-
-
-@shared_task
-def save_finding_lazy(item):
-	start_time = time.time()
-	db = client.main
-	finding = db['findings'].insert_one(item)
-	end_time = time.time()
-	elapsed_time = end_time - start_time
-	if DEBUG > 0:
-		console.log(f'mongodb: Created finding {finding.inserted_id} in {elapsed_time:.4f}s', style='dim yellow')
-
-
-@shared_task
-def update_runner_lazy(collection, id, update):
-	db = client.main
-	start_time = time.time()
-	db[collection].update_one({'_id': ObjectId(id)}, {'$set': update})
-	status = update['status']
-	end_time = time.time()
-	elapsed_time = end_time - start_time
-	if DEBUG > 0:
-		console.log(f'mongodb: Updated {collection} {id} in {elapsed_time:.4f}s with status {status}', style='dim yellow')
 
 
 MONGODB_HOOKS = {

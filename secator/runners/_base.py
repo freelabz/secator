@@ -112,19 +112,23 @@ class Runner:
 			self.output_return_type = dict
 
 		# Print options
-		self.print_start = self.run_opts.pop('print_start', False)
-		self.print_item = self.run_opts.pop('print_item', False)
-		self.print_line = self.run_opts.pop('print_line', False)
+		self.print_start = self.run_opts.pop('print_start', DEBUG > 2)
+		self.print_item = self.run_opts.pop('print_item', DEBUG > 0)
+		self.print_line = self.run_opts.pop('print_line', DEBUG > 2)
 		self.print_item_count = self.run_opts.pop('print_item_count', False)
-		self.print_cmd = self.run_opts.pop('print_cmd', False)
-		self.print_input_file = self.run_opts.pop('print_input_file', False)
-		self.print_progress = self.run_opts.pop('print_progress', False)
-		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
+		self.print_cmd = self.run_opts.pop('print_cmd', DEBUG > 0)
+		self.print_run_opts = self.run_opts.pop('print_run_opts', DEBUG > 1)
+		self.print_fmt_opts = self.run_opts.pop('print_fmt_opts', DEBUG > 1)
+		self.print_input_file = self.run_opts.pop('print_input_file', DEBUG > 0)
+		self.print_hooks = self.run_opts.pop('print_hooks', DEBUG > 1)
+		self.print_progress = self.run_opts.pop('print_progress', DEBUG > 0)
+		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', DEBUG > 0)
 		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
-		self.print_run_summary = self.run_opts.pop('print_run_summary', False)
+		self.print_run_summary = self.run_opts.pop('print_run_summary', DEBUG > 2)
 		self.print_json = self.run_opts.get('json', True)
 		self.print_raw = self.run_opts.get('raw', False)
 		self.print_orig = self.run_opts.get('orig', False)
+		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Output options
 		self.output_fmt = self.run_opts.get('format', False)
@@ -195,7 +199,7 @@ class Runner:
 					# Treat progress item
 					if item._type == 'progress':
 						if self.print_progress:
-							self._print(self.get_repr(item), out=sys.stderr, color='dim cyan')
+							self._print(self.get_repr(item))
 						self.output += self.get_repr(item) + '\n'
 						continue
 
@@ -268,13 +272,24 @@ class Runner:
 		}
 
 	def run_hooks(self, hook_type, *args):
-		# logger.debug(f'Running hooks of type {hook_type}')
 		result = args[0] if len(args) > 0 else None
 		if not self.enable_hooks:
 			return result
 		for hook in self.hooks[hook_type]:
-			# logger.debug(hook)
-			result = hook(self, *args)
+			name = f'{self.__class__.__name__}.{hook_type}'
+			fun = f'{hook.__module__}.{hook.__name__}'
+			try:
+				if DEBUG > 1:
+					self._print(
+						f'[dim red]\[debug][/] [dim yellow]hooks: [bold blue]{name}[/] -> [bold green]{fun}[/][/]',
+						rich=True)
+				result = hook(self, *args)
+			except Exception as e:
+				self._print(f'{fun} failed: "{e.__class__.__name__}". Skipping', color='bold red', rich=True)
+				if DEBUG > 0:
+					logger.exception(e)
+				else:
+					self._print('Please set DEBUG to > 1 to see the detailed exception.', color='dim red', rich=True)
 		return result
 
 	def run_validators(self, validator_type, *args):
@@ -283,7 +298,7 @@ class Runner:
 			# logger.debug(validator)
 			if not validator(self, *args):
 				if validator_type == 'input':
-					self._print(f'{validator.__doc__}', color='bold red')
+					self._print(f'{validator.__doc__}', color='bold red', rich=True)
 				return False
 		return True
 
@@ -307,10 +322,9 @@ class Runner:
 		runner_name = self.__class__.__name__
 		self.log_header()
 		self._print(
-			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True, with_timestamp=True)
-		sleep(1)  # needed to show timestamp
+			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True)
 		if not self.sync and self.__class__.__name__ != 'Scan':
-			self._print('🏆 [bold gold3]Live results:[/]', rich=True)
+			self._print('\n🏆 [bold gold3]Live results:[/]', rich=True)
 
 	def log_header(self):
 		"""Log runner header."""
@@ -378,11 +392,11 @@ class Runner:
 			self._print('\n')
 			self._print(
 				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
-				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True, with_timestamp=True)
+				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
 
 		# Log runner errors
 		for error in self.errors:
-			self._print(error, color='bold red')
+			self._print(error, color='bold red', rich=True)
 
 		# Build and send report
 		if self.results:
@@ -392,7 +406,7 @@ class Runner:
 			self.report = report
 
 		# Log results count
-		if self.print_item_count and self.print_json and not self.print_raw and not self.print_orig:
+		if self.print_item_count and not self.print_raw and not self.print_orig:
 			count_map = self._get_results_count()
 			if all(count == 0 for count in count_map.values()):
 				self._print(':adhesive_bandage: Found 0 results.', color='bold red', rich=True)
@@ -598,7 +612,7 @@ class Runner:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, rich=False, with_timestamp=False):
+	def _print(self, data, color=None, out=sys.stderr, rich=False, markup=False):
 		"""Print function.
 
 		Args:
@@ -607,24 +621,37 @@ class Runner:
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
 			rich (bool, Optional): Force rich output.
 		"""
-		# Choose rich console
-		_console = console_stdout if out == sys.stdout else console
-
 		# Print a JSON item
 		if isinstance(data, (OutputType, DotMap, dict)):
 			if getattr(data, 'toDict', None):
 				data = data.toDict()
 			data = json.dumps(data)
 			data = f'{self.prefix:>15} {data}' if self.prefix and not self.print_item else data
+
+		if self.sync or rich:
+			_console = console_stdout if out == sys.stdout else console
+			_console.print(data, highlight=False, style=color, soft_wrap=True)
+		elif markup:
+			from rich import print as _print
+			from rich.text import Text
+			_print(Text.from_markup(data), file=out)
+		else:
 			print(data, file=out)
 
-		# Print a line with timestamp
-		elif with_timestamp:
-			_console.log(data, highlight=False, style=color)
+		# # Print a line using Rich console
+		# if rich:
+		# 	_console = console_stdout if out == sys.stdout else console
+		# 	_console.print(data, highlight=False, style=color, soft_wrap=True)
 
-		# Print a line
-		else:
-			_console.print(data, highlight=False, style=color) if self.sync or rich else print(data, file=out)
+		# # Print a line using Rich markup
+		# elif markup:
+		# 	from rich import print as _print
+		# 	from rich.text import Text
+		# 	_print(Text.from_markup(data), file=out)
+
+		# # Print a line raw
+		# else:
+		# 	print(data, file=out)
 
 	def _set_print_prefix(self):
 		self.prefix = ''

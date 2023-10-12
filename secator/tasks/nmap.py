@@ -10,7 +10,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 								 IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
 								 PORTS, PROVIDER, PROXY, RATE_LIMIT,
 								 REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
-								 SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
+								 SEVERITY, TAGS, DATA_FOLDER, THREADS, TIMEOUT,
 								 USER_AGENT)
 from secator.output_types import Port, Vulnerability
 from secator.tasks._categories import VulnMulti
@@ -53,7 +53,7 @@ class nmap(VulnMulti):
 	}
 	install_cmd = (
 		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
-		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
+		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
 	proxychains = True
 	proxychains_flavor = 'proxychains4'
@@ -91,7 +91,7 @@ class nmap(VulnMulti):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
 			timestr = get_file_timestamp()
-			output_path = f'{TEMP_FOLDER}/nmap_{timestr}.xml'
+			output_path = f'{DATA_FOLDER}/nmap_{timestr}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
 

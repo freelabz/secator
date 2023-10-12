@@ -1,8 +1,10 @@
+import time
 from dataclasses import dataclass, field
 
-from secator.definitions import PORT, HOST, IP, EXTRA_DATA, CPES
-from secator.output_types import OutputType
 from colorama import Fore, Style
+
+from secator.definitions import CPES, EXTRA_DATA, HOST, IP, PORT
+from secator.output_types import OutputType
 
 
 @dataclass
@@ -13,11 +15,11 @@ class Port(OutputType):
 	service_name: str = ''
 	cpes: list = field(default_factory=list)
 	extra_data: dict = field(default_factory=dict, compare=False)
+	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='port', repr=True)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
-
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (PORT, IP)
 

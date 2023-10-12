@@ -1,8 +1,11 @@
+import time
 from dataclasses import dataclass, field
 
-from secator.definitions import URL, STATUS_CODE, TITLE, WEBSERVER, TECH, CONTENT_TYPE, CONTENT_LENGTH, TIME
-from secator.output_types import OutputType
 from colorama import Fore, Style
+
+from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
+								 TECH, TIME, TITLE, URL, WEBSERVER)
+from secator.output_types import OutputType
 
 
 @dataclass
@@ -19,8 +22,11 @@ class Url(OutputType):
 	method: str = field(default='', compare=False)
 	words: int = field(default=0, compare=False)
 	lines: int = field(default=0, compare=False)
+	screenshot_path: str = field(default='', compare=False)
+	stored_response_path: str = field(default='', compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='url', repr=True)
+	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
 
@@ -64,4 +70,6 @@ class Url(OutputType):
 			s += f' [{cyan}{self.content_type}{reset}]'
 		if self.content_length:
 			s += f' [{cyan}{self.content_length}{reset}]'
+		if self.screenshot_path:
+			s += f' [{cyan}{self.screenshot_path}{reset}]'
 		return s

@@ -13,9 +13,9 @@ from rich.rule import Rule
 from secator.celery import app, is_celery_worker_alive
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ASCII, CONFIG_FOLDER, CVES_FOLDER, DEBUG,
+from secator.definitions import (ASCII, CVES_FOLDER, DEBUG,
 							   PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER,
-							   TEMP_FOLDER)
+							   DATA_FOLDER)
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -33,7 +33,7 @@ DEFAULT_CMD_OPTS = {
 	'print_cmd': True,
 }
 if DEBUG > 1:
-	console.print('CELERY CONFIGURATION:', style='bold blue')
+	console.print('[dim red]\[debug][/] [bold magenta]Celery config:[/]')
 	console.print(app.conf.humanize(with_defaults=False, censored=True), style='blue')
 
 
@@ -140,17 +140,17 @@ def report_show(json_path, exclude_fields):
 # WORKER #
 #--------#
 
-@cli.command()
-@click.option('-n', '--name', type=str, default='runner', help='Celery worker name (unique).')
-@click.option('-c', '--concurrency', type=int, default=None, help='Number of child processes processing the queue.')
+@cli.command(context_settings=dict(ignore_unknown_options=True))
+@click.option('-n', '--hostname', type=str, default='runner', help='Celery worker hostname (unique).')
+@click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='celery,io,cpu', help='Listen to a specific queue.')
-@click.option('-P', '--pool', type=str, default=None, help='Pool implementation.')
+@click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
-def worker(name, concurrency, reload, queue, pool, check, dev, stop, show):
+def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Celery worker."""
 	if check:
 		is_celery_worker_alive()
@@ -165,7 +165,7 @@ def worker(name, concurrency, reload, queue, pool, check, dev, stop, show):
 		pool = 'eventlet'
 		cmd = f'celery -A {app} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
-		cmd = f'celery -A {app} worker -n {name} -Q {queue}'
+		cmd = f'celery -A {app} worker -n {hostname} -Q {queue}'
 	if pool:
 		cmd += f' -P {pool}'
 	if concurrency:
@@ -214,25 +214,25 @@ def get_proxy(timeout, number):
 @click.option('--force', is_flag=True)
 def download_cves(force):
 	"""Download CVEs to file system. CVE lookup perf is improved quite a lot."""
-	cve_json_path = f'{TEMP_FOLDER}/circl-cve-search-expanded.json'
+	cve_json_path = f'{DATA_FOLDER}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		Command.run_command(
 			'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
-			cwd=TEMP_FOLDER,
+			cwd=DATA_FOLDER,
 			**DEFAULT_CMD_OPTS
 		)
 		Command.run_command(
-			f'gunzip {TEMP_FOLDER}/circl-cve-search-expanded.json.gz',
-			cwd=TEMP_FOLDER,
+			f'gunzip {DATA_FOLDER}/circl-cve-search-expanded.json.gz',
+			cwd=DATA_FOLDER,
 			**DEFAULT_CMD_OPTS
 		)
 	os.makedirs(CVES_FOLDER, exist_ok=True)
 	with console.status('[bold yellow]Saving CVEs to disk ...[/]'):
-		with open(f'{TEMP_FOLDER}/circl-cve-search-expanded.json', 'r') as f:
+		with open(f'{DATA_FOLDER}/circl-cve-search-expanded.json', 'r') as f:
 			for line in f:
 				data = json.loads(line)
 				cve_id = data['id']
-				cve_path = f'{TEMP_FOLDER}/cves/{cve_id}.json'
+				cve_path = f'{DATA_FOLDER}/cves/{cve_id}.json'
 				with open(cve_path, 'w') as f:
 					f.write(line)
 				console.print(f'CVE saved to {cve_path}')
@@ -280,7 +280,7 @@ def enable_aliases():
 	aliases.append('alias lists="secator s"')
 	aliases_str = '\n'.join(aliases)
 
-	fpath = f'{CONFIG_FOLDER}/.aliases'
+	fpath = f'{DATA_FOLDER}/.aliases'
 	with open(fpath, 'w') as f:
 		f.write(aliases_str)
 	console.print('Aliases:')

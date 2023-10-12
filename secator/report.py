@@ -33,7 +33,9 @@ class Report:
 			try:
 				report_cls(self).send()
 			except Exception as e:
-				console.print(f'Could not create exporter for {self.__class__.__name__}: {str(e)}', style='bold red')
+				console.print(
+					f'Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}',
+					style='bold red')
 
 	def build(self):
 		# Trim options
