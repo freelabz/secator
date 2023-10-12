@@ -26,7 +26,7 @@ class dnsxbrute(ReconDns):
             DOMAIN: lambda x: ".".join(x['host'].split('.')[1:]),
             EXTRA_DATA: lambda x: {
                 'resolver': x['resolver'],
-                'status_code': x['status_code']                
+                'status_code': x['status_code']
 			}
         }
     }
