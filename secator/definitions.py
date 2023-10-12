@@ -20,6 +20,8 @@ ASCII = f"""
 
 # Secator folders
 ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+CONFIGS_FOLDER = ROOT_FOLDER + '/secator/configs'
+EXTRA_CONFIGS_FOLDER = os.environ.get('SECATOR_EXTRA_CONFIGS_FOLDER')
 DATA_FOLDER = os.environ.get('SECATOR_DATA_FOLDER', f'{os.path.expanduser("~")}/.secator')
 TASKS_FOLDER = os.environ.get('SECATOR_TASKS_FOLDER', f'{DATA_FOLDER}/tasks')
 REPORTS_FOLDER = os.environ.get('SECATOR_REPORTS_FOLDER', f'{DATA_FOLDER}/reports')

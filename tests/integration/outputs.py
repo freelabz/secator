@@ -47,7 +47,7 @@ OUTPUTS_TASKS = {
             _source='dnsx'
 		),
         Record(
-            name= "hostmaster.wikimedia.org",
+            name= "wikipedia.org",
             type= "SOA",
             host= "wikipedia.org",
             _source= "dnsx"
@@ -131,26 +131,25 @@ OUTPUTS_TASKS = {
         Url(url='http://www.danielmiessler.com/wp-content/uploads/2010/03/self_discipline.jpeg', _source='gau')
     ],
     'gf': [
-        Tag(name='xss', match='http://localhost:3000?q=test', _source='gf')
+        Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
     'gospider': [
         Url(url='https://danielmiessler.com/t/Newsletter', status_code=200, content_length=92, _source='gospider')
     ],
     'grype': [
-        Vulnerability(
+		Vulnerability(
             matched_at=ROOT_FOLDER,
-            name='Navigation Remapping To Propagate Malicious Content',
+            name='Owner Footprinting',
             provider='cve.circl.lu',
-            id='CVE-2022-23491',
-            confidence='low',
             severity='medium',
-            cvss_score=0,
             tags=['ghsa'],
+			id='CVE-2023-43804',
             extra_data={
-                'product': 'certifi',
-                'version': '2022.12.07',
-                'product_type': 'python',
-                'ghsa_id': 'GHSA-43fp-rhv2-5gv8'
+                'product': 'urllib3',
+				'product_type': 'python',
+                'version': '2.0.5',
+				'version_fixed': '2.0.6',
+                'ghsa_id': 'GHSA-v845-jxx5-vc9f'
             },
             _source='grype',
         )
