@@ -71,6 +71,7 @@ class nmap(VulnMulti):
 			self._print(note)
 		if os.path.exists(self.output_path):
 			nmap_data = self.xml_to_json()
+			yield {'test': 'test', 'return': 'return'}
 			yield from nmap_data
 
 	def xml_to_json(self):

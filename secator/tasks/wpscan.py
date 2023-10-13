@@ -86,7 +86,7 @@ class wpscan(VulnHttp):
 	def yielder(self):
 		prev = self.print_item_count
 		self.print_item_count = False
-		list(super().yielder())
+		yield from super().yielder()
 		if self.return_code != 0:
 			return
 		self.results = []

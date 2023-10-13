@@ -204,14 +204,17 @@ class Runner:
 						continue
 
 					# Add item to results
-					self.results.append(item)
-					self.results_count += 1
-					self.uuids.append(item._uuid)
-					yield item
+					if isinstance(item, OutputType):
+						self.results.append(item)
+						self.results_count += 1
+						self.uuids.append(item._uuid)
+						yield item
 
 					# Print JSON or raw item
 					if self.print_item and item._type != 'target':
-						if self.print_json:
+						if not isinstance(item, OutputType):
+							self._print(f'❌ Failed to parse {item.toDict()}', color='bold orange3')
+						elif self.print_json:
 							self._print(item, out=sys.stdout)
 						elif self.print_raw:
 							self._print(str(item), out=sys.stdout)
