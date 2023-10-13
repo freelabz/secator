@@ -192,8 +192,8 @@ OUTPUTS_TASKS = {
     ],
     'msfconsole': [],
     'naabu': [
-        Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
+        Port(port=3000, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
+        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
     ],
     'nmap': [
         Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
