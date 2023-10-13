@@ -22,7 +22,7 @@ pip3 install dirsearch || true
 sudo apt install -y unzip && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash && sudo mv feroxbuster /usr/local/bin || true
 
 # ffuf
-go install -v github.com/ffuf/ffuf@latest && sudo git clone https://github.com/danielmiessler/SecLists /usr/share/seclists || true
+go install -v github.com/ffuf/ffuf@latest && sudo git clone https://github.com/danielmiessler/SecLists /usr/share/seclists || true || true
 
 # h8mail
 pip3 install h8mail || true
@@ -61,7 +61,7 @@ go install -v github.com/hahwul/dalfox/v2@latest || true
 sudo gem install wpscan || true
 
 # nmap
-sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true
+sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true || true
 
 # nuclei
 go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest || true
