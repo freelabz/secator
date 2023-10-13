@@ -98,4 +98,4 @@ jobs:
 
     - name: Run integration tests (${{ matrix.test_type }})
       run: |
-        DEBUG=2 secator test integration --test tests.integration.test_${{ matrix.test_type }}
+        secator test integration --test tests.integration.test_${{ matrix.test_type }} --tasks nmap --debug 2
