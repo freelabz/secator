@@ -127,7 +127,7 @@ class Runner:
 		self.print_run_summary = self.run_opts.pop('print_run_summary', DEBUG > 2)
 		self.print_json = self.run_opts.get('json', True)
 		self.print_raw = self.run_opts.get('raw', False)
-		self.print_orig = self.run_opts.get('orig', False)
+		self.orig = self.run_opts.get('orig', False)
 		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Output options
@@ -204,7 +204,7 @@ class Runner:
 						continue
 
 					# Add item to results
-					if isinstance(item, OutputType):
+					if isinstance(item, OutputType) or self.orig:
 						self.results.append(item)
 						self.results_count += 1
 						self.uuids.append(item._uuid)
@@ -212,7 +212,7 @@ class Runner:
 
 					# Print JSON or raw item
 					if self.print_item and item._type != 'target':
-						if not isinstance(item, OutputType):
+						if not isinstance(item, OutputType) and not self.orig:
 							self._print(f'❌ Failed to parse {item.toDict()}', color='bold orange3')
 						elif self.print_json:
 							self._print(item, out=sys.stdout)
@@ -410,7 +410,7 @@ class Runner:
 			self.report = report
 
 		# Log results count
-		if self.print_item_count and not self.print_raw and not self.print_orig:
+		if self.print_item_count and not self.print_raw and not self.orig:
 			count_map = self._get_results_count()
 			if all(count == 0 for count in count_map.values()):
 				self._print(':adhesive_bandage: Found 0 results.', color='bold red', rich=True)
@@ -685,7 +685,7 @@ class Runner:
 			return None
 
 		# Convert output dict to another schema
-		if isinstance(item, dict) and not self.print_orig:
+		if isinstance(item, dict) and not self.orig:
 			item = self._convert_item_schema(item)
 		elif isinstance(item, OutputType):
 			pass
@@ -704,7 +704,7 @@ class Runner:
 			self.progress = item.percent
 
 		# Run item convert hooks
-		if not self.print_orig:
+		if not self.orig:
 			item = self.run_hooks('on_item', item)
 
 		# Return item

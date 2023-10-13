@@ -10,6 +10,7 @@ from secator.utils import rich_to_ansi
 class Port(OutputType):
 	port: int
 	host: str
+	state: str = 'UNKNOWN'
 	ip: str = ''
 	service_name: str = ''
 	cpes: list = field(default_factory=list)
@@ -26,7 +27,9 @@ class Port(OutputType):
 		return f'{self.host}:{self.port}'
 
 	def __repr__(self) -> str:
-		s = f'🔓 {self.host}:[red]{self.port}[/]'
+		s = f'🔓 {self.host}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
 		if self.service_name:
-			s += f' [[bold purple]{self.service_name}[/]]'
+			s += f' \[[bold purple]{self.service_name}[/]]'
+		if self.ip:
+			s += f' \[[cyan]{self.ip}[/]]'
 		return rich_to_ansi(s)

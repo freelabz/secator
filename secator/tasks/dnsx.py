@@ -31,7 +31,7 @@ class dnsx(ReconDns):
 		items = []
 		try:
 			item = json.loads(line)
-			if self.print_orig:  # original dnsx output
+			if self.orig:  # original dnsx output
 				return item
 			host = item['host']
 			record_types = ['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'srv', 'ptr', 'soa', 'axfr', 'caa']

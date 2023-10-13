@@ -5,13 +5,13 @@ import re
 import xmltodict
 
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
-								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, ID,
-								 IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
-								 PORTS, PROVIDER, PROXY, RATE_LIMIT,
-								 REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
-								 SEVERITY, TAGS, DATA_FOLDER, THREADS, TIMEOUT,
-								 USER_AGENT)
+from secator.definitions import (CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DELAY,
+								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
+								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
+								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
+								 PROXY, RATE_LIMIT, REFERENCES, RETRIES,
+								 SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
+								 THREADS, TIMEOUT, USER_AGENT)
 from secator.output_types import Port, Vulnerability
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
@@ -71,7 +71,6 @@ class nmap(VulnMulti):
 			self._print(note)
 		if os.path.exists(self.output_path):
 			nmap_data = self.xml_to_json()
-			yield {'test': 'test', 'return': 'return'}
 			yield from nmap_data
 
 	def xml_to_json(self):
@@ -104,10 +103,14 @@ class nmapData(dict):
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
 			for port in self._get_ports(host):
+				# Get port number
 				port_number = port['@portid']
 				if not port_number or not port_number.isdigit():
 					continue
 				port_number = int(port_number)
+
+				# Get port state
+				state = port.get('state', {}).get('@state', '')
 
 				# Get extra data
 				extra_data = self._get_extra_data(port)
@@ -132,6 +135,7 @@ class nmapData(dict):
 				port = {
 					PORT: port_number,
 					HOST: hostname,
+					STATE: state,
 					SERVICE_NAME: service_name,
 					IP: ip,
 					EXTRA_DATA: extra_data

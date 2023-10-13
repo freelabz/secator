@@ -1,7 +1,7 @@
 from secator.decorators import task
 from secator.definitions import (DELAY, HOST, OPT_NOT_SUPPORTED, PORT, PORTS,
-							   PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
-							   TOP_PORTS)
+								 PROXY, RATE_LIMIT, RETRIES, STATE, THREADS,
+								 TIMEOUT, TOP_PORTS)
 from secator.output_types import Port
 from secator.tasks._categories import ReconPort
 
@@ -40,7 +40,8 @@ class naabu(ReconPort):
 	output_map = {
 		Port: {
 			PORT: lambda x: x['port'],
-			HOST: lambda x: x['host'] if 'host' in x else x['ip']
+			HOST: lambda x: x['host'] if 'host' in x else x['ip'],
+			STATE: lambda x: 'open'
 		}
 	}
 	output_types = [Port]

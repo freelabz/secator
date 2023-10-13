@@ -48,7 +48,7 @@ class h8mail(OSInt):
 		if os.path.exists(self.output_path):
 			with open(self.output_path, 'r') as f:
 				data = json.load(f)
-			if self.print_orig:  # original h8mail output
+			if self.orig:  # original h8mail output
 				yield data
 				return
 			targets = data['targets']
