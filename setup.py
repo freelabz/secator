@@ -31,7 +31,7 @@ dependencies = [
     'redis',
     'requests',
     'rich',
-    'rich-click',
+    'rich-click<1.7',
     'tabulate',
     'termcolor',
     'validators',
