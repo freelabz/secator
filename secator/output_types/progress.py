@@ -1,7 +1,9 @@
 import time
 from dataclasses import dataclass, field
 
+from secator.definitions import DEBUG
 from secator.output_types import OutputType
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -23,4 +25,10 @@ class Progress(OutputType):
 		return f'{self.percent}%'
 
 	def __repr__(self) -> str:
-		return f'⏳ {self.percent}% ' + '█' * self.percent
+		s = f'[dim]⏳ {self.percent}% ' + '█' * (self.percent // 10) + '[/]'
+		if self.errors:
+			s += f' [dim red]errors={self.errors}[/]'
+		if DEBUG > 1:
+			ed = ' '.join([f'{k}={v}' for k, v in self.extra_data.items() if k != 'startedAt' and v])
+			s += f' [dim yellow]{ed}[/]'
+		return rich_to_ansi(s)
