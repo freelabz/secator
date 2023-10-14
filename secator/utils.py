@@ -407,7 +407,7 @@ def print_results_table(results, title=None, exclude_fields=[], log=False):
 def rich_to_ansi(text):
 	"""Convert text formatted with rich markup to standard string."""
 	from rich.console import Console
-	tmp_console = Console(file=None, highlight=False, color_system='standard')
+	tmp_console = Console(file=None, highlight=False, color_system='truecolor')
 	with tmp_console.capture() as capture:
 		tmp_console.print(text, end='', soft_wrap=True)
 	return capture.get()
