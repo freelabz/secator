@@ -156,12 +156,13 @@ class Runner:
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self._set_print_prefix()
 
+		# Run hooks
+		self.run_hooks('on_init')
+
 		# Abort if inputs are invalid
 		self.input_valid = True
-		if not self.run_validators('input', self.input):
-			self.input_valid = False
-
-		self.run_hooks('on_init')
+		# if not self.run_validators('input', self.input):
+		# 	self.input_valid = False
 
 	@property
 	def elapsed(self):
@@ -635,10 +636,6 @@ class Runner:
 		if self.sync or rich:
 			_console = console_stdout if out == sys.stdout else console
 			_console.print(data, highlight=False, style=color, soft_wrap=True)
-		elif markup:
-			from rich import print as _print
-			from rich.text import Text
-			_print(Text.from_markup(data), file=out)
 		else:
 			print(data, file=out)
 

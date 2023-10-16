@@ -13,7 +13,7 @@ from secator.tasks._categories import HttpFuzzer
 @task()
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
-	cmd = 'ffuf -noninteractive -recursion'
+	cmd = 'ffuf -noninteractive -recursion -quiet'
 	input_flag = '-u'
 	input_chunk_size = 1
 	file_flag = None

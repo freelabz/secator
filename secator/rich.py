@@ -11,7 +11,7 @@ from rich.traceback import install
 
 from secator.definitions import DEBUG, RECORD
 
-console = Console(stderr=True, record=RECORD)
+console = Console(stderr=True, record=RECORD, color_system='truecolor')
 console_stdout = Console(record=True)
 handler = RichHandler(rich_tracebacks=True)
 install(show_locals=DEBUG > 2, suppress=[click, rich_click])

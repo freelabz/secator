@@ -188,6 +188,7 @@ def run_command(self, results, name, targets, opts={}):
 	# profiler = Profiler(interval=0.0001)
 	# profiler.start()
 	chunk = opts.get('chunk')
+	chunked = opts.get('chunked')
 	chunk_count = opts.get('chunk_count')
 	description = opts.get('description')
 	sync = opts.get('sync', True)
@@ -196,6 +197,12 @@ def run_command(self, results, name, targets, opts={}):
 	context = opts.get('context', {})
 	context['celery_id'] = self.request.id
 	opts['context'] = context
+	s = f'Executing {name}'
+	if chunked:
+		s += f' {chunk}/{chunk_count}'
+	s += f' \[celery: {self.request.id}]'
+	s += f' \[context: {context}]'
+	console.print(s, style='bold red')
 
 	# Update task state in backend
 	count = 0
@@ -232,6 +239,10 @@ def run_command(self, results, name, targets, opts={}):
 		# Get task class
 		task_cls = Task.get_task_class(name)
 
+		# Initiate task
+		task = task_cls(targets, **opts)
+		print(f'Task id set: {task.toDict()["context"]["task_id"]}')
+
 		# If task doesn't support multiple targets, or if the number of targets is too big, split into multiple tasks
 		multiple_targets = isinstance(targets, list) and len(targets) > 1
 		single_target_only = multiple_targets and task_cls.file_flag is None
@@ -264,7 +275,6 @@ def run_command(self, results, name, targets, opts={}):
 			targets = targets[0]
 
 		# Run task
-		task = task_cls(targets, **opts)
 		for item in task:
 			result_uuid = str(uuid.uuid4())
 			item._uuid = result_uuid

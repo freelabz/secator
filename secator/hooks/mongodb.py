@@ -31,7 +31,7 @@ def update_runner(self):
 			if DEBUG > 1:
 				self._print(
 					f'[dim red]\[debug][/] [dim yellow]hooks.mongodb: {type[0]} {self.name} {existing_id} -> '
-					f'{self.status}[/] [dim purple]skipped ({delta:>.2f}s < {UPDATE_FREQUENCY_SECONDS}s)[/]', markup=True)
+					f'{self.status}[/] [dim purple]skipped ({delta:>.2f}s < {UPDATE_FREQUENCY_SECONDS}s)[/]', rich=True)
 			return
 		db = client.main
 		start_time = time.time()
@@ -41,7 +41,7 @@ def update_runner(self):
 		if DEBUG > 0:
 			self._print(
 				f'[dim red]\[debug][/] [dim yellow]hooks.mongodb: {type[0]} {self.name} {existing_id} -> '
-				f'{self.status}[/] [dim green]updated in {elapsed_time:.4f}s[/]', markup=True)
+				f'{self.status}[/] [dim green]updated in {elapsed_time:.4f}s[/]', rich=True)
 		self.last_updated = start_time
 	else:  # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
@@ -51,7 +51,7 @@ def update_runner(self):
 			elapsed_time = end_time - start_time
 			self._print(
 				f'[dim red]\[debug][/] [dim yellow]hooks.mongodb: {type[0]} {self.name} {runner.inserted_id} -> '
-				f'{self.status}[/] [dim green]created in {elapsed_time:.4f}s[/]', markup=True)
+				f'{self.status}[/] [dim green]created in {elapsed_time:.4f}s[/]', rich=True)
 
 
 def save_finding(self, item):
@@ -64,7 +64,7 @@ def save_finding(self, item):
 	if DEBUG > 0:
 		self._print(
 			f'[dim red]\[debug][/] [dim yellow]hooks.mongodb: f {finding.inserted_id}[/] [dim green]created in '
-			f'{elapsed_time:.4f}s[/]', markup=True)
+			f'{elapsed_time:.4f}s[/]', rich=True)
 	return item
 
 
@@ -80,6 +80,7 @@ MONGODB_HOOKS = {
 		'on_end': [update_runner],
 	},
 	Task: {
+		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [save_finding],
 		'on_iter': [update_runner],
