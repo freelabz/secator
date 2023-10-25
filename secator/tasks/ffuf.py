@@ -1,23 +1,31 @@
 from secator.decorators import task
-from secator.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH, CONTENT_TYPE,
-							   DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
-							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
-							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
-							   RATE_LIMIT, RETRIES, STATUS_CODE, THREADS, TIME,
-							   TIMEOUT, USER_AGENT, WORDLIST)
-from secator.output_types import Url
+from secator.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH,
+                                 CONTENT_TYPE, DELAY, DEPTH, EXTRA_DATA,
+                                 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+                                 FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
+                                 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+                                 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
+                                 PERCENT, PROXY, RATE_LIMIT, RETRIES,
+                                 STATUS_CODE, THREADS, TIME, TIMEOUT,
+                                 USER_AGENT, WORDLIST)
+from secator.output_types import Progress, Url
+from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
 
+FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[\d/\d\] :: (?P<rps>\d+) req/sec :: Duration: \[(?P<duration>[\d:]+)\] :: Errors: (?P<errors>\d+) ::'
 
 @task()
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
-	cmd = 'ffuf -noninteractive -recursion -quiet'
+	cmd = 'ffuf -noninteractive -recursion'
 	input_flag = '-u'
 	input_chunk_size = 1
 	file_flag = None
 	json_flag = '-json'
+	item_loaders = [
+		JSONSerializer(),
+		RegexSerializer(FFUF_PROGRESS_REGEX, fields=['count', 'total', 'rps', 'duration', 'errors'])
+	]
 	opts = {
 		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Auto-calibration'},
 	}
@@ -46,13 +54,18 @@ class ffuf(HttpFuzzer):
 		WORDLIST: 'w',
 		AUTO_CALIBRATION: 'ac',
 	}
+	output_types = [Url, Progress]
 	output_map = {
 		Url: {
 			STATUS_CODE: 'status',
 			CONTENT_LENGTH: 'length',
 			CONTENT_TYPE: 'content-type',
 			TIME: lambda x: x['duration'] * 10**-9
-		}
+		},
+		Progress: {
+			PERCENT: lambda x: int(int(x['count']) * 100 / int(x['total'])),
+			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['count', 'total', 'errors']}
+		},
 	}
 	encoding = 'ansi'
 	install_cmd = (
@@ -63,13 +76,6 @@ class ffuf(HttpFuzzer):
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'io'
-
-	@staticmethod
-	def validate_input(self, input):
-		"""No list input supported for this command. Pass a single input instead or run in worker mode."""
-		if isinstance(input, list):
-			return False
-		return True
 
 	@staticmethod
 	def on_item(self, item):

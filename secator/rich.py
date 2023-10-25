@@ -52,6 +52,7 @@ FORMATTERS = {
 	'url': lambda host: f'[bold underline blue]{host}[/]',
 	'ip': lambda ip: f'[bold yellow]{ip}[/]',
 	'status_code': status_to_color,
+	'reference': lambda reference: f'[link={reference}]🡕[/]',
 	'_source': lambda source: f'[bold gold3]{source}[/]'
 }
 

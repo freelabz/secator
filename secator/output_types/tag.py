@@ -15,6 +15,9 @@ class Tag(OutputType):
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
+	_tagged: bool = field(default=False, repr=True, compare=False)
+	_duplicate: bool = field(default=False, repr=True, compare=False)
+	_related: list = field(default_factory=list, compare=False)
 
 	_table_fields = ['match', 'name', 'extra_data']
 	_sort_by = ('match', 'name')
@@ -27,14 +30,17 @@ class Tag(OutputType):
 
 	def __repr__(self) -> str:
 		s = f'🏷️  [bold magenta]{self.name}[/]'
+		s += f' found @ [bold]{self.match}[/]'
 		ed = ''
 		if self.extra_data:
-			ed = ' '.join([v for k, v in self.extra_data.items() if k != 'source' and v])
-		if len(ed) < 80:
-			s += f' [bold yellow]{ed}[/]'
-		s += f' found @ [bold]{self.match}[/]'
-		if len(ed) >= 80:
-			s += (
-				':' + '\n' + f'[dim yellow]{ed}[/]'
-			).replace('\n', '\n' + '  ').replace('...TRUNCATED', '\n[italic bold red]...truncated to 1000 chars[/]')
+			for k, v in self.extra_data.items():
+				sep = ' '
+				if not v:
+					continue
+				if len(v) >= 80:
+					v = v.replace('\n', '\n' + '  ').replace('...TRUNCATED', '\n[italic bold red]...truncated to 1000 chars[/]')
+					sep = '\n    '
+				ed += f'\n    [dim red]{k}[/]:{sep}[dim yellow]{v}[/]'
+		if ed:
+			s += ed
 		return rich_to_ansi(s)

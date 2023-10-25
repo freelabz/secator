@@ -27,6 +27,7 @@ class dnsx(ReconDns):
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
 	profile = 'io'
 
+	@staticmethod
 	def item_loader(self, line):
 		items = []
 		try:

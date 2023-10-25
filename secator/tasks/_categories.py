@@ -135,6 +135,17 @@ class Vuln(Command):
 				return json.load(f)
 		return None
 
+	# @staticmethod
+	# def lookup_exploitdb(exploit_id):
+	# 	print('looking up exploit')
+	# 	try:
+	# 		cve_info = requests.get(f'https://exploit-db.com/exploits/{exploit_id}', timeout=5).content
+	# 		print(cve_info)
+	# 	except Exception:
+	# 		logger.error(f'Could not fetch exploit info for exploit {exploit_id}. Skipping.')
+	# 		return None
+	# 	return cve_info
+
 	@staticmethod
 	def lookup_cve(cve_id, cpes=[]):
 		"""Search for a CVE in local db or using cve.circl.lu and return vulnerability data.

@@ -161,7 +161,6 @@ def task():
 def register_runner(cli_endpoint, config):
 	fmt_opts = {
 		'print_cmd': True,
-		'print_progress': True
 	}
 	short_help = ''
 	input_type = 'targets'
@@ -211,8 +210,6 @@ def register_runner(cli_endpoint, config):
 		input_type = task_cls.input_type or 'targets'
 		name = config.name
 		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
-		fmt_opts['print_item'] = True
-		fmt_opts['print_line'] = True
 		fmt_opts['print_item_count'] = True
 		runner_cls = Task
 		no_args_is_help = False
@@ -253,16 +250,12 @@ def register_runner(cli_endpoint, config):
 		else:  # automatically run in worker if it's alive
 			sync = not is_celery_worker_alive()
 		opts['sync'] = sync
-		if cli_endpoint.name in ['scan', 'workflow']:
-			opts.update({
-				'print_item': not sync,
-				'print_line': sync,
-				'print_remote_status': not sync,
-			})
-		else:  # task
-			opts.update({
-				'print_start': not sync,
-			})
+		opts.update({
+			'print_item': not sync,
+			'print_line': sync,
+			'print_remote_status': not sync,
+			'print_start': not sync
+		})
 
 		# Build hooks from driver name
 		hooks = {}

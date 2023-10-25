@@ -96,7 +96,7 @@ def get_task_ids(result, ids=[]):
 		get_task_ids(result.parent, ids=ids)
 
 
-def get_task_info(task_id):
+def get_task_data(task_id):
 	"""Get task info.
 
 	Args:
@@ -117,6 +117,8 @@ def get_task_info(task_id):
 	data['count'] = 0
 	data['error'] = None
 	data['ready'] = False
+	data['descr'] = ''
+	data['progress'] = 0
 	data['results'] = []
 	if res.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
 		data['ready'] = True

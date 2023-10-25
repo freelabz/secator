@@ -20,7 +20,7 @@ from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
 from secator.utils import (detect_host, discover_tasks, find_list_item, flatten,
-						 print_results_table)
+						 print_results_table, debug)
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -32,9 +32,8 @@ DEFAULT_CMD_OPTS = {
 	'no_capture': True,
 	'print_cmd': True,
 }
-if DEBUG > 1:
-	console.print('[dim red]\[debug][/] [bold magenta]Celery config:[/]')
-	console.print(app.conf.humanize(with_defaults=False, censored=True), style='blue')
+debug('conf', obj=dict(app.conf), obj_breaklines=True, component='celery.app.conf', level=4)
+debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, component='celery.tasks', level=4)
 
 
 #--------#
@@ -144,7 +143,7 @@ def report_show(json_path, exclude_fields):
 @click.option('-n', '--hostname', type=str, default='runner', help='Celery worker hostname (unique).')
 @click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
-@click.option('-Q', '--queue', type=str, default='celery,io,cpu', help='Listen to a specific queue.')
+@click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
@@ -155,7 +154,9 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	if check:
 		is_celery_worker_alive()
 		return
-	app = 'secator.celery.app'
+	if not queue:
+		queue = 'io,cpu,' + ','.join([r['queue'] for r in app.conf.task_routes.values()])
+	app_str = 'secator.celery.app'
 	if dev:
 		subcmd = 'stop' if stop else 'show' if show else 'start'
 		logfile = '%n.log'
@@ -163,9 +164,9 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 		queues = '-Q:1 celery -Q:2 io -Q:3 cpu'
 		concur = '-c:1 10 -c:2 100 -c:3 4'
 		pool = 'eventlet'
-		cmd = f'celery -A {app} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
+		cmd = f'celery -A {app_str} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
-		cmd = f'celery -A {app} worker -n {hostname} -Q {queue}'
+		cmd = f'celery -A {app_str} worker -n {hostname} -Q {queue}'
 	if pool:
 		cmd += f' -P {pool}'
 	if concurrency:

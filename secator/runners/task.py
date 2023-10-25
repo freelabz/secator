@@ -33,16 +33,15 @@ class Task(Runner):
 
 		# Fmt opts
 		fmt_opts = {
-			'json': run_opts.get('json', False) and self.sync,
+			'json': run_opts.get('json', False),
 			'print_cmd': True,
 			'print_cmd_prefix': not self.sync,
 			'print_input_file': DEBUG > 0,
 			'print_item': True,
 			'print_item_count': not self.sync and not dry_run,
 			'print_line': not self.output_quiet,
-			'print_progress': True,
 		}
-		self.print_item = not self.sync  # enable print_item for base Task only if running remote
+		# self.print_item = not self.sync  # enable print_item for base Task only if running remote
 		run_opts.update(fmt_opts)
 
 		# Set task output types

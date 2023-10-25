@@ -101,8 +101,12 @@ class wpscan(VulnHttp):
 			with open(self.output_path, 'r') as f:
 				data = json.load(f)
 
+			if self.orig:
+				yield data
+				return
+
 			# Get URL
-			target = data['target_url']
+			target = data.get('target_url', self.targets)
 
 			# Wordpress version
 			version = data.get('version', {})
@@ -112,7 +116,7 @@ class wpscan(VulnHttp):
 				if wp_version_status == 'outdated':
 					vuln = version
 					vuln.update({
-						'url': data['target_url'],
+						'url': target,
 						'to_s': 'Wordpress outdated version',
 						'type': wp_version,
 						'references': {},
