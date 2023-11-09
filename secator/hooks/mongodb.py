@@ -34,7 +34,7 @@ def update_runner(self):
 		delta = start_time - self.last_updated if self.last_updated else MONGODB_UPDATE_FREQUENCY
 		if self.last_updated and delta < MONGODB_UPDATE_FREQUENCY and self.status == 'RUNNING':
 			debug(f'skipped ({delta:>.2f}s < {MONGODB_UPDATE_FREQUENCY}s)',
-		 		  component='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=3)
+		 		  sub='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=3)
 			return
 		db = client.main
 		start_time = time.time()
@@ -43,7 +43,7 @@ def update_runner(self):
 		elapsed = end_time - start_time
 		debug(
 			f'[dim gold4]updated in {elapsed:.4f}s[/]',
-			component='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=2)
+			sub='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=2)
 		self.last_updated = start_time
 	else:  # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
@@ -56,7 +56,7 @@ def update_runner(self):
 		elapsed = end_time - start_time
 		debug(
 			f'created in {elapsed:.4f}s',
-			component='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=2)
+			sub='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=2)
 
 
 def update_finding(self, item):
@@ -73,7 +73,7 @@ def update_finding(self, item):
 		status = 'CREATED'
 	end_time = time.time()
 	elapsed = end_time - start_time
-	debug(f'in {elapsed:.4f}s', component='hooks.mongodb', id=str(item._uuid), obj={'finding': status}, obj_after=False)
+	debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=str(item._uuid), obj={'finding': status}, obj_after=False)
 	return item
 
 
@@ -82,7 +82,7 @@ def find_duplicates(self):
 	if not ws_id:
 		return
 	celery_id = tag_duplicates.delay(ws_id)
-	debug(f'running duplicate check on workspace {ws_id}', id=celery_id, component='hooks.mongodb')
+	debug(f'running duplicate check on workspace {ws_id}', id=celery_id, sub='hooks.mongodb')
 
 
 def load_finding(obj):
@@ -94,7 +94,7 @@ def load_finding(obj):
 			item = klass.load(obj)
 			item._uuid = str(obj['_id'])
 			return item
-	debug('could not load Secator output type from MongoDB object', obj=obj, component='hooks.mongodb')
+	debug('could not load Secator output type from MongoDB object', obj=obj, sub='hooks.mongodb')
 	return None
 
 
@@ -111,11 +111,15 @@ def tag_duplicates(ws_id: str = None):
 		ws_id (str): Workspace id.
 	"""
 	db = client.main
-	workspace_query = list(db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': True}).sort('_timestamp', -1))
-	untagged_query = list(db.findings.find({'_context.workspace_id': str(ws_id)}).sort('_timestamp', -1))
-	# untagged_query = list(db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': False}).sort('_timestamp', -1))
+	workspace_query = list(
+		db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': True}).sort('_timestamp', -1))
+	untagged_query = list(
+		db.findings.find({'_context.workspace_id': str(ws_id)}).sort('_timestamp', -1))
+	# TODO: use this instead when duplicate removal logic is final
+	# untagged_query = list(
+	# 	db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': False}).sort('_timestamp', -1))
 	if not untagged_query:
-		debug('no untagged findings. Skipping.', id=ws_id, component='hooks.mongodb')
+		debug('no untagged findings. Skipping.', id=ws_id, sub='hooks.mongodb')
 		return
 
 	untagged_findings = load_findings(untagged_query)
@@ -143,47 +147,45 @@ def tag_duplicates(ws_id: str = None):
 			obj={
 				'workspace dupes': len(workspace_dupes),
 				'untagged dupes': len(untagged_dupes),
-				'seen dupes': len(seen_dupes)},
+				'seen dupes': len(seen_dupes)
+			},
 			id=ws_id,
-			component='hooks.mongodb')
-		debug(f'duplicate ids: {[i._uuid for i in tmp_duplicates]}', id=ws_id, component='hooks.mongodb')
+			sub='hooks.mongodb')
+		tmp_duplicates_ids = list(dict.fromkeys([i._uuid for i in tmp_duplicates]))
+		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb')
 
 		# Update latest object as non-duplicate
 		if tmp_duplicates:
 			duplicates.extend([f for f in tmp_duplicates])
-			db.findings.update_one(
-				{'_id': ObjectId(item._uuid)},
-				{'$set': {
-					'_related': [t._uuid for t in tmp_duplicates]
-				}})
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, component='hooks.mongodb')
+			db.findings.update_one({'_id': ObjectId(item._uuid)}, {'$set': {'_related': tmp_duplicates_ids}})
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb')
 			non_duplicates.append(item)
 		else:
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, component='hooks.mongodb')
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb')
 			non_duplicates.append(item)
 
 	# debug(f'found {len(duplicates)} total duplicates')
 
 	# Update objects with _tagged and _duplicate fields
-	duplicates_ids = [n._uuid for n in duplicates]
-	non_duplicates_ids = [n._uuid for n in non_duplicates]
+	duplicates_ids = list(dict.fromkeys([n._uuid for n in duplicates]))
+	non_duplicates_ids = list(dict.fromkeys([n._uuid for n in non_duplicates]))
 
-	search = {'_id': { '$in': [ObjectId(d) for d in duplicates_ids] }}
-	update = {'$set': { '_context.workspace_duplicate': True, '_tagged': True}} 
+	search = {'_id': {'$in': [ObjectId(d) for d in duplicates_ids]}}
+	update = {'$set': {'_context.workspace_duplicate': True, '_tagged': True}}
 	db.findings.update_many(search, update)
 
-	search = {'_id': { '$in': [ObjectId(d) for d in non_duplicates_ids] }}
-	update = {'$set': { '_context.workspace_duplicate': False, '_tagged': True}}
+	search = {'_id': {'$in': [ObjectId(d) for d in non_duplicates_ids]}}
+	update = {'$set': {'_context.workspace_duplicate': False, '_tagged': True}}
 	db.findings.update_many(search, update)
 	debug(
-		f'completed duplicates check for workspace.',
+		'completed duplicates check for workspace.',
 		id=ws_id,
 		obj={
 			'processed': len(untagged_findings),
 			'duplicates': len(duplicates_ids),
 			'non-duplicates': len(non_duplicates_ids)
 		},
-		component='hooks.mongodb')
+		sub='hooks.mongodb')
 
 
 MONGODB_HOOKS = {

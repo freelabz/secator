@@ -415,15 +415,15 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
-def debug(msg, component='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
+def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
 	"""Print debug log if DEBUG >= level."""
 	if not DEBUG >= level:
 		return
-	if DEBUG_COMPONENT and not any(s.startswith(component) for s in DEBUG_COMPONENT):
+	if DEBUG_COMPONENT and not any(s.startswith(sub) for s in DEBUG_COMPONENT):
 		return
 	s = ''
-	if component:
-		s += f'[dim yellow4]{component:13s}[/] '
+	if sub:
+		s += f'[dim yellow4]{sub:13s}[/] '
 	obj_str = ''
 	if obj:
 		sep = ', '

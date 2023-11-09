@@ -1,5 +1,5 @@
 import time
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 
 from secator.definitions import CPES, EXTRA_DATA, HOST, IP, PORT
 from secator.output_types import OutputType

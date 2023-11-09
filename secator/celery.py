@@ -1,7 +1,6 @@
 import gc
 import logging
 import traceback
-import uuid
 from time import sleep
 
 import celery
@@ -223,7 +222,7 @@ def run_command(self, results, name, targets, opts={}):
 		}
 	}
 	self.update_state(**state)
-	debug('updated', component='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
+	debug('updated', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
 	# profile_root = Path('/code/.profiles')
 	# profile_root.mkdir(exist_ok=True)
 	# profile_path = f'/code/.profiles/{self.request.id}.bin'
@@ -254,7 +253,7 @@ def run_command(self, results, name, targets, opts={}):
 			# Initiate main task and set context for sub-tasks
 			task = task_cls(targets, parent=parent, has_children=True, **opts)
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
-			debug(f'breaking task by chunks of size {chunk_size}.', id=self.request.id, component='celery.state')
+			debug(f'breaking task by chunks of size {chunk_size}.', id=self.request.id, sub='celery.state')
 			workflow = break_task(
 				task_cls,
 				opts,
@@ -262,14 +261,18 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 			result = workflow.apply() if sync else workflow.apply_async()
-			debug('waiting for subtasks', component='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
+			debug(
+				'waiting for subtasks', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
+				obj_after=False, level=2)
 			if not sync:
 				list(task.__class__.get_live_results(result))
 			with allow_join_result():
 				task_results = result.get()
 				results.extend(task_results)
 				task_state = 'SUCCESS'
-			debug('all subtasks done', component='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
+			debug(
+				'all subtasks done', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
+		 		obj_after=False, level=2)
 
 		# otherwise, run normally
 		else:
@@ -289,7 +292,9 @@ def run_command(self, results, name, targets, opts={}):
 				if item._type == 'progress':
 					state['meta']['progress'] = item.percent
 				self.update_state(**state)
-				debug('items found', component='celery.state', id=self.request.id, obj={full_name: len(task_results)}, obj_after=False, level=4)
+				debug(
+					'items found', sub='celery.state', id=self.request.id, obj={full_name: len(task_results)},
+					obj_after=False, level=4)
 
 			# Update task state based on task return code
 			if task.return_code == 0:
@@ -325,7 +330,7 @@ def run_command(self, results, name, targets, opts={}):
 
 		# Update task state with final status
 		self.update_state(**state)
-		debug('updated', component='celery.state', id=self.request.id, obj={full_name: task_state}, obj_after=False, level=2)
+		debug('updated', sub='celery.state', id=self.request.id, obj={full_name: task_state}, obj_after=False, level=2)
 
 		# Update parent task if necessary
 		if task and task.has_children:

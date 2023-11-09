@@ -24,7 +24,7 @@ class Target(OutputType):
 
 	def __str__(self):
 		return self.name
-	
+
 	def __repr__(self):
 		s = f'🎯 {self.name}'
 		return rich_to_ansi(s)

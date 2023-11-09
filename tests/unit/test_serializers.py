@@ -9,7 +9,7 @@ class TestCeleryCommand(unittest.TestCase):
 
 	def test_dumps_loads(self):
 		results = [
-			Port(port=53, host='localhost'),
+			Port(port=53, ip='127.0.0.1', host='localhost'),
 			Vulnerability(matched_at='localhost', name='CVE-123123123', provider='nmap')
 		]
 		results = dumps_dataclass(results)
@@ -24,7 +24,7 @@ class TestCeleryCommand(unittest.TestCase):
 			'info': {'name': 'test'},
 			'results': {
 				'ports': [
-					{'port': 53, 'host': 'localhost', '_type': 'port'},
+					{'port': 53, 'ip': '127.0.0.1', 'host': 'localhost', '_type': 'port'},
 				],
 				'vulnerabilities': [
 					{'matched_at': 'localhost', 'name': 'CVE-123123123', 'provider': 'nmap', '_type': 'vulnerability'}
@@ -40,7 +40,7 @@ class TestCeleryCommand(unittest.TestCase):
 			'info': {'name': 'test'},
 			'results': {
 				'ports': [
-					Port(port=53, host='localhost'),
+					Port(port=53, ip='127.0.0.1', host='localhost'),
 				],
 				'vulnerabilities': [
 					Vulnerability(matched_at='localhost', name='CVE-123123123', provider='nmap')

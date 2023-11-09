@@ -1,18 +1,19 @@
 from secator.decorators import task
 from secator.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH,
-                                 CONTENT_TYPE, DELAY, DEPTH, EXTRA_DATA,
-                                 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
-                                 FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
-                                 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-                                 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
-                                 PERCENT, PROXY, RATE_LIMIT, RETRIES,
-                                 STATUS_CODE, THREADS, TIME, TIMEOUT,
-                                 USER_AGENT, WORDLIST)
+								 CONTENT_TYPE, DELAY, DEPTH, EXTRA_DATA,
+								 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
+								 PERCENT, PROXY, RATE_LIMIT, RETRIES,
+								 STATUS_CODE, THREADS, TIME, TIMEOUT,
+								 USER_AGENT, WORDLIST)
 from secator.output_types import Progress, Url
 from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
 
-FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[\d/\d\] :: (?P<rps>\d+) req/sec :: Duration: \[(?P<duration>[\d:]+)\] :: Errors: (?P<errors>\d+) ::'
+FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[\d/\d\] :: (?P<rps>\d+) req/sec :: Duration: \[(?P<duration>[\d:]+)\] :: Errors: (?P<errors>\d+) ::'  # noqa: E501
+
 
 @task()
 class ffuf(HttpFuzzer):

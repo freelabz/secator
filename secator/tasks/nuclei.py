@@ -1,10 +1,10 @@
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
-                                 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID, IP,
-                                 MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT,
-                                 PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-                                 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
-                                 USER_AGENT, DEFAULT_NUCLEI_FLAGS)
+								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID, IP,
+								 MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT,
+								 PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
+								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
+								 USER_AGENT, DEFAULT_NUCLEI_FLAGS)
 from secator.output_types import Progress, Vulnerability
 from secator.tasks._categories import VulnMulti
 

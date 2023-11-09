@@ -9,10 +9,10 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
-								 PROXY, RATE_LIMIT, REFERENCES, RETRIES,
-								 SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
-								 THREADS, TIMEOUT, USER_AGENT, REFERENCE)
-from secator.output_types import Port, Vulnerability, Exploit
+								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
+								 RETRIES, SCRIPT, SERVICE_NAME, STATE, TAGS,
+								 THREADS, TIMEOUT, USER_AGENT)
+from secator.output_types import Exploit, Port, Vulnerability
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
 
@@ -301,7 +301,7 @@ class nmapData(dict):
 				# TODO: Implement exploit processing
 				exploit_id, cvss_score, reference_url, _ = elems
 				name = exploit_id
-				edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
+				# edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
 				vuln = {
 					ID: exploit_id,
 					NAME: name,

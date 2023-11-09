@@ -374,7 +374,7 @@ class Command(Runner):
 
 		except FileNotFoundError as e:
 			if self.config.name in str(e):
-				error = f'Executable not found.'
+				error = 'Executable not found.'
 				if self.install_cmd:
 					error += f' Install it with `secator utils install {self.config.name}`.'
 			else:
@@ -586,7 +586,7 @@ class Command(Runner):
 			self.cmd += f' {meta_opts_str}'
 
 	def _build_cmd_input(self):
-		"""Many commands take as input a string or a list. This function facilitate this based on wheter we pass a
+		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a
 		string or a list to the cmd.
 		"""
 		cmd = self.cmd
@@ -595,7 +595,7 @@ class Command(Runner):
 		# If input is None, return the previous command
 		if not input:
 			return
-		
+
 		# If input is a list but has one element, use the standard string input
 		if isinstance(input, list) and len(input) == 1:
 			input = input[0]

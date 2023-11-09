@@ -1,9 +1,8 @@
 from secator.decorators import task
-from secator.runners import Command
+from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
+								 PROVIDER, REFERENCE, TAGS)
 from secator.output_types import Exploit
-from secator.definitions import (
-	ID, NAME, PROVIDER, CVES, MATCHED_AT, REFERENCE, EXTRA_DATA
-)
+from secator.runners import Command
 
 
 @task()
@@ -42,10 +41,12 @@ class searchsploit(Command):
 			split = _in.split('~')
 			self.matched_at = split[0]
 			self.input = split[1]
-		self.input = self.input.replace('httpd', '').replace('/', ' ')
+		if isinstance(self.input, str):
+			self.input = self.input.replace('httpd', '').replace('/', ' ')
 
 	@staticmethod
 	def on_item_pre_convert(self, item):
 		if self.matched_at:
 			item[MATCHED_AT] = self.matched_at
+		item[TAGS] = [self.input.replace('\'', '')]
 		return item

@@ -13,14 +13,13 @@ from rich.rule import Rule
 from secator.celery import app, is_celery_worker_alive
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ASCII, CVES_FOLDER, DEBUG,
-							   PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER,
-							   DATA_FOLDER)
+from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,
+								 PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER)
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
-from secator.utils import (detect_host, discover_tasks, find_list_item, flatten,
-						 print_results_table, debug)
+from secator.utils import (debug, detect_host, discover_tasks, find_list_item,
+						   flatten, print_results_table)
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -32,8 +31,8 @@ DEFAULT_CMD_OPTS = {
 	'no_capture': True,
 	'print_cmd': True,
 }
-debug('conf', obj=dict(app.conf), obj_breaklines=True, component='celery.app.conf', level=4)
-debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, component='celery.tasks', level=4)
+debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
+debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
 
 
 #--------#

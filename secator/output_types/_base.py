@@ -76,7 +76,6 @@ class OutputType:
 		# All values None, raise an error
 		if all(val is None for val in new_item.values()):
 			raise TypeError(f'Item does not match {cls} schema')
-			
 
 		new_item['_type'] = cls.get_name()
 		return cls(**new_item)
@@ -93,4 +92,4 @@ class OutputType:
 		data = self.__dict__.copy()
 		if exclude:
 			return {k: v for k, v in data.items() if k not in exclude}
-		return self.__dict__.copy()
+		return data

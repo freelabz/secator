@@ -260,9 +260,9 @@ class Runner:
 		self.run_hooks('on_end')
 
 	def mark_duplicates(self):
-		debug(f'duplicate check for {self.config.name}', component='runner.mark_duplicates')
+		debug('duplicate check', id=self.config.name, sub='runner.mark_duplicates')
 		for item in self.results:
-			debug(f'duplicate check', obj_breaklines=True, component='runner.mark_duplicates', level=2)
+			debug('duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=2)
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -280,15 +280,15 @@ class Runner:
 
 				for dupe in dupes:
 					if not dupe._duplicate:
-						debug(f'found new duplicate', obj=dupe.toDict(exclude=['_context']), obj_breaklines=True, component='runner.mark_duplicates', level=2)
+						debug(
+							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
+							sub='runner.mark_duplicates', level=2)
 						dupe._duplicate = True
 						dupe = self.run_hooks('on_duplicate', dupe)
 
-		debug('Duplicates:', component='runner.mark_duplicates', level=2)
-		debug('\n\t'.join([repr(i) + f' [{i._uuid}]' for i in self.results if i._duplicate]), component='runner.mark_duplicates', level=2)
-		debug('Results:', component='runner.mark_duplicates', level=2)
-		debug('\n\t'.join([repr(i) + f' [{i._uuid}] {i._related}' for i in self.results if not i._duplicate]), component='runner.mark_duplicates', level=2)
-		debug(f'duplicate check completed for {self.config.name}', component='runner.mark_duplicates')
+		debug('Duplicates:', sub='runner.mark_duplicates', level=2)
+		debug('\n\t'.join([repr(i) for i in self.results if i._duplicate]), sub='runner.mark_duplicates', level=2)
+		debug('duplicate check completed', id=self.config.name, sub='runner.mark_duplicates')
 
 	def yielder(self):
 		raise NotImplementedError()
@@ -328,7 +328,7 @@ class Runner:
 			fun = f'{hook.__module__}.{hook.__name__}'
 			try:
 				_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
-				debug(f'', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, component='hooks', level=3)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
 				result = hook(self, *args)
 			except Exception as e:
 				self._print(f'{fun} failed: "{e.__class__.__name__}". Skipping', color='bold red', rich=True)
@@ -446,7 +446,7 @@ class Runner:
 			self._print(
 				f'✓  [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
 				color='bold green', rich=True)
-			for info in self.infos:	
+			for info in self.infos:
 				self._print(f'   • {info}', color='bold green', rich=True)
 
 		# Log runner errors
@@ -518,7 +518,7 @@ class Runner:
 				full_name = data['name']
 				if data['chunk_info']:
 					full_name += ' ' + data['chunk_info']
-				debug('', component='celery.runner', id=data['id'], obj={full_name: data['state']}, level=4)
+				debug('', sub='celery.runner', id=data['id'], obj={full_name: data['state']}, level=4)
 			if not data:
 				continue
 			yield data
@@ -699,20 +699,20 @@ class Runner:
 		# output type based on the schema
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
-		debug(f'Input item: {item}', component='klass.load', level=5)
-		debug(f'Output types to try: {[o.__name__ for o in output_types]}', component='klass.load', level=5)
+		debug(f'Input item: {item}', sub='klass.load', level=5)
+		debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load', level=5)
 		for klass in output_types:
-			debug(f'Loading item as {klass.__name__}', component='klass.load', level=5)
+			debug(f'Loading item as {klass.__name__}', sub='klass.load', level=5)
 			output_map = getattr(self, 'output_map', {})
 			output_map = output_map.get(klass, {})
 			try:
 				new_item = klass.load(item, output_map)
-				debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', component='klass.load', level=5)
+				debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', sub='klass.load', level=5)
 				break  # found an item that fits
 			except (TypeError, KeyError) as e:  # can't load using class
 				debug(
 					f'[dim red]Failed loading item as {klass.__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
-					component='klass.load',
+					sub='klass.load',
 					level=5)
 				if DEBUG == 6:
 					console.print_exception(show_locals=False)
@@ -797,8 +797,10 @@ class Runner:
 		else:
 			item = DotMap(item)
 
+		# Update item context
+		item._context.update(self.context)
+
 		# Add context, uuid, progress to item
-		item._context = self.context
 		if not item._source:
 			item._source = self.config.name
 
