@@ -1,11 +1,10 @@
 from secator.celery import *
 import unittest
-import json
 from secator.serializers.dataclass import dumps_dataclass, loads_dataclass
 from secator.output_types import Port, Vulnerability
 
 
-class TestCeleryCommand(unittest.TestCase):
+class TestSerializers(unittest.TestCase):
 
 	def test_dumps_loads(self):
 		results = [
