@@ -13,6 +13,7 @@ INPUTS_TASKS = {
     'gospider': 'https://danielmiessler.com/',
     'grype': ROOT_FOLDER,
     'nuclei': 'http://localhost:3000/',
+	'searchsploit': 'apache 2.4.5',
     'subfinder': 'api.github.com',
     'wpscan': 'http://localhost:8000/',
     'h8mail': 'test@test.com',

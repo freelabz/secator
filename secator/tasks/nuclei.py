@@ -20,7 +20,9 @@ class nuclei(VulnMulti):
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'tags': {'type': str, 'help': 'Tags'},
 		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
-		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'}
+		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
+		'template_id': {'type': str, 'short': 'id', 'help': 'Template id'},
+		'debug': {'type': str, 'help': 'Debug mode'},
 	}
 	opt_key_map = {
 		HEADER: 'header',
