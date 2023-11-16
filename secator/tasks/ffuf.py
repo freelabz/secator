@@ -82,5 +82,3 @@ class ffuf(HttpFuzzer):
 	def on_item(self, item):
 		item.method = self.get_opt_value(METHOD) or 'GET'
 		return item
-
-	# TODO: write custom item_loader to pick up Progress items too

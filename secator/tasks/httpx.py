@@ -64,19 +64,6 @@ class httpx(Http):
 	profile = 'cpu'
 
 	@staticmethod
-	def on_item_pre_convert(self, item):
-		for k, v in item.items():
-			if k == 'time':
-				response_time = float(''.join(ch for ch in v if not ch.isalpha()))
-				if v[-2:] == 'ms':
-					response_time = response_time / 1000
-				item[k] = response_time
-			elif k == URL:
-				item[k] = sanitize_url(v)
-		item[URL] = item.get('final_url') or item[URL]
-		return item
-
-	@staticmethod
 	def on_init(self):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
@@ -89,6 +76,19 @@ class httpx(Http):
 			os.makedirs(self.output_response_path, exist_ok=True)
 			os.makedirs(self.output_screenshot_path, exist_ok=True)
 			self.cmd += f' -sr -srd {output_path}'
+
+	@staticmethod
+	def on_item_pre_convert(self, item):
+		for k, v in item.items():
+			if k == 'time':
+				response_time = float(''.join(ch for ch in v if not ch.isalpha()))
+				if v[-2:] == 'ms':
+					response_time = response_time / 1000
+				item[k] = response_time
+			elif k == URL:
+				item[k] = sanitize_url(v)
+		item[URL] = item.get('final_url') or item[URL]
+		return item
 
 	@staticmethod
 	def on_end(self):
