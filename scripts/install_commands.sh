@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # searchsploit
-sudo apt -y install exploitdb || true
+sudo snap install searchsploit || true
 
 # httpx
 go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true

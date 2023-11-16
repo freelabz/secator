@@ -26,7 +26,7 @@ class searchsploit(Command):
 			EXTRA_DATA: lambda x: {'verified': x['Verified']}
 		}
 	}
-	install_cmd = 'sudo apt -y install exploitdb'
+	install_cmd = 'sudo snap install searchsploit'
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
