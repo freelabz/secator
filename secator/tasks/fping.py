@@ -31,6 +31,7 @@ class fping(ReconIp):
 	output_types = [Ip]
 	install_cmd = 'sudo apt install -y fping'
 
+	@staticmethod
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):
 			return {'ip': line, 'alive': True}

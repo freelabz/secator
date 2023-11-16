@@ -21,7 +21,7 @@ import yaml
 from furl import furl
 from rich.markdown import Markdown
 
-from secator.definitions import DEFAULT_STDIN_TIMEOUT
+from secator.definitions import DEFAULT_STDIN_TIMEOUT, DEBUG, DEBUG_COMPONENT
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -387,8 +387,10 @@ def print_results_table(results, title=None, exclude_fields=[], log=False):
 		_print()
 	tables = []
 	for output_type in OUTPUT_TYPES:
+		if output_type.__name__ == 'Progress':
+			continue
 		items = [
-			item for item in results if item._type == output_type.get_name()
+			item for item in results if item._type == output_type.get_name() and not item._duplicate
 		]
 		if items:
 			_table = build_table(
@@ -411,3 +413,33 @@ def rich_to_ansi(text):
 	with tmp_console.capture() as capture:
 		tmp_console.print(text, end='', soft_wrap=True)
 	return capture.get()
+
+
+def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
+	"""Print debug log if DEBUG >= level."""
+	if not DEBUG >= level:
+		return
+	if DEBUG_COMPONENT and not any(s.startswith(sub) for s in DEBUG_COMPONENT):
+		return
+	s = ''
+	if sub:
+		s += f'[dim yellow4]{sub:13s}[/] '
+	obj_str = ''
+	if obj:
+		sep = ', '
+		if obj_breaklines:
+			obj_str += '\n '
+			sep = '\n '
+		if isinstance(obj, dict):
+			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
+		elif isinstance(obj, list):
+			obj_str += sep.join(obj)
+	if obj_str and not obj_after:
+		s = f'{s} {obj_str} '
+	s += f'[dim yellow]{msg}[/] '
+	if obj_str and obj_after:
+		s = f'{s}: {obj_str}'
+	if id:
+		s += f' [italic dim white]\[{id}][/] '
+	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
+	print(s)

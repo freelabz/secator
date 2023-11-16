@@ -76,4 +76,4 @@ class grype(VulnCode):
 	install_cmd = (
 		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
 	)
-	item_loader = grype_item_loader
+	item_loaders = [grype_item_loader]

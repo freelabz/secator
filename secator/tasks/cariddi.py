@@ -41,6 +41,7 @@ class cariddi(HttpCrawler):
 		TIMEOUT: 't',
 		USER_AGENT: 'ua'
 	}
+	item_loaders = []
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@latest'
 	encoding = 'ansi'
 	proxychains = False
@@ -48,6 +49,7 @@ class cariddi(HttpCrawler):
 	proxy_http = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
 	profile = 'cpu'
 
+	@staticmethod
 	def item_loader(self, line):
 		items = []
 		try:

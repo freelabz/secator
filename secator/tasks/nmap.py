@@ -9,10 +9,10 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
-								 PROXY, RATE_LIMIT, REFERENCES, RETRIES,
-								 SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
+								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
+								 RETRIES, SCRIPT, SERVICE_NAME, STATE, TAGS,
 								 THREADS, TIMEOUT, USER_AGENT)
-from secator.output_types import Port, Vulnerability
+from secator.output_types import Exploit, Port, Vulnerability
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
 
@@ -24,10 +24,10 @@ class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap -sT -sV -Pn'
 	input_flag = None
-	input_chunk_size = 10
+	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
-	output_types = [Port, Vulnerability]
+	output_types = [Port, Vulnerability, Exploit]
 	opts = {
 		PORTS: {'type': str, 'help': 'Ports to scan', 'short': 'p'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
@@ -146,7 +146,9 @@ class nmapData(dict):
 				for script in scripts:
 					script_id = script['id']
 					output = script['output']
-					extra_data['nmap_script'] = script_id
+					extra_data = {'script': script_id}
+					if service_name:
+						extra_data['service_name'] = service_name
 					funcmap = {
 						'vulscan': self._parse_vulscan_output,
 						'vulners': self._parse_vulners_output,
@@ -154,6 +156,7 @@ class nmapData(dict):
 					func = funcmap.get(script_id)
 					metadata = {
 						MATCHED_AT: f'{hostname}:{port_number}',
+						IP: ip,
 						EXTRA_DATA: extra_data,
 					}
 					if not func:
@@ -297,16 +300,21 @@ class nmapData(dict):
 			if len(elems) == 4:  # exploit
 				# TODO: Implement exploit processing
 				exploit_id, cvss_score, reference_url, _ = elems
+				name = exploit_id
+				# edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
 				vuln = {
 					ID: exploit_id,
-					NAME: exploit_id,
+					NAME: name,
 					PROVIDER: provider_name,
-					CVSS_SCORE: cvss_score,
-					REFERENCES: [reference_url],
-					SEVERITY: 'critical',
-					TAGS: ['exploit', exploit_id, provider_name],
-					CONFIDENCE: 'low'
+					REFERENCE: reference_url,
+					'_type': 'exploit'
+					# CVSS_SCORE: cvss_score,
+					# CONFIDENCE: 'low'
 				}
+				# TODO: lookup exploit in ExploitDB to find related CVEs
+				# if edb_id:
+				# 	print(edb_id)
+				# 	vuln_data = VulnMulti.lookup_exploitdb(edb_id)
 				yield vuln
 
 			elif len(elems) == 3:  # vuln
@@ -318,7 +326,7 @@ class nmapData(dict):
 					PROVIDER: provider_name,
 					CVSS_SCORE: vuln_cvss,
 					REFERENCES: [reference_url],
-					TAGS: [vuln_id, provider_name],
+					TAGS: [],
 					CONFIDENCE: 'low'
 				}
 				if vuln_type == 'CVE':

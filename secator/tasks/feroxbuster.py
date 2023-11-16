@@ -8,7 +8,7 @@ from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
 							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE, DATA_FOLDER,
-							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS)
+							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, DEFAULT_FEROXBUSTER_FLAGS)
 from secator.output_types import Url
 from secator.tasks._categories import HttpFuzzer
 from secator.utils import get_file_timestamp
@@ -17,7 +17,7 @@ from secator.utils import get_file_timestamp
 @task()
 class feroxbuster(HttpFuzzer):
 	"""Simple, fast, recursive content discovery tool written in Rust"""
-	cmd = 'feroxbuster --silent --auto-bail --no-state'
+	cmd = f'feroxbuster {DEFAULT_FEROXBUSTER_FLAGS}'
 	input_flag = '--url'
 	input_chunk_size = 1
 	file_flag = OPT_PIPE_INPUT

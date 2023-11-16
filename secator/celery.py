@@ -1,7 +1,6 @@
 import gc
 import logging
 import traceback
-import uuid
 from time import sleep
 
 import celery
@@ -20,8 +19,9 @@ from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
-from secator.utils import (TaskError, deduplicate, discover_external_tasks,
-						   discover_internal_tasks, flatten)
+from secator.utils import (TaskError, debug, deduplicate,
+						   discover_external_tasks, discover_internal_tasks,
+						   flatten)
 
 # from pathlib import Path
 # import memray
@@ -35,7 +35,7 @@ logging.basicConfig(
 	handlers=[rich_handler],
 	force=True)
 logging.getLogger('kombu').setLevel(logging.ERROR)
-logging.getLogger('celery').setLevel(logging.INFO if DEBUG > 2 else logging.WARNING)
+logging.getLogger('celery').setLevel(logging.INFO if DEBUG > 6 else logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,7 @@ app.conf.update({
 		'secator.celery.run_workflow': {'queue': 'celery'},
 		'secator.celery.run_scan': {'queue': 'celery'},
 		'secator.celery.run_task': {'queue': 'celery'},
+		'secator.hooks.mongodb.tag_duplicates': {'queue': 'mongodb'}
 	},
 	'task_reject_on_worker_lost': True,
 	'task_acks_late': True,
@@ -135,7 +136,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
-			opts['chunked'] = True
+			opts['parent'] = False
 		sig = task_cls.s(chunk, **opts).set(queue=task_cls.profile)
 		sigs.append(sig)
 
@@ -197,15 +198,22 @@ def run_command(self, results, name, targets, opts={}):
 	context['celery_id'] = self.request.id
 	opts['context'] = context
 
+	# Debug task
+	full_name = name
+	full_name += f' {chunk}/{chunk_count}' if chunk_count else ''
+
 	# Update task state in backend
 	count = 0
+	msg_type = 'error'
 	task_results = []
 	task_state = 'RUNNING'
 	task = None
+	parent = True
 	state = {
 		'state': task_state,
 		'meta': {
 			'name': name,
+			'progress': 0,
 			'results': [],
 			'chunk': chunk,
 			'chunk_count': chunk_count,
@@ -214,6 +222,7 @@ def run_command(self, results, name, targets, opts={}):
 		}
 	}
 	self.update_state(**state)
+	debug('updated', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
 	# profile_root = Path('/code/.profiles')
 	# profile_root.mkdir(exist_ok=True)
 	# profile_path = f'/code/.profiles/{self.request.id}.bin'
@@ -227,20 +236,24 @@ def run_command(self, results, name, targets, opts={}):
 		if not chunk:
 			targets, opts = run_extractors(results, opts, targets)
 			if not targets:
-				raise ValueError(f'{name}: No targets were specified as input.')
+				msg_type = 'info'
+				raise TaskError(f'No targets were specified as input. Skipping. [{self.request.id}]')
 
 		# Get task class
 		task_cls = Task.get_task_class(name)
 
-		# If task doesn't support multiple targets, or if the number of targets is too big, split into multiple tasks
+		# Get split
 		multiple_targets = isinstance(targets, list) and len(targets) > 1
 		single_target_only = multiple_targets and task_cls.file_flag is None
 		break_size_threshold = multiple_targets and task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
 
+		# If task doesn't support multiple targets, or if the number of targets is too big, split into multiple tasks
 		if single_target_only or (not sync and break_size_threshold):
+
+			# Initiate main task and set context for sub-tasks
+			task = task_cls(targets, parent=parent, has_children=True, **opts)
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
-			if DEBUG > 0:
-				console.print(f'[dim red]\[debug] Breaking task by chunks of size {chunk_size}.[/]')
+			debug(f'breaking task by chunks of size {chunk_size}.', id=self.request.id, sub='celery.state')
 			workflow = break_task(
 				task_cls,
 				opts,
@@ -248,41 +261,48 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 			result = workflow.apply() if sync else workflow.apply_async()
-			# TODO: Replace task with group of chunked tasks using raise replace(workflow)
+			debug(
+				'waiting for subtasks', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
+				obj_after=False, level=2)
+			if not sync:
+				list(task.__class__.get_live_results(result))
 			with allow_join_result():
 				task_results = result.get()
-				console.print('Chunked workflow has finished running, updating parent task with results', style='bold')
 				results.extend(task_results)
-				state['state'] = 'SUCCESS'
+				task_state = 'SUCCESS'
+			debug(
+				'all subtasks done', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
+		 		obj_after=False, level=2)
+
+		# otherwise, run normally
+		else:
+			# If list with 1 element
+			if isinstance(targets, list) and len(targets) == 1:
+				targets = targets[0]
+
+			# Run task
+			task = task_cls(targets, **opts)
+			for item in task:
+				task_results.append(item)
+				results.append(item)
+				count += 1
+				state['meta']['task_results'] = task_results
 				state['meta']['results'] = results
 				state['meta']['count'] = len(task_results)
+				if item._type == 'progress':
+					state['meta']['progress'] = item.percent
 				self.update_state(**state)
-				return results
+				debug(
+					'items found', sub='celery.state', id=self.request.id, obj={full_name: len(task_results)},
+					obj_after=False, level=4)
 
-		# If list with 1 element
-		if isinstance(targets, list) and len(targets) == 1:
-			targets = targets[0]
-
-		# Run task
-		task = task_cls(targets, **opts)
-		for item in task:
-			result_uuid = str(uuid.uuid4())
-			item._uuid = result_uuid
-			task_results.append(item)
-			results.append(item)
-			count += 1
-			state['meta']['task_results'] = task_results
-			state['meta']['results'] = results
-			state['meta']['count'] = len(task_results)
-			self.update_state(**state)
-
-		# Update task state based on task return code
-		if task.return_code == 0:
-			task_state = 'SUCCESS'
-			task_exc = None
-		else:
-			task_state = 'FAILURE'
-			task_exc = TaskError('\n'.join(task.errors))
+			# Update task state based on task return code
+			if task.return_code == 0:
+				task_state = 'SUCCESS'
+				task_exc = None
+			else:
+				task_state = 'FAILURE'
+				task_exc = TaskError('\n'.join(task.errors))
 
 	except BaseException as exc:
 		task_state = 'FAILURE'
@@ -290,24 +310,32 @@ def run_command(self, results, name, targets, opts={}):
 
 	finally:
 		# Set task state and exception
-		state['state'] = 'SUCCESS'
+		state['state'] = 'SUCCESS'  # force task success to serialize exception
 		state['meta']['results'] = results
 		state['meta']['task_results'] = task_results
+		state['meta']['progress'] = 100
 
 		# Handle task failure
 		if task_state == 'FAILURE':
-			exc_str = ' '.join(traceback.format_exception(
-				task_exc,
-				value=task_exc,
-				tb=task_exc.__traceback__))
-			state['meta']['error'] = exc_str
+			if isinstance(task_exc, TaskError):
+				exc_str = str(task_exc)
+			else:  # full traceback
+				exc_str = ' '.join(traceback.format_exception(task_exc, value=task_exc, tb=task_exc.__traceback__))
+			state['meta'][msg_type] = exc_str
 			if task:
-				task._print(exc_str, color='bold red')
+				color = 'bold red' if msg_type == 'error' else 'green'
+				task._print(exc_str, color=color)
 			else:
 				console.log(exc_str)
 
 		# Update task state with final status
 		self.update_state(**state)
+		debug('updated', sub='celery.state', id=self.request.id, obj={full_name: task_state}, obj_after=False, level=2)
+
+		# Update parent task if necessary
+		if task and task.has_children:
+			task.log_results()
+			task.run_hooks('on_end')
 
 		# profiler.stop()
 		# from pathlib import Path
@@ -323,7 +351,7 @@ def run_command(self, results, name, targets, opts={}):
 		gc.collect()
 
 		# If running in chunk mode, only return chunk result, not all results
-		return task_results if chunk else results
+		return results if parent else task_results
 
 
 @app.task

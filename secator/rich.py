@@ -11,7 +11,7 @@ from rich.traceback import install
 
 from secator.definitions import DEBUG, RECORD
 
-console = Console(stderr=True, record=RECORD)
+console = Console(stderr=True, record=RECORD, color_system='truecolor')
 console_stdout = Console(record=True)
 handler = RichHandler(rich_tracebacks=True)
 install(show_locals=DEBUG > 2, suppress=[click, rich_click])
@@ -52,6 +52,7 @@ FORMATTERS = {
 	'url': lambda host: f'[bold underline blue]{host}[/]',
 	'ip': lambda ip: f'[bold yellow]{ip}[/]',
 	'status_code': status_to_color,
+	'reference': lambda reference: f'[link={reference}]🡕[/]',
 	'_source': lambda source: f'[bold gold3]{source}[/]'
 }
 

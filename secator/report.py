@@ -64,11 +64,13 @@ class Report:
 
 		# Fill report
 		for output_type in OUTPUT_TYPES:
+			if output_type.__name__ == 'Progress':
+				continue
 			output_name = output_type.get_name()
 			sort_by, _ = get_table_fields(output_type)
 			items = [
 				item for item in self.runner.results
-				if isinstance(item, OutputType) and item._type == output_name
+				if isinstance(item, OutputType) and item._type == output_name and not item._duplicate
 			]
 			if items:
 				if sort_by and all(sort_by):

@@ -47,6 +47,7 @@ os.makedirs(CELERY_RESULTS_FOLDER, exist_ok=True)
 
 # Environment variables
 DEBUG = int(os.environ.get('DEBUG', '0'))
+DEBUG_COMPONENT = os.environ.get('DEBUG_COMPONENT', '').split(',')
 RECORD = bool(int(os.environ.get('RECORD', 0)))
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'filesystem://')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', f'file://{CELERY_RESULTS_FOLDER}')
@@ -69,8 +70,11 @@ DEFAULT_INPUT_CHUNK_SIZE = int(os.environ.get('DEFAULT_INPUT_CHUNK_SIZE', 1000))
 DEFAULT_STDIN_TIMEOUT = 1000  # seconds
 
 # Default tasks settings
-DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-silent -td')
-DEFAULT_KATANA_FLAGS = os.environ.get('DEFAULT_KATANA_FLAGS', '-silent -jc -js-crawl -known-files all -or -ob')
+DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-td')
+DEFAULT_KATANA_FLAGS = os.environ.get('DEFAULT_KATANA_FLAGS', '-jc -js-crawl -known-files all -or -ob')
+DEFAULT_NUCLEI_FLAGS = os.environ.get('DEFAULT_NUCLEI_FLAGS', '-stats -sj -si 20 -hm -or')
+DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-bail --no-state')
+DEFAULT_PROGRESS_UPDATE_FREQUENCY = 10
 
 # Default wordlists
 DEFAULT_HTTP_WORDLIST = os.environ.get('DEFAULT_HTTP_WORDLIST', f'{WORDLISTS_FOLDER}/Fuzzing/fuzz-Bo0oM.txt')
@@ -88,6 +92,7 @@ CONTENT_TYPE = 'content_type'
 CONTENT_LENGTH = 'content_length'
 CIDR_RANGE = 'cidr_range'
 CPES = 'cpes'
+CVES = 'cves'
 DELAY = 'delay'
 DOMAIN = 'domain'
 DEPTH = 'depth'
@@ -97,7 +102,6 @@ FAILED_HTTP_STATUS = -1
 FILTER_CODES = 'filter_codes'
 FILTER_WORDS = 'filter_words'
 FOLLOW_REDIRECT = 'follow_redirect'
-PATH = 'path'
 FILTER_REGEX = 'filter_regex'
 FILTER_SIZE = 'filter_size'
 HEADER = 'header'
@@ -112,6 +116,9 @@ MATCH_REGEX = 'match_regex'
 MATCH_SIZE = 'match_size'
 MATCH_WORDS = 'match_words'
 OUTPUT_PATH = 'output_path'
+PATH = 'path'
+PAYLOAD = 'payload'
+PERCENT = 'percent'
 PROBE = 'probe'
 PORTS = 'ports'
 PORT = 'port'

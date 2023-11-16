@@ -1,40 +1,41 @@
+import json
+import logging
+import sys
+import uuid
 from contextlib import nullcontext
 from datetime import datetime
 from time import sleep, time
 
 import humanize
 from celery.result import AsyncResult
+from dotmap import DotMap
 from rich.padding import Padding
 from rich.panel import Panel
-from rich.progress import (Progress, SpinnerColumn, TextColumn,
-						   TimeElapsedColumn)
+from rich.progress import Progress as RichProgress
+from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from secator.definitions import DEBUG
-from secator.output_types import OUTPUT_TYPES, OutputType
+from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY
+from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_ids, get_task_info,
-									process_extractor)
-from secator.utils import import_dynamic, merge_opts, pluralize
-from dotmap import DotMap
-import json
-import sys
-import logging
-import uuid
-
+from secator.runners._helpers import (get_task_data, get_task_ids,
+									  process_extractor)
+from secator.utils import (debug, import_dynamic, merge_opts, pluralize,
+						   rich_to_ansi)
 
 logger = logging.getLogger(__name__)
 
 HOOKS = [
+	'before_init',
 	'on_init',
 	'on_start',
 	'on_end',
 	'on_item_pre_convert',
 	'on_item',
+	'on_duplicate',
 	'on_line',
 	'on_iter',
 	'on_error',
-	'on_init'
 ]
 
 VALIDATORS = [
@@ -91,9 +92,11 @@ class Runner:
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.last_updated = None
+		self.last_updated_progress = None
 		self.end_time = None
 		self._hooks = hooks
 		self.errors = []
+		self.infos = []
 		self.output = ''
 		self.status = 'RUNNING'
 		self.progress = 0
@@ -111,29 +114,29 @@ class Runner:
 		if self.output_return_type is dict or (self.json_flag is not None):
 			self.output_return_type = dict
 
-		# Print options
-		self.print_start = self.run_opts.pop('print_start', DEBUG > 2)
-		self.print_item = self.run_opts.pop('print_item', DEBUG > 0)
-		self.print_line = self.run_opts.pop('print_line', DEBUG > 2)
-		self.print_item_count = self.run_opts.pop('print_item_count', False)
-		self.print_cmd = self.run_opts.pop('print_cmd', DEBUG > 0)
-		self.print_run_opts = self.run_opts.pop('print_run_opts', DEBUG > 1)
-		self.print_fmt_opts = self.run_opts.pop('print_fmt_opts', DEBUG > 1)
-		self.print_input_file = self.run_opts.pop('print_input_file', DEBUG > 0)
-		self.print_hooks = self.run_opts.pop('print_hooks', DEBUG > 1)
-		self.print_progress = self.run_opts.pop('print_progress', DEBUG > 0)
-		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', DEBUG > 0)
-		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
-		self.print_run_summary = self.run_opts.pop('print_run_summary', DEBUG > 2)
-		self.print_json = self.run_opts.get('json', True)
-		self.print_raw = self.run_opts.get('raw', False)
-		self.orig = self.run_opts.get('orig', False)
-		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
-
 		# Output options
 		self.output_fmt = self.run_opts.get('format', False)
 		self.output_quiet = self.run_opts.get('quiet', False)
 		self.output_json = self.output_return_type == dict
+
+		# Print options
+		self.print_start = self.run_opts.pop('print_start', False)
+		self.print_item = self.run_opts.pop('print_item', False)
+		self.print_line = self.run_opts.pop('print_line', self.sync and not self.output_quiet)
+		self.print_item_count = self.run_opts.pop('print_item_count', False)
+		self.print_cmd = self.run_opts.pop('print_cmd', False)
+		self.print_run_opts = self.run_opts.pop('print_run_opts', DEBUG > 1)
+		self.print_fmt_opts = self.run_opts.pop('print_fmt_opts', DEBUG > 1)
+		self.print_input_file = self.run_opts.pop('print_input_file', False)
+		self.print_hooks = self.run_opts.pop('print_hooks', DEBUG > 1)
+		self.print_progress = self.run_opts.pop('print_progress', not self.output_quiet)
+		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
+		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
+		self.print_run_summary = self.run_opts.pop('print_run_summary', False)
+		self.print_json = self.run_opts.get('json', False)
+		self.print_raw = self.run_opts.get('raw', False)
+		self.orig = self.run_opts.get('orig', False)
+		self.opts_to_print = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS}
@@ -152,15 +155,21 @@ class Runner:
 			self.validators[key].extend(self.validators.get(self.__class__, {}).get(key, []))
 
 		# Chunks
+		self.parent = self.run_opts.get('parent', True)
+		self.has_children = self.run_opts.get('has_children', False)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self._set_print_prefix()
+
+		# Input post-process
+		self.run_hooks('before_init')
 
 		# Abort if inputs are invalid
 		self.input_valid = True
 		if not self.run_validators('input', self.input):
 			self.input_valid = False
 
+		# Run hooks
 		self.run_hooks('on_init')
 
 	@property
@@ -196,13 +205,6 @@ class Runner:
 					if item._uuid in self.uuids:
 						continue
 
-					# Treat progress item
-					if item._type == 'progress':
-						if self.print_progress:
-							self._print(self.get_repr(item))
-						self.output += self.get_repr(item) + '\n'
-						continue
-
 					# Add item to results
 					if isinstance(item, OutputType) or self.orig:
 						self.results.append(item)
@@ -213,15 +215,24 @@ class Runner:
 					# Print JSON or raw item
 					if self.print_item and item._type != 'target':
 						if not isinstance(item, OutputType) and not self.orig:
-							self._print(f'❌ Failed to parse {item.toDict()}', color='bold orange3')
+							item_str = rich_to_ansi(
+								f'[dim red]❌ Failed to load item as output type:\n  {item.toDict()}[/]'
+							)
+							self.output += item_str + '\n'
+							self._print(item_str, rich=True)
 						elif self.print_json:
 							self._print(item, out=sys.stdout)
 						elif self.print_raw:
 							self._print(str(item), out=sys.stdout)
 						else:
-							self._print(self.get_repr(item), out=sys.stdout)
+							item_str = self.get_repr(item)
+							if self.print_remote_status or DEBUG > 1:
+								item_str += f' [{item._source}]'
+							if item._type == 'progress' and not self.print_progress:
+								continue
+							self._print(item_str, out=sys.stdout)
 
-				elif isinstance(item, str):
+				elif item and isinstance(item, str):
 					if self.print_line:
 						self._print(item, out=sys.stderr)
 					if not self.output_json:
@@ -243,9 +254,41 @@ class Runner:
 				self.stop_live_tasks(self.result)
 
 		# Filter results and log info
+		self.mark_duplicates()
 		self.results = self.filter_results()
 		self.log_results()
 		self.run_hooks('on_end')
+
+	def mark_duplicates(self):
+		debug('duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		for item in self.results:
+			debug('duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=2)
+			others = [f for f in self.results if f == item and f._uuid != item._uuid]
+			if others:
+				main = max(item, *others)
+				dupes = [f for f in others if f._uuid != main._uuid]
+				main._duplicate = False
+				main._related.extend([dupe._uuid for dupe in dupes])
+				main._related = list(dict.fromkeys(main._related))
+				if main._uuid != item._uuid:
+					item._duplicate = True
+					item = self.run_hooks('on_item', item)
+					if item._uuid not in main._related:
+						main._related.append(item._uuid)
+					main = self.run_hooks('on_duplicate', main)
+					item = self.run_hooks('on_duplicate', item)
+
+				for dupe in dupes:
+					if not dupe._duplicate:
+						debug(
+							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
+							sub='runner.mark_duplicates', level=2)
+						dupe._duplicate = True
+						dupe = self.run_hooks('on_duplicate', dupe)
+
+		debug('Duplicates:', sub='runner.mark_duplicates', level=2)
+		debug('\n\t'.join([repr(i) for i in self.results if i._duplicate]), sub='runner.mark_duplicates', level=2)
+		debug('duplicate check completed', id=self.config.name, sub='runner.mark_duplicates')
 
 	def yielder(self):
 		raise NotImplementedError()
@@ -257,6 +300,8 @@ class Runner:
 			'name': self.name,
 			'targets': self.targets,
 			'run_opts': self.run_opts,
+			'parent': self.parent,
+			'has_children': self.has_children,
 			'chunk': self.chunk,
 			'chunk_count': self.chunk_count,
 			'results_count': self.results_count,
@@ -282,14 +327,12 @@ class Runner:
 			name = f'{self.__class__.__name__}.{hook_type}'
 			fun = f'{hook.__module__}.{hook.__name__}'
 			try:
-				if DEBUG > 1:
-					self._print(
-						f'[dim red]\[debug][/] [dim yellow]hooks: [bold blue]{name}[/] -> [bold green]{fun}[/][/]',
-						rich=True)
+				_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
 				result = hook(self, *args)
 			except Exception as e:
 				self._print(f'{fun} failed: "{e.__class__.__name__}". Skipping', color='bold red', rich=True)
-				if DEBUG > 0:
+				if DEBUG > 1:
 					logger.exception(e)
 				else:
 					self._print('Please set DEBUG to > 1 to see the detailed exception.', color='dim red', rich=True)
@@ -326,7 +369,7 @@ class Runner:
 		self.log_header()
 		self._print(
 			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True)
-		if not self.sync and self.__class__.__name__ != 'Scan':
+		if not self.sync and self.print_remote_status and self.__class__.__name__ != 'Scan':
 			self._print('\n🏆 [bold gold3]Live results:[/]', rich=True)
 
 	def log_header(self):
@@ -398,9 +441,21 @@ class Runner:
 				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
 				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
 
+		# Log runner infos
+		if self.infos:
+			self._print(
+				f'✓  [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
+				color='bold green', rich=True)
+			for info in self.infos:
+				self._print(f'   • {info}', color='bold green', rich=True)
+
 		# Log runner errors
-		for error in self.errors:
-			self._print(error, color='bold red', rich=True)
+		if self.errors:
+			self._print(
+				f'❌ [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
+				color='bold red', rich=True)
+			for error in self.errors:
+				self._print(f'   • {error}', color='bold red', rich=True)
 
 		# Build and send report
 		if self.results:
@@ -433,24 +488,48 @@ class Runner:
 		"""
 		res = AsyncResult(result.id)
 		while True:
-			task_ids = []
-			get_task_ids(result, ids=task_ids)
-			# results = [res] # TODO: replace task with group of tasks
-			for task_id in task_ids:
-				# TODO: replace task with group of tasks
-				# results.append(AsyncResult(task_id))
-				info = get_task_info(task_id)
-				if not info:
-					continue
-				yield info
+			# Yield results
+			yield from Runner.get_celery_results(result)
 
 			# Break out of while loop
-			# if all(res.ready() for res in results): # TODO: replace task with group of tasks
 			if res.ready():
+				yield from Runner.get_celery_results(result)
 				break
 
 			# Sleep between updates
 			sleep(1)
+
+	@staticmethod
+	def get_celery_results(result):
+		"""Get Celery results from main result object, including any subtasks results.
+
+		Args:
+			result (celery.result.AsyncResult): Result object.
+
+		Yields:
+			dict: Subtasks state and results, Progress objects.
+		"""
+		task_ids = []
+		get_task_ids(result, ids=task_ids)
+		datas = []
+		for task_id in task_ids:
+			data = get_task_data(task_id)
+			if data and DEBUG > 1:
+				full_name = data['name']
+				if data['chunk_info']:
+					full_name += ' ' + data['chunk_info']
+				debug('', sub='celery.runner', id=data['id'], obj={full_name: data['state']}, level=4)
+			if not data:
+				continue
+			yield data
+			datas.append(data)
+
+		# Calculate and yield progress
+		total = len(datas)
+		count_finished = sum([i['ready'] for i in datas if i])
+		percent = int(count_finished * 100 / total) if total > 0 else 0
+		if percent > 0:
+			yield Progress(duration='unknown', percent=percent)
 
 	def stop_live_tasks(self, result):
 		"""Stop live tasks running in Celery worker.
@@ -479,7 +558,7 @@ class Runner:
 
 		# Display live results if print_remote_status is set
 		if print_remote_status:
-			class PanelProgress(Progress):
+			class PanelProgress(RichProgress):
 				def get_renderables(self):
 					yield Padding(Panel(
 						self.make_tasks_table(self.tasks),
@@ -496,9 +575,10 @@ class Runner:
 				TextColumn('{task.fields[state]:<20}'),
 				TimeElapsedColumn(),
 				TextColumn('{task.fields[count]}'),
+				# TextColumn('{task.fields[progress]}%'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
 				refresh_per_second=1,
-				transient=True,
+				transient=False,
 				# console=console,
 				# redirect_stderr=True,
 				# redirect_stdout=False
@@ -518,42 +598,64 @@ class Runner:
 			tasks_progress = {}
 
 			# Get live results and print progress
-			for info in Runner.get_live_results(result):
+			for data in Runner.get_live_results(result):
+
+				# If progress object, yield progress and ignore tracking
+				if isinstance(data, OutputType) and data._type == 'progress':
+					yield data
+					continue
+
+				# TODO: add error output type and yield errors in get_celery_results
+				# if isinstance(data, OutputType) and data._type == 'error':
+				# 	yield data
+				# 	continue
 
 				# Re-yield so that we can consume it externally
 				if results_only:
-					yield from info['results']
+					yield from data['results']
 				else:
-					yield info
+					yield data
 
 				if not print_remote_status:
 					continue
 
  				# Ignore partials in output unless DEBUG > 1
 				# TODO: weird to change behavior based on debug flag, could cause issues
-				if info['chunk'] and not DEBUG > 1:
-					continue
+				# if data['chunk'] and not DEBUG > 1:
+				# 	continue
 
-				# Handle error if any
+				# Handle messages if any
 				# TODO: error handling should be moved to process_live_tasks
-				state = info['state']
-				if info['error']:
+				state = data['state']
+				error = data.get('error')
+				info = data.get('info')
+				full_name = data['name']
+				chunk_info = data.get('chunk_info', '')
+				if chunk_info:
+					full_name += f' {chunk_info}'
+				if error:
 					state = 'FAILURE'
-					error = 'Error in task {name} {chunk_info}:\n{error}'.format(**info)
+					error = f'{full_name}: {error}'
 					if error not in self.errors:
 						self.errors.append(error)
+				if info:
+					info = f'{full_name}: {info}'
+					if info not in self.infos:
+						self.infos.append(info)
 
-				task_id = info['id']
+				task_id = data['id']
 				state_str = f'[{state_colors[state]}]{state}[/]'
-				info['state'] = state_str
+				data['state'] = state_str
 
 				if task_id not in tasks_progress:
-					id = progress.add_task('', **info)
+					id = progress.add_task('', **data)
 					tasks_progress[task_id] = id
 				else:
 					progress_id = tasks_progress[task_id]
 					if state in ['SUCCESS', 'FAILURE']:
-						progress.update(progress_id, advance=100, **info)
+						progress.update(progress_id, advance=100, **data)
+					elif data['progress'] != 0:
+						progress.update(progress_id, advance=data['progress'], **data)
 
 			# Update all tasks to 100 %
 			for progress_id in tasks_progress.values():
@@ -573,7 +675,7 @@ class Runner:
 			# Keep the field types in results not specified in the extractors.
 			extract_fields = [e['type'] for e in extractors]
 			keep_fields = [
-				_type for _type in OUTPUT_TYPES
+				_type for _type in OUTPUT_TYPES if _type.__name__ != 'Progress'
 				if _type not in extract_fields
 			]
 			results.extend([
@@ -597,16 +699,23 @@ class Runner:
 		# output type based on the schema
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
+		debug(f'Input item: {item}', sub='klass.load', level=5)
+		debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load', level=5)
 		for klass in output_types:
+			debug(f'Loading item as {klass.__name__}', sub='klass.load', level=5)
 			output_map = getattr(self, 'output_map', {})
 			output_map = output_map.get(klass, {})
 			try:
 				new_item = klass.load(item, output_map)
+				debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', sub='klass.load', level=5)
 				break  # found an item that fits
 			except (TypeError, KeyError) as e:  # can't load using class
-				if DEBUG > 2:
-					console.print_exception(show_locals=True)
-					console.print(f'Failed loading item with {klass}: {str(e)}. Continuing')
+				debug(
+					f'[dim red]Failed loading item as {klass.__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
+					sub='klass.load',
+					level=5)
+				if DEBUG == 6:
+					console.print_exception(show_locals=False)
 				continue
 
 		# No output type was found, so make no conversion
@@ -616,7 +725,7 @@ class Runner:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, rich=False, markup=False):
+	def _print(self, data, color=None, out=sys.stderr, rich=False):
 		"""Print function.
 
 		Args:
@@ -635,10 +744,6 @@ class Runner:
 		if self.sync or rich:
 			_console = console_stdout if out == sys.stdout else console
 			_console.print(data, highlight=False, style=color, soft_wrap=True)
-		elif markup:
-			from rich import print as _print
-			from rich.text import Text
-			_print(Text.from_markup(data), file=out)
 		else:
 			print(data, file=out)
 
@@ -692,22 +797,27 @@ class Runner:
 		else:
 			item = DotMap(item)
 
+		# Update item context
+		item._context.update(self.context)
+
 		# Add context, uuid, progress to item
-		item._context = self.context
 		if not item._source:
 			item._source = self.config.name
 
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
 
-		if item._type == 'progress':
+		if item._type == 'progress' and item._source == self.config.name and int(item.percent) != 100:
 			self.progress = item.percent
+			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < DEFAULT_PROGRESS_UPDATE_FREQUENCY:
+				return None
+			else:
+				self.last_updated_progress = item._timestamp
 
-		# Run item convert hooks
-		if not self.orig:
+		# Run on_item hooks
+		if isinstance(item, OutputType) and not self.orig:
 			item = self.run_hooks('on_item', item)
 
-		# Return item
 		return item
 
 	def get_repr(self, item=None):

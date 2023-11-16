@@ -19,7 +19,7 @@ DALFOX_TYPE_MAP = {
 @task()
 class dalfox(VulnHttp):
 	"""Powerful open source XSS scanning tool."""
-	cmd = 'dalfox --silence'
+	cmd = 'dalfox'
 	input_type = URL
 	input_flag = 'url'
 	file_flag = 'file'

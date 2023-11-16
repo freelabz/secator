@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# searchsploit
+sudo snap install searchsploit || true
+
 # httpx
 go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest || true
 

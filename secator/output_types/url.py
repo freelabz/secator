@@ -23,11 +23,14 @@ class Url(OutputType):
 	lines: int = field(default=0, compare=False)
 	screenshot_path: str = field(default='', compare=False)
 	stored_response_path: str = field(default='', compare=False)
-	_source: str = field(default='', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='url', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
+	_tagged: bool = field(default=False, repr=True, compare=False)
+	_duplicate: bool = field(default=False, repr=True, compare=False)
+	_related: list = field(default_factory=list, compare=False)
 
 	_table_fields = [
 		URL,
@@ -40,7 +43,12 @@ class Url(OutputType):
 		TIME
 	]
 	_sort_by = (URL,)
-	_raw_field = URL
+
+	def __gt__(self, other):
+		# favor httpx over other url info tools
+		if self._source == 'httpx' and other._source != 'httpx':
+			return True
+		return super().__gt__(other)
 
 	def __str__(self):
 		return self.url
@@ -55,14 +63,14 @@ class Url(OutputType):
 		if self.title:
 			s += f' \[[green]{self.title}[/]]'
 		if self.webserver:
-			s += f' \[[cyan]{self.webserver}[/]]'
+			s += f' \[[magenta]{self.webserver}[/]]'
 		if self.tech:
 			techs_str = ', '.join([f'[magenta]{tech}[/]' for tech in self.tech])
 			s += f' [{techs_str}]'
 		if self.content_type:
-			s += f' \[[cyan]{self.content_type}[/]]'
+			s += f' \[[magenta]{self.content_type}[/]]'
 		if self.content_length:
-			s += f' \[[cyan]{self.content_length}[/]]'
+			s += f' \[[magenta]{self.content_length}[/]]'
 		if self.screenshot_path:
-			s += f' \[[cyan]{self.screenshot_path}[/]]'
+			s += f' \[[magenta]{self.screenshot_path}[/]]'
 		return rich_to_ansi(s)

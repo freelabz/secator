@@ -69,10 +69,23 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 				continue
 			with self.subTest(name=cls.__name__):
 				console.print(f'Testing {cls.__name__} ...')
-				input = INPUTS_TASKS.get(cls.__name__) or INPUTS_TASKS[cls.input_type]
+
+				# Get task input
+				input = INPUTS_TASKS.get(cls.__name__) or INPUTS_TASKS.get(cls.input_type)
+				if not input:
+					console.print(f'No input for {cls.__name__} ! Skipping')
+					continue
+
+				# Get task output
 				outputs = OUTPUTS_TASKS.get(cls.__name__, [])
+
+				# Init task
 				task = cls(input, **opts)
+
+				# Run task
 				results = task.run()
+				if DEBUG > 2:
+					console.print([list(r.toDict() for r in results)])
 
 				# Check return code
 				if not task.ignore_return_code:
@@ -80,6 +93,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 				if not results:
 					console.print(f'No results from {cls.__name__} ! Skipping item check.')
+					continue
 
 				# Test result types
 				self._test_task_output(

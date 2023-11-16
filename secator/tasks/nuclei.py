@@ -1,9 +1,10 @@
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
-							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
-							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PROVIDER,
-							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
-							   SEVERITY, TAGS, THREADS, TIMEOUT, USER_AGENT)
+								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID, IP,
+								 MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT,
+								 PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
+								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
+								 USER_AGENT, DEFAULT_NUCLEI_FLAGS)
 from secator.output_types import Progress, Vulnerability
 from secator.tasks._categories import VulnMulti
 
@@ -11,7 +12,7 @@ from secator.tasks._categories import VulnMulti
 @task()
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
-	cmd = 'nuclei -silent -stats -sj -si 20 -hm'
+	cmd = f'nuclei {DEFAULT_NUCLEI_FLAGS}'
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-jsonl'
@@ -19,7 +20,9 @@ class nuclei(VulnMulti):
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'tags': {'type': str, 'help': 'Tags'},
 		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
-		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'}
+		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
+		'template_id': {'type': str, 'short': 'id', 'help': 'Template id'},
+		'debug': {'type': str, 'help': 'Debug mode'},
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -52,14 +55,15 @@ class nuclei(VulnMulti):
 			CONFIDENCE: lambda x: 'high',
 			CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
 			MATCHED_AT:  'matched-at',
+			IP: 'ip',
 			TAGS: lambda x: x['info']['tags'],
 			REFERENCES: lambda x: x['info'].get('reference', []),
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 			PROVIDER: 'nuclei',
 		},
 		Progress: {
-			'percent': lambda x: int(x['percent']),
-			'extra_data': lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
+			PERCENT: lambda x: int(x['percent']),
+			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
 		}
 	}
 	ignore_return_code = True

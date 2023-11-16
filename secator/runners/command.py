@@ -19,7 +19,7 @@ from secator.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
 from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
-from secator.utils import get_file_timestamp
+from secator.utils import get_file_timestamp, debug
 
 # from rich.markup import escape
 # from rich.text import Text
@@ -82,7 +82,8 @@ class Command(Runner):
 	install_cmd = None
 
 	# Serializer
-	item_loader = JSONSerializer()
+	item_loader = None
+	item_loaders = [JSONSerializer(),]
 
 	# Ignore return code
 	ignore_return_code = False
@@ -127,9 +128,6 @@ class Command(Runner):
 			hooks=hooks,
 			context=context)
 
-		# Input is targets
-		self.input = input
-
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
 
@@ -146,43 +144,46 @@ class Command(Runner):
 		# Build command
 		self._build_cmd()
 
+		# Build item loaders
+		instance_func = getattr(self, 'item_loader', None)
+		item_loaders = self.item_loaders.copy()
+		if instance_func:
+			item_loaders.append(instance_func)
+		self.item_loaders = item_loaders
+
 		# Print built cmd
-		if self.print_cmd:
+		if self.print_cmd and not self.has_children:
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
 			self._print(self.cmd, color='bold cyan', rich=True)
 
 		# Print built input
 		if self.print_input_file and self.input_path:
-			input_str = '\n '.join(self.input)
-			if input_str.strip():
-				self._print(
-					f'[dim red]\[debug][/] [bold magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]\n',
-					rich=True)
+			input_str = '\n '.join(self.input).strip()
+			debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]')
 
 		# Print run options
 		if self.print_run_opts:
 			input_str = '\n '.join([
-				f'[bold blue]{k}[/]=[bold green]{v}[/]' for k, v in self.run_opts.items() if v is not None])
-			if input_str.strip():
-				self._print(f'[dim red]\[debug][/] [bold magenta]Run opts:[/]\n {input_str}\n', rich=True)
+				f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.run_opts.items() if v is not None]).strip()
+			debug(f'[dim magenta]Run opts:[/]\n {input_str}')
 
 		# Print format options
 		if self.print_fmt_opts:
 			input_str = '\n '.join([
-				f'[bold blue]{k}[/]=[bold green]{v}[/]' for k, v in self.print_opts.items() if v is not None])
-			if input_str.strip():
-				self._print(f'[dim red]\[debug][/] [bold magenta]Print opts:[/]\n {input_str}\n', rich=True)
+				f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.opts_to_print.items() if v is not None]).strip()
+			debug(f'[dim magenta]Print opts:[/]\n {input_str}')
 
 		# Print hooks
 		if self.print_hooks:
 			input_str = ''
 			for hook_name, hook_funcs in self.hooks.items():
-				hook_funcs_str = ', '.join([f'[bold green]{h.__module__}.{h.__qualname__}[/]' for h in hook_funcs])
+				hook_funcs_str = ', '.join([f'[dim green]{h.__module__}.{h.__qualname__}[/]' for h in hook_funcs])
 				if hook_funcs:
-					input_str += f'[bold blue]{hook_name} -> {hook_funcs_str}\n '
-			if input_str.strip():
-				self._print(f'[dim red]\[debug][/] [bold magenta]Hooks:[/]\n {input_str}\n', rich=True)
+					input_str += f'[dim blue]{hook_name}[/] -> {hook_funcs_str}\n '
+			input_str = input_str.strip()
+			if input_str:
+				debug(f'[dim magenta]Hooks:[/]\n {input_str}')
 
 	def toDict(self):
 		res = super().toDict()
@@ -323,7 +324,7 @@ class Command(Runner):
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
 			self._print(
-				f'[bold red]Ignoring proxy "{self.proxy}" for {self.__class__.__name__} (not supported).[/]')
+				f'[bold red]Ignoring proxy "{self.proxy}" for {self.__class__.__name__} (not supported).[/]', rich=True)
 
 	#----------#
 	# Internal #
@@ -373,11 +374,14 @@ class Command(Runner):
 
 		except FileNotFoundError as e:
 			if self.config.name in str(e):
-				error = f'{self.config.name} not installed.'
+				error = 'Executable not found.'
 				if self.install_cmd:
 					error += f' Install it with `secator utils install {self.config.name}`.'
 			else:
 				error = str(e)
+			celery_id = self.context.get('celery_id', '')
+			if celery_id:
+				error += f' [{celery_id}]'
 			self.errors.append(error)
 			self.return_code = 1
 			if error:
@@ -413,10 +417,7 @@ class Command(Runner):
 				# Run item_loader to try parsing as dict
 				items = None
 				if self.output_json:
-					if callable(self.item_loader):
-						items = self.item_loader(line)
-					else:
-						items = self.item_loader.run(line)
+					items = self.run_item_loaders(line)
 
 				# Yield line if no items parsed
 				if not items and not self.output_quiet:
@@ -436,6 +437,21 @@ class Command(Runner):
 
 		# Retrieve the return code and output
 		self._wait_for_end(process)
+
+	def run_item_loaders(self, line):
+		"""Run item loaders on a string."""
+		items = []
+		for item_loader in self.item_loaders:
+			result = None
+			if (callable(item_loader)):
+				result = item_loader(self, line)
+			elif item_loader:
+				result = item_loader.run(line)
+			if isinstance(result, dict):
+				result = [result]
+			if result:
+				items.extend(result)
+		return items
 
 	def _wait_for_end(self, process):
 		"""Wait for process to finish and process output and return code."""
@@ -570,7 +586,7 @@ class Command(Runner):
 			self.cmd += f' {meta_opts_str}'
 
 	def _build_cmd_input(self):
-		"""Many commands take as input a string or a list. This function facilitate this based on wheter we pass a
+		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a
 		string or a list to the cmd.
 		"""
 		cmd = self.cmd
@@ -584,7 +600,7 @@ class Command(Runner):
 		if isinstance(input, list) and len(input) == 1:
 			input = input[0]
 
-		# If input is a list and the tool does not supports file input flag, use cat-piped input.
+		# If input is a list and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped input.
 		# Otherwise pass the file path to the tool.
 		if isinstance(input, list):
 			timestr = get_file_timestamp()
@@ -597,8 +613,11 @@ class Command(Runner):
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'
-			else:
+			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
+			else:
+				self._print(f'{self.__class__.__name__} does not support multiple inputs.', color='bold red')
+				self.input_valid = False
 
 			self.input_path = fpath
 

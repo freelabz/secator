@@ -45,11 +45,10 @@ class Scan(Runner):
 			# Workflow fmt options
 			run_opts = self.run_opts.copy()
 			fmt_opts = {
-				'json': run_opts.get('json', False) and self.sync,
+				'json': run_opts.get('json', False),
 				'print_item': False,
 				'print_start': True,
 				'print_run_summary': True,
-				'print_remote_status': not self.sync,
 			}
 			run_opts.update(fmt_opts)
 

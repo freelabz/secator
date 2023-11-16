@@ -25,6 +25,7 @@ class mapcidr(ReconIp):
 		THREADS: OPT_NOT_SUPPORTED,
 	}
 
+	@staticmethod
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):
 			return {'ip': line, 'alive': False}

@@ -7,12 +7,8 @@ input_types:
   - host
   - cidr_range
 tasks:
-  _group:
-    naabu:
-      description: Find open ports
-    nuclei/network:
-      description: Scan network and SSL vulnerabilities
-      tags: [network, ssl]
+  naabu:
+    description: Find open ports
   nmap:
     description: Search for vulnerabilities on open ports
     targets_: port.host
@@ -23,19 +19,23 @@ tasks:
       - type: port
         field: '{host}:{port}'
         condition: item._source == 'nmap'
-  nuclei/url:
-    description: Search for vulnerabilities on alive HTTP services
-    exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
-    targets_:
-      - type: url
-        field: url
-        condition: item.status_code != 0
+  _group:
+    nuclei/network:
+      description: Scan network and SSL vulnerabilities
+      tags: [network, ssl]
+    nuclei/url:
+      description: Search for vulnerabilities on alive HTTP services
+      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
+      targets_:
+        - type: url
+          field: url
+          condition: item.status_code != 0
 results:
   - type: port
     condition: item._source == 'nmap'
 
   - type: vulnerability
-    condition: item.confidence == 'high'
+  #   condition: item.confidence == 'high'
 
   - type: url
     condition: item.status_code != 0
