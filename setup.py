@@ -51,7 +51,7 @@ setup(name=name,
       long_description=long_description,
       long_description_content_type='text/markdown',
       author='FLZ Security',
-      author_email='olivier.cervello@gmail.com',
+      author_email='ocervello@freelabz.com',
       license='MIT',
       packages=find_packages(exclude=['contrib', 'docs']),
       classifiers=[
