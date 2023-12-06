@@ -116,7 +116,7 @@ pip3 install git+https://github.com/freelabz/secator.git
 ### Install specific tasks
 
 ```sh
-secsy u install <TASK_NAME>
+secator u install <TASK_NAME>
 ```
 
 ## Usage
