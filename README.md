@@ -1,5 +1,5 @@
 <h1 align="center">
-	<img src=https://github.com/freelabz/secator/assets/9629314/ee203af4-e853-439a-af01-edeabfc4bf07/>
+	<img src="https://github.com/freelabz/secator/assets/9629314/ee203af4-e853-439a-af01-edeabfc4bf07/" width="400">
 </h1>
 
 <h4 align="center">Security swiss-knife to speed up vulnerability assessments.</h4>
