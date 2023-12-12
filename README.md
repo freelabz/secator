@@ -1,6 +1,5 @@
 <h1 align="center">
-	secator
-	<br>
+	<img src=https://github.com/freelabz/secator/assets/9629314/ee203af4-e853-439a-af01-edeabfc4bf07/>
 </h1>
 
 <h4 align="center">Security swiss-knife to speed up vulnerability assessments.</h4>
