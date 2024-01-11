@@ -2,7 +2,7 @@
 	<img src="https://github.com/freelabz/secator/assets/9629314/ee203af4-e853-439a-af01-edeabfc4bf07/" width="400">
 </h1>
 
-<h4 align="center">Security swiss-knife to speed up vulnerability assessments.</h4>
+<h4 align="center">The pentester's swiss knife.</h4>
 
 <p align="center">
 <!-- <a href="https://goreportcard.com/report/github.com/freelabz/secator"><img src="https://goreportcard.com/badge/github.com/freelabz/secator"></a> -->
