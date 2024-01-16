@@ -150,4 +150,5 @@ secator s host mydomain.com
 To go deeper with `secator`, check out:
 * Our complete [documentation](https://docs.freelabz.com)
 * Our getting started [tutorial video](https://youtu.be/-JmUTNWQDTQ?si=qpAClDWMXo2zwUK7)
+* Our [Medium post](https://medium.com/p/09333f3d3682)
 * Follow us on social media: [@freelabz](https://twitter.com/freelabz) on Twitter and [@FreeLabz](https://youtube.com/@FreeLabz) on YouTube
