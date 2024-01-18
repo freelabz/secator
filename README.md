@@ -112,11 +112,24 @@ pip3 install secator
 </details>
 
 
-### Install specific tasks
+### Install underlying tools
 
+`secator` is designed to work with the latest version of all the tools it supports. Please make sure you are using the latest version of the tools you are using with `secator`.
+
+A convenience utility is provided to install all tools:
+```sh
+secator u install
+```
+
+... or to update specific tools:
 ```sh
 secator u install <TASK_NAME>
 ```
+
+Please note that:
+* this install method requires `apt` so it will not work on distributions not supporting it.
+* this is tested merely on Ubuntu and some of these installs might not work on other distributions.
+* ideally you update the tools yourself, and use `secator` as a convenient wrapper on top of them.
 
 ## Usage
 ```sh
