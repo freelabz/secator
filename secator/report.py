@@ -18,7 +18,7 @@ class Report:
 		exporters (list): List of exporter classes.
 	"""
 	def __init__(self, runner, title=None, exporters=[]):
-		self.title = title or f'{runner.__class__.__name__.lower()}_{runner.config.name}'
+		self.title = title or f'{runner.config.type.lower()}_{runner.config.name}'
 		self.runner = runner
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
@@ -84,7 +84,7 @@ class Report:
 		output_folder = Path(REPORTS_FOLDER)
 		if self.runner.workspace_name:
 			output_folder = output_folder / Path(self.runner.workspace_name)
-		output_folder = output_folder / Path(pluralize(self.runner.__class__.__name__).lower())
+		output_folder = output_folder / Path(pluralize(self.runner.config.type).lower())
 		output_folder = str(output_folder)
 		os.makedirs(output_folder, exist_ok=True)
 		self.output_folder = output_folder
