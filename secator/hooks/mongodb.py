@@ -1,9 +1,7 @@
 from bson.objectid import ObjectId
 import os
 import logging
-import re
 import time
-import urllib
 
 from celery import shared_task
 

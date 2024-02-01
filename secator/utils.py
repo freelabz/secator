@@ -14,8 +14,7 @@ from importlib import import_module
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
-from urllib import parse
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 import netifaces
 import yaml
@@ -459,6 +458,6 @@ def escape_mongodb_url(url):
 	if match:
 		url = match.group('url')
 		user, password = tuple(match.group('userpass').split(':'))
-		user, password = parse.quote(user), parse.quote(password)
+		user, password = quote(user), quote(password)
 		return f'mongodb://{user}:{password}@{url}'
 	return url
