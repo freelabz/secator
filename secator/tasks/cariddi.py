@@ -88,7 +88,7 @@ class cariddi(HttpCrawler):
 				items.append(secret)
 
 			for info in infos:
-				CARIDDI_IGNORE_LIST = ['BTC address']
+				CARIDDI_IGNORE_LIST = ['BTC address']  # TODO: make this a config option
 				if info['name'] in CARIDDI_IGNORE_LIST:
 					continue
 				match = info['match']
