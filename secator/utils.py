@@ -447,7 +447,7 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 
 def escape_mongodb_url(url):
 	"""Escape username / password from MongoDB URL if any.
-	
+
 	Args:
 		url (str): Full MongoDB URL string.
 
