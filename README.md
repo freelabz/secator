@@ -140,7 +140,7 @@ secator --help
 ![](images/help.png)
 
 
-### Running secator
+### Usage examples
 
 Run a fuzzing task (`ffuf`):
 
@@ -148,16 +148,23 @@ Run a fuzzing task (`ffuf`):
 secator x ffuf http://testphp.vulnweb.com/FUZZ
 ```
 
-Run a port scan:
+Run a url crawl workflow:
 
 ```sh
-secator w port_scan mydomain.com
+secator w url_crawl http://testphp.vulnweb.com
 ```
 
-Run a full host scan:
+Run a host scan:
 
 ```sh
 secator s host mydomain.com
+```
+
+and more... to list all tasks / workflows / scans that you can use:
+```sh
+secator x --help
+secator w --help
+secator s --help
 ```
 
 ## Learn more
