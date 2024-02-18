@@ -9,11 +9,11 @@ load_dotenv(find_dotenv(usecwd=True), override=False)
 # Globals
 VERSION = get_distribution('secator').version
 ASCII = f"""
-                         __            
-   ________  _________ _/ /_____  _____
-  / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/
- (__  /  __/ /__/ /_/ / /_/ /_/ / /    
-/____/\___/\___/\__,_/\__/\____/_/     v{VERSION}
+                     _             
+  ___  ___  ___ __ _| |_ ___  _ __ 
+ / __|/ _ \/ __/ _` | __/ _ \| '__|
+ \__ \  __/ (_| (_| | || (_) | |   
+ |___/\___|\___\__,_|\__\___/|_|    v{VERSION}
 
                     freelabz.com
 """  # noqa: W605,W291
@@ -82,7 +82,7 @@ DEFAULT_DNS_WORDLIST = os.environ.get('DEFAULT_DNS_WORDLIST', f'{WORDLISTS_FOLDE
 
 # Constants
 OPT_NOT_SUPPORTED = -1
-OPT_PIPE_INPUT = -1
+OPT_PIPE_INPUT = -2
 
 # Vocab
 ALIVE = 'alive'
