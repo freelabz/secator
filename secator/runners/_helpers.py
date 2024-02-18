@@ -65,7 +65,7 @@ def process_extractor(results, extractor, ctx={}):
 		item for item in results if item._type == _type and eval(_condition)
 	]
 	if _field:
-		_field = '{' + _field + '}' if not _field.startswith('{') else _field
+		_field = '{' + _field + '}' if not '{' in _field else _field
 		items = [_field.format(**item.toDict()) for item in items]
 	return items
 
