@@ -2,7 +2,8 @@ type: workflow
 name: url_crawl
 alias: urlcrawl
 description: URL crawl (fast)
-tags: [http, crawl]
+tags: [http
+- crawl]
 options:
   match_codes: 200,204,301,302,307,401,403,405,500
 input_types:
@@ -22,6 +23,22 @@ tasks:
     targets_:
       type: url
       field: url
+      condition: item.method == 'GET'
+  ph:
+    description: Find patterns in raw response files
+    p: api-keys,aws-keys,cors,debug-pages,debug_logic,firebase,fw,go-functions,http-auth,ip,js-sinks,json-sec,php-curl,php-errors,php-serialized,php-sinks,php-sources,s3-buckets,servers,takeovers,truffle,upload-fields
+    targets_:
+      type: url
+      field: stored_response_path
+      condition: item.stored_response_path != ''
+
+  # fourohme:
+  #   description: Test HTTP headers bypass on 40*
+  #   targets_:
+  #     type: url
+  #     field: url
+  #     condition: item.method == 'GET' && 401 <= item.status_code <= 500
+
 results:
   - type: url
     condition: item._source == 'httpx'
