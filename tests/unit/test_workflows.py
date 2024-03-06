@@ -37,7 +37,7 @@ class TestAdHocWorkflow(unittest.TestCase):
 	# 		"content_type":
 	# 		"text/html",
 	# 		"content_length": 11577,
-	# 		"host": "82.66.157.114",
+	# 		"host": "***REMOVED***",
 	# 		"time": 0.16246860100000002,
 	# 		"_source": "httpx",
 	# 		"_type": "url"
