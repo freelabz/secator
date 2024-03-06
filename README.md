@@ -1,16 +1,17 @@
 <h1 align="center">
-	secator
-	<br>
+	<img src="https://github.com/freelabz/secator/assets/9629314/ee203af4-e853-439a-af01-edeabfc4bf07/" width="400">
 </h1>
 
-<h4 align="center">Security swiss-knife to speed up vulnerability assessments.</h4>
+<h4 align="center">The pentester's swiss knife.</h4>
 
 <p align="center">
 <!-- <a href="https://goreportcard.com/report/github.com/freelabz/secator"><img src="https://goreportcard.com/badge/github.com/freelabz/secator"></a> -->
-<a href="https://github.com/freelabz/secator/issues"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
+<img src="https://img.shields.io/badge/python-3.6-blue.svg">
 <a href="https://github.com/freelabz/secator/releases"><img src="https://img.shields.io/github/release/freelabz/secator"></a>
-<a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache-blue.svg"></a>
+<a href="https://github.com/freelabz/secator/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-brightgreen.svg"></a>
+<a href="https://pypi.org/project/secator/"><img src="https://img.shields.io/pypi/dm/secator"></a>
 <a href="https://twitter.com/freelabz"><img src="https://img.shields.io/twitter/follow/freelabz.svg?logo=twitter"></a>
+<a href="https://youtube.com/@FreeLabz"><img src="https://img.shields.io/youtube/channel/subscribers/UCu-F6SpU0h2NP18zBBP04cw?style=social&label=Subscribe%20%40FreeLabz"></a>
 <!-- <a href="https://discord.gg/freelabz"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a> -->
 </p>
 
@@ -84,20 +85,20 @@ check that the command complies with our selection criterias before doing so. If
 Secator requires **python >= 3.8** to install successfully. Run the following command to install the latest version:
 
 ```sh
-pip3 install git+https://github.com/freelabz/secator.git
+pip3 install secator
 ```
 
 <details>
 	<summary>Bash one-liner</summary>
 
-	git clone https://github.com/freelabz/secator && sh ./scripts/install.sh
+	git clone https://github.com/freelabz/secator && sh ./secator/scripts/install.sh
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	docker build -t secator
+	docker pull freelabz/secator
 
 </details>
 
@@ -113,11 +114,24 @@ pip3 install git+https://github.com/freelabz/secator.git
 </details>
 
 
-### Install specific tasks
+### Install underlying tools
 
+`secator` is designed to work with the latest version of all the tools it supports. Please make sure you are using the latest version of the tools you are using with `secator`.
+
+A convenience utility is provided to install all tools:
+```sh
+secator u install
+```
+
+... or to update specific tools:
 ```sh
 secator u install <TASK_NAME>
 ```
+
+Please note that:
+* this install method requires `apt` so it will not work on distributions not supporting it.
+* this is tested merely on Ubuntu and some of these installs might not work on other distributions.
+* ideally you update the tools yourself, and use `secator` as a convenient wrapper on top of them.
 
 ## Usage
 ```sh
@@ -126,7 +140,7 @@ secator --help
 ![](images/help.png)
 
 
-### Running secator
+### Usage examples
 
 Run a fuzzing task (`ffuf`):
 
@@ -134,16 +148,39 @@ Run a fuzzing task (`ffuf`):
 secator x ffuf http://testphp.vulnweb.com/FUZZ
 ```
 
-Run a port scan:
+Run a url crawl workflow:
 
 ```sh
-secator w port_scan mydomain.com
+secator w url_crawl http://testphp.vulnweb.com
 ```
 
-Run a full host scan:
+Run a host scan:
 
 ```sh
 secator s host mydomain.com
 ```
 
-For more, read the complete [documentation](https://docs.freelabz.com).
+and more... to list all tasks / workflows / scans that you can use:
+```sh
+secator x --help
+secator w --help
+secator s --help
+```
+
+## Learn more
+
+To go deeper with `secator`, check out:
+* Our complete [documentation](https://docs.freelabz.com)
+* Our getting started [tutorial video](https://youtu.be/-JmUTNWQDTQ?si=qpAClDWMXo2zwUK7)
+* Our [Medium post](https://medium.com/p/09333f3d3682)
+* Follow us on social media: [@freelabz](https://twitter.com/freelabz) on Twitter and [@FreeLabz](https://youtube.com/@FreeLabz) on YouTube
+
+## Stats
+
+<a href="https://star-history.com/#freelabz/secator&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=freelabz/secator&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=freelabz/secator&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=freelabz/secator&type=Date" />
+  </picture>
+</a>
