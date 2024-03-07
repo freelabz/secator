@@ -6,24 +6,30 @@ tags: [http, dir]
 input_types:
   - url
 tasks:
-  ffuf:
-    description: Search for HTTP directories
-    wordlist: /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt
-    targets_:
-      - type: target
-        field: '{name}/FUZZ'
-  cariddi:
-    description: Crawl HTTP directories for content
-    targets_:
-      - target.name
-      - url.url
-  httpx:
-    description: Run HTTP probes on crawled URLs
-    follow_redirects: True
+  _group:
+    dirsearch:
+      description: Search for HTTP directories
+      wordlist: /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt
+    ffuf:
+      description: Search for HTTP directories
+      wordlist: /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt
+      targets_:
+        - type: target
+          field: '{name}/FUZZ'
+    httpx:
+      description: Run httpx on input URLs
+  katana:
+    description: Run crawler on found directories
     targets_:
       - type: url
         field: url
-        condition: item.status_code == 0
-results:
-- type: url
-  condition: item.status_code != 0
+        condition: "'Index of' in item.title"  # identified as directories by httpx + page title
+      - type: url
+        field: url
+        condition: item._source == 'ffuf'  # identified as directories by ffuf + wordlist
+  cariddi:
+    description: Run pattern matcher on directory files
+    targets_:
+      - type: url
+        field: url
+        condition: item._source == 'katana'  # directory files identified by katana

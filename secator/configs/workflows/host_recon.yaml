@@ -35,7 +35,6 @@ results:
     condition: item._source == 'nmap'
 
   - type: vulnerability
-  #   condition: item.confidence == 'high'
 
   - type: url
     condition: item.status_code != 0

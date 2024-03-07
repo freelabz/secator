@@ -9,14 +9,14 @@ input_types:
   - url
 tasks:
   _group:
-    # gau:
-    #   description: Search for passive URLs
-    # gospider:
-    #   description: Crawl URLs
-    cariddi:
-      description: Hunt URLs patterns
+    gau:
+      description: Search for passive URLs
+    gospider:
+      description: Crawl URLs
     katana:
       description: Crawl URLs
+  cariddi:
+    description: Hunt URLs patterns
   httpx:
     description: Run HTTP probes on crawled URLs
     targets_:
