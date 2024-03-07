@@ -14,7 +14,7 @@ from importlib import import_module
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 import netifaces
 import yaml
@@ -443,3 +443,21 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		s += f' [italic dim white]\[{id}][/] '
 	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
 	print(s)
+
+
+def escape_mongodb_url(url):
+	"""Escape username / password from MongoDB URL if any.
+
+	Args:
+		url (str): Full MongoDB URL string.
+
+	Returns:
+		str: Escaped MongoDB URL string.
+	"""
+	match = re.search('mongodb://(?P<userpass>.*)@(?P<url>.*)', url)
+	if match:
+		url = match.group('url')
+		user, password = tuple(match.group('userpass').split(':'))
+		user, password = quote(user), quote(password)
+		return f'mongodb://{user}:{password}@{url}'
+	return url
