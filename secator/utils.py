@@ -417,9 +417,9 @@ def rich_to_ansi(text):
 
 def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG >= level:
+	if DEBUG_COMPONENT and not any(sub.startswith(s) for s in DEBUG_COMPONENT):
 		return
-	if DEBUG_COMPONENT and not any(s.startswith(sub) for s in DEBUG_COMPONENT):
+	elif not DEBUG_COMPONENT and not DEBUG >= level:
 		return
 	s = ''
 	if sub:
