@@ -1,11 +1,15 @@
 from secator.definitions import DEBUG
+from secator.exporters import JsonExporter
 from secator.output_types import Target
 from secator.runners import Runner
 from secator.utils import discover_tasks
 
 
 class Task(Runner):
-	default_exporters = []
+
+	default_exporters = [
+		JsonExporter,
+	]
 	enable_hooks = False
 
 	def delay(cls, *args, **kwargs):
@@ -51,6 +55,7 @@ class Task(Runner):
 		hooks = {task_cls: self.hooks}
 		run_opts['hooks'] = hooks
 		run_opts['context'] = self.context
+		run_opts['reports_folder'] = self.reports_folder
 
 		# Run task
 		if self.sync:

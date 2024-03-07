@@ -4,7 +4,6 @@ import rich_click as click
 from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
-from secator.celery import is_celery_worker_alive
 from secator.definitions import OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
@@ -82,8 +81,9 @@ def get_command_options(*tasks):
 	"""
 	opt_cache = []
 	all_opts = OrderedDict({})
-
 	for cls in tasks:
+		if cls is None:
+			continue
 		opts = OrderedDict(RUNNER_GLOBAL_OPTS, **RUNNER_OPTS, **cls.meta_opts, **cls.opts)
 		for opt, opt_conf in opts.items():
 
@@ -159,6 +159,7 @@ def task():
 
 
 def register_runner(cli_endpoint, config):
+	from secator.celery import is_celery_worker_alive
 	fmt_opts = {
 		'print_cmd': True,
 	}

@@ -91,7 +91,7 @@ class nmap(VulnMulti):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
 			timestr = get_file_timestamp()
-			output_path = f'{DATA_FOLDER}/nmap_{timestr}.xml'
+			output_path = f'{self.reports_folder}/.outputs/nmap_{timestr}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
 

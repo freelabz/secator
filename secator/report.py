@@ -23,7 +23,7 @@ class Report:
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
 		self.workspace_name = runner.workspace_name
-		self.create_local_folders()
+		self.output_folder = runner.reports_folder
 
 	def as_table(self):
 		print_results_table(self.results, self.title)
@@ -79,15 +79,6 @@ class Report:
 
 		# Save data
 		self.data = data
-
-	def create_local_folders(self):
-		output_folder = Path(REPORTS_FOLDER)
-		if self.runner.workspace_name:
-			output_folder = output_folder / Path(self.runner.workspace_name)
-		output_folder = output_folder / Path(pluralize(self.runner.config.type).lower())
-		output_folder = str(output_folder)
-		os.makedirs(output_folder, exist_ok=True)
-		self.output_folder = output_folder
 
 
 def get_table_fields(output_type):

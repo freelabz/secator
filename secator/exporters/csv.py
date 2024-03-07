@@ -15,7 +15,7 @@ class CsvExporter(Exporter):
             if not items:
                 continue
             keys = list(items[0].keys())
-            csv_path = f'{self.report.output_folder}/{title}_{output_type}_{self.report.timestamp}.csv'
+            csv_path = f'{self.report.output_folder}/report_{output_type}.csv'
             csv_paths.append(csv_path)
             with open(csv_path, 'w', newline='') as output_file:
                 dict_writer = _csv.DictWriter(output_file, keys)

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import sys
 import uuid
 from contextlib import nullcontext
@@ -14,11 +15,11 @@ from rich.panel import Panel
 from rich.progress import Progress as RichProgress
 from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY
+from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY, REPORTS_FOLDER
 from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_data, get_task_ids,
+from secator.runners._helpers import (get_task_data, get_task_ids, get_task_folder_id,
 									  process_extractor)
 from secator.utils import (debug, import_dynamic, merge_opts, pluralize,
 						   rich_to_ansi)
@@ -76,6 +77,9 @@ class Runner:
 	# Run hooks
 	enable_hooks = True
 
+	# Reports folder
+	reports_folder = None
+
 	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
@@ -104,6 +108,17 @@ class Runner:
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
 		self.result = None
+
+		# Determine report folder
+		default_report_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
+		_id = get_task_folder_id(default_report_folder_base)
+		default_report_folder = f'{default_report_folder_base}/{_id}'
+		self.reports_folder = run_opts.get('reports_folder') or f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s/{_id}'
+
+		# Make reports folders
+		os.makedirs(self.reports_folder, exist_ok=True)
+		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
+		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
 
 		# Process input
 		self.input = targets
@@ -450,7 +465,7 @@ class Runner:
 				self._print(f'   • {info}', color='bold green', rich=True)
 
 		# Log runner errors
-		if self.errors:
+		if self.errors and not self.sync:
 			self._print(
 				f'❌ [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)

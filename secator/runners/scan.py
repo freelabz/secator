@@ -1,7 +1,7 @@
 import logging
 
 from secator.config import ConfigLoader
-from secator.exporters import CsvExporter, JsonExporter
+from secator.exporters import JsonExporter
 from secator.runners._base import Runner
 from secator.runners._helpers import run_extractors
 from secator.runners.workflow import Workflow
@@ -15,7 +15,6 @@ class Scan(Runner):
 
 	default_exporters = [
 		JsonExporter,
-		CsvExporter
 	]
 
 	@classmethod
@@ -44,6 +43,7 @@ class Scan(Runner):
 
 			# Workflow fmt options
 			run_opts = self.run_opts.copy()
+			run_opts['reports_folder'] = self.reports_folder
 			fmt_opts = {
 				'json': run_opts.get('json', False),
 				'print_item': False,

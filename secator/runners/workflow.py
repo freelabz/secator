@@ -1,7 +1,7 @@
 from celery import chain, chord
 
 from secator.definitions import DEBUG
-from secator.exporters import CsvExporter, JsonExporter
+from secator.exporters import JsonExporter
 from secator.output_types import Target
 from secator.runners._base import Runner
 from secator.runners.task import Task
@@ -12,7 +12,6 @@ class Workflow(Runner):
 
 	default_exporters = [
 		JsonExporter,
-		CsvExporter
 	]
 
 	@classmethod
@@ -48,6 +47,7 @@ class Workflow(Runner):
 
 		# Construct run opts
 		run_opts['hooks'] = self._hooks.get(Task, {})
+		run_opts['reports_folder'] = self.reports_folder
 		run_opts.update(fmt_opts)
 
 		# Build Celery workflow

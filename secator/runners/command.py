@@ -605,7 +605,7 @@ class Command(Runner):
 		if isinstance(input, list):
 			timestr = get_file_timestamp()
 			cmd_name = cmd.split(' ')[0].split('/')[-1]
-			fpath = f'{DATA_FOLDER}/{cmd_name}_{timestr}.txt'
+			fpath = f'{self.reports_folder}/.inputs/{cmd_name}_{timestr}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:
