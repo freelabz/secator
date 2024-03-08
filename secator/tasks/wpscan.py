@@ -74,15 +74,6 @@ class wpscan(VulnHttp):
 	ignore_return_code = True
 	profile = 'io'
 
-	@staticmethod
-	def on_init(self):
-		output_path = self.get_opt_value('output_path')
-		if not output_path:
-			timestr = get_file_timestamp()
-			output_path = f'{DATA_FOLDER}/wpscan_{timestr}.json'
-		self.output_path = output_path
-		self.cmd += f' -o {self.output_path}'
-
 	def yielder(self):
 		prev = self.print_item_count
 		self.print_item_count = False
@@ -177,3 +168,12 @@ class wpscan(VulnHttp):
 						)
 
 		self.print_item_count = prev
+
+	@staticmethod
+	def on_init(self):
+		output_path = self.get_opt_value('output_path')
+		if not output_path:
+			timestr = get_file_timestamp()
+			output_path = f'{DATA_FOLDER}/wpscan_{timestr}.json'
+		self.output_path = output_path
+		self.cmd += f' -o {self.output_path}'
