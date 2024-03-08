@@ -92,7 +92,7 @@ To install `secator` **and all the tools** it supports:
 <details>
 	<summary>Bash one-liner</summary>
 
-	wget https://github.com/freelabz/secator/blob/main/scripts/install.sh | sh
+	wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh| sh
 
 </details>
 
