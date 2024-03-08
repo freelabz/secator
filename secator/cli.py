@@ -243,10 +243,16 @@ def generate_bash_install():
 	"""Generate bash install script for all secator-supported tasks."""
 	path = ROOT_FOLDER + '/scripts/install_commands.sh'
 	with open(path, 'w') as f:
+		yellow ='\\033[0;93m'
+		cyan ='\\033[0;96m'
+		green ='\\033[0;92m'
+		nc ='\\033[0m' # No Color
 		f.write('#!/bin/bash\n\n')
 		for task in ALL_TASKS:
 			if task.install_cmd:
 				f.write(f'# {task.__name__}\n')
+				f.write(f'echo -e "\n🗄 {yellow}Installing {task.__name__} ...{nc}"\n')
+				f.write(f'echo -e "{cyan}{task.install_cmd}{nc}"\n')
 				f.write(task.install_cmd + ' || true' + '\n\n')
 	Command.run_command(
 		f'chmod +x {path}',

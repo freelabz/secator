@@ -53,7 +53,7 @@ class dirsearch(HttpFuzzer):
 			STATUS_CODE: 'status'
 		}
 	}
-	install_cmd = 'pip3 install dirsearch'
+	install_cmd = 'pipx install dirsearch'
 	proxychains = True
 	proxy_socks5 = True
 	proxy_http = True

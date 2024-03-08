@@ -41,7 +41,7 @@ class maigret(ReconUser):
 			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
 	}
-	install_cmd = 'pip3 install maigret'
+	install_cmd = 'pipx install maigret'
 	socks5_proxy = True
 	profile = 'io'
 
