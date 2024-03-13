@@ -726,7 +726,7 @@ class Runner:
 				break  # found an item that fits
 			except (TypeError, KeyError) as e:  # can't load using class
 				debug(
-					f'[dim red]Failed loading item as {klass.__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
+					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
 					sub='klass.load',
 					level=5)
 				if DEBUG == 6:
