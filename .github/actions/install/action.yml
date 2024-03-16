@@ -14,12 +14,4 @@ runs:
 
   - name: Install secator with pipx
     shell: bash
-    run: pipx install .[dev]
-
-  - name: Install flake8
-    shell: bash
-    run: pipx install flake8
-
-  - name: Install coverage
-    shell: bash
-    run: pipx install coverage
+    run: pipx install .[dev] --include-deps

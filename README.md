@@ -120,7 +120,7 @@ To install `secator` **without the underlying tools**:
 
 	git clone https://github.com/freelabz/secator
 	cd secator
-	pipx install -e .
+	pipx install -e .[dev] --include-deps
 
 </details>
 

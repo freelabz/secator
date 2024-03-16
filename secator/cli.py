@@ -592,6 +592,7 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
+	os.environ['STORE_HTTP_RESPONSES'] = '0'
 
 	cmd = 'coverage run --omit="*test*" -m unittest'
 	if test:
@@ -603,6 +604,7 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 
 	result = Command.run_command(
 		cmd,
+		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
 	if coverage:
@@ -617,6 +619,7 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 def lint():
 	result = Command.run_command(
 		'flake8 secator/',
+		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
 	sys.exit(result.return_code)
