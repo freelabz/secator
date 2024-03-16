@@ -575,6 +575,7 @@ def integration(tasks, workflows, scans, test, debug):
 		cmd += ' discover -v tests.integration'
 	result = Command.run_command(
 		cmd,
+		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
 	sys.exit(result.return_code)
