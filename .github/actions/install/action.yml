@@ -1,0 +1,26 @@
+name: Install secator
+description: Installs secator
+inputs: 
+  python-version:
+    required: true
+runs:
+  using: "composite"
+  steps:
+  - uses: actions/checkout@v3
+
+  - name: Set up Python ${{ inputs.python-version }}
+    uses: actions/setup-python@v3
+    with:
+      python-version: ${{ inputs.python-version }}
+
+  - name: Install secator with pipx
+    shell: bash
+    run: pipx install .[dev]
+
+  - name: Install flake8
+    shell: bash
+    run: pipx install flake8
+
+  - name: Install coverage
+    shell: bash
+    run: pipx install coverage
