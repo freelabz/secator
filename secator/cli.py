@@ -566,7 +566,7 @@ def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
-	cmd = 'python -m unittest'
+	cmd = f'{sys.executable} -m unittest'
 	if test:
 		if not test.startswith('tests.integration'):
 			test = f'tests.integration.{test}'
