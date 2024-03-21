@@ -99,8 +99,8 @@ sudo apt install -y libpcap-dev && go install -v github.com/projectdiscovery/naa
 # maigret
 echo -e "
 🗄 \033[0;93mInstalling maigret ...\033[0m"
-echo -e "\033[0;96mpipx install maigret\033[0m"
-pipx install maigret || true
+echo -e "\033[0;96mpipx install git+https://github.com/soxoj/maigret@6be2f409e58056b1ca8571a8151e53bef107dedc\033[0m"
+pipx install git+https://github.com/soxoj/maigret@6be2f409e58056b1ca8571a8151e53bef107dedc || true
 
 # gf
 echo -e "
@@ -135,6 +135,6 @@ sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /op
 # nuclei
 echo -e "
 🗄 \033[0;93mInstalling nuclei ...\033[0m"
-echo -e "\033[0;96mgo install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest\033[0m"
-go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest || true
+echo -e "\033[0;96mgo install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest && nuclei update-templates\033[0m"
+go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest && nuclei update-templates || true
 

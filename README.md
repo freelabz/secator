@@ -81,18 +81,18 @@ Feel free to request new tools to be added by opening an issue, but please
 check that the tool complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
 
 
-## Install Secator
+## Installation
 
-Secator requires **python >= 3.8**.
+`secator` requires **python >= 3.8**.
 
-### All-in-one
+### Bundle
 
-To install `secator` **and all the tools** it supports:
+To install `secator` **with all the supported tools**:
 
 <details>
 	<summary>Bash one-liner</summary>
 
-	wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh| sh
+	wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
 
 </details>
 
@@ -104,14 +104,16 @@ To install `secator` **and all the tools** it supports:
 </details>
 
 
-### Library only
+### Single
 
-To install `secator` **without the underlying tools**:
+To install `secator` **without the supported tools**:
 
 <details>
 	<summary>PyPI build</summary>
 
 	pipx install secator
+
+You can also use `pip install secator` but make sure you do it in a virtual environment (with `pipx` you do not need to). 
 
 </details>
 
@@ -120,12 +122,13 @@ To install `secator` **without the underlying tools**:
 
 	git clone https://github.com/freelabz/secator
 	cd secator
-	pipx install -e .[dev] --include-deps
+	pipx install -e .[dev]
+
+You can also use `pip install secator -e .[dev]` but make sure you do it in a virtual environment (with `pipx` you do not need to).
+
+You can then use `secator u install <TOOL_NAME>` to install individual tools, or manage them externally to your liking.
 
 </details>
-
-
-You can then use `secator u install <TOOL_NAME>` to install individual tools.
 
 
 ## Usage
