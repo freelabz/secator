@@ -595,7 +595,7 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 	os.environ['DEBUG'] = str(debug)
 	os.environ['STORE_HTTP_RESPONSES'] = '0'
 
-	cmd = 'coverage run --omit="*test*" -m unittest'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
 	if test:
 		if not test.startswith('tests.unit'):
 			test = f'tests.unit.{test}'
@@ -610,7 +610,7 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 	)
 	if coverage:
 		Command.run_command(
-			'coverage report -m',
+			f'{sys.executable} -m coverage report -m',
 			**DEFAULT_CMD_OPTS
 		)
 	sys.exit(result.return_code)
@@ -619,7 +619,7 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 @test.command()
 def lint():
 	result = Command.run_command(
-		'flake8 secator/',
+		f'{sys.executable} -m flake8 secator/',
 		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
