@@ -85,7 +85,7 @@ check that the tool complies with our selection criterias before doing so. If it
 
 `secator` requires **python >= 3.8**.
 
-### Bundle
+### Bundle (recommended)
 
 To install `secator` **with all the supported tools**:
 
@@ -94,13 +94,15 @@ To install `secator` **with all the supported tools**:
 
 	wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
 
+This script installs the latest Go and Ruby versions, all the tools supported by `secator`, as well as `secator` itself.
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	docker pull freelabz/secator
+	docker run freelabz/secator
 
+The Docker image is quite big, because it contains all the tools supported by `secator`.
 </details>
 
 
@@ -126,9 +128,9 @@ You can also use `pip install secator` but make sure you do it in a virtual envi
 
 You can also use `pip install secator -e .[dev]` but make sure you do it in a virtual environment (with `pipx` you do not need to).
 
-You can then use `secator u install <TOOL_NAME>` to install individual tools, or manage them externally to your liking.
-
 </details>
+
+You can then use `secator u install <TOOL_NAME>` to install individual tools, `secator u install` to install all tools, or just manage them externally to your liking.
 
 
 ## Usage
