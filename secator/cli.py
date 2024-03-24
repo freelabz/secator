@@ -244,6 +244,33 @@ def install_ruby():
 			console.print(':tada: Ruby installed successfully !', style='bold green')
 
 
+@install.command('cves')
+@click.option('--force', is_flag=True)
+def install_cves(force):
+	"""Download CVEs to file system. CVE lookup perf is improved quite a lot."""
+	cve_json_path = f'{CVES_FOLDER}/circl-cve-search-expanded.json'
+	if not os.path.exists(cve_json_path) or force:
+		Command.run_command(
+			'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
+			cwd=CVES_FOLDER,
+			**DEFAULT_CMD_OPTS
+		)
+		Command.run_command(
+			f'gunzip {CVES_FOLDER}/circl-cve-search-expanded.json.gz',
+			cwd=CVES_FOLDER,
+			**DEFAULT_CMD_OPTS
+		)
+	with console.status('[bold yellow]Saving CVEs to disk ...[/]'):
+		with open(cve_json_path, 'r') as f:
+			for line in f:
+				data = json.loads(line)
+				cve_id = data['id']
+				cve_path = f'{CVES_FOLDER}/{cve_id}.json'
+				with open(cve_path, 'w') as f:
+					f.write(line)
+				console.print(f'CVE saved to {cve_path}')
+
+
 #-------#
 # UTILS #
 #-------#
@@ -264,56 +291,6 @@ def get_proxy(timeout, number):
 	for _ in range(number):
 		url = proxy.get()
 		print(url)
-
-
-@utils.command()
-@click.option('--force', is_flag=True)
-def download_cves(force):
-	"""Download CVEs to file system. CVE lookup perf is improved quite a lot."""
-	cve_json_path = f'{DATA_FOLDER}/circl-cve-search-expanded.json'
-	if not os.path.exists(cve_json_path) or force:
-		Command.run_command(
-			'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
-			cwd=DATA_FOLDER,
-			**DEFAULT_CMD_OPTS
-		)
-		Command.run_command(
-			f'gunzip {DATA_FOLDER}/circl-cve-search-expanded.json.gz',
-			cwd=DATA_FOLDER,
-			**DEFAULT_CMD_OPTS
-		)
-	os.makedirs(CVES_FOLDER, exist_ok=True)
-	with console.status('[bold yellow]Saving CVEs to disk ...[/]'):
-		with open(f'{DATA_FOLDER}/circl-cve-search-expanded.json', 'r') as f:
-			for line in f:
-				data = json.loads(line)
-				cve_id = data['id']
-				cve_path = f'{DATA_FOLDER}/cves/{cve_id}.json'
-				with open(cve_path, 'w') as f:
-					f.write(line)
-				console.print(f'CVE saved to {cve_path}')
-
-
-@utils.command()
-def generate_bash_install():
-	"""Generate bash install script for all secator-supported tasks."""
-	path = ROOT_FOLDER + '/scripts/install_commands.sh'
-	with open(path, 'w') as f:
-		yellow = '\\033[0;93m'
-		cyan = '\\033[0;96m'
-		nc = '\\033[0m'  # No Color
-		f.write('#!/bin/bash\n\n')
-		for task in ALL_TASKS:
-			if task.install_cmd:
-				f.write(f'# {task.__name__}\n')
-				f.write(f'echo -e "\n🗄 {yellow}Installing {task.__name__} ...{nc}"\n')
-				f.write(f'echo -e "{cyan}{task.install_cmd}{nc}"\n')
-				f.write(task.install_cmd + ' || true' + '\n\n')
-	Command.run_command(
-		f'chmod +x {path}',
-		**DEFAULT_CMD_OPTS
-	)
-	console.print(f':file_cabinet: [bold green]Saved install script to {path}[/]')
 
 
 @utils.command()
