@@ -66,9 +66,9 @@ jobs:
 
     - name: Install dependencies
       run: |
-        ./scripts/install_go.sh
-        ./scripts/install_ruby.sh
-        ./scripts/install_commands.sh
+        secator install go
+        secator install ruby
+        secator install tools
 
     - name: Add GOBIN to PATH
       run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
