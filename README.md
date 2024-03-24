@@ -97,11 +97,17 @@ This script installs the latest Go and Ruby versions, all the tools supported by
 	<summary>PyPI</summary>
 
 	pipx install secator
-	secator install go    # install the latest version of Go
-	secator install ruby  # install the latest version of Ruby
-	secator install tools # install supported tools
 
-You can also use `pip install secator` but make sure you are in a virtual environment !
+  You can also use `pip install secator` but make sure you are in a virtual environment !
+
+  Then you can run:
+
+	secator install go    # latest version of Go
+	secator install ruby  # latest version of Ruby
+	secator install tools # supported tools
+
+  Note: you can skip these steps if you are managing tools externally, or don't want to install everything.
+
 </details>
 
 <details>
@@ -110,6 +116,17 @@ You can also use `pip install secator` but make sure you are in a virtual enviro
 	docker run freelabz/secator
 
 The Docker image is quite big, because it contains all the tools supported by `secator`.
+</details>
+
+<details>
+	<summary>Development build</summary>
+
+  ```
+git clone https://github.com/freelabz/secator
+cd secator
+pipx install -e .[dev]
+  ```
+
 </details>
 
 
