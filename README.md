@@ -85,16 +85,23 @@ check that the tool complies with our selection criterias before doing so. If it
 
 `secator` requires **python >= 3.8**.
 
-### Bundle (recommended)
-
-To install `secator` **with all the supported tools**:
-
 <details>
-	<summary>Bash one-liner</summary>
+  <summary>Bash</summary>
 
-	wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
+    wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
 
 This script installs the latest Go and Ruby versions, all the tools supported by `secator`, as well as `secator` itself.
+</details>
+
+<details>
+	<summary>PyPI</summary>
+
+	pipx install secator
+	secator install go    # install the latest version of Go
+	secator install ruby  # install the latest version of Ruby
+	secator install tools # install supported tools
+
+You can also use `pip install secator` but make sure you are in a virtual environment !
 </details>
 
 <details>
@@ -104,33 +111,6 @@ This script installs the latest Go and Ruby versions, all the tools supported by
 
 The Docker image is quite big, because it contains all the tools supported by `secator`.
 </details>
-
-
-### Single
-
-To install `secator` **without the supported tools**:
-
-<details>
-	<summary>PyPI build</summary>
-
-	pipx install secator
-
-You can also use `pip install secator` but make sure you do it in a virtual environment (with `pipx` you do not need to). 
-
-</details>
-
-<details>
-	<summary>Development build</summary>
-
-	git clone https://github.com/freelabz/secator
-	cd secator
-	pipx install -e .[dev]
-
-You can also use `pip install secator -e .[dev]` but make sure you do it in a virtual environment (with `pipx` you do not need to).
-
-</details>
-
-You can then use `secator u install <TOOL_NAME>` to install individual tools, `secator u install` to install all tools, or just manage them externally to your liking.
 
 
 ## Usage

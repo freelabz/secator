@@ -35,10 +35,9 @@ debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', le
 debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
 
 
-#--------#
-# GROUPS #
-#--------#
-
+#-----#
+# CLI #
+#-----#
 
 @click.group(cls=OrderedGroup)
 @click.option('--no-banner', '-nb', is_flag=True, default=False)
@@ -49,6 +48,10 @@ def cli(no_banner):
 	pass
 
 
+#------#
+# TASK #
+#------#
+
 @cli.group(aliases=['x', 't', 'cmd'])
 def task():
 	"""Run a task."""
@@ -58,6 +61,10 @@ def task():
 for cls in ALL_TASKS:
 	config = DotMap({'name': cls.__name__})
 	register_runner(task, config)
+
+#----------#
+# WORKFLOW #
+#----------#
 
 
 @cli.group(cls=OrderedGroup, aliases=['w', 'wf', 'flow'])
@@ -70,6 +77,9 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 	register_runner(workflow, config)
 
 
+#------#
+# SCAN #
+#------#
 @cli.group(cls=OrderedGroup, aliases=['z', 's', 'sc'])
 def scan():
 	"""Run a scan."""
@@ -78,12 +88,6 @@ def scan():
 
 for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
-
-
-@cli.group(aliases=['u'])
-def utils():
-	"""Utilities."""
-	pass
 
 
 #--------#
@@ -179,24 +183,76 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	)
 
 
+#---------#
+# INSTALL #
+#---------#
+
+
+@cli.group(aliases=['i'])
+def install():
+	"Install frameworks and tools."
+	pass
+
+
+@install.command('tools')
+@click.argument('cmds', required=False)
+def install_tools(cmds):
+	"""Install secator tools and frameworks."""
+	if cmds is not None:
+		cmds = cmds.split(',')
+		tools = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
+	else:
+		tools = ALL_TASKS
+
+	for ix, cls in enumerate(tools):
+		with console.status(f'[bold yellow][{ix}/{len(tools)}] Installing {cls.__name__} ...'):
+			cls.install()
+		console.print()
+
+
+@install.command('go')
+def install_go():
+	"""Install Go."""
+	with console.status('[bold yellow] Installing Go...'):
+		ret = Command.run_command(
+			'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
+			cls_attributes={'shell': True},
+			cwd=DATA_FOLDER,
+			print_cmd=True,
+			print_line=True
+		)
+		if ret.return_code != 0:
+			console.print(':exclamation_mark: Failed to install Go.', style='bold red')
+		else:
+			console.print(':tada: Go installed successfully !', style='bold green')
+
+
+@install.command('ruby')
+def install_ruby():
+	"""Install Ruby."""
+	with console.status('[bold yellow] Installing Ruby...'):
+		ret = Command.run_command(
+			'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
+			cls_attributes={'shell': True},
+			cwd=DATA_FOLDER,
+			print_cmd=True,
+			print_line=True
+		)
+		if ret.return_code != 0:
+			console.print(':exclamation_mark: Failed to install Ruby.', style='bold red')
+		else:
+			console.print(':tada: Ruby installed successfully !', style='bold green')
+
+
 #-------#
 # UTILS #
 #-------#
 
 
-@utils.command()
-@click.argument('cmds', required=False)
-def install(cmds):
-	"""Install secator-supported commands."""
-	if cmds is not None:
-		cmds = cmds.split(',')
-		cmds = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
-	else:
-		cmds = ALL_TASKS
-	for ix, cls in enumerate(cmds):
-		with console.status(f'[bold yellow][{ix}/{len(cmds)}] Installing {cls.__name__} ...'):
-			cls.install()
-		console.print()
+@cli.group(aliases=['u'])
+def utils():
+	"""Utilities."""
+	pass
 
 
 @utils.command()
