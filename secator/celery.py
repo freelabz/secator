@@ -20,7 +20,7 @@ from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, debug, deduplicate,
-						   discover_external_tasks, discover_internal_tasks,
+						   discover_tasks,
 						   flatten)
 
 # from pathlib import Path
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 trace.LOG_SUCCESS = """\
 Task %(name)s[%(id)s] succeeded in %(runtime)ss\
 """
-COMMANDS = discover_internal_tasks() + discover_external_tasks()
+discover_tasks()  # TODO: remove dirty fix
 
 app = celery.Celery(__name__)
 app.conf.update({

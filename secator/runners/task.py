@@ -51,6 +51,7 @@ class Task(Runner):
 		hooks = {task_cls: self.hooks}
 		run_opts['hooks'] = hooks
 		run_opts['context'] = self.context
+		run_opts['reports_folder'] = self.reports_folder
 
 		# Run task
 		if self.sync:
