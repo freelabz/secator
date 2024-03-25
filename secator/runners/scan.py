@@ -44,6 +44,7 @@ class Scan(Runner):
 
 			# Workflow fmt options
 			run_opts = self.run_opts.copy()
+			run_opts['reports_folder'] = self.reports_folder
 			fmt_opts = {
 				'json': run_opts.get('json', False),
 				'print_item': False,

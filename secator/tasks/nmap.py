@@ -5,7 +5,7 @@ import re
 import xmltodict
 
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DELAY,
+from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
@@ -93,7 +93,7 @@ class nmap(VulnMulti):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
 			timestr = get_file_timestamp()
-			output_path = f'{DATA_FOLDER}/nmap_{timestr}.xml'
+			output_path = f'{self.reports_folder}/.outputs/nmap_{timestr}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
 

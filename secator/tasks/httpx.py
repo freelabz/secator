@@ -1,5 +1,4 @@
 import os
-import uuid
 
 from secator.decorators import task
 from secator.definitions import (DEFAULT_HTTPX_FLAGS,
@@ -8,7 +7,7 @@ from secator.definitions import (DEFAULT_HTTPX_FLAGS,
 								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
-								 RATE_LIMIT, RETRIES, TASKS_FOLDER, THREADS,
+								 RATE_LIMIT, RETRIES, THREADS,
 								 TIMEOUT, URL, USER_AGENT)
 from secator.tasks._categories import Http
 from secator.utils import sanitize_url
@@ -69,13 +68,11 @@ class httpx(Http):
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
 		if DEFAULT_STORE_HTTP_RESPONSES:
-			_id = uuid.uuid4()
-			output_path = f'{TASKS_FOLDER}/{_id}'
-			self.output_response_path = f'{output_path}/response'
-			self.output_screenshot_path = f'{output_path}/screenshot'
+			self.output_response_path = f'{self.reports_folder}/response'
+			self.output_screenshot_path = f'{self.reports_folder}/screenshot'
 			os.makedirs(self.output_response_path, exist_ok=True)
 			os.makedirs(self.output_screenshot_path, exist_ok=True)
-			self.cmd += f' -sr -srd {output_path}'
+			self.cmd += f' -sr -srd {self.reports_folder}'
 
 	@staticmethod
 	def on_item_pre_convert(self, item):

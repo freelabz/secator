@@ -26,6 +26,8 @@ from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
+_tasks = []
+
 
 class TaskError(ValueError):
 	pass
@@ -194,6 +196,8 @@ def discover_internal_tasks():
 		try:
 			module = import_module(f'secator.tasks.{module_name}')
 		except ImportError:
+			# console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
+			# console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
 			continue
 		for attribute_name in dir(module):
 			attribute = getattr(module, attribute_name)
@@ -228,7 +232,10 @@ def discover_external_tasks():
 
 def discover_tasks():
 	"""Find all secator tasks (internal + external)."""
-	return discover_internal_tasks() + discover_external_tasks()
+	global _tasks
+	if not _tasks:
+		_tasks = discover_internal_tasks() + discover_external_tasks()
+	return _tasks
 
 
 def import_dynamic(cls_path, cls_root='Command'):
@@ -262,7 +269,7 @@ def get_command_cls(cls_name):
 	Returns:
 		cls: Class.
 	"""
-	tasks_classes = discover_internal_tasks() + discover_external_tasks()
+	tasks_classes = discover_tasks()
 	for task_cls in tasks_classes:
 		if task_cls.__name__ == cls_name:
 			return task_cls
@@ -332,7 +339,7 @@ def pluralize(word):
 def get_task_name_padding(classes=None):
 	all_tasks = discover_tasks()
 	classes = classes or all_tasks
-	return max([len(cls.__name__) for cls in discover_tasks() if cls in classes]) + 2
+	return max([len(cls.__name__) for cls in all_tasks if cls in classes]) + 2
 
 
 def load_fixture(name, fixtures_dir, ext=None, only_path=False):

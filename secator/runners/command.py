@@ -16,7 +16,7 @@ from secator.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
 							   DEFAULT_FREEPROXY_TIMEOUT,
 							   DEFAULT_PROXYCHAINS_COMMAND,
 							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, DATA_FOLDER, DEFAULT_INPUT_CHUNK_SIZE)
+							   OPT_PIPE_INPUT, DEFAULT_INPUT_CHUNK_SIZE)
 from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
@@ -653,7 +653,7 @@ class Command(Runner):
 		if isinstance(input, list):
 			timestr = get_file_timestamp()
 			cmd_name = cmd.split(' ')[0].split('/')[-1]
-			fpath = f'{DATA_FOLDER}/{cmd_name}_{timestr}.txt'
+			fpath = f'{self.reports_folder}/.inputs/{cmd_name}_{timestr}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:
