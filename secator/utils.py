@@ -14,7 +14,7 @@ from importlib import import_module
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 import ifaddr
 import yaml
@@ -413,9 +413,10 @@ def rich_to_ansi(text):
 
 def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG >= level:
+	debug_comp_empty = DEBUG_COMPONENT == [""] or not DEBUG_COMPONENT
+	if not debug_comp_empty and not any(sub.startswith(s) for s in DEBUG_COMPONENT):
 		return
-	if DEBUG_COMPONENT and not any(s.startswith(sub) for s in DEBUG_COMPONENT):
+	elif debug_comp_empty and not DEBUG >= level:
 		return
 	s = ''
 	if sub:
@@ -439,3 +440,21 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		s += f' [italic dim white]\[{id}][/] '
 	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
 	print(s)
+
+
+def escape_mongodb_url(url):
+	"""Escape username / password from MongoDB URL if any.
+
+	Args:
+		url (str): Full MongoDB URL string.
+
+	Returns:
+		str: Escaped MongoDB URL string.
+	"""
+	match = re.search('mongodb://(?P<userpass>.*)@(?P<url>.*)', url)
+	if match:
+		url = match.group('url')
+		user, password = tuple(match.group('userpass').split(':'))
+		user, password = quote(user), quote(password)
+		return f'mongodb://{user}:{password}@{url}'
+	return url

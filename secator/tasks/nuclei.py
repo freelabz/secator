@@ -85,7 +85,7 @@ class nuclei(VulnMulti):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
 		data['template_id'] = item['template-id']
-		data['template_url'] = item['template-url']
+		data['template_url'] = item.get('template-url', '')
 		return data
 
 	@staticmethod
