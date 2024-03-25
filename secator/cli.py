@@ -194,7 +194,7 @@ def report_show(json_path, exclude_fields):
 def health(json, debug):
 	"""Health."""
 	tools = [cls for cls in ALL_TASKS]
-	status = {'tools': {}, 'languages': {}}
+	status = {'tools': {}, 'languages': {}, 'secator': {'cli': {}, 'worker': {}}}
 
 	def check_ret_code(ret):
 		if ret.return_code == 0:
@@ -206,7 +206,7 @@ def health(json, debug):
 	def state_to_str(ret):
 		return '[bold green]ok[/]' if check_ret_code(ret) else '[bold red]failed[/]'
 
-	# Check secator
+	# Check secator CLI + worker
 	console.print(':wrench: [bold gold3]Checking secator ...[/]')
 	ret = Command.run_command(
 		'secator --help',
@@ -214,8 +214,13 @@ def health(json, debug):
 		quiet=not debug
 	)
 	if not json:
-		console.print(f'[bold magenta]secator[/]: {state_to_str(ret)}')
-		status['secator'] = {'installed': ret.return_code == 0}
+		console.print(f'[bold magenta]cli[/]: {state_to_str(ret)}')
+		status['secator']['cli'] = {'installed': ret.return_code == 0}
+
+	ok = '[bold green]up[/]' if is_celery_worker_alive() else '[bold red]down[/]'
+	if not json:
+		console.print(f'[bold magenta]worker[/]: {ok}')
+		status['secator']['worker'] = {'running': ok}
 
 	# Check languages
 	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
