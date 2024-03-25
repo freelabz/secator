@@ -16,12 +16,12 @@ from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse, quote
 
-import netifaces
+import ifaddr
 import yaml
 from furl import furl
 from rich.markdown import Markdown
 
-from secator.definitions import DEFAULT_STDIN_TIMEOUT, DEBUG, DEBUG_COMPONENT
+from secator.definitions import DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -358,17 +358,13 @@ def get_file_timestamp():
 
 
 def detect_host(interface=None):
-	ifaces = netifaces.interfaces()
-	host = None
-	for iface in ifaces:
-		addrs = netifaces.ifaddresses(iface)
+	adapters = ifaddr.get_adapters()
+	for adapter in adapters:
+		iface = adapter.name
 		if (interface and iface != interface) or iface == 'lo':
 			continue
-		host = addrs[netifaces.AF_INET][0]['addr']
-		interface = iface
-		if 'tun' in iface:
-			break
-	return host
+		return adapter.ips[0].ip
+	return None
 
 
 def find_list_item(array, val, key='id', default=None):
