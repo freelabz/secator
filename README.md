@@ -86,7 +86,7 @@ check that the tool complies with our selection criterias before doing so. If it
 `secator` requires **python >= 3.8**.
 
 <details>
-  <summary>Bash</summary>
+  <summary>Bash one-liner</summary>
 
     wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
 
@@ -94,7 +94,7 @@ This script installs the latest Go and Ruby versions, all the tools supported by
 </details>
 
 <details>
-	<summary>PyPI</summary>
+	<summary>Stable build</summary>
 
 	pipx install secator
 
@@ -106,16 +106,8 @@ This script installs the latest Go and Ruby versions, all the tools supported by
 	secator install ruby  # latest version of Ruby
 	secator install tools # supported tools
 
-  Note: you can skip these steps if you are managing tools externally, or don't want to install everything.
+  ***Note:*** you can skip these steps if you are managing tools externally, or don't want to install everything.
 
-</details>
-
-<details>
-	<summary>Docker</summary>
-
-	docker run freelabz/secator
-
-The Docker image is quite big, because it contains all the tools supported by `secator`.
 </details>
 
 <details>
@@ -129,6 +121,13 @@ pipx install -e .[dev]
 
 </details>
 
+<details>
+	<summary>Docker</summary>
+
+	docker run freelabz/secator
+
+The Docker image is quite big, because it contains all the tools supported by `secator`.
+</details>
 
 ## Usage
 ```sh

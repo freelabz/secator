@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV GOROOT="/usr/local/go"
 ENV GOPATH=$HOME/go
-ENV PATH="${PATH}:${GOROOT}/bin:${GOPATH}/bin:/root/.local/share/pipx/venvs/secator/bin"
+ENV PATH="${PATH}:${GOROOT}/bin:${GOPATH}/bin:/root/.local/share/pipx/venvs/secator/bin:/root/go/bin"
 
 # Install Python
 RUN apt update -y && \
@@ -40,6 +40,7 @@ RUN apt update -y && \
 	proxychains \
 	proxychains-ng
 RUN pip3 install pipx
+RUN pip3 uninstall httpx
 
 # Install Metasploit framework
 RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
@@ -48,30 +49,13 @@ RUN ./msfinstall
 
 # Copy code
 WORKDIR /code
-
-# Download CVEs
-# COPY scripts/download_cves.sh .
-# RUN ./download_cves.sh
-
-# Download and install go
-COPY scripts/install_go.sh .
-RUN ./install_go.sh
-ENV PATH="$PATH:/root/go/bin"
-
-# Download an install Ruby
-COPY scripts/install_ruby.sh .
-RUN ./install_ruby.sh
-
-# Install secator-supported commands
-COPY scripts/install_commands.sh .
-RUN ./install_commands.sh
-
-# Copy rest of the code
 COPY . /code/
 
 # Install secator
-RUN pip3 uninstall httpx
 RUN pipx install .[dev,google]
+RUN secator install go
+RUN secator install ruby
+RUN secator install tools
 
 # Set entrypoint
 ENTRYPOINT ["secator"]
