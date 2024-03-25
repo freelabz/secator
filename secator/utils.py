@@ -356,6 +356,7 @@ def load_fixture(name, fixtures_dir, ext=None, only_path=False):
 def get_file_timestamp():
 	return datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%f_%p")
 
+
 def detect_host(interface=None):
 	adapters = ifaddr.get_adapters()
 	for adapter in adapters:
@@ -364,6 +365,7 @@ def detect_host(interface=None):
 			continue
 		return adapter.ips[0].ip
 	return None
+
 
 def find_list_item(array, val, key='id', default=None):
 	return next((item for item in array if item[key] == val), default)
