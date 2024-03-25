@@ -39,6 +39,7 @@ ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
 RUN apt update -y && \
     apt install -y \
 	curl \
+	gcc \
 	git \
 	golang-go \
     make \
