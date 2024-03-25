@@ -85,14 +85,12 @@ check that the tool complies with our selection criterias before doing so. If it
 
 `secator` requires **Python >= 3.8** and **`pipx`** (or **`pip`**).
 
-`secator` supported tools require **Go 1.22.0** and **Ruby > 3.0**.
-
 <details>
   <summary>Bash (bundle)</summary>
 
     wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
 
-This script installs `secator`, the latest Go and Ruby versions, and all the tools supported by `secator`.
+This script is an all-in-one bundle that installs `secator`, the latest Go and Ruby versions, and all the tools supported by `secator`.
 </details>
 
 <details>
@@ -100,35 +98,39 @@ This script installs `secator`, the latest Go and Ruby versions, and all the too
 
 	pipx install secator
 
-  You can also use `pip install secator` but make sure you are in a virtual environment !
+  ***Notes:***
+  * Make sure `~/.local/bin/` is added to your `PATH` since this is where `pipx` install binaries.
+  * You can also use `pip install secator` but make sure you are in a virtual environment.
 
-  Then you can run:
+  To install `secator` tools:
 
 	secator install go    # latest version of Go
 	secator install ruby  # latest version of Ruby
 	secator install tools # supported tools
 
-  ***Note:*** you can skip these steps if you are managing tools externally, or don't want to install everything.
+  ***Note:*** you can skip these steps if you are managing Go, Ruby, or tools externally, or don't want to install everything.
 
 </details>
 
 <details>
 	<summary>PyPI (development)</summary>
 
-  ```
+  ```sh
 git clone https://github.com/freelabz/secator
 cd secator
 pipx install -e .[dev]
   ```
 
-You can also use `pip install secator` but make sure you are in a virtual environment !
+  ***Notes:***
+  * Make sure `~/.local/bin/` is added to your `PATH` since this is where `pipx` install binaries.
+  * You can also use `pip install secator` but make sure you are in a virtual environment !
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	docker run freelabz/secator
+	docker run -it freelabz/secator --help
 
 The Docker image is quite big, because it contains all the tools supported by `secator`.
 </details>

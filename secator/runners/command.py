@@ -487,6 +487,7 @@ class Command(Runner):
 			sys.exit(1)
 
 		# If not, prompt the user for a password
+		self._print('[bold red]Please enter sudo password to continue.[/]')
 		for _ in range(3):
 			self._print('\[sudo] password: ')
 			sudo_password = getpass.getpass()

@@ -450,7 +450,7 @@ class Runner:
 				self._print(f'   • {info}', color='bold green', rich=True)
 
 		# Log runner errors
-		if self.errors:
+		if self.errors and not self.output_quiet:
 			self._print(
 				f':exclamation_mark:[bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)
