@@ -1,10 +1,7 @@
 import operator
-import os
-from pathlib import Path
 
-from secator.definitions import REPORTS_FOLDER
 from secator.output_types import OUTPUT_TYPES, OutputType
-from secator.utils import merge_opts, pluralize, get_file_timestamp, print_results_table
+from secator.utils import merge_opts, get_file_timestamp, print_results_table
 from secator.rich import console
 
 

@@ -4,7 +4,6 @@ from secator.rich import console
 
 class TxtExporter(Exporter):
     def send(self):
-        title = self.report.data['info']['title']
         results = self.report.data['results']
         txt_paths = []
 

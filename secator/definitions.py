@@ -59,7 +59,7 @@ GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
 # Defaults HTTP and Proxy settings
 DEFAULT_SOCKS5_PROXY = os.environ.get('SOCKS5_PROXY', "socks5://127.0.0.1:9050")
 DEFAULT_HTTP_PROXY = os.environ.get('HTTP_PROXY', "https://127.0.0.1:9080")
-DEFAULT_STORE_HTTP_RESPONSES = bool(int(os.environ.get('STORE_HTTP_RESPONSES', 1)))
+DEFAULT_STORE_HTTP_RESPONSES = bool(int(os.environ.get('STORE_HTTP_RESPONSES', 0)))
 DEFAULT_PROXYCHAINS_COMMAND = "proxychains"
 DEFAULT_FREEPROXY_TIMEOUT = 1  # seconds
 

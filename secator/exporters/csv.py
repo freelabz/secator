@@ -6,7 +6,6 @@ from secator.rich import console
 
 class CsvExporter(Exporter):
     def send(self):
-        title = self.report.data['info']['title']
         results = self.report.data['results']
         csv_paths = []
 

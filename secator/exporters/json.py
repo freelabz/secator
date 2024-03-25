@@ -5,7 +5,6 @@ from secator.serializers.dataclass import dumps_dataclass
 
 class JsonExporter(Exporter):
 	def send(self):
-		title = self.report.data['info']['title']
 		json_path = f'{self.report.output_folder}/report.json'
 
 		# Save JSON report to file

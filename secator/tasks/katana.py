@@ -1,6 +1,5 @@
 import os
 import json
-import uuid
 from urllib.parse import urlparse
 
 from secator.decorators import task

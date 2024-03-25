@@ -15,7 +15,7 @@ from secator.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
 							   DEFAULT_FREEPROXY_TIMEOUT,
 							   DEFAULT_PROXYCHAINS_COMMAND,
 							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, DATA_FOLDER, DEFAULT_INPUT_CHUNK_SIZE)
+							   OPT_PIPE_INPUT, DEFAULT_INPUT_CHUNK_SIZE)
 from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
