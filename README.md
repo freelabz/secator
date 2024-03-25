@@ -83,18 +83,20 @@ check that the tool complies with our selection criterias before doing so. If it
 
 ## Installation
 
-`secator` requires **python >= 3.8**.
+`secator` requires **Python >= 3.8** and **`pipx`** (or **`pip`**).
+
+`secator` supported tools require **Go 1.22.0** and **Ruby > 3.0**.
 
 <details>
-  <summary>Bash one-liner</summary>
+  <summary>Bash (bundle)</summary>
 
     wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
 
-This script installs the latest Go and Ruby versions, all the tools supported by `secator`, as well as `secator` itself.
+This script installs `secator`, the latest Go and Ruby versions, and all the tools supported by `secator`.
 </details>
 
 <details>
-	<summary>Stable build</summary>
+	<summary>PyPI (stable)</summary>
 
 	pipx install secator
 
@@ -111,13 +113,15 @@ This script installs the latest Go and Ruby versions, all the tools supported by
 </details>
 
 <details>
-	<summary>Development build</summary>
+	<summary>PyPI (development)</summary>
 
   ```
 git clone https://github.com/freelabz/secator
 cd secator
 pipx install -e .[dev]
   ```
+
+You can also use `pip install secator` but make sure you are in a virtual environment !
 
 </details>
 
