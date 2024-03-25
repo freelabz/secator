@@ -48,6 +48,7 @@ class Workflow(Runner):
 
 		# Construct run opts
 		run_opts['hooks'] = self._hooks.get(Task, {})
+		run_opts['reports_folder'] = self.reports_folder
 		run_opts.update(fmt_opts)
 
 		# Build Celery workflow

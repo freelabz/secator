@@ -1,3 +1,5 @@
+import os
+
 from celery.result import AsyncResult, GroupResult
 from rich.prompt import Confirm
 
@@ -98,7 +100,7 @@ def get_task_ids(result, ids=[]):
 
 def get_task_data(task_id):
 	"""Get task info.
-
+default_report_folder_base
 	Args:
 		task_id (str): Celery task id.
 
@@ -151,3 +153,20 @@ def confirm_exit(func):
 				self.log_results()
 				raise KeyboardInterrupt
 	return inner_function
+
+
+def get_task_folder_id(path):
+	names = []
+	if not os.path.exists(path):
+		return 0
+	for f in os.scandir(path):
+		if f.is_dir():
+			try:
+				int(f.name)
+				names.append(int(f.name))
+			except ValueError:
+				continue
+	names.sort()
+	if names:
+		return names[-1] + 1
+	return 0
