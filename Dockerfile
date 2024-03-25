@@ -39,6 +39,7 @@ ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
 RUN apt update -y && \
     apt install -y \
 	curl \
+	gcc \
 	git \
 	golang-go \
     make \
@@ -46,7 +47,8 @@ RUN apt update -y && \
 	python3 \
 	python3-pip \
 	python3-venv \
-	ruby \
+	ruby-full \
+	rubygems \
 	sudo \
 	vim \
     wget \
