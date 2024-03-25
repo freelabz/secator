@@ -459,15 +459,15 @@ class Runner:
 		# Log runner infos
 		if self.infos:
 			self._print(
-				f'✓  [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
+				f':heavy_check_mark: [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
 				color='bold green', rich=True)
 			for info in self.infos:
 				self._print(f'   • {info}', color='bold green', rich=True)
 
 		# Log runner errors
-		if self.errors:
+		if self.errors and not self.output_quiet:
 			self._print(
-				f'❌ [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
+				f':exclamation_mark:[bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)
 			for error in self.errors:
 				self._print(f'   • {error}', color='bold red', rich=True)
@@ -483,9 +483,9 @@ class Runner:
 		if self.print_item_count and not self.print_raw and not self.orig:
 			count_map = self._get_results_count()
 			if all(count == 0 for count in count_map.values()):
-				self._print(':adhesive_bandage: Found 0 results.', color='bold red', rich=True)
+				self._print(':exclamation_mark:Found 0 results.', color='bold red', rich=True)
 			else:
-				results_str = ':pill: Found ' + ' and '.join([
+				results_str = ':heavy_check_mark: Found ' + ' and '.join([
 					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
 					for name, count in count_map.items()
 				]) + '.'

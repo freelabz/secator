@@ -27,7 +27,7 @@ class h8mail(OSInt):
 	output_map = {
 	}
 
-	install_cmd = 'pip3 install h8mail'
+	install_cmd = 'pipx install h8mail'
 
 	@staticmethod
 	def on_start(self):

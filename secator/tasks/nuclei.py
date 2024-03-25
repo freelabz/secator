@@ -67,7 +67,7 @@ class nuclei(VulnMulti):
 		}
 	}
 	ignore_return_code = True
-	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest'
+	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest && nuclei update-templates'
 	proxychains = False
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same

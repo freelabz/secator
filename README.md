@@ -45,9 +45,10 @@ and it is designed to improve productivity for pentesters and security researche
 
 * **Customizable**
 
-## Supported commands
 
-`secator` integrates the following commands:
+## Supported tools
+
+`secator` integrates the following tools:
 
 | Name                                                          | Description                                                                    | Category       |
 |---------------------------------------------------------------|--------------------------------------------------------------------------------|----------------|
@@ -76,62 +77,63 @@ and it is designed to improve productivity for pentesters and security researche
 | [nuclei](https://github.com/projectdiscovery/nuclei)          | Fast and customisable vulnerability scanner based on simple YAML based DSL.    | `vuln/multi`   |
 | [searchsploit](https://gitlab.com/exploit-database/exploitdb) | Exploit searcher. | `exploit/search`    |
 
-Feel free to request new commands to be added by opening an issue, but please 
-check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
+Feel free to request new tools to be added by opening an issue, but please 
+check that the tool complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
 
 
-## Install Secator
+## Installation
 
-Secator requires **python >= 3.8** to install successfully. Run the following command to install the latest version:
-
-```sh
-pip3 install secator
-```
+`secator` requires **Python >= 3.8** and **`pipx`** (or **`pip`**).
 
 <details>
-	<summary>Bash one-liner</summary>
+  <summary>Bash (bundle)</summary>
 
-	git clone https://github.com/freelabz/secator && sh ./secator/scripts/install.sh
+    wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
+
+This script is an all-in-one bundle that installs `secator`, the latest Go and Ruby versions, and all the tools supported by `secator`.
+</details>
+
+<details>
+	<summary>PyPI (stable)</summary>
+
+	pipx install secator
+
+  ***Notes:***
+  * Make sure `~/.local/bin/` is added to your `PATH` since this is where `pipx` install binaries.
+  * You can also use `pip install secator` but make sure you are in a virtual environment.
+
+  To install `secator` tools:
+
+	secator install go    # latest version of Go
+	secator install ruby  # latest version of Ruby
+	secator install tools # supported tools
+
+  ***Note:*** you can skip these steps if you are managing Go, Ruby, or tools externally, or don't want to install everything.
+
+</details>
+
+<details>
+	<summary>PyPI (development)</summary>
+
+  ```sh
+git clone https://github.com/freelabz/secator
+cd secator
+pipx install -e .[dev]
+  ```
+
+  ***Notes:***
+  * Make sure `~/.local/bin/` is added to your `PATH` since this is where `pipx` install binaries.
+  * You can also use `pip install secator` but make sure you are in a virtual environment !
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	docker pull freelabz/secator
+	docker run -it freelabz/secator --help
 
+The Docker image is quite big, because it contains all the tools supported by `secator`.
 </details>
-
-<details>
-	<summary>Development build</summary>
-
-	git clone https://github.com/freelabz/secator
-	cd secator
-	python3 -m virtualenv -p python3 ~/.virtualenvs/secator
-	source ~/.virtualenvs/secator/bin/activate
-	pip3 install -e .
-
-</details>
-
-
-### Install underlying tools
-
-`secator` is designed to work with the latest version of all the tools it supports. Please make sure you are using the latest version of the tools you are using with `secator`.
-
-A convenience utility is provided to install all tools:
-```sh
-secator u install
-```
-
-... or to update specific tools:
-```sh
-secator u install <TASK_NAME>
-```
-
-Please note that:
-* this install method requires `apt` so it will not work on distributions not supporting it.
-* this is tested merely on Ubuntu and some of these installs might not work on other distributions.
-* ideally you update the tools yourself, and use `secator` as a convenient wrapper on top of them.
 
 ## Usage
 ```sh

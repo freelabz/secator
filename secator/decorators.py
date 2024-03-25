@@ -50,6 +50,7 @@ class OrderedGroup(RichGroup):
 				# we have a list so create group aliases
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
+				f.__doc__ = f.__doc__ or 'N/A'
 				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
 				for alias in aliases:
 					grp = super(OrderedGroup, self).group(

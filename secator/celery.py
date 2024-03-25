@@ -322,11 +322,6 @@ def run_command(self, results, name, targets, opts={}):
 			else:  # full traceback
 				exc_str = ' '.join(traceback.format_exception(task_exc, value=task_exc, tb=task_exc.__traceback__))
 			state['meta'][msg_type] = exc_str
-			if task:
-				color = 'bold red' if msg_type == 'error' else 'green'
-				task._print(exc_str, color=color)
-			else:
-				console.log(exc_str)
 
 		# Update task state with final status
 		self.update_state(**state)
@@ -477,6 +472,6 @@ def is_celery_worker_alive():
 	result = bool(result)
 	if result:
 		console.print('Celery worker is alive !', style='bold green')
-	else:
-		console.print('No Celery worker alive.', style='bold red')
+	# else:
+		# console.print('No Celery worker alive.', style='bold red')
 	return result

@@ -1,44 +1,61 @@
 FROM kalilinux/kali-rolling
 
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-ENV GOROOT="/usr/local/go"
-ENV GOPATH=$HOME/go
-ENV PATH="${PATH}:${GOROOT}/bin:${GOPATH}/bin"
+ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
 
 # Install Python
+# RUN apt update -y && \
+#     apt install -y \
+# 	software-properties-common \
+#     curl \
+# 	gcc \
+#     git \
+# 	golang-go \
+#     make \
+# 	python3 \
+# 	python3-pip \
+# 	python3-venv \
+# 	ruby \
+# 	sudo \
+# 	vim \
+#     wget \
+#     zlib1g \
+#     zlib1g-dev \
+# 	libc6-dev \
+# 	libgdbm-dev \
+# 	libbz2-dev \
+# 	libffi-dev \
+# 	libreadline-dev \
+# 	libncursesw5-dev \
+# 	libsqlite3-dev \
+# 	libssl-dev \
+# 	tk-dev \
+# 	chromium \
+#     jq \
+#     openssl \
+# 	proxychains \
+# 	proxychains-ng \
+# 	&& rm -rf /var/lib/apt/lists/*
+
 RUN apt update -y && \
     apt install -y \
-	software-properties-common \
-    curl \
-	gcc \
-    git \
+	curl \
+	git \
+	golang-go \
     make \
+	pipx \
+	python3 \
+	python3-pip \
+	python3-venv \
+	ruby \
 	sudo \
 	vim \
     wget \
-    zlib1g \
-    zlib1g-dev \
-	libc6-dev \
-	libgdbm-dev \
-	libbz2-dev \
-	libffi-dev \
-	libreadline-dev \
-	libncursesw5-dev \
-	libsqlite3-dev \
-	libssl-dev \
-	tk-dev
-RUN wget https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz
-RUN tar xvf Python-3.10.2.tgz && cd Python-3.10.2/ && ./configure --enable-optimizations && make && make install
-
-# Install additional tools
-RUN apt update -y && \
-	apt install -y \
 	chromium \
     jq \
     openssl \
 	proxychains \
-	proxychains-ng
+	proxychains-ng \
+	&& rm -rf /var/lib/apt/lists/*
 
 # Install Metasploit framework
 RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
@@ -47,38 +64,11 @@ RUN ./msfinstall
 
 # Copy code
 WORKDIR /code
-
-# Download CVEs
-# COPY scripts/download_cves.sh .
-# RUN ./download_cves.sh
-
-# Download and install go 1.19
-COPY scripts/install_go.sh .
-RUN ./install_go.sh
-ENV PATH="$PATH:/root/go/bin"
-
-# Download an install Ruby
-COPY scripts/install_ruby.sh .
-RUN ./install_ruby.sh
-
-# Install secator tasks
-COPY scripts/install_commands.sh .
-RUN ./install_commands.sh
-
-# Install nuclei templates
-RUN nuclei update-templates
-
-# Install Python package and CLI
-COPY requirements.txt .
-RUN pip3 install wheel
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# Copy rest of the code
 COPY . /code/
 
 # Install secator
-RUN pip3 uninstall httpx
-RUN pip3 install --no-deps -e .
+RUN pipx install .[dev,google]
+RUN secator install tools
 
 # Set entrypoint
 ENTRYPOINT ["secator"]

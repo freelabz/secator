@@ -35,10 +35,9 @@ debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', le
 debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
 
 
-#--------#
-# GROUPS #
-#--------#
-
+#-----#
+# CLI #
+#-----#
 
 @click.group(cls=OrderedGroup)
 @click.option('--no-banner', '-nb', is_flag=True, default=False)
@@ -49,6 +48,10 @@ def cli(no_banner):
 	pass
 
 
+#------#
+# TASK #
+#------#
+
 @cli.group(aliases=['x', 't', 'cmd'])
 def task():
 	"""Run a task."""
@@ -58,6 +61,10 @@ def task():
 for cls in ALL_TASKS:
 	config = DotMap({'name': cls.__name__, 'type': 'task'})
 	register_runner(task, config)
+
+#----------#
+# WORKFLOW #
+#----------#
 
 
 @cli.group(cls=OrderedGroup, aliases=['w', 'wf', 'flow'])
@@ -70,6 +77,10 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 	register_runner(workflow, config)
 
 
+#------#
+# SCAN #
+#------#
+
 @cli.group(cls=OrderedGroup, aliases=['z', 's', 'sc'])
 def scan():
 	"""Run a scan."""
@@ -80,10 +91,49 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
 
 
-@cli.group(aliases=['u'])
-def utils():
-	"""Utilities."""
-	pass
+#--------#
+# WORKER #
+#--------#
+
+@cli.command(context_settings=dict(ignore_unknown_options=True))
+@click.option('-n', '--hostname', type=str, default='runner', help='Celery worker hostname (unique).')
+@click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
+@click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
+@click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
+@click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
+@click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
+@click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
+@click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
+@click.option('--show', is_flag=True, help='Show command (celery multi).')
+def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
+	"""Workers."""
+	if check:
+		is_celery_worker_alive()
+		return
+	if not queue:
+		queue = 'io,cpu,' + ','.join([r['queue'] for r in app.conf.task_routes.values()])
+	app_str = 'secator.celery.app'
+	if dev:
+		subcmd = 'stop' if stop else 'show' if show else 'start'
+		logfile = '%n.log'
+		pidfile = '%n.pid'
+		queues = '-Q:1 celery -Q:2 io -Q:3 cpu'
+		concur = '-c:1 10 -c:2 100 -c:3 4'
+		pool = 'eventlet'
+		cmd = f'celery -A {app_str} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
+	else:
+		cmd = f'celery -A {app_str} worker -n {hostname} -Q {queue}'
+	if pool:
+		cmd += f' -P {pool}'
+	if concurrency:
+		cmd += f' -c {concurrency}'
+	if reload:
+		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
+		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
+	Command.run_command(
+		cmd,
+		**DEFAULT_CMD_OPTS
+	)
 
 
 #--------#
@@ -134,130 +184,214 @@ def report_show(json_path, exclude_fields):
 # 	pass
 
 
-#--------#
-# WORKER #
-#--------#
+#---------#
+# INSTALL #
+#---------#
 
-@cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.option('-n', '--hostname', type=str, default='runner', help='Celery worker hostname (unique).')
-@click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
-@click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
-@click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
-@click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
-@click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
-@click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
-@click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
-@click.option('--show', is_flag=True, help='Show command (celery multi).')
-def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
-	"""Celery worker."""
-	if check:
-		is_celery_worker_alive()
-		return
-	if not queue:
-		queue = 'io,cpu,' + ','.join([r['queue'] for r in app.conf.task_routes.values()])
-	app_str = 'secator.celery.app'
-	if dev:
-		subcmd = 'stop' if stop else 'show' if show else 'start'
-		logfile = '%n.log'
-		pidfile = '%n.pid'
-		queues = '-Q:1 celery -Q:2 io -Q:3 cpu'
-		concur = '-c:1 10 -c:2 100 -c:3 4'
-		pool = 'eventlet'
-		cmd = f'celery -A {app_str} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
-	else:
-		cmd = f'celery -A {app_str} worker -n {hostname} -Q {queue}'
-	if pool:
-		cmd += f' -P {pool}'
-	if concurrency:
-		cmd += f' -c {concurrency}'
-	if reload:
-		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
-		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
-	Command.run_command(
-		cmd,
-		**DEFAULT_CMD_OPTS
+@cli.command('health')
+@click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
+@click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
+def health(json, debug):
+	"""Health."""
+	tools = [cls for cls in ALL_TASKS]
+	status = {'tools': {}, 'languages': {}, 'secator': {'cli': {}, 'worker': {}}}
+
+	def check_ret_code(ret):
+		if ret.return_code == 0:
+			return True
+		elif ret.return_code == 2 and ret.cmd.split(' ')[0] == 'searchsploit':
+			return True
+		return False
+
+	def state_to_str(ret):
+		return '[bold green]ok[/]' if check_ret_code(ret) else '[bold red]failed[/]'
+
+	# Check secator CLI + worker
+	console.print(':wrench: [bold gold3]Checking secator ...[/]')
+	ret = Command.run_command(
+		'secator --help',
+		print_cmd=False,
+		quiet=not debug
 	)
+	if not json:
+		console.print(f'[bold magenta]cli[/]: {state_to_str(ret)}')
+		status['secator']['cli'] = {'installed': ret.return_code == 0}
+
+	ok = '[bold green]up[/]' if is_celery_worker_alive() else '[bold red]down[/]'
+	if not json:
+		console.print(f'[bold magenta]worker[/]: {ok}')
+		status['secator']['worker'] = {'running': ok}
+
+	# Check languages
+	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
+	for cmd in ['go version', 'python3 --help', 'ruby --help', 'rustc']:
+		lang = cmd.split(' ')[0]
+		ret = Command.run_command(
+			cmd,
+			print_cmd=False,
+			quiet=not debug
+		)
+		if not json:
+			console.print(f'[bold magenta]{lang}[/]: {state_to_str(ret)}')
+		status['languages'][lang.split(' ')[0]] = {'installed': ret.return_code == 0}
+
+	# Check tools
+	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
+	for tool in tools:
+		ret = Command.run_command(
+			tool.cmd.split(' ')[0] + f' {tool.opt_prefix}help',
+			print_cmd=False,
+			quiet=not debug
+		)
+		if not json:
+			console.print(f'[bold magenta]{tool.__name__}[/]: {state_to_str(ret)}')
+		status['tools'][tool.__name__] = {'installed': check_ret_code(ret)}
+	if json:
+		console.print(status)
 
 
-#-------#
-# UTILS #
-#-------#
+@cli.group(aliases=['i'])
+def install():
+	"Installations."
+	pass
 
 
-@utils.command()
+@install.command('go')
+def install_go():
+	"""Install Go."""
+	with console.status('[bold yellow] Installing Go...'):
+		ret = Command.run_command(
+			'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
+			cls_attributes={'shell': True},
+			cwd=DATA_FOLDER,
+			print_cmd=True,
+			print_line=True
+		)
+		if ret.return_code != 0:
+			console.print(':exclamation_mark: Failed to install Go.', style='bold red')
+		else:
+			console.print(':tada: Go installed successfully !', style='bold green')
+
+
+@install.command('ruby')
+def install_ruby():
+	"""Install Ruby."""
+	with console.status('[bold yellow] Installing Ruby...'):
+		ret = Command.run_command(
+			'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
+			cls_attributes={'shell': True},
+			cwd=DATA_FOLDER,
+			print_cmd=True,
+			print_line=True
+		)
+		if ret.return_code != 0:
+			console.print(':exclamation_mark: Failed to install Ruby.', style='bold red')
+		else:
+			console.print(':tada: Ruby installed successfully !', style='bold green')
+
+
+@install.command('tools')
 @click.argument('cmds', required=False)
-def install(cmds):
-	"""Install secator-supported commands."""
+def install_tools(cmds):
+	"""Install supported tools."""
 	if cmds is not None:
 		cmds = cmds.split(',')
-		cmds = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
+		tools = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
 	else:
-		cmds = ALL_TASKS
-	for ix, cls in enumerate(cmds):
-		with console.status(f'[bold yellow][{ix}/{len(cmds)}] Installing {cls.__name__} ...'):
+		tools = ALL_TASKS
+
+	for ix, cls in enumerate(tools):
+		with console.status(f'[bold yellow][{ix}/{len(tools)}] Installing {cls.__name__} ...'):
 			cls.install()
 		console.print()
 
 
-@utils.command()
-@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
-@click.option('--number', '-n', type=int, default=1, help='Number of proxies')
-def get_proxy(timeout, number):
-	"""Get a random proxy."""
-	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
-	for _ in range(number):
-		url = proxy.get()
-		print(url)
-
-
-@utils.command()
+@install.command('cves')
 @click.option('--force', is_flag=True)
-def download_cves(force):
-	"""Download CVEs to file system. CVE lookup perf is improved quite a lot."""
-	cve_json_path = f'{DATA_FOLDER}/circl-cve-search-expanded.json'
+def install_cves(force):
+	"""Install CVEs to file system for passive vulnerability search."""
+	cve_json_path = f'{CVES_FOLDER}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		Command.run_command(
 			'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
-			cwd=DATA_FOLDER,
+			cwd=CVES_FOLDER,
 			**DEFAULT_CMD_OPTS
 		)
 		Command.run_command(
-			f'gunzip {DATA_FOLDER}/circl-cve-search-expanded.json.gz',
-			cwd=DATA_FOLDER,
+			f'gunzip {CVES_FOLDER}/circl-cve-search-expanded.json.gz',
+			cwd=CVES_FOLDER,
 			**DEFAULT_CMD_OPTS
 		)
-	os.makedirs(CVES_FOLDER, exist_ok=True)
 	with console.status('[bold yellow]Saving CVEs to disk ...[/]'):
-		with open(f'{DATA_FOLDER}/circl-cve-search-expanded.json', 'r') as f:
+		with open(cve_json_path, 'r') as f:
 			for line in f:
 				data = json.loads(line)
 				cve_id = data['id']
-				cve_path = f'{DATA_FOLDER}/cves/{cve_id}.json'
+				cve_path = f'{CVES_FOLDER}/{cve_id}.json'
 				with open(cve_path, 'w') as f:
 					f.write(line)
 				console.print(f'CVE saved to {cve_path}')
 
 
-@utils.command()
-def generate_bash_install():
-	"""Generate bash install script for all secator-supported tasks."""
-	path = ROOT_FOLDER + '/scripts/install_commands.sh'
-	with open(path, 'w') as f:
-		f.write('#!/bin/bash\n\n')
-		for task in ALL_TASKS:
-			if task.install_cmd:
-				f.write(f'# {task.__name__}\n')
-				f.write(task.install_cmd + ' || true' + '\n\n')
-	Command.run_command(
-		f'chmod +x {path}',
-		**DEFAULT_CMD_OPTS
-	)
-	console.print(f':file_cabinet: [bold green]Saved install script to {path}[/]')
+#-------#
+# ALIAS #
+#-------#
 
 
-@utils.command()
-def enable_aliases():
+@cli.group(aliases=['a'])
+def alias():
+	"""Aliases."""
+	pass
+
+
+@alias.command('enable')
+@click.pass_context
+def enable_aliases(ctx):
 	"""Enable aliases."""
+	fpath = f'{DATA_FOLDER}/.aliases'
+	aliases = ctx.invoke(list_aliases, silent=True)
+	aliases_str = '\n'.join(aliases)
+	with open(fpath, 'w') as f:
+		f.write(aliases_str)
+	console.print('')
+	console.print(f':file_cabinet: Alias file written to {fpath}', style='bold green')
+	console.print('To load the aliases, run:')
+	md = f"""
+```sh
+source {fpath}                     # load the aliases in the current shell
+echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load them automatically
+```
+"""
+	console.print(Markdown(md))
+	console.print()
+
+
+@alias.command('disable')
+@click.pass_context
+def disable_aliases(ctx):
+	"""Disable aliases."""
+	fpath = f'{DATA_FOLDER}/.unalias'
+	aliases = ctx.invoke(list_aliases, silent=True)
+	aliases_str = ''
+	for alias in aliases:
+		aliases_str += alias.split('=')[0].replace('alias', 'unalias') + '\n'
+	console.print(f':file_cabinet: Unalias file written to {fpath}', style='bold green')
+	console.print('To unload the aliases, run:')
+	with open(fpath, 'w') as f:
+		f.write(aliases_str)
+	md = f"""
+```sh
+source {fpath}
+```
+"""
+	console.print(Markdown(md))
+	console.print()
+
+
+@alias.command('list')
+@click.option('--silent', is_flag=True, default=False, help='No print')
+def list_aliases(silent):
+	"""List aliases"""
 	aliases = []
 	aliases.extend([
 		f'alias {task.__name__}="secator x {task.__name__}"'
@@ -278,34 +412,55 @@ def enable_aliases():
 	aliases.append('alias listx="secator x"')
 	aliases.append('alias listw="secator w"')
 	aliases.append('alias lists="secator s"')
-	aliases_str = '\n'.join(aliases)
 
-	fpath = f'{DATA_FOLDER}/.aliases'
-	with open(fpath, 'w') as f:
-		f.write(aliases_str)
+	if silent:
+		return aliases
 	console.print('Aliases:')
 	for alias in aliases:
 		alias_split = alias.split('=')
 		alias_name, alias_cmd = alias_split[0].replace('alias ', ''), alias_split[1].replace('"', '')
 		console.print(f'[bold magenta]{alias_name:<15}-> {alias_cmd}')
 
-	console.print(f':file_cabinet: Alias file written to {fpath}', style='bold green')
-	console.print('To load the aliases, run:')
-	md = f"""
-```sh
-source {fpath}                     # load the aliases in the current shell
-echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load them automatically
-```
-"""
-	console.print(Markdown(md))
-	console.print()
+	return aliases
+
+
+#-------#
+# UTILS #
+#-------#
+
+
+@cli.group(aliases=['u'])
+def utils():
+	"""Utilities."""
+	pass
 
 
 @utils.command()
-def disable_aliases():
-	"""Disable aliases."""
-	for task in ALL_TASKS:
-		Command.run_command(f'unalias {task.name}', cls_attributes={'shell': True})
+def bash_install():
+	"""Generate bash install script for all secator-supported tasks."""
+	path = ROOT_FOLDER + '/scripts/install_commands.sh'
+	with open(path, 'w') as f:
+		f.write('#!/bin/bash\n\n')
+		for task in ALL_TASKS:
+			if task.install_cmd:
+				f.write(f'# {task.__name__}\n')
+				f.write(task.install_cmd + ' || true' + '\n\n')
+	Command.run_command(
+		f'chmod +x {path}',
+		**DEFAULT_CMD_OPTS
+	)
+	console.print(f':file_cabinet: [bold green]Saved install script to {path}[/]')
+
+
+@utils.command()
+@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
+@click.option('--number', '-n', type=int, default=1, help='Number of proxies')
+def get_proxy(timeout, number):
+	"""Get a random proxy."""
+	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
+	for _ in range(number):
+		url = proxy.get()
+		print(url)
 
 
 @utils.command()
@@ -546,7 +701,7 @@ def record(record_name, script, interactive, width, height, output_dir):
 
 @cli.group()
 def test():
-	"""Run tests."""
+	"""Tests."""
 	pass
 
 
@@ -561,7 +716,7 @@ def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
-	cmd = 'python -m unittest'
+	cmd = f'{sys.executable} -m unittest'
 	if test:
 		if not test.startswith('tests.integration'):
 			test = f'tests.integration.{test}'
@@ -570,6 +725,7 @@ def integration(tasks, workflows, scans, test, debug):
 		cmd += ' discover -v tests.integration'
 	result = Command.run_command(
 		cmd,
+		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
 	sys.exit(result.return_code)
@@ -587,8 +743,9 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
+	os.environ['STORE_HTTP_RESPONSES'] = '0'
 
-	cmd = 'coverage run --omit="*test*" -m unittest'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
 	if test:
 		if not test.startswith('tests.unit'):
 			test = f'tests.unit.{test}'
@@ -598,11 +755,12 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 
 	result = Command.run_command(
 		cmd,
+		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
 	if coverage:
 		Command.run_command(
-			'coverage report -m',
+			f'{sys.executable} -m coverage report -m',
 			**DEFAULT_CMD_OPTS
 		)
 	sys.exit(result.return_code)
@@ -611,7 +769,8 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 @test.command()
 def lint():
 	result = Command.run_command(
-		'flake8 secator/',
+		f'{sys.executable} -m flake8 secator/',
+		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
 	sys.exit(result.return_code)

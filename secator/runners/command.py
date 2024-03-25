@@ -1,3 +1,4 @@
+import getpass
 import logging
 import os
 import re
@@ -262,9 +263,9 @@ class Command(Runner):
 	@classmethod
 	def install(cls):
 		"""Install command by running the content of cls.install_cmd."""
-		console.log(f':pill: Installing {cls.__name__}...', style='bold yellow')
+		console.print(f':heavy_check_mark: Installing {cls.__name__}...', style='bold yellow')
 		if not cls.install_cmd:
-			console.log(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
+			console.print(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
 			return
 		ret = cls.run_command(
 			cls.install_cmd,
@@ -274,9 +275,9 @@ class Command(Runner):
 			cls_attributes={'shell': True}
 		)
 		if ret.return_code != 0:
-			console.log(f'Failed to install {cls.__name__}.', style='bold red')
+			console.print(f':exclamation_mark: Failed to install {cls.__name__}.', style='bold red')
 		else:
-			console.log(f'{cls.__name__} installed successfully !', style='bold green')
+			console.print(f':tada: {cls.__name__} installed successfully !', style='bold green')
 		return ret
 
 	@classmethod
@@ -352,6 +353,9 @@ class Command(Runner):
 		# Callback before running command
 		self.run_hooks('on_start')
 
+		# Check for sudo requirements and prepare the password if needed
+		sudo_password = self._prompt_sudo(self.cmd)
+
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
 
@@ -365,6 +369,7 @@ class Command(Runner):
 			env.update(self.env)
 			process = subprocess.Popen(
 				command,
+				stdin=subprocess.PIPE if sudo_password else None,
 				stdout=sys.stdout if self.no_capture else subprocess.PIPE,
 				stderr=sys.stderr if self.no_capture else subprocess.STDOUT,
 				universal_newlines=True,
@@ -372,11 +377,16 @@ class Command(Runner):
 				env=env,
 				cwd=self.cwd)
 
+			# If sudo password is provided, send it to stdin
+			if sudo_password:
+				process.stdin.write(f"{sudo_password}\n")
+				process.stdin.flush()
+
 		except FileNotFoundError as e:
 			if self.config.name in str(e):
 				error = 'Executable not found.'
 				if self.install_cmd:
-					error += f' Install it with `secator utils install {self.config.name}`.'
+					error += f' Install it with `secator install tools {self.config.name}`.'
 			else:
 				error = str(e)
 			celery_id = self.context.get('celery_id', '')
@@ -384,8 +394,6 @@ class Command(Runner):
 				error += f' [{celery_id}]'
 			self.errors.append(error)
 			self.return_code = 1
-			if error:
-				self._print(error, color='bold red')
 			return
 
 		try:
@@ -453,6 +461,48 @@ class Command(Runner):
 				items.extend(result)
 		return items
 
+	def _prompt_sudo(self, command):
+		"""
+		Checks if the command requires sudo and prompts for the password if necessary.
+
+		Args:
+			command (str): The initial command to be executed.
+
+		Returns:
+			str or None: The sudo password if required; otherwise, None.
+		"""
+		sudo_password = None
+
+		# Check if sudo is required by the command
+		if not re.search(r'\bsudo\b', command):
+			return None
+
+		# Check if sudo can be executed without a password
+		if subprocess.run(['sudo', '-n', 'true'], capture_output=True).returncode == 0:
+			return None
+
+		# Check if we have a tty
+		if not os.isatty(sys.stdin.fileno()):
+			self._print("No TTY detected. Sudo password prompt requires a TTY to proceed.", color='bold red')
+			sys.exit(1)
+
+		# If not, prompt the user for a password
+		self._print('[bold red]Please enter sudo password to continue.[/]')
+		for _ in range(3):
+			self._print('\[sudo] password: ')
+			sudo_password = getpass.getpass()
+			result = subprocess.run(
+				['sudo', '-S', '-p', '', 'true'],
+				input=sudo_password + "\n",
+				text=True,
+				capture_output=True
+			)
+			if result.returncode == 0:
+				return sudo_password  # Password is correct
+			self._print("Sorry, try again.")
+		self._print("Sudo password verification failed after 3 attempts.")
+		return None
+
 	def _wait_for_end(self, process):
 		"""Wait for process to finish and process output and return code."""
 		process.wait()
@@ -469,11 +519,9 @@ class Command(Runner):
 
 		if self.return_code == -2 or self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			self._print(error, color='bold red')
 			self.errors.append(error)
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}.'
-			self._print(error, color='bold red')
 			self.errors.append(error)
 
 	@staticmethod
