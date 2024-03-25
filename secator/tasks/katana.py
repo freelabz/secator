@@ -114,11 +114,6 @@ class katana(HttpCrawler):
 			self.cmd += f' -sr -srd {output_path}'
 
 	@staticmethod
-	def on_end(self):
-		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(self.output_response_path + '/index.txt'):
-			os.remove(self.output_response_path + '/index.txt')
-
-	@staticmethod
 	def on_item(self, item):
 		if not isinstance(item, Url):
 			return item
@@ -131,3 +126,8 @@ class katana(HttpCrawler):
 				fout.writelines('\n')
 				fout.writelines(first_line)
 		return item
+
+	@staticmethod
+	def on_end(self):
+		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(self.output_response_path + '/index.txt'):
+			os.remove(self.output_response_path + '/index.txt')
