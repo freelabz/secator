@@ -188,9 +188,9 @@ def report_show(json_path, exclude_fields):
 # 	pass
 
 
-#---------#
-# INSTALL #
-#---------#
+#--------#
+# HEALTH #
+#--------#
 
 
 def which(command):
@@ -204,7 +204,8 @@ def which(command):
 	"""
 	return Command.run_command(
 		f'which {command}',
-		quiet=True
+		quiet=True,
+		print_errors=False
 	)
 
 
@@ -230,11 +231,15 @@ def get_version(version_cmd):
 
 	Args:
 		version_cmd (str): Command to get the version.
+
+	Returns:
+		str: Version string.
 	"""
 	regex = r'[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
 	ret = Command.run_command(
 		version_cmd,
-		quiet=True
+		quiet=True,
+		print_errors=False
 	)
 	match = re.findall(regex, ret.output)
 	if not match:
@@ -250,11 +255,16 @@ def health(json, debug):
 	tools = [cls for cls in ALL_TASKS]
 	status = {'tools': {}, 'languages': {}, 'secator': {}}
 
-	def print_status(cmd, return_code, version=None, bin=None):
+	def print_status(cmd, return_code, version=None, bin=None, category=None):
 		s = '[bold green]ok     [/]' if return_code == 0 else '[bold red]failed [/]'
 		s = f'[bold magenta]{cmd:<15}[/] {s} '
 		if return_code == 0 and version:
-			s += f'[bold blue]{version:<12}[/]'
+			if version == 'N/A':
+				s += f'[dim blue]{version:<12}[/]'
+			else:
+				s += f'[bold blue]{version:<12}[/]'
+		elif category:
+			s += ' '*12 + f'[dim]# secator install {category} {cmd}'
 		if bin:
 			s += f'[dim gold3]{bin}[/]'
 		console.print(s, highlight=False)
@@ -263,7 +273,7 @@ def health(json, debug):
 	console.print(':wrench: [bold gold3]Checking secator ...[/]')
 	ret = which('secator')
 	if not json:
-		print_status('secator', ret.return_code, VERSION, ret.output)
+		print_status('secator', ret.return_code, VERSION, ret.output, None)
 	status['secator'] = {'installed': ret.return_code == 0}
 
 	# Check languages
@@ -273,7 +283,7 @@ def health(json, debug):
 		ret = which(lang)
 		ret2 = get_version(f'{lang} {version_flag}')
 		if not json:
-			print_status(lang, ret.return_code, ret2, ret.output)
+			print_status(lang, ret.return_code, ret2, ret.output, 'lang')
 		status['languages'][lang] = {'installed': ret.return_code == 0}
 
 	# Check tools
@@ -283,12 +293,16 @@ def health(json, debug):
 		ret = which(cmd)
 		ret2 = version(tool)
 		if not json:
-			print_status(tool.__name__, ret.return_code, ret2, ret.output)
+			print_status(tool.__name__, ret.return_code, ret2, ret.output, 'tools')
 		status['tools'][tool.__name__] = {'installed': ret.return_code == 0}
 
 	# Print JSON health
 	if json:
 		console.print(status)
+
+#---------#
+# INSTALL #
+#---------#
 
 
 @cli.group(aliases=['i'])
@@ -297,7 +311,13 @@ def install():
 	pass
 
 
-@install.command('go')
+@install.group()
+def lang():
+	"Languages."
+	pass
+
+
+@lang.command('go')
 def install_go():
 	"""Install Go."""
 	with console.status('[bold yellow] Installing Go...'):
@@ -314,7 +334,7 @@ def install_go():
 			console.print(':tada: Go installed successfully !', style='bold green')
 
 
-@install.command('ruby')
+@lang.command('ruby')
 def install_ruby():
 	"""Install Ruby."""
 	with console.status('[bold yellow] Installing Ruby...'):

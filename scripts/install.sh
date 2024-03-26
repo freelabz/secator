@@ -11,8 +11,8 @@ echo -e "🗄 ${YELLOW}Installing secator ...${NC}"
 pipx install secator
 echo -e "🗄 ${GREEN}secator installed successfully !${NC}\n"
 
-secator install go
-secator install ruby
+secator install lang go
+secator install lang ruby
 secator install tools
 
 echo -e "🗄 ${YELLOW}Adding ~/go/bin and ~/.local/bin to .bashrc ...${NC}"

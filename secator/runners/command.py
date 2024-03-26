@@ -284,10 +284,11 @@ class Command(Runner):
 		return ret
 
 	@classmethod
-	def run_command(cls, cmd, name='helperClass', cls_attributes={}, **kwargs):
+	def run_command(cls, cmd, name=None, cls_attributes={}, **kwargs):
 		"""Run adhoc command. Can be used without defining an inherited class to run a command, while still enjoying
 		all the good stuff in this class.
 		"""
+		name = name or cmd.split(' ')[0]
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)

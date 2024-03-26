@@ -138,6 +138,7 @@ class Runner:
 		self.print_start = self.run_opts.pop('print_start', False)
 		self.print_item = self.run_opts.pop('print_item', False)
 		self.print_line = self.run_opts.pop('print_line', self.sync and not self.output_quiet)
+		self.print_errors = self.run_opts.pop('print_errors', True)
 		self.print_item_count = self.run_opts.pop('print_item_count', False)
 		self.print_cmd = self.run_opts.pop('print_cmd', False)
 		self.print_run_opts = self.run_opts.pop('print_run_opts', DEBUG > 1)
@@ -465,7 +466,7 @@ class Runner:
 				self._print(f'   • {info}', color='bold green', rich=True)
 
 		# Log runner errors
-		if self.errors and not self.output_quiet:
+		if self.errors and self.print_errors:
 			self._print(
 				f':exclamation_mark:[bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)

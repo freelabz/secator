@@ -83,37 +83,20 @@ check that the tool complies with our selection criterias before doing so. If it
 
 ## Installation
 
-`secator` requires **Python >= 3.8** and **`pipx`** (or **`pip`**).
+### Installing secator
+
+`secator` requires **Python >= 3.8**.
+
 
 <details>
-  <summary>Bash (bundle)</summary>
-
-    wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
-
-This script is an all-in-one bundle that installs `secator`, the latest Go and Ruby versions, and all the tools supported by `secator`.
-</details>
-
-<details>
-	<summary>PyPI (stable)</summary>
+	<summary>Pipx (stable)</summary>
 
 	pipx install secator
 
-  ***Notes:***
-  * Make sure `~/.local/bin/` is added to your `PATH` since this is where `pipx` install binaries.
-  * You can also use `pip install secator` but make sure you are in a virtual environment.
-
-  To install `secator` tools:
-
-	secator install go    # latest version of Go
-	secator install ruby  # latest version of Ruby
-	secator install tools # supported tools
-
-  ***Note:*** you can skip these steps if you are managing Go, Ruby, or tools externally, or don't want to install everything.
-
 </details>
 
 <details>
-	<summary>PyPI (development)</summary>
+	<summary>Pipx (development)</summary>
 
   ```sh
 git clone https://github.com/freelabz/secator
@@ -121,9 +104,12 @@ cd secator
 pipx install -e .[dev]
   ```
 
-  ***Notes:***
-  * Make sure `~/.local/bin/` is added to your `PATH` since this is where `pipx` install binaries.
-  * You can also use `pip install secator` but make sure you are in a virtual environment !
+</details>
+
+<details>
+  <summary>Bash</summary>
+
+    wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
 
 </details>
 
@@ -132,8 +118,47 @@ pipx install -e .[dev]
 
 	docker run -it freelabz/secator --help
 
-The Docker image is quite big, because it contains all the tools supported by `secator`.
 </details>
+
+<details>
+	<summary>Docker Compose</summary>
+
+	docker run -it freelabz/secator --help
+
+</details>
+
+***Note:*** If you chose the Bash or Docker installation methods, you can skip the next sections #installing-languages and #installing-tools.
+
+### Installing languages
+
+Since `secator` uses external tools, you might need to install languages used by those tools assuming they are not already installed on your system.
+
+We provide utilities to install required languages if you don't manage them externally:
+```sh
+secator install lang go   # install Go
+secator install lang ruby # install Ruby
+```
+
+### Installing tools
+
+By default, `secator` does not install any of the external tools it supports.
+
+If for instance you are using Kali Linux, most commands will already be installed on the system and we do not want to tamper with their installation.
+
+However, we provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
+```sh
+secator install tools httpx  # install httpx
+secator install tools        # install all supported tools
+```
+
+Please make sure you are using the latest available versions for each tool before you run secator or you might run into parsing / formatting issues.
+
+### Checking installation health
+
+To figure out which languages or tools are installed on your system (along with their version):
+```sh
+secator health
+```
 
 ## Usage
 ```sh

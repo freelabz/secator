@@ -23,6 +23,7 @@ class ffuf(HttpFuzzer):
 	input_chunk_size = 1
 	file_flag = None
 	json_flag = '-json'
+	version_flag = '-V'
 	item_loaders = [
 		JSONSerializer(),
 		RegexSerializer(FFUF_PROGRESS_REGEX, fields=['count', 'total', 'rps', 'duration', 'errors'])
