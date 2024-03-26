@@ -79,6 +79,9 @@ class Command(Runner):
 	# Flag to enable output JSON
 	json_flag = None
 
+	# Flag to show version
+	version_flag = None
+
 	# Install command
 	install_cmd = None
 
@@ -428,7 +431,7 @@ class Command(Runner):
 					items = self.run_item_loaders(line)
 
 				# Yield line if no items parsed
-				if not items and not self.output_quiet:
+				if not items:
 					yield line
 
 				# Turn results into list if not already a list

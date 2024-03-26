@@ -14,7 +14,7 @@ from secator.celery import app, is_celery_worker_alive
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,
-								 PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER)
+								 PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, OPT_NOT_SUPPORTED, VERSION)
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -39,13 +39,17 @@ debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='
 # CLI #
 #-----#
 
-@click.group(cls=OrderedGroup)
+@click.group(cls=OrderedGroup, invoke_without_command=True)
 @click.option('--no-banner', '-nb', is_flag=True, default=False)
-def cli(no_banner):
+@click.option('--version', '-version', is_flag=True, default=False)
+@click.pass_context
+def cli(ctx, no_banner, version):
 	"""Secator CLI."""
 	if not no_banner:
 		print(ASCII, file=sys.stderr)
-	pass
+	if ctx.invoked_subcommand is None:
+		if version:
+			print(f'Current Version: v{VERSION}')
 
 
 #------#
@@ -188,64 +192,93 @@ def report_show(json_path, exclude_fields):
 # INSTALL #
 #---------#
 
+
+def which(command):
+	return Command.run_command(
+		f'which {command}',
+		quiet=True
+	)
+
+
+def version(cls):
+	"""Get version for a Command.
+
+	Args:
+		cls: Command class.
+
+	Returns:
+		string: Version string or 'n/a' if not found.
+	"""
+	base_cmd = cls.cmd.split(' ')[0]
+	if cls.version_flag == OPT_NOT_SUPPORTED:
+		return 'N/A'
+	version_flag = cls.version_flag or f'{cls.opt_prefix}version'
+	version_cmd = f'{base_cmd} {version_flag}'
+	return get_version(version_cmd)
+
+
+def get_version(version_cmd):
+	"""Run version command and match first version number found.
+
+	Args:
+		version_cmd (str): Command to get the version.
+	"""
+	regex = r'[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
+	ret = Command.run_command(
+		version_cmd,
+		quiet=True
+	)
+	match = re.findall(regex, ret.output)
+	if not match:
+		return 'n/a'
+	return match[0]
+
+
 @cli.command('health')
 @click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
 def health(json, debug):
 	"""Health."""
 	tools = [cls for cls in ALL_TASKS]
-	status = {'tools': {}, 'languages': {}, 'secator': {'cli': {}, 'worker': {}}}
+	status = {'tools': {}, 'languages': {}, 'secator': {}}
 
-	def check_ret_code(ret):
-		if ret.return_code == 0:
-			return True
-		elif ret.return_code == 2 and ret.cmd.split(' ')[0] == 'searchsploit':
-			return True
-		return False
+	def print_status(cmd, return_code, version=None, bin=None):
+		s = '[bold green]ok   [/]' if return_code == 0 else '[bold red]failed[/]'
+		s = f'[bold magenta]{cmd:<15}[/] {s} '
+		if version:
+			s += f'[bold blue]{version:<12}[/]'
+		if bin:
+			s += f'[dim gold3]{bin}[/]'
+		console.print(s, highlight=False)
 
-	def state_to_str(ret):
-		return '[bold green]ok[/]' if check_ret_code(ret) else '[bold red]failed[/]'
-
-	# Check secator CLI + worker
+	# Check secator
 	console.print(':wrench: [bold gold3]Checking secator ...[/]')
-	ret = Command.run_command(
-		'secator --help',
-		print_cmd=False,
-		quiet=not debug
-	)
+	ret = which('secator')
 	if not json:
-		console.print(f'[bold magenta]cli[/]: {state_to_str(ret)}')
-		status['secator']['cli'] = {'installed': ret.return_code == 0}
-
-	ok = '[bold green]up[/]' if is_celery_worker_alive() else '[bold red]down[/]'
-	if not json:
-		console.print(f'[bold magenta]worker[/]: {ok}')
-		status['secator']['worker'] = {'running': ok}
+		print_status('secator', ret.return_code, VERSION, ret.output)
+	status['secator'] = {'installed': ret.return_code == 0}
 
 	# Check languages
 	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
-	for cmd in ['go version', 'python3 --help', 'ruby --help', 'rustc']:
-		lang = cmd.split(' ')[0]
-		ret = Command.run_command(
-			cmd,
-			print_cmd=False,
-			quiet=not debug
-		)
+	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version', 'rustc': '--version'}
+	for lang, version_flag in version_cmds.items():
+		ret = which(lang)
+		ret2 = get_version(f'{lang} {version_flag}')
 		if not json:
-			console.print(f'[bold magenta]{lang}[/]: {state_to_str(ret)}')
-		status['languages'][lang.split(' ')[0]] = {'installed': ret.return_code == 0}
+			print_status(lang, ret.return_code, ret2, ret.output)
+		status['languages'][lang] = {'installed': ret.return_code == 0}
 
 	# Check tools
 	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
 	for tool in tools:
-		ret = Command.run_command(
-			tool.cmd.split(' ')[0] + f' {tool.opt_prefix}help',
-			print_cmd=False,
-			quiet=not debug
-		)
+		cmd = tool.cmd.split(' ')[0]
+		ret = which(cmd)
+		ret2 = version(tool)
 		if not json:
-			console.print(f'[bold magenta]{tool.__name__}[/]: {state_to_str(ret)}')
-		status['tools'][tool.__name__] = {'installed': check_ret_code(ret)}
+			print_status(tool.__name__, ret.return_code, ret2, ret.output)
+		status['tools'][tool.__name__] = {'installed': ret.return_code == 0}
+
+	# Print JSON health
 	if json:
 		console.print(status)
 

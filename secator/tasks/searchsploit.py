@@ -1,6 +1,6 @@
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
-								 PROVIDER, REFERENCE, TAGS)
+								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
 from secator.output_types import Exploit
 from secator.runners import Command
 
@@ -11,6 +11,7 @@ class searchsploit(Command):
 	cmd = 'searchsploit'
 	input_flag = None
 	json_flag = '--json'
+	version_flag = OPT_NOT_SUPPORTED
 	opts = {
 		'strict': {'short': 's', 'is_flag': True, 'default': False, 'help': 'Strict match'}
 	}

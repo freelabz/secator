@@ -16,6 +16,7 @@ class h8mail(OSInt):
 	input_flag = '--targets'
 	input_type = EMAIL
 	file_flag = '-domain'
+	version_flag = '--help'
 	opt_prefix = '--'
 	opt_key_map = {
 

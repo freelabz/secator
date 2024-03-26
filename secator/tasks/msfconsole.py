@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 class msfconsole(VulnMulti):
 	"""CLI to access and work with the Metasploit Framework."""
 	cmd = 'msfconsole --quiet'
+	version_flag = OPT_NOT_SUPPORTED
 	input_type = HOST
 	input_chunk_size = 1
 	output_types = []
