@@ -312,12 +312,12 @@ def install():
 
 
 @install.group()
-def lang():
+def langs():
 	"Languages."
 	pass
 
 
-@lang.command('go')
+@langs.command('go')
 def install_go():
 	"""Install Go."""
 	with console.status('[bold yellow] Installing Go...'):
@@ -334,7 +334,7 @@ def install_go():
 			console.print(':tada: Go installed successfully !', style='bold green')
 
 
-@lang.command('ruby')
+@langs.command('ruby')
 def install_ruby():
 	"""Install Ruby."""
 	with console.status('[bold yellow] Installing Ruby...'):

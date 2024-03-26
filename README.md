@@ -146,8 +146,8 @@ Since `secator` uses external tools, you might need to install languages used by
 
 We provide utilities to install required languages if you don't manage them externally:
 ```sh
-secator install lang go   # install Go
-secator install lang ruby # install Ruby
+secator install langs go   # install Go
+secator install langs ruby # install Ruby
 ```
 
 ### Installing tools

@@ -66,8 +66,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        secator install lang go
-        secator install lang ruby
+        secator install langs go
+        secator install langs ruby
         secator install tools
 
     - name: Add GOBIN to PATH
