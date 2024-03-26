@@ -91,39 +91,50 @@ check that the tool complies with our selection criterias before doing so. If it
 <details>
 	<summary>Pipx (stable)</summary>
 
-	pipx install secator
+```sh
+pipx install secator
+```
 
 </details>
 
 <details>
 	<summary>Pipx (development)</summary>
 
-  ```sh
+```sh
 git clone https://github.com/freelabz/secator
 cd secator
 pipx install -e .[dev]
-  ```
+```
 
 </details>
 
 <details>
   <summary>Bash</summary>
 
-    wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
+```sh
+wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
+```
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	docker run -it freelabz/secator --help
+```sh
+docker run -it freelabz/secator --help
+```
 
 </details>
 
 <details>
 	<summary>Docker Compose</summary>
 
-	docker run -it freelabz/secator --help
+```sh
+git clone https://github.com/freelabz/secator
+cd secator
+docker-compose up -d
+docker-compose exec secator secator --help
+```
 
 </details>
 
