@@ -194,6 +194,14 @@ def report_show(json_path, exclude_fields):
 
 
 def which(command):
+	"""Run which on a command.
+
+	Args:
+		command (str): Command to check.
+
+	Returns:
+		secator.Command: Command instance.
+	"""
 	return Command.run_command(
 		f'which {command}',
 		quiet=True
@@ -243,9 +251,9 @@ def health(json, debug):
 	status = {'tools': {}, 'languages': {}, 'secator': {}}
 
 	def print_status(cmd, return_code, version=None, bin=None):
-		s = '[bold green]ok   [/]' if return_code == 0 else '[bold red]failed[/]'
+		s = '[bold green]ok     [/]' if return_code == 0 else '[bold red]failed [/]'
 		s = f'[bold magenta]{cmd:<15}[/] {s} '
-		if version:
+		if return_code == 0 and version:
 			s += f'[bold blue]{version:<12}[/]'
 		if bin:
 			s += f'[dim gold3]{bin}[/]'
