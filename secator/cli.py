@@ -313,7 +313,7 @@ def install():
 
 @install.group()
 def langs():
-	"Languages."
+	"Install languages."
 	pass
 
 
