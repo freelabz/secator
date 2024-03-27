@@ -85,20 +85,17 @@ check that the tool complies with our selection criterias before doing so. If it
 
 ### Installing secator
 
-`secator` requires **Python >= 3.8**.
-
-
 <details>
-	<summary>Pip (stable)</summary>
+	<summary>Pipx</summary>
 
 ```sh
-pip install secator
+pipx install secator
 ```
 
 </details>
 
 <details>
-	<summary>Pip (development)</summary>
+	<summary>Pip</summary>
 
 ```sh
 git clone https://github.com/freelabz/secator
@@ -138,12 +135,14 @@ docker-compose exec secator secator --help
 
 </details>
 
-***Note:*** If you chose the Bash or Docker installation methods, you can skip the next sections [Installating optional dependenceis](#installing-optional-dependencies), [Installing languages](#installing-languages) and [Installing tools](#installing-tools).
+***Note:*** If you chose the Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
 
 
-### Installing optional dependencies
+### Installing addons
 
-There are several optional dependencies available for `secator`:
+`secator` comes installed with the minimum amount of dependencies.
+
+There are several addons available for `secator`:
 
 <details>
 	<summary>worker</summary>
@@ -212,7 +211,7 @@ secator install addons trace
 
 ### Installing languages
 
-Since `secator` uses external tools, you might need to install languages used by those tools assuming they are not already installed on your system.
+`secator` uses external tools, so you might need to install languages used by those tools assuming they are not already installed on your system.
 
 We provide utilities to install required languages if you don't manage them externally:
 ```sh
@@ -222,11 +221,9 @@ secator install langs ruby # install Ruby
 
 ### Installing tools
 
-By default, `secator` does not install any of the external tools it supports.
+`secator` does not install any of the external tools it supports by default.
 
-If for instance you are using Kali Linux, most commands will already be installed on the system and we do not want to tamper with their installation.
-
-However, we provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
+We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
 ```sh
 secator install tools httpx  # install httpx
 secator install tools        # install all supported tools
