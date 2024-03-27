@@ -2,43 +2,10 @@ FROM kalilinux/kali-rolling
 
 ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
 
-# Install Python
-# RUN apt update -y && \
-#     apt install -y \
-# 	software-properties-common \
-#     curl \
-# 	gcc \
-#     git \
-# 	golang-go \
-#     make \
-# 	python3 \
-# 	python3-pip \
-# 	python3-venv \
-# 	ruby \
-# 	sudo \
-# 	vim \
-#     wget \
-#     zlib1g \
-#     zlib1g-dev \
-# 	libc6-dev \
-# 	libgdbm-dev \
-# 	libbz2-dev \
-# 	libffi-dev \
-# 	libreadline-dev \
-# 	libncursesw5-dev \
-# 	libsqlite3-dev \
-# 	libssl-dev \
-# 	tk-dev \
-# 	chromium \
-#     jq \
-#     openssl \
-# 	proxychains \
-# 	proxychains-ng \
-# 	&& rm -rf /var/lib/apt/lists/*
-
 RUN apt update -y && \
     apt install -y \
 	curl \
+	gcc \
 	git \
 	golang-go \
     make \
@@ -46,7 +13,8 @@ RUN apt update -y && \
 	python3 \
 	python3-pip \
 	python3-venv \
-	ruby \
+	ruby-full \
+	rubygems \
 	sudo \
 	vim \
     wget \
