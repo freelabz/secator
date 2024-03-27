@@ -1,3 +1,0 @@
-include secator/configs/workflows/*.yaml
-include secator/configs/scans/*.yaml
-include secator/configs/profiles/*.yaml

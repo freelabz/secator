@@ -10,7 +10,6 @@ from jinja2 import Template
 from rich.markdown import Markdown
 from rich.rule import Rule
 
-from secator.celery import app, is_celery_worker_alive
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,
@@ -31,8 +30,6 @@ DEFAULT_CMD_OPTS = {
 	'no_capture': True,
 	'print_cmd': True,
 }
-debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
-debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
 
 
 #-----#
@@ -111,6 +108,9 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Workers."""
+	from secator.celery import app, is_celery_worker_alive
+	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
+	debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
 	if check:
 		is_celery_worker_alive()
 		return

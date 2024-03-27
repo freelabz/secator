@@ -59,6 +59,7 @@ trace = [
   'pyinstrument',
 ]
 worker = [
+  'celery',
   'gevent',
   'eventlet',
   'flower',
