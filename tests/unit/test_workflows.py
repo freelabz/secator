@@ -1,11 +1,8 @@
-from celery import chain
-from secator.celery import app
 from secator.tasks import httpx
 import unittest
 import json
-from secator.definitions import DEBUG
+from secator.definitions import DEBUG, CELERY_ENABLED
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS
-from secator.celery import forward_results
 from secator.rich import console
 
 TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
@@ -17,6 +14,11 @@ class TestAdHocWorkflow(unittest.TestCase):
 		if not httpx in TEST_TASKS:
 			return
 
+		if not CELERY_ENABLED:
+			return
+
+		from celery import chain
+		from secator.celery import app, forward_results
 		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(TARGETS)):
 			sigs = [forward_results.si([])] + [httpx.s(target) for target in TARGETS]
 			workflow = chain(*sigs)

@@ -162,3 +162,10 @@ VULN_TYPE = 'type'
 WEBSERVER = 'webserver'
 WORDLIST = 'wordlist'
 WORDS = 'words'
+
+# Try to import Celery
+try:
+    import celery  # noqa: F401
+    CELERY_ENABLED = 1
+except ModuleNotFoundError:
+    CELERY_ENABLED = 0

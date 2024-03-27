@@ -1,4 +1,3 @@
-from secator.celery import *
 import unittest
 from secator.serializers.dataclass import dumps_dataclass, loads_dataclass
 from secator.output_types import Port, Vulnerability
