@@ -168,9 +168,9 @@ def discover_internal_tasks():
 			continue
 		try:
 			module = import_module(f'secator.tasks.{module_name}')
-		except ImportError:
-			# console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
-			# console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
+		except ImportError as e:
+			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
+			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
 			continue
 		for attribute_name in dir(module):
 			attribute = getattr(module, attribute_name)

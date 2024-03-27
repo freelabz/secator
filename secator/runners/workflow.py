@@ -1,5 +1,3 @@
-from celery import chain, chord
-
 from secator.definitions import DEBUG
 from secator.exporters import CsvExporter, JsonExporter
 from secator.output_types import Target
@@ -71,6 +69,7 @@ class Workflow(Runner):
 		Returns:
 			celery.chain: Celery task chain.
 		"""
+		from celery import chain
 		from secator.celery import forward_results
 		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
@@ -94,6 +93,7 @@ class Workflow(Runner):
 		Returns:
 			list: List of signatures.
 		"""
+		from celery import chain, chord
 		from secator.celery import forward_results
 		sigs = []
 		for task_name, task_opts in obj.items():

@@ -14,7 +14,6 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 THREADS, TIMEOUT, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability
 from secator.tasks._categories import VulnMulti
-from secator.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +91,7 @@ class nmap(VulnMulti):
 	def on_init(self):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
-			timestr = get_file_timestamp()
-			output_path = f'{self.reports_folder}/.outputs/nmap_{timestr}.xml'
+			output_path = f'{self.reports_folder}/.outputs/nmap.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
 

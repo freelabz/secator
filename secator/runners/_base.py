@@ -8,7 +8,6 @@ from datetime import datetime
 from time import sleep, time
 
 import humanize
-from celery.result import AsyncResult
 from dotmap import DotMap
 from rich.padding import Padding
 from rich.panel import Panel
@@ -502,6 +501,7 @@ class Runner:
 		Yields:
 			dict: Subtasks state and results.
 		"""
+		from celery.result import AsyncResult
 		res = AsyncResult(result.id)
 		while True:
 			# Yield results

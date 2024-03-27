@@ -3,10 +3,9 @@ import logging
 import traceback
 from time import sleep
 
-import celery
-from celery import chain, chord, signals
+from celery import Celery, chain, chord, signals
 from celery.app import trace
-from celery.result import AsyncResult, allow_join_result
+from celery.result import AsyncResult, GroupResult, allow_join_result
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
@@ -42,9 +41,8 @@ logger = logging.getLogger(__name__)
 trace.LOG_SUCCESS = """\
 Task %(name)s[%(id)s] succeeded in %(runtime)ss\
 """
-discover_tasks()  # TODO: remove dirty fix
 
-app = celery.Celery(__name__)
+app = Celery(__name__)
 app.conf.update({
 	# Worker config
 	'worker_send_task_events': True,
@@ -450,13 +448,13 @@ def get_nested_results(result, results=[]):
 	if result is None:
 		return
 
-	if isinstance(result, celery.result.GroupResult):
+	if isinstance(result, GroupResult):
 		console.log(repr(result))
 		get_nested_results(result.parent, results=results)
 		for child in result.children:
 			get_nested_results(child, results=results)
 
-	elif isinstance(result, celery.result.AsyncResult):
+	elif isinstance(result, AsyncResult):
 		console.log(repr(result))
 		res = result.get()
 		console.log(f'-> Found {len(res)} results.')

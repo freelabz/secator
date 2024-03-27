@@ -89,21 +89,21 @@ check that the tool complies with our selection criterias before doing so. If it
 
 
 <details>
-	<summary>Pipx (stable)</summary>
+	<summary>Pip (stable)</summary>
 
 ```sh
-pipx install secator
+pip install secator
 ```
 
 </details>
 
 <details>
-	<summary>Pipx (development)</summary>
+	<summary>Pip (development)</summary>
 
 ```sh
 git clone https://github.com/freelabz/secator
 cd secator
-pipx install -e .[dev]
+pip install -e .[dev]
 ```
 
 </details>
@@ -138,7 +138,77 @@ docker-compose exec secator secator --help
 
 </details>
 
-***Note:*** If you chose the Bash or Docker installation methods, you can skip the next sections #installing-languages and #installing-tools.
+***Note:*** If you chose the Bash or Docker installation methods, you can skip the next sections [Installating optional dependenceis](#installing-optional-dependencies), [Installing languages](#installing-languages) and [Installing tools](#installing-tools).
+
+
+### Installing optional dependencies
+
+There are several optional dependencies available for `secator`:
+
+<details>
+	<summary>worker</summary>
+
+Add support for Celery (see [Distributed runs with Celery](https://docs.freelabz.com/in-depth/distributed-runs-with-celery)).
+```sh
+secator install addons worker
+```
+
+</details>
+
+
+<details>
+	<summary>google</summary>
+
+Add support for Google Drive exporter (`-o gdrive`).
+
+```sh
+secator install addons google
+```
+
+</details>
+
+<details>
+	<summary>mongodb</summary>
+
+Add support for MongoDB driver (`-driver mongodb`).
+```sh
+secator install addons mongodb
+```
+
+</details>
+
+<details>
+	<summary>redis</summary>
+
+Add support for Redis backend (Celery).
+
+```sh
+secator install addons redis
+```
+
+</details>
+
+<details>
+	<summary>dev</summary>
+
+Add development tools like `coverage` and `flake8` required for running tests.
+
+```sh
+secator install addons dev
+```
+
+</details>
+
+<details>
+	<summary>trace</summary>
+
+Add tracing tools like `memray` and `pyinstrument` required for tracing functions.
+
+```sh
+secator install addons trace
+```
+
+</details>
 
 ### Installing languages
 

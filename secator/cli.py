@@ -47,13 +47,15 @@ def cli(ctx, no_banner, version):
 	if ctx.invoked_subcommand is None:
 		if version:
 			print(f'Current Version: v{VERSION}')
+		else:
+			ctx.get_help()
 
 
 #------#
 # TASK #
 #------#
 
-@cli.group(aliases=['x', 't', 'cmd'])
+@cli.group(aliases=['x', 't'])
 def task():
 	"""Run a task."""
 	pass
@@ -68,7 +70,7 @@ for cls in ALL_TASKS:
 #----------#
 
 
-@cli.group(cls=OrderedGroup, aliases=['w', 'wf', 'flow'])
+@cli.group(cls=OrderedGroup, aliases=['w'])
 def workflow():
 	"""Run a workflow."""
 	pass
@@ -82,7 +84,7 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 # SCAN #
 #------#
 
-@cli.group(cls=OrderedGroup, aliases=['z', 's', 'sc'])
+@cli.group(cls=OrderedGroup, aliases=['s'])
 def scan():
 	"""Run a scan."""
 	pass
@@ -96,7 +98,7 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 # WORKER #
 #--------#
 
-@cli.command(context_settings=dict(ignore_unknown_options=True))
+@cli.command(name='worker', context_settings=dict(ignore_unknown_options=True), aliases=['wk'])
 @click.option('-n', '--hostname', type=str, default='runner', help='Celery worker hostname (unique).')
 @click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
@@ -107,7 +109,7 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
-	"""Workers."""
+	"""Run a worker."""
 	from secator.celery import app, is_celery_worker_alive
 	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
 	debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
@@ -248,7 +250,7 @@ def get_version(version_cmd):
 	return match[0]
 
 
-@cli.command('health')
+@cli.command(name='health', aliases=['h'])
 @click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
 def health(json, debug):
@@ -306,10 +308,95 @@ def health(json, debug):
 #---------#
 
 
+def check_install(cmd, title):
+	with console.status(f'[bold yellow] Installing {title}...'):
+		ret = Command.run_command(
+			cmd,
+			cls_attributes={'shell': True},
+			print_cmd=True,
+			print_line=True
+		)
+		if ret.return_code != 0:
+			console.print(f':exclamation_mark: Failed to install {title}.', style='bold red')
+		else:
+			console.print(f':tada: {title.capitalize()} installed successfully !', style='bold green')
+	return ret
+
+
 @cli.group(aliases=['i'])
 def install():
 	"Installations."
 	pass
+
+
+@install.group()
+def addons():
+	"Install addons."
+	pass
+
+
+@addons.command('worker')
+def install_worker():
+	"Install worker addon."
+	ret = check_install(
+		cmd=f'{sys.executable} -m pip install secator[worker]',
+		title='worker addon'
+	)
+	if ret.return_code == 0:
+		console.print('[bold gold3]:wrench: Next steps:[/]')
+		console.print('   :keycap_1: Run "secator worker" to run a Celery worker using the file system as a backend and broker.')  # noqa: E501
+		console.print('   :keycap_2: Run "secator x httpx testphp.vulnweb.com" to admire your task running in a worker.')  # noqa: E501
+		console.print('   :keycap_3: [dim]\[optional][/dim] Run "secator install addons redis" to install a Redis backend and broker.')  # noqa: E501
+
+
+@addons.command('google')
+def install_google():
+	"Install google addon."
+	check_install(
+		cmd=f'{sys.executable} -m pip install secator[google]',
+		title='google addon'
+	)
+	console.print('[bold gold3]:wrench: Next steps:[/]')
+	console.print('   :keycap_1: Set the "GOOGLE_CREDENTIALS_PATH" and "GOOGLE_DRIVE_PARENT_FOLDER_ID" environment variables.')  # noqa: E501
+	console.print('   :keycap_2: Run "secator x httpx testphp.vulnweb.com -o gdrive" to admire your results flowing to Google Drive.')  # noqa: E501
+
+
+@addons.command('mongodb')
+def install_mongodb():
+	"Install mongodb addon."
+	check_install(
+		cmd=f'{sys.executable} -m pip install secator[mongodb]',
+		title='mongodb addon'
+	)
+	console.print('[bold gold3]:wrench: Next steps:[/]')
+	console.print('   :keycap_1: Set the "MONGODB_URL=mongodb://<url>" environment variable pointing to your MongoDB instance.')  # noqa: E501
+	console.print('   :keycap_2: Run "secator x httpx testphp.vulnweb.com -driver mongodb" to admire your results flowing to MongoDB in real-time.')  # noqa: E501
+
+
+@addons.command('redis')
+def install_redis():
+	"Install redis addon."
+	check_install(
+		cmd=f'{sys.executable} -m pip install secator[redis]',
+		title='redis addon'
+	)
+	console.print('[bold gold3]:wrench: Next steps:[/]')
+	console.print('   :keycap_1: Set the "CELERY_BROKER_URL=redis://<url>" environment variable pointing to your Redis instance.')  # noqa: E501
+	console.print('   :keycap_2: Run "secator worker" to run a worker.')
+	console.print('   :keycap_3: Run "secator x httpx testphp.vulnweb.com" to run a test task.')
+
+
+@addons.command('dev')
+def install_dev():
+	"Install dev addon."
+	check_install(
+		cmd=f'{sys.executable} -m pip install secator[dev]',
+		title='mongodb addon'
+	)
+	console.print('[bold gold3]:wrench: Next steps:[/]')
+	console.print('   :keycap_1: Run "secator test lint" to run lint tests.')
+	console.print('   :keycap_2: Run "secator test unit" to run unit tests.')
+	console.print('   :keycap_3: Run "secator test integration" to run integration tests.')
 
 
 @install.group()
@@ -321,35 +408,19 @@ def langs():
 @langs.command('go')
 def install_go():
 	"""Install Go."""
-	with console.status('[bold yellow] Installing Go...'):
-		ret = Command.run_command(
-			'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
-			cls_attributes={'shell': True},
-			cwd=DATA_FOLDER,
-			print_cmd=True,
-			print_line=True
-		)
-		if ret.return_code != 0:
-			console.print(':exclamation_mark: Failed to install Go.', style='bold red')
-		else:
-			console.print(':tada: Go installed successfully !', style='bold green')
+	check_install(
+		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
+		title='Go'
+	)
 
 
 @langs.command('ruby')
 def install_ruby():
 	"""Install Ruby."""
-	with console.status('[bold yellow] Installing Ruby...'):
-		ret = Command.run_command(
-			'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
-			cls_attributes={'shell': True},
-			cwd=DATA_FOLDER,
-			print_cmd=True,
-			print_line=True
-		)
-		if ret.return_code != 0:
-			console.print(':exclamation_mark: Failed to install Ruby.', style='bold red')
-		else:
-			console.print(':tada: Ruby installed successfully !', style='bold green')
+	check_install(
+		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
+		title='Ruby'
+	)
 
 
 @install.command('tools')
@@ -374,17 +445,19 @@ def install_cves(force):
 	"""Install CVEs to file system for passive vulnerability search."""
 	cve_json_path = f'{CVES_FOLDER}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
-		Command.run_command(
-			'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
-			cwd=CVES_FOLDER,
-			**DEFAULT_CMD_OPTS
-		)
-		Command.run_command(
-			f'gunzip {CVES_FOLDER}/circl-cve-search-expanded.json.gz',
-			cwd=CVES_FOLDER,
-			**DEFAULT_CMD_OPTS
-		)
-	with console.status('[bold yellow]Saving CVEs to disk ...[/]'):
+		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
+			Command.run_command(
+				'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
+				cwd=CVES_FOLDER,
+				**DEFAULT_CMD_OPTS
+			)
+		with console.status('[bold yellow]Unzipping CVEs ...[/]'):
+			Command.run_command(
+				f'gunzip {CVES_FOLDER}/circl-cve-search-expanded.json.gz',
+				cwd=CVES_FOLDER,
+				**DEFAULT_CMD_OPTS
+			)
+	with console.status(f'[bold yellow]Installing CVEs to {CVES_FOLDER} ...[/]'):
 		with open(cve_json_path, 'r') as f:
 			for line in f:
 				data = json.loads(line)
@@ -393,6 +466,7 @@ def install_cves(force):
 				with open(cve_path, 'w') as f:
 					f.write(line)
 				console.print(f'CVE saved to {cve_path}')
+	console.print(':tada: CVEs installed successfully !', style='bold green')
 
 
 #-------#

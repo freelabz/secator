@@ -8,11 +8,10 @@ import sys
 
 from time import sleep
 
-from celery.result import AsyncResult
 from fp.fp import FreeProxy
 
 from secator.config import ConfigLoader
-from secator.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
+from secator.definitions import (DEFAULT_HTTP_PROXY,
 							   DEFAULT_FREEPROXY_TIMEOUT,
 							   DEFAULT_PROXYCHAINS_COMMAND,
 							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
@@ -217,16 +216,6 @@ class Command(Runner):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
 		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
-
-	@classmethod
-	def poll(cls, result):
-		# TODO: Move this to TaskBase
-		while not result.ready():
-			data = AsyncResult(result.id).info
-			if DEBUG > 1 and isinstance(data, dict):
-				print(data)
-			sleep(1)
-		return result.get()
 
 	def get_opt_value(self, opt_name):
 		return Command._get_opt_value(

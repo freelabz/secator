@@ -31,13 +31,13 @@ classifiers = [
 ]
 dependencies = [
   "bs4",
-  "celery",
   "cpe",
   "dotmap",
   "free-proxy",
-  "jinja2",
+  "furl",
   "humanize",
   "ifaddr",
+  "jinja2",
   "python-dotenv",
   "pyyaml",
   "requests",
@@ -67,7 +67,7 @@ worker = [
 redis = [
   'redis',
 ]
-mongo = [
+mongodb = [
   'pymongo',
 ]
 google = [
