@@ -24,6 +24,7 @@ class dalfox(VulnHttp):
 	input_flag = 'url'
 	file_flag = 'file'
 	json_flag = '--format json'
+	version_flag = 'version'
 	opt_prefix = '--'
 	opt_key_map = {
 		HEADER: 'header',

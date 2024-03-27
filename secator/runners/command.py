@@ -79,6 +79,9 @@ class Command(Runner):
 	# Flag to enable output JSON
 	json_flag = None
 
+	# Flag to show version
+	version_flag = None
+
 	# Install command
 	install_cmd = None
 
@@ -281,10 +284,11 @@ class Command(Runner):
 		return ret
 
 	@classmethod
-	def run_command(cls, cmd, name='helperClass', cls_attributes={}, **kwargs):
+	def run_command(cls, cmd, name=None, cls_attributes={}, **kwargs):
 		"""Run adhoc command. Can be used without defining an inherited class to run a command, while still enjoying
 		all the good stuff in this class.
 		"""
+		name = name or cmd.split(' ')[0]
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
@@ -428,7 +432,7 @@ class Command(Runner):
 					items = self.run_item_loaders(line)
 
 				# Yield line if no items parsed
-				if not items and not self.output_quiet:
+				if not items:
 					yield line
 
 				# Turn results into list if not already a list
