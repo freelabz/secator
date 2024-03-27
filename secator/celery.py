@@ -7,7 +7,7 @@ import celery
 from celery import chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
-# from pyinstrument import Profiler
+# from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
 from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
@@ -24,7 +24,7 @@ from secator.utils import (TaskError, debug, deduplicate,
 						   flatten)
 
 # from pathlib import Path
-# import memray
+# import memray  # TODO: conditional memray tracing
 
 rich_handler = RichHandler(rich_tracebacks=True)
 rich_handler.setLevel(logging.INFO)

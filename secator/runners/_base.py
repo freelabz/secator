@@ -746,7 +746,7 @@ class Runner:
 
 		Args:
 			data (str or dict): Input data.
-			color (str, Optional): Termcolor color.
+			color (str, Optional): Rich color.
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
 			rich (bool, Optional): Force rich output.
 		"""

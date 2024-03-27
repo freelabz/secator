@@ -18,7 +18,6 @@ from urllib.parse import urlparse, quote
 
 import ifaddr
 import yaml
-from furl import furl
 from rich.markdown import Markdown
 
 from secator.definitions import DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT
@@ -125,32 +124,6 @@ def match_extensions(response, allowed_ext=['.html']):
 	if (ext and ext in allowed_ext) or (ext2 and ext2 in allowed_ext):
 		return True
 	return False
-
-
-def filter_urls(urls, **remove_parts):
-	"""Filter a list of URLs using `furl`.
-
-	Args:
-		urls (list): List of URLs to filter.
-		remove_parts (dict): Dict of URL pieces to remove.
-
-	Example:
-		>>> urls = ['http://localhost/test.js', 'http://localhost/test?a=1&b=2']
-		>>> filter_urls(urls, filter_ext=True)
-		['http://localhost/test']
-
-	Returns:
-		list: List of filtered URLs.
-	"""
-	if not remove_parts:
-		return urls
-	furl_remove_args = {
-		k.replace('remove_', ''): v for k, v in remove_parts.items()
-	}
-	return [
-		sanitize_url(furl(url).remove(**furl_remove_args).url)
-		for url in urls
-	]
 
 
 def deduplicate(array, attr=None):
