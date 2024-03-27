@@ -19,7 +19,6 @@ from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, debug, deduplicate,
-						   discover_tasks,
 						   flatten)
 
 # from pathlib import Path
