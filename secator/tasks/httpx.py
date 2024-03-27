@@ -82,7 +82,6 @@ class httpx(Http):
 		if screenshot:
 			self.cmd += ' -esb -ehb'
 
-
 	@staticmethod
 	def on_item_pre_convert(self, item):
 		for k, v in item.items():
