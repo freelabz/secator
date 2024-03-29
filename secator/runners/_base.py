@@ -367,7 +367,11 @@ class Runner:
 					if DEBUG > 1:
 						logger.exception(e)
 					else:
-						self._print('Please set DEBUG to > 1 to see the detailed exception.', color='dim red', rich=True)
+						self._print(
+							f'{fun} failed: "{e.__class__.__name__}: {str(e)}". Skipping',
+							color='bold red',
+							rich=True)
+						self._print('Set DEBUG to > 1 to see the detailed exception.', color='dim red', rich=True)
 		return result
 
 	def run_validators(self, validator_type, *args):
