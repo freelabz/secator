@@ -263,7 +263,7 @@ class Runner:
 
 				elif item and isinstance(item, str):
 					if self.print_line:
-						self._print(item, out=sys.stderr)
+						self._print(item, out=sys.stderr, end='')
 					if not self.output_json:
 						self.results.append(item)
 						yield item
@@ -758,7 +758,7 @@ class Runner:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, rich=False):
+	def _print(self, data, color=None, out=sys.stderr, rich=False, end='\n'):
 		"""Print function.
 
 		Args:
@@ -776,7 +776,7 @@ class Runner:
 
 		if self.sync or rich:
 			_console = console_stdout if out == sys.stdout else console
-			_console.print(data, highlight=False, style=color, soft_wrap=True)
+			_console.print(data, highlight=False, style=color, soft_wrap=True, end=end)
 		else:
 			print(data, file=out)
 

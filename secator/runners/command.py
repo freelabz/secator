@@ -401,8 +401,8 @@ class Command(Runner):
 				if not line:
 					break
 
-				# Strip line
-				line = line.strip()
+				# Strip line endings
+				# line = line.rstrip()
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
