@@ -19,7 +19,7 @@ from secator.definitions import (DEFAULT_HTTP_PROXY,
 from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
-from secator.utils import get_file_timestamp, debug
+from secator.utils import debug
 
 # from rich.markup import escape
 # from rich.text import Text
@@ -644,9 +644,7 @@ class Command(Runner):
 		# If input is a list and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped input.
 		# Otherwise pass the file path to the tool.
 		if isinstance(input, list):
-			timestr = get_file_timestamp()
-			cmd_name = cmd.split(' ')[0].split('/')[-1]
-			fpath = f'{self.reports_folder}/.inputs/{cmd_name}_{timestr}.txt'
+			fpath = f'{self.reports_folder}/.inputs/{self.unique_name}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:

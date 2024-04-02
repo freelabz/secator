@@ -73,7 +73,7 @@ class feroxbuster(HttpFuzzer):
 	def on_init(self):
 		self.output_path = self.get_opt_value('output_path')
 		if not self.output_path:
-			self.output_path = f'{self.reports_folder}/.outputs/feroxbuster.json'
+			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		Path(self.output_path).touch()
 		self.cmd += f' --output {self.output_path}'
 

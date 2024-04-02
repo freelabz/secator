@@ -139,6 +139,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
 	Command.run_command(
 		cmd,
+		name='secator worker',
 		**DEFAULT_CMD_OPTS
 	)
 
@@ -861,6 +862,7 @@ def integration(tasks, workflows, scans, test, debug):
 		cmd += ' discover -v tests.integration'
 	result = Command.run_command(
 		cmd,
+		name='integration tests',
 		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
@@ -891,12 +893,14 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 
 	result = Command.run_command(
 		cmd,
+		name='unit tests',
 		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)
 	if coverage:
 		Command.run_command(
 			f'{sys.executable} -m coverage report -m',
+			name='unit tests',
 			**DEFAULT_CMD_OPTS
 		)
 	sys.exit(result.return_code)
@@ -906,6 +910,7 @@ def unit(tasks, workflows, scans, test, coverage=False, debug=False):
 def lint():
 	result = Command.run_command(
 		f'{sys.executable} -m flake8 secator/',
+		name='lint tests',
 		cwd=ROOT_FOLDER,
 		**DEFAULT_CMD_OPTS
 	)

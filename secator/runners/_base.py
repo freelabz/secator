@@ -188,6 +188,8 @@ class Runner:
 		self.has_children = self.run_opts.get('has_children', False)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
+		self.unique_name = self.name.replace('/', '_')
+		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
 		self._set_print_prefix()
 
 		# Input post-process
@@ -662,7 +664,6 @@ class Runner:
 				# 	continue
 
 				# Handle messages if any
-				# TODO: error handling should be moved to process_live_tasks
 				state = data['state']
 				error = data.get('error')
 				info = data.get('info')

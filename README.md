@@ -98,9 +98,7 @@ pipx install secator
 	<summary>Pip</summary>
 
 ```sh
-git clone https://github.com/freelabz/secator
-cd secator
-pip install -e .[dev]
+pip install secator
 ```
 
 </details>

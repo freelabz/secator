@@ -24,7 +24,7 @@ class Task(Runner):
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 
-		# Task opts
+		# Run opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
 		dry_run = run_opts.get('show', False)

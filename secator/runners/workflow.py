@@ -31,26 +31,27 @@ class Workflow(Runner):
 		for target in self.targets:
 			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
-		# Task fmt opts
-		run_opts = self.run_opts.copy()
-		fmt_opts = {
-			'json': run_opts.get('json', False),
+		# Task opts
+		task_run_opts = self.run_opts.copy()
+		task_fmt_opts = {
+			'json': task_run_opts.get('json', False),
 			'print_cmd': True,
 			'print_cmd_prefix': not self.sync,
 			'print_description': self.sync,
-			'print_input_file': DEBUG,
+			'print_input_file': DEBUG > 0,
 			'print_item': True,
 			'print_item_count': True,
 			'print_line': not self.sync,
+			'print_progress': self.sync,
 		}
 
 		# Construct run opts
-		run_opts['hooks'] = self._hooks.get(Task, {})
-		run_opts['reports_folder'] = self.reports_folder
-		run_opts.update(fmt_opts)
+		task_run_opts['hooks'] = self._hooks.get(Task, {})
+		task_run_opts['reports_folder'] = self.reports_folder
+		task_run_opts.update(task_fmt_opts)
 
 		# Build Celery workflow
-		workflow = self.build_celery_workflow(run_opts=run_opts, results=self.results)
+		workflow = self.build_celery_workflow(run_opts=task_run_opts, results=self.results)
 
 		# Run Celery workflow and get results
 		if self.sync:
