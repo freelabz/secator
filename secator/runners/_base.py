@@ -641,7 +641,8 @@ class Runner:
 
 				# If progress object, yield progress and ignore tracking
 				if isinstance(data, OutputType) and data._type == 'progress':
-					yield data
+					if data.percent != 100:
+						yield data
 					continue
 
 				# TODO: add error output type and yield errors in get_celery_results
