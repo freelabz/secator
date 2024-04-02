@@ -263,7 +263,7 @@ class Runner:
 
 				elif item and isinstance(item, str):
 					if self.print_line:
-						self._print(item, out=sys.stderr, end='')
+						self._print(item, out=sys.stderr, end='\n')
 					if not self.output_json:
 						self.results.append(item)
 						yield item
