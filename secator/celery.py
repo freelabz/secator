@@ -3,11 +3,10 @@ import logging
 import traceback
 from time import sleep
 
-import celery
-from celery import chain, chord, signals
+from celery import Celery, chain, chord, signals
 from celery.app import trace
-from celery.result import AsyncResult, allow_join_result
-# from pyinstrument import Profiler
+from celery.result import AsyncResult, GroupResult, allow_join_result
+# from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
 from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
@@ -20,11 +19,10 @@ from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, debug, deduplicate,
-						   discover_tasks,
 						   flatten)
 
 # from pathlib import Path
-# import memray
+# import memray  # TODO: conditional memray tracing
 
 rich_handler = RichHandler(rich_tracebacks=True)
 rich_handler.setLevel(logging.INFO)
@@ -42,9 +40,8 @@ logger = logging.getLogger(__name__)
 trace.LOG_SUCCESS = """\
 Task %(name)s[%(id)s] succeeded in %(runtime)ss\
 """
-discover_tasks()  # TODO: remove dirty fix
 
-app = celery.Celery(__name__)
+app = Celery(__name__)
 app.conf.update({
 	# Worker config
 	'worker_send_task_events': True,
@@ -450,13 +447,13 @@ def get_nested_results(result, results=[]):
 	if result is None:
 		return
 
-	if isinstance(result, celery.result.GroupResult):
+	if isinstance(result, GroupResult):
 		console.log(repr(result))
 		get_nested_results(result.parent, results=results)
 		for child in result.children:
 			get_nested_results(child, results=results)
 
-	elif isinstance(result, celery.result.AsyncResult):
+	elif isinstance(result, AsyncResult):
 		console.log(repr(result))
 		res = result.get()
 		console.log(f'-> Found {len(res)} results.')

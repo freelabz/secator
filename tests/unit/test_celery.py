@@ -1,5 +1,5 @@
-from secator.celery import *
-import unittest
+# from secator.celery import *
+# import unittest
 
 
 # class TestCeleryCommand(unittest.TestCase):

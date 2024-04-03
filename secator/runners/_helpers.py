@@ -1,6 +1,5 @@
 import os
 
-from celery.result import AsyncResult, GroupResult
 from rich.prompt import Confirm
 
 from secator.utils import deduplicate
@@ -79,6 +78,7 @@ def get_task_ids(result, ids=[]):
 		result (Union[AsyncResult, GroupResult]): Celery result object.
 		ids (list): List of ids.
 	"""
+	from celery.result import AsyncResult, GroupResult
 	if result is None:
 		return
 
@@ -100,13 +100,14 @@ def get_task_ids(result, ids=[]):
 
 def get_task_data(task_id):
 	"""Get task info.
-default_report_folder_base
+
 	Args:
 		task_id (str): Celery task id.
 
 	Returns:
 		dict: Task info (id, name, state, results, chunk_info, count, error, ready).
 	"""
+	from celery.result import AsyncResult
 	res = AsyncResult(task_id)
 	if not (res and res.args and len(res.args) > 1):
 		return

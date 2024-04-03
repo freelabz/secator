@@ -24,7 +24,7 @@ class Task(Runner):
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 
-		# Task opts
+		# Run opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
 		dry_run = run_opts.get('show', False)
@@ -39,7 +39,7 @@ class Task(Runner):
 			'print_input_file': DEBUG > 0,
 			'print_item': True,
 			'print_item_count': not self.sync and not dry_run,
-			'print_line': not self.output_quiet,
+			'print_line': self.sync and not self.output_quiet,
 		}
 		# self.print_item = not self.sync  # enable print_item for base Task only if running remote
 		run_opts.update(fmt_opts)

@@ -18,7 +18,6 @@ from urllib.parse import urlparse, quote
 
 import ifaddr
 import yaml
-from furl import furl
 from rich.markdown import Markdown
 
 from secator.definitions import DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT
@@ -127,32 +126,6 @@ def match_extensions(response, allowed_ext=['.html']):
 	return False
 
 
-def filter_urls(urls, **remove_parts):
-	"""Filter a list of URLs using `furl`.
-
-	Args:
-		urls (list): List of URLs to filter.
-		remove_parts (dict): Dict of URL pieces to remove.
-
-	Example:
-		>>> urls = ['http://localhost/test.js', 'http://localhost/test?a=1&b=2']
-		>>> filter_urls(urls, filter_ext=True)
-		['http://localhost/test']
-
-	Returns:
-		list: List of filtered URLs.
-	"""
-	if not remove_parts:
-		return urls
-	furl_remove_args = {
-		k.replace('remove_', ''): v for k, v in remove_parts.items()
-	}
-	return [
-		sanitize_url(furl(url).remove(**furl_remove_args).url)
-		for url in urls
-	]
-
-
 def deduplicate(array, attr=None):
 	"""Deduplicate list of OutputType items.
 
@@ -195,9 +168,9 @@ def discover_internal_tasks():
 			continue
 		try:
 			module = import_module(f'secator.tasks.{module_name}')
-		except ImportError:
-			# console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
-			# console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
+		except ImportError as e:
+			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
+			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
 			continue
 		for attribute_name in dir(module):
 			attribute = getattr(module, attribute_name)

@@ -113,10 +113,10 @@ class katana(HttpCrawler):
 		if not isinstance(item, Url):
 			return item
 		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(item.stored_response_path):
-			with open(item.stored_response_path, 'r') as fin:
+			with open(item.stored_response_path, 'r', encoding='latin-1') as fin:
 				data = fin.read().splitlines(True)
 				first_line = data[0]
-			with open(item.stored_response_path, 'w') as fout:
+			with open(item.stored_response_path, 'w', encoding='latin-1') as fout:
 				fout.writelines(data[1:])
 				fout.writelines('\n')
 				fout.writelines(first_line)

@@ -14,7 +14,6 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 THREADS, TIMEOUT, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability
 from secator.tasks._categories import VulnMulti
-from secator.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +62,14 @@ class nmap(VulnMulti):
 	proxy_http = False
 	profile = 'io'
 
+	@staticmethod
+	def on_init(self):
+		output_path = self.get_opt_value('output_path')
+		if not output_path:
+			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
+		self.output_path = output_path
+		self.cmd += f' -oX {self.output_path}'
+
 	def yielder(self):
 		yield from super().yielder()
 		if self.return_code != 0:
@@ -87,15 +94,6 @@ class nmap(VulnMulti):
 					f'Cannot parse nmap XML output {self.output_path} to valid JSON.')
 		results['_host'] = self.input
 		return nmapData(results)
-
-	@staticmethod
-	def on_init(self):
-		output_path = self.get_opt_value('output_path')
-		if not output_path:
-			timestr = get_file_timestamp()
-			output_path = f'{self.reports_folder}/.outputs/nmap_{timestr}.xml'
-		self.output_path = output_path
-		self.cmd += f' -oX {self.output_path}'
 
 
 class nmapData(dict):

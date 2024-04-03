@@ -8,11 +8,10 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
-							   RATE_LIMIT, RETRIES, STATUS_CODE, DATA_FOLDER,
+							   RATE_LIMIT, RETRIES, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST)
 from secator.output_types import Url
 from secator.tasks._categories import HttpFuzzer
-from secator.utils import get_file_timestamp
 
 
 @task()
@@ -85,6 +84,5 @@ class dirsearch(HttpFuzzer):
 	def on_init(self):
 		self.output_path = self.get_opt_value('output_path')
 		if not self.output_path:
-			timestr = get_file_timestamp()
-			self.output_path = f'{DATA_FOLDER}/dirsearch_{timestr}.json'
+			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.cmd += f' -o {self.output_path}'

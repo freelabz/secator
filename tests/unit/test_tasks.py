@@ -335,14 +335,14 @@ class TestCommandHooks(unittest.TestCase):
 		if not httpx in TEST_TASKS:
 			return
 
-		def on_init(self):
+		def raise_exc(self):
 			raise Exception('Test passed')
 
 		hooks = {
-			'on_init': [on_init]
+			'on_init': [raise_exc]
 		}
 		fixture = FIXTURES_TASKS[httpx]
 		with mock_subprocess_popen([json.dumps(fixture)]):
 			with self.assertRaises(Exception, msg='Test passed'):
 				input = INPUTS_TASKS[HOST]
-				httpx(input, hooks=hooks)
+				httpx(input, hooks=hooks, raise_on_error=True) 
