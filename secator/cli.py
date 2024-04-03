@@ -15,7 +15,7 @@ from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,
 								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
 								 ROOT_FOLDER, SCRIPTS_FOLDER, VERSION,
-								 WORKER_ADDON_ENABLED)
+								 WORKER_ADDON_ENABLED, DEV_ADDON_ENABLED, DEV_PACKAGE)
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -113,7 +113,7 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
 	if not WORKER_ADDON_ENABLED:
-		console.print('[bold red]Missing worker dependencies: please run `secator install addons worker`[/].')
+		console.print('[bold red]Missing worker addon: please run `secator install addons worker`[/].')
 		sys.exit(1)
 	from secator.celery import app, is_celery_worker_alive
 	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
@@ -314,7 +314,7 @@ def health(json, debug):
 #---------#
 
 
-def check_install(cmd, title):
+def run_install(cmd, title, next_steps=None):
 	with console.status(f'[bold yellow] Installing {title}...'):
 		ret = Command.run_command(
 			cmd,
@@ -326,7 +326,11 @@ def check_install(cmd, title):
 			console.print(f':exclamation_mark: Failed to install {title}.', style='bold red')
 		else:
 			console.print(f':tada: {title.capitalize()} installed successfully !', style='bold green')
-	return ret
+			if next_steps:
+				console.print('[bold gold3]:wrench: Next steps:[/]')
+				for ix, step in enumerate(next_steps):
+					console.print(f'   :keycap_{ix}: {step}')
+		sys.exit(ret.return_code)
 
 
 @cli.group(aliases=['i'])
@@ -344,65 +348,71 @@ def addons():
 @addons.command('worker')
 def install_worker():
 	"Install worker addon."
-	ret = check_install(
+	run_install(
 		cmd=f'{sys.executable} -m pip install secator[worker]',
-		title='worker addon'
+		title='worker addon',
+		next_steps=[
+			'Run "secator worker" to run a Celery worker using the file system as a backend and broker.',
+			'Run "secator x httpx testphp.vulnweb.com" to admire your task running in a worker.',
+			'[dim]\[optional][/dim] Run "secator install addons redis" to install the Redis addon.'
+		]
 	)
-	if ret.return_code == 0:
-		console.print('[bold gold3]:wrench: Next steps:[/]')
-		console.print('   :keycap_1: Run "secator worker" to run a Celery worker using the file system as a backend and broker.')  # noqa: E501
-		console.print('   :keycap_2: Run "secator x httpx testphp.vulnweb.com" to admire your task running in a worker.')  # noqa: E501
-		console.print('   :keycap_3: [dim]\[optional][/dim] Run "secator install addons redis" to install a Redis backend and broker.')  # noqa: E501
 
 
 @addons.command('google')
 def install_google():
 	"Install google addon."
-	check_install(
+	run_install(
 		cmd=f'{sys.executable} -m pip install secator[google]',
-		title='google addon'
+		title='google addon',
+		next_steps=[
+			'Set the "GOOGLE_CREDENTIALS_PATH" and "GOOGLE_DRIVE_PARENT_FOLDER_ID" environment variables.',
+			'Run "secator x httpx testphp.vulnweb.com -o gdrive" to admire your results flowing to Google Drive.'
+		]
 	)
-	console.print('[bold gold3]:wrench: Next steps:[/]')
-	console.print('   :keycap_1: Set the "GOOGLE_CREDENTIALS_PATH" and "GOOGLE_DRIVE_PARENT_FOLDER_ID" environment variables.')  # noqa: E501
-	console.print('   :keycap_2: Run "secator x httpx testphp.vulnweb.com -o gdrive" to admire your results flowing to Google Drive.')  # noqa: E501
 
 
 @addons.command('mongodb')
 def install_mongodb():
 	"Install mongodb addon."
-	check_install(
+	run_install(
 		cmd=f'{sys.executable} -m pip install secator[mongodb]',
-		title='mongodb addon'
+		title='mongodb addon',
+		next_steps=[
+			'[dim]\[optional][/] Run "docker run --name mongo -p 27017:27017 -d mongo:latest" to run a local MongoDB instance.',
+			'Set the "MONGODB_URL=mongodb://<url>" environment variable pointing to your MongoDB instance.',
+			'Run "secator x httpx testphp.vulnweb.com -driver mongodb" to save results to MongoDB.'
+		]
 	)
-	console.print('[bold gold3]:wrench: Next steps:[/]')
-	console.print('   :keycap_1: Set the "MONGODB_URL=mongodb://<url>" environment variable pointing to your MongoDB instance.')  # noqa: E501
-	console.print('   :keycap_2: Run "secator x httpx testphp.vulnweb.com -driver mongodb" to admire your results flowing to MongoDB in real-time.')  # noqa: E501
 
 
 @addons.command('redis')
 def install_redis():
 	"Install redis addon."
-	check_install(
+	run_install(
 		cmd=f'{sys.executable} -m pip install secator[redis]',
-		title='redis addon'
+		title='redis addon',
+		next_steps=[
+			'[dim]\[optional][/] Run "docker run --name redis -p 5432:5432 -d redis" to run a local Redis instance.',
+			'Set the "CELERY_BROKER_URL=redis://<url>" environment variable pointing to your Redis instance.',
+			'Run "secator worker" to run a worker.',
+			'Run "secator x httpx testphp.vulnweb.com" to run a test task.'
+		]
 	)
-	console.print('[bold gold3]:wrench: Next steps:[/]')
-	console.print('   :keycap_1: Set the "CELERY_BROKER_URL=redis://<url>" environment variable pointing to your Redis instance.')  # noqa: E501
-	console.print('   :keycap_2: Run "secator worker" to run a worker.')
-	console.print('   :keycap_3: Run "secator x httpx testphp.vulnweb.com" to run a test task.')
 
 
 @addons.command('dev')
 def install_dev():
 	"Install dev addon."
-	check_install(
+	run_install(
 		cmd=f'{sys.executable} -m pip install secator[dev]',
-		title='mongodb addon'
+		title='dev addon',
+		next_steps=[
+			'Run "secator test lint" to run lint tests.',
+			'Run "secator test unit" to run unit tests.',
+			'Run "secator test integration" to run integration tests.',
+		]
 	)
-	console.print('[bold gold3]:wrench: Next steps:[/]')
-	console.print('   :keycap_1: Run "secator test lint" to run lint tests.')
-	console.print('   :keycap_2: Run "secator test unit" to run unit tests.')
-	console.print('   :keycap_3: Run "secator test integration" to run integration tests.')
 
 
 @install.group()
@@ -414,7 +424,7 @@ def langs():
 @langs.command('go')
 def install_go():
 	"""Install Go."""
-	check_install(
+	run_install(
 		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
 		title='Go'
 	)
@@ -423,7 +433,7 @@ def install_go():
 @langs.command('ruby')
 def install_ruby():
 	"""Install Ruby."""
-	check_install(
+	run_install(
 		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
 		title='Ruby'
 	)
@@ -575,23 +585,6 @@ def list_aliases(silent):
 def utils():
 	"""Utilities."""
 	pass
-
-
-@utils.command()
-def bash_install():
-	"""Generate bash install script for all secator-supported tasks."""
-	path = ROOT_FOLDER + '/scripts/install_commands.sh'
-	with open(path, 'w') as f:
-		f.write('#!/bin/bash\n\n')
-		for task in ALL_TASKS:
-			if task.install_cmd:
-				f.write(f'# {task.__name__}\n')
-				f.write(task.install_cmd + ' || true' + '\n\n')
-	Command.run_command(
-		f'chmod +x {path}',
-		**DEFAULT_CMD_OPTS
-	)
-	console.print(f':file_cabinet: [bold green]Saved install script to {path}[/]')
 
 
 @utils.command()
@@ -841,10 +834,66 @@ def record(record_name, script, interactive, width, height, output_dir):
 #------#
 
 
-@cli.group()
+@cli.group(cls=OrderedGroup)
 def test():
 	"""Tests."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to run tests.[/]')
+		sys.exit(1)
+	if not DEV_ADDON_ENABLED:
+		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
+		sys.exit(1)
 	pass
+
+
+def run_test(cmd, name):
+	"""Run a test and return the result.
+
+	Args:
+		cmd: Command to run.
+		name: Name of the test.
+	"""
+	result = Command.run_command(
+		cmd,
+		name=name + ' tests',
+		cwd=ROOT_FOLDER,
+		**DEFAULT_CMD_OPTS
+	)
+	if result.return_code == 0:
+		console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
+	sys.exit(result.return_code)
+
+
+@test.command()
+def lint():
+	"""Run lint tests."""
+	cmd = f'{sys.executable} -m flake8 secator/'
+	run_test(cmd, 'lint')
+
+
+@test.command()
+@click.option('--tasks', type=str, default='', help='Secator tasks to test (comma-separated)')
+@click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
+@click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
+@click.option('--test', '-t', type=str, help='Secator test to run')
+@click.option('--debug', '-d', type=int, default=0, help='Add debug information')
+def unit(tasks, workflows, scans, test, debug=False):
+	"""Run unit tests."""
+	os.environ['TEST_TASKS'] = tasks or ''
+	os.environ['TEST_WORKFLOWS'] = workflows or ''
+	os.environ['TEST_SCANS'] = scans or ''
+	os.environ['DEBUG'] = str(debug)
+	os.environ['DEFAULT_STORE_HTTP_RESPONSES'] = '0'
+	os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
+
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
+	if test:
+		if not test.startswith('tests.unit'):
+			test = f'tests.unit.{test}'
+		cmd += f' {test}'
+	else:
+		cmd += ' discover -v tests.unit'
+	run_test(cmd, 'unit')
 
 
 @test.command()
@@ -854,10 +903,12 @@ def test():
 @click.option('--test', '-t', type=str, help='Secator test to run')
 @click.option('--debug', '-d', type=int, default=0, help='Add debug information')
 def integration(tasks, workflows, scans, test, debug):
+	"""Run integration tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
+	os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
 	cmd = f'{sys.executable} -m unittest'
 	if test:
 		if not test.startswith('tests.integration'):
@@ -865,58 +916,11 @@ def integration(tasks, workflows, scans, test, debug):
 		cmd += f' {test}'
 	else:
 		cmd += ' discover -v tests.integration'
-	result = Command.run_command(
-		cmd,
-		name='integration tests',
-		cwd=ROOT_FOLDER,
-		**DEFAULT_CMD_OPTS
-	)
-	sys.exit(result.return_code)
+	run_test(cmd, 'integration')
 
 
 @test.command()
-@click.option('--tasks', type=str, default='', help='Secator tasks to test (comma-separated)')
-@click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
-@click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
-@click.option('--test', '-t', type=str, help='Secator test to run')
-@click.option('--coverage', '-x', is_flag=True, help='Run coverage on results')
-@click.option('--debug', '-d', type=int, default=0, help='Add debug information')
-def unit(tasks, workflows, scans, test, coverage=False, debug=False):
-	os.environ['TEST_TASKS'] = tasks or ''
-	os.environ['TEST_WORKFLOWS'] = workflows or ''
-	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['DEBUG'] = str(debug)
-	os.environ['STORE_HTTP_RESPONSES'] = '0'
-
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
-	if test:
-		if not test.startswith('tests.unit'):
-			test = f'tests.unit.{test}'
-		cmd += f' {test}'
-	else:
-		cmd += ' discover -v tests.unit'
-
-	result = Command.run_command(
-		cmd,
-		name='unit tests',
-		cwd=ROOT_FOLDER,
-		**DEFAULT_CMD_OPTS
-	)
-	if coverage:
-		Command.run_command(
-			f'{sys.executable} -m coverage report -m',
-			name='unit tests',
-			**DEFAULT_CMD_OPTS
-		)
-	sys.exit(result.return_code)
-
-
-@test.command()
-def lint():
-	result = Command.run_command(
-		f'{sys.executable} -m flake8 secator/',
-		name='lint tests',
-		cwd=ROOT_FOLDER,
-		**DEFAULT_CMD_OPTS
-	)
-	sys.exit(result.return_code)
+def coverage():
+	"""Run coverage report."""
+	cmd = f'{sys.executable} -m coverage report -m'
+	run_test(cmd, 'coverage')

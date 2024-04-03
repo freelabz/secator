@@ -100,9 +100,6 @@ class Command(Runner):
 	# Output
 	output = ''
 
-	# Default run opts
-	default_run_opts = {}
-
 	# Proxy options
 	proxychains = False
 	proxy_socks5 = False

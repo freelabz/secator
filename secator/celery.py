@@ -5,7 +5,7 @@ from time import sleep
 
 from celery import Celery, chain, chord, signals
 from celery.app import trace
-from celery.result import AsyncResult, GroupResult, allow_join_result
+from celery.result import AsyncResult, allow_join_result
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
@@ -363,11 +363,6 @@ def forward_results(results):
 # Celery result utils #
 #---------------------#
 
-def find_root_task(result):
-	while (result.parent is not None):
-		result = result.parent
-	return result
-
 
 def poll_task(result, seen=[]):
 	"""Poll Celery result tree recursively to get results live.
@@ -413,54 +408,6 @@ def poll_task(result, seen=[]):
 		if not res.ready():
 			sleep(0.1)
 			yield from poll_task(result, seen=seen)
-
-
-def get_results(result):
-	"""Get all intermediate results from Celery result object.
-
-	Use this when running complex workflows with .si() i.e not passing results
-	between tasks.
-
-	Args:
-		result (Union[AsyncResult, GroupResult]): Celery result.
-
-	Returns:
-		list: List of results.
-	"""
-	while not result.ready():
-		continue
-	results = []
-	get_nested_results(result, results=results)
-	return results
-
-
-def get_nested_results(result, results=[]):
-	"""Get results recursively from Celery result object by parsing result tree
-	in reverse order. Also gets results from GroupResult children.
-
-	Args:
-		result (Union[AsyncResult, GroupResult]): Celery result object.
-
-	Returns:
-		list: List of results.
-	"""
-	if result is None:
-		return
-
-	if isinstance(result, GroupResult):
-		console.log(repr(result))
-		get_nested_results(result.parent, results=results)
-		for child in result.children:
-			get_nested_results(child, results=results)
-
-	elif isinstance(result, AsyncResult):
-		console.log(repr(result))
-		res = result.get()
-		console.log(f'-> Found {len(res)} results.')
-		console.log(f'-> {res}')
-		if res is not None:
-			results.extend(res)
-		get_nested_results(result.parent, results=results)
 
 
 def is_celery_worker_alive():

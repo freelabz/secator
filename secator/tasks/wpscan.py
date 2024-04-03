@@ -4,7 +4,7 @@ import os
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
-							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PROVIDER,
+							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
 							   SEVERITY, TAGS, THREADS, TIMEOUT,
 							   URL, USER_AGENT)
@@ -170,7 +170,7 @@ class wpscan(VulnHttp):
 
 	@staticmethod
 	def on_init(self):
-		output_path = self.get_opt_value('output_path')
+		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path

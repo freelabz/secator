@@ -7,7 +7,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
+							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST)
 from secator.output_types import Url
@@ -82,7 +82,7 @@ class dirsearch(HttpFuzzer):
 
 	@staticmethod
 	def on_init(self):
-		self.output_path = self.get_opt_value('output_path')
+		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.cmd += f' -o {self.output_path}'

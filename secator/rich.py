@@ -5,7 +5,6 @@ import rich_click
 import yaml
 from rich import box
 from rich.console import Console
-from rich.logging import RichHandler
 from rich.table import Table
 from rich.traceback import install
 
@@ -13,7 +12,7 @@ from secator.definitions import DEBUG, RECORD
 
 console = Console(stderr=True, record=RECORD, color_system='truecolor')
 console_stdout = Console(record=True)
-handler = RichHandler(rich_tracebacks=True)
+# handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
 install(show_locals=DEBUG > 2, suppress=[click, rich_click])
 
 
