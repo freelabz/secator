@@ -641,8 +641,7 @@ class Runner:
 
 				# If progress object, yield progress and ignore tracking
 				if isinstance(data, OutputType) and data._type == 'progress':
-					if data.percent != 100:
-						yield data
+					yield data
 					continue
 
 				# TODO: add error output type and yield errors in get_celery_results
@@ -846,9 +845,11 @@ class Runner:
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
 
-		if item._type == 'progress' and item._source == self.config.name and int(item.percent) != 100:
+		if item._type == 'progress' and item._source == self.config.name:
 			self.progress = item.percent
 			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < DEFAULT_PROGRESS_UPDATE_FREQUENCY:
+				return None
+			elif int(item.percent) in [0, 100]:
 				return None
 			else:
 				self.last_updated_progress = item._timestamp
