@@ -1,16 +1,16 @@
-from bson.objectid import ObjectId
-import os
 import logging
+import os
 import time
 
+import pymongo
+from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.definitions import DEFAULT_PROGRESS_UPDATE_FREQUENCY
-from secator.runners import Task, Workflow, Scan
 from secator.output_types import OUTPUT_TYPES
+from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
-import pymongo
 # import gevent.monkey
 # gevent.monkey.patch_all()
 

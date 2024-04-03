@@ -1,11 +1,12 @@
-from collections import OrderedDict
 import sys
+from collections import OrderedDict
 
 import rich_click as click
 from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
-from secator.definitions import OPT_NOT_SUPPORTED, CELERY_ENABLED
+from secator.definitions import (MONGODB_ADDON_ENABLED, OPT_NOT_SUPPORTED,
+								 WORKER_ADDON_ENABLED)
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
@@ -274,7 +275,7 @@ def register_runner(cli_endpoint, config):
 		# opts.update(unknown_opts)
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
-		if sync or show or not CELERY_ENABLED:
+		if sync or show or not WORKER_ADDON_ENABLED:
 			sync = True
 		elif worker:
 			sync = False
@@ -292,12 +293,11 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = {}
 		if driver == 'mongodb':
-			try:
-				from secator.hooks.mongodb import MONGODB_HOOKS
-				hooks = MONGODB_HOOKS
-			except ModuleNotFoundError:
-				_get_rich_console().print('[bold red]Missing MongoDB dependencies: please run `secator install addons mongo`[/].')
+			if not MONGODB_ADDON_ENABLED:
+				_get_rich_console().print('[bold red]Missing MongoDB dependencies: please run `secator install addons mongodb`[/].')
 				sys.exit(1)
+			from secator.hooks.mongodb import MONGODB_HOOKS
+			hooks = MONGODB_HOOKS
 
 		# Build exporters
 		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)

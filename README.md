@@ -140,20 +140,54 @@ docker-compose exec secator secator --help
 `secator` uses external tools, so you might need to install languages used by those tools assuming they are not already installed on your system.
 
 We provide utilities to install required languages if you don't manage them externally:
+
+<details>
+	<summary>Go</summary>
+
 ```sh
-secator install langs go   # install Go
-secator install langs ruby # install Ruby
+secator install langs go
 ```
+
+</details>
+
+<details>
+	<summary>Ruby</summary>
+
+```sh
+secator install langs ruby
+```
+
+</details>
 
 ### Installing tools
 
 `secator` does not install any of the external tools it supports by default.
 
 We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
+
+<details>
+	<summary>All tools</summary>
+
 ```sh
-secator install tools httpx  # install httpx
-secator install tools        # install all supported tools
+secator install tools
 ```
+
+</details>
+
+<details>
+	<summary>Specific tools</summary>
+
+```sh
+secator install tools <TOOL_NAME>
+```
+
+For instance, to install `httpx`, use:
+
+```sh
+secator install tools httpx
+```
+
+</details>
 
 Please make sure you are using the latest available versions for each tool before you run secator or you might run into parsing / formatting issues.
 
@@ -166,7 +200,7 @@ There are several addons available for `secator`:
 <details>
 	<summary>worker</summary>
 
-Add support for Celery (see [Distributed runs with Celery](https://docs.freelabz.com/in-depth/distributed-runs-with-celery)).
+Add support for Celery workers (see [Distributed runs with Celery](https://docs.freelabz.com/in-depth/distributed-runs-with-celery)).
 ```sh
 secator install addons worker
 ```

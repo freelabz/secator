@@ -2,8 +2,9 @@
 
 import os
 
+from dotenv import find_dotenv, load_dotenv
 from pkg_resources import get_distribution
-from dotenv import load_dotenv, find_dotenv
+
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # Globals
@@ -163,9 +164,16 @@ WEBSERVER = 'webserver'
 WORDLIST = 'wordlist'
 WORDS = 'words'
 
-# Try to import Celery
+# Check worker addon
 try:
-    import celery  # noqa: F401
-    CELERY_ENABLED = 1
+    import eventlet  # noqa: F401
+    WORKER_ADDON_ENABLED = 1
 except ModuleNotFoundError:
-    CELERY_ENABLED = 0
+    WORKER_ADDON_ENABLED = 0
+
+# Check mongodb addon
+try:
+    import pymongo  # noqa: F401
+    MONGODB_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+    MONGODB_ADDON_ENABLED = 0

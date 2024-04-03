@@ -30,21 +30,22 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-  "bs4",
-  "cpe",
-  "dotmap",
-  "free-proxy",
-  "furl",
-  "humanize",
-  "ifaddr",
-  "jinja2",
-  "python-dotenv",
-  "pyyaml",
-  "requests",
-  "rich",
+  "bs4<1",
+  'celery<6',
+  "cpe<2",
+  "dotmap<2",
+  "free-proxy<2",
+  "furl<3",
+  "humanize<5",
+  "ifaddr<1",
+  "jinja2<4",
+  "python-dotenv<2",
+  "pyyaml<7",
+  "requests<3",
+  "rich<14",
   "rich-click<1.7",
-  "validators",
-  "xmltodict"
+  "validators<1",
+  "xmltodict<1"
 ]
 
 [project.optional-dependencies]
@@ -59,7 +60,6 @@ trace = [
   'pyinstrument',
 ]
 worker = [
-  'celery',
   'gevent',
   'eventlet',
   'flower',
