@@ -4,7 +4,7 @@ import os
 import re
 
 from secator.decorators import task
-from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, PROXY,
+from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
 								 TIMEOUT, URL, USERNAME)
 from secator.output_types import UserAccount
@@ -70,7 +70,7 @@ class maigret(ReconUser):
 
 	@staticmethod
 	def on_init(self):
-		output_path = self.get_opt_value('output_path')
+		output_path = self.get_opt_value(OUTPUT_PATH)
 		self.output_path = output_path
 
 	@staticmethod

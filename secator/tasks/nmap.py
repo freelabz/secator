@@ -8,7 +8,7 @@ from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
-								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
+								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, STATE, TAGS,
 								 THREADS, TIMEOUT, USER_AGENT)
@@ -64,7 +64,7 @@ class nmap(VulnMulti):
 
 	@staticmethod
 	def on_init(self):
-		output_path = self.get_opt_value('output_path')
+		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
@@ -279,7 +279,7 @@ class nmapData(dict):
 				vuln_data = VulnMulti.lookup_cve(vuln['id'], cpes=cpes)
 				if vuln_data:
 					vuln.update(vuln_data)
-					yield vuln
+				yield vuln
 			else:
 				# logger.debug(f'Vulscan provider {provider_name} is not supported YET.')
 				continue
@@ -334,11 +334,8 @@ class nmapData(dict):
 					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=cpes)
 					if vuln_data:
 						vuln.update(vuln_data)
-						yield vuln
+					yield vuln
 				else:
 					logger.debug(f'Vulners parser for "{vuln_type}" is not implemented YET.')
 			else:
 				logger.error(f'Unrecognized vulners output: {elems}')
-
-	def _parse_http_csrf_output(self, out, port_data):
-		pass

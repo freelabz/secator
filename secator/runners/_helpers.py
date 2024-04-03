@@ -1,7 +1,5 @@
 import os
 
-from rich.prompt import Confirm
-
 from secator.utils import deduplicate
 
 
@@ -137,23 +135,6 @@ def get_task_data(task_id):
 		# del data['results']
 		# del data['task_results']
 	return data
-
-
-def confirm_exit(func):
-	"""Decorator asking user for confirmation to exit.
-
-	Args:
-		func (func): Decorated function.
-	"""
-	def inner_function(self, *args, **kwargs):
-		try:
-			func(self, *args, **kwargs)
-		except KeyboardInterrupt:
-			exit_confirmed = Confirm.ask('Are you sure you want to exit ?')
-			if exit_confirmed:
-				self.log_results()
-				raise KeyboardInterrupt
-	return inner_function
 
 
 def get_task_folder_id(path):

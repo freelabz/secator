@@ -4,7 +4,6 @@ from secator.runners import Workflow
 from secator.config import ConfigLoader
 from secator.rich import console
 from secator.celery import *
-import _thread
 import os
 import sys
 import json

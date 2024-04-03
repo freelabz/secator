@@ -173,6 +173,7 @@ def decorate_command_options(opts):
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
 			short = conf.pop('short', None)
+			conf.pop('internal', False)
 			conf.pop('prefix', None)
 			long = f'--{opt_name}'
 			short = f'-{short}' if short else f'-{opt_name}'

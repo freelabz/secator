@@ -2,7 +2,6 @@ import importlib
 import inspect
 import itertools
 import logging
-import mimetypes
 import operator
 import os
 import re
@@ -108,24 +107,6 @@ def sanitize_url(http_url):
 	return url.geturl().rstrip('/')
 
 
-def match_extensions(response, allowed_ext=['.html']):
-	"""Check if a URL is a file from the HTTP response by looking at the content_type and the URL.
-
-	Args:
-		response (dict): httpx response.
-
-	Returns:
-		bool: True if is a file, False otherwise.
-	"""
-	content_type = response.get('content_type', '').split(';')[0]
-	url = response.get('final_url') or response['url']
-	ext = mimetypes.guess_extension(content_type)
-	ext2 = os.path.splitext(urlparse(url).path)[1]
-	if (ext and ext in allowed_ext) or (ext2 and ext2 in allowed_ext):
-		return True
-	return False
-
-
 def deduplicate(array, attr=None):
 	"""Deduplicate list of OutputType items.
 
@@ -145,17 +126,6 @@ def deduplicate(array, attr=None):
 				memo.add(getattr(sub, attr))
 		return sorted(res, key=operator.attrgetter(attr))
 	return sorted(list(dict.fromkeys(array)))
-
-
-def setup_logger(level='info', format='%(message)s'):
-	logger = logging.getLogger('secator')
-	level = logging.getLevelName(level.upper())
-	logger.setLevel(level)
-	handler = logging.StreamHandler()
-	formatter = logging.Formatter(format)
-	handler.setFormatter(formatter)
-	logger.addHandler(handler)
-	return logger
 
 
 def discover_internal_tasks():
@@ -307,12 +277,6 @@ def pluralize(word):
 		return word.rstrip('y') + 'ies'
 	else:
 		return f'{word}s'
-
-
-def get_task_name_padding(classes=None):
-	all_tasks = discover_tasks()
-	classes = classes or all_tasks
-	return max([len(cls.__name__) for cls in all_tasks if cls in classes]) + 2
 
 
 def load_fixture(name, fixtures_dir, ext=None, only_path=False):
