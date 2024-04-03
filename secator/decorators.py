@@ -296,7 +296,7 @@ def register_runner(cli_endpoint, config):
 				from secator.hooks.mongodb import MONGODB_HOOKS
 				hooks = MONGODB_HOOKS
 			except ModuleNotFoundError:
-				_get_rich_console().print('[bold red]Missing MongoDB dependencies: please run `pipx install secator\[mongo]`[/].')
+				_get_rich_console().print('[bold red]Missing MongoDB dependencies: please run `secator install addons mongo`[/].')
 				sys.exit(1)
 
 		# Build exporters

@@ -135,6 +135,27 @@ docker-compose exec secator secator --help
 
 ***Note:*** If you chose the Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
 
+### Installing languages
+
+`secator` uses external tools, so you might need to install languages used by those tools assuming they are not already installed on your system.
+
+We provide utilities to install required languages if you don't manage them externally:
+```sh
+secator install langs go   # install Go
+secator install langs ruby # install Ruby
+```
+
+### Installing tools
+
+`secator` does not install any of the external tools it supports by default.
+
+We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
+```sh
+secator install tools httpx  # install httpx
+secator install tools        # install all supported tools
+```
+
+Please make sure you are using the latest available versions for each tool before you run secator or you might run into parsing / formatting issues.
 
 ### Installing addons
 
@@ -206,28 +227,6 @@ secator install addons trace
 ```
 
 </details>
-
-### Installing languages
-
-`secator` uses external tools, so you might need to install languages used by those tools assuming they are not already installed on your system.
-
-We provide utilities to install required languages if you don't manage them externally:
-```sh
-secator install langs go   # install Go
-secator install langs ruby # install Ruby
-```
-
-### Installing tools
-
-`secator` does not install any of the external tools it supports by default.
-
-We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
-```sh
-secator install tools httpx  # install httpx
-secator install tools        # install all supported tools
-```
-
-Please make sure you are using the latest available versions for each tool before you run secator or you might run into parsing / formatting issues.
 
 ### Checking installation health
 
