@@ -732,7 +732,7 @@ def serve(directory, host, port, interface):
 	console.print(Rule())
 	console.print('Starting HTTP server ...', style='bold yellow')
 	Command.run_command(
-		f'python -m http.server {port}',
+		f'{sys.executable} -m http.server {port}',
 		cwd=directory,
 		**DEFAULT_CMD_OPTS
 	)
