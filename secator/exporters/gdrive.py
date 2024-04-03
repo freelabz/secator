@@ -55,7 +55,7 @@ class GdriveExporter(Exporter):
 				k.replace('_', ' ').upper()
 				for k in list(items[0].keys())
 			]
-			csv_path = f'{self.report.output_folder}/{title}_{output_type}_{self.report.timestamp}.csv'
+			csv_path = f'{self.report.output_folder}/report_{output_type}.csv'
 			if not os.path.exists(csv_path):
 				console.print(
 					f'Unable to find CSV at {csv_path}. For Google sheets reports, please enable CSV reports as well.')

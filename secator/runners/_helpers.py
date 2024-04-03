@@ -1,4 +1,5 @@
-from celery.result import AsyncResult, GroupResult
+import os
+
 from rich.prompt import Confirm
 
 from secator.utils import deduplicate
@@ -77,6 +78,7 @@ def get_task_ids(result, ids=[]):
 		result (Union[AsyncResult, GroupResult]): Celery result object.
 		ids (list): List of ids.
 	"""
+	from celery.result import AsyncResult, GroupResult
 	if result is None:
 		return
 
@@ -105,6 +107,7 @@ def get_task_data(task_id):
 	Returns:
 		dict: Task info (id, name, state, results, chunk_info, count, error, ready).
 	"""
+	from celery.result import AsyncResult
 	res = AsyncResult(task_id)
 	if not (res and res.args and len(res.args) > 1):
 		return
@@ -151,3 +154,20 @@ def confirm_exit(func):
 				self.log_results()
 				raise KeyboardInterrupt
 	return inner_function
+
+
+def get_task_folder_id(path):
+	names = []
+	if not os.path.exists(path):
+		return 0
+	for f in os.scandir(path):
+		if f.is_dir():
+			try:
+				int(f.name)
+				names.append(int(f.name))
+			except ValueError:
+				continue
+	names.sort()
+	if names:
+		return names[-1] + 1
+	return 0

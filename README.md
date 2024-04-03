@@ -45,9 +45,10 @@ and it is designed to improve productivity for pentesters and security researche
 
 * **Customizable**
 
-## Supported commands
 
-`secator` integrates the following commands:
+## Supported tools
+
+`secator` integrates the following tools:
 
 | Name                                                          | Description                                                                    | Category       |
 |---------------------------------------------------------------|--------------------------------------------------------------------------------|----------------|
@@ -76,62 +77,197 @@ and it is designed to improve productivity for pentesters and security researche
 | [nuclei](https://github.com/projectdiscovery/nuclei)          | Fast and customisable vulnerability scanner based on simple YAML based DSL.    | `vuln/multi`   |
 | [searchsploit](https://gitlab.com/exploit-database/exploitdb) | Exploit searcher. | `exploit/search`    |
 
-Feel free to request new commands to be added by opening an issue, but please 
-check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
+Feel free to request new tools to be added by opening an issue, but please 
+check that the tool complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
 
 
-## Install Secator
+## Installation
 
-Secator requires **python >= 3.8** to install successfully. Run the following command to install the latest version:
-
-```sh
-pip3 install secator
-```
+### Installing secator
 
 <details>
-	<summary>Bash one-liner</summary>
+	<summary>Pipx</summary>
 
-	git clone https://github.com/freelabz/secator && sh ./secator/scripts/install.sh
+```sh
+pipx install secator
+```
+
+</details>
+
+<details>
+	<summary>Pip</summary>
+
+```sh
+pip install secator
+```
+
+</details>
+
+<details>
+  <summary>Bash</summary>
+
+```sh
+wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
+```
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	docker pull freelabz/secator
+```sh
+docker run -it freelabz/secator --help
+```
 
 </details>
 
 <details>
-	<summary>Development build</summary>
+	<summary>Docker Compose</summary>
 
-	git clone https://github.com/freelabz/secator
-	cd secator
-	python3 -m virtualenv -p python3 ~/.virtualenvs/secator
-	source ~/.virtualenvs/secator/bin/activate
-	pip3 install -e .
+```sh
+git clone https://github.com/freelabz/secator
+cd secator
+docker-compose up -d
+docker-compose exec secator secator --help
+```
+
+</details>
+
+***Note:*** If you chose the Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
+
+### Installing languages
+
+`secator` uses external tools, so you might need to install languages used by those tools assuming they are not already installed on your system.
+
+We provide utilities to install required languages if you don't manage them externally:
+
+<details>
+	<summary>Go</summary>
+
+```sh
+secator install langs go
+```
+
+</details>
+
+<details>
+	<summary>Ruby</summary>
+
+```sh
+secator install langs ruby
+```
+
+</details>
+
+### Installing tools
+
+`secator` does not install any of the external tools it supports by default.
+
+We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
+
+<details>
+	<summary>All tools</summary>
+
+```sh
+secator install tools
+```
+
+</details>
+
+<details>
+	<summary>Specific tools</summary>
+
+```sh
+secator install tools <TOOL_NAME>
+```
+
+For instance, to install `httpx`, use:
+
+```sh
+secator install tools httpx
+```
+
+</details>
+
+Please make sure you are using the latest available versions for each tool before you run secator or you might run into parsing / formatting issues.
+
+### Installing addons
+
+`secator` comes installed with the minimum amount of dependencies.
+
+There are several addons available for `secator`:
+
+<details>
+	<summary>worker</summary>
+
+Add support for Celery workers (see [Distributed runs with Celery](https://docs.freelabz.com/in-depth/distributed-runs-with-celery)).
+```sh
+secator install addons worker
+```
 
 </details>
 
 
-### Install underlying tools
+<details>
+	<summary>google</summary>
 
-`secator` is designed to work with the latest version of all the tools it supports. Please make sure you are using the latest version of the tools you are using with `secator`.
+Add support for Google Drive exporter (`-o gdrive`).
 
-A convenience utility is provided to install all tools:
 ```sh
-secator u install
+secator install addons google
 ```
 
-... or to update specific tools:
+</details>
+
+<details>
+	<summary>mongodb</summary>
+
+Add support for MongoDB driver (`-driver mongodb`).
 ```sh
-secator u install <TASK_NAME>
+secator install addons mongodb
 ```
 
-Please note that:
-* this install method requires `apt` so it will not work on distributions not supporting it.
-* this is tested merely on Ubuntu and some of these installs might not work on other distributions.
-* ideally you update the tools yourself, and use `secator` as a convenient wrapper on top of them.
+</details>
+
+<details>
+	<summary>redis</summary>
+
+Add support for Redis backend (Celery).
+
+```sh
+secator install addons redis
+```
+
+</details>
+
+<details>
+	<summary>dev</summary>
+
+Add development tools like `coverage` and `flake8` required for running tests.
+
+```sh
+secator install addons dev
+```
+
+</details>
+
+<details>
+	<summary>trace</summary>
+
+Add tracing tools like `memray` and `pyinstrument` required for tracing functions.
+
+```sh
+secator install addons trace
+```
+
+</details>
+
+### Checking installation health
+
+To figure out which languages or tools are installed on your system (along with their version):
+```sh
+secator health
+```
 
 ## Usage
 ```sh

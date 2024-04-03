@@ -23,6 +23,7 @@ class ffuf(HttpFuzzer):
 	input_chunk_size = 1
 	file_flag = None
 	json_flag = '-json'
+	version_flag = '-V'
 	item_loaders = [
 		JSONSerializer(),
 		RegexSerializer(FFUF_PROGRESS_REGEX, fields=['count', 'total', 'rps', 'duration', 'errors'])
@@ -82,5 +83,3 @@ class ffuf(HttpFuzzer):
 	def on_item(self, item):
 		item.method = self.get_opt_value(METHOD) or 'GET'
 		return item
-
-	# TODO: write custom item_loader to pick up Progress items too

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import sys
 import uuid
 from contextlib import nullcontext
@@ -7,18 +8,17 @@ from datetime import datetime
 from time import sleep, time
 
 import humanize
-from celery.result import AsyncResult
 from dotmap import DotMap
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.progress import Progress as RichProgress
 from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY
+from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY, REPORTS_FOLDER
 from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_data, get_task_ids,
+from secator.runners._helpers import (get_task_data, get_task_ids, get_task_folder_id,
 									  process_extractor)
 from secator.utils import (debug, import_dynamic, merge_opts, pluralize,
 						   rich_to_ansi)
@@ -76,6 +76,9 @@ class Runner:
 	# Run hooks
 	enable_hooks = True
 
+	# Reports folder
+	reports_folder = None
+
 	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
@@ -105,6 +108,17 @@ class Runner:
 		self.uuids = []
 		self.result = None
 
+		# Determine report folder
+		default_reports_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
+		_id = get_task_folder_id(default_reports_folder_base)
+		default_report_folder = f'{default_reports_folder_base}/{_id}'
+		self.reports_folder = run_opts.get('reports_folder') or default_report_folder
+
+		# Make reports folders
+		os.makedirs(self.reports_folder, exist_ok=True)
+		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
+		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
+
 		# Process input
 		self.input = targets
 		if isinstance(self.input, list) and len(self.input) == 1:
@@ -122,7 +136,8 @@ class Runner:
 		# Print options
 		self.print_start = self.run_opts.pop('print_start', False)
 		self.print_item = self.run_opts.pop('print_item', False)
-		self.print_line = self.run_opts.pop('print_line', self.sync and not self.output_quiet)
+		self.print_line = self.run_opts.pop('print_line', False)
+		self.print_errors = self.run_opts.pop('print_errors', True)
 		self.print_item_count = self.run_opts.pop('print_item_count', False)
 		self.print_cmd = self.run_opts.pop('print_cmd', False)
 		self.print_run_opts = self.run_opts.pop('print_run_opts', DEBUG > 1)
@@ -139,12 +154,26 @@ class Runner:
 		self.opts_to_print = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Hooks
+		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 		self.hooks = {name: [] for name in HOOKS}
 		for key in self.hooks:
+
+			# Register class specific hooks
 			instance_func = getattr(self, key, None)
 			if instance_func:
+				name = f'{self.__class__.__name__}.{key}'
+				fun = f'{instance_func.__module__}.{instance_func.__name__}'
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks', level=3)
 				self.hooks[key].append(instance_func)
-			self.hooks[key].extend(hooks.get(self.__class__, {}).get(key, []))
+
+			# Register user hooks
+			user_hooks = hooks.get(self.__class__, {}).get(key, [])
+			user_hooks.extend(hooks.get(key, []))
+			for hook in user_hooks:
+				name = f'{self.__class__.__name__}.{key}'
+				fun = f'{hook.__module__}.{hook.__name__}'
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks', level=3)
+			self.hooks[key].extend(user_hooks)
 
 		# Validators
 		self.validators = {name: [] for name in VALIDATORS}
@@ -159,6 +188,8 @@ class Runner:
 		self.has_children = self.run_opts.get('has_children', False)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
+		self.unique_name = self.name.replace('/', '_')
+		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
 		self._set_print_prefix()
 
 		# Input post-process
@@ -234,7 +265,7 @@ class Runner:
 
 				elif item and isinstance(item, str):
 					if self.print_line:
-						self._print(item, out=sys.stderr)
+						self._print(item, out=sys.stderr, end='\n')
 					if not self.output_json:
 						self.results.append(item)
 						yield item
@@ -330,12 +361,19 @@ class Runner:
 				_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
 				result = hook(self, *args)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'ended'}, id=_id, sub='hooks', level=3)
 			except Exception as e:
-				self._print(f'{fun} failed: "{e.__class__.__name__}". Skipping', color='bold red', rich=True)
-				if DEBUG > 1:
-					logger.exception(e)
+				if self.raise_on_error:
+					raise e
 				else:
-					self._print('Please set DEBUG to > 1 to see the detailed exception.', color='dim red', rich=True)
+					if DEBUG > 1:
+						logger.exception(e)
+					else:
+						self._print(
+							f'{fun} failed: "{e.__class__.__name__}: {str(e)}". Skipping',
+							color='bold red',
+							rich=True)
+						self._print('Set DEBUG to > 1 to see the detailed exception.', color='dim red', rich=True)
 		return result
 
 	def run_validators(self, validator_type, *args):
@@ -444,15 +482,15 @@ class Runner:
 		# Log runner infos
 		if self.infos:
 			self._print(
-				f'✓  [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
+				f':heavy_check_mark: [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
 				color='bold green', rich=True)
 			for info in self.infos:
 				self._print(f'   • {info}', color='bold green', rich=True)
 
 		# Log runner errors
-		if self.errors:
+		if self.errors and self.print_errors:
 			self._print(
-				f'❌ [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
+				f':exclamation_mark:[bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)
 			for error in self.errors:
 				self._print(f'   • {error}', color='bold red', rich=True)
@@ -468,9 +506,9 @@ class Runner:
 		if self.print_item_count and not self.print_raw and not self.orig:
 			count_map = self._get_results_count()
 			if all(count == 0 for count in count_map.values()):
-				self._print(':adhesive_bandage: Found 0 results.', color='bold red', rich=True)
+				self._print(':exclamation_mark:Found 0 results.', color='bold red', rich=True)
 			else:
-				results_str = ':pill: Found ' + ' and '.join([
+				results_str = ':heavy_check_mark: Found ' + ' and '.join([
 					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
 					for name, count in count_map.items()
 				]) + '.'
@@ -486,6 +524,7 @@ class Runner:
 		Yields:
 			dict: Subtasks state and results.
 		"""
+		from celery.result import AsyncResult
 		res = AsyncResult(result.id)
 		while True:
 			# Yield results
@@ -625,7 +664,6 @@ class Runner:
 				# 	continue
 
 				# Handle messages if any
-				# TODO: error handling should be moved to process_live_tasks
 				state = data['state']
 				error = data.get('error')
 				info = data.get('info')
@@ -711,7 +749,7 @@ class Runner:
 				break  # found an item that fits
 			except (TypeError, KeyError) as e:  # can't load using class
 				debug(
-					f'[dim red]Failed loading item as {klass.__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
+					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
 					sub='klass.load',
 					level=5)
 				if DEBUG == 6:
@@ -725,12 +763,12 @@ class Runner:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, rich=False):
+	def _print(self, data, color=None, out=sys.stderr, rich=False, end='\n'):
 		"""Print function.
 
 		Args:
 			data (str or dict): Input data.
-			color (str, Optional): Termcolor color.
+			color (str, Optional): Rich color.
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
 			rich (bool, Optional): Force rich output.
 		"""
@@ -743,7 +781,7 @@ class Runner:
 
 		if self.sync or rich:
 			_console = console_stdout if out == sys.stdout else console
-			_console.print(data, highlight=False, style=color, soft_wrap=True)
+			_console.print(data, highlight=False, style=color, soft_wrap=True, end=end)
 		else:
 			print(data, file=out)
 
@@ -807,9 +845,11 @@ class Runner:
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
 
-		if item._type == 'progress' and item._source == self.config.name and int(item.percent) != 100:
+		if item._type == 'progress' and item._source == self.config.name:
 			self.progress = item.percent
 			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < DEFAULT_PROGRESS_UPDATE_FREQUENCY:
+				return None
+			elif int(item.percent) in [0, 100]:
 				return None
 			else:
 				self.last_updated_progress = item._timestamp

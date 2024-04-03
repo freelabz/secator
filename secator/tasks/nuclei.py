@@ -21,7 +21,7 @@ class nuclei(VulnMulti):
 		'tags': {'type': str, 'help': 'Tags'},
 		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
 		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
-		'template_id': {'type': str, 'short': 'id', 'help': 'Template id'},
+		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
 		'debug': {'type': str, 'help': 'Debug mode'},
 	}
 	opt_key_map = {
@@ -67,7 +67,7 @@ class nuclei(VulnMulti):
 		}
 	}
 	ignore_return_code = True
-	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest'
+	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest && nuclei update-templates'
 	proxychains = False
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
@@ -85,7 +85,7 @@ class nuclei(VulnMulti):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
 		data['template_id'] = item['template-id']
-		data['template_url'] = item['template-url']
+		data['template_url'] = item.get('template-url', '')
 		return data
 
 	@staticmethod

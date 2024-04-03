@@ -42,13 +42,15 @@ class Scan(Runner):
 				console.log(f'No targets were specified for workflow {name}. Skipping.')
 				continue
 
-			# Workflow fmt options
+			# Workflow opts
 			run_opts = self.run_opts.copy()
+			run_opts['reports_folder'] = self.reports_folder
 			fmt_opts = {
 				'json': run_opts.get('json', False),
 				'print_item': False,
 				'print_start': True,
 				'print_run_summary': True,
+				'print_progress': self.sync
 			}
 			run_opts.update(fmt_opts)
 

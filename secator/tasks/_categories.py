@@ -17,6 +17,7 @@ from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE,
 							   URL, USER_AGENT, USERNAME, WORDLIST)
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
 								Vulnerability)
+from secator.rich import console
 from secator.runners import Command
 
 logger = logging.getLogger(__name__)
@@ -163,10 +164,10 @@ class Vuln(Command):
 			try:
 				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5).json()
 				if not cve_info:
-					logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
+					console.print(f'Could not fetch CVE info for cve {cve_id}. Skipping.', highlight=False)
 					return
 			except Exception:
-				logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
+				console.print(f'Could not fetch CVE info for cve {cve_id}. Skipping.', highlight=False)
 				return None
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.

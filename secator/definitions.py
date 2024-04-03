@@ -2,8 +2,9 @@
 
 import os
 
+from dotenv import find_dotenv, load_dotenv
 from pkg_resources import get_distribution
-from dotenv import load_dotenv, find_dotenv
+
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # Globals
@@ -20,10 +21,10 @@ ASCII = f"""
 
 # Secator folders
 ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-CONFIGS_FOLDER = ROOT_FOLDER + '/secator/configs'
+LIB_FOLDER = ROOT_FOLDER + '/secator'
+CONFIGS_FOLDER = LIB_FOLDER + '/configs'
 EXTRA_CONFIGS_FOLDER = os.environ.get('SECATOR_EXTRA_CONFIGS_FOLDER')
 DATA_FOLDER = os.environ.get('SECATOR_DATA_FOLDER', f'{os.path.expanduser("~")}/.secator')
-TASKS_FOLDER = os.environ.get('SECATOR_TASKS_FOLDER', f'{DATA_FOLDER}/tasks')
 REPORTS_FOLDER = os.environ.get('SECATOR_REPORTS_FOLDER', f'{DATA_FOLDER}/reports')
 WORDLISTS_FOLDER = os.environ.get('SECATOR_WORDLISTS_FOLDER', '/usr/share/seclists')
 SCRIPTS_FOLDER = f'{ROOT_FOLDER}/scripts'
@@ -31,7 +32,6 @@ CVES_FOLDER = f'{DATA_FOLDER}/cves'
 PAYLOADS_FOLDER = f'{DATA_FOLDER}/payloads'
 REVSHELLS_FOLDER = f'{DATA_FOLDER}/revshells'
 os.makedirs(DATA_FOLDER, exist_ok=True)
-os.makedirs(TASKS_FOLDER, exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 os.makedirs(WORDLISTS_FOLDER, exist_ok=True)
 os.makedirs(SCRIPTS_FOLDER, exist_ok=True)
@@ -74,7 +74,7 @@ DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-td')
 DEFAULT_KATANA_FLAGS = os.environ.get('DEFAULT_KATANA_FLAGS', '-jc -js-crawl -known-files all -or -ob')
 DEFAULT_NUCLEI_FLAGS = os.environ.get('DEFAULT_NUCLEI_FLAGS', '-stats -sj -si 20 -hm -or')
 DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-bail --no-state')
-DEFAULT_PROGRESS_UPDATE_FREQUENCY = 10
+DEFAULT_PROGRESS_UPDATE_FREQUENCY = 60
 
 # Default wordlists
 DEFAULT_HTTP_WORDLIST = os.environ.get('DEFAULT_HTTP_WORDLIST', f'{WORDLISTS_FOLDER}/Fuzzing/fuzz-Bo0oM.txt')
@@ -163,3 +163,17 @@ VULN_TYPE = 'type'
 WEBSERVER = 'webserver'
 WORDLIST = 'wordlist'
 WORDS = 'words'
+
+# Check worker addon
+try:
+    import eventlet  # noqa: F401
+    WORKER_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+    WORKER_ADDON_ENABLED = 0
+
+# Check mongodb addon
+try:
+    import pymongo  # noqa: F401
+    MONGODB_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+    MONGODB_ADDON_ENABLED = 0

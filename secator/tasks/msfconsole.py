@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 class msfconsole(VulnMulti):
 	"""CLI to access and work with the Metasploit Framework."""
 	cmd = 'msfconsole --quiet'
+	version_flag = OPT_NOT_SUPPORTED
 	input_type = HOST
 	input_chunk_size = 1
 	output_types = []
@@ -44,6 +45,7 @@ class msfconsole(VulnMulti):
 	}
 	encoding = 'ansi'
 	ignore_return_code = True
+	# install_cmd = 'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/msfinstall.sh | sh'
 
 	@staticmethod
 	def validate_input(self, input):
