@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from cpe import CPE
 
 from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE,
-							   DEFAULT_HTTP_WORDLIST, DELAY, DEPTH, DESCRIPTION,
+							   DEFAULT_HTTP_WORDLIST, DEFAULT_SKIP_CVE_SEARCH, DELAY, DEPTH, DESCRIPTION,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
@@ -17,6 +17,7 @@ from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE,
 							   URL, USER_AGENT, USERNAME, WORDLIST)
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
 								Vulnerability)
+from secator.rich import console
 from secator.runners import Command
 
 logger = logging.getLogger(__name__)
@@ -61,10 +62,6 @@ OPTS_RECON = [
 
 OPTS_VULN = [
 	HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
-]
-
-OPTS_OSINT = [
-
 ]
 
 
@@ -159,14 +156,17 @@ class Vuln(Command):
 		"""
 		cve_info = Vuln.lookup_local_cve(cve_id)
 		if not cve_info:
-			# logger.debug(f'{cve_id} not found locally. Use `secator utils download-cves` to update the local database.')
+			if DEFAULT_SKIP_CVE_SEARCH:
+				logger.debug(f'{cve_id} not found locally, and DEFAULT_SKIP_CVE_SEARCH is set: ignoring online search.')
+				return None
+			# logger.debug(f'{cve_id} not found locally. Use `secator install cves` to install CVEs locally.')
 			try:
 				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5).json()
 				if not cve_info:
-					logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
-					return
+					console.print(f'Could not fetch CVE info for cve {cve_id}. Skipping.', highlight=False)
+					return None
 			except Exception:
-				logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
+				console.print(f'Could not fetch CVE info for cve {cve_id}. Skipping.', highlight=False)
 				return None
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.

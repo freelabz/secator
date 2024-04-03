@@ -1,6 +1,5 @@
 import os
 import json
-import uuid
 from urllib.parse import urlparse
 
 from secator.decorators import task
@@ -11,7 +10,7 @@ from secator.definitions import (CONTENT_TYPE, DEFAULT_KATANA_FLAGS,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
 								 RATE_LIMIT, RETRIES, STATUS_CODE,
-								 STORED_RESPONSE_PATH, TASKS_FOLDER, TECH,
+								 STORED_RESPONSE_PATH, TECH,
 								 THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER, CONTENT_LENGTH)
 from secator.output_types import Url, Tag
 from secator.tasks._categories import HttpCrawler
@@ -107,27 +106,23 @@ class katana(HttpCrawler):
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
 		if DEFAULT_STORE_HTTP_RESPONSES:
-			_id = uuid.uuid4()
-			output_path = f'{TASKS_FOLDER}/{_id}'
-			self.output_response_path = output_path
-			os.makedirs(self.output_response_path, exist_ok=True)
-			self.cmd += f' -sr -srd {output_path}'
-
-	@staticmethod
-	def on_end(self):
-		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(self.output_response_path + '/index.txt'):
-			os.remove(self.output_response_path + '/index.txt')
+			self.cmd += f' -sr -srd {self.reports_folder}'
 
 	@staticmethod
 	def on_item(self, item):
 		if not isinstance(item, Url):
 			return item
 		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(item.stored_response_path):
-			with open(item.stored_response_path, 'r') as fin:
+			with open(item.stored_response_path, 'r', encoding='latin-1') as fin:
 				data = fin.read().splitlines(True)
 				first_line = data[0]
-			with open(item.stored_response_path, 'w') as fout:
+			with open(item.stored_response_path, 'w', encoding='latin-1') as fout:
 				fout.writelines(data[1:])
 				fout.writelines('\n')
 				fout.writelines(first_line)
 		return item
+
+	@staticmethod
+	def on_end(self):
+		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(self.reports_folder + '/index.txt'):
+			os.remove(self.reports_folder + '/index.txt')

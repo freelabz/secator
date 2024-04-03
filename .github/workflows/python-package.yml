@@ -15,21 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10"]
+        python-version: ["3.9", "3.10", "3.11"]
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+    - uses: ./.github/actions/install
       with:
         python-version: ${{ matrix.python-version }}
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install -r requirements.txt
-        python -m pip install .
-        python -m pip install .[dev]
 
     - name: Run unit tests
       run: |
@@ -40,21 +32,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10"]
+        python-version: ["3.9", "3.10", "3.11"]
     steps:
     - uses: actions/checkout@v3
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+  
+    - uses: ./.github/actions/install
       with:
         python-version: ${{ matrix.python-version }}
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install -r requirements.txt
-        python -m pip install .
-        python -m pip install .[dev]
 
     - name: Run lint tests
       run: |
@@ -65,14 +49,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10"]
+        python-version: ["3.11"]
         test_type: ['tasks']
         # test_type: ['tasks', 'workflows', 'scans']
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+    - uses: ./.github/actions/install
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -83,12 +66,9 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        python -m pip install -r requirements.txt
-        python -m pip install .
-        python -m pip install .[dev]
-        ./scripts/install_go.sh
-        ./scripts/install_commands.sh
+        secator install langs go
+        secator install langs ruby
+        secator install tools
 
     - name: Add GOBIN to PATH
       run: echo "${HOME}/.local/bin" >> $GITHUB_PATH

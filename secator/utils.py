@@ -2,7 +2,6 @@ import importlib
 import inspect
 import itertools
 import logging
-import mimetypes
 import operator
 import os
 import re
@@ -14,17 +13,18 @@ from importlib import import_module
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
-import netifaces
+import ifaddr
 import yaml
-from furl import furl
 from rich.markdown import Markdown
 
-from secator.definitions import DEFAULT_STDIN_TIMEOUT, DEBUG, DEBUG_COMPONENT
+from secator.definitions import DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
+
+_tasks = []
 
 
 class TaskError(ValueError):
@@ -107,50 +107,6 @@ def sanitize_url(http_url):
 	return url.geturl().rstrip('/')
 
 
-def match_extensions(response, allowed_ext=['.html']):
-	"""Check if a URL is a file from the HTTP response by looking at the content_type and the URL.
-
-	Args:
-		response (dict): httpx response.
-
-	Returns:
-		bool: True if is a file, False otherwise.
-	"""
-	content_type = response.get('content_type', '').split(';')[0]
-	url = response.get('final_url') or response['url']
-	ext = mimetypes.guess_extension(content_type)
-	ext2 = os.path.splitext(urlparse(url).path)[1]
-	if (ext and ext in allowed_ext) or (ext2 and ext2 in allowed_ext):
-		return True
-	return False
-
-
-def filter_urls(urls, **remove_parts):
-	"""Filter a list of URLs using `furl`.
-
-	Args:
-		urls (list): List of URLs to filter.
-		remove_parts (dict): Dict of URL pieces to remove.
-
-	Example:
-		>>> urls = ['http://localhost/test.js', 'http://localhost/test?a=1&b=2']
-		>>> filter_urls(urls, filter_ext=True)
-		['http://localhost/test']
-
-	Returns:
-		list: List of filtered URLs.
-	"""
-	if not remove_parts:
-		return urls
-	furl_remove_args = {
-		k.replace('remove_', ''): v for k, v in remove_parts.items()
-	}
-	return [
-		sanitize_url(furl(url).remove(**furl_remove_args).url)
-		for url in urls
-	]
-
-
 def deduplicate(array, attr=None):
 	"""Deduplicate list of OutputType items.
 
@@ -172,17 +128,6 @@ def deduplicate(array, attr=None):
 	return sorted(list(dict.fromkeys(array)))
 
 
-def setup_logger(level='info', format='%(message)s'):
-	logger = logging.getLogger('secator')
-	level = logging.getLevelName(level.upper())
-	logger.setLevel(level)
-	handler = logging.StreamHandler()
-	formatter = logging.Formatter(format)
-	handler.setFormatter(formatter)
-	logger.addHandler(handler)
-	return logger
-
-
 def discover_internal_tasks():
 	"""Find internal secator tasks."""
 	from secator.runners import Runner
@@ -193,7 +138,9 @@ def discover_internal_tasks():
 			continue
 		try:
 			module = import_module(f'secator.tasks.{module_name}')
-		except ImportError:
+		except ImportError as e:
+			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
+			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
 			continue
 		for attribute_name in dir(module):
 			attribute = getattr(module, attribute_name)
@@ -228,7 +175,10 @@ def discover_external_tasks():
 
 def discover_tasks():
 	"""Find all secator tasks (internal + external)."""
-	return discover_internal_tasks() + discover_external_tasks()
+	global _tasks
+	if not _tasks:
+		_tasks = discover_internal_tasks() + discover_external_tasks()
+	return _tasks
 
 
 def import_dynamic(cls_path, cls_root='Command'):
@@ -262,7 +212,7 @@ def get_command_cls(cls_name):
 	Returns:
 		cls: Class.
 	"""
-	tasks_classes = discover_internal_tasks() + discover_external_tasks()
+	tasks_classes = discover_tasks()
 	for task_cls in tasks_classes:
 		if task_cls.__name__ == cls_name:
 			return task_cls
@@ -329,12 +279,6 @@ def pluralize(word):
 		return f'{word}s'
 
 
-def get_task_name_padding(classes=None):
-	all_tasks = discover_tasks()
-	classes = classes or all_tasks
-	return max([len(cls.__name__) for cls in discover_tasks() if cls in classes]) + 2
-
-
 def load_fixture(name, fixtures_dir, ext=None, only_path=False):
 	fixture_path = f'{fixtures_dir}/{name}'
 	exts = ['.json', '.txt', '.xml', '.rc']
@@ -358,17 +302,13 @@ def get_file_timestamp():
 
 
 def detect_host(interface=None):
-	ifaces = netifaces.interfaces()
-	host = None
-	for iface in ifaces:
-		addrs = netifaces.ifaddresses(iface)
+	adapters = ifaddr.get_adapters()
+	for adapter in adapters:
+		iface = adapter.name
 		if (interface and iface != interface) or iface == 'lo':
 			continue
-		host = addrs[netifaces.AF_INET][0]['addr']
-		interface = iface
-		if 'tun' in iface:
-			break
-	return host
+		return adapter.ips[0].ip
+	return None
 
 
 def find_list_item(array, val, key='id', default=None):
@@ -417,9 +357,10 @@ def rich_to_ansi(text):
 
 def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG >= level:
+	debug_comp_empty = DEBUG_COMPONENT == [""] or not DEBUG_COMPONENT
+	if not debug_comp_empty and not any(sub.startswith(s) for s in DEBUG_COMPONENT):
 		return
-	if DEBUG_COMPONENT and not any(s.startswith(sub) for s in DEBUG_COMPONENT):
+	elif debug_comp_empty and not DEBUG >= level:
 		return
 	s = ''
 	if sub:
@@ -443,3 +384,21 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		s += f' [italic dim white]\[{id}][/] '
 	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
 	print(s)
+
+
+def escape_mongodb_url(url):
+	"""Escape username / password from MongoDB URL if any.
+
+	Args:
+		url (str): Full MongoDB URL string.
+
+	Returns:
+		str: Escaped MongoDB URL string.
+	"""
+	match = re.search('mongodb://(?P<userpass>.*)@(?P<url>.*)', url)
+	if match:
+		url = match.group('url')
+		user, password = tuple(match.group('userpass').split(':'))
+		user, password = quote(user), quote(password)
+		return f'mongodb://{user}:{password}@{url}'
+	return url
