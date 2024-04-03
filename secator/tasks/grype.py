@@ -7,41 +7,6 @@ from secator.output_types import Vulnerability
 from secator.tasks._categories import VulnCode
 
 
-def grype_item_loader(self, line):
-	"""Load vulnerabilty dicts from grype line output."""
-	split = [i for i in line.split(' ') if i]
-	if not len(split) == 6 or split[0] == 'NAME':
-		return None
-	product, version_vuln, version, product_type, vuln_id, severity = tuple(split)
-	extra_data = {
-		'product': product,
-		'version': version,
-		'product_type': product_type
-	}
-	data = {
-		'id': vuln_id,
-		'matched_at': self.input,
-		'confidence': 'medium',
-		'severity': severity.lower(),
-		'provider': 'grype',
-		'cvss_score': -1,
-		'tags': [],
-	}
-	if vuln_id.startswith('GHSA'):
-		data['provider'] = 'github.com'
-		data['references'] = [f'https://github.com/advisories/{vuln_id}']
-		data['tags'].extend(['cve', 'ghsa'])
-		vuln = VulnCode.lookup_ghsa(vuln_id)
-		data.update(vuln)
-		extra_data['ghsa_id'] = vuln_id
-	elif vuln_id.startswith('CVE'):
-		vuln = VulnCode.lookup_cve(vuln_id)
-		vuln['tags'].append('cve')
-		data.update(vuln)
-	data['extra_data'] = extra_data
-	return data
-
-
 @task()
 class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
@@ -65,4 +30,49 @@ class grype(VulnCode):
 	install_cmd = (
 		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
 	)
-	item_loader = grype_item_loader
+
+	@staticmethod
+	def item_loader(self, line):
+		"""Load vulnerabilty dicts from grype line output."""
+		split = [i for i in line.split(' ') if i]
+		if not len(split) in [5, 6] or split[0] == 'NAME':
+			return None
+		version_fixed = None
+		if len(split) == 5:  # no version fixed
+			product, version, product_type, vuln_id, severity = tuple(split)
+		elif len(split) == 6:
+			product, version, version_fixed, product_type, vuln_id, severity = tuple(split)
+		extra_data = {
+			'lang': product_type,
+			'product': product,
+			'version': version,
+		}
+		if version_fixed:
+			extra_data['version_fixed'] = version_fixed
+		data = {
+			'id': vuln_id,
+			'name': vuln_id,
+			'matched_at': self.input,
+			'confidence': 'medium',
+			'severity': severity.lower(),
+			'provider': 'grype',
+			'cvss_score': -1,
+			'tags': [],
+		}
+		if vuln_id.startswith('GHSA'):
+			data['provider'] = 'github.com'
+			data['references'] = [f'https://github.com/advisories/{vuln_id}']
+			data['tags'].extend(['cve', 'ghsa'])
+			vuln = VulnCode.lookup_ghsa(vuln_id)
+			if vuln:
+				data.update(vuln)
+				data['severity'] = data['severity'] or severity.lower()
+				extra_data['ghsa_id'] = vuln_id
+		elif vuln_id.startswith('CVE'):
+			vuln = VulnCode.lookup_cve(vuln_id)
+			if vuln:
+				vuln['tags'].append('cve')
+				data.update(vuln)
+				data['severity'] = data['severity'] or severity.lower()
+		data['extra_data'] = extra_data
+		return data

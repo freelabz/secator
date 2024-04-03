@@ -6,17 +6,16 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
 							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
-							   SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
+							   SEVERITY, TAGS, THREADS, TIMEOUT,
 							   URL, USER_AGENT)
 from secator.output_types import Tag, Vulnerability
 from secator.tasks._categories import VulnHttp
-from secator.utils import get_file_timestamp
 
 
 @task()
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
-	cmd = 'wpscan'
+	cmd = 'wpscan --random-user-agent --force --verbose'
 	file_flag = None
 	input_flag = '--url'
 	input_type = URL
@@ -72,20 +71,12 @@ class wpscan(VulnHttp):
 	proxy_http = True
 	proxy_socks5 = False
 	ignore_return_code = True
-
-	@staticmethod
-	def on_init(self):
-		output_path = self.get_opt_value('output_path')
-		if not output_path:
-			timestr = get_file_timestamp()
-			output_path = f'{TEMP_FOLDER}/wpscan_{timestr}.json'
-		self.output_path = output_path
-		self.cmd += f' -o {self.output_path}'
+	profile = 'io'
 
 	def yielder(self):
 		prev = self.print_item_count
 		self.print_item_count = False
-		list(super().yielder())
+		yield from super().yielder()
 		if self.return_code != 0:
 			return
 		self.results = []
@@ -100,8 +91,12 @@ class wpscan(VulnHttp):
 			with open(self.output_path, 'r') as f:
 				data = json.load(f)
 
+			if self.orig:
+				yield data
+				return
+
 			# Get URL
-			target = data['target_url']
+			target = data.get('target_url', self.targets)
 
 			# Wordpress version
 			version = data.get('version', {})
@@ -111,7 +106,7 @@ class wpscan(VulnHttp):
 				if wp_version_status == 'outdated':
 					vuln = version
 					vuln.update({
-						'url': data['target_url'],
+						'url': target,
 						'to_s': 'Wordpress outdated version',
 						'type': wp_version,
 						'references': {},
@@ -172,3 +167,11 @@ class wpscan(VulnHttp):
 						)
 
 		self.print_item_count = prev
+
+	@staticmethod
+	def on_init(self):
+		output_path = self.get_opt_value('output_path')
+		if not output_path:
+			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+		self.output_path = output_path
+		self.cmd += f' -o {self.output_path}'

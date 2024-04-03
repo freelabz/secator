@@ -1,4 +1,5 @@
-from celery.result import AsyncResult, GroupResult
+import os
+
 from rich.prompt import Confirm
 
 from secator.utils import deduplicate
@@ -77,6 +78,7 @@ def get_task_ids(result, ids=[]):
 		result (Union[AsyncResult, GroupResult]): Celery result object.
 		ids (list): List of ids.
 	"""
+	from celery.result import AsyncResult, GroupResult
 	if result is None:
 		return
 
@@ -87,15 +89,16 @@ def get_task_ids(result, ids=[]):
 		if result.id not in ids:
 			ids.append(result.id)
 
-	if result.children:
+	if hasattr(result, 'children') and result.children:
 		for child in result.children:
 			get_task_ids(child, ids=ids)
 
 	# Browse parent
-	get_task_ids(result.parent, ids=ids)
+	if hasattr(result, 'parent') and result.parent:
+		get_task_ids(result.parent, ids=ids)
 
 
-def get_task_info(task_id):
+def get_task_data(task_id):
 	"""Get task info.
 
 	Args:
@@ -104,6 +107,7 @@ def get_task_info(task_id):
 	Returns:
 		dict: Task info (id, name, state, results, chunk_info, count, error, ready).
 	"""
+	from celery.result import AsyncResult
 	res = AsyncResult(task_id)
 	if not (res and res.args and len(res.args) > 1):
 		return
@@ -116,6 +120,9 @@ def get_task_info(task_id):
 	data['count'] = 0
 	data['error'] = None
 	data['ready'] = False
+	data['descr'] = ''
+	data['progress'] = 0
+	data['results'] = []
 	if res.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
 		data['ready'] = True
 	if res.info and not isinstance(res.info, list):
@@ -147,3 +154,20 @@ def confirm_exit(func):
 				self.log_results()
 				raise KeyboardInterrupt
 	return inner_function
+
+
+def get_task_folder_id(path):
+	names = []
+	if not os.path.exists(path):
+		return 0
+	for f in os.scandir(path):
+		if f.is_dir():
+			try:
+				int(f.name)
+				names.append(int(f.name))
+			except ValueError:
+				continue
+	names.sort()
+	if names:
+		return names[-1] + 1
+	return 0

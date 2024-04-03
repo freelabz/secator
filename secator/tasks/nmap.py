@@ -5,16 +5,15 @@ import re
 import xmltodict
 
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
-								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, ID,
-								 IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PORT,
-								 PORTS, PROVIDER, PROXY, RATE_LIMIT,
-								 REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
-								 SEVERITY, TAGS, TEMP_FOLDER, THREADS, TIMEOUT,
-								 USER_AGENT)
-from secator.output_types import Port, Vulnerability
+from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
+								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
+								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
+								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
+								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
+								 RETRIES, SCRIPT, SERVICE_NAME, STATE, TAGS,
+								 THREADS, TIMEOUT, USER_AGENT)
+from secator.output_types import Exploit, Port, Vulnerability
 from secator.tasks._categories import VulnMulti
-from secator.utils import get_file_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +23,15 @@ class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap -sT -sV -Pn'
 	input_flag = None
-	input_chunk_size = 10
+	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
-	output_types = [Port, Vulnerability]
+	output_types = [Port, Vulnerability, Exploit]
 	opts = {
 		PORTS: {'type': str, 'help': 'Ports to scan', 'short': 'p'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
+		# 'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
+		'tcp_syn_stealth': {'type': bool, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'}
 	}
 	opt_key_map = {
@@ -53,12 +54,21 @@ class nmap(VulnMulti):
 	}
 	install_cmd = (
 		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
-		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan'
+		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
 	proxychains = True
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = False
 	proxy_http = False
+	profile = 'io'
+
+	@staticmethod
+	def on_init(self):
+		output_path = self.get_opt_value('output_path')
+		if not output_path:
+			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
+		self.output_path = output_path
+		self.cmd += f' -oX {self.output_path}'
 
 	def yielder(self):
 		yield from super().yielder()
@@ -85,15 +95,6 @@ class nmap(VulnMulti):
 		results['_host'] = self.input
 		return nmapData(results)
 
-	@staticmethod
-	def on_init(self):
-		output_path = self.get_opt_value('output_path')
-		if not output_path:
-			timestr = get_file_timestamp()
-			output_path = f'{TEMP_FOLDER}/nmap_{timestr}.xml'
-		self.output_path = output_path
-		self.cmd += f' -oX {self.output_path}'
-
 
 class nmapData(dict):
 
@@ -102,10 +103,14 @@ class nmapData(dict):
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
 			for port in self._get_ports(host):
+				# Get port number
 				port_number = port['@portid']
 				if not port_number or not port_number.isdigit():
 					continue
 				port_number = int(port_number)
+
+				# Get port state
+				state = port.get('state', {}).get('@state', '')
 
 				# Get extra data
 				extra_data = self._get_extra_data(port)
@@ -130,6 +135,7 @@ class nmapData(dict):
 				port = {
 					PORT: port_number,
 					HOST: hostname,
+					STATE: state,
 					SERVICE_NAME: service_name,
 					IP: ip,
 					EXTRA_DATA: extra_data
@@ -140,7 +146,9 @@ class nmapData(dict):
 				for script in scripts:
 					script_id = script['id']
 					output = script['output']
-					extra_data['nmap_script'] = script_id
+					extra_data = {'script': script_id}
+					if service_name:
+						extra_data['service_name'] = service_name
 					funcmap = {
 						'vulscan': self._parse_vulscan_output,
 						'vulners': self._parse_vulners_output,
@@ -148,6 +156,7 @@ class nmapData(dict):
 					func = funcmap.get(script_id)
 					metadata = {
 						MATCHED_AT: f'{hostname}:{port_number}',
+						IP: ip,
 						EXTRA_DATA: extra_data,
 					}
 					if not func:
@@ -291,16 +300,21 @@ class nmapData(dict):
 			if len(elems) == 4:  # exploit
 				# TODO: Implement exploit processing
 				exploit_id, cvss_score, reference_url, _ = elems
+				name = exploit_id
+				# edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
 				vuln = {
 					ID: exploit_id,
-					NAME: exploit_id,
+					NAME: name,
 					PROVIDER: provider_name,
-					CVSS_SCORE: cvss_score,
-					REFERENCES: [reference_url],
-					SEVERITY: 'critical',
-					TAGS: ['exploit', exploit_id, provider_name],
-					CONFIDENCE: 'low'
+					REFERENCE: reference_url,
+					'_type': 'exploit'
+					# CVSS_SCORE: cvss_score,
+					# CONFIDENCE: 'low'
 				}
+				# TODO: lookup exploit in ExploitDB to find related CVEs
+				# if edb_id:
+				# 	print(edb_id)
+				# 	vuln_data = VulnMulti.lookup_exploitdb(edb_id)
 				yield vuln
 
 			elif len(elems) == 3:  # vuln
@@ -312,7 +326,7 @@ class nmapData(dict):
 					PROVIDER: provider_name,
 					CVSS_SCORE: vuln_cvss,
 					REFERENCES: [reference_url],
-					TAGS: [vuln_id, provider_name],
+					TAGS: [],
 					CONFIDENCE: 'low'
 				}
 				if vuln_type == 'CVE':

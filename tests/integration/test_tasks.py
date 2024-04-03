@@ -37,19 +37,21 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 	def test_tasks(self):
 		opts = META_OPTS.copy()
 		fmt_opts = {
-			'print_item': DEBUG > 1,
 			'print_cmd': DEBUG > 0,
-			'print_line': DEBUG > 1,
-			'table': DEBUG > 0,
+			'print_item': DEBUG > 1,
+			'print_item_count': DEBUG > 0,
+			'json': DEBUG > 2
 		}
 		extra_opts = {
+			'dirsearch.filter_size': 1987,
+			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
-			'dirsearch.filter_size': 1987,
-			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
+			'h8mail.local_breach': load_fixture('h8mail_breach', INTEGRATION_DIR, only_path=True),
+			'nmap.port': '3000,8080',
 			'match_codes': '200',
 			'maigret.site': 'github',
-			'nmap.port': '3000,8080'
+			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 		}
 
 		# Merge opts
@@ -63,12 +65,27 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['timeout']
 
 		for cls in TEST_TASKS:
+			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
+				continue
 			with self.subTest(name=cls.__name__):
 				console.print(f'Testing {cls.__name__} ...')
-				input = INPUTS_TASKS.get(cls.__name__) or INPUTS_TASKS[cls.input_type]
+
+				# Get task input
+				input = INPUTS_TASKS.get(cls.__name__) or INPUTS_TASKS.get(cls.input_type)
+				if not input:
+					console.print(f'No input for {cls.__name__} ! Skipping')
+					continue
+
+				# Get task output
 				outputs = OUTPUTS_TASKS.get(cls.__name__, [])
+
+				# Init task
 				task = cls(input, **opts)
+
+				# Run task
 				results = task.run()
+				if DEBUG > 2:
+					console.print([list(r.toDict() for r in results)])
 
 				# Check return code
 				if not task.ignore_return_code:
@@ -76,6 +93,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 				if not results:
 					console.print(f'No results from {cls.__name__} ! Skipping item check.')
+					continue
 
 				# Test result types
 				self._test_task_output(

@@ -41,8 +41,9 @@ class maigret(ReconUser):
 			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
 	}
-	install_cmd = 'pip3 install maigret'
+	install_cmd = 'pipx install git+https://github.com/soxoj/maigret@6be2f409e58056b1ca8571a8151e53bef107dedc'
 	socks5_proxy = True
+	profile = 'io'
 
 	def yielder(self):
 		prev = self.print_item_count

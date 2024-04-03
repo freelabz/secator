@@ -6,9 +6,9 @@ import yaml
 from dotmap import DotMap
 
 from secator.rich import console
+from secator.definitions import CONFIGS_FOLDER, EXTRA_CONFIGS_FOLDER
 
-DEFAULT_CONFIGS_DIR = os.path.dirname(os.path.abspath(__file__)) + '/configs'
-CONFIGS_DIR_KEYS = ['workflows', 'scans', 'profiles']
+CONFIGS_DIR_KEYS = ['workflow', 'scan', 'profile']
 
 
 def load_config(name):
@@ -20,7 +20,7 @@ def load_config(name):
 	Returns:
 		dict: Loaded config.
 	"""
-	path = Path(DEFAULT_CONFIGS_DIR) / f'{name}.yaml'
+	path = Path(CONFIGS_FOLDER) / f'{name}.yaml'
 	if not path.exists():
 		console.log(f'Config "{name}" could not be loaded.')
 		return
@@ -28,19 +28,28 @@ def load_config(name):
 		return yaml.load(f.read(), Loader=yaml.Loader)
 
 
-def find_configs(*dirs):
-	results = {}
-	for type in CONFIGS_DIR_KEYS:
-		default_dir = f'{DEFAULT_CONFIGS_DIR}/{type}'
-		dirs_type = [default_dir] + list(dirs)
-		paths = []
-		for dir in dirs_type:
-			dir_paths = [
-				os.path.abspath(path)
-				for path in glob.glob(dir + '/*.yaml')
-			]
-			paths.extend(dir_paths)
-		results[type] = paths
+def find_configs():
+	results = {'scan': [], 'workflow': [], 'profile': []}
+	dirs_type = [CONFIGS_FOLDER]
+	if EXTRA_CONFIGS_FOLDER:
+		dirs_type.append(EXTRA_CONFIGS_FOLDER)
+	paths = []
+	for dir in dirs_type:
+		dir_paths = [
+			os.path.abspath(path)
+			for path in glob.glob(dir.rstrip('/') + '/**/*.y*ml', recursive=True)
+		]
+		paths.extend(dir_paths)
+	for path in paths:
+		with open(path, 'r') as f:
+			try:
+				config = yaml.load(f.read(), yaml.Loader)
+				type = config.get('type')
+				if type:
+					results[type].append(path)
+			except yaml.YAMLError as exc:
+				console.log(f'Unable to load config at {path}')
+				console.log(str(exc))
 	return results
 
 

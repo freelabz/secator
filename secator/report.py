@@ -1,10 +1,7 @@
 import operator
-import os
-from pathlib import Path
 
-from secator.definitions import REPORTS_FOLDER
 from secator.output_types import OUTPUT_TYPES, OutputType
-from secator.utils import merge_opts, pluralize, get_file_timestamp, print_results_table
+from secator.utils import merge_opts, get_file_timestamp, print_results_table
 from secator.rich import console
 
 
@@ -23,7 +20,7 @@ class Report:
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
 		self.workspace_name = runner.workspace_name
-		self.create_local_folders()
+		self.output_folder = runner.reports_folder
 
 	def as_table(self):
 		print_results_table(self.results, self.title)
@@ -33,7 +30,9 @@ class Report:
 			try:
 				report_cls(self).send()
 			except Exception as e:
-				console.print(f'Could not create exporter for {self.__class__.__name__}: {str(e)}', style='bold red')
+				console.print(
+					f'Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}',
+					style='bold red')
 
 	def build(self):
 		# Trim options
@@ -62,11 +61,13 @@ class Report:
 
 		# Fill report
 		for output_type in OUTPUT_TYPES:
+			if output_type.__name__ == 'Progress':
+				continue
 			output_name = output_type.get_name()
 			sort_by, _ = get_table_fields(output_type)
 			items = [
 				item for item in self.runner.results
-				if isinstance(item, OutputType) and item._type == output_name
+				if isinstance(item, OutputType) and item._type == output_name and not item._duplicate
 			]
 			if items:
 				if sort_by and all(sort_by):
@@ -75,15 +76,6 @@ class Report:
 
 		# Save data
 		self.data = data
-
-	def create_local_folders(self):
-		output_folder = Path(REPORTS_FOLDER)
-		if self.runner.workspace_name:
-			output_folder = output_folder / Path(self.runner.workspace_name)
-		output_folder = output_folder / Path(pluralize(self.runner.__class__.__name__).lower())
-		output_folder = str(output_folder)
-		os.makedirs(output_folder, exist_ok=True)
-		self.output_folder = output_folder
 
 
 def get_table_fields(output_type):

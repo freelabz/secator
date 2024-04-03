@@ -1,12 +1,12 @@
-import os
+import sys
 from collections import OrderedDict
 
 import rich_click as click
 from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
-from secator.celery import is_celery_worker_alive
-from secator.definitions import OPT_NOT_SUPPORTED
+from secator.definitions import (MONGODB_ADDON_ENABLED, OPT_NOT_SUPPORTED,
+								 WORKER_ADDON_ENABLED)
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
@@ -17,6 +17,7 @@ RUNNER_OPTS = {
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
+	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
 	'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
@@ -25,8 +26,9 @@ RUNNER_OPTS = {
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
 	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
-	'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
+	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
+	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 }
 
 DEFAULT_CLI_OPTIONS = list(RUNNER_OPTS.keys()) + list(RUNNER_GLOBAL_OPTS.keys())
@@ -37,18 +39,47 @@ class OrderedGroup(RichGroup):
 		super(OrderedGroup, self).__init__(name, commands, **attrs)
 		self.commands = commands or OrderedDict()
 
+	def command(self, *args, **kwargs):
+		"""Behaves the same as `click.Group.command()` but supports aliases.
+		"""
+		def decorator(f):
+			aliases = kwargs.pop("aliases", None)
+			if aliases:
+				max_width = _get_rich_console().width
+				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
+				padding = max_width // 4
+
+				name = kwargs.pop("name", None)
+				if not name:
+					raise click.UsageError("`name` command argument is required when using aliases.")
+
+				f.__doc__ = f.__doc__ or 'N/A'
+				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
+				base_command = super(OrderedGroup, self).command(
+					name, *args, **kwargs
+				)(f)
+				for alias in aliases:
+					cmd = super(OrderedGroup, self).command(alias, *args, hidden=True, **kwargs)(f)
+					cmd.help = f"Alias for '{name}'.\n\n{cmd.help}"
+					cmd.params = base_command.params
+
+			else:
+				cmd = super(OrderedGroup, self).command(*args, **kwargs)(f)
+
+			return cmd
+		return decorator
+
 	def group(self, *args, **kwargs):
-		"""Behaves the same as `click.Group.group()` except if passed
-		a list of names, all after the first will be aliases for the first.
+		"""Behaves the same as `click.Group.group()` but supports aliases.
 		"""
 		def decorator(f):
 			aliases = kwargs.pop('aliases', [])
 			aliased_group = []
 			if aliases:
 				max_width = _get_rich_console().width
-				# we have a list so create group aliases
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
+				f.__doc__ = f.__doc__ or 'N/A'
 				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
 				for alias in aliases:
 					grp = super(OrderedGroup, self).group(
@@ -173,7 +204,7 @@ def register_runner(cli_endpoint, config):
 		from secator.cli import ALL_CONFIGS
 		tasks = [
 			get_command_cls(task)
-			for workflow in ALL_CONFIGS.workflows
+			for workflow in ALL_CONFIGS.workflow
 			for task in Task.get_tasks_from_conf(workflow.tasks)
 			if workflow.name in list(config.workflows.keys())
 		]
@@ -184,6 +215,7 @@ def register_runner(cli_endpoint, config):
 			short_help += f' [dim]alias: {config.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
+		fmt_opts['print_progress'] = False
 		runner_cls = Scan
 
 	elif cli_endpoint.name == 'workflow':
@@ -198,6 +230,7 @@ def register_runner(cli_endpoint, config):
 			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
+		fmt_opts['print_progress'] = False
 		runner_cls = Workflow
 
 	elif cli_endpoint.name == 'task':
@@ -209,8 +242,6 @@ def register_runner(cli_endpoint, config):
 		input_type = task_cls.input_type or 'targets'
 		name = config.name
 		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
-		fmt_opts['print_item'] = True
-		fmt_opts['print_line'] = True
 		fmt_opts['print_item_count'] = True
 		runner_cls = Task
 		no_args_is_help = False
@@ -234,37 +265,42 @@ def register_runner(cli_endpoint, config):
 		opts.update(fmt_opts)
 		sync = opts['sync']
 		worker = opts['worker']
-		debug = opts['debug']
+		# debug = opts['debug']
 		ws = opts.pop('workspace')
+		driver = opts.pop('driver', '')
+		show = opts['show']
 		context = {'workspace_name': ws}
-		if debug:
-			os.environ['DEBUG'] = str(debug)
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
-		if sync:
+		if sync or show or not WORKER_ADDON_ENABLED:
 			sync = True
 		elif worker:
 			sync = False
 		else:  # automatically run in worker if it's alive
+			from secator.celery import is_celery_worker_alive
 			sync = not is_celery_worker_alive()
 		opts['sync'] = sync
-		if cli_endpoint.name in ['scan', 'workflow']:
-			opts.update({
-				'print_item': not sync,
-				'print_line': sync,
-				'print_remote_status': not sync,
-				'print_results': not sync,
-			})
-		else:  # task
-			opts.update({
-				'print_start': not sync,
-			})
+		opts.update({
+			'print_item': not sync,
+			'print_line': sync,
+			'print_remote_status': not sync,
+			'print_start': not sync
+		})
+
+		# Build hooks from driver name
+		hooks = {}
+		if driver == 'mongodb':
+			if not MONGODB_ADDON_ENABLED:
+				_get_rich_console().print('[bold red]Missing MongoDB dependencies: please run `secator install addons mongodb`[/].')
+				sys.exit(1)
+			from secator.hooks.mongodb import MONGODB_HOOKS
+			hooks = MONGODB_HOOKS
 
 		# Build exporters
-		runner = runner_cls(config, targets, run_opts=opts, context=context)
+		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}

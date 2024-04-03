@@ -1,27 +1,34 @@
+import os
+import json
 from urllib.parse import urlparse
 
 from secator.decorators import task
-from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
-							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-							   FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES,
-							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
-							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   STATUS_CODE, TECH, THREADS, TIME, TIMEOUT, URL,
-							   USER_AGENT)
-from secator.output_types import Url
+from secator.definitions import (CONTENT_TYPE, DEFAULT_KATANA_FLAGS,
+								 DEFAULT_STORE_HTTP_RESPONSES, DELAY, DEPTH,
+								 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
+								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
+								 RATE_LIMIT, RETRIES, STATUS_CODE,
+								 STORED_RESPONSE_PATH, TECH,
+								 THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER, CONTENT_LENGTH)
+from secator.output_types import Url, Tag
 from secator.tasks._categories import HttpCrawler
 
 
 @task()
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
-	cmd = 'katana -silent -jc -js-crawl -known-files all'
+	# TODO: add -fx for form detection and extract 'forms' from the output with custom item_loader
+	# TODO: add -jsluice for JS parsing
+	cmd = f'katana {DEFAULT_KATANA_FLAGS}'
 	file_flag = '-list'
 	input_flag = '-u'
-	json_flag = '-json'
+	json_flag = '-jsonl'
 	opts = {
 		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
-		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'}
+		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'},
+		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'}
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -54,12 +61,68 @@ class katana(HttpCrawler):
 			TIME: 'timestamp',
 			METHOD: lambda x: x['request']['method'],
 			STATUS_CODE: lambda x: x['response'].get('status_code'),
-			CONTENT_TYPE: lambda x: x['response'].get('content_type', ';').split(';')[0],
+			CONTENT_TYPE: lambda x: x['response'].get('headers', {}).get('content_type', ';').split(';')[0],
+			CONTENT_LENGTH: lambda x: x['response'].get('headers', {}).get('content_length', 0),
+			WEBSERVER: lambda x: x['response'].get('headers', {}).get('server', ''),
 			TECH: lambda x: x['response'].get('technologies', []),
+			STORED_RESPONSE_PATH: lambda x: x['response'].get('stored_response_path', '')
 			# TAGS: lambda x: x['response'].get('server')
 		}
 	}
+	item_loaders = []
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'io'
+
+	@staticmethod
+	def item_loader(self, item):
+		try:
+			item = json.loads(item)
+		except json.JSONDecodeError:
+			return None
+
+		# form detection
+		forms = item.get('response', {}).get('forms', [])
+		if forms:
+			for form in forms:
+				method = form['method']
+				yield Url(form['action'], host=urlparse(item['request']['endpoint']).netloc, method=method)
+				yield Tag(
+					name='form',
+					match=form['action'],
+					extra_data={
+						'method': form['method'],
+						'enctype': form.get('enctype', ''),
+						'parameters': ','.join(form.get('parameters', []))
+					}
+				)
+		yield item
+
+	@staticmethod
+	def on_init(self):
+		debug_resp = self.get_opt_value('debug_resp')
+		if debug_resp:
+			self.cmd = self.cmd.replace('-silent', '')
+		if DEFAULT_STORE_HTTP_RESPONSES:
+			self.cmd += f' -sr -srd {self.reports_folder}'
+
+	@staticmethod
+	def on_item(self, item):
+		if not isinstance(item, Url):
+			return item
+		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(item.stored_response_path):
+			with open(item.stored_response_path, 'r', encoding='latin-1') as fin:
+				data = fin.read().splitlines(True)
+				first_line = data[0]
+			with open(item.stored_response_path, 'w', encoding='latin-1') as fout:
+				fout.writelines(data[1:])
+				fout.writelines('\n')
+				fout.writelines(first_line)
+		return item
+
+	@staticmethod
+	def on_end(self):
+		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(self.reports_folder + '/index.txt'):
+			os.remove(self.reports_folder + '/index.txt')

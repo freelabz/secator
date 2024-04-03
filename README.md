@@ -1,16 +1,17 @@
 <h1 align="center">
-	secator
-	<br>
+	<img src="https://github.com/freelabz/secator/assets/9629314/ee203af4-e853-439a-af01-edeabfc4bf07/" width="400">
 </h1>
 
-<h4 align="center">Security swiss-knife to speed up vulnerability assessments.</h4>
+<h4 align="center">The pentester's swiss knife.</h4>
 
 <p align="center">
 <!-- <a href="https://goreportcard.com/report/github.com/freelabz/secator"><img src="https://goreportcard.com/badge/github.com/freelabz/secator"></a> -->
-<a href="https://github.com/freelabz/secator/issues"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
+<img src="https://img.shields.io/badge/python-3.6-blue.svg">
 <a href="https://github.com/freelabz/secator/releases"><img src="https://img.shields.io/github/release/freelabz/secator"></a>
-<a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache-blue.svg"></a>
+<a href="https://github.com/freelabz/secator/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-brightgreen.svg"></a>
+<a href="https://pypi.org/project/secator/"><img src="https://img.shields.io/pypi/dm/secator"></a>
 <a href="https://twitter.com/freelabz"><img src="https://img.shields.io/twitter/follow/freelabz.svg?logo=twitter"></a>
+<a href="https://youtube.com/@FreeLabz"><img src="https://img.shields.io/youtube/channel/subscribers/UCu-F6SpU0h2NP18zBBP04cw?style=social&label=Subscribe%20%40FreeLabz"></a>
 <!-- <a href="https://discord.gg/freelabz"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a> -->
 </p>
 
@@ -44,9 +45,10 @@ and it is designed to improve productivity for pentesters and security researche
 
 * **Customizable**
 
-## Supported commands
 
-`secator` integrates the following commands:
+## Supported tools
+
+`secator` integrates the following tools:
 
 | Name                                                          | Description                                                                    | Category       |
 |---------------------------------------------------------------|--------------------------------------------------------------------------------|----------------|
@@ -58,6 +60,9 @@ and it is designed to improve productivity for pentesters and security researche
 | [dirsearch](https://github.com/maurosoria/dirsearch)          | Web path discovery.                                                            | `http/fuzzer`  |
 | [feroxbuster](https://github.com/epi052/feroxbuster)          | Simple, fast, recursive content discovery tool written in Rust.                | `http/fuzzer`  |
 | [ffuf](https://github.com/ffuf/ffuf)                          | Fast web fuzzer written in Go.                                                 | `http/fuzzer`  |
+| [h8mail](https://github.com/khast3x/h8mail)                   | Email OSINT and breach hunting tool.                                           | `osint`        |
+| [dnsx](https://github.com/projectdiscovery/dnsx)              | Fast and multi-purpose DNS toolkit designed for running DNS queries.           | `recon/dns`    |
+| [dnsxbrute](https://github.com/projectdiscovery/dnsx)              | Fast and multi-purpose DNS toolkit designed for running DNS queries (bruteforce mode).           | `recon/dns`    |
 | [subfinder](https://github.com/projectdiscovery/subfinder)    | Fast subdomain finder.                                                         | `recon/dns`    |
 | [fping](https://fping.org/)                                   | Find alive hosts on local networks.                                            | `recon/ip`     |
 | [mapcidr](https://github.com/projectdiscovery/mapcidr)        | Expand CIDR ranges into IPs.                                                   | `recon/ip`     |
@@ -70,50 +75,198 @@ and it is designed to improve productivity for pentesters and security researche
 | [wpscan](https://github.com/wpscanteam/wpscan)                | WordPress Security Scanner                                                     | `vuln/multi`   |
 | [nmap](https://github.com/nmap/nmap)                          | Vulnerability scanner using NSE scripts.                                       | `vuln/multi`   |
 | [nuclei](https://github.com/projectdiscovery/nuclei)          | Fast and customisable vulnerability scanner based on simple YAML based DSL.    | `vuln/multi`   |
-| [dnsx](https://github.com/projectdiscovery/dnsx)              | A fast and multi-purpose DNS toolkit designed for running DNS queries.         | `recon/dns`    |
+| [searchsploit](https://gitlab.com/exploit-database/exploitdb) | Exploit searcher. | `exploit/search`    |
 
-Feel free to request new commands to be added by opening an issue, but please 
-check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
+Feel free to request new tools to be added by opening an issue, but please 
+check that the tool complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
 
 
-## Install Secator
+## Installation
 
-Secator requires **python >= 3.8** to install successfully. Run the following command to install the latest version:
-
-```sh
-pip3 install git+https://github.com/freelabz/secator.git
-```
+### Installing secator
 
 <details>
-	<summary>Bash one-liner</summary>
+	<summary>Pipx</summary>
 
-	git clone https://github.com/freelabz/secator && sh ./scripts/install.sh
+```sh
+pipx install secator
+```
+
+</details>
+
+<details>
+	<summary>Pip</summary>
+
+```sh
+pip install secator
+```
+
+</details>
+
+<details>
+  <summary>Bash</summary>
+
+```sh
+wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
+```
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	docker build -t secator
+```sh
+docker run -it freelabz/secator --help
+```
 
 </details>
 
 <details>
-	<summary>Development build</summary>
+	<summary>Docker Compose</summary>
 
-	git clone https://github.com/freelabz/secator
-	cd secator
-	python3 -m virtualenv -p python3 ~/.virtualenvs/secator
-	source ~/.virtualenvs/secator/bin/activate
-	pip3 install -e .
+```sh
+git clone https://github.com/freelabz/secator
+cd secator
+docker-compose up -d
+docker-compose exec secator secator --help
+```
+
+</details>
+
+***Note:*** If you chose the Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
+
+### Installing languages
+
+`secator` uses external tools, so you might need to install languages used by those tools assuming they are not already installed on your system.
+
+We provide utilities to install required languages if you don't manage them externally:
+
+<details>
+	<summary>Go</summary>
+
+```sh
+secator install langs go
+```
+
+</details>
+
+<details>
+	<summary>Ruby</summary>
+
+```sh
+secator install langs ruby
+```
+
+</details>
+
+### Installing tools
+
+`secator` does not install any of the external tools it supports by default.
+
+We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
+
+<details>
+	<summary>All tools</summary>
+
+```sh
+secator install tools
+```
+
+</details>
+
+<details>
+	<summary>Specific tools</summary>
+
+```sh
+secator install tools <TOOL_NAME>
+```
+
+For instance, to install `httpx`, use:
+
+```sh
+secator install tools httpx
+```
+
+</details>
+
+Please make sure you are using the latest available versions for each tool before you run secator or you might run into parsing / formatting issues.
+
+### Installing addons
+
+`secator` comes installed with the minimum amount of dependencies.
+
+There are several addons available for `secator`:
+
+<details>
+	<summary>worker</summary>
+
+Add support for Celery workers (see [Distributed runs with Celery](https://docs.freelabz.com/in-depth/distributed-runs-with-celery)).
+```sh
+secator install addons worker
+```
 
 </details>
 
 
-### Install specific tasks
+<details>
+	<summary>google</summary>
+
+Add support for Google Drive exporter (`-o gdrive`).
 
 ```sh
-secsy u install <TASK_NAME>
+secator install addons google
+```
+
+</details>
+
+<details>
+	<summary>mongodb</summary>
+
+Add support for MongoDB driver (`-driver mongodb`).
+```sh
+secator install addons mongodb
+```
+
+</details>
+
+<details>
+	<summary>redis</summary>
+
+Add support for Redis backend (Celery).
+
+```sh
+secator install addons redis
+```
+
+</details>
+
+<details>
+	<summary>dev</summary>
+
+Add development tools like `coverage` and `flake8` required for running tests.
+
+```sh
+secator install addons dev
+```
+
+</details>
+
+<details>
+	<summary>trace</summary>
+
+Add tracing tools like `memray` and `pyinstrument` required for tracing functions.
+
+```sh
+secator install addons trace
+```
+
+</details>
+
+### Checking installation health
+
+To figure out which languages or tools are installed on your system (along with their version):
+```sh
+secator health
 ```
 
 ## Usage
@@ -123,7 +276,7 @@ secator --help
 ![](images/help.png)
 
 
-### Running secator
+### Usage examples
 
 Run a fuzzing task (`ffuf`):
 
@@ -131,16 +284,39 @@ Run a fuzzing task (`ffuf`):
 secator x ffuf http://testphp.vulnweb.com/FUZZ
 ```
 
-Run a port scan:
+Run a url crawl workflow:
 
 ```sh
-secator w port_scan mydomain.com
+secator w url_crawl http://testphp.vulnweb.com
 ```
 
-Run a full host scan:
+Run a host scan:
 
 ```sh
 secator s host mydomain.com
 ```
 
-For more, read the complete [documentation](https://docs.freelabz.com).
+and more... to list all tasks / workflows / scans that you can use:
+```sh
+secator x --help
+secator w --help
+secator s --help
+```
+
+## Learn more
+
+To go deeper with `secator`, check out:
+* Our complete [documentation](https://docs.freelabz.com)
+* Our getting started [tutorial video](https://youtu.be/-JmUTNWQDTQ?si=qpAClDWMXo2zwUK7)
+* Our [Medium post](https://medium.com/p/09333f3d3682)
+* Follow us on social media: [@freelabz](https://twitter.com/freelabz) on Twitter and [@FreeLabz](https://youtube.com/@FreeLabz) on YouTube
+
+## Stats
+
+<a href="https://star-history.com/#freelabz/secator&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=freelabz/secator&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=freelabz/secator&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=freelabz/secator&type=Date" />
+  </picture>
+</a>

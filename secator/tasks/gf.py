@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import OPT_PIPE_INPUT, URL
+from secator.definitions import OPT_PIPE_INPUT, OPT_NOT_SUPPORTED, URL
 from secator.output_types import Tag
 from secator.tasks._categories import Tagger
 
@@ -10,6 +10,7 @@ class gf(Tagger):
 	cmd = 'gf'
 	file_flag = OPT_PIPE_INPUT
 	input_flag = OPT_PIPE_INPUT
+	version_flag = OPT_NOT_SUPPORTED
 	opts = {
 		'pattern': {'type': str, 'help': 'Pattern names to match against (comma-delimited)'}
 	}
@@ -22,7 +23,10 @@ class gf(Tagger):
 		'git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true'
 	)
 	output_types = [Tag]
-	item_loader = lambda self, line: {'match': line, 'name': self.get_opt_value('pattern')}  # noqa: E731
+
+	@staticmethod
+	def item_loader(self, line):
+		return {'match': line, 'name': self.get_opt_value('pattern').rstrip() + ' pattern'}  # noqa: E731,E501
 
 	@staticmethod
 	def on_item(self, item):

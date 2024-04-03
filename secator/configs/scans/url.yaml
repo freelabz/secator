@@ -5,8 +5,8 @@ profile: default
 input_types:
   - url
 workflows:
-  url_nuclei:
   url_crawl:
+  url_nuclei:
   url_vuln:
     targets_:
     - url.url

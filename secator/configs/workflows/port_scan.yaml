@@ -12,15 +12,23 @@ tasks:
     description: Search for vulnerabilities on open ports
     targets_: port.host
     ports_: port.port
-  httpx:
-    description: Probe HTTP services on open ports
-    targets_:
+  _group:
+    searchsploit:
+      description: Search for related exploits
+      targets_:
       - type: port
-        field: '{host}:{port}'
-        condition: item._source == 'nmap'
+        field: '{host}~{service_name}'
+        condition: item._source == 'nmap' and len(item.service_name.split('/')) > 1
+    httpx:
+      description: Probe HTTP services on open ports
+      targets_:
+        - type: port
+          field: '{host}:{port}'
+          condition: item._source == 'nmap'
 results:
   - type: port
-    condition: item._source == 'nmap'
 
   - type: url
     condition: item.status_code != 0
+
+  - type: vulnerability

@@ -19,11 +19,12 @@ DALFOX_TYPE_MAP = {
 @task()
 class dalfox(VulnHttp):
 	"""Powerful open source XSS scanning tool."""
-	cmd = 'dalfox --silence'
+	cmd = 'dalfox'
 	input_type = URL
 	input_flag = 'url'
 	file_flag = 'file'
 	json_flag = '--format json'
+	version_flag = 'version'
 	opt_prefix = '--'
 	opt_key_map = {
 		HEADER: 'header',
@@ -57,6 +58,7 @@ class dalfox(VulnHttp):
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = True
 	proxy_http = True
+	profile = 'cpu'
 
 	@staticmethod
 	def on_line(self, line):

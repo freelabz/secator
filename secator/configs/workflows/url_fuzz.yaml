@@ -5,14 +5,14 @@ description: URL fuzz (slow)
 tags: [http, fuzz]
 input_types:
   - url
-options:
-  match_codes: 200,204,301,302,307,401,403,405,500
+# options:
+#   match_codes: 200,204,301,302,307,401,403,405,500
 tasks:
   _group:
-    dirsearch:
-      description: Fuzz URLs
-    feroxbuster:
-      description: Fuzz URLs
+    # dirsearch:
+    #   description: Fuzz URLs
+    # feroxbuster:
+    #   description: Fuzz URLs
     ffuf:
       description: Fuzz URLs
       targets_:
@@ -23,6 +23,12 @@ tasks:
     targets_:
       type: url
       field: url
+  katana:
+    description: Run crawler on found directories
+    targets_:
+      type: url
+      field: url
+      condition: "'Index of' in item.title"
 results:
   - type: url
     condition: item._source == 'httpx'
