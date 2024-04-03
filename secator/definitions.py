@@ -2,8 +2,9 @@
 
 import os
 
+from dotenv import find_dotenv, load_dotenv
 from pkg_resources import get_distribution
-from dotenv import load_dotenv, find_dotenv
+
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # Globals
@@ -73,7 +74,7 @@ DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-td')
 DEFAULT_KATANA_FLAGS = os.environ.get('DEFAULT_KATANA_FLAGS', '-jc -js-crawl -known-files all -or -ob')
 DEFAULT_NUCLEI_FLAGS = os.environ.get('DEFAULT_NUCLEI_FLAGS', '-stats -sj -si 20 -hm -or')
 DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-bail --no-state')
-DEFAULT_PROGRESS_UPDATE_FREQUENCY = 10
+DEFAULT_PROGRESS_UPDATE_FREQUENCY = 60
 
 # Default wordlists
 DEFAULT_HTTP_WORDLIST = os.environ.get('DEFAULT_HTTP_WORDLIST', f'{WORDLISTS_FOLDER}/Fuzzing/fuzz-Bo0oM.txt')
@@ -162,3 +163,17 @@ VULN_TYPE = 'type'
 WEBSERVER = 'webserver'
 WORDLIST = 'wordlist'
 WORDS = 'words'
+
+# Check worker addon
+try:
+    import eventlet  # noqa: F401
+    WORKER_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+    WORKER_ADDON_ENABLED = 0
+
+# Check mongodb addon
+try:
+    import pymongo  # noqa: F401
+    MONGODB_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+    MONGODB_ADDON_ENABLED = 0

@@ -1,6 +1,35 @@
 
 Please read this document before opening a new pull request.
 
+## Create a dev environment
+
+To create a dev environment, you can either use `pipx` or `virtualenv` + `pip`:
+
+<details>
+	<summary>Pipx</summary>
+
+```sh
+git clone https://github.com/freelabz/secator
+cd secator
+pipx install -e .[dev]
+```
+
+</details>
+
+<details>
+	<summary>Pip</summary>
+
+```sh
+git clone https://github.com/freelabz/secator
+cd secator
+virtualenv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+```
+
+</details>
+
+
 ## Contribute a new task
 
 To contribute a new task back to `secator` repository, it needs to validate some requirements:
@@ -11,28 +40,25 @@ To contribute a new task back to `secator` repository, it needs to validate some
   - It MUST have an `install_cmd` key.
 
 - Add your **task definition** to the `tasks/` directory. If your task class is named `MyAwesomeTask`, call it `my_awesome_task.py`
-- [Optional] Add your output type to `secator`:
-	- Add your type definition to `output_types/` directory. If your output type is named `MyAwesomeType`, call it `my_awesome_type.py`
+
+- [Optional] Add your output type(s) to `secator`:
+	- Add your type(s) definition(s) to `output_types/` directory. If your output type is named `MyAwesomeType`, call the file `my_awesome_type.py`
 	- Import your type class in `__init__.py`
 
 - Add a **unit test** for your task:
-	- `tests/fixtures/<MYTASK>_output.(json|xml|rc|txt)`: add a fixture for the original command output.
+	- `tests/fixtures/<TASK_NAME>_output.(json|xml|rc|txt)`: add a fixture for the original command output.
 		- Make sure it is anonymized from PII data
-		- Run `secator x mytask <HOST>` to make sure the output is shown correctly on the CLI. Also run with `-json` to 
+		- Run `secator x <TASK_NAME> <HOST>` to make sure the output is shown correctly on the CLI. Also run with `-json` to 
 			verify the output schema
 		- This fixture will be used by unit tests to emulate data sent by your task
-	- Validate your unit test by running: `secator test unit --task <MYTASK> --test test_tasks`
+	- Validate your unit test by running: `secator test unit --task <TASK_NAME> --test test_tasks`
 
 - Add an **integration test** for your task:
 	- `tests/integration/inputs.py` - to modify integration inputs
 	- `tests/integration/outputs.py` - to modify expected outputs
-	- Validate your integration test by running: `secator test integration --task <MYTASK> --test test_tasks`
+	- Validate your integration test by running: `secator test integration --task <TASK_NAME> --test test_tasks`
 
 - Run the lint tests: `secator test lint`
-
-- Once `unit`, `integration` and `lint` tests pass:
-	- Generate the new command installation with `secator u generate-bash-install`
-	- Add the updated `scripts/install_commands.sh` to your commit.
 
 - Open a new pull request with your changes.
 
@@ -49,8 +75,8 @@ To contribute a new task back to `secator` repository, it needs to validate some
 	- `outputs.py`: add some expected outputs of your workflow
 
 - Run the integration tests:
-	- For workflows: `secator test integration --test test_workflows --workflows <MYWORKFLOW>
-	- For scans: `secator test integration --test test_scans --scans <MYSCAN>`
+	- For workflows: `secator test integration --test test_workflows --workflows <WORKFLOW_NAME>`
+	- For scans: `secator test integration --test test_scans --scans <SCAN_NAME>`
 
 - Open a new pull request with your changes.
 

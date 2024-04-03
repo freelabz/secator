@@ -8,11 +8,10 @@ import sys
 
 from time import sleep
 
-from celery.result import AsyncResult
 from fp.fp import FreeProxy
 
 from secator.config import ConfigLoader
-from secator.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
+from secator.definitions import (DEFAULT_HTTP_PROXY,
 							   DEFAULT_FREEPROXY_TIMEOUT,
 							   DEFAULT_PROXYCHAINS_COMMAND,
 							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
@@ -20,7 +19,7 @@ from secator.definitions import (DEBUG, DEFAULT_HTTP_PROXY,
 from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
-from secator.utils import get_file_timestamp, debug
+from secator.utils import debug
 
 # from rich.markup import escape
 # from rich.text import Text
@@ -218,16 +217,6 @@ class Command(Runner):
 		from secator.celery import run_command
 		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
 
-	@classmethod
-	def poll(cls, result):
-		# TODO: Move this to TaskBase
-		while not result.ready():
-			data = AsyncResult(result.id).info
-			if DEBUG > 1 and isinstance(data, dict):
-				print(data)
-			sleep(1)
-		return result.get()
-
 	def get_opt_value(self, opt_name):
 		return Command._get_opt_value(
 			self.run_opts,
@@ -412,8 +401,8 @@ class Command(Runner):
 				if not line:
 					break
 
-				# Strip line
-				line = line.strip()
+				# Strip line endings
+				line = line.rstrip()
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
@@ -655,9 +644,7 @@ class Command(Runner):
 		# If input is a list and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped input.
 		# Otherwise pass the file path to the tool.
 		if isinstance(input, list):
-			timestr = get_file_timestamp()
-			cmd_name = cmd.split(' ')[0].split('/')[-1]
-			fpath = f'{self.reports_folder}/.inputs/{cmd_name}_{timestr}.txt'
+			fpath = f'{self.reports_folder}/.inputs/{self.unique_name}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:

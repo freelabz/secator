@@ -85,11 +85,8 @@ check that the tool complies with our selection criterias before doing so. If it
 
 ### Installing secator
 
-`secator` requires **Python >= 3.8**.
-
-
 <details>
-	<summary>Pipx (stable)</summary>
+	<summary>Pipx</summary>
 
 ```sh
 pipx install secator
@@ -98,12 +95,10 @@ pipx install secator
 </details>
 
 <details>
-	<summary>Pipx (development)</summary>
+	<summary>Pip</summary>
 
 ```sh
-git clone https://github.com/freelabz/secator
-cd secator
-pipx install -e .[dev]
+pip install secator
 ```
 
 </details>
@@ -138,31 +133,134 @@ docker-compose exec secator secator --help
 
 </details>
 
-***Note:*** If you chose the Bash or Docker installation methods, you can skip the next sections #installing-languages and #installing-tools.
+***Note:*** If you chose the Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
 
 ### Installing languages
 
-Since `secator` uses external tools, you might need to install languages used by those tools assuming they are not already installed on your system.
+`secator` uses external tools, so you might need to install languages used by those tools assuming they are not already installed on your system.
 
 We provide utilities to install required languages if you don't manage them externally:
+
+<details>
+	<summary>Go</summary>
+
 ```sh
-secator install langs go   # install Go
-secator install langs ruby # install Ruby
+secator install langs go
 ```
+
+</details>
+
+<details>
+	<summary>Ruby</summary>
+
+```sh
+secator install langs ruby
+```
+
+</details>
 
 ### Installing tools
 
-By default, `secator` does not install any of the external tools it supports.
+`secator` does not install any of the external tools it supports by default.
 
-If for instance you are using Kali Linux, most commands will already be installed on the system and we do not want to tamper with their installation.
+We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
 
-However, we provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
+<details>
+	<summary>All tools</summary>
+
 ```sh
-secator install tools httpx  # install httpx
-secator install tools        # install all supported tools
+secator install tools
 ```
 
+</details>
+
+<details>
+	<summary>Specific tools</summary>
+
+```sh
+secator install tools <TOOL_NAME>
+```
+
+For instance, to install `httpx`, use:
+
+```sh
+secator install tools httpx
+```
+
+</details>
+
 Please make sure you are using the latest available versions for each tool before you run secator or you might run into parsing / formatting issues.
+
+### Installing addons
+
+`secator` comes installed with the minimum amount of dependencies.
+
+There are several addons available for `secator`:
+
+<details>
+	<summary>worker</summary>
+
+Add support for Celery workers (see [Distributed runs with Celery](https://docs.freelabz.com/in-depth/distributed-runs-with-celery)).
+```sh
+secator install addons worker
+```
+
+</details>
+
+
+<details>
+	<summary>google</summary>
+
+Add support for Google Drive exporter (`-o gdrive`).
+
+```sh
+secator install addons google
+```
+
+</details>
+
+<details>
+	<summary>mongodb</summary>
+
+Add support for MongoDB driver (`-driver mongodb`).
+```sh
+secator install addons mongodb
+```
+
+</details>
+
+<details>
+	<summary>redis</summary>
+
+Add support for Redis backend (Celery).
+
+```sh
+secator install addons redis
+```
+
+</details>
+
+<details>
+	<summary>dev</summary>
+
+Add development tools like `coverage` and `flake8` required for running tests.
+
+```sh
+secator install addons dev
+```
+
+</details>
+
+<details>
+	<summary>trace</summary>
+
+Add tracing tools like `memray` and `pyinstrument` required for tracing functions.
+
+```sh
+secator install addons trace
+```
+
+</details>
 
 ### Checking installation health
 

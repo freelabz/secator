@@ -49,9 +49,9 @@ if TEST_SCANS:
 else:
 	TEST_SCANS = ALL_SCANS
 
-#-------------#
+#-------------------#
 # TEST INPUTS_TASKS #
-#-------------#
+#-------------------#
 INPUTS_TASKS = {
 	URL: 'https://fake.com',
 	HOST: 'fake.com',
