@@ -13,7 +13,9 @@ from rich.rule import Rule
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,
-								 PAYLOADS_FOLDER, ROOT_FOLDER, SCRIPTS_FOLDER, OPT_NOT_SUPPORTED, VERSION)
+								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
+								 ROOT_FOLDER, SCRIPTS_FOLDER, VERSION,
+								 WORKER_ADDON_ENABLED)
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -110,6 +112,9 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
+	if not WORKER_ADDON_ENABLED:
+		console.print('[bold red]Missing worker dependencies: please run `secator install addons worker`[/].')
+		sys.exit(1)
 	from secator.celery import app, is_celery_worker_alive
 	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
 	debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)

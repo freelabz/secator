@@ -30,49 +30,49 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-  "bs4",
-  "cpe",
-  "dotmap",
-  "free-proxy",
-  "furl",
-  "humanize",
-  "ifaddr",
-  "jinja2",
-  "python-dotenv",
-  "pyyaml",
-  "requests",
-  "rich",
-  "rich-click<1.7",
-  "validators",
-  "xmltodict"
+  "bs4 < 1",
+  'celery < 6',
+  "cpe < 2",
+  "dotmap < 2",
+  "free-proxy < 2",
+  "furl < 3",
+  "humanize < 5",
+  "ifaddr < 1",
+  "jinja2 < 4",
+  "python-dotenv < 2",
+  "pyyaml < 7",
+  "requests < 3",
+  "rich < 14",
+  "rich-click < 1.7",
+  "validators < 1",
+  "xmltodict < 1"
 ]
 
 [project.optional-dependencies]
 dev = [
-  'coverage',
-  'flake8',
-  'watchdog',
-  'asciinema-automation',
+  'coverage < 8',
+  'flake8 < 8',
+  'watchdog < 3',
+  'asciinema-automation < 1',
 ]
 trace = [
-  'memray',
-  'pyinstrument',
+  'memray < 2',
+  'pyinstrument < 5',
 ]
 worker = [
-  'celery',
-  'gevent',
-  'eventlet',
-  'flower',
+  'gevent < 25',
+  'eventlet < 1',
+  'flower < 3',
 ]
 redis = [
-  'redis',
+  'redis < 6',
 ]
 mongodb = [
-  'pymongo',
+  'pymongo < 5',
 ]
 google = [
-  'google-api-python-client',
-  'gspread'
+  'google-api-python-client < 3',
+  'gspread < 7'
 ]
 
 [project.scripts]
