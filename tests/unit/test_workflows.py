@@ -1,7 +1,7 @@
 from secator.tasks import httpx
 import unittest
 import json
-from secator.definitions import DEBUG, CELERY_ENABLED
+from secator.definitions import DEBUG
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS
 from secator.rich import console
 
@@ -12,9 +12,6 @@ class TestAdHocWorkflow(unittest.TestCase):
 
 	def test_chain(self):
 		if not httpx in TEST_TASKS:
-			return
-
-		if not CELERY_ENABLED:
 			return
 
 		from celery import chain
