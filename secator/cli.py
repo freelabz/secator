@@ -393,8 +393,9 @@ def install_redis():
 		cmd=f'{sys.executable} -m pip install secator[redis]',
 		title='redis addon',
 		next_steps=[
-			'[dim]\[optional][/] Run "docker run --name redis -p 5432:5432 -d redis" to run a local Redis instance.',
+			'[dim]\[optional][/] Run "docker run --name redis -p 6379:6379 -d redis" to run a local Redis instance.',
 			'Set the "CELERY_BROKER_URL=redis://<url>" environment variable pointing to your Redis instance.',
+			'Set the "CELERY_RESULT_BACKEND=redis://<url>" environment variable pointing to your Redis instance.',
 			'Run "secator worker" to run a worker.',
 			'Run "secator x httpx testphp.vulnweb.com" to run a test task.'
 		]
