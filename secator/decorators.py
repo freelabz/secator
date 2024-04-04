@@ -291,6 +291,10 @@ def register_runner(cli_endpoint, config):
 			'print_start': not sync
 		})
 
+		if show:
+			print_workflow_tree(config)
+			return
+
 		# Build hooks from driver name
 		hooks = {}
 		if driver == 'mongodb':
@@ -312,6 +316,62 @@ def register_runner(cli_endpoint, config):
 		short_help=short_help)(func)
 
 	generate_rich_click_opt_groups(cli_endpoint, name, input_type, options)
+
+
+def print_workflow_tree(config):
+	from rich.console import Console
+	from rich.table import Table
+
+	console = Console()
+	table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1))
+
+	# Identify all task and group names and their order
+	task_order = list(config['tasks'].keys())
+
+	# Determine the maximum height of the table needed
+	max_height = max(len(details) for details in config['tasks'].values() if isinstance(details, dict))
+
+	# Adjust max_height for centering if the number of tasks is even
+	if max_height % 2 == 0:
+		max_height += 1  # Increase by 1 to allow centering
+
+	middle_index = max_height // 2  # Middle row for arrows and single tasks
+
+	# Setup table columns based on the order and add arrow columns
+	for i, name in enumerate(task_order):
+		if '_group' in name:
+			table.add_column(name, justify="left")
+		else:
+			table.add_column(name, justify="left")
+
+		# Add an arrow column after each task/group except the last one
+		if i < len(task_order) - 1:
+			table.add_column(f"arrow_{i}", justify="center", style="bold yellow")
+
+	# Initialize rows with empty strings
+	rows = [["" for _ in range(len(task_order) * 2 - 1)] for _ in range(max_height)]
+
+	# Populate the rows with tasks, group tasks, and arrows
+	for col_idx, name in enumerate(task_order):
+		actual_col = col_idx * 2  # Adjust column index to account for arrow columns
+		if '_group' in name:
+			group_tasks = list(config['tasks'][name].keys())
+			start_row = (max_height - len(group_tasks)) // 2
+			for row_idx, task_name in enumerate(group_tasks, start=start_row):
+				rows[row_idx][actual_col] = f"[bold magenta]{task_name}[/]"
+		else:
+			# Place single tasks in the middle row
+			rows[middle_index][actual_col] = f"[bold magenta]{name}[/]"
+
+		# Place an arrow in the center row of the arrow column, except after the last task/group
+		if col_idx < len(task_order) - 1:
+			rows[middle_index][actual_col + 1] = ":right_arrow:"
+
+	# Add populated rows to the table
+	for row in rows:
+		table.add_row(*row)
+
+	console.print(table)
 
 
 def generate_rich_click_opt_groups(cli_endpoint, name, input_type, options):
