@@ -217,7 +217,7 @@ OUTPUTS_TASKS = {
     ],
     'wpscan': [
         Tag(
-            name='Wordpress theme - twentytwentyfour 1.0',
+            name='Wordpress theme - twentytwentyfour 1.1',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(
