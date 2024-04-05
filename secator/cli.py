@@ -292,7 +292,7 @@ def health(json, debug):
 		ret = which(lang)
 		ret2 = get_version(f'{lang} {version_flag}')
 		if not json:
-			print_status(lang, ret.return_code, ret2, ret.output, 'lang')
+			print_status(lang, ret.return_code, ret2, ret.output, 'langs')
 		status['languages'][lang] = {'installed': ret.return_code == 0}
 
 	# Check tools
