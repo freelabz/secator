@@ -12,10 +12,13 @@ from rich.rule import Rule
 
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,
+from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,  # noqa: F401
+								 DEV_ADDON_ENABLED, DEV_PACKAGE,
+								 GOOGLE_ADDON_ENABLED, MONGODB_ADDON_ENABLED,
 								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
-								 ROOT_FOLDER, SCRIPTS_FOLDER, VERSION,
-								 WORKER_ADDON_ENABLED, DEV_ADDON_ENABLED, DEV_PACKAGE)
+								 REDIS_ADDON_ENABLED, ROOT_FOLDER,
+								 SCRIPTS_FOLDER, TRACE_ADDON_ENABLED, VERSION,
+								 WORKER_ADDON_ENABLED)
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -287,7 +290,7 @@ def health(json, debug):
 
 	# Check languages
 	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
-	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version', 'rustc': '--version'}
+	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
 	for lang, version_flag in version_cmds.items():
 		ret = which(lang)
 		ret2 = get_version(f'{lang} {version_flag}')
@@ -304,6 +307,14 @@ def health(json, debug):
 		if not json:
 			print_status(tool.__name__, ret.return_code, ret2, ret.output, 'tools')
 		status['tools'][tool.__name__] = {'installed': ret.return_code == 0}
+
+	# Check addons
+	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	for addon in ['google', 'mongodb', 'redis', 'trace']:
+		addon_var = globals()[f'{addon.upper()}_ADDON_ENABLED']
+		ret = 0 if addon_var == 1 else 1
+		bin = None if addon_var == 0 else ' '
+		print_status(addon, ret, 'N/A', bin, 'addons')
 
 	# Print JSON health
 	if json:
@@ -349,7 +360,7 @@ def addons():
 def install_worker():
 	"Install worker addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install secator[worker]',
+		cmd=f'{sys.executable} -m pip install .[worker]',
 		title='worker addon',
 		next_steps=[
 			'Run "secator worker" to run a Celery worker using the file system as a backend and broker.',
@@ -363,7 +374,7 @@ def install_worker():
 def install_google():
 	"Install google addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install secator[google]',
+		cmd=f'{sys.executable} -m pip install .[google]',
 		title='google addon',
 		next_steps=[
 			'Set the "GOOGLE_CREDENTIALS_PATH" and "GOOGLE_DRIVE_PARENT_FOLDER_ID" environment variables.',
@@ -376,7 +387,7 @@ def install_google():
 def install_mongodb():
 	"Install mongodb addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install secator[mongodb]',
+		cmd=f'{sys.executable} -m pip install .[mongodb]',
 		title='mongodb addon',
 		next_steps=[
 			'[dim]\[optional][/] Run "docker run --name mongo -p 27017:27017 -d mongo:latest" to run a local MongoDB instance.',
@@ -390,7 +401,7 @@ def install_mongodb():
 def install_redis():
 	"Install redis addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install secator[redis]',
+		cmd=f'{sys.executable} -m pip install .[redis]',
 		title='redis addon',
 		next_steps=[
 			'[dim]\[optional][/] Run "docker run --name redis -p 6379:6379 -d redis" to run a local Redis instance.',
@@ -407,6 +418,20 @@ def install_dev():
 	"Install dev addon."
 	run_install(
 		cmd=f'{sys.executable} -m pip install secator[dev]',
+		title='dev addon',
+		next_steps=[
+			'Run "secator test lint" to run lint tests.',
+			'Run "secator test unit" to run unit tests.',
+			'Run "secator test integration" to run integration tests.',
+		]
+	)
+
+
+@addons.command('trace')
+def install_trace():
+	"Install trace addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[trace]',
 		title='dev addon',
 		next_steps=[
 			'Run "secator test lint" to run lint tests.',

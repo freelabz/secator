@@ -10,13 +10,13 @@ load_dotenv(find_dotenv(usecwd=True), override=False)
 # Globals
 VERSION = get_distribution('secator').version
 ASCII = f"""
-                         __            
+						 __            
    ________  _________ _/ /_____  _____
   / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/
  (__  /  __/ /__/ /_/ / /_/ /_/ / /    
 /____/\___/\___/\__,_/\__/\____/_/     v{VERSION}
 
-                    freelabz.com
+					freelabz.com
 """  # noqa: W605,W291
 
 # Secator folders
@@ -157,27 +157,48 @@ WORDS = 'words'
 
 # Check worker addon
 try:
-    import eventlet  # noqa: F401
-    WORKER_ADDON_ENABLED = 1
+	import eventlet  # noqa: F401
+	WORKER_ADDON_ENABLED = 1
 except ModuleNotFoundError:
-    WORKER_ADDON_ENABLED = 0
+	WORKER_ADDON_ENABLED = 0
+
+# Check google addon
+try:
+	import gspread  # noqa: F401
+	GOOGLE_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+	GOOGLE_ADDON_ENABLED = 0
 
 # Check mongodb addon
 try:
-    import pymongo  # noqa: F401
-    MONGODB_ADDON_ENABLED = 1
+	import pymongo  # noqa: F401
+	MONGODB_ADDON_ENABLED = 1
 except ModuleNotFoundError:
-    MONGODB_ADDON_ENABLED = 0
+	MONGODB_ADDON_ENABLED = 0
+
+# Check redis addon
+try:
+	import redis  # noqa: F401
+	REDIS_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+	REDIS_ADDON_ENABLED = 0
 
 # Check dev addon
 try:
-    import flake8  # noqa: F401
-    DEV_ADDON_ENABLED = 1
+	import flake8  # noqa: F401
+	DEV_ADDON_ENABLED = 1
 except ModuleNotFoundError:
-    DEV_ADDON_ENABLED = 0
+	DEV_ADDON_ENABLED = 0
+
+# Check trace addon
+try:
+	import memray  # noqa: F401
+	TRACE_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+	TRACE_ADDON_ENABLED = 0
 
 # Check dev package
 if not os.path.exists(TESTS_FOLDER):
-    DEV_PACKAGE = 0
+	DEV_PACKAGE = 0
 else:
-    DEV_PACKAGE = 1
+	DEV_PACKAGE = 1
