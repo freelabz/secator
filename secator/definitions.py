@@ -16,7 +16,7 @@ ASCII = f"""
  (__  /  __/ /__/ /_/ / /_/ /_/ / /    
 /____/\___/\___/\__,_/\__/\____/_/     v{VERSION}
 
-					freelabz.com
+			freelabz.com
 """  # noqa: W605,W291
 
 # Secator folders
