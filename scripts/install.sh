@@ -3,6 +3,10 @@ YELLOW='\033[0;93m'
 GREEN='\033[0;92m'
 NC='\033[0m' # No Color
 
+echo -e "🗄 ${YELLOW}Running apt update ...${NC}"
+sudo apt update
+echo -e "🗄 ${GREEN}Ran apt update successfully !${NC}\n"
+
 echo -e "🗄 ${YELLOW}Installing Python and pipx ...${NC}"
 sudo apt install -y python3-pip pipx
 echo -e "🗄 ${GREEN}pipx installed successfully !${NC}\n"
