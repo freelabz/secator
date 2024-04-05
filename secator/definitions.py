@@ -10,7 +10,7 @@ load_dotenv(find_dotenv(usecwd=True), override=False)
 # Globals
 VERSION = get_distribution('secator').version
 ASCII = f"""
-						 __            
+                         __            
    ________  _________ _/ /_____  _____
   / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/
  (__  /  __/ /__/ /_/ / /_/ /_/ / /    
