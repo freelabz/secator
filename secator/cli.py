@@ -451,7 +451,10 @@ def install_go():
 	"""Install Go."""
 	run_install(
 		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
-		title='Go'
+		title='Go',
+		next_steps=[
+			'Add ~/go/bin to your $PATH'
+		]
 	)
 
 
