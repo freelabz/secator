@@ -16,9 +16,8 @@ from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,  # noqa: F401
 								 DEV_ADDON_ENABLED, DEV_PACKAGE,
 								 GOOGLE_ADDON_ENABLED, MONGODB_ADDON_ENABLED,
 								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
-								 REDIS_ADDON_ENABLED, ROOT_FOLDER,
-								 SCRIPTS_FOLDER, TRACE_ADDON_ENABLED, VERSION,
-								 WORKER_ADDON_ENABLED)
+								 REDIS_ADDON_ENABLED, REVSHELLS_FOLDER, ROOT_FOLDER,
+								 TRACE_ADDON_ENABLED, VERSION, WORKER_ADDON_ENABLED)
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -484,7 +483,7 @@ def install_tools(cmds):
 @install.command('cves')
 @click.option('--force', is_flag=True)
 def install_cves(force):
-	"""Install CVEs to file system for passive vulnerability search."""
+	"""Install CVEs (enables passive vulnerability search)."""
 	cve_json_path = f'{CVES_FOLDER}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
@@ -616,8 +615,8 @@ def utils():
 @utils.command()
 @click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
-def get_proxy(timeout, number):
-	"""Get a random proxy."""
+def proxy(timeout, number):
+	"""Get random proxies from FreeProxy."""
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
 	for _ in range(number):
 		url = proxy.get()
@@ -630,8 +629,9 @@ def get_proxy(timeout, number):
 @click.option('--port', '-p', type=int, default=9001, show_default=True, help='Specify PORT for revshell')
 @click.option('--interface', '-i', type=str, help='Interface to use to detect IP')
 @click.option('--listen', '-l', is_flag=True, default=False, help='Spawn netcat listener on specified port')
-def revshells(name, host, port, interface, listen):
-	"""Show reverse shell source codes and run netcat listener."""
+@click.option('--force', is_flag=True)
+def revshell(name, host, port, interface, listen, force):
+	"""Show reverse shell source codes and run netcat listener (-l)."""
 	if host is None:  # detect host automatically
 		host = detect_host(interface)
 		if not host:
@@ -640,7 +640,20 @@ def revshells(name, host, port, interface, listen):
 				style='bold red')
 			return
 
-	with open(f'{SCRIPTS_FOLDER}/revshells.json') as f:
+	# Download reverse shells JSON from repo
+	revshells_json = f'{REVSHELLS_FOLDER}/revshells.json'
+	if not os.path.exists(revshells_json) or force:
+		ret = Command.run_command(
+			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {REVSHELLS_FOLDER}',  # noqa: E501
+			cls_attributes={'shell': True},
+			print_cmd=True,
+			print_line=True
+		)
+		if not ret.return_code == 0:
+			sys.exit(1)
+
+	# Parse JSON into shells
+	with open(revshells_json) as f:
 		shells = json.loads(f.read())
 		for sh in shells:
 			sh['alias'] = '_'.join(sh['name'].lower()
@@ -700,7 +713,7 @@ def revshells(name, host, port, interface, listen):
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
-	"""Serve payloads in HTTP server."""
+	"""Run HTTP server to serve payloads."""
 	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
 	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
 	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/master/SUDO_KILLERv2.4.2.sh'
