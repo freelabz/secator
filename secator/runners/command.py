@@ -155,7 +155,7 @@ class Command(Runner):
 		if self.print_cmd and not self.has_children:
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-			self._print(self.cmd, color='bold cyan', rich=True)
+			self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
 		# Print built input
 		if self.print_input_file and self.input_path:

@@ -12,10 +12,12 @@ from rich.rule import Rule
 
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,
+from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,  # noqa: F401
+								 DEV_ADDON_ENABLED, DEV_PACKAGE,
+								 GOOGLE_ADDON_ENABLED, MONGODB_ADDON_ENABLED,
 								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
-								 ROOT_FOLDER, SCRIPTS_FOLDER, VERSION,
-								 WORKER_ADDON_ENABLED, DEV_ADDON_ENABLED, DEV_PACKAGE)
+								 REDIS_ADDON_ENABLED, REVSHELLS_FOLDER, ROOT_FOLDER,
+								 TRACE_ADDON_ENABLED, VERSION, WORKER_ADDON_ENABLED)
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -287,12 +289,12 @@ def health(json, debug):
 
 	# Check languages
 	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
-	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version', 'rustc': '--version'}
+	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
 	for lang, version_flag in version_cmds.items():
 		ret = which(lang)
 		ret2 = get_version(f'{lang} {version_flag}')
 		if not json:
-			print_status(lang, ret.return_code, ret2, ret.output, 'lang')
+			print_status(lang, ret.return_code, ret2, ret.output, 'langs')
 		status['languages'][lang] = {'installed': ret.return_code == 0}
 
 	# Check tools
@@ -304,6 +306,14 @@ def health(json, debug):
 		if not json:
 			print_status(tool.__name__, ret.return_code, ret2, ret.output, 'tools')
 		status['tools'][tool.__name__] = {'installed': ret.return_code == 0}
+
+	# Check addons
+	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	for addon in ['google', 'mongodb', 'redis', 'trace']:
+		addon_var = globals()[f'{addon.upper()}_ADDON_ENABLED']
+		ret = 0 if addon_var == 1 else 1
+		bin = None if addon_var == 0 else ' '
+		print_status(addon, ret, 'N/A', bin, 'addons')
 
 	# Print JSON health
 	if json:
@@ -349,7 +359,7 @@ def addons():
 def install_worker():
 	"Install worker addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install secator[worker]',
+		cmd=f'{sys.executable} -m pip install .[worker]',
 		title='worker addon',
 		next_steps=[
 			'Run "secator worker" to run a Celery worker using the file system as a backend and broker.',
@@ -363,7 +373,7 @@ def install_worker():
 def install_google():
 	"Install google addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install secator[google]',
+		cmd=f'{sys.executable} -m pip install .[google]',
 		title='google addon',
 		next_steps=[
 			'Set the "GOOGLE_CREDENTIALS_PATH" and "GOOGLE_DRIVE_PARENT_FOLDER_ID" environment variables.',
@@ -376,7 +386,7 @@ def install_google():
 def install_mongodb():
 	"Install mongodb addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install secator[mongodb]',
+		cmd=f'{sys.executable} -m pip install .[mongodb]',
 		title='mongodb addon',
 		next_steps=[
 			'[dim]\[optional][/] Run "docker run --name mongo -p 27017:27017 -d mongo:latest" to run a local MongoDB instance.',
@@ -390,7 +400,7 @@ def install_mongodb():
 def install_redis():
 	"Install redis addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install secator[redis]',
+		cmd=f'{sys.executable} -m pip install .[redis]',
 		title='redis addon',
 		next_steps=[
 			'[dim]\[optional][/] Run "docker run --name redis -p 6379:6379 -d redis" to run a local Redis instance.',
@@ -416,6 +426,20 @@ def install_dev():
 	)
 
 
+@addons.command('trace')
+def install_trace():
+	"Install trace addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[trace]',
+		title='dev addon',
+		next_steps=[
+			'Run "secator test lint" to run lint tests.',
+			'Run "secator test unit" to run unit tests.',
+			'Run "secator test integration" to run integration tests.',
+		]
+	)
+
+
 @install.group()
 def langs():
 	"Install languages."
@@ -427,7 +451,10 @@ def install_go():
 	"""Install Go."""
 	run_install(
 		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
-		title='Go'
+		title='Go',
+		next_steps=[
+			'Add ~/go/bin to your $PATH'
+		]
 	)
 
 
@@ -459,7 +486,7 @@ def install_tools(cmds):
 @install.command('cves')
 @click.option('--force', is_flag=True)
 def install_cves(force):
-	"""Install CVEs to file system for passive vulnerability search."""
+	"""Install CVEs (enables passive vulnerability search)."""
 	cve_json_path = f'{CVES_FOLDER}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
@@ -591,8 +618,8 @@ def utils():
 @utils.command()
 @click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
-def get_proxy(timeout, number):
-	"""Get a random proxy."""
+def proxy(timeout, number):
+	"""Get random proxies from FreeProxy."""
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
 	for _ in range(number):
 		url = proxy.get()
@@ -605,8 +632,9 @@ def get_proxy(timeout, number):
 @click.option('--port', '-p', type=int, default=9001, show_default=True, help='Specify PORT for revshell')
 @click.option('--interface', '-i', type=str, help='Interface to use to detect IP')
 @click.option('--listen', '-l', is_flag=True, default=False, help='Spawn netcat listener on specified port')
-def revshells(name, host, port, interface, listen):
-	"""Show reverse shell source codes and run netcat listener."""
+@click.option('--force', is_flag=True)
+def revshell(name, host, port, interface, listen, force):
+	"""Show reverse shell source codes and run netcat listener (-l)."""
 	if host is None:  # detect host automatically
 		host = detect_host(interface)
 		if not host:
@@ -615,7 +643,20 @@ def revshells(name, host, port, interface, listen):
 				style='bold red')
 			return
 
-	with open(f'{SCRIPTS_FOLDER}/revshells.json') as f:
+	# Download reverse shells JSON from repo
+	revshells_json = f'{REVSHELLS_FOLDER}/revshells.json'
+	if not os.path.exists(revshells_json) or force:
+		ret = Command.run_command(
+			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {REVSHELLS_FOLDER}',  # noqa: E501
+			cls_attributes={'shell': True},
+			print_cmd=True,
+			print_line=True
+		)
+		if not ret.return_code == 0:
+			sys.exit(1)
+
+	# Parse JSON into shells
+	with open(revshells_json) as f:
 		shells = json.loads(f.read())
 		for sh in shells:
 			sh['alias'] = '_'.join(sh['name'].lower()
@@ -675,7 +716,7 @@ def revshells(name, host, port, interface, listen):
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
-	"""Serve payloads in HTTP server."""
+	"""Run HTTP server to serve payloads."""
 	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
 	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
 	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/master/SUDO_KILLERv2.4.2.sh'

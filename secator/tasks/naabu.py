@@ -45,7 +45,7 @@ class naabu(ReconPort):
 		}
 	}
 	output_types = [Port]
-	install_cmd = 'sudo apt install -y libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'
+	install_cmd = 'sudo apt install -y build-essential libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'  # noqa: E501
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = False
