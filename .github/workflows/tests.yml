@@ -65,17 +65,17 @@ jobs:
       with:
         version: '1.29.2'
 
+    - name: Add GOBIN to PATH
+      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
+  
+    - name: Add GOPATH to PATH
+      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
+
     - name: Install dependencies
       run: |
         secator install langs go
         secator install langs ruby
         secator install tools
-
-    - name: Add GOBIN to PATH
-      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
-
-    - name: Add GOPATH to PATH
-      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
 
     - name: Run integration tests (${{ matrix.test_type }})
       run: |
