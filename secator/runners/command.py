@@ -134,6 +134,9 @@ class Command(Runner):
 		# No capturing of stdout / stderr.
 		self.no_capture = self.run_opts.get('no_capture', False)
 
+		# No processing of output lines.
+		self.no_process = self.run_opts.get('no_process', False)
+
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
@@ -256,13 +259,7 @@ class Command(Runner):
 		if not cls.install_cmd:
 			console.print(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
 			return
-		ret = cls.run_command(
-			cls.install_cmd,
-			name=cls.__name__,
-			print_cmd=True,
-			print_line=True,
-			cls_attributes={'shell': True}
-		)
+		ret = cls.execute(cls.install_cmd, name=cls.__name__, cls_attributes={'shell': True})
 		if ret.return_code != 0:
 			console.print(f':exclamation_mark: Failed to install {cls.__name__}.', style='bold red')
 		else:
@@ -270,16 +267,30 @@ class Command(Runner):
 		return ret
 
 	@classmethod
-	def run_command(cls, cmd, name=None, cls_attributes={}, **kwargs):
-		"""Run adhoc command. Can be used without defining an inherited class to run a command, while still enjoying
-		all the good stuff in this class.
+	def execute(cls, cmd, name=None, cls_attributes={}, **kwargs):
+		"""Execute an ad-hoc command.
+
+		Can be used without defining an inherited class to run a command, while still enjoying all the good stuff in
+		this class.
+
+		Args:
+			cls (object): Class.
+			cmd (str): Command.
+			name (str): Printed name.
+			cls_attributes (dict): Class attributes.
+			kwargs (dict): Options.
+
+		Returns:
+			secator.runners.Command: instance of the Command.
 		"""
 		name = name or cmd.split(' ')[0]
+		kwargs['no_process'] = True
+		kwargs['print_cmd'] = not kwargs.get('quiet', False)
+		kwargs['print_item'] = not kwargs.get('quiet', False)
+		kwargs['print_line'] = not kwargs.get('quiet', False)
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
-		cmd_instance.print_line = not kwargs.get('quiet', False)
-		cmd_instance.print_item = not kwargs.get('quiet', False)
 		cmd_instance.run()
 		return cmd_instance
 
@@ -400,6 +411,9 @@ class Command(Runner):
 
 				# Strip line endings
 				line = line.rstrip()
+				if self.no_process:
+					yield line
+					continue
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':

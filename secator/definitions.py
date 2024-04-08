@@ -190,6 +190,13 @@ try:
 except ModuleNotFoundError:
 	DEV_ADDON_ENABLED = 0
 
+# Check build addon
+try:
+	import hatch  # noqa: F401
+	BUILD_ADDON_ENABLED = 1
+except ModuleNotFoundError:
+	BUILD_ADDON_ENABLED = 0
+
 # Check trace addon
 try:
 	import memray  # noqa: F401
