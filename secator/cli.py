@@ -840,17 +840,18 @@ def record(record_name, script, interactive, width, height, output_dir):
 @utils.group('build')
 def build():
 	"""Build secator."""
-	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
-		sys.exit(1)
-	if not BUILD_ADDON_ENABLED:
-		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
-		sys.exit(1)
+	pass
 
 
 @build.command('pypi')
 def build_pypi():
 	"""Build secator PyPI package."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
+		sys.exit(1)
+	if not BUILD_ADDON_ENABLED:
+		console.print('[bold red]Missing build addon: please run `secator install addons build`')
+		sys.exit(1)
 	with console.status('[bold gold3]Building PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
 		sys.exit(ret.return_code)
@@ -869,17 +870,18 @@ def build_docker(dev):
 @utils.group('publish')
 def publish():
 	"""Publish secator."""
-	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to make releases.[/]')
-		sys.exit(1)
-	if not BUILD_ADDON_ENABLED:
-		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
-		sys.exit(1)
+	pass
 
 
 @publish.command('pypi')
 def publish_pypi():
 	"""Publish secator PyPI package."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
+		sys.exit(1)
+	if not BUILD_ADDON_ENABLED:
+		console.print('[bold red]Missing build addon: please run `secator install addons build`')
+		sys.exit(1)
 	os.environ['HATCH_INDEX_USER'] = '__token__'
 	hatch_token = os.environ.get('HATCH_INDEX_AUTH')
 	if not hatch_token:
