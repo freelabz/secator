@@ -15,5 +15,5 @@ jobs:
     steps:
       - uses: GoogleCloudPlatform/release-please-action@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN }}
           release-type: python
