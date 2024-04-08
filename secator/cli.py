@@ -13,7 +13,7 @@ from rich.rule import Rule
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,  # noqa: F401
-								 DEV_ADDON_ENABLED, DEV_PACKAGE,
+								 BUILD_ADDON_ENABLED, DEV_ADDON_ENABLED, DEV_PACKAGE,
 								 GOOGLE_ADDON_ENABLED, LIB_FOLDER, MONGODB_ADDON_ENABLED,
 								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
 								 REDIS_ADDON_ENABLED, REVSHELLS_FOLDER, ROOT_FOLDER,
@@ -30,10 +30,6 @@ ALL_TASKS = discover_tasks()
 ALL_CONFIGS = ConfigLoader.load_all()
 ALL_WORKFLOWS = ALL_CONFIGS.workflow
 ALL_SCANS = ALL_CONFIGS.scan
-DEFAULT_CMD_OPTS = {
-	'no_capture': True,
-	'print_cmd': True,
-}
 
 
 #-----#
@@ -259,7 +255,7 @@ def health(json, debug):
 	status = {'tools': {}, 'languages': {}, 'secator': {}}
 
 	def print_status(cmd, return_code, version=None, bin=None, category=None):
-		s = '[bold green]ok     [/]' if return_code == 0 else '[bold red]failed [/]'
+		s = '[bold green]ok      [/]' if return_code == 0 else '[bold red]missing [/]'
 		s = f'[bold magenta]{cmd:<15}[/] {s} '
 		if return_code == 0 and version:
 			if version == 'N/A':
@@ -301,7 +297,7 @@ def health(json, debug):
 
 	# Check addons
 	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
-	for addon in ['google', 'mongodb', 'redis', 'dev', 'trace']:
+	for addon in ['google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
 		addon_var = globals()[f'{addon.upper()}_ADDON_ENABLED']
 		ret = 0 if addon_var == 1 else 1
 		bin = None if addon_var == 0 else ' '
@@ -419,6 +415,20 @@ def install_trace():
 	run_install(
 		cmd=f'{sys.executable} -m pip install secator[trace]',
 		title='dev addon',
+		next_steps=[
+			'Run "secator test lint" to run lint tests.',
+			'Run "secator test unit" to run unit tests.',
+			'Run "secator test integration" to run integration tests.',
+		]
+	)
+
+
+@addons.command('build')
+def install_build():
+	"Install build addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[build]',
+		title='build addon',
 		next_steps=[
 			'Run "secator test lint" to run lint tests.',
 			'Run "secator test unit" to run unit tests.',
@@ -833,7 +843,7 @@ def build():
 	if not DEV_PACKAGE:
 		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
 		sys.exit(1)
-	if not DEV_ADDON_ENABLED:
+	if not BUILD_ADDON_ENABLED:
 		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
 		sys.exit(1)
 
@@ -842,7 +852,7 @@ def build():
 def build_pypi():
 	"""Build secator PyPI package."""
 	with console.status('[bold gold3]Building PyPI package...[/]'):
-		ret = Command.execute(f'{sys.executable} -m hatch build', cwd=ROOT_FOLDER)
+		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
 		sys.exit(ret.return_code)
 
 
@@ -852,7 +862,7 @@ def build_docker(dev):
 	"""Build secator Docker image."""
 	version = 'dev' if dev else VERSION
 	with console.status('[bold gold3]Building Docker image...[/]'):
-		ret = Command.execute(f'docker build -t freelabz/secator:{version} .', cwd=ROOT_FOLDER)
+		ret = Command.execute(f'docker build -t freelabz/secator:{version} .', name='docker build', cwd=ROOT_FOLDER)
 		sys.exit(ret.return_code)
 
 
@@ -862,7 +872,7 @@ def publish():
 	if not DEV_PACKAGE:
 		console.print('[bold red]You MUST use a development version of secator to make releases.[/]')
 		sys.exit(1)
-	if not DEV_ADDON_ENABLED:
+	if not BUILD_ADDON_ENABLED:
 		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
 		sys.exit(1)
 
@@ -876,7 +886,7 @@ def publish_pypi():
 		console.print('[bold red]Missing PyPI auth token (HATCH_INDEX_AUTH env variable).')
 		sys.exit(1)
 	with console.status('[bold gold3]Publishing PyPI package...[/]'):
-		ret = Command.execute(f'{sys.executable} -m hatch publish', cwd=ROOT_FOLDER)
+		ret = Command.execute(f'{sys.executable} -m hatch publish', name='hatch publish', cwd=ROOT_FOLDER)
 		sys.exit(ret.return_code)
 
 
@@ -886,7 +896,7 @@ def publish_docker(dev):
 	"""Publish secator Docker image."""
 	version = 'dev' if dev else VERSION
 	with console.status('[bold gold3]Publishing PyPI package...[/]'):
-		ret = Command.execute(f'docker push freelabz/secator:{version}', cwd=ROOT_FOLDER)
+		ret = Command.execute(f'docker push freelabz/secator:{version}', name='docker push', cwd=ROOT_FOLDER)
 		sys.exit(ret.return_code)
 
 

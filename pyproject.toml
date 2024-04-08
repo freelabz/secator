@@ -50,11 +50,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  'hatch < 2',
   'coverage < 8',
   'flake8 < 8',
   'watchdog < 3',
   'asciinema-automation < 1',
+]
+build = [
+  'hatch < 2',
 ]
 trace = [
   'memray < 2',
