@@ -268,7 +268,7 @@ secator install addons trace
 Add `hatch` for building and publishing the PyPI package.
 
 ```sh
-secator install addons hatch
+secator install addons build
 ```
 
 </details>
