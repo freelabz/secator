@@ -50,6 +50,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  'hatch < 2',
   'coverage < 8',
   'flake8 < 8',
   'watchdog < 3',
