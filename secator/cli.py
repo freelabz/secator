@@ -14,7 +14,7 @@ from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,  # noqa: F401
 								 DEV_ADDON_ENABLED, DEV_PACKAGE,
-								 GOOGLE_ADDON_ENABLED, MONGODB_ADDON_ENABLED,
+								 GOOGLE_ADDON_ENABLED, LIB_FOLDER, MONGODB_ADDON_ENABLED,
 								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
 								 REDIS_ADDON_ENABLED, REVSHELLS_FOLDER, ROOT_FOLDER,
 								 TRACE_ADDON_ENABLED, VERSION, WORKER_ADDON_ENABLED)
@@ -50,7 +50,11 @@ def cli(ctx, no_banner, version):
 		print(ASCII, file=sys.stderr)
 	if ctx.invoked_subcommand is None:
 		if version:
-			print(f'Current Version: v{VERSION}')
+			console.print(f'[bold gold3]Current version[/]: v{VERSION}', highlight=False)
+			console.print(f'[bold gold3]Python binary[/]: {sys.executable}')
+			if DEV_PACKAGE:
+				console.print(f'[bold gold3]Root folder[/]: {ROOT_FOLDER}')
+			console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
 		else:
 			ctx.get_help()
 
@@ -144,11 +148,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	if reload:
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
-	Command.run_command(
-		cmd,
-		name='secator worker',
-		**DEFAULT_CMD_OPTS
-	)
+	Command.execute(cmd, name='secator worker')
 
 
 #--------#
@@ -213,11 +213,7 @@ def which(command):
 	Returns:
 		secator.Command: Command instance.
 	"""
-	return Command.run_command(
-		f'which {command}',
-		quiet=True,
-		print_errors=False
-	)
+	return Command.execute(f'which {command}', quiet=True, print_errors=False)
 
 
 def version(cls):
@@ -247,11 +243,7 @@ def get_version(version_cmd):
 		str: Version string.
 	"""
 	regex = r'[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
-	ret = Command.run_command(
-		version_cmd,
-		quiet=True,
-		print_errors=False
-	)
+	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
 	match = re.findall(regex, ret.output)
 	if not match:
 		return 'n/a'
@@ -309,7 +301,7 @@ def health(json, debug):
 
 	# Check addons
 	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
-	for addon in ['google', 'mongodb', 'redis', 'trace']:
+	for addon in ['google', 'mongodb', 'redis', 'dev', 'trace']:
 		addon_var = globals()[f'{addon.upper()}_ADDON_ENABLED']
 		ret = 0 if addon_var == 1 else 1
 		bin = None if addon_var == 0 else ' '
@@ -326,12 +318,7 @@ def health(json, debug):
 
 def run_install(cmd, title, next_steps=None):
 	with console.status(f'[bold yellow] Installing {title}...'):
-		ret = Command.run_command(
-			cmd,
-			cls_attributes={'shell': True},
-			print_cmd=True,
-			print_line=True
-		)
+		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_cmd=True, print_line=True)
 		if ret.return_code != 0:
 			console.print(f':exclamation_mark: Failed to install {title}.', style='bold red')
 		else:
@@ -490,17 +477,9 @@ def install_cves(force):
 	cve_json_path = f'{CVES_FOLDER}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
-			Command.run_command(
-				'wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz',
-				cwd=CVES_FOLDER,
-				**DEFAULT_CMD_OPTS
-			)
+			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=CVES_FOLDER)
 		with console.status('[bold yellow]Unzipping CVEs ...[/]'):
-			Command.run_command(
-				f'gunzip {CVES_FOLDER}/circl-cve-search-expanded.json.gz',
-				cwd=CVES_FOLDER,
-				**DEFAULT_CMD_OPTS
-			)
+			Command.execute(f'gunzip {CVES_FOLDER}/circl-cve-search-expanded.json.gz', cwd=CVES_FOLDER)
 	with console.status(f'[bold yellow]Installing CVEs to {CVES_FOLDER} ...[/]'):
 		with open(cve_json_path, 'r') as f:
 			for line in f:
@@ -646,11 +625,9 @@ def revshell(name, host, port, interface, listen, force):
 	# Download reverse shells JSON from repo
 	revshells_json = f'{REVSHELLS_FOLDER}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
-		ret = Command.run_command(
+		ret = Command.execute(
 			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {REVSHELLS_FOLDER}',  # noqa: E501
-			cls_attributes={'shell': True},
-			print_cmd=True,
-			print_line=True
+			cls_attributes={'shell': True}
 		)
 		if not ret.return_code == 0:
 			sys.exit(1)
@@ -704,10 +681,7 @@ def revshell(name, host, port, interface, listen, force):
 	if listen:
 		console.print(f'Starting netcat listener on port {port} ...', style='bold gold3')
 		cmd = f'nc -lvnp {port}'
-		Command.run_command(
-			cmd,
-			**DEFAULT_CMD_OPTS
-		)
+		Command.execute(cmd)
 
 
 @utils.command()
@@ -719,7 +693,7 @@ def serve(directory, host, port, interface):
 	"""Run HTTP server to serve payloads."""
 	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
 	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
-	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/master/SUDO_KILLERv2.4.2.sh'
+	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/V3/SUDO_KILLERv3.sh'
 	PAYLOADS = [
 		{
 			'fname': 'lse.sh',
@@ -744,20 +718,11 @@ def serve(directory, host, port, interface):
 			with console.status(f'[bold yellow][{ix}/{len(PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
 				cmd = payload['command']
 				console.print(f'[bold magenta]{fname} [dim]({descr})[/] ...[/]', )
-				opts = DEFAULT_CMD_OPTS.copy()
-				opts['no_capture'] = False
-				Command.run_command(
-					cmd,
-					cls_attributes={'shell': True},
-					cwd=directory,
-					**opts
-				)
+				Command.execute(cmd, cls_attributes={'shell': True}, cwd=directory)
 		console.print()
 
 	console.print(Rule())
 	console.print(f'Available payloads in {directory}: ', style='bold yellow')
-	opts = DEFAULT_CMD_OPTS.copy()
-	opts['print_cmd'] = False
 	for fname in os.listdir(directory):
 		if not host:
 			host = detect_host(interface)
@@ -772,12 +737,8 @@ def serve(directory, host, port, interface):
 		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
 		console.print('')
 	console.print(Rule())
-	console.print('Starting HTTP server ...', style='bold yellow')
-	Command.run_command(
-		f'{sys.executable} -m http.server {port}',
-		cwd=directory,
-		**DEFAULT_CMD_OPTS
-	)
+	console.print(f'Started HTTP server on port {port}, waiting for incoming connections ...', style='bold yellow')
+	Command.execute(f'{sys.executable} -m http.server {port}', cwd=directory)
 
 
 @utils.command()
@@ -813,18 +774,15 @@ def record(record_name, script, interactive, width, height, output_dir):
 			console.print(f'Removed existing {output_cast_path}', style='bold green')
 
 		with console.status('[bold gold3]Recording with asciinema ...[/]'):
-			Command.run_command(
+			Command.execute(
 				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
 				cls_attributes=attrs,
 				raw=True,
-				**DEFAULT_CMD_OPTS,
 			)
 			console.print(f'Generated {output_cast_path}', style='bold green')
 	elif interactive:
 		os.environ.update(attrs['env'])
-		Command.run_command(
-			f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}',
-		)
+		Command.execute(f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}')
 
 	# Resize cast file
 	if os.path.exists(output_cast_path):
@@ -851,11 +809,10 @@ def record(record_name, script, interactive, width, height, output_dir):
 
 		# Edit cast file to reduce long timeouts
 		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
-			Command.run_command(
+			Command.execute(
 				f'asciinema-edit quantize --range 1 {output_cast_path} --out {output_cast_path}.tmp',
 				cls_attributes=attrs,
 				raw=True,
-				**DEFAULT_CMD_OPTS,
 			)
 			if os.path.exists(f'{output_cast_path}.tmp'):
 				os.replace(f'{output_cast_path}.tmp', output_cast_path)
@@ -863,12 +820,74 @@ def record(record_name, script, interactive, width, height, output_dir):
 
 	# Convert to GIF
 	with console.status(f'[bold gold3]Converting to {output_gif_path} ...[/]'):
-		Command.run_command(
+		Command.execute(
 			f'agg {output_cast_path} {output_gif_path}',
 			cls_attributes=attrs,
-			**DEFAULT_CMD_OPTS,
 		)
 		console.print(f'Generated {output_gif_path}', style='bold green')
+
+
+@utils.group('build')
+def build():
+	"""Build secator."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
+		sys.exit(1)
+	if not DEV_ADDON_ENABLED:
+		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
+		sys.exit(1)
+
+
+@build.command('pypi')
+def build_pypi():
+	"""Build secator PyPI package."""
+	with console.status('[bold gold3]Building PyPI package...[/]'):
+		ret = Command.execute(f'{sys.executable} -m hatch build', cwd=ROOT_FOLDER)
+		sys.exit(ret.return_code)
+
+
+@build.command('docker')
+@click.option('--dev', '-dev', is_flag=True, default=False, help='Build dev version')
+def build_docker(dev):
+	"""Build secator Docker image."""
+	version = 'dev' if dev else VERSION
+	with console.status('[bold gold3]Building Docker image...[/]'):
+		ret = Command.execute(f'docker build -t freelabz/secator:{version} .', cwd=ROOT_FOLDER)
+		sys.exit(ret.return_code)
+
+
+@utils.group('publish')
+def publish():
+	"""Publish secator."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to make releases.[/]')
+		sys.exit(1)
+	if not DEV_ADDON_ENABLED:
+		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
+		sys.exit(1)
+
+
+@publish.command('pypi')
+def publish_pypi():
+	"""Publish secator PyPI package."""
+	os.environ['HATCH_INDEX_USER'] = '__token__'
+	hatch_token = os.environ.get('HATCH_INDEX_AUTH')
+	if not hatch_token:
+		console.print('[bold red]Missing PyPI auth token (HATCH_INDEX_AUTH env variable).')
+		sys.exit(1)
+	with console.status('[bold gold3]Publishing PyPI package...[/]'):
+		ret = Command.execute(f'{sys.executable} -m hatch publish', cwd=ROOT_FOLDER)
+		sys.exit(ret.return_code)
+
+
+@publish.command('docker')
+@click.option('--dev', '-dev', is_flag=True, default=False, help='Build dev version')
+def publish_docker(dev):
+	"""Publish secator Docker image."""
+	version = 'dev' if dev else VERSION
+	with console.status('[bold gold3]Publishing PyPI package...[/]'):
+		ret = Command.execute(f'docker push freelabz/secator:{version}', cwd=ROOT_FOLDER)
+		sys.exit(ret.return_code)
 
 
 #------#
@@ -895,12 +914,7 @@ def run_test(cmd, name):
 		cmd: Command to run.
 		name: Name of the test.
 	"""
-	result = Command.run_command(
-		cmd,
-		name=name + ' tests',
-		cwd=ROOT_FOLDER,
-		**DEFAULT_CMD_OPTS
-	)
+	result = Command.execute(cmd, name=name + ' tests', cwd=ROOT_FOLDER)
 	if result.return_code == 0:
 		console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
 	sys.exit(result.return_code)
