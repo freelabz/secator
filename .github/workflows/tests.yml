@@ -14,9 +14,11 @@ jobs:
       matrix:
         python-version: ["3.9", "3.10", "3.11"]
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-    - uses: ./.github/actions/install
+    - name: Install secator
+      uses: ./.github/actions/install
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -35,9 +37,11 @@ jobs:
       matrix:
         python-version: ["3.9", "3.10", "3.11"]
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
   
-    - uses: ./.github/actions/install
+    - name: Install secator
+      uses: ./.github/actions/install
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -54,9 +58,11 @@ jobs:
         test_type: ['tasks']
         # test_type: ['tasks', 'workflows', 'scans']
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-    - uses: ./.github/actions/install
+    - name: Install secator
+      uses: ./.github/actions/install
       with:
         python-version: ${{ matrix.python-version }}
 
