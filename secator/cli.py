@@ -906,11 +906,11 @@ def publish_docker(tag, latest):
 	if not tag:
 		tag = VERSION if latest else 'dev'
 	cmd = f'docker push freelabz/secator:{tag}'
-	cmd2 = f'docker push freelabz/secator:latest'
+	cmd2 = 'docker push freelabz/secator:latest'
 	with console.status(f'[bold gold3]Publishing Docker image {tag}...[/]'):
 		ret = Command.execute(cmd, name=f'docker push ({tag})', cwd=ROOT_FOLDER)
 		if latest:
-			ret2 = Command.execute(cmd2, name=f'docker push (latest)')
+			ret2 = Command.execute(cmd2, name='docker push (latest)')
 			sys.exit(max(ret.return_code, ret2.return_code))
 		sys.exit(ret.return_code)
 
