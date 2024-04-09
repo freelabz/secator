@@ -53,7 +53,7 @@ class OrderedGroup(RichGroup):
 				if not name:
 					raise click.UsageError("`name` command argument is required when using aliases.")
 
-				f.__doc__ = f.__doc__ or 'N/A'
+				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
 				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
 				base_command = super(OrderedGroup, self).command(
 					name, *args, **kwargs
@@ -79,7 +79,7 @@ class OrderedGroup(RichGroup):
 				max_width = _get_rich_console().width
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
-				f.__doc__ = f.__doc__ or 'N/A'
+				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
 				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
 				for alias in aliases:
 					grp = super(OrderedGroup, self).group(

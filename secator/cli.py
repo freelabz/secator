@@ -12,18 +12,15 @@ from rich.rule import Rule
 
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,  # noqa: F401
-								 BUILD_ADDON_ENABLED, DEV_ADDON_ENABLED, DEV_PACKAGE,
-								 GOOGLE_ADDON_ENABLED, LIB_FOLDER, MONGODB_ADDON_ENABLED,
-								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
-								 REDIS_ADDON_ENABLED, REVSHELLS_FOLDER, ROOT_FOLDER,
-								 TRACE_ADDON_ENABLED, VERSION, WORKER_ADDON_ENABLED)
+from secator.definitions import (ASCII, BUILD_ADDON_ENABLED, CVES_FOLDER, DATA_FOLDER, DEV_ADDON_ENABLED,  # noqa: F401
+								 DEV_PACKAGE, GOOGLE_ADDON_ENABLED, VERSION_LATEST, LIB_FOLDER, MONGODB_ADDON_ENABLED,
+								 VERSION_OBSOLETE, OPT_NOT_SUPPORTED, PAYLOADS_FOLDER, REDIS_ADDON_ENABLED, REVSHELLS_FOLDER, ROOT_FOLDER,
+								 TRACE_ADDON_ENABLED, VERSION, VERSION_STR, WORKER_ADDON_ENABLED)
 from secator.installer import ToolInstaller
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
-from secator.utils import (debug, detect_host, discover_tasks, find_list_item,
-						   flatten, print_results_table)
+from secator.utils import debug, detect_host, discover_tasks, find_list_item, flatten, print_results_table
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -33,25 +30,32 @@ ALL_WORKFLOWS = ALL_CONFIGS.workflow
 ALL_SCANS = ALL_CONFIGS.scan
 
 
+def print_version():
+	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False)
+	console.print(f'[bold gold3]Latest version[/]: {VERSION_LATEST}', highlight=False)
+	console.print(f'[bold gold3]Python binary[/]: {sys.executable}')
+	if DEV_PACKAGE:
+		console.print(f'[bold gold3]Root folder[/]: {ROOT_FOLDER}')
+	console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
+
+
 #-----#
 # CLI #
 #-----#
 
 @click.group(cls=OrderedGroup, invoke_without_command=True)
-@click.option('--no-banner', '-nb', is_flag=True, default=False)
 @click.option('--version', '-version', is_flag=True, default=False)
 @click.pass_context
-def cli(ctx, no_banner, version):
+def cli(ctx, version):
 	"""Secator CLI."""
-	if not no_banner:
-		print(ASCII, file=sys.stderr)
+	console.print(ASCII, highlight=False)
+	if VERSION_OBSOLETE:
+		console.print(
+			'[bold red]:warning: secator version is outdated: '
+			f'run "secator update" to install the newest version ({VERSION_LATEST}).\n')
 	if ctx.invoked_subcommand is None:
 		if version:
-			console.print(f'[bold gold3]Current version[/]: v{VERSION}', highlight=False)
-			console.print(f'[bold gold3]Python binary[/]: {sys.executable}')
-			if DEV_PACKAGE:
-				console.print(f'[bold gold3]Root folder[/]: {ROOT_FOLDER}')
-			console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
+			print_version()
 		else:
 			ctx.get_help()
 
@@ -148,6 +152,328 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	Command.execute(cmd, name='secator worker')
 
 
+#-------#
+# UTILS #
+#-------#
+
+
+@cli.group(aliases=['u'])
+def util():
+	"""Run a utility."""
+	pass
+
+
+@util.command()
+@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
+@click.option('--number', '-n', type=int, default=1, help='Number of proxies')
+def proxy(timeout, number):
+	"""Get random proxies from FreeProxy."""
+	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
+	for _ in range(number):
+		url = proxy.get()
+		print(url)
+
+
+@util.command()
+@click.argument('name', type=str, default=None, required=False)
+@click.option('--host', '-h', type=str, default=None, help='Specify LHOST for revshell, otherwise autodetected.')
+@click.option('--port', '-p', type=int, default=9001, show_default=True, help='Specify PORT for revshell')
+@click.option('--interface', '-i', type=str, help='Interface to use to detect IP')
+@click.option('--listen', '-l', is_flag=True, default=False, help='Spawn netcat listener on specified port')
+@click.option('--force', is_flag=True)
+def revshell(name, host, port, interface, listen, force):
+	"""Show reverse shell source codes and run netcat listener (-l)."""
+	if host is None:  # detect host automatically
+		host = detect_host(interface)
+		if not host:
+			console.print(
+				f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.',
+				style='bold red')
+			return
+
+	# Download reverse shells JSON from repo
+	revshells_json = f'{REVSHELLS_FOLDER}/revshells.json'
+	if not os.path.exists(revshells_json) or force:
+		ret = Command.execute(
+			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {REVSHELLS_FOLDER}',  # noqa: E501
+			cls_attributes={'shell': True}
+		)
+		if not ret.return_code == 0:
+			sys.exit(1)
+
+	# Parse JSON into shells
+	with open(revshells_json) as f:
+		shells = json.loads(f.read())
+		for sh in shells:
+			sh['alias'] = '_'.join(sh['name'].lower()
+				.replace('-c', '')
+				.replace('-e', '')
+				.replace('-i', '')
+				.replace('c#', 'cs')
+				.replace('#', '')
+				.replace('(', '')
+				.replace(')', '')
+				.strip()
+				.split(' ')).replace('_1', '')
+			cmd = re.sub(r"\s\s+", "", sh.get('command', ''), flags=re.UNICODE)
+			cmd = cmd.replace('\n', ' ')
+			sh['cmd_short'] = (cmd[:30] + '..') if len(cmd) > 30 else cmd
+
+	shell = [
+		shell for shell in shells if shell['name'] == name or shell['alias'] == name
+	]
+	if not shell:
+		console.print('Available shells:', style='bold yellow')
+		shells_str = [
+			'[bold magenta]{alias:<20}[/][dim white]{name:<20}[/][dim gold3]{cmd_short:<20}[/]'.format(**sh)
+			for sh in shells
+		]
+		console.print('\n'.join(shells_str))
+	else:
+		shell = shell[0]
+		command = shell['command']
+		alias = shell['alias']
+		name = shell['name']
+		command_str = Template(command).render(ip=host, port=port, shell='bash')
+		console.print(Rule(f'[bold gold3]{alias}[/] - [bold red]{name} REMOTE SHELL', style='bold red', align='left'))
+		lang = shell.get('lang') or 'sh'
+		if len(command.splitlines()) == 1:
+			console.print()
+			print(f'\033[0;36m{command_str}')
+		else:
+			md = Markdown(f'```{lang}\n{command_str}\n```')
+			console.print(md)
+			console.print(f'Save this script as rev.{lang} and run it on your target', style='dim italic')
+		console.print()
+		console.print(Rule(style='bold red'))
+
+	if listen:
+		console.print(f'Starting netcat listener on port {port} ...', style='bold gold3')
+		cmd = f'nc -lvnp {port}'
+		Command.execute(cmd)
+
+
+@util.command()
+@click.option('--directory', '-d', type=str, default=PAYLOADS_FOLDER, show_default=True, help='HTTP server directory')
+@click.option('--host', '-h', type=str, default=None, help='HTTP host')
+@click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
+@click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
+def serve(directory, host, port, interface):
+	"""Run HTTP server to serve payloads."""
+	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
+	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
+	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/V3/SUDO_KILLERv3.sh'
+	PAYLOADS = [
+		{
+			'fname': 'lse.sh',
+			'description': 'Linux Smart Enumeration',
+			'command': f'wget {LSE_URL} -O lse.sh && chmod 700 lse.sh'
+		},
+		{
+			'fname': 'linpeas.sh',
+			'description': 'Linux Privilege Escalation Awesome Script',
+			'command': f'wget {LINPEAS_URL} -O linpeas.sh && chmod 700 linpeas.sh'
+		},
+		{
+			'fname': 'sudo_killer.sh',
+			'description': 'SUDO_KILLER',
+			'command': f'wget {SUDOKILLER_URL} -O sudo_killer.sh && chmod 700 sudo_killer.sh'
+		}
+	]
+	for ix, payload in enumerate(PAYLOADS):
+		descr = payload.get('description', '')
+		fname = payload['fname']
+		if not os.path.exists(f'{directory}/{fname}'):
+			with console.status(f'[bold yellow][{ix}/{len(PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
+				cmd = payload['command']
+				console.print(f'[bold magenta]{fname} [dim]({descr})[/] ...[/]', )
+				Command.execute(cmd, cls_attributes={'shell': True}, cwd=directory)
+		console.print()
+
+	console.print(Rule())
+	console.print(f'Available payloads in {directory}: ', style='bold yellow')
+	for fname in os.listdir(directory):
+		if not host:
+			host = detect_host(interface)
+			if not host:
+				console.print(
+					f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.',
+					style='bold red')
+				return
+		payload = find_list_item(PAYLOADS, fname, key='fname', default={})
+		fdescr = payload.get('description', 'No description')
+		console.print(f'{fname} [dim]({fdescr})[/]', style='bold magenta')
+		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
+		console.print('')
+	console.print(Rule())
+	console.print(f'Started HTTP server on port {port}, waiting for incoming connections ...', style='bold yellow')
+	Command.execute(f'{sys.executable} -m http.server {port}', cwd=directory)
+
+
+@util.command()
+@click.argument('record_name', type=str, default=None)
+@click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')
+@click.option('--interactive', '-i', is_flag=True, default=False, help='Interactive record.')
+@click.option('--width', '-w', type=int, default=None, help='Recording width')
+@click.option('--height', '-h', type=int, default=None, help='Recording height')
+@click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
+def record(record_name, script, interactive, width, height, output_dir):
+	"""Record secator session using asciinema."""
+	# 120 x 30 is a good ratio for GitHub
+	width = width or console.size.width
+	height = height or console.size.height
+	attrs = {
+		'shell': False,
+		'env': {
+			'RECORD': '1',
+			'LINES': str(height),
+			'PS1': '$ ',
+			'COLUMNS': str(width),
+			'TERM': 'xterm-256color'
+		}
+	}
+	output_cast_path = f'{output_dir}/{record_name}.cast'
+	output_gif_path = f'{output_dir}/{record_name}.gif'
+
+	# Run automated 'story' script with asciinema-automation
+	if script:
+		# If existing cast file, remove it
+		if os.path.exists(output_cast_path):
+			os.unlink(output_cast_path)
+			console.print(f'Removed existing {output_cast_path}', style='bold green')
+
+		with console.status('[bold gold3]Recording with asciinema ...[/]'):
+			Command.execute(
+				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
+				cls_attributes=attrs,
+				raw=True,
+			)
+			console.print(f'Generated {output_cast_path}', style='bold green')
+	elif interactive:
+		os.environ.update(attrs['env'])
+		Command.execute(f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}')
+
+	# Resize cast file
+	if os.path.exists(output_cast_path):
+		with console.status('[bold gold3]Cleaning up .cast and set custom settings ...'):
+			with open(output_cast_path, 'r') as f:
+				lines = f.readlines()
+			updated_lines = []
+			for ix, line in enumerate(lines):
+				tmp_line = json.loads(line)
+				if ix == 0:
+					tmp_line['width'] = width
+					tmp_line['height'] = height
+					tmp_line['env']['SHELL'] = '/bin/sh'
+					lines[0] = json.dumps(tmp_line) + '\n'
+					updated_lines.append(json.dumps(tmp_line) + '\n')
+				elif tmp_line[2].endswith(' \r'):
+					tmp_line[2] = tmp_line[2].replace(' \r', '')
+					updated_lines.append(json.dumps(tmp_line) + '\n')
+				else:
+					updated_lines.append(line)
+			with open(output_cast_path, 'w') as f:
+				f.writelines(updated_lines)
+			console.print('')
+
+		# Edit cast file to reduce long timeouts
+		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
+			Command.execute(
+				f'asciinema-edit quantize --range 1 {output_cast_path} --out {output_cast_path}.tmp',
+				cls_attributes=attrs,
+				raw=True,
+			)
+			if os.path.exists(f'{output_cast_path}.tmp'):
+				os.replace(f'{output_cast_path}.tmp', output_cast_path)
+			console.print(f'Edited {output_cast_path}', style='bold green')
+
+	# Convert to GIF
+	with console.status(f'[bold gold3]Converting to {output_gif_path} ...[/]'):
+		Command.execute(
+			f'agg {output_cast_path} {output_gif_path}',
+			cls_attributes=attrs,
+		)
+		console.print(f'Generated {output_gif_path}', style='bold green')
+
+
+@util.group('build')
+def build():
+	"""Build secator."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
+		sys.exit(1)
+	pass
+
+
+@build.command('pypi')
+def build_pypi():
+	"""Build secator PyPI package."""
+	if not BUILD_ADDON_ENABLED:
+		console.print('[bold red]Missing build addon: please run `secator install addons build`')
+		sys.exit(1)
+	with console.status('[bold gold3]Building PyPI package...[/]'):
+		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
+		sys.exit(ret.return_code)
+
+
+@build.command('docker')
+@click.option('--tag', '-t', type=str, default=None, help='Specific tag')
+@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
+def build_docker(tag, latest):
+	"""Build secator Docker image."""
+	if not tag:
+		tag = VERSION if latest else 'dev'
+	cmd = f'docker build -t freelabz/secator:{tag}'
+	if latest:
+		cmd += ' -t freelabz/secator:latest'
+	cmd += ' .'
+	with console.status('[bold gold3]Building Docker image...[/]'):
+		ret = Command.execute(cmd, name='docker build', cwd=ROOT_FOLDER)
+		sys.exit(ret.return_code)
+
+
+@util.group('publish')
+def publish():
+	"""Publish secator."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to publish builds.[/]')
+		sys.exit(1)
+	pass
+
+
+@publish.command('pypi')
+def publish_pypi():
+	"""Publish secator PyPI package."""
+	if not BUILD_ADDON_ENABLED:
+		console.print('[bold red]Missing build addon: please run `secator install addons build`')
+		sys.exit(1)
+	os.environ['HATCH_INDEX_USER'] = '__token__'
+	hatch_token = os.environ.get('HATCH_INDEX_AUTH')
+	if not hatch_token:
+		console.print('[bold red]Missing PyPI auth token (HATCH_INDEX_AUTH env variable).')
+		sys.exit(1)
+	with console.status('[bold gold3]Publishing PyPI package...[/]'):
+		ret = Command.execute(f'{sys.executable} -m hatch publish', name='hatch publish', cwd=ROOT_FOLDER)
+		sys.exit(ret.return_code)
+
+
+@publish.command('docker')
+@click.option('--tag', '-t', default=None, help='Specific tag')
+@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
+def publish_docker(tag, latest):
+	"""Publish secator Docker image."""
+	if not tag:
+		tag = VERSION if latest else 'dev'
+	cmd = f'docker push freelabz/secator:{tag}'
+	cmd2 = 'docker push freelabz/secator:latest'
+	with console.status(f'[bold gold3]Publishing Docker image {tag}...[/]'):
+		ret = Command.execute(cmd, name=f'docker push ({tag})', cwd=ROOT_FOLDER)
+		if latest:
+			ret2 = Command.execute(cmd2, name='docker push (latest)')
+			sys.exit(max(ret.return_code, ret2.return_code))
+		sys.exit(ret.return_code)
+
+
 #--------#
 # REPORT #
 #--------#
@@ -155,7 +481,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 
 @cli.group(aliases=['r'])
 def report():
-	"""Reports."""
+	"""View previous reports."""
 	pass
 
 
@@ -247,11 +573,11 @@ def get_version(version_cmd):
 	return match[0]
 
 
-@cli.command(name='health', aliases=['h'])
+@cli.command(name='health')
 @click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
 def health(json, debug):
-	"""Health."""
+	"""[dim]Get health status.[/]"""
 	tools = [cls for cls in ALL_TASKS]
 	status = {'tools': {}, 'languages': {}, 'secator': {}}
 
@@ -333,9 +659,9 @@ def run_install(cmd, title, next_steps=None):
 		sys.exit(ret.return_code)
 
 
-@cli.group(aliases=['i'])
+@cli.group()
 def install():
-	"Installations."
+	"""[dim]Install langs, tools and addons.[/]"""
 	pass
 
 
@@ -509,14 +835,30 @@ def install_cves(force):
 	console.print(':tada: CVEs installed successfully !', style='bold green')
 
 
+#--------#
+# UPDATE #
+#--------#
+
+@cli.command('update')
+def update():
+	"""[dim]Update to latest version.[/]"""
+	if not VERSION_OBSOLETE:
+		console.print(f'[bold green]secator is already at the newest version {VERSION_LATEST}[/]')
+	console.print(f'[bold gold3]:wrench: Updating secator from {VERSION} to {VERSION_LATEST} ...[/]')
+	if 'pipx' in sys.executable:
+		Command.execute(f'pipx install secator=={VERSION_LATEST} --force')
+	else:
+		Command.execute(f'pip install secator=={VERSION_LATEST}')
+
+
 #-------#
 # ALIAS #
 #-------#
 
 
-@cli.group(aliases=['a'])
+@cli.group()
 def alias():
-	"""Aliases."""
+	"""[dim]Configure aliases.[/]"""
 	pass
 
 
@@ -600,328 +942,6 @@ def list_aliases(silent):
 	return aliases
 
 
-#-------#
-# UTILS #
-#-------#
-
-
-@cli.group(aliases=['u'])
-def utils():
-	"""Utilities."""
-	pass
-
-
-@utils.command()
-@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
-@click.option('--number', '-n', type=int, default=1, help='Number of proxies')
-def proxy(timeout, number):
-	"""Get random proxies from FreeProxy."""
-	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
-	for _ in range(number):
-		url = proxy.get()
-		print(url)
-
-
-@utils.command()
-@click.argument('name', type=str, default=None, required=False)
-@click.option('--host', '-h', type=str, default=None, help='Specify LHOST for revshell, otherwise autodetected.')
-@click.option('--port', '-p', type=int, default=9001, show_default=True, help='Specify PORT for revshell')
-@click.option('--interface', '-i', type=str, help='Interface to use to detect IP')
-@click.option('--listen', '-l', is_flag=True, default=False, help='Spawn netcat listener on specified port')
-@click.option('--force', is_flag=True)
-def revshell(name, host, port, interface, listen, force):
-	"""Show reverse shell source codes and run netcat listener (-l)."""
-	if host is None:  # detect host automatically
-		host = detect_host(interface)
-		if not host:
-			console.print(
-				f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.',
-				style='bold red')
-			return
-
-	# Download reverse shells JSON from repo
-	revshells_json = f'{REVSHELLS_FOLDER}/revshells.json'
-	if not os.path.exists(revshells_json) or force:
-		ret = Command.execute(
-			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {REVSHELLS_FOLDER}',  # noqa: E501
-			cls_attributes={'shell': True}
-		)
-		if not ret.return_code == 0:
-			sys.exit(1)
-
-	# Parse JSON into shells
-	with open(revshells_json) as f:
-		shells = json.loads(f.read())
-		for sh in shells:
-			sh['alias'] = '_'.join(sh['name'].lower()
-				.replace('-c', '')
-				.replace('-e', '')
-				.replace('-i', '')
-				.replace('c#', 'cs')
-				.replace('#', '')
-				.replace('(', '')
-				.replace(')', '')
-				.strip()
-				.split(' ')).replace('_1', '')
-			cmd = re.sub(r"\s\s+", "", sh.get('command', ''), flags=re.UNICODE)
-			cmd = cmd.replace('\n', ' ')
-			sh['cmd_short'] = (cmd[:30] + '..') if len(cmd) > 30 else cmd
-
-	shell = [
-		shell for shell in shells if shell['name'] == name or shell['alias'] == name
-	]
-	if not shell:
-		console.print('Available shells:', style='bold yellow')
-		shells_str = [
-			'[bold magenta]{alias:<20}[/][dim white]{name:<20}[/][dim gold3]{cmd_short:<20}[/]'.format(**sh)
-			for sh in shells
-		]
-		console.print('\n'.join(shells_str))
-	else:
-		shell = shell[0]
-		command = shell['command']
-		alias = shell['alias']
-		name = shell['name']
-		command_str = Template(command).render(ip=host, port=port, shell='bash')
-		console.print(Rule(f'[bold gold3]{alias}[/] - [bold red]{name} REMOTE SHELL', style='bold red', align='left'))
-		lang = shell.get('lang') or 'sh'
-		if len(command.splitlines()) == 1:
-			console.print()
-			print(f'\033[0;36m{command_str}')
-		else:
-			md = Markdown(f'```{lang}\n{command_str}\n```')
-			console.print(md)
-			console.print(f'Save this script as rev.{lang} and run it on your target', style='dim italic')
-		console.print()
-		console.print(Rule(style='bold red'))
-
-	if listen:
-		console.print(f'Starting netcat listener on port {port} ...', style='bold gold3')
-		cmd = f'nc -lvnp {port}'
-		Command.execute(cmd)
-
-
-@utils.command()
-@click.option('--directory', '-d', type=str, default=PAYLOADS_FOLDER, show_default=True, help='HTTP server directory')
-@click.option('--host', '-h', type=str, default=None, help='HTTP host')
-@click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
-@click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
-def serve(directory, host, port, interface):
-	"""Run HTTP server to serve payloads."""
-	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
-	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
-	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/V3/SUDO_KILLERv3.sh'
-	PAYLOADS = [
-		{
-			'fname': 'lse.sh',
-			'description': 'Linux Smart Enumeration',
-			'command': f'wget {LSE_URL} -O lse.sh && chmod 700 lse.sh'
-		},
-		{
-			'fname': 'linpeas.sh',
-			'description': 'Linux Privilege Escalation Awesome Script',
-			'command': f'wget {LINPEAS_URL} -O linpeas.sh && chmod 700 linpeas.sh'
-		},
-		{
-			'fname': 'sudo_killer.sh',
-			'description': 'SUDO_KILLER',
-			'command': f'wget {SUDOKILLER_URL} -O sudo_killer.sh && chmod 700 sudo_killer.sh'
-		}
-	]
-	for ix, payload in enumerate(PAYLOADS):
-		descr = payload.get('description', '')
-		fname = payload['fname']
-		if not os.path.exists(f'{directory}/{fname}'):
-			with console.status(f'[bold yellow][{ix}/{len(PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
-				cmd = payload['command']
-				console.print(f'[bold magenta]{fname} [dim]({descr})[/] ...[/]', )
-				Command.execute(cmd, cls_attributes={'shell': True}, cwd=directory)
-		console.print()
-
-	console.print(Rule())
-	console.print(f'Available payloads in {directory}: ', style='bold yellow')
-	for fname in os.listdir(directory):
-		if not host:
-			host = detect_host(interface)
-			if not host:
-				console.print(
-					f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.',
-					style='bold red')
-				return
-		payload = find_list_item(PAYLOADS, fname, key='fname', default={})
-		fdescr = payload.get('description', 'No description')
-		console.print(f'{fname} [dim]({fdescr})[/]', style='bold magenta')
-		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
-		console.print('')
-	console.print(Rule())
-	console.print(f'Started HTTP server on port {port}, waiting for incoming connections ...', style='bold yellow')
-	Command.execute(f'{sys.executable} -m http.server {port}', cwd=directory)
-
-
-@utils.command()
-@click.argument('record_name', type=str, default=None)
-@click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')
-@click.option('--interactive', '-i', is_flag=True, default=False, help='Interactive record.')
-@click.option('--width', '-w', type=int, default=None, help='Recording width')
-@click.option('--height', '-h', type=int, default=None, help='Recording height')
-@click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
-def record(record_name, script, interactive, width, height, output_dir):
-	"""Record secator session using asciinema."""
-	# 120 x 30 is a good ratio for GitHub
-	width = width or console.size.width
-	height = height or console.size.height
-	attrs = {
-		'shell': False,
-		'env': {
-			'RECORD': '1',
-			'LINES': str(height),
-			'PS1': '$ ',
-			'COLUMNS': str(width),
-			'TERM': 'xterm-256color'
-		}
-	}
-	output_cast_path = f'{output_dir}/{record_name}.cast'
-	output_gif_path = f'{output_dir}/{record_name}.gif'
-
-	# Run automated 'story' script with asciinema-automation
-	if script:
-		# If existing cast file, remove it
-		if os.path.exists(output_cast_path):
-			os.unlink(output_cast_path)
-			console.print(f'Removed existing {output_cast_path}', style='bold green')
-
-		with console.status('[bold gold3]Recording with asciinema ...[/]'):
-			Command.execute(
-				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
-				cls_attributes=attrs,
-				raw=True,
-			)
-			console.print(f'Generated {output_cast_path}', style='bold green')
-	elif interactive:
-		os.environ.update(attrs['env'])
-		Command.execute(f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}')
-
-	# Resize cast file
-	if os.path.exists(output_cast_path):
-		with console.status('[bold gold3]Cleaning up .cast and set custom settings ...'):
-			with open(output_cast_path, 'r') as f:
-				lines = f.readlines()
-			updated_lines = []
-			for ix, line in enumerate(lines):
-				tmp_line = json.loads(line)
-				if ix == 0:
-					tmp_line['width'] = width
-					tmp_line['height'] = height
-					tmp_line['env']['SHELL'] = '/bin/sh'
-					lines[0] = json.dumps(tmp_line) + '\n'
-					updated_lines.append(json.dumps(tmp_line) + '\n')
-				elif tmp_line[2].endswith(' \r'):
-					tmp_line[2] = tmp_line[2].replace(' \r', '')
-					updated_lines.append(json.dumps(tmp_line) + '\n')
-				else:
-					updated_lines.append(line)
-			with open(output_cast_path, 'w') as f:
-				f.writelines(updated_lines)
-			console.print('')
-
-		# Edit cast file to reduce long timeouts
-		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
-			Command.execute(
-				f'asciinema-edit quantize --range 1 {output_cast_path} --out {output_cast_path}.tmp',
-				cls_attributes=attrs,
-				raw=True,
-			)
-			if os.path.exists(f'{output_cast_path}.tmp'):
-				os.replace(f'{output_cast_path}.tmp', output_cast_path)
-			console.print(f'Edited {output_cast_path}', style='bold green')
-
-	# Convert to GIF
-	with console.status(f'[bold gold3]Converting to {output_gif_path} ...[/]'):
-		Command.execute(
-			f'agg {output_cast_path} {output_gif_path}',
-			cls_attributes=attrs,
-		)
-		console.print(f'Generated {output_gif_path}', style='bold green')
-
-
-@utils.group('build')
-def build():
-	"""Build secator."""
-	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
-		sys.exit(1)
-	pass
-
-
-@build.command('pypi')
-def build_pypi():
-	"""Build secator PyPI package."""
-	if not BUILD_ADDON_ENABLED:
-		console.print('[bold red]Missing build addon: please run `secator install addons build`')
-		sys.exit(1)
-	with console.status('[bold gold3]Building PyPI package...[/]'):
-		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
-		sys.exit(ret.return_code)
-
-
-@build.command('docker')
-@click.option('--tag', '-t', type=str, default=None, help='Specific tag')
-@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
-def build_docker(tag, latest):
-	"""Build secator Docker image."""
-	if not tag:
-		tag = VERSION if latest else 'dev'
-	cmd = f'docker build -t freelabz/secator:{tag}'
-	if latest:
-		cmd += ' -t freelabz/secator:latest'
-	cmd += ' .'
-	with console.status('[bold gold3]Building Docker image...[/]'):
-		ret = Command.execute(cmd, name='docker build', cwd=ROOT_FOLDER)
-		sys.exit(ret.return_code)
-
-
-@utils.group('publish')
-def publish():
-	"""Publish secator."""
-	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to publish builds.[/]')
-		sys.exit(1)
-	pass
-
-
-@publish.command('pypi')
-def publish_pypi():
-	"""Publish secator PyPI package."""
-	if not BUILD_ADDON_ENABLED:
-		console.print('[bold red]Missing build addon: please run `secator install addons build`')
-		sys.exit(1)
-	os.environ['HATCH_INDEX_USER'] = '__token__'
-	hatch_token = os.environ.get('HATCH_INDEX_AUTH')
-	if not hatch_token:
-		console.print('[bold red]Missing PyPI auth token (HATCH_INDEX_AUTH env variable).')
-		sys.exit(1)
-	with console.status('[bold gold3]Publishing PyPI package...[/]'):
-		ret = Command.execute(f'{sys.executable} -m hatch publish', name='hatch publish', cwd=ROOT_FOLDER)
-		sys.exit(ret.return_code)
-
-
-@publish.command('docker')
-@click.option('--tag', '-t', default=None, help='Specific tag')
-@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
-def publish_docker(tag, latest):
-	"""Publish secator Docker image."""
-	if not tag:
-		tag = VERSION if latest else 'dev'
-	cmd = f'docker push freelabz/secator:{tag}'
-	cmd2 = 'docker push freelabz/secator:latest'
-	with console.status(f'[bold gold3]Publishing Docker image {tag}...[/]'):
-		ret = Command.execute(cmd, name=f'docker push ({tag})', cwd=ROOT_FOLDER)
-		if latest:
-			ret2 = Command.execute(cmd2, name='docker push (latest)')
-			sys.exit(max(ret.return_code, ret2.return_code))
-		sys.exit(ret.return_code)
-
-
 #------#
 # TEST #
 #------#
@@ -929,7 +949,7 @@ def publish_docker(tag, latest):
 
 @cli.group(cls=OrderedGroup)
 def test():
-	"""Tests."""
+	"""[dim]Run tests."""
 	if not DEV_PACKAGE:
 		console.print('[bold red]You MUST use a development version of secator to run tests.[/]')
 		sys.exit(1)

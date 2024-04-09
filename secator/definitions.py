@@ -1,20 +1,37 @@
 #!/usr/bin/python
 
 import os
+import requests
 
 from dotenv import find_dotenv, load_dotenv
-from pkg_resources import get_distribution
+from pkg_resources import get_distribution, parse_version
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
+
+def get_latest_version():
+	"""Get latest secator version from GitHub API."""
+	try:
+		resp = requests.get('https://api.github.com/repos/freelabz/secator/releases/latest', timeout=2)
+		resp.raise_for_status()
+		latest_version = resp.json()['name'].lstrip('v')
+		return latest_version
+	except (requests.exceptions.RequestException):
+		return None
+
+
 # Globals
 VERSION = get_distribution('secator').version
+VERSION_LATEST = get_latest_version()
+VERSION_OBSOLETE = parse_version(VERSION_LATEST) > parse_version(VERSION) if VERSION_LATEST else False
+VERSION_STR = f'{VERSION} [bold red](outdated)[/]' if VERSION_OBSOLETE else VERSION
+
 ASCII = f"""
 			 __            
    ________  _________ _/ /_____  _____
   / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/
  (__  /  __/ /__/ /_/ / /_/ /_/ / /    
-/____/\___/\___/\__,_/\__/\____/_/     v{VERSION}
+/____/\___/\___/\__,_/\__/\____/_/     v{VERSION_STR}
 
 			freelabz.com
 """  # noqa: W605,W291
