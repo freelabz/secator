@@ -9,7 +9,7 @@ import io
 
 from secator.rich import console
 from secator.runners import Command
-from secator.definitions import GITHUB_TOKEN
+from secator.definitions import BIN_FOLDER, GITHUB_TOKEN
 
 
 class ToolInstaller:
@@ -104,8 +104,7 @@ class GithubInstaller:
 
 		# Download and unpack asset
 		console.print(f'Found release URL: {download_url}')
-		destination = os.path.join(os.path.expanduser("~"), ".local", "bin")
-		cls._download_and_unpack(download_url, destination, repo)
+		cls._download_and_unpack(download_url, BIN_FOLDER, repo)
 		return True
 
 	@classmethod
