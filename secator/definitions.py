@@ -205,7 +205,7 @@ except ModuleNotFoundError:
 	TRACE_ADDON_ENABLED = 0
 
 # Check dev package
-if not os.path.exists(TESTS_FOLDER):
-	DEV_PACKAGE = 0
-else:
+if os.path.exists(f'{ROOT_FOLDER}/pyproject.toml'):
 	DEV_PACKAGE = 1
+else:
+	DEV_PACKAGE = 0

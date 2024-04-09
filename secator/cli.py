@@ -840,15 +840,15 @@ def record(record_name, script, interactive, width, height, output_dir):
 @utils.group('build')
 def build():
 	"""Build secator."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
+		sys.exit(1)
 	pass
 
 
 @build.command('pypi')
 def build_pypi():
 	"""Build secator PyPI package."""
-	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
-		sys.exit(1)
 	if not BUILD_ADDON_ENABLED:
 		console.print('[bold red]Missing build addon: please run `secator install addons build`')
 		sys.exit(1)
@@ -858,27 +858,33 @@ def build_pypi():
 
 
 @build.command('docker')
-@click.option('--dev', '-dev', is_flag=True, default=False, help='Build dev version')
-def build_docker(dev):
+@click.option('--tag', '-t', type=str, default=None, help='Specific tag')
+@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
+def build_docker(tag, latest):
 	"""Build secator Docker image."""
-	version = 'dev' if dev else VERSION
+	if not tag:
+		tag = VERSION if latest else 'dev'
+	cmd = f'docker build -t freelabz/secator:{tag}'
+	if latest:
+		cmd += ' -t freelabz/secator:latest'
+	cmd += ' .'
 	with console.status('[bold gold3]Building Docker image...[/]'):
-		ret = Command.execute(f'docker build -t freelabz/secator:{version} .', name='docker build', cwd=ROOT_FOLDER)
+		ret = Command.execute(cmd, name='docker build', cwd=ROOT_FOLDER)
 		sys.exit(ret.return_code)
 
 
 @utils.group('publish')
 def publish():
 	"""Publish secator."""
+	if not DEV_PACKAGE:
+		console.print('[bold red]You MUST use a development version of secator to publish builds.[/]')
+		sys.exit(1)
 	pass
 
 
 @publish.command('pypi')
 def publish_pypi():
 	"""Publish secator PyPI package."""
-	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
-		sys.exit(1)
 	if not BUILD_ADDON_ENABLED:
 		console.print('[bold red]Missing build addon: please run `secator install addons build`')
 		sys.exit(1)
@@ -893,12 +899,19 @@ def publish_pypi():
 
 
 @publish.command('docker')
-@click.option('--dev', '-dev', is_flag=True, default=False, help='Build dev version')
-def publish_docker(dev):
+@click.option('--tag', '-t', default=None, help='Specific tag')
+@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
+def publish_docker(tag, latest):
 	"""Publish secator Docker image."""
-	version = 'dev' if dev else VERSION
-	with console.status('[bold gold3]Publishing PyPI package...[/]'):
-		ret = Command.execute(f'docker push freelabz/secator:{version}', name='docker push', cwd=ROOT_FOLDER)
+	if not tag:
+		tag = VERSION if latest else 'dev'
+	cmd = f'docker push freelabz/secator:{tag}'
+	cmd2 = f'docker push freelabz/secator:latest'
+	with console.status(f'[bold gold3]Publishing Docker image {tag}...[/]'):
+		ret = Command.execute(cmd, name=f'docker push ({tag})', cwd=ROOT_FOLDER)
+		if latest:
+			ret2 = Command.execute(cmd2, name=f'docker push (latest)')
+			sys.exit(max(ret.return_code, ret2.return_code))
 		sys.exit(ret.return_code)
 
 
