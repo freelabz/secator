@@ -60,9 +60,9 @@ jobs:
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - name: Build Docker image
-      run: secator u build docker
+      run: secator u build docker --latest
 
     - name: Publish Docker image
-      run: secator u publish docker
+      run: secator u publish docker --latest
 
 
