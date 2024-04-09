@@ -213,7 +213,7 @@ def which(command):
 	return Command.execute(f'which {command}', quiet=True, print_errors=False)
 
 
-def version(cls):
+def get_version_cls(cls):
 	"""Get version for a Command.
 
 	Args:
@@ -270,43 +270,49 @@ def health(json, debug):
 		console.print(s, highlight=False)
 
 	# Check secator
-	console.print(':wrench: [bold gold3]Checking secator ...[/]')
+	if not json:
+		console.print(':wrench: [bold gold3]Checking secator ...[/]')
 	ret = which('secator')
 	if not json:
 		print_status('secator', ret.return_code, VERSION, ret.output, None)
-	status['secator'] = {'installed': ret.return_code == 0}
+	status['secator'] = {'installed': ret.return_code == 0, 'version': VERSION}
 
 	# Check languages
-	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
+	if not json:
+		console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
 	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
 	for lang, version_flag in version_cmds.items():
 		ret = which(lang)
-		ret2 = get_version(f'{lang} {version_flag}')
+		version = get_version(f'{lang} {version_flag}')
 		if not json:
-			print_status(lang, ret.return_code, ret2, ret.output, 'langs')
-		status['languages'][lang] = {'installed': ret.return_code == 0}
+			print_status(lang, ret.return_code, version, ret.output, 'langs')
+		status['languages'][lang] = {'installed': ret.return_code == 0, 'version': version}
 
 	# Check tools
-	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
+	if not json:
+		console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
 	for tool in tools:
 		cmd = tool.cmd.split(' ')[0]
 		ret = which(cmd)
-		ret2 = version(tool)
+		version = get_version_cls(tool)
 		if not json:
-			print_status(tool.__name__, ret.return_code, ret2, ret.output, 'tools')
-		status['tools'][tool.__name__] = {'installed': ret.return_code == 0}
+			print_status(tool.__name__, ret.return_code, version, ret.output, 'tools')
+		status['tools'][tool.__name__] = {'installed': ret.return_code == 0, 'version': version}
 
 	# Check addons
-	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	if not json:
+		console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
 	for addon in ['google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
 		addon_var = globals()[f'{addon.upper()}_ADDON_ENABLED']
 		ret = 0 if addon_var == 1 else 1
 		bin = None if addon_var == 0 else ' '
-		print_status(addon, ret, 'N/A', bin, 'addons')
+		if not json:
+			print_status(addon, ret, 'N/A', bin, 'addons')
 
 	# Print JSON health
 	if json:
-		console.print(status)
+		import json as _json
+		print(_json.dumps(status))
 
 #---------#
 # INSTALL #
