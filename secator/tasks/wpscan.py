@@ -67,7 +67,6 @@ class wpscan(VulnHttp):
 	}
 	output_types = [Vulnerability, Tag]
 	install_cmd = 'sudo apt install build-essential && sudo gem install wpscan'
-	install_github_handle = 'wpscanteam/wpscan'
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False

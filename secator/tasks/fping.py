@@ -30,7 +30,6 @@ class fping(ReconIp):
 	input_type = IP
 	output_types = [Ip]
 	install_cmd = 'sudo apt install -y fping'
-	install_github_handle = 'schweikert/fping'
 
 	@staticmethod
 	def item_loader(self, line):

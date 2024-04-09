@@ -2,6 +2,7 @@
 import requests
 import os
 import platform
+import shutil
 import tarfile
 import zipfile
 import io
@@ -104,7 +105,7 @@ class GithubInstaller:
 		# Download and unpack asset
 		console.print(f'Found release URL: {download_url}')
 		destination = os.path.join(os.path.expanduser("~"), ".local", "bin")
-		cls._download_and_unpack(download_url, destination)
+		cls._download_and_unpack(download_url, destination, repo)
 		return True
 
 	@classmethod
@@ -156,21 +157,37 @@ class GithubInstaller:
 			return potential_matches[0]
 
 	@classmethod
-	def _download_and_unpack(cls, url, destination):
+	def _download_and_unpack(cls, url, destination, repo_name):
 		"""Download and unpack a release asset."""
 		console.print(f'Downloading and unpacking to {destination}...')
 		response = requests.get(url)
 		response.raise_for_status()
 
+		# Create a temporary directory to extract the archive
+		temp_dir = os.path.join("/tmp", repo_name)
+		os.makedirs(temp_dir, exist_ok=True)
+
 		if url.endswith('.zip'):
 			with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
-				zip_ref.extractall(destination)
+				zip_ref.extractall(temp_dir)
 		elif url.endswith('.tar.gz'):
 			with tarfile.open(fileobj=io.BytesIO(response.content), mode='r:gz') as tar:
-				tar.extractall(path=destination)
+				tar.extractall(path=temp_dir)
+
+		# For archives, find and move the binary that matches the repo name
+		binary_path = cls._find_binary_in_directory(temp_dir, repo_name)
+		if binary_path:
+			os.chmod(binary_path, 0o755)  # Make it executable
+			shutil.move(binary_path, os.path.join(destination, repo_name))  # Move the binary
 		else:
-			# For single binary releases, just write the content to a file
-			# This assumes the asset URL points directly to the binary file
-			binary_path = os.path.join(destination, os.path.basename(url))
-			with open(binary_path, 'wb') as file:
-				file.write(response.content)
+			console.print('[bold red]Binary matching the repository name was not found in the archive.[/]')
+
+	@classmethod
+	def _find_binary_in_directory(cls, directory, binary_name):
+		"""Search for the binary in the given directory that matches the repository name."""
+		for root, _, files in os.walk(directory):
+			for file in files:
+				# Match the file name exactly with the repository name
+				if file == binary_name:
+					return os.path.join(root, file)
+		return None

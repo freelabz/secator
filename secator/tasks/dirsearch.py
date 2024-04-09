@@ -53,7 +53,6 @@ class dirsearch(HttpFuzzer):
 		}
 	}
 	install_cmd = 'pipx install dirsearch'
-	install_github_handle = 'maurosoria/dirsearch'
 	proxychains = True
 	proxy_socks5 = True
 	proxy_http = True
