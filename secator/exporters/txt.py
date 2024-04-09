@@ -11,7 +11,7 @@ class TxtExporter(Exporter):
             items = [str(i) for i in items]
             if not items:
                 continue
-            txt_path = f'{self.report.output_folder}/report.txt'
+            txt_path = f'{self.report.output_folder}/report_{output_type}.txt'
             with open(txt_path, 'w') as f:
                 f.write('\n'.join(items))
             txt_paths.append(txt_path)
