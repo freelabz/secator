@@ -53,6 +53,7 @@ class dalfox(VulnHttp):
 		}
 	}
 	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
+	install_github_handle = 'hahwul/dalfox'
 	encoding = 'ansi'
 	proxychains = False
 	proxychains_flavor = 'proxychains4'

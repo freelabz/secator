@@ -24,6 +24,7 @@ ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 LIB_FOLDER = ROOT_FOLDER + '/secator'
 CONFIGS_FOLDER = LIB_FOLDER + '/configs'
 EXTRA_CONFIGS_FOLDER = os.environ.get('SECATOR_EXTRA_CONFIGS_FOLDER')
+BIN_FOLDER = os.environ.get('SECATOR_BIN_FOLDER', f'{os.path.expanduser("~")}/.local/bin')
 DATA_FOLDER = os.environ.get('SECATOR_DATA_FOLDER', f'{os.path.expanduser("~")}/.secator')
 REPORTS_FOLDER = os.environ.get('SECATOR_REPORTS_FOLDER', f'{DATA_FOLDER}/reports')
 WORDLISTS_FOLDER = os.environ.get('SECATOR_WORDLISTS_FOLDER', f'{DATA_FOLDER}/wordlists')
@@ -32,6 +33,7 @@ CVES_FOLDER = f'{DATA_FOLDER}/cves'
 PAYLOADS_FOLDER = f'{DATA_FOLDER}/payloads'
 REVSHELLS_FOLDER = f'{DATA_FOLDER}/revshells'
 TESTS_FOLDER = f'{ROOT_FOLDER}/tests'
+os.makedirs(BIN_FOLDER, exist_ok=True)
 os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 os.makedirs(WORDLISTS_FOLDER, exist_ok=True)
@@ -58,6 +60,7 @@ CELERY_BROKER_VISIBILITY_TIMEOUT = int(os.environ.get('CELERY_BROKER_VISIBILITY_
 CELERY_OVERRIDE_DEFAULT_LOGGING = bool(int(os.environ.get('CELERY_OVERRIDE_DEFAULT_LOGGING', 1)))
 GOOGLE_DRIVE_PARENT_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_PARENT_FOLDER_ID')
 GOOGLE_CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH')
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 
 # Defaults HTTP and Proxy settings
 DEFAULT_SOCKS5_PROXY = os.environ.get('SOCKS5_PROXY', "socks5://127.0.0.1:9050")

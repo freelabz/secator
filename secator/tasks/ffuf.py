@@ -71,6 +71,7 @@ class ffuf(HttpFuzzer):
 	}
 	encoding = 'ansi'
 	install_cmd = f'go install -v github.com/ffuf/ffuf@latest && sudo git clone https://github.com/danielmiessler/SecLists {WORDLISTS_FOLDER}/seclists || true'  # noqa: E501
+	install_github_handle = 'ffuf/ffuf'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True

@@ -82,6 +82,8 @@ jobs:
         secator install langs go
         secator install langs ruby
         secator install tools
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
     - name: Run integration tests (${{ matrix.test_type }})
       run: |
