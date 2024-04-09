@@ -42,6 +42,7 @@ class maigret(ReconUser):
 		}
 	}
 	install_cmd = 'pipx install git+https://github.com/soxoj/maigret@6be2f409e58056b1ca8571a8151e53bef107dedc'
+	install_github_handle = 'soxoj/maigret'
 	socks5_proxy = True
 	profile = 'io'
 

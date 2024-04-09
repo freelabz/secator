@@ -71,6 +71,7 @@ class katana(HttpCrawler):
 	}
 	item_loaders = []
 	install_cmd = 'sudo apt install build-essential && go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
+	install_github_handle = 'projectdiscovery/katana'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True

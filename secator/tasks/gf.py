@@ -22,6 +22,7 @@ class gf(Tagger):
 		'go install -v github.com/tomnomnom/gf@latest && '
 		'git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true'
 	)
+	install_github_handle = 'tomnomnom/gf'
 	output_types = [Tag]
 
 	@staticmethod

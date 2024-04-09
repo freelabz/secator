@@ -28,6 +28,7 @@ class h8mail(OSInt):
 	}
 
 	install_cmd = 'pipx install h8mail'
+	install_github_handle = 'khast3x/h8mail'
 
 	@staticmethod
 	def on_start(self):

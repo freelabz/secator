@@ -18,6 +18,7 @@ from secator.definitions import (ASCII, CVES_FOLDER, DATA_FOLDER,  # noqa: F401
 								 OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
 								 REDIS_ADDON_ENABLED, REVSHELLS_FOLDER, ROOT_FOLDER,
 								 TRACE_ADDON_ENABLED, VERSION, WORKER_ADDON_ENABLED)
+from secator.installer import ToolInstaller
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -476,7 +477,7 @@ def install_tools(cmds):
 
 	for ix, cls in enumerate(tools):
 		with console.status(f'[bold yellow][{ix}/{len(tools)}] Installing {cls.__name__} ...'):
-			cls.install()
+			ToolInstaller.install(cls)
 		console.print()
 
 

@@ -56,6 +56,7 @@ class nmap(VulnMulti):
 		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
+	install_github_handle = 'nmap/nmap'
 	proxychains = True
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = False

@@ -60,6 +60,7 @@ class httpx(Http):
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
+	install_github_handle = 'projectdiscovery/httpx'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True

@@ -16,7 +16,6 @@ from secator.definitions import (DEFAULT_HTTP_PROXY,
 							   DEFAULT_PROXYCHAINS_COMMAND,
 							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, DEFAULT_INPUT_CHUNK_SIZE)
-from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
 from secator.utils import debug
@@ -81,8 +80,9 @@ class Command(Runner):
 	# Flag to show version
 	version_flag = None
 
-	# Install command
+	# Install
 	install_cmd = None
+	install_github_handle = None
 
 	# Serializer
 	item_loader = None
@@ -251,20 +251,6 @@ class Command(Runner):
 	#---------------#
 	# Class methods #
 	#---------------#
-
-	@classmethod
-	def install(cls):
-		"""Install command by running the content of cls.install_cmd."""
-		console.print(f':heavy_check_mark: Installing {cls.__name__}...', style='bold yellow')
-		if not cls.install_cmd:
-			console.print(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
-			return
-		ret = cls.execute(cls.install_cmd, name=cls.__name__, cls_attributes={'shell': True})
-		if ret.return_code != 0:
-			console.print(f':exclamation_mark: Failed to install {cls.__name__}.', style='bold red')
-		else:
-			console.print(f':tada: {cls.__name__} installed successfully !', style='bold green')
-		return ret
 
 	@classmethod
 	def execute(cls, cmd, name=None, cls_attributes={}, **kwargs):
