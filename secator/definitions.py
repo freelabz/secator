@@ -99,8 +99,10 @@ DEFAULT_PROGRESS_UPDATE_FREQUENCY = int(os.environ.get('DEFAULT_PROGRESS_UPDATE_
 DEFAULT_SKIP_CVE_SEARCH = bool(int(os.environ.get('DEFAULT_SKIP_CVE_SEARCH', 0)))
 
 # Default wordlists
-DEFAULT_HTTP_WORDLIST = os.environ.get('DEFAULT_HTTP_WORDLIST', f'{WORDLISTS_FOLDER}/Fuzzing/fuzz-Bo0oM.txt')
-DEFAULT_DNS_WORDLIST = os.environ.get('DEFAULT_DNS_WORDLIST', f'{WORDLISTS_FOLDER}/Discovery/DNS/combined_subdomains.txt')  # noqa:E501
+DEFAULT_HTTP_WORDLIST = os.environ.get('DEFAULT_HTTP_WORDLIST', f'{WORDLISTS_FOLDER}/fuzz-Bo0oM.txt')
+DEFAULT_HTTP_WORDLIST_URL = 'https://raw.githubusercontent.com/Bo0oM/fuzz.txt/master/fuzz.txt'
+DEFAULT_DNS_WORDLIST = os.environ.get('DEFAULT_DNS_WORDLIST', f'{WORDLISTS_FOLDER}/combined_subdomains.txt')
+DEFAULT_DNS_WORDLIST_URL = 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt'  # noqa: E501
 
 # Constants
 OPT_NOT_SUPPORTED = -1

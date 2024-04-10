@@ -162,7 +162,7 @@ class Runner:
 			instance_func = getattr(self, key, None)
 			if instance_func:
 				name = f'{self.__class__.__name__}.{key}'
-				fun = f'{instance_func.__module__}.{instance_func.__name__}'
+				fun = self.get_func_path(instance_func)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks', level=3)
 				self.hooks[key].append(instance_func)
 
@@ -171,7 +171,7 @@ class Runner:
 			user_hooks.extend(hooks.get(key, []))
 			for hook in user_hooks:
 				name = f'{self.__class__.__name__}.{key}'
-				fun = f'{hook.__module__}.{hook.__name__}'
+				fun = self.get_func_path(hook)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks', level=3)
 			self.hooks[key].extend(user_hooks)
 
@@ -871,3 +871,8 @@ class Runner:
 		elif isinstance(item, OutputType):
 			item = repr(item)
 		return item
+
+	@classmethod
+	def get_func_path(cls, fun):
+		"""Print symbolic path of class method."""
+		return f'{fun.__module__}.{fun.__class__.__name__}.{fun.__name__}'
