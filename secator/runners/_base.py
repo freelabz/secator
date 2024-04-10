@@ -171,7 +171,7 @@ class Runner:
 			user_hooks.extend(hooks.get(key, []))
 			for hook in user_hooks:
 				name = f'{self.__class__.__name__}.{key}'
-				fun = f'{hook.__module__}.{hook.__name__}'
+				fun = self.get_func_path(hook)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks', level=3)
 			self.hooks[key].extend(user_hooks)
 
