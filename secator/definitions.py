@@ -6,6 +6,8 @@ import requests
 from dotenv import find_dotenv, load_dotenv
 from pkg_resources import get_distribution, parse_version
 
+from secator.rich import console
+
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 
@@ -16,7 +18,8 @@ def get_latest_version():
 		resp.raise_for_status()
 		latest_version = resp.json()['name'].lstrip('v')
 		return latest_version
-	except (requests.exceptions.RequestException):
+	except requests.exceptions.RequestException as e:
+		console.print(f'[bold red]Failed to get latest version from GitHub: {type(e).__name__}.')
 		return None
 
 
@@ -50,20 +53,10 @@ CVES_FOLDER = f'{DATA_FOLDER}/cves'
 PAYLOADS_FOLDER = f'{DATA_FOLDER}/payloads'
 REVSHELLS_FOLDER = f'{DATA_FOLDER}/revshells'
 TESTS_FOLDER = f'{ROOT_FOLDER}/tests'
-os.makedirs(BIN_FOLDER, exist_ok=True)
-os.makedirs(DATA_FOLDER, exist_ok=True)
-os.makedirs(REPORTS_FOLDER, exist_ok=True)
-os.makedirs(WORDLISTS_FOLDER, exist_ok=True)
-os.makedirs(SCRIPTS_FOLDER, exist_ok=True)
-os.makedirs(CVES_FOLDER, exist_ok=True)
-os.makedirs(PAYLOADS_FOLDER, exist_ok=True)
-os.makedirs(REVSHELLS_FOLDER, exist_ok=True)
 
 # Celery local fs folders
 CELERY_DATA_FOLDER = f'{DATA_FOLDER}/celery/data'
 CELERY_RESULTS_FOLDER = f'{DATA_FOLDER}/celery/results'
-os.makedirs(CELERY_DATA_FOLDER, exist_ok=True)
-os.makedirs(CELERY_RESULTS_FOLDER, exist_ok=True)
 
 # Environment variables
 DEBUG = int(os.environ.get('DEBUG', '0'))
@@ -176,6 +169,30 @@ TAGS = 'tags'
 WEBSERVER = 'webserver'
 WORDLIST = 'wordlist'
 WORDS = 'words'
+
+
+# Create all folders
+for folder in [BIN_FOLDER, DATA_FOLDER, REPORTS_FOLDER, WORDLISTS_FOLDER, SCRIPTS_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER,
+			   REVSHELLS_FOLDER, CELERY_DATA_FOLDER, CELERY_RESULTS_FOLDER]:
+	if not os.path.exists(folder):
+		os.makedirs(folder)
+		console.print(f'[bold turquoise4]Created folder[/] {folder}.')
+
+
+# Download default wordlists
+for wordlist in ['HTTP', 'DNS']:
+	wordlist_path = globals()[f'DEFAULT_{wordlist}_WORDLIST']
+	wordlist_url = globals()[f'DEFAULT_{wordlist}_WORDLIST_URL']
+	if not os.path.exists(wordlist_path):
+		try:
+			resp = requests.get(wordlist_url)
+			with open(wordlist_path, 'w') as f:
+				f.write(resp.text)
+				console.print(f'[bold turquoise4]Downloaded default {wordlist} wordlist[/] {wordlist_path}.')
+		except requests.exceptions.RequestException as e:
+			console.print(f'[bold red]Failed to download default {wordlist} wordlist: {type(e).__name__}.')
+			pass
+
 
 # Check worker addon
 try:

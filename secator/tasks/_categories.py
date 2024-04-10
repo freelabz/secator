@@ -6,8 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DEFAULT_DNS_WORDLIST,
-								 DEFAULT_DNS_WORDLIST_URL, DEFAULT_HTTP_WORDLIST, DEFAULT_HTTP_WORDLIST_URL,
+from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DEFAULT_HTTP_WORDLIST,
 								 DEFAULT_SKIP_CVE_SEARCH, DELAY, DEPTH, DESCRIPTION, FILTER_CODES, FILTER_REGEX,
 								 FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, MATCH_CODES, MATCH_REGEX,
 								 MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
@@ -82,11 +81,6 @@ class HttpFuzzer(Command):
 	input_type = URL
 	output_types = [Url]
 
-	@staticmethod
-	def before_init(self):
-		if not os.path.exists(DEFAULT_HTTP_WORDLIST):
-			self.execute(f'wget -O {DEFAULT_HTTP_WORDLIST} {DEFAULT_HTTP_WORDLIST_URL}', quiet=True)
-
 
 #----------------#
 # Recon category #
@@ -100,11 +94,6 @@ class Recon(Command):
 class ReconDns(Recon):
 	input_type = HOST
 	output_types = [Subdomain]
-
-	@staticmethod
-	def before_init(self):
-		if not os.path.exists(DEFAULT_DNS_WORDLIST):
-			self.execute(f'wget -O {DEFAULT_DNS_WORDLIST} {DEFAULT_DNS_WORDLIST_URL}', quiet=True)  # noqa: E501
 
 
 class ReconUser(Recon):
