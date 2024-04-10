@@ -159,12 +159,12 @@ class Runner:
 		for key in self.hooks:
 
 			# Register class specific hooks
-			instance_func = getattr(self, key, None)
-			if instance_func:
+			class_hook = getattr(self, key, None)
+			if class_hook:
 				name = f'{self.__class__.__name__}.{key}'
-				fun = self.get_func_path(instance_func)
+				fun = self.get_func_path(class_hook)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks', level=3)
-				self.hooks[key].append(instance_func)
+				self.hooks[key].append(class_hook)
 
 			# Register user hooks
 			user_hooks = hooks.get(self.__class__, {}).get(key, [])
@@ -356,7 +356,7 @@ class Runner:
 			return result
 		for hook in self.hooks[hook_type]:
 			name = f'{self.__class__.__name__}.{hook_type}'
-			fun = f'{hook.__module__}.{hook.__name__}'
+			fun = self.get_func_path(hook)
 			try:
 				_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
@@ -873,6 +873,29 @@ class Runner:
 		return item
 
 	@classmethod
-	def get_func_path(cls, fun):
-		"""Print symbolic path of class method."""
-		return f'{fun.__module__}.{fun.__class__.__name__}.{fun.__name__}'
+	def get_func_path(cls, func):
+		"""
+		Get the full symbolic path of a function or method, including staticmethods,
+		using function and method attributes.
+
+		Args:
+			func (function, method, or staticmethod): A function or method object.
+		"""
+		if hasattr(func, '__self__'):
+			if func.__self__ is not None:
+				# It's a method bound to an instance
+				class_name = func.__self__.__class__.__name__
+				return f"{func.__module__}.{class_name}.{func.__name__}"
+			else:
+				# It's a method bound to a class (class method)
+				class_name = func.__qualname__.rsplit('.', 1)[0]
+				return f"{func.__module__}.{class_name}.{func.__name__}"
+		else:
+			# Handle static and regular functions
+			if '.' in func.__qualname__:
+				# Static method or a function defined inside a class
+				class_name, func_name = func.__qualname__.rsplit('.', 1)
+				return f"{func.__module__}.{class_name}.{func_name}"
+			else:
+				# Regular function not attached to a class
+				return f"{func.__module__}.{func.__name__}"
