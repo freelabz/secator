@@ -3,7 +3,6 @@ import logging
 import os
 import re
 import shlex
-import signal
 import subprocess
 import sys
 
@@ -355,7 +354,7 @@ class Command(Runner):
 		try:
 			env = os.environ
 			env.update(self.env)
-			self.process = subprocess.Popen(
+			process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
 				stdout=sys.stdout if self.no_capture else subprocess.PIPE,
@@ -364,22 +363,34 @@ class Command(Runner):
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
-			for sig in [signal.SIGINT, signal.SIGTERM]:
-				signal.signal(sig, self.exit_gracefully)
-				signal.siginterrupt(sig, False)
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
-				self.process.stdin.write(f"{sudo_password}\n")
-				self.process.stdin.flush()
+				process.stdin.write(f"{sudo_password}\n")
+				process.stdin.flush()
 
+		except FileNotFoundError as e:
+			if self.config.name in str(e):
+				error = 'Executable not found.'
+				if self.install_cmd:
+					error += f' Install it with `secator install tools {self.config.name}`.'
+			else:
+				error = str(e)
+			celery_id = self.context.get('celery_id', '')
+			if celery_id:
+				error += f' [{celery_id}]'
+			self.errors.append(error)
+			self.return_code = 1
+			return
+
+		try:
 			# No capture mode, wait for command to finish and return
 			if self.no_capture:
-				self._wait_for_end(self.process)
+				self._wait_for_end(process)
 				return
 
 			# Process the output in real-time
-			for line in iter(lambda: self.process.stdout.readline(), b''):
+			for line in iter(lambda: process.stdout.readline(), b''):
 				sleep(0)  # for async to give up control
 				if not line:
 					break
@@ -418,32 +429,12 @@ class Command(Runner):
 				if items:
 					yield from items
 
-		except FileNotFoundError as e:
-			if self.config.name in str(e):
-				error = 'Executable not found.'
-				if self.install_cmd:
-					error += f' Install it with `secator install tools {self.config.name}`.'
-			else:
-				error = str(e)
-			celery_id = self.context.get('celery_id', '')
-			if celery_id:
-				error += f' [{celery_id}]'
-			self.errors.append(error)
-			self.return_code = 1
-			return
+		except KeyboardInterrupt:
+			process.kill()
+			self.killed = True
 
 		# Retrieve the return code and output
-		self._wait_for_end()
-
-	def exit_gracefully(self, signum, frame):
-		import signal
-		signal_name = signal.Signals(signum).name
-		self._print(f'[bold red]Caught {signal_name}: killing process.')
-		self.process.kill()
-		# import os
-		# self.process.stdout.close()
-		# os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-		self.killed = True
+		self._wait_for_end(process)
 
 	def run_item_loaders(self, line):
 		"""Run item loaders on a string."""
@@ -502,16 +493,16 @@ class Command(Runner):
 		self._print("Sudo password verification failed after 3 attempts.")
 		return None
 
-	def _wait_for_end(self):
+	def _wait_for_end(self, process):
 		"""Wait for process to finish and process output and return code."""
-		self.process.wait()
-		self.return_code = self.process.returncode
+		process.wait()
+		self.return_code = process.returncode
 
 		if self.no_capture:
 			self.output = ''
 		else:
 			self.output = self.output.strip()
-			self.process.stdout.close()
+			process.stdout.close()
 
 		if self.ignore_return_code:
 			self.return_code = 0
