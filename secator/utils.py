@@ -12,14 +12,16 @@ from datetime import datetime
 from importlib import import_module
 from inspect import isclass
 from pathlib import Path
+from pkg_resources import parse_version
 from pkgutil import iter_modules
 from urllib.parse import urlparse, quote
+
 
 import ifaddr
 import yaml
 from rich.markdown import Markdown
 
-from secator.definitions import DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT
+from secator.definitions import DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT, VERSION, DEV_PACKAGE, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -402,3 +404,30 @@ def escape_mongodb_url(url):
 		user, password = quote(user), quote(password)
 		return f'mongodb://{user}:{password}@{url}'
 	return url
+
+
+def get_latest_version():
+	"""Get latest secator version from GitHub API.
+
+	Returns:
+		tuple(str, bool): Latest version (str), current version obsolete (boolean).
+	"""
+	from secator.installer import GithubInstaller
+	latest_version = GithubInstaller.get_latest_version('freelabz/secator')
+	if not latest_version:
+		return None, False
+	obsolete = parse_version(VERSION) < parse_version(latest_version)
+	return latest_version, obsolete
+
+
+def print_version():
+	"""Print version information."""
+	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False)
+	latest_version, obsolete = get_latest_version()
+	console.print(f'[bold gold3]Latest version[/]: {latest_version}', highlight=False)
+	console.print(f'[bold gold3]Python binary[/]: {sys.executable}')
+	if DEV_PACKAGE:
+		console.print(f'[bold gold3]Root folder[/]: {ROOT_FOLDER}')
+	console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
+	if obsolete:
+		console.print(f'[bold red]secator is outdated, run "secator update" to install the latest version.')

@@ -58,7 +58,7 @@ class Workflow(Runner):
 			results = workflow.apply().get()
 		else:
 			result = workflow()
-			self.result = result
+			self.celery_result = result
 			results = self.process_live_tasks(result, results_only=True, print_remote_status=self.print_remote_status)
 
 		# Get workflow results
