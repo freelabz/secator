@@ -19,12 +19,18 @@ class searchsploit(Command):
 	output_types = [Exploit]
 	output_map = {
 		Exploit: {
-			NAME: lambda x: '-'.join(x['Title'].split('-')[1:]).strip(),
-			PROVIDER: lambda x: 'EDB',
+			NAME: 'Title',
 			ID: 'EDB-ID',
+			PROVIDER: lambda x: 'EDB',
 			CVES: lambda x: [c for c in x['Codes'].split(';') if c.startswith('CVE-')],
 			REFERENCE: lambda x: f'https://exploit-db.com/exploits/{x["EDB-ID"]}',
-			EXTRA_DATA: lambda x: {'verified': x['Verified']}
+			TAGS: lambda x: [
+				'_'.join(tag.lower().replace('-', '_').replace('(', '').replace(')', '').split(' '))
+				for tag in x['Tags'].split(',')
+			],
+			EXTRA_DATA: lambda x: {
+				k.lower(): v for k, v in x.items() if k not in ['Title', 'EDB-ID', 'Codes', 'Tags', 'Source'] and v != ''
+			}
 		}
 	}
 	install_cmd = 'sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb || true && sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit'  # noqa: E501
@@ -50,5 +56,4 @@ class searchsploit(Command):
 	def on_item_pre_convert(self, item):
 		if self.matched_at:
 			item[MATCHED_AT] = self.matched_at
-		item[TAGS] = [self.input.replace('\'', '')]
 		return item
