@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 
@@ -363,7 +364,6 @@ class Command(Runner):
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
-			import signal
 			for sig in [signal.SIGINT, signal.SIGTERM]:
 				signal.signal(sig, self.exit_gracefully)
 				signal.siginterrupt(sig, False)
@@ -438,8 +438,11 @@ class Command(Runner):
 	def exit_gracefully(self, signum, frame):
 		import signal
 		signal_name = signal.Signals(signum).name
-		self._print(f'[bold red]Caught signal {signal_name}. Killing process.')
+		self._print(f'[bold red]Caught {signal_name}: killing process.')
 		self.process.kill()
+		# import os
+		# self.process.stdout.close()
+		# os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
 		self.killed = True
 
 	def run_item_loaders(self, line):
