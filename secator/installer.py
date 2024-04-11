@@ -321,7 +321,7 @@ def fmt_health_table_row(version_info, category=None):
 		_version = '[bold green]ok        [/]'
 	elif status:
 		if not version and installed:
-			_version = f'[bold green]ok        [/]'
+			_version = '[bold green]ok        [/]'
 		_version += f' [dim]({status}[/])'
 
 	row = (name_str, _version)
