@@ -262,6 +262,26 @@ secator install addons trace
 
 </details>
 
+<details>
+	<summary>build</summary>
+
+Add `hatch` for building and publishing the PyPI package.
+
+```sh
+secator install addons build
+```
+
+</details>
+
+
+### Install CVEs
+
+`secator` makes remote API calls to https://cve.circl.lu/ to get in-depth information about the CVEs it encounters.
+We provide a subcommand to download all known CVEs locally so that future lookups are made from disk instead:
+```sh
+secator install cves
+```
+
 ### Checking installation health
 
 To figure out which languages or tools are installed on your system (along with their version):

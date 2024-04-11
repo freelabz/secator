@@ -1,6 +1,6 @@
 name: Install secator
 description: Installs secator
-inputs: 
+inputs:
   python-version:
     required: true
 runs:

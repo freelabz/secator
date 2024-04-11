@@ -135,7 +135,7 @@ class msfconsole(VulnMulti):
 #         self.client = MsfRpcClient(pw, ssl=True, **run_opts)
 #
 #     # def start_msgrpc(self):
-#     #     code, out = run_command(f'msfrpcd -P {self.password}')
+#     #     code, out = Command.execute(f'msfrpcd -P {self.password}')
 #     #     logger.info(out)
 #
 #     def get_lhost(self):

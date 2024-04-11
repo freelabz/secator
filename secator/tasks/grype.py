@@ -30,6 +30,7 @@ class grype(VulnCode):
 	install_cmd = (
 		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
 	)
+	install_github_handle = 'anchore/grype'
 
 	@staticmethod
 	def item_loader(self, line):

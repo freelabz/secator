@@ -25,6 +25,7 @@ class dnsx(ReconDns):
 	}
 
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
+	install_github_handle = 'projectdiscovery/dnsx'
 	profile = 'io'
 
 	@staticmethod

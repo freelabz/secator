@@ -106,7 +106,7 @@ class Runner:
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
-		self.result = None
+		self.celery_result = None
 
 		# Determine report folder
 		default_reports_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
@@ -159,19 +159,19 @@ class Runner:
 		for key in self.hooks:
 
 			# Register class specific hooks
-			instance_func = getattr(self, key, None)
-			if instance_func:
+			class_hook = getattr(self, key, None)
+			if class_hook:
 				name = f'{self.__class__.__name__}.{key}'
-				fun = f'{instance_func.__module__}.{instance_func.__name__}'
+				fun = self.get_func_path(class_hook)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks', level=3)
-				self.hooks[key].append(instance_func)
+				self.hooks[key].append(class_hook)
 
 			# Register user hooks
 			user_hooks = hooks.get(self.__class__, {}).get(key, [])
 			user_hooks.extend(hooks.get(key, []))
 			for hook in user_hooks:
 				name = f'{self.__class__.__name__}.{key}'
-				fun = f'{hook.__module__}.{hook.__name__}'
+				fun = self.get_func_path(hook)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks', level=3)
 			self.hooks[key].extend(user_hooks)
 
@@ -280,9 +280,9 @@ class Runner:
 
 		except KeyboardInterrupt:
 			self._print('Process was killed manually (CTRL+C / CTRL+X).', color='bold red', rich=True)
-			if self.result:
+			if self.celery_result:
 				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
-				self.stop_live_tasks(self.result)
+				self.stop_live_tasks(self.celery_result)
 
 		# Filter results and log info
 		self.mark_duplicates()
@@ -291,9 +291,10 @@ class Runner:
 		self.run_hooks('on_end')
 
 	def mark_duplicates(self):
-		debug('duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		dupe_count = 0
 		for item in self.results:
-			debug('duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=2)
+			debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -313,13 +314,16 @@ class Runner:
 					if not dupe._duplicate:
 						debug(
 							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-							sub='runner.mark_duplicates', level=2)
+							sub='runner.mark_duplicates', level=5)
+						dupe_count += 1
 						dupe._duplicate = True
 						dupe = self.run_hooks('on_duplicate', dupe)
 
-		debug('Duplicates:', sub='runner.mark_duplicates', level=2)
-		debug('\n\t'.join([repr(i) for i in self.results if i._duplicate]), sub='runner.mark_duplicates', level=2)
-		debug('duplicate check completed', id=self.config.name, sub='runner.mark_duplicates')
+		duplicates = [repr(i) for i in self.results if i._duplicate]
+		if duplicates:
+			duplicates_str = '\n\t'.join(duplicates)
+			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='runner.mark_duplicates', level=5)
+		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.mark_duplicates')
 
 	def yielder(self):
 		raise NotImplementedError()
@@ -356,7 +360,7 @@ class Runner:
 			return result
 		for hook in self.hooks[hook_type]:
 			name = f'{self.__class__.__name__}.{hook_type}'
-			fun = f'{hook.__module__}.{hook.__name__}'
+			fun = self.get_func_path(hook)
 			try:
 				_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
@@ -871,3 +875,31 @@ class Runner:
 		elif isinstance(item, OutputType):
 			item = repr(item)
 		return item
+
+	@classmethod
+	def get_func_path(cls, func):
+		"""
+		Get the full symbolic path of a function or method, including staticmethods,
+		using function and method attributes.
+
+		Args:
+			func (function, method, or staticmethod): A function or method object.
+		"""
+		if hasattr(func, '__self__'):
+			if func.__self__ is not None:
+				# It's a method bound to an instance
+				class_name = func.__self__.__class__.__name__
+				return f"{func.__module__}.{class_name}.{func.__name__}"
+			else:
+				# It's a method bound to a class (class method)
+				class_name = func.__qualname__.rsplit('.', 1)[0]
+				return f"{func.__module__}.{class_name}.{func.__name__}"
+		else:
+			# Handle static and regular functions
+			if '.' in func.__qualname__:
+				# Static method or a function defined inside a class
+				class_name, func_name = func.__qualname__.rsplit('.', 1)
+				return f"{func.__module__}.{class_name}.{func_name}"
+			else:
+				# Regular function not attached to a class
+				return f"{func.__module__}.{func.__name__}"

@@ -16,7 +16,6 @@ from secator.definitions import (DEFAULT_HTTP_PROXY,
 							   DEFAULT_PROXYCHAINS_COMMAND,
 							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, DEFAULT_INPUT_CHUNK_SIZE)
-from secator.rich import console
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
 from secator.utils import debug
@@ -81,8 +80,9 @@ class Command(Runner):
 	# Flag to show version
 	version_flag = None
 
-	# Install command
+	# Install
 	install_cmd = None
+	install_github_handle = None
 
 	# Serializer
 	item_loader = None
@@ -134,6 +134,9 @@ class Command(Runner):
 		# No capturing of stdout / stderr.
 		self.no_capture = self.run_opts.get('no_capture', False)
 
+		# No processing of output lines.
+		self.no_process = self.run_opts.get('no_process', False)
+
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
@@ -155,7 +158,7 @@ class Command(Runner):
 		if self.print_cmd and not self.has_children:
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-			self._print(self.cmd, color='bold cyan', rich=True)
+			self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
 		# Print built input
 		if self.print_input_file and self.input_path:
@@ -250,36 +253,30 @@ class Command(Runner):
 	#---------------#
 
 	@classmethod
-	def install(cls):
-		"""Install command by running the content of cls.install_cmd."""
-		console.print(f':heavy_check_mark: Installing {cls.__name__}...', style='bold yellow')
-		if not cls.install_cmd:
-			console.print(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
-			return
-		ret = cls.run_command(
-			cls.install_cmd,
-			name=cls.__name__,
-			print_cmd=True,
-			print_line=True,
-			cls_attributes={'shell': True}
-		)
-		if ret.return_code != 0:
-			console.print(f':exclamation_mark: Failed to install {cls.__name__}.', style='bold red')
-		else:
-			console.print(f':tada: {cls.__name__} installed successfully !', style='bold green')
-		return ret
+	def execute(cls, cmd, name=None, cls_attributes={}, **kwargs):
+		"""Execute an ad-hoc command.
 
-	@classmethod
-	def run_command(cls, cmd, name=None, cls_attributes={}, **kwargs):
-		"""Run adhoc command. Can be used without defining an inherited class to run a command, while still enjoying
-		all the good stuff in this class.
+		Can be used without defining an inherited class to run a command, while still enjoying all the good stuff in
+		this class.
+
+		Args:
+			cls (object): Class.
+			cmd (str): Command.
+			name (str): Printed name.
+			cls_attributes (dict): Class attributes.
+			kwargs (dict): Options.
+
+		Returns:
+			secator.runners.Command: instance of the Command.
 		"""
 		name = name or cmd.split(' ')[0]
+		kwargs['no_process'] = True
+		kwargs['print_cmd'] = not kwargs.get('quiet', False)
+		kwargs['print_item'] = not kwargs.get('quiet', False)
+		kwargs['print_line'] = not kwargs.get('quiet', False)
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
-		cmd_instance.print_line = not kwargs.get('quiet', False)
-		cmd_instance.print_item = not kwargs.get('quiet', False)
 		cmd_instance.run()
 		return cmd_instance
 
@@ -400,6 +397,9 @@ class Command(Runner):
 
 				# Strip line endings
 				line = line.rstrip()
+				if self.no_process:
+					yield line
+					continue
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':

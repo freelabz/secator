@@ -14,6 +14,7 @@ class mapcidr(ReconIp):
 	input_flag = '-cidr'
 	file_flag = '-cl'
 	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest'
+	install_github_handle = 'projectdiscovery/mapcidr'
 	input_type = CIDR_RANGE
 	output_types = [Ip]
 	opt_key_map = {

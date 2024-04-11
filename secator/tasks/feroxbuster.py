@@ -64,6 +64,7 @@ class feroxbuster(HttpFuzzer):
 		'curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | '
 		'bash && sudo mv feroxbuster /usr/local/bin'
 	)
+	install_github_handle = 'epi052/feroxbuster'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
