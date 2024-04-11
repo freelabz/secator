@@ -160,7 +160,7 @@ for folder in [BIN_FOLDER, DATA_FOLDER, REPORTS_FOLDER, WORDLISTS_FOLDER, SCRIPT
 	if not os.path.exists(folder):
 		console.print(f'[bold turquoise4]Creating folder {folder} ...[/] ', end='')
 		os.makedirs(folder)
-		console.print(f'[bold green]ok.[/]')
+		console.print('[bold green]ok.[/]')
 
 
 # Download default wordlists
@@ -173,7 +173,7 @@ for wordlist in ['HTTP', 'DNS']:
 			resp = requests.get(wordlist_url)
 			with open(wordlist_path, 'w') as f:
 				f.write(resp.text)
-			console.print(f'[bold green]ok.[/]')
+			console.print('[bold green]ok.[/]')
 		except requests.exceptions.RequestException as e:
 			console.print(f'[bold green]failed ({type(e).__name__}).[/]')
 			pass

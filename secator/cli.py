@@ -7,6 +7,7 @@ import rich_click as click
 from dotmap import DotMap
 from fp.fp import FreeProxy
 from jinja2 import Template
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
 
@@ -14,12 +15,13 @@ from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import (ADDONS_ENABLED, ASCII, CVES_FOLDER, DATA_FOLDER, DEV_PACKAGE, OPT_NOT_SUPPORTED,
 								 PAYLOADS_FOLDER, REVSHELLS_FOLDER, ROOT_FOLDER, VERSION)
-from secator.installer import ToolInstaller, fetch_tool_releases
+from secator.installer import ToolInstaller, get_version_info, get_health_table, fmt_health_table_row
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
-from secator.utils import (debug, detect_host, discover_tasks, find_list_item, flatten, get_latest_version,
+from secator.utils import (debug, detect_host, discover_tasks, find_list_item, flatten,
 						   print_results_table, print_version)
+
 click.rich_click.USE_RICH_MARKUP = True
 
 ALL_TASKS = discover_tasks()
@@ -511,36 +513,6 @@ def report_show(json_path, exclude_fields):
 # HEALTH #
 #--------#
 
-
-def which(command):
-	"""Run which on a command.
-
-	Args:
-		command (str): Command to check.
-
-	Returns:
-		secator.Command: Command instance.
-	"""
-	return Command.execute(f'which {command}', quiet=True, print_errors=False)
-
-
-def get_version_cls(cls):
-	"""Get version for a Command.
-
-	Args:
-		cls: Command class.
-
-	Returns:
-		string: Version string or 'N/A' if not found.
-	"""
-	base_cmd = cls.cmd.split(' ')[0]
-	if cls.version_flag == OPT_NOT_SUPPORTED:
-		return 'N/A'
-	version_flag = cls.version_flag or f'{cls.opt_prefix}version'
-	version_cmd = f'{base_cmd} {version_flag}'
-	return get_version(version_cmd)
-
-
 @cli.command(name='health')
 @click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
@@ -548,48 +520,57 @@ def health(json, debug):
 	"""[dim]Get health status.[/]"""
 	tools = ALL_TASKS
 	status = {'secator': {}, 'languages': {}, 'tools': {}, 'addons': {}}
-	from secator.installer import get_version_info, print_version_info
 
 	# Check secator
-	if not json:
-		console.print(':wrench: [bold gold3]Checking secator ...[/]')
+	console.print(':wrench: [bold gold3]Checking secator ...[/]')
 	info = get_version_info('secator', '-version', 'freelabz/secator')
-	if not json:
-		print_version_info(info)
+	table = get_health_table()
+	with Live(table):
+		row = fmt_health_table_row(info)
+		table.add_row(*row)
 	status['secator'] = info
 
 	# Check languages
-	if not json:
-		console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
+	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
 	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
-	for lang, version_flag in version_cmds.items():
-		info = get_version_info(lang, version_flag)
-		if not json:
-			print_version_info(info, 'lang')
-		status['languages'][lang] = info
+	table = get_health_table()
+	with Live(table):
+		for lang, version_flag in version_cmds.items():
+			info = get_version_info(lang, version_flag)
+			row = fmt_health_table_row(info, 'langs')
+			table.add_row(*row)
+			status['languages'][lang] = info
 
 	# Check tools
-	if not json:
-		console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
-	for tool in tools:
-		cmd = tool.cmd.split(' ')[0]
-		version_flag = tool.version_flag or f'{tool.opt_prefix}version'
-		if tool.version_flag == OPT_NOT_SUPPORTED:
-			version_flag = None
-		info = get_version_info(cmd, version_flag, tool.install_github_handle)
-		if not json:
-			print_version_info(info, 'tools')
-		status['tools'][tool.__name__] = info
+	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
+	table = get_health_table()
+	with Live(table):
+		for tool in tools:
+			cmd = tool.cmd.split(' ')[0]
+			version_flag = tool.version_flag or f'{tool.opt_prefix}version'
+			version_flag = None if tool.version_flag == OPT_NOT_SUPPORTED else version_flag
+			info = get_version_info(cmd, version_flag, tool.install_github_handle)
+			row = fmt_health_table_row(info, 'tools')
+			table.add_row(*row)
+			status['tools'][tool.__name__] = info
 
-	# Check addons
-	# if not json:
-	# 	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
-	# for addon in ['google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
-	# 	addon_var = ADDONS_ENABLED[addon]
-	# 	info = {'name': addon, 'version': 'latest' if addon_var else None, 'latest_version': None, 'location': None}
-	# 	if not json:
-	# 		print_version_info(info, 'addons')
-	# 	status['addons'][addon] = info
+	# # Check addons
+	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	table = get_health_table()
+	with Live(table):
+		for addon in ['google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
+			addon_var = ADDONS_ENABLED[addon]
+			info = {
+				'name': addon,
+				'version': None,
+				'status': 'ok' if addon_var else 'missing',
+				'latest_version': None,
+				'installed': addon_var,
+				'location': None
+			}
+			row = fmt_health_table_row(info, 'addons')
+			table.add_row(*row)
+			status['addons'][addon] = info
 
 	# Print JSON health
 	if json:
@@ -798,9 +779,11 @@ def install_cves(force):
 @cli.command('update')
 def update():
 	"""[dim]Update to latest version.[/]"""
-	latest_version, obsolete = get_latest_version()
-	if not obsolete:
-		console.print(f'[bold green]secator is already at the newest version {latest_version}[/]')
+	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
+	latest_version = info['latest_version']
+	if info['status'] == 'latest':
+		console.print(f'[bold green]secator is already at the newest version {latest_version}[/] !')
+		sys.exit(0)
 	console.print(f'[bold gold3]:wrench: Updating secator from {VERSION} to {latest_version} ...[/]')
 	if 'pipx' in sys.executable:
 		Command.execute(f'pipx install secator=={latest_version} --force')

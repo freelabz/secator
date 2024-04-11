@@ -7,7 +7,7 @@ import tarfile
 import zipfile
 import io
 
-from threading import Thread
+from rich.table import Table
 
 from secator.rich import console
 from secator.runners import Command
@@ -215,34 +215,6 @@ class GithubInstaller:
 					return os.path.join(root, file)
 		return None
 
-def fetch_tool_releases(tools):
-	"""Fetch the latest releases for a list of tools using threading.
-
-	Args:
-		tools (list): List of tool classes.
-
-	Returns:
-		dict: {tool_cls: latest_version}
-	"""
-	threads = []
-	results = {}
-
-	def fetch_and_store(tool):
-		"""Helper function to fetch data and store it in results."""
-		latest_version = GithubInstaller.get_latest_version(tool.install_github_handle)
-		results[tool] = latest_version
-
-	for tool in tools:
-		thread = Thread(target=fetch_and_store, args=(tool,))
-		thread.start()
-		threads.append(thread)
-
-	# Wait for all threads to complete
-	for thread in threads:
-		thread.join()
-
-	return results
-
 
 def which(command):
 	"""Run which on a command.
@@ -275,94 +247,89 @@ def get_version(version_cmd):
 	return match[0]
 
 
-def get_version_info(name, version_flag=None, github_handle=None):
+def get_version_info(name, version_flag=None, github_handle=None, version=None):
 	"""Get version info for a command.
 
 	Args:
 		name (str): Command name.
 		version_flag (str): Version flag.
 		github_handle (str): Github handle.
+		version (str): Existing version.
 
 	Return:
 		dict: Version info.
 	"""
 	from pkg_resources import parse_version
 	from secator.installer import GithubInstaller
-	version_info = {
+	info = {
 		'name': name,
 		'installed': False,
-		'version': None,
+		'version': version,
 		'latest_version': None,
 		'location': None,
-		'status': 'missing'
+		'status': ''
 	}
 
 	# Get binary path
 	location = which(name).output
-	version_info['location'] = location
-	if location:
-		version_info['installed'] = True
-		version_info['status'] = 'outdated'
+	info['location'] = location
 
 	# Get current version
-	if not version_flag:
-		return version_info
-	version_cmd = f'{name} {version_flag}'
-	version = get_version(version_cmd)
-	version_info['version'] = version
+	if version_flag:
+		version_cmd = f'{name} {version_flag}'
+		version = get_version(version_cmd)
+		info['version'] = version
 
 	# Get latest version
-	if not github_handle:
-		return version_info
 	latest_version = GithubInstaller.get_latest_version(github_handle)
-	version_info['latest_version'] = latest_version
+	info['latest_version'] = latest_version
 
-	if not version and not latest_version:
-		version_info['status'] = 'unknown'
-	
-	elif not latest_version:
-		version_info['status'] = 'ok'
-	
-	elif not version:
-		version_info['status'] = 'missing'
-	
-	elif parse_version(version)< parse_version(latest_version):
-		version_info['status'] = 'outdated'
-	
+	if location:
+		info['installed'] = True
+		if version and latest_version:
+			if parse_version(version) < parse_version(latest_version):
+				info['status'] = 'outdated'
+			else:
+				info['status'] = 'latest'
+		elif not version:
+			info['status'] = 'unknown version'
+		elif not latest_version:
+			info['status'] = 'unknown latest'
 	else:
-		version_info['status'] = 'ok'
+		info['status'] = 'missing'
 
-	return version_info
+	return info
 
 
-def print_version_info(version_info, category=None):
+def fmt_health_table_row(version_info, category=None):
 	name = version_info['name']
 	version = version_info['version']
-	location = version_info['location']
-	latest_version = version_info['latest_version']
 	status = version_info['status']
-	if status == 'outdated':
-		status_color = 'bold orange1'
-	elif status == 'ok':
-		status_color = 'bold green'
+	installed = version_info['installed']
+	name_str = f'[magenta]{name}[/]'
+
+	# Format version row
+	_version = version or ''
+	_version = f'[bold green]{_version:<10}[/]'
+	if status == 'latest':
+		_version += ' [bold green](latest)[/]'
+	elif status == 'outdated':
+		_version += ' [bold red](outdated)[/]'
 	elif status == 'missing':
-		status_color = 'bold red'
-	else:
-		status_color = 'bold turquoise4'
-	s = f'[bold magenta]{name:<15}[/] [{status_color}]{status:<12}[/]'
-	if version:
-		if version == 'N/A':
-			version_color = 'dim blue'
-		elif status == 'outdated':
-			version_color = 'bold orange1'
-			version += f' [dim](<{latest_version})[/] '
-		else:
-			version_color = 'bold green'
-		s += f'[{version_color}]{version:<15}[/]'
-	else:
-		s += ' '*15
-	if location:
-		s += f'[dim gold3]{location}[/]'
-	elif category:
-		s += f'[dim]# secator install {category} {name}'
-	console.print(s, highlight=False)
+		_version = '[bold red]missing[/]'
+	elif status == 'ok':
+		_version = '[bold green]ok        [/]'
+	elif status:
+		if not version and installed:
+			_version = f'[bold green]ok        [/]'
+		_version += f' [dim]({status}[/])'
+
+	row = (name_str, _version)
+	return row
+
+
+def get_health_table():
+	table = Table(box=None, show_header=False)
+	for col in ['name', 'version']:
+		table.add_column(col)
+	return table
