@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/freelabz/secator/compare/v0.3.0...v0.3.1) (2024-04-11)
+
+
+### Bug Fixes
+
+* download default wordlists if missing ([#261](https://github.com/freelabz/secator/issues/261)) ([7bec2a4](https://github.com/freelabz/secator/commit/7bec2a46d054aa7d3702eb77d25b9f791f5cc9c5))
+* rework init & tools install ([#271](https://github.com/freelabz/secator/issues/271)) ([6c477fc](https://github.com/freelabz/secator/commit/6c477fc99d5f1dd625423ba27dc563acc50194bf))
+* wrong hook name in debug output ([#262](https://github.com/freelabz/secator/issues/262)) ([f2ee367](https://github.com/freelabz/secator/commit/f2ee36779615bd2c1ef1f80679a9cc77e9e592d6))
+
 ## [0.3.0](https://github.com/freelabz/secator/compare/v0.2.0...v0.3.0) (2024-04-09)
 
 
