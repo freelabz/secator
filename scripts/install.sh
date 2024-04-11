@@ -7,9 +7,9 @@ echo -e "🗄 ${YELLOW}Running apt update ...${NC}"
 sudo apt update
 echo -e "🗄 ${GREEN}Ran apt update successfully !${NC}\n"
 
-echo -e "🗄 ${YELLOW}Installing Python and pipx ...${NC}"
-sudo apt install -y python3-pip pipx
-echo -e "🗄 ${GREEN}pipx installed successfully !${NC}\n"
+echo -e "🗄 ${YELLOW}Installing pipx and git ...${NC}"
+sudo apt install -y pipx git
+echo -e "🗄 ${GREEN}pipx and git installed successfully !${NC}\n"
 
 echo -e "🗄 ${YELLOW}Setting \$PATH ...${NC}"
 export PATH=$PATH:~/.local/bin:~/go/bin
