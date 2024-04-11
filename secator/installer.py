@@ -292,9 +292,9 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 			else:
 				info['status'] = 'latest'
 		elif not version:
-			info['status'] = 'unknown version'
+			info['status'] = 'current unknown'
 		elif not latest_version:
-			info['status'] = 'unknown latest'
+			info['status'] = 'latest unknown'
 	else:
 		info['status'] = 'missing'
 
