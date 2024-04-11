@@ -28,5 +28,5 @@ echo -e "🗄 ${GREEN}secator installed successfully !${NC}\n"
 
 echo -e "🗄 ${YELLOW}Adding ~/go/bin and ~/.local/bin to \$PATH in .bashrc ...${NC}"
 echo "export PATH=$PATH:~/go/bin:~/.local/bin" >> ~/.bashrc
-source ~/.bashrc
+. ~/.bashrc
 echo -e "🗄 ${GREEN}\$PATH modified successfully !${NC}\n"

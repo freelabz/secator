@@ -612,7 +612,7 @@ def addons():
 def install_worker():
 	"Install worker addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install .[worker]',
+		cmd=f'{sys.executable} -m pip install secator[worker]',
 		title='worker addon',
 		next_steps=[
 			'Run "secator worker" to run a Celery worker using the file system as a backend and broker.',
@@ -626,7 +626,7 @@ def install_worker():
 def install_google():
 	"Install google addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install .[google]',
+		cmd=f'{sys.executable} -m pip install secator[google]',
 		title='google addon',
 		next_steps=[
 			'Set the "GOOGLE_CREDENTIALS_PATH" and "GOOGLE_DRIVE_PARENT_FOLDER_ID" environment variables.',
@@ -639,7 +639,7 @@ def install_google():
 def install_mongodb():
 	"Install mongodb addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install .[mongodb]',
+		cmd=f'{sys.executable} -m pip install secator[mongodb]',
 		title='mongodb addon',
 		next_steps=[
 			'[dim]\[optional][/] Run "docker run --name mongo -p 27017:27017 -d mongo:latest" to run a local MongoDB instance.',
@@ -653,7 +653,7 @@ def install_mongodb():
 def install_redis():
 	"Install redis addon."
 	run_install(
-		cmd=f'{sys.executable} -m pip install .[redis]',
+		cmd=f'{sys.executable} -m pip install secator[redis]',
 		title='redis addon',
 		next_steps=[
 			'[dim]\[optional][/] Run "docker run --name redis -p 6379:6379 -d redis" to run a local Redis instance.',
