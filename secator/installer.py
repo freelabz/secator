@@ -306,7 +306,7 @@ def fmt_health_table_row(version_info, category=None):
 	version = version_info['version']
 	status = version_info['status']
 	installed = version_info['installed']
-	name_str = f'[magenta]{name}[/]'
+	name_str = f'[magenta]{name:<13}[/]'
 
 	# Format version row
 	_version = version or ''
