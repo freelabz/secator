@@ -416,6 +416,8 @@ def print_version():
 	location = info['location']
 	if status == 'outdated':
 		console.print('[bold red] (outdated)[/]')
+	else:
+		console.print('')
 	console.print(f'[bold gold3]Latest version[/]: {latest_version}', highlight=False)
 	console.print(f'[bold gold3]Location[/]: {location}')
 	console.print(f'[bold gold3]Python binary[/]: {sys.executable}')
