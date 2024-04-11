@@ -525,7 +525,7 @@ def health(json, debug):
 	console.print(':wrench: [bold gold3]Checking secator ...[/]')
 	info = get_version_info('secator', '-version', 'freelabz/secator')
 	table = get_health_table()
-	with Live(table):
+	with Live(table, console=console):
 		row = fmt_health_table_row(info)
 		table.add_row(*row)
 	status['secator'] = info
@@ -534,7 +534,7 @@ def health(json, debug):
 	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
 	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
 	table = get_health_table()
-	with Live(table):
+	with Live(table, console=console):
 		for lang, version_flag in version_cmds.items():
 			info = get_version_info(lang, version_flag)
 			row = fmt_health_table_row(info, 'langs')
@@ -544,7 +544,7 @@ def health(json, debug):
 	# Check tools
 	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
 	table = get_health_table()
-	with Live(table):
+	with Live(table, console=console):
 		for tool in tools:
 			cmd = tool.cmd.split(' ')[0]
 			version_flag = tool.version_flag or f'{tool.opt_prefix}version'
@@ -557,7 +557,7 @@ def health(json, debug):
 	# # Check addons
 	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
 	table = get_health_table()
-	with Live(table):
+	with Live(table, console=console):
 		for addon in ['google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
 			addon_var = ADDONS_ENABLED[addon]
 			info = {
