@@ -4,37 +4,20 @@ import os
 import requests
 
 from dotenv import find_dotenv, load_dotenv
-from pkg_resources import get_distribution, parse_version
+from pkg_resources import get_distribution
 
 from secator.rich import console
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
-
-def get_latest_version():
-	"""Get latest secator version from GitHub API."""
-	try:
-		resp = requests.get('https://api.github.com/repos/freelabz/secator/releases/latest', timeout=2)
-		resp.raise_for_status()
-		latest_version = resp.json()['name'].lstrip('v')
-		return latest_version
-	except requests.exceptions.RequestException as e:
-		console.print(f'[bold red]Failed to get latest version from GitHub: {type(e).__name__}.')
-		return None
-
-
 # Globals
 VERSION = get_distribution('secator').version
-VERSION_LATEST = get_latest_version()
-VERSION_OBSOLETE = parse_version(VERSION_LATEST) > parse_version(VERSION) if VERSION_LATEST else False
-VERSION_STR = f'{VERSION} [bold red](outdated)[/]' if VERSION_OBSOLETE else VERSION
-
 ASCII = f"""
 			 __            
    ________  _________ _/ /_____  _____
   / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/
  (__  /  __/ /__/ /_/ / /_/ /_/ / /    
-/____/\___/\___/\__,_/\__/\____/_/     v{VERSION_STR}
+/____/\___/\___/\__,_/\__/\____/_/     v{VERSION}
 
 			freelabz.com
 """  # noqa: W605,W291
@@ -175,8 +158,9 @@ WORDS = 'words'
 for folder in [BIN_FOLDER, DATA_FOLDER, REPORTS_FOLDER, WORDLISTS_FOLDER, SCRIPTS_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER,
 			   REVSHELLS_FOLDER, CELERY_DATA_FOLDER, CELERY_RESULTS_FOLDER]:
 	if not os.path.exists(folder):
+		console.print(f'[bold turquoise4]Creating folder {folder} ...[/] ', end='')
 		os.makedirs(folder)
-		console.print(f'[bold turquoise4]Created folder[/] {folder}.')
+		console.print('[bold green]ok.[/]')
 
 
 # Download default wordlists
@@ -185,66 +169,68 @@ for wordlist in ['HTTP', 'DNS']:
 	wordlist_url = globals()[f'DEFAULT_{wordlist}_WORDLIST_URL']
 	if not os.path.exists(wordlist_path):
 		try:
+			console.print(f'[bold turquoise4]Downloading default {wordlist} wordlist {wordlist_path} ...[/] ', end='')
 			resp = requests.get(wordlist_url)
 			with open(wordlist_path, 'w') as f:
 				f.write(resp.text)
-				console.print(f'[bold turquoise4]Downloaded default {wordlist} wordlist[/] {wordlist_path}.')
+			console.print('[bold green]ok.[/]')
 		except requests.exceptions.RequestException as e:
-			console.print(f'[bold red]Failed to download default {wordlist} wordlist: {type(e).__name__}.')
+			console.print(f'[bold green]failed ({type(e).__name__}).[/]')
 			pass
 
+ADDONS_ENABLED = {}
 
 # Check worker addon
 try:
 	import eventlet  # noqa: F401
-	WORKER_ADDON_ENABLED = 1
+	ADDONS_ENABLED['worker'] = True
 except ModuleNotFoundError:
-	WORKER_ADDON_ENABLED = 0
+	ADDONS_ENABLED['worker'] = False
 
 # Check google addon
 try:
 	import gspread  # noqa: F401
-	GOOGLE_ADDON_ENABLED = 1
+	ADDONS_ENABLED['google'] = True
 except ModuleNotFoundError:
-	GOOGLE_ADDON_ENABLED = 0
+	ADDONS_ENABLED['google'] = False
 
 # Check mongodb addon
 try:
 	import pymongo  # noqa: F401
-	MONGODB_ADDON_ENABLED = 1
+	ADDONS_ENABLED['mongodb'] = True
 except ModuleNotFoundError:
-	MONGODB_ADDON_ENABLED = 0
+	ADDONS_ENABLED['mongodb'] = False
 
 # Check redis addon
 try:
 	import redis  # noqa: F401
-	REDIS_ADDON_ENABLED = 1
+	ADDONS_ENABLED['redis'] = True
 except ModuleNotFoundError:
-	REDIS_ADDON_ENABLED = 0
+	ADDONS_ENABLED['redis'] = False
 
 # Check dev addon
 try:
 	import flake8  # noqa: F401
-	DEV_ADDON_ENABLED = 1
+	ADDONS_ENABLED['dev'] = True
 except ModuleNotFoundError:
-	DEV_ADDON_ENABLED = 0
+	ADDONS_ENABLED['dev'] = False
 
 # Check build addon
 try:
 	import hatch  # noqa: F401
-	BUILD_ADDON_ENABLED = 1
+	ADDONS_ENABLED['build'] = True
 except ModuleNotFoundError:
-	BUILD_ADDON_ENABLED = 0
+	ADDONS_ENABLED['build'] = False
 
 # Check trace addon
 try:
 	import memray  # noqa: F401
-	TRACE_ADDON_ENABLED = 1
+	ADDONS_ENABLED['trace'] = True
 except ModuleNotFoundError:
-	TRACE_ADDON_ENABLED = 0
+	ADDONS_ENABLED['trace'] = False
 
 # Check dev package
 if os.path.exists(f'{ROOT_FOLDER}/pyproject.toml'):
-	DEV_PACKAGE = 1
+	DEV_PACKAGE = True
 else:
-	DEV_PACKAGE = 0
+	DEV_PACKAGE = False

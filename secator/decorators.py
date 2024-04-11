@@ -5,8 +5,7 @@ import rich_click as click
 from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
-from secator.definitions import (MONGODB_ADDON_ENABLED, OPT_NOT_SUPPORTED,
-								 WORKER_ADDON_ENABLED)
+from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
@@ -276,7 +275,7 @@ def register_runner(cli_endpoint, config):
 		# opts.update(unknown_opts)
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
-		if sync or show or not WORKER_ADDON_ENABLED:
+		if sync or show or not ADDONS_ENABLED['worker']:
 			sync = True
 		elif worker:
 			sync = False
@@ -294,7 +293,7 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = {}
 		if driver == 'mongodb':
-			if not MONGODB_ADDON_ENABLED:
+			if not ADDONS_ENABLED['mongo']:
 				_get_rich_console().print('[bold red]Missing MongoDB dependencies: please run `secator install addons mongodb`[/].')
 				sys.exit(1)
 			from secator.hooks.mongodb import MONGODB_HOOKS

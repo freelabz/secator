@@ -39,7 +39,8 @@ class Task(Runner):
 			'print_input_file': DEBUG > 0,
 			'print_item': True,
 			'print_item_count': not self.sync and not dry_run,
-			'print_line': self.sync and not self.output_quiet,
+			'print_line': True
+			# 'print_line': self.sync and not self.output_quiet,
 		}
 		# self.print_item = not self.sync  # enable print_item for base Task only if running remote
 		run_opts.update(fmt_opts)
@@ -59,9 +60,9 @@ class Task(Runner):
 			if dry_run:  # don't run
 				return
 		else:
-			result = task_cls.delay(self.targets, **run_opts)
+			self.celery_result = task_cls.delay(self.targets, **run_opts)
 			task = self.process_live_tasks(
-				result,
+				self.celery_result,
 				description=False,
 				results_only=True,
 				print_remote_status=self.print_remote_status)

@@ -106,7 +106,7 @@ class Runner:
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
-		self.result = None
+		self.celery_result = None
 
 		# Determine report folder
 		default_reports_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
@@ -280,9 +280,9 @@ class Runner:
 
 		except KeyboardInterrupt:
 			self._print('Process was killed manually (CTRL+C / CTRL+X).', color='bold red', rich=True)
-			if self.result:
+			if self.celery_result:
 				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
-				self.stop_live_tasks(self.result)
+				self.stop_live_tasks(self.celery_result)
 
 		# Filter results and log info
 		self.mark_duplicates()
@@ -291,9 +291,10 @@ class Runner:
 		self.run_hooks('on_end')
 
 	def mark_duplicates(self):
-		debug('duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		dupe_count = 0
 		for item in self.results:
-			debug('duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=2)
+			debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -313,13 +314,16 @@ class Runner:
 					if not dupe._duplicate:
 						debug(
 							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-							sub='runner.mark_duplicates', level=2)
+							sub='runner.mark_duplicates', level=5)
+						dupe_count += 1
 						dupe._duplicate = True
 						dupe = self.run_hooks('on_duplicate', dupe)
 
-		debug('Duplicates:', sub='runner.mark_duplicates', level=2)
-		debug('\n\t'.join([repr(i) for i in self.results if i._duplicate]), sub='runner.mark_duplicates', level=2)
-		debug('duplicate check completed', id=self.config.name, sub='runner.mark_duplicates')
+		duplicates = [repr(i) for i in self.results if i._duplicate]
+		if duplicates:
+			duplicates_str = '\n\t'.join(duplicates)
+			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='runner.mark_duplicates', level=5)
+		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.mark_duplicates')
 
 	def yielder(self):
 		raise NotImplementedError()

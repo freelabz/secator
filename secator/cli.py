@@ -7,22 +7,20 @@ import rich_click as click
 from dotmap import DotMap
 from fp.fp import FreeProxy
 from jinja2 import Template
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
 
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ASCII, BUILD_ADDON_ENABLED, CVES_FOLDER, DATA_FOLDER,  # noqa: F401
-								 DEFAULT_DNS_WORDLIST, DEFAULT_DNS_WORDLIST_URL, DEFAULT_HTTP_WORDLIST,
-								 DEFAULT_HTTP_WORDLIST_URL, DEV_ADDON_ENABLED, DEV_PACKAGE, GOOGLE_ADDON_ENABLED,
-								 LIB_FOLDER, MONGODB_ADDON_ENABLED, OPT_NOT_SUPPORTED, PAYLOADS_FOLDER,
-								 REDIS_ADDON_ENABLED, REVSHELLS_FOLDER, ROOT_FOLDER, TRACE_ADDON_ENABLED, VERSION,
-								 VERSION_LATEST, VERSION_OBSOLETE, VERSION_STR, WORKER_ADDON_ENABLED)
-from secator.installer import ToolInstaller
+from secator.definitions import (ADDONS_ENABLED, ASCII, CVES_FOLDER, DATA_FOLDER, DEV_PACKAGE, OPT_NOT_SUPPORTED,
+								 PAYLOADS_FOLDER, REVSHELLS_FOLDER, ROOT_FOLDER, VERSION)
+from secator.installer import ToolInstaller, get_version_info, get_health_table, fmt_health_table_row
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
-from secator.utils import debug, detect_host, discover_tasks, find_list_item, flatten, print_results_table
+from secator.utils import (debug, detect_host, discover_tasks, find_list_item, flatten,
+						   print_results_table, print_version)
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -30,15 +28,6 @@ ALL_TASKS = discover_tasks()
 ALL_CONFIGS = ConfigLoader.load_all()
 ALL_WORKFLOWS = ALL_CONFIGS.workflow
 ALL_SCANS = ALL_CONFIGS.scan
-
-
-def print_version():
-	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False)
-	console.print(f'[bold gold3]Latest version[/]: {VERSION_LATEST}', highlight=False)
-	console.print(f'[bold gold3]Python binary[/]: {sys.executable}')
-	if DEV_PACKAGE:
-		console.print(f'[bold gold3]Root folder[/]: {ROOT_FOLDER}')
-	console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
 
 
 #-----#
@@ -51,10 +40,6 @@ def print_version():
 def cli(ctx, version):
 	"""Secator CLI."""
 	console.print(ASCII, highlight=False)
-	if VERSION_OBSOLETE:
-		console.print(
-			'[bold red]:warning: secator version is outdated: '
-			f'run "secator update" to install the newest version ({VERSION_LATEST}).\n')
 	if ctx.invoked_subcommand is None:
 		if version:
 			print_version()
@@ -121,7 +106,7 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
-	if not WORKER_ADDON_ENABLED:
+	if not ADDONS_ENABLED['worker']:
 		console.print('[bold red]Missing worker addon: please run `secator install addons worker`[/].')
 		sys.exit(1)
 	from secator.celery import app, is_celery_worker_alive
@@ -410,7 +395,7 @@ def build():
 @build.command('pypi')
 def build_pypi():
 	"""Build secator PyPI package."""
-	if not BUILD_ADDON_ENABLED:
+	if not ADDONS_ENABLED['build']:
 		console.print('[bold red]Missing build addon: please run `secator install addons build`')
 		sys.exit(1)
 	with console.status('[bold gold3]Building PyPI package...[/]'):
@@ -446,7 +431,7 @@ def publish():
 @publish.command('pypi')
 def publish_pypi():
 	"""Publish secator PyPI package."""
-	if not BUILD_ADDON_ENABLED:
+	if not ADDONS_ENABLED['build']:
 		console.print('[bold red]Missing build addon: please run `secator install addons build`')
 		sys.exit(1)
 	os.environ['HATCH_INDEX_USER'] = '__token__'
@@ -528,114 +513,64 @@ def report_show(json_path, exclude_fields):
 # HEALTH #
 #--------#
 
-
-def which(command):
-	"""Run which on a command.
-
-	Args:
-		command (str): Command to check.
-
-	Returns:
-		secator.Command: Command instance.
-	"""
-	return Command.execute(f'which {command}', quiet=True, print_errors=False)
-
-
-def get_version_cls(cls):
-	"""Get version for a Command.
-
-	Args:
-		cls: Command class.
-
-	Returns:
-		string: Version string or 'n/a' if not found.
-	"""
-	base_cmd = cls.cmd.split(' ')[0]
-	if cls.version_flag == OPT_NOT_SUPPORTED:
-		return 'N/A'
-	version_flag = cls.version_flag or f'{cls.opt_prefix}version'
-	version_cmd = f'{base_cmd} {version_flag}'
-	return get_version(version_cmd)
-
-
-def get_version(version_cmd):
-	"""Run version command and match first version number found.
-
-	Args:
-		version_cmd (str): Command to get the version.
-
-	Returns:
-		str: Version string.
-	"""
-	regex = r'[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
-	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
-	match = re.findall(regex, ret.output)
-	if not match:
-		return 'n/a'
-	return match[0]
-
-
 @cli.command(name='health')
 @click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
 def health(json, debug):
 	"""[dim]Get health status.[/]"""
-	tools = [cls for cls in ALL_TASKS]
-	status = {'tools': {}, 'languages': {}, 'secator': {}}
-
-	def print_status(cmd, return_code, version=None, bin=None, category=None):
-		s = '[bold green]ok      [/]' if return_code == 0 else '[bold red]missing [/]'
-		s = f'[bold magenta]{cmd:<15}[/] {s} '
-		if return_code == 0 and version:
-			if version == 'N/A':
-				s += f'[dim blue]{version:<12}[/]'
-			else:
-				s += f'[bold blue]{version:<12}[/]'
-		elif category:
-			s += ' '*12 + f'[dim]# secator install {category} {cmd}'
-		if bin:
-			s += f'[dim gold3]{bin}[/]'
-		console.print(s, highlight=False)
+	tools = ALL_TASKS
+	status = {'secator': {}, 'languages': {}, 'tools': {}, 'addons': {}}
 
 	# Check secator
-	if not json:
-		console.print(':wrench: [bold gold3]Checking secator ...[/]')
-	ret = which('secator')
-	if not json:
-		print_status('secator', ret.return_code, VERSION, ret.output, None)
-	status['secator'] = {'installed': ret.return_code == 0, 'version': VERSION}
+	console.print(':wrench: [bold gold3]Checking secator ...[/]')
+	info = get_version_info('secator', '-version', 'freelabz/secator')
+	table = get_health_table()
+	with Live(table, console=console):
+		row = fmt_health_table_row(info)
+		table.add_row(*row)
+	status['secator'] = info
 
 	# Check languages
-	if not json:
-		console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
+	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
 	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
-	for lang, version_flag in version_cmds.items():
-		ret = which(lang)
-		version = get_version(f'{lang} {version_flag}')
-		if not json:
-			print_status(lang, ret.return_code, version, ret.output, 'langs')
-		status['languages'][lang] = {'installed': ret.return_code == 0, 'version': version}
+	table = get_health_table()
+	with Live(table, console=console):
+		for lang, version_flag in version_cmds.items():
+			info = get_version_info(lang, version_flag)
+			row = fmt_health_table_row(info, 'langs')
+			table.add_row(*row)
+			status['languages'][lang] = info
 
 	# Check tools
-	if not json:
-		console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
-	for tool in tools:
-		cmd = tool.cmd.split(' ')[0]
-		ret = which(cmd)
-		version = get_version_cls(tool)
-		if not json:
-			print_status(tool.__name__, ret.return_code, version, ret.output, 'tools')
-		status['tools'][tool.__name__] = {'installed': ret.return_code == 0, 'version': version}
+	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
+	table = get_health_table()
+	with Live(table, console=console):
+		for tool in tools:
+			cmd = tool.cmd.split(' ')[0]
+			version_flag = tool.version_flag or f'{tool.opt_prefix}version'
+			version_flag = None if tool.version_flag == OPT_NOT_SUPPORTED else version_flag
+			info = get_version_info(cmd, version_flag, tool.install_github_handle)
+			row = fmt_health_table_row(info, 'tools')
+			table.add_row(*row)
+			status['tools'][tool.__name__] = info
 
-	# Check addons
-	if not json:
-		console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
-	for addon in ['google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
-		addon_var = globals()[f'{addon.upper()}_ADDON_ENABLED']
-		ret = 0 if addon_var == 1 else 1
-		bin = None if addon_var == 0 else ' '
-		if not json:
-			print_status(addon, ret, 'N/A', bin, 'addons')
+	# # Check addons
+	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	table = get_health_table()
+	with Live(table, console=console):
+		for addon in ['google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
+			addon_var = ADDONS_ENABLED[addon]
+			info = {
+				'name': addon,
+				'version': None,
+				'status': 'ok' if addon_var else 'missing',
+				'latest_version': None,
+				'installed': addon_var,
+				'location': None
+			}
+			row = fmt_health_table_row(info, 'addons')
+			table.add_row(*row)
+			status['addons'][addon] = info
 
 	# Print JSON health
 	if json:
@@ -844,13 +779,16 @@ def install_cves(force):
 @cli.command('update')
 def update():
 	"""[dim]Update to latest version.[/]"""
-	if not VERSION_OBSOLETE:
-		console.print(f'[bold green]secator is already at the newest version {VERSION_LATEST}[/]')
-	console.print(f'[bold gold3]:wrench: Updating secator from {VERSION} to {VERSION_LATEST} ...[/]')
+	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
+	latest_version = info['latest_version']
+	if info['status'] == 'latest':
+		console.print(f'[bold green]secator is already at the newest version {latest_version}[/] !')
+		sys.exit(0)
+	console.print(f'[bold gold3]:wrench: Updating secator from {VERSION} to {latest_version} ...[/]')
 	if 'pipx' in sys.executable:
-		Command.execute(f'pipx install secator=={VERSION_LATEST} --force')
+		Command.execute(f'pipx install secator=={latest_version} --force')
 	else:
-		Command.execute(f'pip install secator=={VERSION_LATEST}')
+		Command.execute(f'pip install secator=={latest_version}')
 
 
 #-------#
@@ -955,7 +893,7 @@ def test():
 	if not DEV_PACKAGE:
 		console.print('[bold red]You MUST use a development version of secator to run tests.[/]')
 		sys.exit(1)
-	if not DEV_ADDON_ENABLED:
+	if not ADDONS_ENABLED['dev']:
 		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
 		sys.exit(1)
 	pass
