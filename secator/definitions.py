@@ -155,7 +155,7 @@ WORDS = 'words'
 
 
 # Create all folders
-for folder in [BIN_FOLDER, DATA_FOLDER, REPORTS_FOLDER, WORDLISTS_FOLDER, SCRIPTS_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER,
+for folder in [BIN_FOLDER, DATA_FOLDER, REPORTS_FOLDER, WORDLISTS_FOLDER, CVES_FOLDER, PAYLOADS_FOLDER,
 			   REVSHELLS_FOLDER, CELERY_DATA_FOLDER, CELERY_RESULTS_FOLDER]:
 	if not os.path.exists(folder):
 		console.print(f'[bold turquoise4]Creating folder {folder} ...[/] ', end='')
