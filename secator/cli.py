@@ -558,7 +558,7 @@ def health(json, debug):
 	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
 	table = get_health_table()
 	with Live(table, console=console):
-		for addon in ['google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
+		for addon in ['worker', 'google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
 			addon_var = ADDONS_ENABLED[addon]
 			info = {
 				'name': addon,
