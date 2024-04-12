@@ -1,34 +1,28 @@
-FROM kalilinux/kali-rolling
+FROM alpine:latest
 
 ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
 
-RUN apt update -y && \
-    apt install -y \
+RUN apk add --no-cache \
 	curl \
 	gcc \
 	git \
-	golang-go \
+	go \
     make \
 	pipx \
-	python3 \
-	python3-pip \
-	python3-venv \
-	ruby-full \
-	rubygems \
+	python3-dev \
+	ruby \
 	sudo \
 	vim \
     wget \
 	chromium \
     jq \
     openssl \
-	proxychains \
-	proxychains-ng \
-	&& rm -rf /var/lib/apt/lists/*
+	proxychains-ng
 
 # Install Metasploit framework
-RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
-RUN chmod 755 msfinstall
-RUN ./msfinstall
+# RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
+# RUN chmod 755 msfinstall
+# RUN ./msfinstall
 
 # Copy code
 WORKDIR /code
