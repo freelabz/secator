@@ -53,6 +53,7 @@ app.conf.update({
 	'broker_transport_options': {
 		'data_folder_in': CELERY_DATA_FOLDER,
 		'data_folder_out': CELERY_DATA_FOLDER,
+		"control_folder": CELERY_DATA_FOLDER,
 		'visibility_timeout': CELERY_BROKER_VISIBILITY_TIMEOUT,
 	},
 	'broker_connection_retry_on_startup': True,
