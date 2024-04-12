@@ -24,10 +24,7 @@ class searchsploit(Command):
 			PROVIDER: lambda x: 'EDB',
 			CVES: lambda x: [c for c in x['Codes'].split(';') if c.startswith('CVE-')],
 			REFERENCE: lambda x: f'https://exploit-db.com/exploits/{x["EDB-ID"]}',
-			TAGS: lambda x: [
-				'_'.join(tag.lower().replace('-', '_').replace('(', '').replace(')', '').split(' '))
-				for tag in x['Tags'].split(',')
-			],
+			TAGS: lambda x: searchsploit.tags_extractor(x),
 			EXTRA_DATA: lambda x: {
 				k.lower(): v for k, v in x.items() if k not in ['Title', 'EDB-ID', 'Codes', 'Tags', 'Source'] and v != ''
 			}
@@ -40,6 +37,18 @@ class searchsploit(Command):
 	proxy_http = False
 	input_chunk_size = 1
 	profile = 'io'
+
+	@staticmethod
+	def tags_extractor(item):
+		tags = []
+		for tag in item['Tags'].split(','):
+			_tag = '_'.join(
+				tag.lower().replace('-', '_',).replace('(', '').replace(')', '').split(' ')
+			)
+			if not _tag:
+				continue
+			tags.append(tag)
+		return tags
 
 	@staticmethod
 	def before_init(self):
@@ -56,4 +65,10 @@ class searchsploit(Command):
 	def on_item_pre_convert(self, item):
 		if self.matched_at:
 			item[MATCHED_AT] = self.matched_at
+		return item
+
+	@staticmethod
+	def on_item(self, item):
+		input_tag = '-'.join(self.input.replace('\'', '').split(' '))
+		item.tags = [input_tag] + item.tags
 		return item
