@@ -417,6 +417,6 @@ def is_celery_worker_alive():
 	result = bool(result)
 	if result:
 		console.print('Celery worker is alive !', style='bold green')
-	# else:
-		# console.print('No Celery worker alive.', style='bold red')
+	else:
+		console.print('No Celery worker alive.', style='bold orange1')
 	return result

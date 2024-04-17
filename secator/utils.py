@@ -1,4 +1,3 @@
-import importlib
 import inspect
 import itertools
 import logging
@@ -195,7 +194,7 @@ def import_dynamic(cls_path, cls_root='Command'):
 	"""
 	try:
 		package, name = cls_path.rsplit(".", maxsplit=1)
-		cls = getattr(importlib.import_module(package), name)
+		cls = getattr(import_module(package), name)
 		root_cls = inspect.getmro(cls)[-2]
 		if root_cls.__name__ == cls_root:
 			return cls

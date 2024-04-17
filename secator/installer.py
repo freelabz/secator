@@ -261,7 +261,7 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 	Return:
 		dict: Version info.
 	"""
-	from pkg_resources import parse_version
+	from packaging import version as _version
 	from secator.installer import GithubInstaller
 	info = {
 		'name': name,
@@ -291,7 +291,7 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 		if version == 'failed':
 			info['status'] = 'failed'
 		elif version and latest_version:
-			if parse_version(version) < parse_version(latest_version):
+			if _version.parse(version) < _version.parse(latest_version):
 				info['status'] = 'outdated'
 			else:
 				info['status'] = 'latest'
