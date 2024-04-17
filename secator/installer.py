@@ -241,6 +241,8 @@ def get_version(version_cmd):
 	import re
 	regex = r'[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
+	if ret.return_code != 0:
+		return 'failed'
 	match = re.findall(regex, ret.output)
 	if not match:
 		return ''
@@ -286,7 +288,9 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 
 	if location:
 		info['installed'] = True
-		if version and latest_version:
+		if version == 'failed':
+			info['status'] = 'failed'
+		elif version and latest_version:
 			if parse_version(version) < parse_version(latest_version):
 				info['status'] = 'outdated'
 			else:
@@ -317,6 +321,8 @@ def fmt_health_table_row(version_info, category=None):
 		_version += ' [bold red](outdated)[/]'
 	elif status == 'missing':
 		_version = '[bold red]missing[/]'
+	elif status == 'failed':
+		_version = '[bold red]failed[/]'
 	elif status == 'ok':
 		_version = '[bold green]ok        [/]'
 	elif status:

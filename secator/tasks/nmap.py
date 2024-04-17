@@ -53,7 +53,7 @@ class nmap(VulnMulti):
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
 	install_cmd = (
-		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
+		'sudo apk add nmap nmap-scripts && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
 	proxychains = True
