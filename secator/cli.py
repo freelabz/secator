@@ -106,9 +106,16 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
+	from secator.definitions import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
 	if not ADDONS_ENABLED['worker']:
 		console.print('[bold red]Missing worker addon: please run `secator install addons worker`[/].')
 		sys.exit(1)
+	broker_protocol = CELERY_BROKER_URL.split('://')[0]
+	backend_protocol = CELERY_RESULT_BACKEND.split('://')[0]
+	if CELERY_BROKER_URL:
+		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
+			console.print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
+			sys.exit(1)
 	from secator.celery import app, is_celery_worker_alive
 	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
 	debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
