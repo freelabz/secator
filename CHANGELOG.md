@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.4](https://github.com/freelabz/secator/compare/v0.3.3...v0.3.4) (2024-04-15)
+
+
+### Bug Fixes
+
+* install cariddi from GitHub releases ([#290](https://github.com/freelabz/secator/issues/290)) ([21c9078](https://github.com/freelabz/secator/commit/21c90787713fc08fcf375b37b144a4b86ebc49ee))
+* install cariddi from GitHub releases ([#292](https://github.com/freelabz/secator/issues/292)) ([8be216b](https://github.com/freelabz/secator/commit/8be216b01cb2fbc82aca7be32fc190adf17bda52))
+
+## [0.3.3](https://github.com/freelabz/secator/compare/v0.3.2...v0.3.3) (2024-04-13)
+
+
+### Bug Fixes
+
+* tools install ([#288](https://github.com/freelabz/secator/issues/288)) ([0608a1f](https://github.com/freelabz/secator/commit/0608a1f408551942fca3c729b975b1acbb588903))
+
+
+### Documentation
+
+* update Docker instructions ([21afd3f](https://github.com/freelabz/secator/commit/21afd3fea06bb2f8ca11a37ec14a5a78d5c0ecb1))
+
 ## [0.3.2](https://github.com/freelabz/secator/compare/v0.3.1...v0.3.2) (2024-04-12)
 
 
