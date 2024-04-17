@@ -111,8 +111,12 @@ class Runner:
 		# Determine report folder
 		default_reports_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
 		_id = get_task_folder_id(default_reports_folder_base)
-		default_report_folder = f'{default_reports_folder_base}/{_id}'
-		self.reports_folder = run_opts.get('reports_folder') or default_report_folder
+		self.reports_folder = f'{default_reports_folder_base}/{_id}'
+
+		# Make reports folders
+		os.makedirs(self.reports_folder, exist_ok=True)
+		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
+		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
 
 		# Process input
 		self.input = targets
@@ -214,11 +218,6 @@ class Runner:
 	def __iter__(self):
 		if self.print_start:
 			self.log_start()
-
-		# Make reports folders
-		os.makedirs(self.reports_folder, exist_ok=True)
-		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
-		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
 
 		if not self.input_valid:
 			return
