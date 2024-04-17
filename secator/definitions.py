@@ -4,14 +4,14 @@ import os
 import requests
 
 from dotenv import find_dotenv, load_dotenv
-from pkg_resources import get_distribution
+from importlib.metadata import version
 
 from secator.rich import console
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # Globals
-VERSION = get_distribution('secator').version
+VERSION = version('secator')
 ASCII = f"""
 			 __            
    ________  _________ _/ /_____  _____
