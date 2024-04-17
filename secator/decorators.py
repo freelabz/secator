@@ -24,7 +24,6 @@ RUNNER_OPTS = {
 
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
-	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
 	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
@@ -264,7 +263,6 @@ def register_runner(cli_endpoint, config):
 	def func(ctx, **opts):
 		opts.update(fmt_opts)
 		sync = opts['sync']
-		worker = opts['worker']
 		# debug = opts['debug']
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
@@ -275,13 +273,22 @@ def register_runner(cli_endpoint, config):
 		# opts.update(unknown_opts)
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
-		if sync or show or not ADDONS_ENABLED['worker']:
+		if sync or show:
 			sync = True
-		elif worker:
-			sync = False
-		else:  # automatically run in worker if it's alive
+		else:
 			from secator.celery import is_celery_worker_alive
-			sync = not is_celery_worker_alive()
+			worker_alive = is_celery_worker_alive()
+			if not worker_alive:
+				sync = True
+			else:
+				sync = False
+				from secator.definitions import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
+				broker_protocol = CELERY_BROKER_URL.split('://')[0]
+				backend_protocol = CELERY_RESULT_BACKEND.split('://')[0]
+				if CELERY_BROKER_URL:
+					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
+						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
+						sys.exit(1)
 		opts['sync'] = sync
 		opts.update({
 			'print_item': not sync,
@@ -293,8 +300,8 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = {}
 		if driver == 'mongodb':
-			if not ADDONS_ENABLED['mongo']:
-				_get_rich_console().print('[bold red]Missing MongoDB dependencies: please run `secator install addons mongodb`[/].')
+			if not ADDONS_ENABLED['mongodb']:
+				_get_rich_console().print('[bold red]Missing `mongodb` addon: please run `secator install addons mongodb`[/].')
 				sys.exit(1)
 			from secator.hooks.mongodb import MONGODB_HOOKS
 			hooks = MONGODB_HOOKS
