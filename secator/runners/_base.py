@@ -14,7 +14,8 @@ from rich.panel import Panel
 from rich.progress import Progress as RichProgress
 from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY, REPORTS_FOLDER
+from secator.definitions import DEBUG
+from secator.piny import config
 from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
@@ -48,7 +49,7 @@ class Runner:
 	"""Runner class.
 
 	Args:
-		config (secator.config.ConfigLoader): Loaded config.
+		cfg (secator.config.ConfigLoader): Loaded config.
 		targets (list): List of targets to run task on.
 		results (list): List of existing results to re-use.
 		workspace_name (str): Workspace name.
@@ -79,10 +80,10 @@ class Runner:
 	# Reports folder
 	reports_folder = None
 
-	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
-		self.config = config
-		self.name = run_opts.get('name', config.name)
-		self.description = run_opts.get('description', config.description)
+	def __init__(self, cfg, targets, results=[], run_opts={}, hooks={}, context={}):
+		self.config = cfg
+		self.name = run_opts.get('name', cfg.name)
+		self.description = run_opts.get('description', cfg.description)
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
@@ -109,7 +110,7 @@ class Runner:
 		self.celery_result = None
 
 		# Determine report folder
-		default_reports_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
+		default_reports_folder_base = f'{config.folders.reports}/{self.workspace_name}/{self.config.type}s'
 		_id = get_task_folder_id(default_reports_folder_base)
 		self.reports_folder = f'{default_reports_folder_base}/{_id}'
 
@@ -850,7 +851,8 @@ class Runner:
 
 		if item._type == 'progress' and item._source == self.config.name:
 			self.progress = item.percent
-			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < DEFAULT_PROGRESS_UPDATE_FREQUENCY:
+			update_frequency = config.runners.progress_update_frequency
+			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:
 				return None
 			elif int(item.percent) in [0, 100]:
 				return None

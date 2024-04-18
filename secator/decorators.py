@@ -6,6 +6,7 @@ from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
 from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
+from secator.piny import config
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
@@ -187,7 +188,7 @@ def task():
 	return decorator
 
 
-def register_runner(cli_endpoint, config):
+def register_runner(cli_endpoint, cfg):
 	fmt_opts = {
 		'print_cmd': True,
 	}
@@ -205,13 +206,13 @@ def register_runner(cli_endpoint, config):
 			get_command_cls(task)
 			for workflow in ALL_CONFIGS.workflow
 			for task in Task.get_tasks_from_conf(workflow.tasks)
-			if workflow.name in list(config.workflows.keys())
+			if workflow.name in list(cfg.workflows.keys())
 		]
 		input_type = 'targets'
-		name = config.name
-		short_help = config.description or ''
-		if config.alias:
-			short_help += f' [dim]alias: {config.alias}'
+		name = cfg.name
+		short_help = cfg.description or ''
+		if cfg.alias:
+			short_help += f' [dim]alias: {cfg.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
 		fmt_opts['print_progress'] = False
@@ -220,13 +221,13 @@ def register_runner(cli_endpoint, config):
 	elif cli_endpoint.name == 'workflow':
 		# TODO: this should be refactored to workflow.get_tasks_from_conf() or workflow.tasks
 		tasks = [
-			get_command_cls(task) for task in Task.get_tasks_from_conf(config.tasks)
+			get_command_cls(task) for task in Task.get_tasks_from_conf(cfg.tasks)
 		]
 		input_type = 'targets'
-		name = config.name
-		short_help = config.description or ''
-		if config.alias:
-			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
+		name = cfg.name
+		short_help = cfg.description or ''
+		if cfg.alias:
+			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {cfg.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
 		fmt_opts['print_progress'] = False
@@ -234,12 +235,12 @@ def register_runner(cli_endpoint, config):
 
 	elif cli_endpoint.name == 'task':
 		tasks = [
-			get_command_cls(config.name)
+			get_command_cls(cfg.name)
 		]
-		task_cls = Task.get_task_class(config.name)
+		task_cls = Task.get_task_class(cfg.name)
 		task_category = get_command_category(task_cls)
 		input_type = task_cls.input_type or 'targets'
-		name = config.name
+		name = cfg.name
 		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
 		fmt_opts['print_item_count'] = True
 		runner_cls = Task
@@ -282,10 +283,9 @@ def register_runner(cli_endpoint, config):
 				sync = True
 			else:
 				sync = False
-				from secator.definitions import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
-				broker_protocol = CELERY_BROKER_URL.split('://')[0]
-				backend_protocol = CELERY_RESULT_BACKEND.split('://')[0]
-				if CELERY_BROKER_URL:
+				broker_protocol = config.celery.broker_url.split('://')[0]
+				backend_protocol = config.celery.result_backend.split('://')[0]
+				if config.celery.broker_url:
 					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 						sys.exit(1)
@@ -307,12 +307,12 @@ def register_runner(cli_endpoint, config):
 			hooks = MONGODB_HOOKS
 
 		# Build exporters
-		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
+		runner = runner_cls(cfg, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}
 	cli_endpoint.command(
-		name=config.name,
+		name=cfg.name,
 		context_settings=settings,
 		no_args_is_help=no_args_is_help,
 		short_help=short_help)(func)

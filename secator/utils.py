@@ -19,8 +19,8 @@ import ifaddr
 import yaml
 from rich.markdown import Markdown
 
-from secator.definitions import (DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT, VERSION, DEV_PACKAGE, ROOT_FOLDER,
-								 LIB_FOLDER)
+from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.piny import config, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def expand_input(input):
 	"""
 	if input is None:  # read from stdin
 		console.print('Waiting for input on stdin ...', style='bold yellow')
-		rlist, _, _ = select.select([sys.stdin], [], [], DEFAULT_STDIN_TIMEOUT)
+		rlist, _, _ = select.select([sys.stdin], [], [], config.cli.stdin_timeout)
 		if rlist:
 			data = sys.stdin.read().splitlines()
 		else:

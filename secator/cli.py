@@ -13,8 +13,8 @@ from rich.rule import Rule
 
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ADDONS_ENABLED, ASCII, CVES_FOLDER, DATA_FOLDER, DEV_PACKAGE, OPT_NOT_SUPPORTED,
-								 PAYLOADS_FOLDER, REVSHELLS_FOLDER, ROOT_FOLDER, VERSION)
+from secator.definitions import (ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION)
+from secator.piny import config, ROOT_FOLDER
 from secator.installer import ToolInstaller, get_version_info, get_health_table, fmt_health_table_row
 from secator.rich import console
 from secator.runners import Command
@@ -106,13 +106,13 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
-	from secator.definitions import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
+	from secator.piny import config
 	if not ADDONS_ENABLED['worker']:
 		console.print('[bold red]Missing worker addon: please run `secator install addons worker`[/].')
 		sys.exit(1)
-	broker_protocol = CELERY_BROKER_URL.split('://')[0]
-	backend_protocol = CELERY_RESULT_BACKEND.split('://')[0]
-	if CELERY_BROKER_URL:
+	broker_protocol = config.celery.broker_url.split('://')[0]
+	backend_protocol = config.celery.result_backend.split('://')[0]
+	if config.celery.broker_url:
 		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 			console.print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 			sys.exit(1)
@@ -186,10 +186,10 @@ def revshell(name, host, port, interface, listen, force):
 			return
 
 	# Download reverse shells JSON from repo
-	revshells_json = f'{REVSHELLS_FOLDER}/revshells.json'
+	revshells_json = f'{config.folders.revshells}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
 		ret = Command.execute(
-			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {REVSHELLS_FOLDER}',  # noqa: E501
+			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {config.folders.revshells}',  # noqa: E501
 			cls_attributes={'shell': True}
 		)
 		if not ret.return_code == 0:
@@ -248,7 +248,7 @@ def revshell(name, host, port, interface, listen, force):
 
 
 @util.command()
-@click.option('--directory', '-d', type=str, default=PAYLOADS_FOLDER, show_default=True, help='HTTP server directory')
+@click.option('--directory', '-d', type=str, default=config.folders.payloads, show_default=True, help='HTTP server directory')
 @click.option('--host', '-h', type=str, default=None, help='HTTP host')
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
@@ -636,7 +636,7 @@ def install_google():
 		cmd=f'{sys.executable} -m pip install secator[google]',
 		title='google addon',
 		next_steps=[
-			'Set the "GOOGLE_CREDENTIALS_PATH" and "GOOGLE_DRIVE_PARENT_FOLDER_ID" environment variables.',
+			'Set the "config.addons.google.credentials_path" and "config.addons.google.drive_parent_folder_id" environment variables.',
 			'Run "secator x httpx testphp.vulnweb.com -o gdrive" to admire your results flowing to Google Drive.'
 		]
 	)
@@ -664,8 +664,8 @@ def install_redis():
 		title='redis addon',
 		next_steps=[
 			'[dim]\[optional][/] Run "docker run --name redis -p 6379:6379 -d redis" to run a local Redis instance.',
-			'Set the "CELERY_BROKER_URL=redis://<url>" environment variable pointing to your Redis instance.',
-			'Set the "CELERY_RESULT_BACKEND=redis://<url>" environment variable pointing to your Redis instance.',
+			'Set `celery.broker_url=redis://<url>` in your config.'
+			'Set `celery.result_backend=redis://<url>` in your config.'
 			'Run "secator worker" to run a worker.',
 			'Run "secator x httpx testphp.vulnweb.com" to run a test task.'
 		]
@@ -761,18 +761,18 @@ def install_tools(cmds):
 @click.option('--force', is_flag=True)
 def install_cves(force):
 	"""Install CVEs (enables passive vulnerability search)."""
-	cve_json_path = f'{CVES_FOLDER}/circl-cve-search-expanded.json'
+	cve_json_path = f'{config.folders.cves}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
-			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=CVES_FOLDER)
+			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=config.folders.cves)
 		with console.status('[bold yellow]Unzipping CVEs ...[/]'):
-			Command.execute(f'gunzip {CVES_FOLDER}/circl-cve-search-expanded.json.gz', cwd=CVES_FOLDER)
-	with console.status(f'[bold yellow]Installing CVEs to {CVES_FOLDER} ...[/]'):
+			Command.execute(f'gunzip {config.folders.cves}/circl-cve-search-expanded.json.gz', cwd=config.folders.cves)
+	with console.status(f'[bold yellow]Installing CVEs to {config.folders.cves} ...[/]'):
 		with open(cve_json_path, 'r') as f:
 			for line in f:
 				data = json.loads(line)
 				cve_id = data['id']
-				cve_path = f'{CVES_FOLDER}/{cve_id}.json'
+				cve_path = f'{config.folders.cves}/{cve_id}.json'
 				with open(cve_path, 'w') as f:
 					f.write(line)
 				console.print(f'CVE saved to {cve_path}')
@@ -813,7 +813,7 @@ def alias():
 @click.pass_context
 def enable_aliases(ctx):
 	"""Enable aliases."""
-	fpath = f'{DATA_FOLDER}/.aliases'
+	fpath = f'{config.folders.data}/.aliases'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = '\n'.join(aliases)
 	with open(fpath, 'w') as f:
@@ -835,7 +835,7 @@ echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load 
 @click.pass_context
 def disable_aliases(ctx):
 	"""Disable aliases."""
-	fpath = f'{DATA_FOLDER}/.unalias'
+	fpath = f'{config.folders.data}/.unalias'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = ''
 	for alias in aliases:
@@ -938,8 +938,10 @@ def unit(tasks, workflows, scans, test, debug=False):
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
-	os.environ['DEFAULT_STORE_HTTP_RESPONSES'] = '0'
-	os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
+
+	# TODO: set secator config instead
+	# os.environ['DEFAULT_STORE_HTTP_RESPONSES'] = '0'
+	# os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
 
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
 	if test:
@@ -963,7 +965,9 @@ def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['DEBUG'] = str(debug)
-	os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
+
+	# TODO: set secator config instead
+	# os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
 	cmd = f'{sys.executable} -m unittest'
 	if test:
 		if not test.startswith('tests.integration'):

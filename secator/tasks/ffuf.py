@@ -7,7 +7,8 @@ from secator.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 								 PERCENT, PROXY, RATE_LIMIT, RETRIES,
 								 STATUS_CODE, THREADS, TIME, TIMEOUT,
-								 USER_AGENT, WORDLIST, WORDLISTS_FOLDER)
+								 USER_AGENT, WORDLIST)
+from secator.piny import config
 from secator.output_types import Progress, Url
 from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
@@ -70,7 +71,7 @@ class ffuf(HttpFuzzer):
 		},
 	}
 	encoding = 'ansi'
-	install_cmd = f'go install -v github.com/ffuf/ffuf@latest && sudo git clone https://github.com/danielmiessler/SecLists {WORDLISTS_FOLDER}/seclists || true'  # noqa: E501
+	install_cmd = f'go install -v github.com/ffuf/ffuf@latest'  # noqa: E501
 	install_github_handle = 'ffuf/ffuf'
 	proxychains = False
 	proxy_socks5 = True
