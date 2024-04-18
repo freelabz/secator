@@ -1,10 +1,13 @@
-from pydantic import BaseModel, DirectoryPath, NewPath, computed_field, validator
-from piny import PydanticV2Validator, MatcherWithDefaults, YamlLoader, errors
 import sys
-from typing import Union, List, Dict
-from secator.rich import console
 from pathlib import Path
+from typing import Dict, List, Union
+
 import requests
+from dotmap import DotMap
+from piny import MatcherWithDefaults, PydanticV2Validator, YamlLoader, errors
+from pydantic import BaseModel, DirectoryPath, NewPath, computed_field
+
+from secator.rich import console
 
 PotentialDirectoryPath = Union[DirectoryPath, NewPath]
 
@@ -150,7 +153,10 @@ class Scans(BaseModel):
 
 class Wordlists(BaseModel):
 	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains'}
-	files: Dict[str, str] = {'bo0m_fuzz': 'https://github.com/Bo0oM/fuzz.txt/blob/master/fuzz.txt', 'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt'}
+	files: Dict[str, str] = {
+		'bo0m_fuzz': 'https://github.com/Bo0oM/fuzz.txt/blob/master/fuzz.txt',
+		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt'  # noqa: E501
+	}
 	lists: Dict[str, List[str]] = {}
 
 
@@ -204,9 +210,7 @@ try:
 	).load()
 
 	# Convert to dotmap for easier access
-	from dotmap import DotMap
 	config = DotMap(config)
-
 
 	# Create folders if they don't exist already
 	for name, dir in config.folders.items():

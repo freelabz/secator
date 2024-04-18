@@ -58,8 +58,8 @@ def task():
 
 
 for cls in ALL_TASKS:
-	config = DotMap({'name': cls.__name__, 'type': 'task'})
-	register_runner(task, config)
+	cfg = DotMap({'name': cls.__name__, 'type': 'task'})
+	register_runner(task, cfg)
 
 #----------#
 # WORKFLOW #
@@ -72,8 +72,8 @@ def workflow():
 	pass
 
 
-for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
-	register_runner(workflow, config)
+for cfg in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
+	register_runner(workflow, cfg)
 
 
 #------#
@@ -86,8 +86,8 @@ def scan():
 	pass
 
 
-for config in sorted(ALL_SCANS, key=lambda x: x['name']):
-	register_runner(scan, config)
+for cfg in sorted(ALL_SCANS, key=lambda x: x['name']):
+	register_runner(scan, cfg)
 
 
 #--------#
@@ -248,7 +248,7 @@ def revshell(name, host, port, interface, listen, force):
 
 
 @util.command()
-@click.option('--directory', '-d', type=str, default=config.folders.payloads, show_default=True, help='HTTP server directory')
+@click.option('--directory', '-d', type=str, default=config.folders.payloads, help='HTTP server directory')
 @click.option('--host', '-h', type=str, default=None, help='HTTP host')
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
@@ -636,7 +636,7 @@ def install_google():
 		cmd=f'{sys.executable} -m pip install secator[google]',
 		title='google addon',
 		next_steps=[
-			'Set the "config.addons.google.credentials_path" and "config.addons.google.drive_parent_folder_id" environment variables.',
+			'Set the "config.addons.google.credentials_path" and "config.addons.google.drive_parent_folder_id" environment variables.',  # noqa: E501
 			'Run "secator x httpx testphp.vulnweb.com -o gdrive" to admire your results flowing to Google Drive.'
 		]
 	)

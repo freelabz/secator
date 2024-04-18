@@ -8,7 +8,6 @@ from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, USER_AGENT)
-from secator.piny import config
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
 

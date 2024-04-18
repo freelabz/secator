@@ -6,7 +6,6 @@ from dotenv import find_dotenv, load_dotenv
 from importlib.metadata import version
 
 from secator.piny import config, ROOT_FOLDER
-from secator.rich import console
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
 

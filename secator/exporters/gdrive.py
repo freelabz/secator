@@ -20,7 +20,7 @@ class GdriveExporter(Exporter):
 			console.print(':file_cabinet: Missing config.addons.google.credentials_path to save to Google Sheets', style='red')
 			return
 		if not config.addons.google.drive_parent_folder_id:
-			console.print(':file_cabinet: Missing config.addons.google.drive_parent_folder_id to save to Google Sheets.', style='red')
+			console.print(':file_cabinet: Missing config.addons.google.drive_parent_folder_id to save to Google Sheets.', style='red')  # noqa: E501
 			return
 		client = gspread.service_account(config.addons.google.credentials_path)
 

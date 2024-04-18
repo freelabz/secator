@@ -6,12 +6,11 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE,
-								 DELAY, DEPTH, DESCRIPTION, FILTER_CODES, FILTER_REGEX,
-								 FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, MATCH_CODES, MATCH_REGEX,
-								 MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT, USERNAME, WORDLIST)
-from secator.piny import config
+from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
+								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
+								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.piny import config
 from secator.rich import console
