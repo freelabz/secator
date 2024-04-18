@@ -1,15 +1,21 @@
 import sys
 from pathlib import Path
 from typing import Dict, List, Union
+from typing_extensions import Annotated
 
 import requests
 from dotmap import DotMap
 from piny import MatcherWithDefaults, PydanticV2Validator, YamlLoader, errors
-from pydantic import BaseModel, DirectoryPath, NewPath, computed_field
+from pydantic import AfterValidator, BaseModel, DirectoryPath, NewPath, computed_field
+from pydantic.types import PathType
 
 from secator.rich import console
 
-PotentialDirectoryPath = Union[DirectoryPath, NewPath]
+expand_home = AfterValidator(lambda v: v.expanduser())
+PotentialDirectoryPath = Union[
+	Annotated[Path, expand_home, PathType('dir')],
+	Annotated[Path, expand_home, PathType('new')]
+]
 
 ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
@@ -92,63 +98,23 @@ class HTTP(BaseModel):
 
 
 class Tasks(BaseModel):
-	print_start: bool = False
-	print_item: bool = False
-	print_line: bool = False
-	print_errors: bool = False
-	print_item_count: bool = False
-	print_cmd: bool = False
-	print_run_opts: bool = False
-	print_fmt_opts: bool = False
-	print_input_file: bool = False
-	print_hooks: bool = False
-	print_progress: bool = False
-	print_remote_status: bool = False
-	print_run_summary: bool = False
-	print_json: bool = False
-	print_raw: bool = False
-	raise_on_error: bool = False
 	exporters: List[str] = ['json', 'csv']
 
 
 class Workflows(BaseModel):
-	print_start: bool = False
-	print_item: bool = False
-	print_line: bool = False
-	print_errors: bool = False
-	print_item_count: bool = False
-	print_cmd: bool = False
-	print_run_opts: bool = False
-	print_fmt_opts: bool = False
-	print_input_file: bool = False
-	print_hooks: bool = False
-	print_progress: bool = False
-	print_remote_status: bool = False
-	print_run_summary: bool = False
-	print_json: bool = False
-	print_raw: bool = False
-	raise_on_error: bool = False
 	exporters: List[str] = ['json', 'csv']
 
 
 class Scans(BaseModel):
-	print_start: bool = False
-	print_item: bool = False
-	print_line: bool = False
-	print_errors: bool = False
-	print_item_count: bool = False
-	print_cmd: bool = False
-	print_run_opts: bool = False
-	print_fmt_opts: bool = False
-	print_input_file: bool = False
-	print_hooks: bool = False
-	print_progress: bool = False
-	print_remote_status: bool = False
-	print_run_summary: bool = False
-	print_json: bool = False
-	print_raw: bool = False
-	raise_on_error: bool = False
 	exporters: List[str] = ['json', 'csv']
+
+
+class Payloads(BaseModel):
+	files: Dict[str, str] = {
+		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
+		'linpeas': 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh',
+		'sudo_killer': 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/V3/SUDO_KILLERv3.sh'
+	}
 
 
 class Wordlists(BaseModel):
@@ -182,10 +148,6 @@ class Addons(BaseModel):
 	mongodb: MongodbAddon = MongodbAddon()
 
 
-class Payloads(BaseModel):
-	templates: List[str] = []
-
-
 class ConfigModel(BaseModel):
 	folders: Folders = Folders()
 	debug: Debug = Debug()
@@ -196,56 +158,124 @@ class ConfigModel(BaseModel):
 	tasks: Tasks = Tasks()
 	workflows: Workflows = Workflows()
 	scans: Scans = Scans()
-	wordlists: Wordlists = Wordlists()
 	payloads: Payloads = Payloads()
+	wordlists: Wordlists = Wordlists()
 	addons: Addons = Addons()
 
 
+# Load configs
 try:
-	config = YamlLoader(
-		f'{LIB_FOLDER}/configs/config.yml',
+	default_config_path = LIB_FOLDER / 'configs' / 'config.yml'
+	default_config = YamlLoader(
+		default_config_path,
 		matcher=MatcherWithDefaults,
 		validator=PydanticV2Validator,
 		schema=ConfigModel,
 	).load()
 
 	# Convert to dotmap for easier access
-	config = DotMap(config)
+	config = DotMap(default_config)
 
-	# Create folders if they don't exist already
-	for name, dir in config.folders.items():
-		if not dir.exists():
-			console.print(f'[bold turquoise4]Creating folder {dir} ...[/] ', end='')
-			dir.mkdir(parents=False)
-			console.print('[bold green]ok.[/]')
+	# Load user configs
+	user_configs = [
+		config.folders.data / 'config.yml',
+		Path.cwd() / 'config.yml'
+	]
+	for config_path in user_configs:
+		if config_path.exists():
+			config = YamlLoader(
+				config_path,
+				matcher=MatcherWithDefaults,
+				validator=PydanticV2Validator,
+				schema=ConfigModel
+			).load()
+			console.print(f'Using custom config at {config_path}')
 
 	# Set default Celery backend
 	if not config.celery.result_backend:
 		config.celery.result_backend = f'file://{config.folders.celery_results}'
 
-	# Download default wordlists
-	wordlist = config.folders.wordlists
-	for name, url in config.wordlists.files.items():
-		name_txt = f'{name}.txt'
-		target_path = wordlist / name_txt
-		if not target_path.exists():
-			try:
-				console.print(f'[bold turquoise4]Downloading wordlist [bold magenta]{name_txt}[/] ...[/] ', end='')
-				resp = requests.get(url)
-				target_path.touch()
-				with target_path.open('w') as f:
-					f.write(resp.text)
-				console.print('[bold green]ok.[/]')
-				config.wordlists.files[name] = target_path.resolve()
-			except requests.exceptions.RequestException as e:
-				console.print(f'[bold green]failed ({type(e).__name__}).[/]')
-				pass
-		else:
-			config.wordlists.files[name] = target_path.resolve()
-	for category, name in config.wordlists.defaults.items():
-		if name in config.wordlists.files.keys():
-			config.wordlists.defaults[category] = str(config.wordlists.files[name])
+	# Save default config to configs/ folder
+	import os
+	if os.environ.get('SAVE_DEFAULT_CONFIG', '0') == '1':
+		console.print(f'Saving default config to {default_config_path}')
+		import yaml
+		from pathlib import Path, PosixPath, WindowsPath
+		home = str(Path.home())
+		config.celery.result_backend = config.celery.result_backend.replace(home, '~')
+
+		def posix_path_representer(dumper, data):
+			path = str(data)
+			if path.startswith(home):
+				path = path.replace(home, '~')
+			return dumper.represent_scalar('tag:yaml.org,2002:str', path)
+
+		class LineBreakDumper(yaml.SafeDumper):
+			def write_line_break(self, data=None):
+				super().write_line_break(data)
+				if len(self.indents) == 1:
+					super().write_line_break()
+
+		LineBreakDumper.add_representer(Path, posix_path_representer)
+		LineBreakDumper.add_representer(PosixPath, posix_path_representer)
+		LineBreakDumper.add_representer(WindowsPath, posix_path_representer)
+
+		with default_config_path.open('w') as f:
+			f.write(yaml.dump(default_config, Dumper=LineBreakDumper, sort_keys=False))
 
 except errors.ValidationError as e:
 	print(str(e))
 	sys.exit(0)
+
+
+# Create folders if they don't exist already
+for name, dir in config.folders.items():
+	if not dir.exists():
+		console.print(f'[bold turquoise4]Creating folder {dir} ...[/] ', end='')
+		dir.mkdir(parents=False)
+		console.print('[bold green]ok.[/]')
+
+# Download wordlists
+for name, url in config.wordlists.files.items():
+	filename = url.split('/')[-1]
+	target_path = config.folders.wordlists / filename
+	if not target_path.exists():
+		try:
+			console.print(f'[bold turquoise4]Downloading wordlist [bold magenta]{filename}[/] ...[/] ', end='')
+			resp = requests.get(url)
+			target_path.touch()
+			with target_path.open('w') as f:
+				f.write(resp.text)
+			console.print('[bold green]ok.[/]')
+			config.wordlists.files[name] = target_path.resolve()
+		except requests.exceptions.RequestException as e:
+			console.print(f'[bold green]failed ({type(e).__name__}).[/]')
+			pass
+	else:
+		config.wordlists.files[name] = target_path.resolve()
+
+# Set default wordlists
+for category, name in config.wordlists.defaults.items():
+	if name in config.wordlists.files.keys():
+		config.wordlists.defaults[category] = str(config.wordlists.files[name])
+
+# Download default payloads
+for name, url in config.payloads.files.items():
+	filename = url.split('/')[-1]
+	target_path = config.folders.payloads / filename
+	if not target_path.exists():
+		try:
+			console.print(f'[bold turquoise4]Downloading payload [bold magenta]{filename}[/] ...[/] ', end='')
+			resp = requests.get(url)
+			target_path.touch()
+			with target_path.open('w') as f:
+				f.write(resp.text)
+			console.print('[bold green]ok.[/]')
+			config.wordlists.files[name] = target_path.resolve()
+		except requests.exceptions.RequestException as e:
+			console.print(f'[bold green]failed ({type(e).__name__}).[/]')
+			pass
+	else:
+		config.payloads.files[name] = target_path.resolve()
+
+# console.print(config.toDict())

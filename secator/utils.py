@@ -312,10 +312,6 @@ def detect_host(interface=None):
 	return None
 
 
-def find_list_item(array, val, key='id', default=None):
-	return next((item for item in array if item[key] == val), default)
-
-
 def print_results_table(results, title=None, exclude_fields=[], log=False):
 	from secator.output_types import OUTPUT_TYPES
 	from secator.rich import build_table

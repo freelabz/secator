@@ -13,14 +13,13 @@ from rich.rule import Rule
 
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION)
-from secator.piny import config, ROOT_FOLDER
-from secator.installer import ToolInstaller, get_version_info, get_health_table, fmt_health_table_row
+from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
+from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
+from secator.piny import ROOT_FOLDER, config
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
-from secator.utils import (debug, detect_host, discover_tasks, find_list_item, flatten,
-						   print_results_table, print_version)
+from secator.utils import debug, detect_host, discover_tasks, flatten, print_results_table, print_version
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -254,36 +253,6 @@ def revshell(name, host, port, interface, listen, force):
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
 	"""Run HTTP server to serve payloads."""
-	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
-	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
-	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/V3/SUDO_KILLERv3.sh'
-	PAYLOADS = [
-		{
-			'fname': 'lse.sh',
-			'description': 'Linux Smart Enumeration',
-			'command': f'wget {LSE_URL} -O lse.sh && chmod 700 lse.sh'
-		},
-		{
-			'fname': 'linpeas.sh',
-			'description': 'Linux Privilege Escalation Awesome Script',
-			'command': f'wget {LINPEAS_URL} -O linpeas.sh && chmod 700 linpeas.sh'
-		},
-		{
-			'fname': 'sudo_killer.sh',
-			'description': 'SUDO_KILLER',
-			'command': f'wget {SUDOKILLER_URL} -O sudo_killer.sh && chmod 700 sudo_killer.sh'
-		}
-	]
-	for ix, payload in enumerate(PAYLOADS):
-		descr = payload.get('description', '')
-		fname = payload['fname']
-		if not os.path.exists(f'{directory}/{fname}'):
-			with console.status(f'[bold yellow][{ix}/{len(PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
-				cmd = payload['command']
-				console.print(f'[bold magenta]{fname} [dim]({descr})[/] ...[/]', )
-				Command.execute(cmd, cls_attributes={'shell': True}, cwd=directory)
-		console.print()
-
 	console.print(Rule())
 	console.print(f'Available payloads in {directory}: ', style='bold yellow')
 	for fname in os.listdir(directory):
@@ -294,9 +263,7 @@ def serve(directory, host, port, interface):
 					f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.',
 					style='bold red')
 				return
-		payload = find_list_item(PAYLOADS, fname, key='fname', default={})
-		fdescr = payload.get('description', 'No description')
-		console.print(f'{fname} [dim]({fdescr})[/]', style='bold magenta')
+		console.print(f'{fname} [dim][/]', style='bold magenta')
 		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
 		console.print('')
 	console.print(Rule())
