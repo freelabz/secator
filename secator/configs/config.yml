@@ -1,7 +1,7 @@
 dirs:
   bin: ~/.local/bin
   data: ~/.secator
-  configs: ~/.secator/configs
+  templates: ~/.secator/templates
   reports: ~/.secator/reports
   wordlists: ~/.secator/wordlists
   cves: ~/.secator/cves
@@ -59,7 +59,7 @@ payloads:
   templates:
     lse: https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh
     linpeas: https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh
-    sudo_killer: https://github.com/TH3xACE/SUDO_KILLER
+    sudo_killer: git+https://github.com/TH3xACE/SUDO_KILLER
 
 wordlists:
   defaults:

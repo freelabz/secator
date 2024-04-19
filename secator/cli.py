@@ -15,7 +15,7 @@ from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
-from secator.piny import ROOT_FOLDER, config
+from secator.piny import config, OFFLINE_MODE, ROOT_FOLDER
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -161,6 +161,9 @@ def util():
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
+	if OFFLINE_MODE:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
 	for _ in range(number):
 		url = proxy.get()
@@ -183,10 +186,15 @@ def revshell(name, host, port, interface, listen, force):
 				f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.',
 				style='bold red')
 			return
+		else:
+			console.print(f'[bold green]Detected host IP: [bold orange1]{host}[/].[/]')
 
 	# Download reverse shells JSON from repo
 	revshells_json = f'{config.dirs.revshells}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
+		if OFFLINE_MODE:
+			console.print('[bold red]Cannot run this command in offline mode.[/]')
+			return
 		ret = Command.execute(
 			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {config.dirs.revshells}',  # noqa: E501
 			cls_attributes={'shell': True}
@@ -436,6 +444,44 @@ def publish_docker(tag, latest):
 
 
 #--------#
+# CONFIG #
+#--------#
+
+@cli.group('config')
+def _config():
+	pass
+
+
+@_config.command('show')
+@click.option('--default', is_flag=True, help='Show default config')
+@click.option('--save', is_flag=True, help='Save default config to configs/config.yml')
+def config_show(default, save):
+	"""Show default secator config."""
+	from secator.piny import config, default_config_path, Config
+	from pathlib import Path
+	if default:
+		tmp_path = Path('tmp_config.yml')
+		with tmp_path.open('w') as f:
+			f.write('_dummy:')
+		cfg = Config.parse(tmp_path)
+		cfg.print(yaml=True)
+		if save:
+			cfg.save(default_config_path)
+			console.print(f'\n[bold green]:tada: Saved default config to [/]{default_config_path}')
+		tmp_path.unlink()
+	else:
+		config.print(yaml=True)
+
+
+@_config.command('edit')
+@click.argument('key')
+@click.argument('value')
+def config_edit(key, value):
+	setattr(config, key, value)
+	config.save()
+
+
+#--------#
 # REPORT #
 #--------#
 
@@ -557,6 +603,9 @@ def health(json, debug):
 
 
 def run_install(cmd, title, next_steps=None):
+	if OFFLINE_MODE:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	with console.status(f'[bold yellow] Installing {title}...'):
 		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_cmd=True, print_line=True)
 		if ret.return_code != 0:
@@ -712,6 +761,9 @@ def install_ruby():
 @click.argument('cmds', required=False)
 def install_tools(cmds):
 	"""Install supported tools."""
+	if OFFLINE_MODE:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	if cmds is not None:
 		cmds = cmds.split(',')
 		tools = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
@@ -728,6 +780,9 @@ def install_tools(cmds):
 @click.option('--force', is_flag=True)
 def install_cves(force):
 	"""Install CVEs (enables passive vulnerability search)."""
+	if OFFLINE_MODE:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	cve_json_path = f'{config.dirs.cves}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
@@ -753,6 +808,9 @@ def install_cves(force):
 @cli.command('update')
 def update():
 	"""[dim]Update to latest version.[/]"""
+	if OFFLINE_MODE:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
 	if info['status'] == 'latest':

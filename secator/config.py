@@ -30,8 +30,8 @@ def load_config(name):
 def find_configs():
 	results = {'scan': [], 'workflow': [], 'profile': []}
 	dirs_type = [CONFIGS_FOLDER]
-	if config.dirs.configs:
-		dirs_type.append(config.dirs.configs)
+	if config.dirs.templates:
+		dirs_type.append(config.dirs.templates)
 	paths = []
 	for dir in dirs_type:
 		dir_paths = [

@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from subprocess import call, DEVNULL
 from typing import Dict, List
 from typing_extensions import Annotated, Self
 
@@ -12,16 +13,18 @@ from pydantic import AfterValidator, BaseModel, model_validator
 from secator.rich import console
 
 Directory = Annotated[Path, AfterValidator(lambda v: v.expanduser())]
+StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.home())))]
 
 ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
+OFFLINE_MODE = bool(int(os.environ.get('OFFLINE_MODE', '0')))
 
 
 class Directories(BaseModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
 	data: Directory = Path.home() / '.secator'
-	configs: Directory = ''
+	templates: Directory = ''
 	reports: Directory = ''
 	wordlists: Directory = ''
 	cves: Directory = ''
@@ -34,7 +37,7 @@ class Directories(BaseModel):
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['configs', 'reports', 'wordlists', 'cves', 'payloads', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -52,7 +55,7 @@ class Celery(BaseModel):
 	broker_connection_timeout: float = 4.0
 	broker_visibility_timeout: int = 3600
 	override_default_logging: bool = True
-	result_backend: str = ''
+	result_backend: StrExpandHome = ''
 
 
 class Cli(BaseModel):
@@ -91,7 +94,7 @@ class Payloads(BaseModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
 		'linpeas': 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh',
-		'sudo_killer': 'https://github.com/TH3xACE/SUDO_KILLER'
+		'sudo_killer': 'git+https://github.com/TH3xACE/SUDO_KILLER'
 	}
 
 
@@ -154,15 +157,20 @@ class Config(DotMap):
 		config = Config(config_dict)
 		config._path = yaml_path
 
-		# HACK: set default result_backend
+		# HACK: set default result_backend if unset
 		if not config.celery.result_backend:
 			config.celery.result_backend = f'file://{config.dirs.celery_results}'
+
 		return config
 
-	def __repr__(self):
-		from rich.syntax import Syntax
-		console.print(Syntax(self.dump(), 'yaml'))
-		return ''
+	def print(self, yaml=False):
+		if yaml:
+			from rich.syntax import Syntax
+			_path = f'# {self._path}\n\n'
+			data = Syntax(_path + self.dump(), 'yaml', theme='github-dark', padding=1)
+		else:
+			data = self.toDict()
+		console.print(data)
 
 	def save(self, target_path=None):
 		if not target_path:
@@ -217,31 +225,63 @@ class Config(DotMap):
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 
-def download_remote_files(data: dict, target_folder: Path, type: str):
-	"""Download remote files to target folder.
+def download_files(data: dict, target_folder: Path, type: str):
+	"""Download remote files to target folder, clone git repos, or symlink local files.
 
 	Args:
-		data (dict): Dict of name to url.
-		target_folder (pathlib.Path): Target folder.
-		type (str): Type of files to download.
+		data (dict): Dict of name to url or local path prefixed with 'git+' for Git repos.
+		target_folder (Path): Target folder for storing files or repos.
+		type (str): Type of files to handle.
 	"""
-	for name, url in data.items():
-		filename = url.split('/')[-1]
-		target_path = target_folder / filename
-		if not target_path.exists():
-			try:
-				console.print(f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ', end='')
-				resp = requests.get(url, timeout=3)
-				resp.raise_for_status()
-				target_path.touch()
-				with target_path.open('w') as f:
-					f.write(resp.text)
-				console.print('[bold green]ok.[/]')
-				data[name] = target_path.resolve()
-			except requests.RequestException as e:
-				console.print(f'[bold green]failed ({type(e).__name__}).[/]')
-				pass
+	for name, url_or_path in data.items():
+		if url_or_path.startswith('git+'):
+			# Clone Git repository
+			git_url = url_or_path[4:]  # remove 'git+' prefix
+			repo_name = git_url.split('/')[-1]
+			if repo_name.endswith('.git'):
+				repo_name = repo_name[:-4]
+			target_path = target_folder / repo_name
+			if not target_path.exists():
+				console.print(f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ', end='')
+				if OFFLINE_MODE:
+					console.print('[bold orange1]skipped [dim](offline)[/].[/]')
+					continue
+				try:
+					call(['git', 'clone', git_url, str(target_path)], stderr=DEVNULL, stdout=DEVNULL)
+					console.print('[bold green]ok.[/]')
+				except Exception as e:
+					console.print(f'[bold red]failed ({str(e)}).[/]')
+			data[name] = target_path.resolve()
+		elif Path(url_or_path).exists():
+			# Create a symbolic link for a local file
+			local_path = Path(url_or_path)
+			target_path = target_folder / local_path.name
+			if not target_path.exists():
+				console.print(f'[bold turquoise4]Symlinking {type} [bold magenta]{local_path.name}[/] ...[/] ', end='')
+				try:
+					target_path.symlink_to(local_path)
+					console.print('[bold green]ok.[/]')
+				except Exception as e:
+					console.print(f'[bold red]failed ({str(e)}).[/]')
+			data[name] = target_path.resolve()
 		else:
+			# Download files from URL
+			filename = url_or_path.split('/')[-1]
+			target_path = target_folder / filename
+			if not target_path.exists():
+				try:
+					console.print(f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ', end='')
+					if OFFLINE_MODE:
+						console.print('[bold orange1]skipped [dim](offline)[/].[/]')
+						continue
+					resp = requests.get(url_or_path, timeout=3)
+					resp.raise_for_status()
+					with open(target_path, 'wb') as f:
+						f.write(resp.content)
+					console.print('[bold green]ok.[/]')
+				except requests.RequestException as e:
+					console.print(f'[bold red]failed ({str(e)}).[/]')
+					continue
 			data[name] = target_path.resolve()
 
 
@@ -262,33 +302,29 @@ try:
 			config = Config.parse(config_path)
 	console.print(f'[bold green]Loaded config [/]{config._path}')
 
-	# Save default config to configs/ folder
-	if os.environ.get('SAVE_DEFAULT_CONFIG', '0') == '1':
-		console.print(f'[bold green]Saved default config to [/]{default_config_path}')
-		default_config.save()
-
 except errors.ValidationError as e:
 	print(str(e))
 	sys.exit(0)
 
 
-# Create folders if they don't exist already
+# Create directories if they don't exist already
 for name, dir in config.dirs.items():
 	if not dir.exists():
-		console.print(f'[bold turquoise4]Creating folder {dir} ...[/] ', end='')
+		console.print(f'[bold turquoise4]Creating directory [bold magenta]{name}[/] ... [/]', end='')
 		dir.mkdir(parents=False)
-		console.print('[bold green]ok.[/]')
+		console.print('[bold green]ok. [/]')
 
 
 # Download wordlists and set defaults
-download_remote_files(config.wordlists.files, config.dirs.wordlists, 'wordlist')
+download_files(config.wordlists.templates, config.dirs.wordlists, 'wordlist')
 for category, name in config.wordlists.defaults.items():
-	if name in config.wordlists.files.keys():
-		config.wordlists.defaults[category] = str(config.wordlists.files[name])
+	if name in config.wordlists.templates.keys():
+		config.wordlists.defaults[category] = str(config.wordlists.templates[name])
 
 
 # Download payloads
-download_remote_files(config.wordlists.files, config.dirs.wordlists, 'payload')
+download_files(config.payloads.templates, config.dirs.payloads, 'payload')
 
+# Print config
 if config.debug.component == 'config':
-	console.print(config)
+	config.print()
