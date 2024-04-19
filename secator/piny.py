@@ -171,6 +171,8 @@ class Config(DotMap):
 		config._path = yaml_path
 		config._partial = DotMap(original_config)
 		config._keymap = Config.build_key_map(config)
+		if config._created:
+			del config._created
 
 		# HACK: set default result_backend if unset
 		if not config.celery.result_backend:
@@ -189,24 +191,32 @@ class Config(DotMap):
 		current_time = datetime.now().isoformat()
 		if not yaml_path:
 			yaml_path = Path(f'tmp_{current_time}.yml')
-			yaml_path.touch()
+		yaml_path.touch()
 		with yaml_path.open('w') as f:
-			f.write(f'_last_updated: {current_time}')
+			f.write(f'_created: {current_time}')
 		return yaml_path
 
 	def print(self, partial=True):
+		yaml_str = Config.dump(self, partial=partial)
+		if not str(self._path).startswith('tmp'):
+			yaml_str = f'# {self._path}\n\n{yaml_str}'
+		Config.print_yaml(yaml_str)
+
+	@staticmethod
+	def print_yaml(string):
 		from rich.syntax import Syntax
-		_path = f'# {self._path}\n\n'
-		data = Syntax(_path + self.dump(partial=partial), 'yaml', theme='github-dark', padding=1)
+		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
 		console.print(data)
 
 	def save(self, target_path: Path = None, partial=True):
 		if not target_path:
 			target_path = self._path
 		with target_path.open('w') as f:
-			f.write(self.dump(partial=partial))
+			f.write(Config.dump(self, partial=partial))
+		self._path = target_path
 
-	def dump(self, partial=True):
+	@staticmethod
+	def dump(config, partial=True):
 		"""Safe dump config as yaml:
 		- `Path`, `PosixPath` and `WindowsPath` objects are translated to strings.
 		- Home directory in paths is replaced with the tilde '~'.
@@ -238,17 +248,19 @@ class Config(DotMap):
 		LineBreakDumper.add_representer(WindowsPath, posix_path_representer)
 
 		# Get data dict
-		data = self.toDict()
+		data = config.toDict()
 
-		# HACK: Replace home dir in result_backend
-		data['celery']['result_backend'] = data['celery']['result_backend'].replace(home, '~')
+		if isinstance(config, Config):
+			# HACK: Replace home dir in result_backend
+			data['celery']['result_backend'] = data['celery']['result_backend'].replace(home, '~')
 
-		# Render either partial or full config
-		if partial:
-			data = data['_partial']
-		else:
-			del data['_path']
-			del data['_partial']
+			# Render either partial or full config
+			if partial:
+				data = data['_partial']
+			else:
+				del data['_path']
+				del data['_partial']
+				del data['_keymap']
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 	@staticmethod
@@ -264,23 +276,27 @@ class Config(DotMap):
 				key_map['_'.join(current_path).upper()] = current_path
 		return key_map
 
-	def get(self, key):
+	def get(self, key=None, print=True):
 		"""Retrieve a value from the configuration using a dotted path."""
-		# Convert dotted key path to the corresponding uppercase key used in _keymap
-		map_key = key.upper().replace('.', '_')
-		if map_key in self._keymap:
-			# Traverse the configuration according to the mapped path
-			result = self
-			for part in self._keymap[map_key]:
-				result = result[part]
-			return result
-		else:
-			console.print(f'[bold red]Key {key} not found in configuration.[/]')
+		value = self
+		if key:
+			for part in key.split('.'):
+				value = value[part]
+		if value is None:
+			console.print(f'[bold red]Key {key} does not exist.[/]')
 			return None
+		if print:
+			if key:
+				yaml_str = Config.dump(DotMap({key: value}))
+			else:
+				yaml_str = Config.dump(self, partial=False)
+			Config.print_yaml(yaml_str)
+		return value
 
 	def set(self, key, value):
 		"""Set a value in the configuration using a dotted path."""
 		# Convert dotted key path to the corresponding uppercase key used in _keymap
+		existing_value = self.get(key, print=False)
 		map_key = key.upper().replace('.', '_')
 		success = False
 		if map_key in self._keymap:
@@ -293,12 +309,21 @@ class Config(DotMap):
 
 			# Set the value on the final part of the path
 			final_key = self._keymap[map_key][-1]
+
+			# Convert the value to the correct type based on the current value type
+			if isinstance(existing_value, bool):
+				value = value.lower() in ("true", "1", "t")
+			elif isinstance(existing_value, int):
+				value = int(value)
+			elif isinstance(existing_value, float):
+				value = float(value)
+
 			target[final_key] = value
 			partial[final_key] = value
-			console.print(f'[bold green]Key {key} set to {value}[/]')
+			self.get(key)
 			success = True
 		else:
-			console.print(f'[bold red]Key {key} not found in configuration. Cannot set value.[/]')
+			console.print(f'[bold red]{key} not found in configuration.[/]')
 		return success
 
 	# def apply_env_overrides(self):
@@ -384,6 +409,7 @@ try:
 	default_config = Config.parse()
 	user_config_path = default_config.dirs.data / 'config.yml'
 	if not user_config_path.exists():
+		default_config.dirs.data.mkdir(parents=False)
 		Config.create_empty_config(user_config_path)
 	config = Config.parse(user_config_path)
 except errors.ValidationError as e:

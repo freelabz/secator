@@ -447,17 +447,11 @@ def _config():
 	pass
 
 
-@_config.command('show')
-@click.option('--save-default', is_flag=True, help='Save default configuration (with defaults)')
-@click.option('--full', is_flag=True, help='Show full configuration (with defaults)')
-def config_show(save_default, full):
-	"""Show default secator config."""
-	config.print(partial=not full)
-	from secator.piny import LIB_FOLDER
-	if save_default:
-		path = LIB_FOLDER / 'config.yml'
-		config.save(target_path=path, partial=not full)
-		console.print(f'\n[bold green]:tada: Saved config to [/]{path}')
+@_config.command('get')
+@click.argument('key', required=False)
+def config_get(key=None):
+	"""Get config value."""
+	config.get(key)
 
 
 @_config.command('set')
@@ -467,9 +461,21 @@ def config_set(key, value):
 	"""Set config value."""
 	success = config.set(key, value)
 	if success:
-		config.print()
 		config.save()
-		console.print(f'\n[bold green]:tada: Saved config to [/]{config._path}')
+		console.print(f'[bold green]:tada: Saved config to [/]{config._path}')
+
+
+@_config.command('default')
+@click.option('--save', is_flag=True)
+def config_default(save):
+	"""Save default secator config to file."""
+	from secator.piny import LIB_FOLDER, Config
+	conf = Config.parse()
+	conf.print(partial=False)
+	if save:
+		path = LIB_FOLDER / 'configs' / 'config.yml'
+		conf.save(target_path=path, partial=False)
+		console.print(f'\n[bold green]:tada: Saved config to [/]{path}')
 
 
 # TODO: implement reset method
