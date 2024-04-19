@@ -110,7 +110,7 @@ class Scans(BaseModel):
 
 
 class Payloads(BaseModel):
-	files: Dict[str, str] = {
+	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
 		'linpeas': 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh',
 		'sudo_killer': 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/V3/SUDO_KILLERv3.sh'
@@ -119,8 +119,8 @@ class Payloads(BaseModel):
 
 class Wordlists(BaseModel):
 	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains'}
-	files: Dict[str, str] = {
-		'bo0m_fuzz': 'https://github.com/Bo0oM/fuzz.txt/blob/master/fuzz.txt',
+	templates: Dict[str, str] = {
+		'bo0m_fuzz': 'https://raw.githubusercontent.com/Bo0oM/fuzz.txt/master/fuzz.txt',
 		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt'  # noqa: E501
 	}
 	lists: Dict[str, List[str]] = {}
