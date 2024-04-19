@@ -1,10 +1,13 @@
 import sys
+
+from datetime import datetime
 from pathlib import Path
 from subprocess import call, DEVNULL
 from typing import Dict, List
 from typing_extensions import Annotated, Self
 
 import requests
+import yaml
 from dotmap import DotMap
 from piny import MatcherWithDefaults, PydanticV2Validator, YamlLoader, errors
 from pydantic import AfterValidator, BaseModel, model_validator
@@ -144,8 +147,20 @@ class ConfigModel(BaseModel):
 
 class Config(DotMap):
 
+	_error = False
+
 	@staticmethod
-	def parse(yaml_path: Path):
+	def parse(yaml_path: Path = None):
+
+		# Write temp config
+		temp = not yaml_path
+		yaml_path = yaml_path or Config.create_empty_config()
+
+		# Save original config
+		with yaml_path.open('r') as f:
+			original_config = yaml.load(f.read(), Loader=yaml.Loader)
+
+		# Load and validate config
 		config_dict = YamlLoader(
 				yaml_path,
 				matcher=MatcherWithDefaults,
@@ -154,32 +169,44 @@ class Config(DotMap):
 		).load()
 		config = Config(config_dict)
 		config._path = yaml_path
+		config._partial = DotMap(original_config)
+		config._keymap = Config.build_key_map(config)
 
 		# HACK: set default result_backend if unset
 		if not config.celery.result_backend:
 			config.celery.result_backend = f'file://{config.dirs.celery_results}'
 
+		# Override config values with environment variables
+		# config.apply_env_overrides()
+
+		# Delete tmp config
+		yaml_path.unlink() if temp else None
+
 		return config
 
-	def print(self, yaml=False):
-		if yaml:
-			from rich.syntax import Syntax
-			_path = f'# {self._path}\n\n'
-			data = Syntax(_path + self.dump(), 'yaml', theme='github-dark', padding=1)
-		else:
-			data = self.toDict()
+	@staticmethod
+	def create_empty_config(yaml_path=None):
+		current_time = datetime.now().isoformat()
+		if not yaml_path:
+			yaml_path = Path(f'tmp_{current_time}.yml')
+			yaml_path.touch()
+		with yaml_path.open('w') as f:
+			f.write(f'_last_updated: {current_time}')
+		return yaml_path
+
+	def print(self, partial=True):
+		from rich.syntax import Syntax
+		_path = f'# {self._path}\n\n'
+		data = Syntax(_path + self.dump(partial=partial), 'yaml', theme='github-dark', padding=1)
 		console.print(data)
 
-	def save(self, target_path=None):
+	def save(self, target_path: Path = None, partial=True):
 		if not target_path:
 			target_path = self._path
 		with target_path.open('w') as f:
-			f.write(self.dump())
+			f.write(self.dump(partial=partial))
 
-	def edit(self, key, value):
-		pass
-
-	def dump(self):
+	def dump(self, partial=True):
 		"""Safe dump config as yaml:
 		- `Path`, `PosixPath` and `WindowsPath` objects are translated to strings.
 		- Home directory in paths is replaced with the tilde '~'.
@@ -216,11 +243,86 @@ class Config(DotMap):
 		# HACK: Replace home dir in result_backend
 		data['celery']['result_backend'] = data['celery']['result_backend'].replace(home, '~')
 
-		# HACK: remove _path from config
-		del data['_path']
-
-		# Dump YAML to string
+		# Render either partial or full config
+		if partial:
+			data = data['_partial']
+		else:
+			del data['_path']
+			del data['_partial']
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
+
+	@staticmethod
+	def build_key_map(config, base_path=[]):
+		key_map = {}
+		for key, value in config.items():
+			if key.startswith('_'):  # ignore
+				continue
+			current_path = base_path + [key]
+			if isinstance(value, dict):
+				key_map.update(Config.build_key_map(value, current_path))
+			else:
+				key_map['_'.join(current_path).upper()] = current_path
+		return key_map
+
+	def get(self, key):
+		"""Retrieve a value from the configuration using a dotted path."""
+		# Convert dotted key path to the corresponding uppercase key used in _keymap
+		map_key = key.upper().replace('.', '_')
+		if map_key in self._keymap:
+			# Traverse the configuration according to the mapped path
+			result = self
+			for part in self._keymap[map_key]:
+				result = result[part]
+			return result
+		else:
+			console.print(f'[bold red]Key {key} not found in configuration.[/]')
+			return None
+
+	def set(self, key, value):
+		"""Set a value in the configuration using a dotted path."""
+		# Convert dotted key path to the corresponding uppercase key used in _keymap
+		map_key = key.upper().replace('.', '_')
+		success = False
+		if map_key in self._keymap:
+			# Traverse to the second last key to handle the setting correctly
+			target = self
+			partial = self._partial
+			for part in self._keymap[map_key][:-1]:
+				target = target[part]
+				partial = partial[part]
+
+			# Set the value on the final part of the path
+			final_key = self._keymap[map_key][-1]
+			target[final_key] = value
+			partial[final_key] = value
+			console.print(f'[bold green]Key {key} set to {value}[/]')
+			success = True
+		else:
+			console.print(f'[bold red]Key {key} not found in configuration. Cannot set value.[/]')
+		return success
+
+	# def apply_env_overrides(self):
+	# 	"""Override config values from environment variables."""
+	# 	# Build a map of keys from the config
+	# 	key_map = Config.build_key_map(self)
+
+	# 	# Prefix for environment variables to target
+	# 	prefix = "SECATOR_"
+
+	# 	# Loop through environment variables
+	# 	for var in os.environ:
+	# 		if var.startswith(prefix):
+	# 			# Remove prefix and get the path from the key map
+	# 			key = var[len(prefix):]
+	# 			if key in key_map:
+	# 				path = key_map[key]
+	# 				value = os.environ[var]
+
+	# 				# Set the new value recursively
+	# 				self.set(path, value)
+	# 				print(f"Config updated: {'.'.join(path)} set to {config[path[0]]}")
+	# 			else:
+	# 				print(f"No config path found for {var}")
 
 
 def download_files(data: dict, target_folder: Path, type: str):
@@ -279,21 +381,11 @@ def download_files(data: dict, target_folder: Path, type: str):
 
 # Load configs
 try:
-	default_config_path = LIB_FOLDER / 'configs' / 'config.yml'
-	default_config = Config.parse(default_config_path)
-	default_config_path = default_config._path
-	config = default_config
-
-	# Override with user configs
-	user_configs = [
-		config.dirs.data / 'config.yml',
-		Path.cwd() / 'config.yml'
-	]
-	for config_path in user_configs:
-		if config_path.exists():
-			config = Config.parse(config_path)
-	console.print(f'[bold green]Loaded config [/]{config._path}')
-
+	default_config = Config.parse()
+	user_config_path = default_config.dirs.data / 'config.yml'
+	if not user_config_path.exists():
+		Config.create_empty_config(user_config_path)
+	config = Config.parse(user_config_path)
 except errors.ValidationError as e:
 	print(str(e))
 	sys.exit(0)

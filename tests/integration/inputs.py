@@ -11,7 +11,7 @@ INPUTS_TASKS = {
     'gf': 'http://localhost:3000?q=test',
     'gau': 'https://danielmiessler.com/',
     'gospider': 'https://danielmiessler.com/',
-    'grype': ROOT_FOLDER,
+    'grype': str(ROOT_FOLDER),
     'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
     'subfinder': 'api.github.com',
@@ -23,7 +23,7 @@ INPUTS_TASKS = {
 
 INPUTS_WORKFLOWS = {
 	'cidr_recon': '127.0.0.1/30',
-    'code_scan': ROOT_FOLDER,
+    'code_scan': str(ROOT_FOLDER),
     # 'dir_finder': 'localhost:3000',  # TODO: add fixture with directories
     'host_recon': 'localhost',
 	'subdomain_recon': 'api.github.com',

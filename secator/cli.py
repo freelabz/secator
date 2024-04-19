@@ -441,41 +441,47 @@ def publish_docker(tag, latest):
 # CONFIG #
 #--------#
 
+
 @cli.group('config')
 def _config():
 	pass
 
 
 @_config.command('show')
-@click.option('--default', is_flag=True, help='Show default config')
-@click.option('--save', is_flag=True, help='Save full configuration (with all defaults)')
-def config_show(default, save):
+@click.option('--save-default', is_flag=True, help='Save default configuration (with defaults)')
+@click.option('--full', is_flag=True, help='Show full configuration (with defaults)')
+def config_show(save_default, full):
 	"""Show default secator config."""
-	from secator.piny import config, default_config_path, Config
-	from pathlib import Path
-	if default:
-		tmp_path = Path('tmp_config.yml')
-		with tmp_path.open('w') as f:
-			f.write('_dummy:')
-		cfg = Config.parse(tmp_path)
-		cfg.print(yaml=True)
-		cfg_path = default_config_path
-		tmp_path.unlink()
-	else:
-		cfg = config
-		cfg_path = config._path
-		config.print(yaml=True)
-	if save:
-		cfg.save(cfg_path)
-		console.print(f'\n[bold green]:tada: Saved config to [/]{cfg_path}')
+	config.print(partial=not full)
+	from secator.piny import LIB_FOLDER
+	if save_default:
+		path = LIB_FOLDER / 'config.yml'
+		config.save(target_path=path, partial=not full)
+		console.print(f'\n[bold green]:tada: Saved config to [/]{path}')
 
 
-@_config.command('edit')
+@_config.command('set')
 @click.argument('key')
 @click.argument('value')
-def config_edit(key, value):
-	setattr(config, key, value)
-	config.save()
+def config_set(key, value):
+	"""Set config value."""
+	success = config.set(key, value)
+	if success:
+		config.print()
+		config.save()
+		console.print(f'\n[bold green]:tada: Saved config to [/]{config._path}')
+
+
+# TODO: implement reset method
+# @_config.command('reset')
+# @click.argument('key')
+# def config_reset(key):
+# 	"""Reset config value to default."""
+# 	success = config.set(key, None)
+# 	if success:
+# 		config.print()
+# 		config.save()
+# 		console.print(f'\n[bold green]:tada: Saved config to [/]{config._path}')
 
 
 #--------#
