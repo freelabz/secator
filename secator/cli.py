@@ -185,10 +185,10 @@ def revshell(name, host, port, interface, listen, force):
 			return
 
 	# Download reverse shells JSON from repo
-	revshells_json = f'{config.folders.revshells}/revshells.json'
+	revshells_json = f'{config.dirs.revshells}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
 		ret = Command.execute(
-			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {config.folders.revshells}',  # noqa: E501
+			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {config.dirs.revshells}',  # noqa: E501
 			cls_attributes={'shell': True}
 		)
 		if not ret.return_code == 0:
@@ -247,7 +247,7 @@ def revshell(name, host, port, interface, listen, force):
 
 
 @util.command()
-@click.option('--directory', '-d', type=str, default=config.folders.payloads, help='HTTP server directory')
+@click.option('--directory', '-d', type=str, default=config.dirs.payloads, help='HTTP server directory')
 @click.option('--host', '-h', type=str, default=None, help='HTTP host')
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
@@ -728,18 +728,18 @@ def install_tools(cmds):
 @click.option('--force', is_flag=True)
 def install_cves(force):
 	"""Install CVEs (enables passive vulnerability search)."""
-	cve_json_path = f'{config.folders.cves}/circl-cve-search-expanded.json'
+	cve_json_path = f'{config.dirs.cves}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
-			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=config.folders.cves)
+			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=config.dirs.cves)
 		with console.status('[bold yellow]Unzipping CVEs ...[/]'):
-			Command.execute(f'gunzip {config.folders.cves}/circl-cve-search-expanded.json.gz', cwd=config.folders.cves)
-	with console.status(f'[bold yellow]Installing CVEs to {config.folders.cves} ...[/]'):
+			Command.execute(f'gunzip {config.dirs.cves}/circl-cve-search-expanded.json.gz', cwd=config.dirs.cves)
+	with console.status(f'[bold yellow]Installing CVEs to {config.dirs.cves} ...[/]'):
 		with open(cve_json_path, 'r') as f:
 			for line in f:
 				data = json.loads(line)
 				cve_id = data['id']
-				cve_path = f'{config.folders.cves}/{cve_id}.json'
+				cve_path = f'{config.dirs.cves}/{cve_id}.json'
 				with open(cve_path, 'w') as f:
 					f.write(line)
 				console.print(f'CVE saved to {cve_path}')
@@ -780,7 +780,7 @@ def alias():
 @click.pass_context
 def enable_aliases(ctx):
 	"""Enable aliases."""
-	fpath = f'{config.folders.data}/.aliases'
+	fpath = f'{config.dirs.data}/.aliases'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = '\n'.join(aliases)
 	with open(fpath, 'w') as f:
@@ -802,7 +802,7 @@ echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load 
 @click.pass_context
 def disable_aliases(ctx):
 	"""Disable aliases."""
-	fpath = f'{config.folders.data}/.unalias'
+	fpath = f'{config.dirs.data}/.unalias'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = ''
 	for alias in aliases:

@@ -46,9 +46,9 @@ app.conf.update({
 	# Broker config
 	'broker_url': config.celery.broker_url,
 	'broker_transport_options': {
-		'data_folder_in': config.folders.celery_data,
-		'data_folder_out': config.folders.celery_data,
-		'control_folder': config.folders.celery_data,
+		'data_folder_in': config.dirs.celery_data,
+		'data_folder_out': config.dirs.celery_data,
+		'control_folder': config.dirs.celery_data,
 		'visibility_timeout': config.celery.broker_visibility_timeout,
 	},
 	'broker_connection_retry_on_startup': True,

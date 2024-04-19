@@ -1,7 +1,7 @@
-folders:
+dirs:
   bin: ~/.local/bin
   data: ~/.secator
-  extra_configs: ~/.secator/configs
+  configs: ~/.secator/configs
   reports: ~/.secator/reports
   wordlists: ~/.secator/wordlists
   cves: ~/.secator/cves
@@ -21,7 +21,7 @@ celery:
   broker_connection_timeout: 4.0
   broker_visibility_timeout: 3600
   override_default_logging: true
-  result_backend: ''
+  result_backend: file://~/.secator/celery/results
 
 cli:
   github_token: ''
@@ -59,7 +59,7 @@ payloads:
   templates:
     lse: https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh
     linpeas: https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh
-    sudo_killer: https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/V3/SUDO_KILLERv3.sh
+    sudo_killer: https://github.com/TH3xACE/SUDO_KILLER
 
 wordlists:
   defaults:

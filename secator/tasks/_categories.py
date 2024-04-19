@@ -122,7 +122,7 @@ class Vuln(Command):
 
 	@staticmethod
 	def lookup_local_cve(cve_id):
-		cve_path = f'{config.folders.data}/cves/{cve_id}.json'
+		cve_path = f'{config.dirs.data}/cves/{cve_id}.json'
 		if os.path.exists(cve_path):
 			with open(cve_path, 'r') as f:
 				return json.load(f)

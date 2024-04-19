@@ -110,7 +110,7 @@ class Runner:
 		self.celery_result = None
 
 		# Determine report folder
-		default_reports_folder_base = f'{config.folders.reports}/{self.workspace_name}/{self.config.type}s'
+		default_reports_folder_base = f'{config.dirs.reports}/{self.workspace_name}/{self.config.type}s'
 		_id = get_task_folder_id(default_reports_folder_base)
 		self.reports_folder = f'{default_reports_folder_base}/{_id}'
 

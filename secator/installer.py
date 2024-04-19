@@ -95,7 +95,7 @@ class GithubInstaller:
 
 		# Download and unpack asset
 		console.print(f'Found release URL: {download_url}')
-		cls._download_and_unpack(download_url, config.folders.bin, repo)
+		cls._download_and_unpack(download_url, config.dirs.bin, repo)
 		return True
 
 	@classmethod
