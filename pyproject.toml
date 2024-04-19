@@ -40,12 +40,13 @@ dependencies = [
   "ifaddr < 1",
   "jinja2 < 4",
   "packaging < 25",
-  "piny < 2",
+  "piny[pydantic] < 2",
   "python-dotenv < 2",
   "pyyaml < 7",
   "requests < 3",
   "rich < 14",
   "rich-click < 1.7",
+  "typing_extensions < 5",
   "validators < 1",
   "xmltodict < 1"
 ]
