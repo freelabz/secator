@@ -116,7 +116,7 @@ wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/instal
 	<summary>Docker</summary>
 
 ```sh
-docker run -it --rm --net=host -v $HOME/.secator:/root/.secator freelabz/secator --help
+docker run -it --rm --net=host -v ~/.secator:/root/.secator freelabz/secator --help
 ```
 
 The volume mount -v is necessary to save all secator reports to your host machine, and--net=host is recommended to grant full access to the host network.
