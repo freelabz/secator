@@ -18,7 +18,6 @@ StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.
 ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
-OFFLINE_MODE = bool(int(os.environ.get('OFFLINE_MODE', '0')))
 
 
 class Directories(BaseModel):
@@ -243,9 +242,6 @@ def download_files(data: dict, target_folder: Path, type: str):
 			target_path = target_folder / repo_name
 			if not target_path.exists():
 				console.print(f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ', end='')
-				if OFFLINE_MODE:
-					console.print('[bold orange1]skipped [dim](offline)[/].[/]')
-					continue
 				try:
 					call(['git', 'clone', git_url, str(target_path)], stderr=DEVNULL, stdout=DEVNULL)
 					console.print('[bold green]ok.[/]')
@@ -271,9 +267,6 @@ def download_files(data: dict, target_folder: Path, type: str):
 			if not target_path.exists():
 				try:
 					console.print(f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ', end='')
-					if OFFLINE_MODE:
-						console.print('[bold orange1]skipped [dim](offline)[/].[/]')
-						continue
 					resp = requests.get(url_or_path, timeout=3)
 					resp.raise_for_status()
 					with open(target_path, 'wb') as f:
