@@ -6,7 +6,7 @@ from typing_extensions import Annotated
 import requests
 from dotmap import DotMap
 from piny import MatcherWithDefaults, PydanticV2Validator, YamlLoader, errors
-from pydantic import AfterValidator, BaseModel, DirectoryPath, NewPath, computed_field
+from pydantic import AfterValidator, BaseModel, computed_field
 from pydantic.types import PathType
 
 from secator.rich import console
