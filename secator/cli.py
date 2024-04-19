@@ -448,7 +448,7 @@ def _config():
 
 @_config.command('show')
 @click.option('--default', is_flag=True, help='Show default config')
-@click.option('--save', is_flag=True, help='Save default config to configs/config.yml')
+@click.option('--save', is_flag=True, help='Save full configuration (with all defaults)')
 def config_show(default, save):
 	"""Show default secator config."""
 	from secator.piny import config, default_config_path, Config
@@ -459,12 +459,15 @@ def config_show(default, save):
 			f.write('_dummy:')
 		cfg = Config.parse(tmp_path)
 		cfg.print(yaml=True)
-		if save:
-			cfg.save(default_config_path)
-			console.print(f'\n[bold green]:tada: Saved default config to [/]{default_config_path}')
+		cfg_path = default_config_path
 		tmp_path.unlink()
 	else:
+		cfg = config
+		cfg_path = config._path
 		config.print(yaml=True)
+	if save:
+		cfg.save(cfg_path)
+		console.print(f'\n[bold green]:tada: Saved config to [/]{cfg_path}')
 
 
 @_config.command('edit')

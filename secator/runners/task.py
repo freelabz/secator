@@ -1,11 +1,12 @@
 from secator.definitions import DEBUG
 from secator.output_types import Target
+from secator.piny import config
 from secator.runners import Runner
 from secator.utils import discover_tasks
 
 
 class Task(Runner):
-	default_exporters = []
+	default_exporters = config.tasks.exporters
 	enable_hooks = False
 
 	def delay(cls, *args, **kwargs):

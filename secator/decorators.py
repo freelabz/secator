@@ -12,7 +12,7 @@ from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
 
 RUNNER_OPTS = {
-	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
+	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},

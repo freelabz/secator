@@ -392,14 +392,14 @@ class Runner:
 
 	def resolve_exporters(self):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.get('output', '')
-		if output == '':
-			return self.default_exporters
-		elif output is False:
+		output = self.run_opts.get('output') or self.default_exporters
+		if not output or output in ['false', 'False']:
 			return []
+		if isinstance(output, str):
+			output = output.split(',')
 		exporters = [
 			import_dynamic(f'secator.exporters.{o.capitalize()}Exporter', 'Exporter')
-			for o in output.split(',')
+			for o in output
 			if o
 		]
 		return [e for e in exporters if e]

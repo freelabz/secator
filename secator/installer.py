@@ -11,7 +11,7 @@ from rich.table import Table
 
 from secator.rich import console
 from secator.runners import Command
-from secator.piny import config, OFFLINE_MODE
+from secator.piny import config
 
 
 class ToolInstaller:
