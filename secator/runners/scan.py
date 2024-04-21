@@ -1,7 +1,7 @@
 import logging
 
 from secator.config import ConfigLoader
-from secator.piny import config
+from secator import CONFIG
 from secator.runners._base import Runner
 from secator.runners._helpers import run_extractors
 from secator.runners.workflow import Workflow
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class Scan(Runner):
 
-	default_exporters = config.scans.exporters
+	default_exporters = CONFIG.scans.exporters
 
 	@classmethod
 	def delay(cls, *args, **kwargs):

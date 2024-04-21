@@ -1,6 +1,6 @@
 from secator.definitions import DEBUG
 from secator.output_types import Target
-from secator.piny import config
+from secator import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
@@ -8,7 +8,7 @@ from secator.utils import merge_opts
 
 class Workflow(Runner):
 
-	default_exporters = config.workflows.exporters
+	default_exporters = CONFIG.workflows.exporters
 
 	@classmethod
 	def delay(cls, *args, **kwargs):

@@ -5,7 +5,7 @@ import pymongo
 from bson.objectid import ObjectId
 from celery import shared_task
 
-from secator.piny import config
+from secator import CONFIG
 from secator.output_types import OUTPUT_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
@@ -13,8 +13,8 @@ from secator.utils import debug, escape_mongodb_url
 # import gevent.monkey
 # gevent.monkey.patch_all()
 
-MONGODB_URL = config.addons.mongodb.url
-MONGODB_UPDATE_FREQUENCY = config.addons.mongodb.update_frequency
+MONGODB_URL = CONFIG.addons.mongodb.url
+MONGODB_UPDATE_FREQUENCY = CONFIG.addons.mongodb.update_frequency
 MAX_POOL_SIZE = 100
 
 logger = logging.getLogger(__name__)

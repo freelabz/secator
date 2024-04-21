@@ -12,7 +12,7 @@ from fp.fp import FreeProxy
 
 from secator.config import ConfigLoader
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
-from secator.piny import config
+from secator import CONFIG
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
 from secator.utils import debug
@@ -66,7 +66,7 @@ class Command(Runner):
 	input_path = None
 
 	# Input chunk size (default None)
-	input_chunk_size = config.runners.input_chunk_size
+	input_chunk_size = CONFIG.runners.input_chunk_size
 
 	# Flag to take a file as input
 	file_flag = None
@@ -287,7 +287,7 @@ class Command(Runner):
 		opt_key_map = self.opt_key_map
 		proxy_opt = opt_key_map.get('proxy', False)
 		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
-		proxychains_flavor = getattr(self, 'proxychains_flavor', config.http.proxychains_command)
+		proxychains_flavor = getattr(self, 'proxychains_flavor', CONFIG.http.proxychains_command)
 		proxy = False
 
 		if self.proxy in ['auto', 'proxychains'] and self.proxychains:
@@ -295,12 +295,12 @@ class Command(Runner):
 			proxy = 'proxychains'
 
 		elif self.proxy and support_proxy_opt:
-			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and config.http.socks5_proxy:
-				proxy = config.http.socks5_proxy
-			elif self.proxy in ['auto', 'http'] and self.proxy_http and config.http.http_proxy:
-				proxy = config.http.http_proxy
+			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and CONFIG.http.socks5_proxy:
+				proxy = CONFIG.http.socks5_proxy
+			elif self.proxy in ['auto', 'http'] and self.proxy_http and CONFIG.http.http_proxy:
+				proxy = CONFIG.http.http_proxy
 			elif self.proxy == 'random':
-				proxy = FreeProxy(timeout=config.http.freeproxy_timeout, rand=True, anonym=True).get()
+				proxy = FreeProxy(timeout=CONFIG.http.freeproxy_timeout, rand=True, anonym=True).get()
 			elif self.proxy.startswith(('http://', 'socks5://')):
 				proxy = self.proxy
 

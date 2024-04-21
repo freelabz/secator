@@ -5,7 +5,7 @@ import yaml
 from dotmap import DotMap
 
 from secator.rich import console
-from secator.piny import config, CONFIGS_FOLDER
+from secator import CONFIG, CONFIGS_FOLDER
 
 CONFIGS_DIR_KEYS = ['workflow', 'scan', 'profile']
 
@@ -30,8 +30,8 @@ def load_config(name):
 def find_configs():
 	results = {'scan': [], 'workflow': [], 'profile': []}
 	dirs_type = [CONFIGS_FOLDER]
-	if config.dirs.templates:
-		dirs_type.append(config.dirs.templates)
+	if CONFIG.dirs.templates:
+		dirs_type.append(CONFIG.dirs.templates)
 	paths = []
 	for dir in dirs_type:
 		dir_paths = [

@@ -1,6 +1,6 @@
 from secator.decorators import task
 from secator.definitions import (DOMAIN, HOST, RATE_LIMIT, RETRIES, THREADS, WORDLIST, EXTRA_DATA)
-from secator.piny import config
+from secator import CONFIG
 from secator.output_types import Subdomain
 from secator.tasks._categories import ReconDns
 
@@ -18,7 +18,7 @@ class dnsxbrute(ReconDns):
         THREADS: 'threads',
     }
     opts = {
-        WORDLIST: {'type': str, 'short': 'w', 'default': config.wordlists.defaults.dns, 'help': 'Wordlist'},
+        WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.dns, 'help': 'Wordlist'},
         'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
     }
     output_map = {

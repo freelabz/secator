@@ -1,5 +1,5 @@
 import unittest
-from secator.piny import Config
+from secator import CONFIG
 
 
 class TestPiny(unittest.TestCase):
