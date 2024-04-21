@@ -40,7 +40,6 @@ dependencies = [
   "ifaddr < 1",
   "jinja2 < 4",
   "packaging < 25",
-  "piny[pydantic] < 2",
   "python-dotenv < 2",
   "pyyaml < 7",
   "requests < 3",
