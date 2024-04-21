@@ -1,5 +1,3 @@
-import sys
-
 from pathlib import Path
 from subprocess import call, DEVNULL
 from typing import Dict, List
@@ -183,18 +181,21 @@ class Config(DotMap):
 			Config.print_yaml(yaml_str)
 		return value
 
-	def set(self, key, value):
+	def set(self, key, value, set_partial=True):
 		"""Set a value in the configuration using a dotted path.
 
 		Args:
 			key (str | None): Dotted key path.
 			value (Any): Value.
+			partial (bool): Also set value in partial config (written to disk).
 
 		Returns:
 			bool: Success boolean.
 		"""
-		# Convert dotted key path to the corresponding uppercase key used in _keymap
+		# Get existing value
 		existing_value = self.get(key, print=False)
+
+		# Convert dotted key path to the corresponding uppercase key used in _keymap
 		map_key = key.upper().replace('.', '_')
 		success = False
 		if map_key in self._keymap:
@@ -203,24 +204,31 @@ class Config(DotMap):
 			partial = self._partial
 			for part in self._keymap[map_key][:-1]:
 				target = target[part]
-				partial = partial[part]
+				if set_partial:
+					partial = partial[part]
 
 			# Set the value on the final part of the path
 			final_key = self._keymap[map_key][-1]
 
 			# Convert the value to the correct type based on the current value type
-			if isinstance(existing_value, bool):
-				if not isinstance(value, bool):
-					value = value.lower() in ("true", "1", "t")
-			elif isinstance(existing_value, int):
-				value = int(value)
-			elif isinstance(existing_value, float):
-				value = float(value)
-
-			target[final_key] = value
-			partial[final_key] = value
-			self.get(key, print=False)
-			success = True
+			try:
+				if isinstance(existing_value, bool):
+					if isinstance(value, str):
+						value = value.lower() in ("true", "1", "t")
+					elif isinstance(value, (int, float)):
+						value = True if value == 1 else False
+				elif isinstance(existing_value, int):
+					value = int(value)
+				elif isinstance(existing_value, float):
+					value = float(value)
+				if existing_value != value:
+					target[final_key] = value
+					if set_partial:
+						partial[final_key] = value
+				success = True
+			except ValueError:
+				success = False
+				# console.print(f'[bold red]{key}: cannot cast value "{value}" to {type(existing_value).__name__}')
 		else:
 			console.print(f'[bold red]{key} not found in configuration.[/]')
 		return success
@@ -251,12 +259,13 @@ class Config(DotMap):
 		Config.print_yaml(yaml_str)
 
 	@staticmethod
-	def parse(data: dict = {}, path: Path = None):
+	def parse(data: dict = {}, path: Path = None, env_overrides: bool = False):
 		"""Parse config.
 
 		Args:
 			data (dict): Config data.
 			path (Path | None): Path to YAML config.
+			env_overrides (bool): Apply env overrides.
 
 		Returns:
 			Config: instance of Config object.
@@ -274,9 +283,6 @@ class Config(DotMap):
 			if not config.celery.result_backend:
 				config.celery.result_backend = f'file://{config.dirs.celery_results}'
 
-			# Override config values with environment variables
-			# config.apply_env_overrides()
-
 		except ValidationError as e:
 			error_str = 'Error validating config'
 			if path:
@@ -287,9 +293,20 @@ class Config(DotMap):
 			config = Config.parse()
 			config._valid = False
 
-		config._partial = Config(data)
+		# Set hidden attributes
+		keymap = Config.build_key_map(config)
+		partial = Config(data)
+		config._partial = partial
 		config._path = path
-		config._keymap = Config.build_key_map(config)
+		config._keymap = keymap
+
+		# Override config values with environment variables
+		if env_overrides:
+			config.apply_env_overrides()
+			config = Config.parse(config.toDict(), env_overrides=False)  # re-validate config
+			config._partial = partial
+			config._path = path
+
 		return config
 
 	@staticmethod
@@ -389,28 +406,32 @@ class Config(DotMap):
 				key_map['_'.join(current_path).upper()] = current_path
 		return key_map
 
-	# def apply_env_overrides(self):
-	# 	"""Override config values from environment variables."""
-	# 	# Build a map of keys from the config
-	# 	key_map = Config.build_key_map(self)
+	def apply_env_overrides(self):
+		"""Override config values from environment variables."""
+		# Build a map of keys from the config
+		key_map = Config.build_key_map(self)
 
-	# 	# Prefix for environment variables to target
-	# 	prefix = "SECATOR_"
+		# Prefix for environment variables to target
+		prefix = "SECATOR_"
 
-	# 	# Loop through environment variables
-	# 	for var in os.environ:
-	# 		if var.startswith(prefix):
-	# 			# Remove prefix and get the path from the key map
-	# 			key = var[len(prefix):]
-	# 			if key in key_map:
-	# 				path = key_map[key]
-	# 				value = os.environ[var]
+		# Loop through environment variables
+		import os
+		for var in os.environ:
+			if var.startswith(prefix):
+				# Remove prefix and get the path from the key map
+				key = var[len(prefix):]
+				if key in key_map:
+					path = '.'.join(k.lower() for k in key_map[key])
+					value = os.environ[var]
 
-	# 				# Set the new value recursively
-	# 				self.set(path, value)
-	# 				print(f"Config updated: {'.'.join(path)} set to {config[path[0]]}")
-	# 			else:
-	# 				print(f"No config path found for {var}")
+					# Set the new value recursively
+					success = self.set(path, value, set_partial=False)
+					if success:
+						console.print(f'[bold green4]{var:<50} (override success)[/]')
+					else:
+						console.print(f'[bold red]{var:<50} (override failed: cannot update value)[/]')
+				else:
+					console.print(f'[bold red]{var:<50} (override failed: key not found in config)[/]')
 
 
 def download_files(data: dict, target_folder: Path, type: str):
@@ -468,24 +489,19 @@ def download_files(data: dict, target_folder: Path, type: str):
 
 
 # Load configs
-try:
-	default_config = Config.parse()
-	data_root = default_config.dirs.data
-	config_path = data_root / 'config.yml'
-	if not config_path.exists():
-		if not data_root.exists():
-			console.print(f'[bold turquoise4]Creating directory [bold magenta]{data_root}[/] ... [/]', end='')
-			data_root.mkdir(parents=False)
-			console.print('[bold green]ok.[/]')
-		console.print(
-			f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
-		config_path.touch()
+default_config = Config.parse()
+data_root = default_config.dirs.data
+config_path = data_root / 'config.yml'
+if not config_path.exists():
+	if not data_root.exists():
+		console.print(f'[bold turquoise4]Creating directory [bold magenta]{data_root}[/] ... [/]', end='')
+		data_root.mkdir(parents=False)
 		console.print('[bold green]ok.[/]')
-	CONFIG = Config.parse(path=config_path)
-except Exception as e:
-	print(str(e))
-	sys.exit(0)
-
+	console.print(
+		f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
+	config_path.touch()
+	console.print('[bold green]ok.[/]')
+CONFIG = Config.parse(path=config_path, env_overrides=True)
 
 # Create directories if they don't exist already
 for name, dir in CONFIG.dirs.items():

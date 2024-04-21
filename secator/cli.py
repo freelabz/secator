@@ -465,6 +465,7 @@ def config_set(key, value):
 	"""Set config value."""
 	success = CONFIG.set(key, value)
 	if success:
+		CONFIG.get(key)
 		saved = CONFIG.save()
 		if not saved:
 			return
