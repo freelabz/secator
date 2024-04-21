@@ -465,7 +465,9 @@ def config_set(key, value):
 	"""Set config value."""
 	success = CONFIG.set(key, value)
 	if success:
-		CONFIG.save()
+		saved = CONFIG.save()
+		if not saved:
+			return
 		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
 
 

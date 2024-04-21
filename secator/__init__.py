@@ -8,7 +8,7 @@ from typing_extensions import Annotated, Self
 import requests
 import yaml
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator
+from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
 from secator.rich import console
 
@@ -144,15 +144,16 @@ class SecatorConfig(BaseModel):
 
 
 class Config(DotMap):
-	"""Config utilities.
+	"""Config class.
 
 	Examples:
-	>>> config = Config.parse()  						 # get default config.
-	>>> config = Config.parse('/path/to/my/config.yml')  # get custom config.
-	>>> config.print() 									 # print config without defaults.
-	>>> config.print(partial=False)  					 # print full config.
-	>>> config.set('addons.google.enabled', False)       # set value in config.
-	>>> config.save()									 # save config back to disk.
+	>>> config = Config.parse()  						   # get default config.
+	>>> config = Config.parse({'dirs': {'data': '/tmp/'})  # get custom config (from dict).
+	>>> config = Config.parse(path='/path/to/config.yml')  # get custom config (from YAML file).
+	>>> config.print() 									   # print config without defaults.
+	>>> config.print(partial=False)  					   # print full config.
+	>>> config.set('addons.google.enabled', False)         # set value in config.
+	>>> config.save()									   # save config back to disk.
 	"""
 
 	_error = False
@@ -209,7 +210,8 @@ class Config(DotMap):
 
 			# Convert the value to the correct type based on the current value type
 			if isinstance(existing_value, bool):
-				value = value.lower() in ("true", "1", "t")
+				if not isinstance(value, bool):
+					value = value.lower() in ("true", "1", "t")
 			elif isinstance(existing_value, int):
 				value = int(value)
 			elif isinstance(existing_value, float):
@@ -217,7 +219,7 @@ class Config(DotMap):
 
 			target[final_key] = value
 			partial[final_key] = value
-			self.get(key)
+			self.get(key, print=False)
 			success = True
 		else:
 			console.print(f'[bold red]{key} not found in configuration.[/]')
@@ -231,6 +233,8 @@ class Config(DotMap):
 			partial (bool): Save partial config.
 		"""
 		if not target_path:
+			if not self._path:
+				return
 			target_path = self._path
 		with target_path.open('w') as f:
 			f.write(Config.dump(self, partial=partial))
@@ -247,33 +251,45 @@ class Config(DotMap):
 		Config.print_yaml(yaml_str)
 
 	@staticmethod
-	def parse(yaml_path: Path = None):
-		"""Parse config from YAML path.
+	def parse(data: dict = {}, path: Path = None):
+		"""Parse config.
 
 		Args:
-			yaml_path (Path | None): If None, get default config.
+			data (dict): Config data.
+			path (Path | None): Path to YAML config.
 
 		Returns:
 			Config: instance of Config object.
+			None: if the config was not loaded properly or there are validation errors.
 		"""
-		if not yaml_path:
-			data = {}
-		else:
-			data = Config.read_yaml(yaml_path)
+		if path:
+			data = Config.read_yaml(path)
 
 		# Load data
-		config = Config.load(SecatorConfig, data)
+		try:
+			config = Config.load(SecatorConfig, data)
+			config._valid = True
+
+			# HACK: set default result_backend if unset
+			if not config.celery.result_backend:
+				config.celery.result_backend = f'file://{config.dirs.celery_results}'
+
+			# Override config values with environment variables
+			# config.apply_env_overrides()
+   
+		except ValidationError as e:
+			error_str = 'Error validating config'
+			if path:
+				error_str += f' {path}'
+			error_str += ':\n ' + str(e).replace('\n', '\n  ')
+			console.print(f'[bold red]{error_str}')
+			console.print('[bold green]Falling back to default config.[/]')
+			config = Config.parse()
+			config._valid = False
+
 		config._partial = Config(data)
-		config._path = yaml_path
+		config._path = path
 		config._keymap = Config.build_key_map(config)
-
-		# HACK: set default result_backend if unset
-		if not config.celery.result_backend:
-			config.celery.result_backend = f'file://{config.dirs.celery_results}'
-
-		# Override config values with environment variables
-		# config.apply_env_overrides()
-
 		return config
 
 	@staticmethod
@@ -465,7 +481,7 @@ try:
 			f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
 		config_path.touch()
 		console.print('[bold green]ok.[/]')
-	CONFIG = Config.parse(config_path)
+	CONFIG = Config.parse(path=config_path)
 except Exception as e:
 	print(str(e))
 	sys.exit(0)
