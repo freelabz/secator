@@ -276,7 +276,7 @@ class Config(DotMap):
 
 			# Override config values with environment variables
 			# config.apply_env_overrides()
-   
+
 		except ValidationError as e:
 			error_str = 'Error validating config'
 			if path:
