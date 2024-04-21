@@ -42,6 +42,7 @@ dependencies = [
   "packaging < 25",
   "python-dotenv < 2",
   "pyyaml < 7",
+  "pydantic < 3",
   "requests < 3",
   "rich < 14",
   "rich-click < 1.7",
