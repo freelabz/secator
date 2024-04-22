@@ -1,14 +1,14 @@
 import os
 
 from secator.decorators import task
-from secator.definitions import (DEFAULT_HTTPX_FLAGS,
-								 DEFAULT_STORE_HTTP_RESPONSES, DELAY, DEPTH,
+from secator.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH,
 								 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
 								 RATE_LIMIT, RETRIES, THREADS,
 								 TIMEOUT, URL, USER_AGENT)
+from secator import CONFIG
 from secator.tasks._categories import Http
 from secator.utils import sanitize_url
 
@@ -71,7 +71,7 @@ class httpx(Http):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
-		if DEFAULT_STORE_HTTP_RESPONSES:
+		if CONFIG.http.store_responses:
 			self.output_response_path = f'{self.reports_folder}/response'
 			self.output_screenshot_path = f'{self.reports_folder}/screenshot'
 			os.makedirs(self.output_response_path, exist_ok=True)
@@ -98,7 +98,7 @@ class httpx(Http):
 
 	@staticmethod
 	def on_end(self):
-		if DEFAULT_STORE_HTTP_RESPONSES:
+		if CONFIG.http.store_responses:
 			if os.path.exists(self.output_response_path + '/index.txt'):
 				os.remove(self.output_response_path + '/index.txt')
 			if os.path.exists(self.output_screenshot_path + '/index.txt'):

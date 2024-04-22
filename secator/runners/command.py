@@ -11,11 +11,8 @@ from time import sleep
 from fp.fp import FreeProxy
 
 from secator.config import ConfigLoader
-from secator.definitions import (DEFAULT_HTTP_PROXY,
-							   DEFAULT_FREEPROXY_TIMEOUT,
-							   DEFAULT_PROXYCHAINS_COMMAND,
-							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, DEFAULT_INPUT_CHUNK_SIZE)
+from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
+from secator import CONFIG
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
 from secator.utils import debug
@@ -69,7 +66,7 @@ class Command(Runner):
 	input_path = None
 
 	# Input chunk size (default None)
-	input_chunk_size = DEFAULT_INPUT_CHUNK_SIZE
+	input_chunk_size = CONFIG.runners.input_chunk_size
 
 	# Flag to take a file as input
 	file_flag = None
@@ -110,7 +107,7 @@ class Command(Runner):
 
 	def __init__(self, input=None, **run_opts):
 		# Build runnerconfig on-the-fly
-		config = ConfigLoader(input={
+		cfg = ConfigLoader(input={
 			'name': self.__class__.__name__,
 			'type': 'task',
 			'description': run_opts.get('description', None)
@@ -121,7 +118,7 @@ class Command(Runner):
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
 		super().__init__(
-			config=config,
+			cfg=cfg,
 			targets=input,
 			results=results,
 			run_opts=run_opts,
@@ -290,7 +287,7 @@ class Command(Runner):
 		opt_key_map = self.opt_key_map
 		proxy_opt = opt_key_map.get('proxy', False)
 		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
-		proxychains_flavor = getattr(self, 'proxychains_flavor', DEFAULT_PROXYCHAINS_COMMAND)
+		proxychains_flavor = getattr(self, 'proxychains_flavor', CONFIG.http.proxychains_command)
 		proxy = False
 
 		if self.proxy in ['auto', 'proxychains'] and self.proxychains:
@@ -298,12 +295,12 @@ class Command(Runner):
 			proxy = 'proxychains'
 
 		elif self.proxy and support_proxy_opt:
-			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and DEFAULT_SOCKS5_PROXY:
-				proxy = DEFAULT_SOCKS5_PROXY
-			elif self.proxy in ['auto', 'http'] and self.proxy_http and DEFAULT_HTTP_PROXY:
-				proxy = DEFAULT_HTTP_PROXY
+			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and CONFIG.http.socks5_proxy:
+				proxy = CONFIG.http.socks5_proxy
+			elif self.proxy in ['auto', 'http'] and self.proxy_http and CONFIG.http.http_proxy:
+				proxy = CONFIG.http.http_proxy
 			elif self.proxy == 'random':
-				proxy = FreeProxy(timeout=DEFAULT_FREEPROXY_TIMEOUT, rand=True, anonym=True).get()
+				proxy = FreeProxy(timeout=CONFIG.http.freeproxy_timeout, rand=True, anonym=True).get()
 			elif self.proxy.startswith(('http://', 'socks5://')):
 				proxy = self.proxy
 

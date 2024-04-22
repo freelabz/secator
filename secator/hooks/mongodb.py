@@ -1,12 +1,11 @@
 import logging
-import os
 import time
 
 import pymongo
 from bson.objectid import ObjectId
 from celery import shared_task
 
-from secator.definitions import DEFAULT_PROGRESS_UPDATE_FREQUENCY
+from secator import CONFIG
 from secator.output_types import OUTPUT_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
@@ -14,8 +13,8 @@ from secator.utils import debug, escape_mongodb_url
 # import gevent.monkey
 # gevent.monkey.patch_all()
 
-MONGODB_URL = os.environ.get('MONGODB_URL', 'mongodb://localhost')
-MONGODB_UPDATE_FREQUENCY = int(os.environ.get('MONGODB_UPDATE_FREQUENCY', DEFAULT_PROGRESS_UPDATE_FREQUENCY))
+MONGODB_URL = CONFIG.addons.mongodb.url
+MONGODB_UPDATE_FREQUENCY = CONFIG.addons.mongodb.update_frequency
 MAX_POOL_SIZE = 100
 
 logger = logging.getLogger(__name__)

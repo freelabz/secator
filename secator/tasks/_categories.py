@@ -6,12 +6,13 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DEFAULT_HTTP_WORDLIST,
-								 DEFAULT_SKIP_CVE_SEARCH, DELAY, DEPTH, DESCRIPTION, FILTER_CODES, FILTER_REGEX,
-								 FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, MATCH_CODES, MATCH_REGEX,
-								 MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT, USERNAME, WORDLIST)
+from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
+								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
+								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
+from secator import CONFIG
 from secator.rich import console
 from secator.runners import Command
 
@@ -37,7 +38,7 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_HTTP_WORDLIST, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.http, 'help': 'Wordlist to use'}
 }
 
 OPTS_HTTP = [
@@ -121,7 +122,7 @@ class Vuln(Command):
 
 	@staticmethod
 	def lookup_local_cve(cve_id):
-		cve_path = f'{DATA_FOLDER}/cves/{cve_id}.json'
+		cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
 		if os.path.exists(cve_path):
 			with open(cve_path, 'r') as f:
 				return json.load(f)
@@ -151,8 +152,8 @@ class Vuln(Command):
 		"""
 		cve_info = Vuln.lookup_local_cve(cve_id)
 		if not cve_info:
-			if DEFAULT_SKIP_CVE_SEARCH:
-				logger.debug(f'{cve_id} not found locally, and DEFAULT_SKIP_CVE_SEARCH is set: ignoring online search.')
+			if CONFIG.runners.skip_cve_search:
+				logger.debug(f'{cve_id} not found locally, and config.runners.skip_cve_search is set: ignoring.')
 				return None
 			# logger.debug(f'{cve_id} not found locally. Use `secator install cves` to install CVEs locally.')
 			try:

@@ -1,7 +1,10 @@
 import json
 import os
 import re
+import shutil
 import sys
+
+from pathlib import Path
 
 import rich_click as click
 from dotmap import DotMap
@@ -11,16 +14,15 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
 
+from secator import CONFIG, ROOT_FOLDER, Config, default_config, config_path
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import (ADDONS_ENABLED, ASCII, CVES_FOLDER, DATA_FOLDER, DEV_PACKAGE, OPT_NOT_SUPPORTED,
-								 PAYLOADS_FOLDER, REVSHELLS_FOLDER, ROOT_FOLDER, VERSION)
-from secator.installer import ToolInstaller, get_version_info, get_health_table, fmt_health_table_row
+from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
+from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
-from secator.utils import (debug, detect_host, discover_tasks, find_list_item, flatten,
-						   print_results_table, print_version)
+from secator.utils import debug, detect_host, discover_tasks, flatten, print_results_table, print_version
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -106,13 +108,12 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
-	from secator.definitions import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
 	if not ADDONS_ENABLED['worker']:
 		console.print('[bold red]Missing worker addon: please run `secator install addons worker`[/].')
 		sys.exit(1)
-	broker_protocol = CELERY_BROKER_URL.split('://')[0]
-	backend_protocol = CELERY_RESULT_BACKEND.split('://')[0]
-	if CELERY_BROKER_URL:
+	broker_protocol = CONFIG.celery.broker_url.split('://')[0]
+	backend_protocol = CONFIG.celery.result_backend.split('://')[0]
+	if CONFIG.celery.broker_url:
 		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 			console.print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 			sys.exit(1)
@@ -184,12 +185,14 @@ def revshell(name, host, port, interface, listen, force):
 				f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.',
 				style='bold red')
 			return
+		else:
+			console.print(f'[bold green]Detected host IP: [bold orange1]{host}[/].[/]')
 
 	# Download reverse shells JSON from repo
-	revshells_json = f'{REVSHELLS_FOLDER}/revshells.json'
+	revshells_json = f'{CONFIG.dirs.revshells}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
 		ret = Command.execute(
-			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {REVSHELLS_FOLDER}',  # noqa: E501
+			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {CONFIG.dirs.revshells}',  # noqa: E501
 			cls_attributes={'shell': True}
 		)
 		if not ret.return_code == 0:
@@ -248,42 +251,12 @@ def revshell(name, host, port, interface, listen, force):
 
 
 @util.command()
-@click.option('--directory', '-d', type=str, default=PAYLOADS_FOLDER, show_default=True, help='HTTP server directory')
+@click.option('--directory', '-d', type=str, default=CONFIG.dirs.payloads, help='HTTP server directory')
 @click.option('--host', '-h', type=str, default=None, help='HTTP host')
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
 	"""Run HTTP server to serve payloads."""
-	LSE_URL = 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh'
-	LINPEAS_URL = 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh'
-	SUDOKILLER_URL = 'https://raw.githubusercontent.com/TH3xACE/SUDO_KILLER/V3/SUDO_KILLERv3.sh'
-	PAYLOADS = [
-		{
-			'fname': 'lse.sh',
-			'description': 'Linux Smart Enumeration',
-			'command': f'wget {LSE_URL} -O lse.sh && chmod 700 lse.sh'
-		},
-		{
-			'fname': 'linpeas.sh',
-			'description': 'Linux Privilege Escalation Awesome Script',
-			'command': f'wget {LINPEAS_URL} -O linpeas.sh && chmod 700 linpeas.sh'
-		},
-		{
-			'fname': 'sudo_killer.sh',
-			'description': 'SUDO_KILLER',
-			'command': f'wget {SUDOKILLER_URL} -O sudo_killer.sh && chmod 700 sudo_killer.sh'
-		}
-	]
-	for ix, payload in enumerate(PAYLOADS):
-		descr = payload.get('description', '')
-		fname = payload['fname']
-		if not os.path.exists(f'{directory}/{fname}'):
-			with console.status(f'[bold yellow][{ix}/{len(PAYLOADS)}] Downloading {fname} [dim]({descr})[/] ...[/]'):
-				cmd = payload['command']
-				console.print(f'[bold magenta]{fname} [dim]({descr})[/] ...[/]', )
-				Command.execute(cmd, cls_attributes={'shell': True}, cwd=directory)
-		console.print()
-
 	console.print(Rule())
 	console.print(f'Available payloads in {directory}: ', style='bold yellow')
 	for fname in os.listdir(directory):
@@ -294,9 +267,7 @@ def serve(directory, host, port, interface):
 					f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.',
 					style='bold red')
 				return
-		payload = find_list_item(PAYLOADS, fname, key='fname', default={})
-		fdescr = payload.get('description', 'No description')
-		console.print(f'{fname} [dim]({fdescr})[/]', style='bold magenta')
+		console.print(f'{fname} [dim][/]', style='bold magenta')
 		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
 		console.print('')
 	console.print(Rule())
@@ -469,6 +440,81 @@ def publish_docker(tag, latest):
 
 
 #--------#
+# CONFIG #
+#--------#
+
+
+@cli.group('config')
+def _config():
+	"""View or edit configuration."""
+	pass
+
+
+@_config.command('get')
+@click.option('--full', is_flag=True, help='Show full configuration (with defaults)')
+@click.argument('key', required=False)
+def config_get(full, key=None):
+	"""Get config value."""
+	if key is None:
+		CONFIG.print(partial=not full)
+		return
+	CONFIG.get(key)
+
+
+@_config.command('set')
+@click.argument('key')
+@click.argument('value')
+def config_set(key, value):
+	"""Set config value."""
+	success = CONFIG.set(key, value)
+	if success:
+		CONFIG.get(key)
+		saved = CONFIG.save()
+		if not saved:
+			return
+		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
+
+
+@_config.command('edit')
+@click.option('--resume', is_flag=True)
+def config_edit(resume):
+	"""Edit config."""
+	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
+	if not tmp_config.exists() or not resume:
+		shutil.copyfile(config_path, tmp_config)
+	click.edit(filename=tmp_config)
+	config = Config.parse(path=tmp_config)
+	if config._valid:
+		config.save(config_path)
+		console.print(f'\n[bold green]:tada: Saved config to [/]{config_path}.')
+		tmp_config.unlink()
+	else:
+		console.print('\n[bold green]Hint:[/] Run "secator config edit --resume" to edit your patch and fix issues.')
+
+
+@_config.command('default')
+@click.option('--save', type=str, help='Save default config to file.')
+def config_default(save):
+	"""Get default config."""
+	default_config.print(partial=False)
+	if save:
+		default_config.save(target_path=Path(save), partial=False)
+		console.print(f'\n[bold green]:tada: Saved default config to [/]{save}.')
+
+
+# TODO: implement reset method
+# @_config.command('reset')
+# @click.argument('key')
+# def config_reset(key):
+# 	"""Reset config value to default."""
+# 	success = CONFIG.set(key, None)
+# 	if success:
+# 		CONFIG.print()
+# 		CONFIG.save()
+# 		console.print(f'\n[bold green]:tada: Saved config to [/]{CONFIG._path}')
+
+
+#--------#
 # REPORT #
 #--------#
 
@@ -636,7 +682,7 @@ def install_google():
 		cmd=f'{sys.executable} -m pip install secator[google]',
 		title='google addon',
 		next_steps=[
-			'Set the "GOOGLE_CREDENTIALS_PATH" and "GOOGLE_DRIVE_PARENT_FOLDER_ID" environment variables.',
+			'Set the "config.addons.google.credentials_path" and "config.addons.google.drive_parent_folder_id" environment variables.',  # noqa: E501
 			'Run "secator x httpx testphp.vulnweb.com -o gdrive" to admire your results flowing to Google Drive.'
 		]
 	)
@@ -664,8 +710,8 @@ def install_redis():
 		title='redis addon',
 		next_steps=[
 			'[dim]\[optional][/] Run "docker run --name redis -p 6379:6379 -d redis" to run a local Redis instance.',
-			'Set the "CELERY_BROKER_URL=redis://<url>" environment variable pointing to your Redis instance.',
-			'Set the "CELERY_RESULT_BACKEND=redis://<url>" environment variable pointing to your Redis instance.',
+			'Set `celery.broker_url=redis://<url>` in your config.'
+			'Set `celery.result_backend=redis://<url>` in your config.'
 			'Run "secator worker" to run a worker.',
 			'Run "secator x httpx testphp.vulnweb.com" to run a test task.'
 		]
@@ -761,18 +807,18 @@ def install_tools(cmds):
 @click.option('--force', is_flag=True)
 def install_cves(force):
 	"""Install CVEs (enables passive vulnerability search)."""
-	cve_json_path = f'{CVES_FOLDER}/circl-cve-search-expanded.json'
+	cve_json_path = f'{CONFIG.dirs.cves}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
-			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=CVES_FOLDER)
+			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=CONFIG.dirs.cves)
 		with console.status('[bold yellow]Unzipping CVEs ...[/]'):
-			Command.execute(f'gunzip {CVES_FOLDER}/circl-cve-search-expanded.json.gz', cwd=CVES_FOLDER)
-	with console.status(f'[bold yellow]Installing CVEs to {CVES_FOLDER} ...[/]'):
+			Command.execute(f'gunzip {CONFIG.dirs.cves}/circl-cve-search-expanded.json.gz', cwd=CONFIG.dirs.cves)
+	with console.status(f'[bold yellow]Installing CVEs to {CONFIG.dirs.cves} ...[/]'):
 		with open(cve_json_path, 'r') as f:
 			for line in f:
 				data = json.loads(line)
 				cve_id = data['id']
-				cve_path = f'{CVES_FOLDER}/{cve_id}.json'
+				cve_path = f'{CONFIG.dirs.cves}/{cve_id}.json'
 				with open(cve_path, 'w') as f:
 					f.write(line)
 				console.print(f'CVE saved to {cve_path}')
@@ -813,7 +859,7 @@ def alias():
 @click.pass_context
 def enable_aliases(ctx):
 	"""Enable aliases."""
-	fpath = f'{DATA_FOLDER}/.aliases'
+	fpath = f'{CONFIG.dirs.data}/.aliases'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = '\n'.join(aliases)
 	with open(fpath, 'w') as f:
@@ -835,7 +881,7 @@ echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load 
 @click.pass_context
 def disable_aliases(ctx):
 	"""Disable aliases."""
-	fpath = f'{DATA_FOLDER}/.unalias'
+	fpath = f'{CONFIG.dirs.data}/.unalias'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = ''
 	for alias in aliases:
@@ -937,9 +983,9 @@ def unit(tasks, workflows, scans, test, debug=False):
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['DEBUG'] = str(debug)
-	os.environ['DEFAULT_STORE_HTTP_RESPONSES'] = '0'
-	os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
+	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
+	os.environ['SECATOR_HTTP_STORE_RESPONSES'] = '0'
+	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
 	if test:
@@ -962,8 +1008,9 @@ def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['DEBUG'] = str(debug)
-	os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
+	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
+	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
+
 	cmd = f'{sys.executable} -m unittest'
 	if test:
 		if not test.startswith('tests.integration'):
