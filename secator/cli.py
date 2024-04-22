@@ -107,13 +107,13 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
 	from secator import CONFIG
 	if not ADDONS_ENABLED['worker']:
-		console.print('[bold red]Missing worker addon: please run `secator install addons worker`[/].')
+		console.print('[bold red]Missing worker addon: please run [bold green4]secator install addons worker[/][/].')
 		sys.exit(1)
 	broker_protocol = CONFIG.celery.broker_url.split('://')[0]
 	backend_protocol = CONFIG.celery.result_backend.split('://')[0]
 	if CONFIG.celery.broker_url:
 		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
-			console.print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
+			console.print('[bold red]Missing `redis` addon: please run [bold green4]secator install addons redis[/][/].')
 			sys.exit(1)
 	from secator.celery import app, is_celery_worker_alive
 	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
@@ -372,7 +372,7 @@ def build():
 def build_pypi():
 	"""Build secator PyPI package."""
 	if not ADDONS_ENABLED['build']:
-		console.print('[bold red]Missing build addon: please run `secator install addons build`')
+		console.print('[bold red]Missing build addon: please run [bold green4]secator install addons build[/][/]')
 		sys.exit(1)
 	with console.status('[bold gold3]Building PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
@@ -408,7 +408,7 @@ def publish():
 def publish_pypi():
 	"""Publish secator PyPI package."""
 	if not ADDONS_ENABLED['build']:
-		console.print('[bold red]Missing build addon: please run `secator install addons build`')
+		console.print('[bold red]Missing build addon: please run [bold green4]secator install addons build[/][/]')
 		sys.exit(1)
 	os.environ['HATCH_INDEX_USER'] = '__token__'
 	hatch_token = os.environ.get('HATCH_INDEX_AUTH')
@@ -650,9 +650,9 @@ def install_worker():
 		cmd=f'{sys.executable} -m pip install secator[worker]',
 		title='worker addon',
 		next_steps=[
-			'Run "secator worker" to run a Celery worker using the file system as a backend and broker.',
-			'Run "secator x httpx testphp.vulnweb.com" to admire your task running in a worker.',
-			'[dim]\[optional][/dim] Run "secator install addons redis" to install the Redis addon.'
+			'Run [bold green4]secator worker[/] to run a Celery worker using the file system as a backend and broker.',
+			'Run [bold green4]secator x httpx testphp.vulnweb.com[/] to admire your task running in a worker.',
+			'[dim]\[optional][/dim] Run [bold green4]secator install addons redis[/] to setup Redis backend / broker.'
 		]
 	)
 
@@ -664,8 +664,9 @@ def install_google():
 		cmd=f'{sys.executable} -m pip install secator[google]',
 		title='google addon',
 		next_steps=[
-			'Set the "config.addons.google.credentials_path" and "config.addons.google.drive_parent_folder_id" environment variables.',  # noqa: E501
-			'Run "secator x httpx testphp.vulnweb.com -o gdrive" to admire your results flowing to Google Drive.'
+			'Run [bold green4]secator config set addons.google.credentials_path <VALUE>[/].',
+			'Run [bold green4]secator config set addons.google.drive_parent_folder_id <VALUE>[/].',
+			'Run [bold green4]secator x httpx testphp.vulnweb.com -o gdrive[/] to send reports to Google Drive.'
 		]
 	)
 
@@ -677,9 +678,9 @@ def install_mongodb():
 		cmd=f'{sys.executable} -m pip install secator[mongodb]',
 		title='mongodb addon',
 		next_steps=[
-			'[dim]\[optional][/] Run "docker run --name mongo -p 27017:27017 -d mongo:latest" to run a local MongoDB instance.',
-			'Set the "MONGODB_URL=mongodb://<url>" environment variable pointing to your MongoDB instance.',
-			'Run "secator x httpx testphp.vulnweb.com -driver mongodb" to save results to MongoDB.'
+			'[dim]\[optional][/] Run [bold green4]docker run --name mongo -p 27017:27017 -d mongo:latest[/] to run a local MongoDB instance.',  # noqa: E501
+			'Run [bold green4]secator config set addons.mongodb.url mongodb://<URL>[/].',
+			'Run [bold green4]secator x httpx testphp.vulnweb.com -driver mongodb[/] to save results to MongoDB.'
 		]
 	)
 
@@ -691,11 +692,11 @@ def install_redis():
 		cmd=f'{sys.executable} -m pip install secator[redis]',
 		title='redis addon',
 		next_steps=[
-			'[dim]\[optional][/] Run "docker run --name redis -p 6379:6379 -d redis" to run a local Redis instance.',
-			'Set `celery.broker_url=redis://<url>` in your config.'
-			'Set `celery.result_backend=redis://<url>` in your config.'
-			'Run "secator worker" to run a worker.',
-			'Run "secator x httpx testphp.vulnweb.com" to run a test task.'
+			'[dim]\[optional][/] Run [bold green4]docker run --name redis -p 6379:6379 -d redis[/] to run a local Redis instance.',  # noqa: E501
+			'Run [bold green4]secator config set celery.broker_url redis://<URL>[/]',
+			'Run [bold green4]secator config set celery.result_backend redis://<URL>[/]',
+			'Run [bold green4]secator worker[/] to run a worker.',
+			'Run [bold green4]secator x httpx testphp.vulnweb.com[/] to run a test task.'
 		]
 	)
 
@@ -707,9 +708,9 @@ def install_dev():
 		cmd=f'{sys.executable} -m pip install secator[dev]',
 		title='dev addon',
 		next_steps=[
-			'Run "secator test lint" to run lint tests.',
-			'Run "secator test unit" to run unit tests.',
-			'Run "secator test integration" to run integration tests.',
+			'Run [bold green4]secator test lint[/] to run lint tests.',
+			'Run [bold green4]secator test unit[/] to run unit tests.',
+			'Run [bold green4]secator test integration[/] to run integration tests.',
 		]
 	)
 
@@ -721,9 +722,6 @@ def install_trace():
 		cmd=f'{sys.executable} -m pip install secator[trace]',
 		title='dev addon',
 		next_steps=[
-			'Run "secator test lint" to run lint tests.',
-			'Run "secator test unit" to run unit tests.',
-			'Run "secator test integration" to run integration tests.',
 		]
 	)
 
@@ -735,9 +733,10 @@ def install_build():
 		cmd=f'{sys.executable} -m pip install secator[build]',
 		title='build addon',
 		next_steps=[
-			'Run "secator test lint" to run lint tests.',
-			'Run "secator test unit" to run unit tests.',
-			'Run "secator test integration" to run integration tests.',
+			'Run [bold green4]secator u build pypi[/] to build the PyPI package.',
+			'Run [bold green4]secator u publish pypi[/] to publish the PyPI package.',
+			'Run [bold green4]secator u build docker[/] to build the Docker image.',
+			'Run [bold green4]secator u publish docker[/] to publish the Docker image.',
 		]
 	)
 
@@ -929,7 +928,7 @@ def test():
 		console.print('[bold red]You MUST use a development version of secator to run tests.[/]')
 		sys.exit(1)
 	if not ADDONS_ENABLED['dev']:
-		console.print('[bold red]Missing dev addon: please run `secator install addons dev`')
+		console.print('[bold red]Missing dev addon: please run [bold green4]secator install addons dev[/][/]')
 		sys.exit(1)
 	pass
 
