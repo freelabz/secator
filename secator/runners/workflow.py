@@ -1,6 +1,6 @@
 from secator.definitions import DEBUG
-from secator.exporters import CsvExporter, JsonExporter
 from secator.output_types import Target
+from secator import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
@@ -8,10 +8,7 @@ from secator.utils import merge_opts
 
 class Workflow(Runner):
 
-	default_exporters = [
-		JsonExporter,
-		CsvExporter
-	]
+	default_exporters = CONFIG.workflows.exporters
 
 	@classmethod
 	def delay(cls, *args, **kwargs):

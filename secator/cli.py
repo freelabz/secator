@@ -1,7 +1,10 @@
 import json
 import os
 import re
+import shutil
 import sys
+
+from pathlib import Path
 
 import rich_click as click
 from dotmap import DotMap
@@ -11,11 +14,11 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
 
+from secator import CONFIG, ROOT_FOLDER, Config, default_config, config_path
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
-from secator.piny import config, OFFLINE_MODE, ROOT_FOLDER
 from secator.rich import console
 from secator.runners import Command
 from secator.serializers.dataclass import loads_dataclass
@@ -105,13 +108,12 @@ for cfg in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
-	from secator.piny import config
 	if not ADDONS_ENABLED['worker']:
 		console.print('[bold red]Missing worker addon: please run `secator install addons worker`[/].')
 		sys.exit(1)
-	broker_protocol = config.celery.broker_url.split('://')[0]
-	backend_protocol = config.celery.result_backend.split('://')[0]
-	if config.celery.broker_url:
+	broker_protocol = CONFIG.celery.broker_url.split('://')[0]
+	backend_protocol = CONFIG.celery.result_backend.split('://')[0]
+	if CONFIG.celery.broker_url:
 		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 			console.print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 			sys.exit(1)
@@ -190,13 +192,13 @@ def revshell(name, host, port, interface, listen, force):
 			console.print(f'[bold green]Detected host IP: [bold orange1]{host}[/].[/]')
 
 	# Download reverse shells JSON from repo
-	revshells_json = f'{config.dirs.revshells}/revshells.json'
+	revshells_json = f'{CONFIG.dirs.revshells}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
 		if OFFLINE_MODE:
 			console.print('[bold red]Cannot run this command in offline mode.[/]')
 			return
 		ret = Command.execute(
-			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {config.dirs.revshells}',  # noqa: E501
+			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {CONFIG.dirs.revshells}',  # noqa: E501
 			cls_attributes={'shell': True}
 		)
 		if not ret.return_code == 0:
@@ -255,7 +257,7 @@ def revshell(name, host, port, interface, listen, force):
 
 
 @util.command()
-@click.option('--directory', '-d', type=str, default=config.dirs.payloads, help='HTTP server directory')
+@click.option('--directory', '-d', type=str, default=CONFIG.dirs.payloads, help='HTTP server directory')
 @click.option('--host', '-h', type=str, default=None, help='HTTP host')
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
@@ -449,36 +451,72 @@ def publish_docker(tag, latest):
 
 @cli.group('config')
 def _config():
+	"""View or edit configuration."""
 	pass
 
 
-@_config.command('show')
-@click.option('--default', is_flag=True, help='Show default config')
-@click.option('--save', is_flag=True, help='Save default config to configs/config.yml')
-def config_show(default, save):
-	"""Show default secator config."""
-	from secator.piny import config, default_config_path, Config
-	from pathlib import Path
-	if default:
-		tmp_path = Path('tmp_config.yml')
-		with tmp_path.open('w') as f:
-			f.write('_dummy:')
-		cfg = Config.parse(tmp_path)
-		cfg.print(yaml=True)
-		if save:
-			cfg.save(default_config_path)
-			console.print(f'\n[bold green]:tada: Saved default config to [/]{default_config_path}')
-		tmp_path.unlink()
-	else:
-		config.print(yaml=True)
+@_config.command('get')
+@click.option('--full', is_flag=True, help='Show full configuration (with defaults)')
+@click.argument('key', required=False)
+def config_get(full, key=None):
+	"""Get config value."""
+	if key is None:
+		CONFIG.print(partial=not full)
+		return
+	CONFIG.get(key)
+
+
+@_config.command('set')
+@click.argument('key')
+@click.argument('value')
+def config_set(key, value):
+	"""Set config value."""
+	success = CONFIG.set(key, value)
+	if success:
+		CONFIG.get(key)
+		saved = CONFIG.save()
+		if not saved:
+			return
+		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
 
 
 @_config.command('edit')
-@click.argument('key')
-@click.argument('value')
-def config_edit(key, value):
-	setattr(config, key, value)
-	config.save()
+@click.option('--resume', is_flag=True)
+def config_edit(resume):
+	"""Edit config."""
+	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
+	if not tmp_config.exists() or not resume:
+		shutil.copyfile(config_path, tmp_config)
+	click.edit(filename=tmp_config)
+	config = Config.parse(path=tmp_config)
+	if config._valid:
+		config.save(config_path)
+		console.print(f'\n[bold green]:tada: Saved config to [/]{config_path}.')
+		tmp_config.unlink()
+	else:
+		console.print('\n[bold green]Hint:[/] Run "secator config edit --resume" to edit your patch and fix issues.')
+
+
+@_config.command('default')
+@click.option('--save', type=str, help='Save default config to file.')
+def config_default(save):
+	"""Get default config."""
+	default_config.print(partial=False)
+	if save:
+		default_config.save(target_path=Path(save), partial=False)
+		console.print(f'\n[bold green]:tada: Saved default config to [/]{save}.')
+
+
+# TODO: implement reset method
+# @_config.command('reset')
+# @click.argument('key')
+# def config_reset(key):
+# 	"""Reset config value to default."""
+# 	success = CONFIG.set(key, None)
+# 	if success:
+# 		CONFIG.print()
+# 		CONFIG.save()
+# 		console.print(f'\n[bold green]:tada: Saved config to [/]{CONFIG._path}')
 
 
 #--------#
@@ -783,18 +821,18 @@ def install_cves(force):
 	if OFFLINE_MODE:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
-	cve_json_path = f'{config.dirs.cves}/circl-cve-search-expanded.json'
+	cve_json_path = f'{CONFIG.dirs.cves}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
-			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=config.dirs.cves)
+			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=CONFIG.dirs.cves)
 		with console.status('[bold yellow]Unzipping CVEs ...[/]'):
-			Command.execute(f'gunzip {config.dirs.cves}/circl-cve-search-expanded.json.gz', cwd=config.dirs.cves)
-	with console.status(f'[bold yellow]Installing CVEs to {config.dirs.cves} ...[/]'):
+			Command.execute(f'gunzip {CONFIG.dirs.cves}/circl-cve-search-expanded.json.gz', cwd=CONFIG.dirs.cves)
+	with console.status(f'[bold yellow]Installing CVEs to {CONFIG.dirs.cves} ...[/]'):
 		with open(cve_json_path, 'r') as f:
 			for line in f:
 				data = json.loads(line)
 				cve_id = data['id']
-				cve_path = f'{config.dirs.cves}/{cve_id}.json'
+				cve_path = f'{CONFIG.dirs.cves}/{cve_id}.json'
 				with open(cve_path, 'w') as f:
 					f.write(line)
 				console.print(f'CVE saved to {cve_path}')
@@ -838,7 +876,7 @@ def alias():
 @click.pass_context
 def enable_aliases(ctx):
 	"""Enable aliases."""
-	fpath = f'{config.dirs.data}/.aliases'
+	fpath = f'{CONFIG.dirs.data}/.aliases'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = '\n'.join(aliases)
 	with open(fpath, 'w') as f:
@@ -860,7 +898,7 @@ echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load 
 @click.pass_context
 def disable_aliases(ctx):
 	"""Disable aliases."""
-	fpath = f'{config.dirs.data}/.unalias'
+	fpath = f'{CONFIG.dirs.data}/.unalias'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = ''
 	for alias in aliases:
@@ -962,11 +1000,9 @@ def unit(tasks, workflows, scans, test, debug=False):
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['DEBUG'] = str(debug)
-
-	# TODO: set secator config instead
-	# os.environ['DEFAULT_STORE_HTTP_RESPONSES'] = '0'
-	# os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
+	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
+	os.environ['SECATOR_HTTP_STORE_RESPONSES'] = '0'
+	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
 	if test:
@@ -989,10 +1025,9 @@ def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['DEBUG'] = str(debug)
+	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
+	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
-	# TODO: set secator config instead
-	# os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
 	cmd = f'{sys.executable} -m unittest'
 	if test:
 		if not test.startswith('tests.integration'):

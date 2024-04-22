@@ -15,7 +15,7 @@ from rich.progress import Progress as RichProgress
 from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from secator.definitions import DEBUG
-from secator.piny import config
+from secator import CONFIG
 from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
@@ -110,7 +110,7 @@ class Runner:
 		self.celery_result = None
 
 		# Determine report folder
-		default_reports_folder_base = f'{config.dirs.reports}/{self.workspace_name}/{self.config.type}s'
+		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
 		_id = get_task_folder_id(default_reports_folder_base)
 		self.reports_folder = f'{default_reports_folder_base}/{_id}'
 
@@ -392,14 +392,14 @@ class Runner:
 
 	def resolve_exporters(self):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.get('output', '')
-		if output == '':
-			return self.default_exporters
-		elif output is False:
+		output = self.run_opts.get('output') or self.default_exporters
+		if not output or output in ['false', 'False']:
 			return []
+		if isinstance(output, str):
+			output = output.split(',')
 		exporters = [
 			import_dynamic(f'secator.exporters.{o.capitalize()}Exporter', 'Exporter')
-			for o in output.split(',')
+			for o in output
 			if o
 		]
 		return [e for e in exporters if e]
@@ -851,7 +851,7 @@ class Runner:
 
 		if item._type == 'progress' and item._source == self.config.name:
 			self.progress = item.percent
-			update_frequency = config.runners.progress_update_frequency
+			update_frequency = CONFIG.runners.progress_update_frequency
 			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:
 				return None
 			elif int(item.percent) in [0, 100]:

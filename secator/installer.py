@@ -11,7 +11,7 @@ from rich.table import Table
 
 from secator.rich import console
 from secator.runners import Command
-from secator.piny import config, OFFLINE_MODE
+from secator import CONFIG
 
 
 class ToolInstaller:
@@ -95,7 +95,7 @@ class GithubInstaller:
 
 		# Download and unpack asset
 		console.print(f'Found release URL: {download_url}')
-		cls._download_and_unpack(download_url, config.dirs.bin, repo)
+		cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
 		return True
 
 	@classmethod
@@ -113,8 +113,8 @@ class GithubInstaller:
 		owner, repo = tuple(github_handle.split('/'))
 		url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 		headers = {}
-		if config.cli.github_token:
-			headers['Authorization'] = f'Bearer {config.cli.github_token}'
+		if CONFIG.cli.github_token:
+			headers['Authorization'] = f'Bearer {CONFIG.cli.github_token}'
 		try:
 			response = requests.get(url, headers=headers, timeout=5)
 			response.raise_for_status()

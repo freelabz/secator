@@ -139,17 +139,17 @@ OUTPUTS_TASKS = {
     'grype': [
 		Vulnerability(
             matched_at=ROOT_FOLDER,
-            name='Owner Footprinting',
+            name='Manipulating Web Input to File System Calls',
             provider='cve.circl.lu',
             severity='medium',
             tags=['ghsa'],
-			id='CVE-2023-43804',
+			id='CVE-2023-5752',
             extra_data={
-                'product': 'urllib3',
-				'product_type': 'python',
-                'version': '2.0.5',
-				'version_fixed': '2.0.6',
-                'ghsa_id': 'GHSA-v845-jxx5-vc9f'
+				'lang': 'python',
+                'product': 'pip',
+                'version': '23.0.1',
+				'version_fixed': '23.3',
+                'ghsa_id': 'GHSA-mq26-g339-26xf'
             },
             _source='grype',
         )

@@ -6,13 +6,13 @@ from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
 from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
-from secator.piny import config
+from secator import CONFIG
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
 
 RUNNER_OPTS = {
-	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
+	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
@@ -283,9 +283,9 @@ def register_runner(cli_endpoint, cfg):
 				sync = True
 			else:
 				sync = False
-				broker_protocol = config.celery.broker_url.split('://')[0]
-				backend_protocol = config.celery.result_backend.split('://')[0]
-				if config.celery.broker_url:
+				broker_protocol = CONFIG.celery.broker_url.split('://')[0]
+				backend_protocol = CONFIG.celery.result_backend.split('://')[0]
+				if CONFIG.celery.broker_url:
 					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 						sys.exit(1)
