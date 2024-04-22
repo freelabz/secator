@@ -60,7 +60,7 @@ def task():
 
 
 for cls in ALL_TASKS:
-	cfg = DotMap({'name': cls.__name__, 'type': 'task'})
+	config = DotMap({'name': cls.__name__, 'type': 'task'})
 	register_runner(task, cfg)
 
 #----------#
