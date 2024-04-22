@@ -184,8 +184,6 @@ class Vuln(Command):
 						# logger.debug(f'Found matching CPE FS {cpe_fs} ! The CPE is vulnerable to CVE {cve_id}')
 						cpe_match = True
 						tags.append('cpe-match')
-			if not cpe_match:
-				return None
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
