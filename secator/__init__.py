@@ -460,6 +460,7 @@ def download_files(data: dict, target_folder: Path, type: str):
 				console.print(f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ', end='')
 				if OFFLINE_MODE:
 					console.print('[bold orange1]skipped [dim][offline[/].[/]')
+					continue
 				try:
 					call(['git', 'clone', git_url, str(target_path)], stderr=DEVNULL, stdout=DEVNULL)
 					console.print('[bold green]ok.[/]')
