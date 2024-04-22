@@ -14,7 +14,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
 
-from secator import CONFIG, ROOT_FOLDER, Config, default_config, config_path
+from secator import CONFIG, OFFLINE_MODE, ROOT_FOLDER, Config, default_config, config_path
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
