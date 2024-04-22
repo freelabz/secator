@@ -61,7 +61,7 @@ def task():
 
 for cls in ALL_TASKS:
 	config = DotMap({'name': cls.__name__, 'type': 'task'})
-	register_runner(task, cfg)
+	register_runner(task, config)
 
 #----------#
 # WORKFLOW #
@@ -74,8 +74,8 @@ def workflow():
 	pass
 
 
-for cfg in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
-	register_runner(workflow, cfg)
+for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
+	register_runner(workflow, config)
 
 
 #------#
@@ -88,8 +88,8 @@ def scan():
 	pass
 
 
-for cfg in sorted(ALL_SCANS, key=lambda x: x['name']):
-	register_runner(scan, cfg)
+for config in sorted(ALL_SCANS, key=lambda x: x['name']):
+	register_runner(scan, config)
 
 
 #--------#
