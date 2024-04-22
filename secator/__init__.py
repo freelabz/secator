@@ -6,9 +6,9 @@ from typing_extensions import Annotated, Self
 import requests
 import yaml
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
+from pydantic import AfterValidator, BaseModel, model_validator, ValidationError, Extra
 
-from secator.rich import console
+from secator.rich import console, console_stdout
 
 Directory = Annotated[Path, AfterValidator(lambda v: v.expanduser())]
 StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.home())))]
@@ -18,7 +18,11 @@ LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 
 
-class Directories(BaseModel):
+class StrictModel(BaseModel, extra=Extra.forbid):
+	pass
+
+
+class Directories(StrictModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
 	data: Directory = Path.home() / '.secator'
 	templates: Directory = ''
@@ -41,12 +45,12 @@ class Directories(BaseModel):
 		return self
 
 
-class Debug(BaseModel):
+class Debug(StrictModel):
 	level: int = 0
 	component: str = ''
 
 
-class Celery(BaseModel):
+class Celery(StrictModel):
 	broker_url: str = 'filesystem://'
 	broker_pool_limit: int = 10
 	broker_connection_timeout: float = 4.0
@@ -55,19 +59,19 @@ class Celery(BaseModel):
 	result_backend: StrExpandHome = ''
 
 
-class Cli(BaseModel):
+class Cli(StrictModel):
 	github_token: str = ''
 	record: bool = False
 	stdin_timeout: int = 1000
 
 
-class Runners(BaseModel):
+class Runners(StrictModel):
 	input_chunk_size: int = 1000
 	progress_update_frequency: int = 60
 	skip_cve_search: bool = False
 
 
-class HTTP(BaseModel):
+class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
 	store_responses: bool = False
@@ -75,19 +79,19 @@ class HTTP(BaseModel):
 	freeproxy_timeout: int = 1
 
 
-class Tasks(BaseModel):
+class Tasks(StrictModel):
 	exporters: List[str] = ['json', 'csv']
 
 
-class Workflows(BaseModel):
+class Workflows(StrictModel):
 	exporters: List[str] = ['json', 'csv']
 
 
-class Scans(BaseModel):
+class Scans(StrictModel):
 	exporters: List[str] = ['json', 'csv']
 
 
-class Payloads(BaseModel):
+class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
 		'linpeas': 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh',
@@ -95,7 +99,7 @@ class Payloads(BaseModel):
 	}
 
 
-class Wordlists(BaseModel):
+class Wordlists(StrictModel):
 	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains'}
 	templates: Dict[str, str] = {
 		'bo0m_fuzz': 'https://raw.githubusercontent.com/Bo0oM/fuzz.txt/master/fuzz.txt',
@@ -104,29 +108,29 @@ class Wordlists(BaseModel):
 	lists: Dict[str, List[str]] = {}
 
 
-class GoogleAddon(BaseModel):
+class GoogleAddon(StrictModel):
 	enabled: bool = False
 	drive_parent_folder_id: str = ''
 	credentials_path: str = ''
 
 
-class WorkerAddon(BaseModel):
+class WorkerAddon(StrictModel):
 	enabled: bool = False
 
 
-class MongodbAddon(BaseModel):
+class MongodbAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'mongodb://localhost'
 	update_frequency: int = 60
 
 
-class Addons(BaseModel):
+class Addons(StrictModel):
 	google: GoogleAddon = GoogleAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 
 
-class SecatorConfig(BaseModel):
+class SecatorConfig(StrictModel):
 	dirs: Directories = Directories()
 	debug: Debug = Debug()
 	celery: Celery = Celery()
@@ -230,7 +234,7 @@ class Config(DotMap):
 				success = False
 				# console.print(f'[bold red]{key}: cannot cast value "{value}" to {type(existing_value).__name__}')
 		else:
-			console.print(f'[bold red]{key} not found in configuration.[/]')
+			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
 		return success
 
 	def save(self, target_path: Path = None, partial=True):
@@ -284,12 +288,11 @@ class Config(DotMap):
 				config.celery.result_backend = f'file://{config.dirs.celery_results}'
 
 		except ValidationError as e:
-			error_str = 'Error validating config'
+			error_str = str(e).replace('\n', '\n  ')
 			if path:
-				error_str += f' {path}'
-			error_str += ':\n ' + str(e).replace('\n', '\n  ')
-			console.print(f'[bold red]{error_str}')
-			console.print('[bold green]Falling back to default config.[/]')
+				error_str.replace('SecatorConfig', f'SecatorConfig ({path})')  
+			console.print(f'[bold red]:x: {error_str}')
+			# console.print('[bold green]Using default config.[/]')
 			config = Config.parse()
 			config._valid = False
 
@@ -303,7 +306,8 @@ class Config(DotMap):
 		# Override config values with environment variables
 		if env_overrides:
 			config.apply_env_overrides()
-			config = Config.parse(config.toDict(), env_overrides=False)  # re-validate config
+			data = {k: v for k, v in config.toDict().items() if not k.startswith('_')}
+			config = Config.parse(data, env_overrides=False)  # re-validate config
 			config._partial = partial
 			config._path = path
 
@@ -344,7 +348,7 @@ class Config(DotMap):
 		"""
 		from rich.syntax import Syntax
 		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
-		console.print(data)
+		console_stdout.print(data)
 
 	@staticmethod
 	def dump(config, partial=True):

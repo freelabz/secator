@@ -444,6 +444,7 @@ def publish_docker(tag, latest):
 
 @cli.group('config')
 def _config():
+	"""View or edit configuration."""
 	pass
 
 
@@ -470,6 +471,26 @@ def config_set(key, value):
 		if not saved:
 			return
 		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
+
+
+@_config.command('edit')
+@click.option('--resume', is_flag=True)
+def config_edit(resume):
+	"""Edit config."""
+	from secator import Config, config_path
+	from pathlib import Path
+	import shutil
+	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
+	if not tmp_config.exists() or not resume:
+		shutil.copyfile(config_path, tmp_config)
+	click.edit(filename=tmp_config)
+	config = Config.parse(path=tmp_config)
+	if config._valid:
+		config.save(config_path)
+		console.print(f'\n[bold green]:tada: Saved config to [/]{config_path}.')
+		tmp_config.unlink()
+	else:
+		console.print('\n[bold green]Hint:[/] Run "secator config edit --resume" to edit your patch and fix issues.')
 
 
 @_config.command('default')
@@ -965,11 +986,9 @@ def unit(tasks, workflows, scans, test, debug=False):
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['DEBUG'] = str(debug)
-
-	# TODO: set secator config instead
-	# os.environ['DEFAULT_STORE_HTTP_RESPONSES'] = '0'
-	# os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
+	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
+	os.environ['SECATOR_HTTP_STORE_RESPONSES'] = '0'
+	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
 	if test:
@@ -992,10 +1011,9 @@ def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['DEBUG'] = str(debug)
+	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
+	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
-	# TODO: set secator config instead
-	# os.environ['DEFAULT_SKIP_CVE_SEARCH'] = '1'
 	cmd = f'{sys.executable} -m unittest'
 	if test:
 		if not test.startswith('tests.integration'):
