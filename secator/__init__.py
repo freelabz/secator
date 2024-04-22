@@ -290,7 +290,7 @@ class Config(DotMap):
 		except ValidationError as e:
 			error_str = str(e).replace('\n', '\n  ')
 			if path:
-				error_str.replace('SecatorConfig', f'SecatorConfig ({path})')  
+				error_str.replace('SecatorConfig', f'SecatorConfig ({path})')
 			console.print(f'[bold red]:x: {error_str}')
 			# console.print('[bold green]Using default config.[/]')
 			config = Config.parse()

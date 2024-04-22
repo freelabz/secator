@@ -1,7 +1,10 @@
 import json
 import os
 import re
+import shutil
 import sys
+
+from pathlib import Path
 
 import rich_click as click
 from dotmap import DotMap
@@ -11,7 +14,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
 
-from secator import CONFIG, ROOT_FOLDER
+from secator import CONFIG, ROOT_FOLDER, Config, default_config, config_path
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
@@ -105,7 +108,6 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
-	from secator import CONFIG
 	if not ADDONS_ENABLED['worker']:
 		console.print('[bold red]Missing worker addon: please run `secator install addons worker`[/].')
 		sys.exit(1)
@@ -477,9 +479,6 @@ def config_set(key, value):
 @click.option('--resume', is_flag=True)
 def config_edit(resume):
 	"""Edit config."""
-	from secator import Config, config_path
-	from pathlib import Path
-	import shutil
 	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
 	if not tmp_config.exists() or not resume:
 		shutil.copyfile(config_path, tmp_config)
@@ -497,8 +496,6 @@ def config_edit(resume):
 @click.option('--save', type=str, help='Save default config to file.')
 def config_default(save):
 	"""Get default config."""
-	from secator import default_config
-	from pathlib import Path
 	default_config.print(partial=False)
 	if save:
 		default_config.save(target_path=Path(save), partial=False)
