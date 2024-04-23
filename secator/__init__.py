@@ -64,7 +64,6 @@ class Cli(StrictModel):
 	github_token: str = ''
 	record: bool = False
 	stdin_timeout: int = 1000
-	offline_mode: bool = False
 
 
 class Runners(StrictModel):
@@ -145,6 +144,7 @@ class SecatorConfig(StrictModel):
 	payloads: Payloads = Payloads()
 	wordlists: Wordlists = Wordlists()
 	addons: Addons = Addons()
+	offline_mode: bool = False
 
 
 class Config(DotMap):
@@ -432,11 +432,11 @@ class Config(DotMap):
 					# Set the new value recursively
 					success = self.set(path, value, set_partial=False)
 					if success:
-						console.print(f'[bold green4]{var:<50} (override success)[/]')
+						console.print(f'[bold green4]{var} (override success)[/]')
 					else:
-						console.print(f'[bold red]{var:<50} (override failed: cannot update value)[/]')
+						console.print(f'[bold red]{var} (override failed: cannot update value)[/]')
 				else:
-					console.print(f'[bold red]{var:<50} (override failed: key not found in config)[/]')
+					console.print(f'[bold red]{var} (override failed: key not found in config)[/]')
 
 
 def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):
@@ -524,14 +524,14 @@ for name, dir in CONFIG.dirs.items():
 
 
 # Download wordlists and set defaults
-download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.cli.offline_mode, 'wordlist')
+download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
 for category, name in CONFIG.wordlists.defaults.items():
 	if name in CONFIG.wordlists.templates.keys():
 		CONFIG.wordlists.defaults[category] = str(CONFIG.wordlists.templates[name])
 
 
 # Download payloads
-download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.cli.offline_mode, 'payload')
+download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
 
 # Print config
 if CONFIG.debug.component == 'config':

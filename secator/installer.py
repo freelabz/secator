@@ -282,7 +282,7 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 
 	# Get latest version
 	latest_version = None
-	if not CONFIG.cli.offline_mode:
+	if not CONFIG.offline_mode:
 		latest_version = GithubInstaller.get_latest_version(github_handle)
 		info['latest_version'] = latest_version
 
@@ -297,6 +297,8 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 			info['status'] = 'current unknown'
 		elif not latest_version:
 			info['status'] = 'latest unknown'
+			if CONFIG.offline_mode:
+				info['status'] += ' [dim orange1]\[offline][/]'
 	else:
 		info['status'] = 'missing'
 

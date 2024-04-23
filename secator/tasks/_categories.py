@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 
 import requests
@@ -13,10 +12,9 @@ from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE, DELAY, DEPT
 								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator import CONFIG
-from secator.rich import console
 from secator.runners import Command
+from secator.utils import debug
 
-logger = logging.getLogger(__name__)
 
 OPTS = {
 	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
@@ -132,9 +130,11 @@ class Vuln(Command):
 	# def lookup_exploitdb(exploit_id):
 	# 	print('looking up exploit')
 	# 	try:
-	# 		cve_info = requests.get(f'https://exploit-db.com/exploits/{exploit_id}', timeout=5).content
-	# 		print(cve_info)
-	# 	except Exception:
+	# 		resp = requests.get(f'https://exploit-db.com/exploits/{exploit_id}', timeout=5)
+	#		resp.raise_for_status()
+	#		content = resp.content
+	# 	except requests.RequestException as e:
+	#		debug(f'Failed remote query for {exploit_id} ({str(e)}).', sub='cve')
 	# 		logger.error(f'Could not fetch exploit info for exploit {exploit_id}. Skipping.')
 	# 		return None
 	# 	return cve_info
@@ -151,18 +151,21 @@ class Vuln(Command):
 			dict: vulnerability data.
 		"""
 		cve_info = Vuln.lookup_local_cve(cve_id)
+
+		# Online CVE lookup
 		if not cve_info:
 			if CONFIG.runners.skip_cve_search:
-				logger.debug(f'{cve_id} not found locally, and config.runners.skip_cve_search is set: ignoring.')
+				debug(f'Skip remote query for {cve_id} since config.runners.skip_cve_search is set.', sub='cve')
 				return None
-			# logger.debug(f'{cve_id} not found locally. Use `secator install cves` to install CVEs locally.')
+			if CONFIG.offline_mode:
+				debug(f'Skip remote query for {cve_id} since config.offline_mode is set.', sub='cve')
+				return None
 			try:
-				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5).json()
-				if not cve_info:
-					console.print(f'Could not fetch CVE info for cve {cve_id}. Skipping.', highlight=False)
-					return None
-			except Exception:
-				console.print(f'Could not fetch CVE info for cve {cve_id}. Skipping.', highlight=False)
+				resp = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5)
+				resp.raise_for_status()
+				cve_info = resp.json()
+			except requests.RequestException as e:
+				debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
 				return None
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.
@@ -178,10 +181,10 @@ class Vuln(Command):
 				cpe_fs = cpe_obj.as_fs()
 				# cpe_version = cpe_obj.get_version()[0]
 				vulnerable_fs = cve_info['vulnerable_product']
-				# logger.debug(f'Matching CPE {cpe} against {len(vulnerable_fs)} vulnerable products for {cve_id}')
+				debug(f'Matching CPE {cpe} against {len(vulnerable_fs)} vulnerable products for {cve_id}', sub='cve')
 				for fs in vulnerable_fs:
 					if fs == cpe_fs:
-						# logger.debug(f'Found matching CPE FS {cpe_fs} ! The CPE is vulnerable to CVE {cve_id}')
+						debug(f'Found matching CPE FS {cpe_fs} ! The CPE is vulnerable to CVE {cve_id}', sub='cve')
 						cpe_match = True
 						tags.append('cpe-match')
 			if not cpe_match:
@@ -258,9 +261,13 @@ class Vuln(Command):
 		Returns:
 			dict: vulnerability data.
 		"""
-		reference = f'https://github.com/advisories/{ghsa_id}'
-		response = requests.get(reference)
-		soup = BeautifulSoup(response.text, 'lxml')
+		try:
+			resp = requests.get(f'https://github.com/advisories/{ghsa_id}', timeout=5)
+			resp.raise_for_status()
+		except requests.RequestException as e:
+			debug(f'Failed remote query for {ghsa_id} ({str(e)}).', sub='cve')
+			return None
+		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
 		data = Vuln.lookup_cve(cve_id)
