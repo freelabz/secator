@@ -115,13 +115,22 @@ def get_task_data(task_id):
 	"""
 	from celery.result import AsyncResult
 	res = AsyncResult(task_id)
-	if not (res and res.args and len(res.args) > 1):
+	if not res:
 		return
-	task_name = res.args[1]
+	try:
+		args = res.args
+		info = res.info
+		state = res.state
+	except kombu.exceptions.DecodeError as e:
+		console.print(f'[bold red]{str(e)}. Aborting get_task_data.[/]')
+		return
+	if not (args and len(args) > 1):
+		return
+	task_name = args[1]
 	data = {
 		'id': task_id,
 		'name': task_name,
-		'state': res.state,
+		'state': state,
 		'chunk_info': '',
 		'count': 0,
 		'error': None,
@@ -130,14 +139,12 @@ def get_task_data(task_id):
 		'progress': 0,
 		'results': []
 	}
-	if res.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
+
+	# Set ready flag
+	if state in ['FAILURE', 'SUCCESS', 'REVOKED']:
 		data['ready'] = True
-	try:
-		info = res.info
-	except kombu.exceptions.DecodeError as e:
-		console.print(f'[bold red]{str(e)}. Aborting get_task_data.[/]')
-		data['ready'] = False
-		return data
+
+	# Set task data
 	if info and not isinstance(info, list):
 		data.update(info)
 		chunk = data.get('chunk')
