@@ -1,5 +1,7 @@
 import os
 
+import kombu
+
 from secator.utils import deduplicate
 
 
@@ -109,29 +111,32 @@ def get_task_data(task_id):
 	res = AsyncResult(task_id)
 	if not (res and res.args and len(res.args) > 1):
 		return
-	data = {}
 	task_name = res.args[1]
-	data['id'] = task_id
-	data['name'] = task_name
-	data['state'] = res.state
-	data['chunk_info'] = ''
-	data['count'] = 0
-	data['error'] = None
-	data['ready'] = False
-	data['descr'] = ''
-	data['progress'] = 0
-	data['results'] = []
+	data = {
+		'id': task_id,
+		'name': task_name,
+		'state': res.state,
+		'chunk_info': '',
+		'count': 0,
+		'error': None,
+		'ready': False,
+		'descr': '',
+		'progress': 0,
+		'results': []
+	}
 	if res.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
 		data['ready'] = True
-	if res.info and not isinstance(res.info, list):
-		chunk = res.info.get('chunk', '')
-		chunk_count = res.info.get('chunk_count', '')
-		data['chunk'] = chunk
-		data['chunk_count'] = chunk_count
-		if chunk:
+	try:
+		info = res.info
+	except kombu.exceptions.DecodeError:
+		data['ready'] = False
+		return data
+	if info and not isinstance(info, list):
+		data.update(info)
+		chunk = data.get('chunk')
+		chunk_count = data.get('chunk_count')
+		if chunk and chunk_count:
 			data['chunk_info'] = f'{chunk}/{chunk_count}'
-		data.update(res.info)
-		data['descr'] = data.pop('description', '')
 		# del data['results']
 		# del data['task_results']
 	return data
