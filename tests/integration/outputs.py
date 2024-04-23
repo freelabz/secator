@@ -139,7 +139,7 @@ OUTPUTS_TASKS = {
     'grype': [
 		Vulnerability(
             matched_at=ROOT_FOLDER,
-            name='Manipulating Web Input to File System Calls',
+            name='GHSA-mq26-g339-26xf',
             provider='cve.circl.lu',
             severity='medium',
             tags=['ghsa'],
