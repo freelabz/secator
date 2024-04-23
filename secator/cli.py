@@ -14,7 +14,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
 
-from secator import CONFIG, OFFLINE_MODE, ROOT_FOLDER, Config, default_config, config_path
+from secator import CONFIG, ROOT_FOLDER, Config, default_config, config_path
 from secator.config import ConfigLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
@@ -163,7 +163,7 @@ def util():
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
-	if OFFLINE_MODE:
+	if CONFIG.cli.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
@@ -194,7 +194,7 @@ def revshell(name, host, port, interface, listen, force):
 	# Download reverse shells JSON from repo
 	revshells_json = f'{CONFIG.dirs.revshells}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
-		if OFFLINE_MODE:
+		if CONFIG.cli.offline_mode:
 			console.print('[bold red]Cannot run this command in offline mode.[/]')
 			return
 		ret = Command.execute(
@@ -641,7 +641,7 @@ def health(json, debug):
 
 
 def run_install(cmd, title, next_steps=None):
-	if OFFLINE_MODE:
+	if CONFIG.cli.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
@@ -799,7 +799,7 @@ def install_ruby():
 @click.argument('cmds', required=False)
 def install_tools(cmds):
 	"""Install supported tools."""
-	if OFFLINE_MODE:
+	if CONFIG.cli.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	if cmds is not None:
@@ -818,7 +818,7 @@ def install_tools(cmds):
 @click.option('--force', is_flag=True)
 def install_cves(force):
 	"""Install CVEs (enables passive vulnerability search)."""
-	if OFFLINE_MODE:
+	if CONFIG.cli.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	cve_json_path = f'{CONFIG.dirs.cves}/circl-cve-search-expanded.json'
@@ -846,7 +846,7 @@ def install_cves(force):
 @cli.command('update')
 def update():
 	"""[dim]Update to latest version.[/]"""
-	if OFFLINE_MODE:
+	if CONFIG.cli.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)

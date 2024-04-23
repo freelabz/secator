@@ -17,7 +17,6 @@ StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.
 ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
-OFFLINE_MODE = bool(int(os.environ.get('OFFLINE_MODE', '0')))
 
 
 class StrictModel(BaseModel, extra=Extra.forbid):
@@ -65,6 +64,7 @@ class Cli(StrictModel):
 	github_token: str = ''
 	record: bool = False
 	stdin_timeout: int = 1000
+	offline_mode: bool = False
 
 
 class Runners(StrictModel):
@@ -421,7 +421,6 @@ class Config(DotMap):
 		prefix = "SECATOR_"
 
 		# Loop through environment variables
-		import os
 		for var in os.environ:
 			if var.startswith(prefix):
 				# Remove prefix and get the path from the key map
@@ -440,13 +439,14 @@ class Config(DotMap):
 					console.print(f'[bold red]{var:<50} (override failed: key not found in config)[/]')
 
 
-def download_files(data: dict, target_folder: Path, type: str):
+def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):
 	"""Download remote files to target folder, clone git repos, or symlink local files.
 
 	Args:
 		data (dict): Dict of name to url or local path prefixed with 'git+' for Git repos.
 		target_folder (Path): Target folder for storing files or repos.
 		type (str): Type of files to handle.
+		offline_mode (bool): Offline mode.
 	"""
 	for name, url_or_path in data.items():
 		if url_or_path.startswith('git+'):
@@ -458,7 +458,7 @@ def download_files(data: dict, target_folder: Path, type: str):
 			target_path = target_folder / repo_name
 			if not target_path.exists():
 				console.print(f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ', end='')
-				if OFFLINE_MODE:
+				if offline_mode:
 					console.print('[bold orange1]skipped [dim][offline[/].[/]')
 					continue
 				try:
@@ -486,7 +486,7 @@ def download_files(data: dict, target_folder: Path, type: str):
 			if not target_path.exists():
 				try:
 					console.print(f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ', end='')
-					if OFFLINE_MODE:
+					if offline_mode:
 						console.print('[bold orange1]skipped [dim](offline)[/].[/]')
 						continue
 					resp = requests.get(url_or_path, timeout=3)
@@ -524,14 +524,14 @@ for name, dir in CONFIG.dirs.items():
 
 
 # Download wordlists and set defaults
-download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, 'wordlist')
+download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.cli.offline_mode, 'wordlist')
 for category, name in CONFIG.wordlists.defaults.items():
 	if name in CONFIG.wordlists.templates.keys():
 		CONFIG.wordlists.defaults[category] = str(CONFIG.wordlists.templates[name])
 
 
 # Download payloads
-download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, 'payload')
+download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.cli.offline_mode, 'payload')
 
 # Print config
 if CONFIG.debug.component == 'config':

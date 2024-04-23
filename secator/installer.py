@@ -11,7 +11,7 @@ from rich.table import Table
 
 from secator.rich import console
 from secator.runners import Command
-from secator import CONFIG, OFFLINE_MODE
+from secator import CONFIG
 
 
 class ToolInstaller:
@@ -282,7 +282,7 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 
 	# Get latest version
 	latest_version = None
-	if not OFFLINE_MODE:
+	if not CONFIG.cli.offline_mode:
 		latest_version = GithubInstaller.get_latest_version(github_handle)
 		info['latest_version'] = latest_version
 
