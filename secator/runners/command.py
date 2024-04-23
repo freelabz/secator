@@ -17,9 +17,6 @@ from secator.runners import Runner
 from secator.serializers import JSONSerializer
 from secator.utils import debug
 
-# from rich.markup import escape
-# from rich.text import Text
-
 
 logger = logging.getLogger(__name__)
 
