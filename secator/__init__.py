@@ -472,7 +472,7 @@ def download_files(data: dict, target_folder: Path, offline_mode: bool, type: st
 			local_path = Path(url_or_path)
 			target_path = target_folder / local_path.name
 			if not target_path.exists():
-				console.print(f'[bold turquoise4]Symlinking {type} [bold magenta]{local_path.name}[/] ...[/] ', end='')
+				console.print(f'[bold turquoise4]Symlinking {type} [bold magenta]{name}[/] ...[/] ', end='')
 				try:
 					target_path.symlink_to(local_path)
 					console.print('[bold green]ok.[/]')
@@ -480,8 +480,9 @@ def download_files(data: dict, target_folder: Path, offline_mode: bool, type: st
 					console.print(f'[bold red]failed ({str(e)}).[/]')
 			data[name] = target_path.resolve()
 		else:
-			# Download files from URL
-			filename = url_or_path.split('/')[-1]
+			# Download file from URL
+			ext = url_or_path.split('.')[-1]
+			filename = f'{name}.{ext}'
 			target_path = target_folder / filename
 			if not target_path.exists():
 				try:
@@ -522,13 +523,11 @@ for name, dir in CONFIG.dirs.items():
 		dir.mkdir(parents=False)
 		console.print('[bold green]ok.[/]')
 
-
 # Download wordlists and set defaults
 download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
 for category, name in CONFIG.wordlists.defaults.items():
 	if name in CONFIG.wordlists.templates.keys():
 		CONFIG.wordlists.defaults[category] = str(CONFIG.wordlists.templates[name])
-
 
 # Download payloads
 download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
