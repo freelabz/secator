@@ -7,7 +7,7 @@ from typing_extensions import Annotated, Self
 import requests
 import yaml
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator, ValidationError, Extra
+from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
 from secator.rich import console, console_stdout
 
@@ -19,7 +19,7 @@ LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 
 
-class StrictModel(BaseModel, extra=Extra.forbid):
+class StrictModel(BaseModel, extra='forbid'):
 	pass
 
 
