@@ -188,7 +188,7 @@ def task():
 	return decorator
 
 
-def register_runner(cli_endpoint, cfg):
+def register_runner(cli_endpoint, config):
 	fmt_opts = {
 		'print_cmd': True,
 	}
@@ -206,13 +206,13 @@ def register_runner(cli_endpoint, cfg):
 			get_command_cls(task)
 			for workflow in ALL_CONFIGS.workflow
 			for task in Task.get_tasks_from_conf(workflow.tasks)
-			if workflow.name in list(cfg.workflows.keys())
+			if workflow.name in list(config.workflows.keys())
 		]
 		input_type = 'targets'
-		name = cfg.name
-		short_help = cfg.description or ''
-		if cfg.alias:
-			short_help += f' [dim]alias: {cfg.alias}'
+		name = config.name
+		short_help = config.description or ''
+		if config.alias:
+			short_help += f' [dim]alias: {config.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
 		fmt_opts['print_progress'] = False
@@ -221,13 +221,13 @@ def register_runner(cli_endpoint, cfg):
 	elif cli_endpoint.name == 'workflow':
 		# TODO: this should be refactored to workflow.get_tasks_from_conf() or workflow.tasks
 		tasks = [
-			get_command_cls(task) for task in Task.get_tasks_from_conf(cfg.tasks)
+			get_command_cls(task) for task in Task.get_tasks_from_conf(config.tasks)
 		]
 		input_type = 'targets'
-		name = cfg.name
-		short_help = cfg.description or ''
-		if cfg.alias:
-			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {cfg.alias}'
+		name = config.name
+		short_help = config.description or ''
+		if config.alias:
+			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
 		fmt_opts['print_progress'] = False
@@ -235,12 +235,12 @@ def register_runner(cli_endpoint, cfg):
 
 	elif cli_endpoint.name == 'task':
 		tasks = [
-			get_command_cls(cfg.name)
+			get_command_cls(config.name)
 		]
-		task_cls = Task.get_task_class(cfg.name)
+		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
 		input_type = task_cls.input_type or 'targets'
-		name = cfg.name
+		name = config.name
 		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
 		fmt_opts['print_item_count'] = True
 		runner_cls = Task
@@ -307,12 +307,12 @@ def register_runner(cli_endpoint, cfg):
 			hooks = MONGODB_HOOKS
 
 		# Build exporters
-		runner = runner_cls(cfg, targets, run_opts=opts, hooks=hooks, context=context)
+		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 
 	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}
 	cli_endpoint.command(
-		name=cfg.name,
+		name=config.name,
 		context_settings=settings,
 		no_args_is_help=no_args_is_help,
 		short_help=short_help)(func)

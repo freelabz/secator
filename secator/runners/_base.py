@@ -49,7 +49,7 @@ class Runner:
 	"""Runner class.
 
 	Args:
-		cfg (secator.config.ConfigLoader): Loaded config.
+		config (secator.config.ConfigLoader): Loaded config.
 		targets (list): List of targets to run task on.
 		results (list): List of existing results to re-use.
 		workspace_name (str): Workspace name.
@@ -80,10 +80,10 @@ class Runner:
 	# Reports folder
 	reports_folder = None
 
-	def __init__(self, cfg, targets, results=[], run_opts={}, hooks={}, context={}):
-		self.config = cfg
-		self.name = run_opts.get('name', cfg.name)
-		self.description = run_opts.get('description', cfg.description)
+	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
+		self.config = config
+		self.name = run_opts.get('name', config.name)
+		self.description = run_opts.get('description', config.description)
 		if not isinstance(targets, list):
 			targets = [targets]
 		self.targets = targets
