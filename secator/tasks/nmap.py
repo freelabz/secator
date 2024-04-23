@@ -10,10 +10,11 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
-								 RETRIES, SCRIPT, SERVICE_NAME, STATE, TAGS,
+								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability
 from secator.tasks._categories import VulnMulti
+from secator.utils import debug
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ class nmapData(dict):
 						EXTRA_DATA: extra_data,
 					}
 					if not func:
-						# logger.debug(f'Script output parser for "{script_id}" is not supported YET.')
+						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve')
 						continue
 					for vuln in func(output, cpes=cpes):
 						vuln.update(metadata)
@@ -281,7 +282,7 @@ class nmapData(dict):
 					vuln.update(vuln_data)
 				yield vuln
 			else:
-				# logger.debug(f'Vulscan provider {provider_name} is not supported YET.')
+				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve')
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
@@ -292,7 +293,7 @@ class nmapData(dict):
 				continue
 			line = line.strip()
 			if line.startswith('cpe:'):
-				cpes.append(line)
+				cpes.append(line.rstrip(':'))
 				continue
 			elems = tuple(line.split('\t'))
 			vuln = {}
@@ -319,23 +320,26 @@ class nmapData(dict):
 
 			elif len(elems) == 3:  # vuln
 				vuln_id, vuln_cvss, reference_url = tuple(line.split('\t'))
+				vuln_cvss = float(vuln_cvss)
+				vuln_id = vuln_id.split(':')[-1]
 				vuln_type = vuln_id.split('-')[0]
 				vuln = {
 					ID: vuln_id,
 					NAME: vuln_id,
 					PROVIDER: provider_name,
 					CVSS_SCORE: vuln_cvss,
+					SEVERITY: VulnMulti.cvss_to_severity(vuln_cvss),
 					REFERENCES: [reference_url],
 					TAGS: [],
 					CONFIDENCE: 'low'
 				}
-				if vuln_type == 'CVE':
+				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
 					vuln[TAGS].append('cve')
 					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=cpes)
 					if vuln_data:
 						vuln.update(vuln_data)
 					yield vuln
 				else:
-					logger.debug(f'Vulners parser for "{vuln_type}" is not implemented YET.')
+					debug(f'Vulners parser for "{vuln_type}" is not implemented YET.', sub='cve')
 			else:
-				logger.error(f'Unrecognized vulners output: {elems}')
+				debug(f'Unrecognized vulners output: {elems}', sub='cve')

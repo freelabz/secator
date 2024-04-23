@@ -140,6 +140,25 @@ class Vuln(Command):
 	# 	return cve_info
 
 	@staticmethod
+	def match_cpes(fs1, fs2):
+		"""Check if two CPEs match. Partial matches consisting of <vendor>:<product>:<version> are considered a match.
+
+		Args:
+			fs1 (str): Format string 1.
+			fs2 (str): Format string 2.
+
+		Returns:
+			bool: True if the two CPEs match, False otherwise.
+		"""
+		if fs1 == fs2:
+			return True
+		split_fs1 = fs1.split(':')
+		split_fs2 = fs2.split(':')
+		tup1 = split_fs1[3], split_fs1[4], split_fs1[5]
+		tup2 = split_fs2[3], split_fs2[4], split_fs2[5]
+		return tup1 == tup2
+
+	@staticmethod
 	def lookup_cve(cve_id, cpes=[]):
 		"""Search for a CVE in local db or using cve.circl.lu and return vulnerability data.
 
@@ -181,14 +200,15 @@ class Vuln(Command):
 				cpe_fs = cpe_obj.as_fs()
 				# cpe_version = cpe_obj.get_version()[0]
 				vulnerable_fs = cve_info['vulnerable_product']
-				debug(f'Matching CPE {cpe} against {len(vulnerable_fs)} vulnerable products for {cve_id}', sub='cve')
 				for fs in vulnerable_fs:
-					if fs == cpe_fs:
-						debug(f'Found matching CPE FS {cpe_fs} ! The CPE is vulnerable to CVE {cve_id}', sub='cve')
+					# debug(f'{cve_id}: Testing {cpe_fs} against {fs}', sub='cve')  # for hardcore debugging
+					if Vuln.match_cpes(cpe_fs, fs):
+						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
 						cpe_match = True
 						tags.append('cpe-match')
-			if not cpe_match:
-				return None
+						break
+				if not cpe_match:
+					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve')
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
@@ -227,14 +247,7 @@ class Vuln(Command):
 		# Set vulnerability severity based on CVSS score
 		severity = None
 		if cvss:
-			if cvss < 4:
-				severity = 'low'
-			elif cvss < 7:
-				severity = 'medium'
-			elif cvss < 9:
-				severity = 'high'
-			else:
-				severity = 'critical'
+			severity = Vuln.cvss_to_severity(cvss)
 
 		# Set confidence
 		confidence = 'low' if not cpe_match else 'high'
@@ -275,6 +288,18 @@ class Vuln(Command):
 			data[TAGS].append('ghsa')
 			return data
 		return None
+
+	@staticmethod
+	def cvss_to_severity(cvss):
+		if cvss < 4:
+			severity = 'low'
+		elif cvss < 7:
+			severity = 'medium'
+		elif cvss < 9:
+			severity = 'high'
+		else:
+			severity = 'critical'
+		return severity
 
 
 class VulnHttp(Vuln):
