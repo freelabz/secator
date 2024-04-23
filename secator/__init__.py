@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from subprocess import call, DEVNULL
 from typing import Dict, List
@@ -6,7 +7,7 @@ from typing_extensions import Annotated, Self
 import requests
 import yaml
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator, ValidationError, Extra
+from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
 from secator.rich import console, console_stdout
 
@@ -18,7 +19,7 @@ LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 
 
-class StrictModel(BaseModel, extra=Extra.forbid):
+class StrictModel(BaseModel, extra='forbid'):
 	pass
 
 
@@ -95,7 +96,7 @@ class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
 		'linpeas': 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh',
-		'sudo_killer': 'git+https://github.com/TH3xACE/SUDO_KILLER'
+		'sudo_killer': 'https://github.com/TH3xACE/SUDO_KILLER/archive/refs/heads/V3.zip'
 	}
 
 
@@ -143,6 +144,7 @@ class SecatorConfig(StrictModel):
 	payloads: Payloads = Payloads()
 	wordlists: Wordlists = Wordlists()
 	addons: Addons = Addons()
+	offline_mode: bool = False
 
 
 class Config(DotMap):
@@ -419,7 +421,6 @@ class Config(DotMap):
 		prefix = "SECATOR_"
 
 		# Loop through environment variables
-		import os
 		for var in os.environ:
 			if var.startswith(prefix):
 				# Remove prefix and get the path from the key map
@@ -431,20 +432,21 @@ class Config(DotMap):
 					# Set the new value recursively
 					success = self.set(path, value, set_partial=False)
 					if success:
-						console.print(f'[bold green4]{var:<50} (override success)[/]')
+						console.print(f'[bold green4]{var} (override success)[/]')
 					else:
-						console.print(f'[bold red]{var:<50} (override failed: cannot update value)[/]')
+						console.print(f'[bold red]{var} (override failed: cannot update value)[/]')
 				else:
-					console.print(f'[bold red]{var:<50} (override failed: key not found in config)[/]')
+					console.print(f'[bold red]{var} (override failed: key not found in config)[/]')
 
 
-def download_files(data: dict, target_folder: Path, type: str):
+def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):
 	"""Download remote files to target folder, clone git repos, or symlink local files.
 
 	Args:
 		data (dict): Dict of name to url or local path prefixed with 'git+' for Git repos.
 		target_folder (Path): Target folder for storing files or repos.
 		type (str): Type of files to handle.
+		offline_mode (bool): Offline mode.
 	"""
 	for name, url_or_path in data.items():
 		if url_or_path.startswith('git+'):
@@ -456,6 +458,9 @@ def download_files(data: dict, target_folder: Path, type: str):
 			target_path = target_folder / repo_name
 			if not target_path.exists():
 				console.print(f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ', end='')
+				if offline_mode:
+					console.print('[bold orange1]skipped [dim][offline[/].[/]')
+					continue
 				try:
 					call(['git', 'clone', git_url, str(target_path)], stderr=DEVNULL, stdout=DEVNULL)
 					console.print('[bold green]ok.[/]')
@@ -481,6 +486,9 @@ def download_files(data: dict, target_folder: Path, type: str):
 			if not target_path.exists():
 				try:
 					console.print(f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ', end='')
+					if offline_mode:
+						console.print('[bold orange1]skipped [dim](offline)[/].[/]')
+						continue
 					resp = requests.get(url_or_path, timeout=3)
 					resp.raise_for_status()
 					with open(target_path, 'wb') as f:
@@ -516,14 +524,14 @@ for name, dir in CONFIG.dirs.items():
 
 
 # Download wordlists and set defaults
-download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, 'wordlist')
+download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
 for category, name in CONFIG.wordlists.defaults.items():
 	if name in CONFIG.wordlists.templates.keys():
 		CONFIG.wordlists.defaults[category] = str(CONFIG.wordlists.templates[name])
 
 
 # Download payloads
-download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, 'payload')
+download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
 
 # Print config
 if CONFIG.debug.component == 'config':

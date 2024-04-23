@@ -163,6 +163,9 @@ def util():
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
+	if CONFIG.offline_mode:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
 	for _ in range(number):
 		url = proxy.get()
@@ -191,6 +194,9 @@ def revshell(name, host, port, interface, listen, force):
 	# Download reverse shells JSON from repo
 	revshells_json = f'{CONFIG.dirs.revshells}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
+		if CONFIG.offline_mode:
+			console.print('[bold red]Cannot run this command in offline mode.[/]')
+			return
 		ret = Command.execute(
 			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {CONFIG.dirs.revshells}',  # noqa: E501
 			cls_attributes={'shell': True}
@@ -443,7 +449,6 @@ def publish_docker(tag, latest):
 # CONFIG #
 #--------#
 
-
 @cli.group('config')
 def _config():
 	"""View or edit configuration."""
@@ -636,6 +641,9 @@ def health(json, debug):
 
 
 def run_install(cmd, title, next_steps=None):
+	if CONFIG.offline_mode:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	with console.status(f'[bold yellow] Installing {title}...'):
 		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_cmd=True, print_line=True)
 		if ret.return_code != 0:
@@ -791,6 +799,9 @@ def install_ruby():
 @click.argument('cmds', required=False)
 def install_tools(cmds):
 	"""Install supported tools."""
+	if CONFIG.offline_mode:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	if cmds is not None:
 		cmds = cmds.split(',')
 		tools = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
@@ -807,6 +818,9 @@ def install_tools(cmds):
 @click.option('--force', is_flag=True)
 def install_cves(force):
 	"""Install CVEs (enables passive vulnerability search)."""
+	if CONFIG.offline_mode:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	cve_json_path = f'{CONFIG.dirs.cves}/circl-cve-search-expanded.json'
 	if not os.path.exists(cve_json_path) or force:
 		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
@@ -832,6 +846,9 @@ def install_cves(force):
 @cli.command('update')
 def update():
 	"""[dim]Update to latest version.[/]"""
+	if CONFIG.offline_mode:
+		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		return
 	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
 	if info['status'] == 'latest':
