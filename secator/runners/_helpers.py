@@ -1,8 +1,10 @@
 import os
 
 import kombu
+import kombu.exceptions
 
 from secator.utils import deduplicate
+from secator.rich import console
 
 
 def run_extractors(results, opts, targets=[]):
@@ -82,20 +84,24 @@ def get_task_ids(result, ids=[]):
 	if result is None:
 		return
 
-	if isinstance(result, GroupResult):
-		get_task_ids(result.parent, ids=ids)
+	try:
+		if isinstance(result, GroupResult):
+			get_task_ids(result.parent, ids=ids)
 
-	elif isinstance(result, AsyncResult):
-		if result.id not in ids:
-			ids.append(result.id)
+		elif isinstance(result, AsyncResult):
+			if result.id not in ids:
+				ids.append(result.id)
 
-	if hasattr(result, 'children') and result.children:
-		for child in result.children:
-			get_task_ids(child, ids=ids)
+		if hasattr(result, 'children') and result.children:
+			for child in result.children:
+				get_task_ids(child, ids=ids)
 
-	# Browse parent
-	if hasattr(result, 'parent') and result.parent:
-		get_task_ids(result.parent, ids=ids)
+		# Browse parent
+		if hasattr(result, 'parent') and result.parent:
+			get_task_ids(result.parent, ids=ids)
+	except kombu.exceptions.DecodeError as e:
+		console.print(f'[bold red]{str(e)}. Aborting get_task_ids.[/]')
+		return
 
 
 def get_task_data(task_id):
@@ -128,7 +134,8 @@ def get_task_data(task_id):
 		data['ready'] = True
 	try:
 		info = res.info
-	except kombu.exceptions.DecodeError:
+	except kombu.exceptions.DecodeError as e:
+		console.print(f'[bold red]{str(e)}. Aborting get_task_data.[/]')
 		data['ready'] = False
 		return data
 	if info and not isinstance(info, list):
@@ -137,8 +144,6 @@ def get_task_data(task_id):
 		chunk_count = data.get('chunk_count')
 		if chunk and chunk_count:
 			data['chunk_info'] = f'{chunk}/{chunk_count}'
-		# del data['results']
-		# del data['task_results']
 	return data
 
 
