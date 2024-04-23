@@ -449,14 +449,14 @@ def publish_docker(tag, latest):
 # CONFIG #
 #--------#
 
-@cli.group('config')
-def _config():
-	"""View or edit configuration."""
+@cli.group(aliases=['c'])
+def config():
+	"""View or edit config."""
 	pass
 
 
-@_config.command('get')
-@click.option('--full', is_flag=True, help='Show full configuration (with defaults)')
+@config.command('get')
+@click.option('--full', is_flag=True, help='Show full config (with defaults)')
 @click.argument('key', required=False)
 def config_get(full, key=None):
 	"""Get config value."""
@@ -466,7 +466,7 @@ def config_get(full, key=None):
 	CONFIG.get(key)
 
 
-@_config.command('set')
+@config.command('set')
 @click.argument('key')
 @click.argument('value')
 def config_set(key, value):
@@ -480,7 +480,7 @@ def config_set(key, value):
 		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
 
 
-@_config.command('edit')
+@config.command('edit')
 @click.option('--resume', is_flag=True)
 def config_edit(resume):
 	"""Edit config."""
@@ -497,7 +497,7 @@ def config_edit(resume):
 		console.print('\n[bold green]Hint:[/] Run "secator config edit --resume" to edit your patch and fix issues.')
 
 
-@_config.command('default')
+@config.command('default')
 @click.option('--save', type=str, help='Save default config to file.')
 def config_default(save):
 	"""Get default config."""
