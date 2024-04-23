@@ -107,7 +107,7 @@ class Command(Runner):
 
 	def __init__(self, input=None, **run_opts):
 		# Build runnerconfig on-the-fly
-		cfg = ConfigLoader(input={
+		config = ConfigLoader(input={
 			'name': self.__class__.__name__,
 			'type': 'task',
 			'description': run_opts.get('description', None)
@@ -118,7 +118,7 @@ class Command(Runner):
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
 		super().__init__(
-			cfg=cfg,
+			config=config,
 			targets=input,
 			results=results,
 			run_opts=run_opts,

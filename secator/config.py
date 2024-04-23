@@ -42,8 +42,8 @@ def find_configs():
 	for path in paths:
 		with path.open('r') as f:
 			try:
-				cfg = yaml.load(f.read(), yaml.Loader)
-				type = cfg.get('type')
+				config = yaml.load(f.read(), yaml.Loader)
+				type = config.get('type')
 				if type:
 					results[type].append(path)
 			except yaml.YAMLError as exc:
