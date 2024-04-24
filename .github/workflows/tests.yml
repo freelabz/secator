@@ -2,90 +2,90 @@ name: Tests
 
 on:
   push:
-	branches: [ main ]
+    branches: [ main ]
   pull_request:
-	branches: [ main ]
+    branches: [ main ]
 
 jobs:
   unit:
-	runs-on: ubuntu-latest
-	strategy:
-	  fail-fast: false
-	  matrix:
-		python-version: ["3.9", "3.10", "3.11"]
-	steps:
-	- name: Checkout repository
-	  uses: actions/checkout@v3
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-	- name: Install secator
-	  uses: ./.github/actions/install
-	  with:
-		python-version: ${{ matrix.python-version }}
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
 
-	- name: Run unit tests
-	  run: |
-		secator test unit
+    - name: Run unit tests
+      run: |
+        secator test unit
 
-	- name: Run coverage report
-	  run: |
-		secator test coverage
+    - name: Run coverage report
+      run: |
+        secator test coverage
 
   lint:
-	runs-on: ubuntu-latest
-	strategy:
-	  fail-fast: false
-	  matrix:
-		python-version: ["3.9", "3.10", "3.11"]
-	steps:
-	- name: Checkout repository
-	  uses: actions/checkout@v3
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
   
-	- name: Install secator
-	  uses: ./.github/actions/install
-	  with:
-		python-version: ${{ matrix.python-version }}
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
 
-	- name: Run lint tests
-	  run: |
-		secator test lint
+    - name: Run lint tests
+      run: |
+        secator test lint
 
   integration:
-	runs-on: ubuntu-latest
-	strategy:
-	  fail-fast: false
-	  matrix:
-		python-version: ["3.11"]
-		test_type: ['tasks', 'worker']
-		# test_type: ['tasks', 'workflows', 'scans']
-	steps:
-	- name: Checkout repository
-	  uses: actions/checkout@v3
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+        test_type: ['tasks', 'worker']
+        # test_type: ['tasks', 'workflows', 'scans']
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-	- name: Install secator
-	  uses: ./.github/actions/install
-	  with:
-		python-version: ${{ matrix.python-version }}
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
 
-	- name: Setup docker compose
-	  uses: KengoTODA/actions-setup-docker-compose@v1
-	  with:
-		version: '1.29.2'
+    - name: Setup docker compose
+      uses: KengoTODA/actions-setup-docker-compose@v1
+      with:
+        version: '1.29.2'
 
-	- name: Add GOBIN to PATH
-	  run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
+    - name: Add GOBIN to PATH
+      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
   
-	- name: Add GOPATH to PATH
-	  run: echo "${HOME}/go/bin" >> $GITHUB_PATH
+    - name: Add GOPATH to PATH
+      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
 
-	- name: Install dependencies
-	  run: |
-		secator install langs go
-		secator install langs ruby
-		secator install tools
-		secator install addons worker
-	  env:
-		GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
+    - name: Install dependencies
+      run: |
+        secator install langs go
+        secator install langs ruby
+        secator install tools
+        secator install addons worker
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
-	- name: Run integration tests (${{ matrix.test_type }})
-	  run: |
-		secator test integration --test tests.integration.test_${{ matrix.test_type }}
+    - name: Run integration tests (${{ matrix.test_type }})
+      run: |
+        secator test integration --test tests.integration.test_${{ matrix.test_type }}
