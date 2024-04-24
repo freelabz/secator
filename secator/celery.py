@@ -9,7 +9,7 @@ from celery.result import AsyncResult, allow_join_result
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors

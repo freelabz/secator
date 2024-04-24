@@ -20,7 +20,7 @@ class TestOffline(unittest.TestCase):
 		self.assertEqual(result, None)
 
 	def test_offline_downloads(self):
-		from secator import download_files, CONFIG
+		from secator.config import download_files, CONFIG
 		download_files(
 			{'pyproject.toml': 'https://raw.githubusercontent.com/freelabz/secator/main/pyproject.toml'},
 			CONFIG.dirs.data,

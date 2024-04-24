@@ -14,8 +14,8 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
 
-from secator import CONFIG, ROOT_FOLDER, Config, default_config, config_path
-from secator.config import ConfigLoader
+from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
+from secator.template import TemplateLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
@@ -27,7 +27,7 @@ from secator.utils import debug, detect_host, discover_tasks, flatten, print_res
 click.rich_click.USE_RICH_MARKUP = True
 
 ALL_TASKS = discover_tasks()
-ALL_CONFIGS = ConfigLoader.load_all()
+ALL_CONFIGS = TemplateLoader.load_all()
 ALL_WORKFLOWS = ALL_CONFIGS.workflow
 ALL_SCANS = ALL_CONFIGS.scan
 

@@ -11,7 +11,7 @@ from rich.table import Table
 
 from secator.rich import console
 from secator.runners import Command
-from secator import CONFIG
+from secator.config import CONFIG
 
 
 class ToolInstaller:
