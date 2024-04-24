@@ -49,9 +49,9 @@ if TEST_SCANS:
 else:
 	TEST_SCANS = ALL_SCANS
 
-#-------------#
+#-------------------#
 # TEST INPUTS_TASKS #
-#-------------#
+#-------------------#
 INPUTS_TASKS = {
 	URL: 'https://fake.com',
 	HOST: 'fake.com',
@@ -92,6 +92,7 @@ META_OPTS = {
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
 	'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
 	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True),
+	'nuclei.template_id': 'prometheus-metrics',
 	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
 	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
 	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True)

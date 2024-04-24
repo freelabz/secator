@@ -1,12 +1,11 @@
 import glob
-import os
 from pathlib import Path
 
 import yaml
 from dotmap import DotMap
 
 from secator.rich import console
-from secator.definitions import CONFIGS_FOLDER, EXTRA_CONFIGS_FOLDER
+from secator import CONFIG, CONFIGS_FOLDER
 
 CONFIGS_DIR_KEYS = ['workflow', 'scan', 'profile']
 
@@ -20,7 +19,7 @@ def load_config(name):
 	Returns:
 		dict: Loaded config.
 	"""
-	path = Path(CONFIGS_FOLDER) / f'{name}.yaml'
+	path = CONFIGS_FOLDER / f'{name}.yaml'
 	if not path.exists():
 		console.log(f'Config "{name}" could not be loaded.')
 		return
@@ -31,17 +30,17 @@ def load_config(name):
 def find_configs():
 	results = {'scan': [], 'workflow': [], 'profile': []}
 	dirs_type = [CONFIGS_FOLDER]
-	if EXTRA_CONFIGS_FOLDER:
-		dirs_type.append(EXTRA_CONFIGS_FOLDER)
+	if CONFIG.dirs.templates:
+		dirs_type.append(CONFIG.dirs.templates)
 	paths = []
 	for dir in dirs_type:
 		dir_paths = [
-			os.path.abspath(path)
-			for path in glob.glob(dir.rstrip('/') + '/**/*.y*ml', recursive=True)
+			Path(path)
+			for path in glob.glob(str(dir).rstrip('/') + '/**/*.y*ml', recursive=True)
 		]
 		paths.extend(dir_paths)
 	for path in paths:
-		with open(path, 'r') as f:
+		with path.open('r') as f:
 			try:
 				config = yaml.load(f.read(), yaml.Loader)
 				type = config.get('type')
@@ -59,19 +58,20 @@ class ConfigLoader(DotMap):
 		if name:
 			name = name.replace('-', '_')  # so that workflows have a nice '-' in CLI
 			config = self._load_from_name(name)
-		elif isinstance(input, str):
+		elif isinstance(input, str) or isinstance(input, Path):
 			config = self._load_from_file(input)
 		else:
 			config = input
 		super().__init__(config)
 
 	def _load_from_file(self, path):
-		if not os.path.exists(path):
+		if isinstance(path, str):
+			path = Path(path)
+		if not path.exists():
 			console.log(f'Config path {path} does not exists', style='bold red')
 			return
-		if path and os.path.exists(path):
-			with open(path, 'r') as f:
-				return yaml.load(f.read(), Loader=yaml.Loader)
+		with path.open('r') as f:
+			return yaml.load(f.read(), Loader=yaml.Loader)
 
 	def _load_from_name(self, name):
 		return load_config(name)

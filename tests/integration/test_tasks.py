@@ -22,14 +22,14 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 	def setUp(self):
 		warnings.simplefilter('ignore', category=ResourceWarning)
 		warnings.simplefilter('ignore', category=DeprecationWarning)
-		Command.run_command(
+		Command.execute(
 			f'sh {INTEGRATION_DIR}/setup.sh',
 			cwd=INTEGRATION_DIR
 		)
 		sleep(15)
 
 	def tearDown(self):
-		Command.run_command(
+		Command.execute(
 			f'sh {INTEGRATION_DIR}/teardown.sh',
 			cwd=INTEGRATION_DIR
 		)

@@ -22,14 +22,14 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 	def setUp(self):
 		warnings.simplefilter('ignore', category=ResourceWarning)
 		warnings.simplefilter('ignore', category=DeprecationWarning)
-		Command.run_command(
+		Command.execute(
 			f'sh {INTEGRATION_DIR}/setup.sh',
 			cwd=INTEGRATION_DIR
 		)
 		sleep(15)
 
 	def tearDown(self):
-		Command.run_command(
+		Command.execute(
 			f'sh {INTEGRATION_DIR}/teardown.sh',
 			cwd=INTEGRATION_DIR
 		)
@@ -59,7 +59,7 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 
 		for conf in TEST_SCANS:
 			with self.subTest(name=conf.name):
-				console.print(f'Testing workflow {conf.name} ...')
+				console.print(f'Testing scan {conf.name} ...')
 				inputs = INPUTS_SCANS.get(conf.name, [])
 				outputs = OUTPUTS_SCANS.get(conf.name, [])
 				if not inputs:
@@ -67,8 +67,8 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 						f'No inputs for scan {conf.name} ! Skipping.', style='dim red'
 					)
 					continue
-				workflow = Scan(conf, targets=inputs, **opts)
-				results = workflow.run()
+				scan = Scan(conf, targets=inputs, run_opts=opts)
+				results = scan.run()
 				if DEBUG > 0:
 					for result in results:
 						print(repr(result))

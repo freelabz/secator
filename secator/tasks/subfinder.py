@@ -30,6 +30,7 @@ class subfinder(ReconDns):
 	}
 	output_types = [Subdomain]
 	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
+	install_github_handle = 'projectdiscovery/subfinder'
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False

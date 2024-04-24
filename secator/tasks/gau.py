@@ -37,11 +37,8 @@ class gau(HttpCrawler):
 		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
 	install_cmd = 'go install -v github.com/lc/gau/v2/cmd/gau@latest'
+	install_github_handle = 'lc/gau'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'io'
-
-	# @staticmethod
-	# def validate_item(self, item):
-	# 	return item['url'] == 'response'

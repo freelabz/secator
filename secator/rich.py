@@ -1,20 +1,13 @@
 import operator
 
-import click
-import rich_click
 import yaml
 from rich import box
 from rich.console import Console
-from rich.logging import RichHandler
 from rich.table import Table
-from rich.traceback import install
 
-from secator.definitions import DEBUG, RECORD
-
-console = Console(stderr=True, record=RECORD, color_system='truecolor')
+console = Console(stderr=True, color_system='truecolor')
 console_stdout = Console(record=True)
-handler = RichHandler(rich_tracebacks=True)
-install(show_locals=DEBUG > 2, suppress=[click, rich_click])
+# handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
 
 
 def criticity_to_color(value):
@@ -74,7 +67,7 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		items = sorted(items, key=operator.attrgetter(*sort_by))
 
 	# Create rich table
-	box_style = box.DOUBLE if RECORD else box.ROUNDED
+	box_style = box.ROUNDED
 	table = Table(show_lines=True, box=box_style)
 
 	# Get table schema if any, default to first item keys

@@ -4,7 +4,6 @@ from secator.rich import console
 
 class TxtExporter(Exporter):
     def send(self):
-        title = self.report.data['info']['title']
         results = self.report.data['results']
         txt_paths = []
 
@@ -12,7 +11,7 @@ class TxtExporter(Exporter):
             items = [str(i) for i in items]
             if not items:
                 continue
-            txt_path = f'{self.report.output_folder}/{title}_{output_type}_{self.report.timestamp}.txt'
+            txt_path = f'{self.report.output_folder}/report_{output_type}.txt'
             with open(txt_path, 'w') as f:
                 f.write('\n'.join(items))
             txt_paths.append(txt_path)

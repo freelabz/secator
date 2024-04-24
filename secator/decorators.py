@@ -1,17 +1,18 @@
+import sys
 from collections import OrderedDict
 
 import rich_click as click
 from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
-from secator.celery import is_celery_worker_alive
-from secator.definitions import OPT_NOT_SUPPORTED
+from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
+from secator import CONFIG
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
 
 RUNNER_OPTS = {
-	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
+	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
@@ -24,7 +25,6 @@ RUNNER_OPTS = {
 
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
-	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
 	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
@@ -38,18 +38,47 @@ class OrderedGroup(RichGroup):
 		super(OrderedGroup, self).__init__(name, commands, **attrs)
 		self.commands = commands or OrderedDict()
 
+	def command(self, *args, **kwargs):
+		"""Behaves the same as `click.Group.command()` but supports aliases.
+		"""
+		def decorator(f):
+			aliases = kwargs.pop("aliases", None)
+			if aliases:
+				max_width = _get_rich_console().width
+				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
+				padding = max_width // 4
+
+				name = kwargs.pop("name", None)
+				if not name:
+					raise click.UsageError("`name` command argument is required when using aliases.")
+
+				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
+				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
+				base_command = super(OrderedGroup, self).command(
+					name, *args, **kwargs
+				)(f)
+				for alias in aliases:
+					cmd = super(OrderedGroup, self).command(alias, *args, hidden=True, **kwargs)(f)
+					cmd.help = f"Alias for '{name}'.\n\n{cmd.help}"
+					cmd.params = base_command.params
+
+			else:
+				cmd = super(OrderedGroup, self).command(*args, **kwargs)(f)
+
+			return cmd
+		return decorator
+
 	def group(self, *args, **kwargs):
-		"""Behaves the same as `click.Group.group()` except if passed
-		a list of names, all after the first will be aliases for the first.
+		"""Behaves the same as `click.Group.group()` but supports aliases.
 		"""
 		def decorator(f):
 			aliases = kwargs.pop('aliases', [])
 			aliased_group = []
 			if aliases:
 				max_width = _get_rich_console().width
-				# we have a list so create group aliases
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
+				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
 				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
 				for alias in aliases:
 					grp = super(OrderedGroup, self).group(
@@ -143,6 +172,7 @@ def decorate_command_options(opts):
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
 			short = conf.pop('short', None)
+			conf.pop('internal', False)
 			conf.pop('prefix', None)
 			long = f'--{opt_name}'
 			short = f'-{short}' if short else f'-{opt_name}'
@@ -185,6 +215,7 @@ def register_runner(cli_endpoint, config):
 			short_help += f' [dim]alias: {config.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
+		fmt_opts['print_progress'] = False
 		runner_cls = Scan
 
 	elif cli_endpoint.name == 'workflow':
@@ -199,6 +230,7 @@ def register_runner(cli_endpoint, config):
 			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
+		fmt_opts['print_progress'] = False
 		runner_cls = Workflow
 
 	elif cli_endpoint.name == 'task':
@@ -232,7 +264,6 @@ def register_runner(cli_endpoint, config):
 	def func(ctx, **opts):
 		opts.update(fmt_opts)
 		sync = opts['sync']
-		worker = opts['worker']
 		# debug = opts['debug']
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
@@ -245,10 +276,19 @@ def register_runner(cli_endpoint, config):
 		targets = expand_input(targets)
 		if sync or show:
 			sync = True
-		elif worker:
-			sync = False
-		else:  # automatically run in worker if it's alive
-			sync = not is_celery_worker_alive()
+		else:
+			from secator.celery import is_celery_worker_alive
+			worker_alive = is_celery_worker_alive()
+			if not worker_alive:
+				sync = True
+			else:
+				sync = False
+				broker_protocol = CONFIG.celery.broker_url.split('://')[0]
+				backend_protocol = CONFIG.celery.result_backend.split('://')[0]
+				if CONFIG.celery.broker_url:
+					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
+						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
+						sys.exit(1)
 		opts['sync'] = sync
 		opts.update({
 			'print_item': not sync,
@@ -260,6 +300,9 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = {}
 		if driver == 'mongodb':
+			if not ADDONS_ENABLED['mongodb']:
+				_get_rich_console().print('[bold red]Missing `mongodb` addon: please run `secator install addons mongodb`[/].')
+				sys.exit(1)
 			from secator.hooks.mongodb import MONGODB_HOOKS
 			hooks = MONGODB_HOOKS
 

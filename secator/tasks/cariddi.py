@@ -43,6 +43,7 @@ class cariddi(HttpCrawler):
 	}
 	item_loaders = []
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@latest'
+	install_github_handle = 'edoardottt/cariddi'
 	encoding = 'ansi'
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
@@ -88,7 +89,7 @@ class cariddi(HttpCrawler):
 				items.append(secret)
 
 			for info in infos:
-				CARIDDI_IGNORE_LIST = ['BTC address']
+				CARIDDI_IGNORE_LIST = ['BTC address']  # TODO: make this a config option
 				if info['name'] in CARIDDI_IGNORE_LIST:
 					continue
 				match = info['match']

@@ -6,10 +6,12 @@
 
 <p align="center">
 <!-- <a href="https://goreportcard.com/report/github.com/freelabz/secator"><img src="https://goreportcard.com/badge/github.com/freelabz/secator"></a> -->
-<a href="https://github.com/freelabz/secator/issues"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
+<img src="https://img.shields.io/badge/python-3.6-blue.svg">
 <a href="https://github.com/freelabz/secator/releases"><img src="https://img.shields.io/github/release/freelabz/secator"></a>
-<a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache-blue.svg"></a>
+<a href="https://github.com/freelabz/secator/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-brightgreen.svg"></a>
+<a href="https://pypi.org/project/secator/"><img src="https://img.shields.io/pypi/dm/secator"></a>
 <a href="https://twitter.com/freelabz"><img src="https://img.shields.io/twitter/follow/freelabz.svg?logo=twitter"></a>
+<a href="https://youtube.com/@FreeLabz"><img src="https://img.shields.io/youtube/channel/subscribers/UCu-F6SpU0h2NP18zBBP04cw?style=social&label=Subscribe%20%40FreeLabz"></a>
 <!-- <a href="https://discord.gg/freelabz"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a> -->
 </p>
 
@@ -43,9 +45,10 @@ and it is designed to improve productivity for pentesters and security researche
 
 * **Customizable**
 
-## Supported commands
 
-`secator` integrates the following commands:
+## Supported tools
+
+`secator` integrates the following tools:
 
 | Name                                                          | Description                                                                    | Category       |
 |---------------------------------------------------------------|--------------------------------------------------------------------------------|----------------|
@@ -74,62 +77,229 @@ and it is designed to improve productivity for pentesters and security researche
 | [nuclei](https://github.com/projectdiscovery/nuclei)          | Fast and customisable vulnerability scanner based on simple YAML based DSL.    | `vuln/multi`   |
 | [searchsploit](https://gitlab.com/exploit-database/exploitdb) | Exploit searcher. | `exploit/search`    |
 
-Feel free to request new commands to be added by opening an issue, but please 
-check that the command complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
+Feel free to request new tools to be added by opening an issue, but please 
+check that the tool complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
 
 
-## Install Secator
+## Installation
 
-Secator requires **python >= 3.8** to install successfully. Run the following command to install the latest version:
-
-```sh
-pip3 install secator
-```
+### Installing secator
 
 <details>
-	<summary>Bash one-liner</summary>
+	<summary>Pipx</summary>
 
-	git clone https://github.com/freelabz/secator && sh ./secator/scripts/install.sh
+```sh
+pipx install secator
+```
+
+</details>
+
+<details>
+	<summary>Pip</summary>
+
+```sh
+pip install secator
+```
+
+</details>
+
+<details>
+  <summary>Bash</summary>
+
+```sh
+wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
+```
 
 </details>
 
 <details>
 	<summary>Docker</summary>
 
-	docker pull freelabz/secator
+```sh
+docker run -it --rm --net=host -v ~/.secator:/root/.secator freelabz/secator --help
+```
+
+The volume mount -v is necessary to save all secator reports to your host machine, and--net=host is recommended to grant full access to the host network.
+
+You can alias this command to run it easier:
+```sh
+alias secator="docker run -it --rm --net=host -v ~/.secator:/root/.secator freelabz/secator"
+```
+
+Now you can run secator like if it was installed on baremetal:
+```
+secator --help
+```
 
 </details>
 
 <details>
-	<summary>Development build</summary>
+	<summary>Docker Compose</summary>
 
-	git clone https://github.com/freelabz/secator
-	cd secator
-	python3 -m virtualenv -p python3 ~/.virtualenvs/secator
-	source ~/.virtualenvs/secator/bin/activate
-	pip3 install -e .
+```sh
+git clone https://github.com/freelabz/secator
+cd secator
+docker-compose up -d
+docker-compose exec secator secator --help
+```
+
+</details>
+
+***Note:*** If you chose the Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
+
+### Installing languages
+
+`secator` uses external tools, so you might need to install languages used by those tools assuming they are not already installed on your system.
+
+We provide utilities to install required languages if you don't manage them externally:
+
+<details>
+	<summary>Go</summary>
+
+```sh
+secator install langs go
+```
+
+</details>
+
+<details>
+	<summary>Ruby</summary>
+
+```sh
+secator install langs ruby
+```
+
+</details>
+
+### Installing tools
+
+`secator` does not install any of the external tools it supports by default.
+
+We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
+
+<details>
+	<summary>All tools</summary>
+
+```sh
+secator install tools
+```
+
+</details>
+
+<details>
+	<summary>Specific tools</summary>
+
+```sh
+secator install tools <TOOL_NAME>
+```
+
+For instance, to install `httpx`, use:
+
+```sh
+secator install tools httpx
+```
+
+</details>
+
+Please make sure you are using the latest available versions for each tool before you run secator or you might run into parsing / formatting issues.
+
+### Installing addons
+
+`secator` comes installed with the minimum amount of dependencies.
+
+There are several addons available for `secator`:
+
+<details>
+	<summary>worker</summary>
+
+Add support for Celery workers (see [Distributed runs with Celery](https://docs.freelabz.com/in-depth/distributed-runs-with-celery)).
+```sh
+secator install addons worker
+```
 
 </details>
 
 
-### Install underlying tools
+<details>
+	<summary>google</summary>
 
-`secator` is designed to work with the latest version of all the tools it supports. Please make sure you are using the latest version of the tools you are using with `secator`.
+Add support for Google Drive exporter (`-o gdrive`).
 
-A convenience utility is provided to install all tools:
 ```sh
-secator u install
+secator install addons google
 ```
 
-... or to update specific tools:
+</details>
+
+<details>
+	<summary>mongodb</summary>
+
+Add support for MongoDB driver (`-driver mongodb`).
 ```sh
-secator u install <TASK_NAME>
+secator install addons mongodb
 ```
 
-Please note that:
-* this install method requires `apt` so it will not work on distributions not supporting it.
-* this is tested merely on Ubuntu and some of these installs might not work on other distributions.
-* ideally you update the tools yourself, and use `secator` as a convenient wrapper on top of them.
+</details>
+
+<details>
+	<summary>redis</summary>
+
+Add support for Redis backend (Celery).
+
+```sh
+secator install addons redis
+```
+
+</details>
+
+<details>
+	<summary>dev</summary>
+
+Add development tools like `coverage` and `flake8` required for running tests.
+
+```sh
+secator install addons dev
+```
+
+</details>
+
+<details>
+	<summary>trace</summary>
+
+Add tracing tools like `memray` and `pyinstrument` required for tracing functions.
+
+```sh
+secator install addons trace
+```
+
+</details>
+
+<details>
+	<summary>build</summary>
+
+Add `hatch` for building and publishing the PyPI package.
+
+```sh
+secator install addons build
+```
+
+</details>
+
+
+### Install CVEs
+
+`secator` makes remote API calls to https://cve.circl.lu/ to get in-depth information about the CVEs it encounters.
+We provide a subcommand to download all known CVEs locally so that future lookups are made from disk instead:
+```sh
+secator install cves
+```
+
+### Checking installation health
+
+To figure out which languages or tools are installed on your system (along with their version):
+```sh
+secator health
+```
 
 ## Usage
 ```sh
@@ -138,7 +308,7 @@ secator --help
 ![](images/help.png)
 
 
-### Running secator
+### Usage examples
 
 Run a fuzzing task (`ffuf`):
 
@@ -146,16 +316,23 @@ Run a fuzzing task (`ffuf`):
 secator x ffuf http://testphp.vulnweb.com/FUZZ
 ```
 
-Run a port scan:
+Run a url crawl workflow:
 
 ```sh
-secator w port_scan mydomain.com
+secator w url_crawl http://testphp.vulnweb.com
 ```
 
-Run a full host scan:
+Run a host scan:
 
 ```sh
 secator s host mydomain.com
+```
+
+and more... to list all tasks / workflows / scans that you can use:
+```sh
+secator x --help
+secator w --help
+secator s --help
 ```
 
 ## Learn more

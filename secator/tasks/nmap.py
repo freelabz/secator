@@ -5,16 +5,16 @@ import re
 import xmltodict
 
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DELAY,
+from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
-								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
+								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
-								 RETRIES, SCRIPT, SERVICE_NAME, STATE, TAGS,
+								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability
 from secator.tasks._categories import VulnMulti
-from secator.utils import get_file_timestamp
+from secator.utils import debug
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,8 @@ class nmap(VulnMulti):
 	opts = {
 		PORTS: {'type': str, 'help': 'Ports to scan', 'short': 'p'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
+		# 'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
+		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'}
 	}
 	opt_key_map = {
@@ -61,6 +63,14 @@ class nmap(VulnMulti):
 	proxy_http = False
 	profile = 'io'
 
+	@staticmethod
+	def on_init(self):
+		output_path = self.get_opt_value(OUTPUT_PATH)
+		if not output_path:
+			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
+		self.output_path = output_path
+		self.cmd += f' -oX {self.output_path}'
+
 	def yielder(self):
 		yield from super().yielder()
 		if self.return_code != 0:
@@ -85,15 +95,6 @@ class nmap(VulnMulti):
 					f'Cannot parse nmap XML output {self.output_path} to valid JSON.')
 		results['_host'] = self.input
 		return nmapData(results)
-
-	@staticmethod
-	def on_init(self):
-		output_path = self.get_opt_value('output_path')
-		if not output_path:
-			timestr = get_file_timestamp()
-			output_path = f'{DATA_FOLDER}/nmap_{timestr}.xml'
-		self.output_path = output_path
-		self.cmd += f' -oX {self.output_path}'
 
 
 class nmapData(dict):
@@ -160,7 +161,7 @@ class nmapData(dict):
 						EXTRA_DATA: extra_data,
 					}
 					if not func:
-						# logger.debug(f'Script output parser for "{script_id}" is not supported YET.')
+						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve')
 						continue
 					for vuln in func(output, cpes=cpes):
 						vuln.update(metadata)
@@ -279,9 +280,9 @@ class nmapData(dict):
 				vuln_data = VulnMulti.lookup_cve(vuln['id'], cpes=cpes)
 				if vuln_data:
 					vuln.update(vuln_data)
-					yield vuln
+				yield vuln
 			else:
-				# logger.debug(f'Vulscan provider {provider_name} is not supported YET.')
+				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve')
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
@@ -292,7 +293,7 @@ class nmapData(dict):
 				continue
 			line = line.strip()
 			if line.startswith('cpe:'):
-				cpes.append(line)
+				cpes.append(line.rstrip(':'))
 				continue
 			elems = tuple(line.split('\t'))
 			vuln = {}
@@ -319,26 +320,26 @@ class nmapData(dict):
 
 			elif len(elems) == 3:  # vuln
 				vuln_id, vuln_cvss, reference_url = tuple(line.split('\t'))
+				vuln_cvss = float(vuln_cvss)
+				vuln_id = vuln_id.split(':')[-1]
 				vuln_type = vuln_id.split('-')[0]
 				vuln = {
 					ID: vuln_id,
 					NAME: vuln_id,
 					PROVIDER: provider_name,
 					CVSS_SCORE: vuln_cvss,
+					SEVERITY: VulnMulti.cvss_to_severity(vuln_cvss),
 					REFERENCES: [reference_url],
 					TAGS: [],
 					CONFIDENCE: 'low'
 				}
-				if vuln_type == 'CVE':
+				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
 					vuln[TAGS].append('cve')
 					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=cpes)
 					if vuln_data:
 						vuln.update(vuln_data)
-						yield vuln
+					yield vuln
 				else:
-					logger.debug(f'Vulners parser for "{vuln_type}" is not implemented YET.')
+					debug(f'Vulners parser for "{vuln_type}" is not implemented YET.', sub='cve')
 			else:
-				logger.error(f'Unrecognized vulners output: {elems}')
-
-	def _parse_http_csrf_output(self, out, port_data):
-		pass
+				debug(f'Unrecognized vulners output: {elems}', sub='cve')

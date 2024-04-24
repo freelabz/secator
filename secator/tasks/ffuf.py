@@ -23,6 +23,7 @@ class ffuf(HttpFuzzer):
 	input_chunk_size = 1
 	file_flag = None
 	json_flag = '-json'
+	version_flag = '-V'
 	item_loaders = [
 		JSONSerializer(),
 		RegexSerializer(FFUF_PROGRESS_REGEX, fields=['count', 'total', 'rps', 'duration', 'errors'])
@@ -69,10 +70,8 @@ class ffuf(HttpFuzzer):
 		},
 	}
 	encoding = 'ansi'
-	install_cmd = (
-		'go install -v github.com/ffuf/ffuf@latest && '
-		'sudo git clone https://github.com/danielmiessler/SecLists /usr/share/seclists || true'
-	)
+	install_cmd = 'go install -v github.com/ffuf/ffuf@latest'
+	install_github_handle = 'ffuf/ffuf'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
@@ -82,5 +81,3 @@ class ffuf(HttpFuzzer):
 	def on_item(self, item):
 		item.method = self.get_opt_value(METHOD) or 'GET'
 		return item
-
-	# TODO: write custom item_loader to pick up Progress items too

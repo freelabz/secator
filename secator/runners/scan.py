@@ -1,7 +1,7 @@
 import logging
 
 from secator.config import ConfigLoader
-from secator.exporters import CsvExporter, JsonExporter
+from secator import CONFIG
 from secator.runners._base import Runner
 from secator.runners._helpers import run_extractors
 from secator.runners.workflow import Workflow
@@ -13,10 +13,7 @@ logger = logging.getLogger(__name__)
 
 class Scan(Runner):
 
-	default_exporters = [
-		JsonExporter,
-		CsvExporter
-	]
+	default_exporters = CONFIG.scans.exporters
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
@@ -42,13 +39,14 @@ class Scan(Runner):
 				console.log(f'No targets were specified for workflow {name}. Skipping.')
 				continue
 
-			# Workflow fmt options
+			# Workflow opts
 			run_opts = self.run_opts.copy()
 			fmt_opts = {
 				'json': run_opts.get('json', False),
 				'print_item': False,
 				'print_start': True,
 				'print_run_summary': True,
+				'print_progress': self.sync
 			}
 			run_opts.update(fmt_opts)
 

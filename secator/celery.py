@@ -3,28 +3,21 @@ import logging
 import traceback
 from time import sleep
 
-import celery
-from celery import chain, chord, signals
+from celery import Celery, chain, chord, signals
 from celery.app import trace
 from celery.result import AsyncResult, allow_join_result
-# from pyinstrument import Profiler
+# from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
-from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
-								 CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_URL,
-								 CELERY_BROKER_VISIBILITY_TIMEOUT,
-								 CELERY_DATA_FOLDER,
-								 CELERY_OVERRIDE_DEFAULT_LOGGING,
-								 CELERY_RESULT_BACKEND, DEBUG)
+from secator import CONFIG
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, debug, deduplicate,
-						   discover_external_tasks, discover_internal_tasks,
 						   flatten)
 
 # from pathlib import Path
-# import memray
+# import memray  # TODO: conditional memray tracing
 
 rich_handler = RichHandler(rich_tracebacks=True)
 rich_handler.setLevel(logging.INFO)
@@ -35,16 +28,15 @@ logging.basicConfig(
 	handlers=[rich_handler],
 	force=True)
 logging.getLogger('kombu').setLevel(logging.ERROR)
-logging.getLogger('celery').setLevel(logging.INFO if DEBUG > 6 else logging.WARNING)
+logging.getLogger('celery').setLevel(logging.INFO if CONFIG.debug.level > 6 else logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
 trace.LOG_SUCCESS = """\
 Task %(name)s[%(id)s] succeeded in %(runtime)ss\
 """
-COMMANDS = discover_internal_tasks() + discover_external_tasks()
 
-app = celery.Celery(__name__)
+app = Celery(__name__)
 app.conf.update({
 	# Worker config
 	'worker_send_task_events': True,
@@ -52,18 +44,19 @@ app.conf.update({
 	'worker_max_tasks_per_child': 10,
 
 	# Broker config
-	'broker_url': CELERY_BROKER_URL,
+	'broker_url': CONFIG.celery.broker_url,
 	'broker_transport_options': {
-		'data_folder_in': CELERY_DATA_FOLDER,
-		'data_folder_out': CELERY_DATA_FOLDER,
-		'visibility_timeout': CELERY_BROKER_VISIBILITY_TIMEOUT,
+		'data_folder_in': CONFIG.dirs.celery_data,
+		'data_folder_out': CONFIG.dirs.celery_data,
+		'control_folder': CONFIG.dirs.celery_data,
+		'visibility_timeout': CONFIG.celery.broker_visibility_timeout,
 	},
 	'broker_connection_retry_on_startup': True,
-	'broker_pool_limit': CELERY_BROKER_POOL_LIMIT,
-	'broker_connection_timeout': CELERY_BROKER_CONNECTION_TIMEOUT,
+	'broker_pool_limit': CONFIG.celery.broker_pool_limit,
+	'broker_connection_timeout': CONFIG.celery.broker_connection_timeout,
 
 	# Backend config
-	'result_backend': CELERY_RESULT_BACKEND,
+	'result_backend': CONFIG.celery.result_backend,
 	'result_extended': True,
 	'result_backend_thread_safe': True,
 	# 'result_backend_transport_options': {'master_name': 'mymaster'}, # for Redis HA backend
@@ -92,7 +85,7 @@ app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 
 def maybe_override_logging():
 	def decorator(func):
-		if CELERY_OVERRIDE_DEFAULT_LOGGING:
+		if CONFIG.celery.override_default_logging:
 			return signals.setup_logging.connect(func)
 		else:
 			return func
@@ -109,7 +102,7 @@ def void(*args, **kwargs):
 
 def revoke_task(task_id):
 	console.print(f'Revoking task {task_id}')
-	return app.control.revoke(task_id, terminate=True, signal='SIGKILL')
+	return app.control.revoke(task_id, terminate=True, signal='SIGINT')
 
 
 #--------------#
@@ -153,7 +146,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
-	if DEBUG > 1:
+	if CONFIG.debug.level > 1:
 		logger.info(f'Received task with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
@@ -164,7 +157,7 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
-	if DEBUG > 1:
+	if CONFIG.debug.level > 1:
 		logger.info(f'Received workflow with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
@@ -175,7 +168,7 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
-	if DEBUG > 1:
+	if CONFIG.debug.level > 1:
 		logger.info(f'Received scan with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
@@ -322,11 +315,6 @@ def run_command(self, results, name, targets, opts={}):
 			else:  # full traceback
 				exc_str = ' '.join(traceback.format_exception(task_exc, value=task_exc, tb=task_exc.__traceback__))
 			state['meta'][msg_type] = exc_str
-			if task:
-				color = 'bold red' if msg_type == 'error' else 'green'
-				task._print(exc_str, color=color)
-			else:
-				console.log(exc_str)
 
 		# Update task state with final status
 		self.update_state(**state)
@@ -370,11 +358,6 @@ def forward_results(results):
 #---------------------#
 # Celery result utils #
 #---------------------#
-
-def find_root_task(result):
-	while (result.parent is not None):
-		result = result.parent
-	return result
 
 
 def poll_task(result, seen=[]):
@@ -423,54 +406,6 @@ def poll_task(result, seen=[]):
 			yield from poll_task(result, seen=seen)
 
 
-def get_results(result):
-	"""Get all intermediate results from Celery result object.
-
-	Use this when running complex workflows with .si() i.e not passing results
-	between tasks.
-
-	Args:
-		result (Union[AsyncResult, GroupResult]): Celery result.
-
-	Returns:
-		list: List of results.
-	"""
-	while not result.ready():
-		continue
-	results = []
-	get_nested_results(result, results=results)
-	return results
-
-
-def get_nested_results(result, results=[]):
-	"""Get results recursively from Celery result object by parsing result tree
-	in reverse order. Also gets results from GroupResult children.
-
-	Args:
-		result (Union[AsyncResult, GroupResult]): Celery result object.
-
-	Returns:
-		list: List of results.
-	"""
-	if result is None:
-		return
-
-	if isinstance(result, celery.result.GroupResult):
-		console.log(repr(result))
-		get_nested_results(result.parent, results=results)
-		for child in result.children:
-			get_nested_results(child, results=results)
-
-	elif isinstance(result, celery.result.AsyncResult):
-		console.log(repr(result))
-		res = result.get()
-		console.log(f'-> Found {len(res)} results.')
-		console.log(f'-> {res}')
-		if res is not None:
-			results.extend(res)
-		get_nested_results(result.parent, results=results)
-
-
 def is_celery_worker_alive():
 	"""Check if a Celery worker is available."""
 	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
@@ -478,5 +413,5 @@ def is_celery_worker_alive():
 	if result:
 		console.print('Celery worker is alive !', style='bold green')
 	else:
-		console.print('No Celery worker alive.', style='bold red')
+		console.print('No Celery worker alive.', style='bold orange1')
 	return result

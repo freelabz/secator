@@ -1,6 +1,6 @@
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
-								 PROVIDER, REFERENCE, TAGS)
+								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
 from secator.output_types import Exploit
 from secator.runners import Command
 
@@ -11,6 +11,7 @@ class searchsploit(Command):
 	cmd = 'searchsploit'
 	input_flag = None
 	json_flag = '--json'
+	version_flag = OPT_NOT_SUPPORTED
 	opts = {
 		'strict': {'short': 's', 'is_flag': True, 'default': False, 'help': 'Strict match'}
 	}
@@ -26,7 +27,7 @@ class searchsploit(Command):
 			EXTRA_DATA: lambda x: {'verified': x['Verified']}
 		}
 	}
-	install_cmd = 'sudo snap install searchsploit'
+	install_cmd = 'sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb || true && sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit'  # noqa: E501
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
