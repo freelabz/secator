@@ -348,7 +348,7 @@ class Command(Runner):
 		try:
 			env = os.environ
 			env.update(self.env)
-			process = subprocess.Popen(
+			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
 				stdout=sys.stdout if self.no_capture else subprocess.PIPE,
@@ -360,8 +360,8 @@ class Command(Runner):
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
-				process.stdin.write(f"{sudo_password}\n")
-				process.stdin.flush()
+				self.process.stdin.write(f"{sudo_password}\n")
+				self.process.stdin.flush()
 
 		except FileNotFoundError as e:
 			if self.config.name in str(e):
@@ -380,11 +380,11 @@ class Command(Runner):
 		try:
 			# No capture mode, wait for command to finish and return
 			if self.no_capture:
-				self._wait_for_end(process)
+				self._wait_for_end()
 				return
 
 			# Process the output in real-time
-			for line in iter(lambda: process.stdout.readline(), b''):
+			for line in iter(lambda: self.process.stdout.readline(), b''):
 				sleep(0)  # for async to give up control
 				if not line:
 					break
@@ -424,11 +424,11 @@ class Command(Runner):
 					yield from items
 
 		except KeyboardInterrupt:
-			process.kill()
+			self.process.kill()
 			self.killed = True
 
 		# Retrieve the return code and output
-		self._wait_for_end(process)
+		self._wait_for_end()
 
 	def run_item_loaders(self, line):
 		"""Run item loaders on a string."""
@@ -487,16 +487,16 @@ class Command(Runner):
 		self._print("Sudo password verification failed after 3 attempts.")
 		return None
 
-	def _wait_for_end(self, process):
+	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
-		process.wait()
-		self.return_code = process.returncode
+		self.process.wait()
+		self.return_code = self.process.returncode
 
 		if self.no_capture:
 			self.output = ''
 		else:
 			self.output = self.output.strip()
-			process.stdout.close()
+			self.process.stdout.close()
 
 		if self.ignore_return_code:
 			self.return_code = 0
