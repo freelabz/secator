@@ -2,7 +2,7 @@ import os
 import csv
 import yaml
 
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.exporters._base import Exporter
 from secator.rich import console
 from secator.utils import pluralize

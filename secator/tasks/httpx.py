@@ -8,7 +8,7 @@ from secator.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
 								 RATE_LIMIT, RETRIES, THREADS,
 								 TIMEOUT, URL, USER_AGENT)
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.tasks._categories import Http
 from secator.utils import sanitize_url
 

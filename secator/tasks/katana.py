@@ -12,7 +12,7 @@ from secator.definitions import (CONTENT_TYPE, DEFAULT_KATANA_FLAGS,
 								 RATE_LIMIT, RETRIES, STATUS_CODE,
 								 STORED_RESPONSE_PATH, TECH,
 								 THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER, CONTENT_LENGTH)
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.output_types import Url, Tag
 from secator.tasks._categories import HttpCrawler
 

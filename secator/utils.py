@@ -20,7 +20,7 @@ import yaml
 from rich.markdown import Markdown
 
 from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
-from secator import CONFIG, ROOT_FOLDER, LIB_FOLDER
+from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
 logger = logging.getLogger(__name__)

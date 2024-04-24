@@ -1,7 +1,7 @@
 import logging
 
 from secator.template import TemplateLoader
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners._helpers import run_extractors
 from secator.runners.workflow import Workflow

@@ -12,7 +12,7 @@ from fp.fp import FreeProxy
 
 from secator.template import TemplateLoader
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
 from secator.utils import debug

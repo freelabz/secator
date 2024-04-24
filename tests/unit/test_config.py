@@ -1,5 +1,5 @@
 import unittest
-from secator import Config, CONFIG
+from secator.config import Config, CONFIG
 
 
 class TestConfig(unittest.TestCase):

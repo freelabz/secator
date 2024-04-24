@@ -5,7 +5,7 @@ import yaml
 from dotmap import DotMap
 
 from secator.rich import console
-from secator import CONFIG, CONFIGS_FOLDER
+from secator.config import CONFIG, CONFIGS_FOLDER
 
 TEMPLATES_DIR_KEYS = ['workflow', 'scan', 'profile']
 
