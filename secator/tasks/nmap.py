@@ -11,7 +11,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
-								 THREADS, TIMEOUT, USER_AGENT)
+								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug
@@ -29,11 +29,12 @@ class nmap(VulnMulti):
 	opt_prefix = '--'
 	output_types = [Port, Vulnerability, Exploit]
 	opts = {
-		PORTS: {'type': str, 'help': 'Ports to scan', 'short': 'p'},
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan'},
+		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [full, 100, 1000]'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
 		# 'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
 		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
-		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'}
+		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
