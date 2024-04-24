@@ -151,6 +151,7 @@ def get_task_data(task_id):
 		chunk_count = data.get('chunk_count')
 		if chunk and chunk_count:
 			data['chunk_info'] = f'{chunk}/{chunk_count}'
+		data['descr'] = data.pop('description', '')
 	return data
 
 
