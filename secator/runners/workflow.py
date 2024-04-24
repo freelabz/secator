@@ -81,7 +81,7 @@ class Workflow(Runner):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
-			obj (secator.config.ConfigLoader): Config.
+			obj (secator.config.TemplateLoader): Config.
 			targets (list): List of targets.
 			workflow_opts (dict): Workflow options.
 			run_opts (dict): Run options.

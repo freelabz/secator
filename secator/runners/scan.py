@@ -1,6 +1,6 @@
 import logging
 
-from secator.config import ConfigLoader
+from secator.template import TemplateLoader
 from secator import CONFIG
 from secator.runners._base import Runner
 from secator.runners._helpers import run_extractors
@@ -52,7 +52,7 @@ class Scan(Runner):
 
 			# Run workflow
 			workflow = Workflow(
-				ConfigLoader(name=f'workflows/{name}'),
+				TemplateLoader(name=f'workflows/{name}'),
 				targets,
 				results=[],
 				run_opts=run_opts,

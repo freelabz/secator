@@ -49,7 +49,7 @@ class Runner:
 	"""Runner class.
 
 	Args:
-		config (secator.config.ConfigLoader): Loaded config.
+		config (secator.config.TemplateLoader): Loaded config.
 		targets (list): List of targets to run task on.
 		results (list): List of existing results to re-use.
 		workspace_name (str): Workspace name.

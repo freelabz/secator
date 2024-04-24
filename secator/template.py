@@ -7,10 +7,10 @@ from dotmap import DotMap
 from secator.rich import console
 from secator import CONFIG, CONFIGS_FOLDER
 
-CONFIGS_DIR_KEYS = ['workflow', 'scan', 'profile']
+TEMPLATES_DIR_KEYS = ['workflow', 'scan', 'profile']
 
 
-def load_config(name):
+def load_template(name):
 	"""Load a config by name.
 
 	Args:
@@ -27,7 +27,7 @@ def load_config(name):
 		return yaml.load(f.read(), Loader=yaml.Loader)
 
 
-def find_configs():
+def find_templates():
 	results = {'scan': [], 'workflow': [], 'profile': []}
 	dirs_type = [CONFIGS_FOLDER]
 	if CONFIG.dirs.templates:
@@ -52,7 +52,7 @@ def find_configs():
 	return results
 
 
-class ConfigLoader(DotMap):
+class TemplateLoader(DotMap):
 
 	def __init__(self, input={}, name=None, **kwargs):
 		if name:
@@ -74,14 +74,14 @@ class ConfigLoader(DotMap):
 			return yaml.load(f.read(), Loader=yaml.Loader)
 
 	def _load_from_name(self, name):
-		return load_config(name)
+		return load_template(name)
 
 	@classmethod
 	def load_all(cls):
-		configs = find_configs()
-		return ConfigLoader({
-			key: [ConfigLoader(path) for path in configs[key]]
-			for key in CONFIGS_DIR_KEYS
+		configs = find_templates()
+		return TemplateLoader({
+			key: [TemplateLoader(path) for path in configs[key]]
+			for key in TEMPLATES_DIR_KEYS
 		})
 
 	def get_tasks_class(self):
@@ -89,14 +89,14 @@ class ConfigLoader(DotMap):
 		tasks = []
 		for name, conf in self.tasks.items():
 			if name == '_group':
-				group_conf = ConfigLoader(input={'tasks': conf})
+				group_conf = TemplateLoader(input={'tasks': conf})
 				tasks.extend(group_conf.get_tasks_class())
 			else:
 				tasks.append(Task.get_task_class(name))
 		return tasks
 
 	def get_workflows(self):
-		return [ConfigLoader(name=f'workflows/{name}') for name, _ in self.workflows.items()]
+		return [TemplateLoader(name=f'workflows/{name}') for name, _ in self.workflows.items()]
 
 	def get_workflow_supported_opts(self):
 		opts = {}

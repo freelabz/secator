@@ -10,7 +10,7 @@ from time import sleep
 
 from fp.fp import FreeProxy
 
-from secator.config import ConfigLoader
+from secator.template import TemplateLoader
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator import CONFIG
 from secator.runners import Runner
@@ -104,7 +104,7 @@ class Command(Runner):
 
 	def __init__(self, input=None, **run_opts):
 		# Build runnerconfig on-the-fly
-		config = ConfigLoader(input={
+		config = TemplateLoader(input={
 			'name': self.__class__.__name__,
 			'type': 'task',
 			'description': run_opts.get('description', None)
