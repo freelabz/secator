@@ -430,7 +430,7 @@ class Config(DotMap):
 					value = os.environ[var]
 
 					# Set the new value recursively
-					success = self.set(path, value, set_partial=False)
+					success = self.set(path, value, set_partial=True)
 					if success:
 						console.print(f'[bold green4]{var} (override success)[/]')
 					else:

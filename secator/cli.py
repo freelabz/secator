@@ -1026,6 +1026,14 @@ def integration(tasks, workflows, scans, test, debug):
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
+	os.environ['SECATOR_DIRS_DATA'] = '/tmp/data'
+	os.environ['SECATOR_DIRS_REPORTS'] = '/tmp/data/reports'
+	os.environ['SECATOR_DIRS_CELERY'] = '/tmp/celery'
+	os.environ['SECATOR_DIRS_CELERY_DATA'] = '/tmp/celery/data'
+	os.environ['SECATOR_DIRS_CELERY_RESULTS'] = '/tmp/celery/results'
+	import shutil
+	for path in ['/tmp/data', '/tmp/celery', '/tmp/celery/data', '/tmp/celery/results']:
+		shutil.rmtree(path, ignore_errors=True)
 
 	cmd = f'{sys.executable} -m unittest'
 	if test:

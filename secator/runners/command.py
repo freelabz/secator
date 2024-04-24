@@ -264,7 +264,7 @@ class Command(Runner):
 			secator.runners.Command: instance of the Command.
 		"""
 		name = name or cmd.split(' ')[0]
-		kwargs['no_process'] = True
+		kwargs['no_process'] = kwargs.get('no_process', True)
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_item'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = not kwargs.get('quiet', False)
