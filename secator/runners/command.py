@@ -268,10 +268,12 @@ class Command(Runner):
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_item'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = not kwargs.get('quiet', False)
+		delay_run = kwargs.pop('delay_run', False)
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
-		cmd_instance.run()
+		if not delay_run:
+			cmd_instance.run()
 		return cmd_instance
 
 	def configure_proxy(self):
