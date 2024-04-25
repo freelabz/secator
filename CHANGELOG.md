@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.3.6](https://github.com/freelabz/secator/compare/v0.3.5...v0.3.6) (2024-04-17)
+
+
+### Bug Fixes
+
+* broken reports folder on remote workers ([#307](https://github.com/freelabz/secator/issues/307)) ([9a7a1f1](https://github.com/freelabz/secator/commit/9a7a1f1c449c688701b02be66e98d3434073bbb0))
+* searchsploit install ([#306](https://github.com/freelabz/secator/issues/306)) ([040cfaf](https://github.com/freelabz/secator/commit/040cfaf6968ae120241fdd6a74a9a6cd5fa0631d))
+
+## [0.3.5](https://github.com/freelabz/secator/compare/v0.3.4...v0.3.5) (2024-04-17)
+
+
+### Bug Fixes
+
+* Celery control folder ([#298](https://github.com/freelabz/secator/issues/298)) ([3cbc0a3](https://github.com/freelabz/secator/commit/3cbc0a37d06c9b3a20eb0005b1cb68b484d22d15))
+* remove pkg_resources in favor of packaging ([#304](https://github.com/freelabz/secator/issues/304)) ([6cf478c](https://github.com/freelabz/secator/commit/6cf478c1f1c4b7363d1710e634686ede8a209594))
+* typo in `requires-python` in pyproject.toml ([#303](https://github.com/freelabz/secator/issues/303)) ([7a7766c](https://github.com/freelabz/secator/commit/7a7766caba0faa98406764fa1bb5ad2eae346302))
+
+
+### Documentation
+
+* update README.md ([8f1b1c1](https://github.com/freelabz/secator/commit/8f1b1c1cb852a88d80aa15379962aaa36afc7635))
+* update SECURITY.md ([6518dd6](https://github.com/freelabz/secator/commit/6518dd646c0358e661e186edf28b4fb0494bf712))
+
+## [0.3.4](https://github.com/freelabz/secator/compare/v0.3.3...v0.3.4) (2024-04-15)
+
+
+### Bug Fixes
+
+* install cariddi from GitHub releases ([#290](https://github.com/freelabz/secator/issues/290)) ([21c9078](https://github.com/freelabz/secator/commit/21c90787713fc08fcf375b37b144a4b86ebc49ee))
+* install cariddi from GitHub releases ([#292](https://github.com/freelabz/secator/issues/292)) ([8be216b](https://github.com/freelabz/secator/commit/8be216b01cb2fbc82aca7be32fc190adf17bda52))
+
 ## [0.3.3](https://github.com/freelabz/secator/compare/v0.3.2...v0.3.3) (2024-04-13)
 
 

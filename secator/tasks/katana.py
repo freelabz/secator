@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from secator.decorators import task
 from secator.definitions import (CONTENT_TYPE, DEFAULT_KATANA_FLAGS,
-								 DEFAULT_STORE_HTTP_RESPONSES, DELAY, DEPTH,
+								 DELAY, DEPTH,
 								 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
@@ -12,6 +12,7 @@ from secator.definitions import (CONTENT_TYPE, DEFAULT_KATANA_FLAGS,
 								 RATE_LIMIT, RETRIES, STATUS_CODE,
 								 STORED_RESPONSE_PATH, TECH,
 								 THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER, CONTENT_LENGTH)
+from secator.config import CONFIG
 from secator.output_types import Url, Tag
 from secator.tasks._categories import HttpCrawler
 
@@ -106,14 +107,14 @@ class katana(HttpCrawler):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
-		if DEFAULT_STORE_HTTP_RESPONSES:
+		if CONFIG.http.store_responses:
 			self.cmd += f' -sr -srd {self.reports_folder}'
 
 	@staticmethod
 	def on_item(self, item):
 		if not isinstance(item, Url):
 			return item
-		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(item.stored_response_path):
+		if CONFIG.http.store_responses and os.path.exists(item.stored_response_path):
 			with open(item.stored_response_path, 'r', encoding='latin-1') as fin:
 				data = fin.read().splitlines(True)
 				first_line = data[0]
@@ -125,5 +126,5 @@ class katana(HttpCrawler):
 
 	@staticmethod
 	def on_end(self):
-		if DEFAULT_STORE_HTTP_RESPONSES and os.path.exists(self.reports_folder + '/index.txt'):
+		if CONFIG.http.store_responses and os.path.exists(self.reports_folder + '/index.txt'):
 			os.remove(self.reports_folder + '/index.txt')

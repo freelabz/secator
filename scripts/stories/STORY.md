@@ -60,9 +60,9 @@ secator z default mydomain.com --worker
 **Callbacks (library mode):**
 ```py
 from secator.runners import Workflow
-from secator.config import ConfigLoader
+from secator.template import TemplateLoader
 
-config = ConfigLoader(name='workflows/host_recon')
+config = TemplateLoader(name='workflows/host_recon')
 hooks = {
 	Task: {
 		'on_item': {
