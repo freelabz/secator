@@ -19,25 +19,25 @@ class TestWorker(unittest.TestCase):
 		cls.cmd.process.kill()
 		cls.thread.join()
 
-	# def test_httpx(self):
-	# 	from secator.output_types import Url
-	# 	cmd = Command.execute(
-	# 		'secator x httpx testphp.vulnweb.com -json',
-	# 		no_process=False,
-	# 		cls_attributes={'output_types': [Url]}
-	# 	)
-	# 	# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
-	# 	self.assertEqual(len(cmd.results), 1)
-	# 	url = Url(
-	# 		'http://testphp.vulnweb.com',
-	# 		status_code=200,
-	# 		title='Home of Acunetix Art',
-	# 		webserver='nginx',
-	# 		tech=['DreamWeaver', 'Nginx:1.19.0', 'PHP:5.6.40', 'Ubuntu'],
-	# 		content_type='text/html',
-	# 		content_length=4958
-	# 	)
-	# 	self.assertEqual(cmd.results[0], url)
+	def test_httpx(self):
+		from secator.output_types import Url
+		cmd = Command.execute(
+			'secator x httpx testphp.vulnweb.com -json',
+			no_process=False,
+			cls_attributes={'output_types': [Url]}
+		)
+		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
+		self.assertEqual(len(cmd.results), 1)
+		url = Url(
+			'http://testphp.vulnweb.com',
+			status_code=200,
+			title='Home of Acunetix Art',
+			webserver='nginx',
+			tech=['DreamWeaver', 'Nginx:1.19.0', 'PHP:5.6.40', 'Ubuntu'],
+			content_type='text/html',
+			content_length=4958
+		)
+		self.assertEqual(cmd.results[0], url)
 
 	def test_host_recon(self):
 		from secator.output_types import Url, Port, Vulnerability
