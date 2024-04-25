@@ -55,7 +55,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11"]
-        test_type: ['tasks']
+        test_type: ['tasks', 'worker']
         # test_type: ['tasks', 'workflows', 'scans']
     steps:
     - name: Checkout repository
@@ -82,6 +82,7 @@ jobs:
         secator install langs go
         secator install langs ruby
         secator install tools
+        secator install addons worker
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
