@@ -510,7 +510,8 @@ class Runner:
 				color='bold red', rich=True)
 			for error in self.errors:
 				self._print(f'   • {error}', color='bold red', rich=True)
-			self._print(f'   • Check {self.output_path} for details.', color='bold red', rich=True)
+			if self.sync:
+				self._print(f'   • Check {self.output_path} for details.', color='bold red', rich=True)
 
 		# Build and send report
 		if self.results:
