@@ -238,6 +238,8 @@ class Config(DotMap):
 				value = int(value)
 			elif isinstance(existing_value, float):
 				value = float(value)
+			elif isinstance(existing_value, Path):
+				value = Path(value)
 		except ValueError:
 			pass
 		finally:
