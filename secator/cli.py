@@ -481,7 +481,7 @@ def config_set(key, value):
 			return
 		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
 	else:
-		console.print(f'[bold red]:x: Config is invalid, not saved.')
+		console.print('[bold red]:x: Invalid config, not saving it.')
 
 
 @config.command('edit')

@@ -408,6 +408,7 @@ class Config(DotMap):
 				path = path.replace(home, '~')
 			return dumper.represent_scalar('tag:yaml.org,2002:str', path)
 
+		LineBreakDumper.add_representer(str, posix_path_representer)
 		LineBreakDumper.add_representer(Path, posix_path_representer)
 		LineBreakDumper.add_representer(PosixPath, posix_path_representer)
 		LineBreakDumper.add_representer(WindowsPath, posix_path_representer)
@@ -450,15 +451,10 @@ class Config(DotMap):
 					path = '.'.join(k.lower() for k in self._keymap[key])
 					value = os.environ[var]
 					self.set(path, value)
-					if self.validate(print_errors=False):
-						if print_errors:
-							console.print(f'[bold green]{var} (override success)[/]')
-					else:
-						if print_errors:
-							console.print(f'[bold red]{var} (override failed)[/]')
-				else:
-					if print_errors:
-						console.print(f'[bold red]{var} (override failed: key not found)[/]')
+					if not self.validate(print_errors=False) and print_errors:
+						console.print(f'[bold red]{var} (override failed)[/]')
+				elif print_errors:
+					console.print(f'[bold red]{var} (override failed: key not found)[/]')
 
 
 def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):
