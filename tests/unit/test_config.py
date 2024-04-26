@@ -17,20 +17,19 @@ class TestConfig(unittest.TestCase):
 
 	def test_parse_empty_config(self):
 		config = Config.parse()
-		self.assertTrue(config._valid)
+		self.assertIsNotNone(config)
 		self.assertIsInstance(config, Config)
 		self.assertIsInstance(config.addons.google.enabled, bool)
 
 	def test_parse_valid_config(self):
 		config = Config.parse(self.valid_config)
-		self.assertTrue(config._valid)
+		self.assertIsNotNone(config)
 		self.assertIsInstance(config, Config)
 		self.assertEqual(config.addons.google.enabled, True)
 
 	def test_parse_invalid_config(self):
 		config = Config.parse(self.invalid_config)
-		self.assertFalse(config._valid)
-		self.assertIsInstance(config.addons.google.enabled, bool)
+		self.assertIsNone(config)
 
 	def test_parse_home_dir_expand(self):
 		from pathlib import Path

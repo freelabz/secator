@@ -461,7 +461,8 @@ def config():
 def config_get(full, key=None):
 	"""Get config value."""
 	if key is None:
-		CONFIG.print(partial=not full)
+		partial = not full and CONFIG != default_config
+		CONFIG.print(partial=partial)
 		return
 	CONFIG.get(key)
 
@@ -471,8 +472,9 @@ def config_get(full, key=None):
 @click.argument('value')
 def config_set(key, value):
 	"""Set config value."""
-	success = CONFIG.set(key, value)
-	if success:
+	CONFIG.set(key, value)
+	config = CONFIG.validate()
+	if config:
 		CONFIG.get(key)
 		saved = CONFIG.save()
 		if not saved:
@@ -489,7 +491,7 @@ def config_edit(resume):
 		shutil.copyfile(config_path, tmp_config)
 	click.edit(filename=tmp_config)
 	config = Config.parse(path=tmp_config)
-	if config._valid:
+	if config:
 		config.save(config_path)
 		console.print(f'\n[bold green]:tada: Saved config to [/]{config_path}.')
 		tmp_config.unlink()
