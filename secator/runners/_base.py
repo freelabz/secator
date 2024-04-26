@@ -120,8 +120,8 @@ class Runner:
 		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
 
-		# Output file path
-		self.output_path = f'{self.reports_folder}/.outputs/logs.txt'
+		# Output log path
+		self.output_log_path = f'{self.reports_folder}/.outputs/logs.txt'
 
 		# Process input
 		self.input = targets
@@ -496,7 +496,7 @@ class Runner:
 				self._print(f'   • {info}', color='bold green', rich=True)
 
 		# Save logs to file
-		with open(self.output_path, 'w') as f:
+		with open(self.output_log_path, 'w') as f:
 			f.write(self.output)
 
 		# Catch additional errors from output
@@ -511,7 +511,7 @@ class Runner:
 			for error in self.errors:
 				self._print(f'   • {error}', color='bold red', rich=True)
 			if self.sync:
-				self._print(f'   • Check {self.output_path} for details.', color='bold red', rich=True)
+				self._print(f'   • Check {self.output_log_path} for details.', color='bold red', rich=True)
 
 		# Build and send report
 		if self.results:
