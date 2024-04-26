@@ -14,7 +14,8 @@ from rich.panel import Panel
 from rich.progress import Progress as RichProgress
 from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY, REPORTS_FOLDER
+from secator.definitions import DEBUG
+from secator.config import CONFIG
 from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
@@ -48,7 +49,7 @@ class Runner:
 	"""Runner class.
 
 	Args:
-		config (secator.config.ConfigLoader): Loaded config.
+		config (secator.config.TemplateLoader): Loaded config.
 		targets (list): List of targets to run task on.
 		results (list): List of existing results to re-use.
 		workspace_name (str): Workspace name.
@@ -106,13 +107,12 @@ class Runner:
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
-		self.result = None
+		self.celery_result = None
 
 		# Determine report folder
-		default_reports_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
+		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
 		_id = get_task_folder_id(default_reports_folder_base)
-		default_report_folder = f'{default_reports_folder_base}/{_id}'
-		self.reports_folder = run_opts.get('reports_folder') or default_report_folder
+		self.reports_folder = f'{default_reports_folder_base}/{_id}'
 
 		# Make reports folders
 		os.makedirs(self.reports_folder, exist_ok=True)
@@ -280,9 +280,9 @@ class Runner:
 
 		except KeyboardInterrupt:
 			self._print('Process was killed manually (CTRL+C / CTRL+X).', color='bold red', rich=True)
-			if self.result:
+			if self.celery_result:
 				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
-				self.stop_live_tasks(self.result)
+				self.stop_live_tasks(self.celery_result)
 
 		# Filter results and log info
 		self.mark_duplicates()
@@ -291,9 +291,10 @@ class Runner:
 		self.run_hooks('on_end')
 
 	def mark_duplicates(self):
-		debug('duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		dupe_count = 0
 		for item in self.results:
-			debug('duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=2)
+			debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -313,13 +314,16 @@ class Runner:
 					if not dupe._duplicate:
 						debug(
 							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-							sub='runner.mark_duplicates', level=2)
+							sub='runner.mark_duplicates', level=5)
+						dupe_count += 1
 						dupe._duplicate = True
 						dupe = self.run_hooks('on_duplicate', dupe)
 
-		debug('Duplicates:', sub='runner.mark_duplicates', level=2)
-		debug('\n\t'.join([repr(i) for i in self.results if i._duplicate]), sub='runner.mark_duplicates', level=2)
-		debug('duplicate check completed', id=self.config.name, sub='runner.mark_duplicates')
+		duplicates = [repr(i) for i in self.results if i._duplicate]
+		if duplicates:
+			duplicates_str = '\n\t'.join(duplicates)
+			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='runner.mark_duplicates', level=5)
+		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.mark_duplicates')
 
 	def yielder(self):
 		raise NotImplementedError()
@@ -388,14 +392,14 @@ class Runner:
 
 	def resolve_exporters(self):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.get('output', '')
-		if output == '':
-			return self.default_exporters
-		elif output is False:
+		output = self.run_opts.get('output') or self.default_exporters
+		if not output or output in ['false', 'False']:
 			return []
+		if isinstance(output, str):
+			output = output.split(',')
 		exporters = [
 			import_dynamic(f'secator.exporters.{o.capitalize()}Exporter', 'Exporter')
-			for o in output.split(',')
+			for o in output
 			if o
 		]
 		return [e for e in exporters if e]
@@ -847,7 +851,8 @@ class Runner:
 
 		if item._type == 'progress' and item._source == self.config.name:
 			self.progress = item.percent
-			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < DEFAULT_PROGRESS_UPDATE_FREQUENCY:
+			update_frequency = CONFIG.runners.progress_update_frequency
+			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:
 				return None
 			elif int(item.percent) in [0, 100]:
 				return None

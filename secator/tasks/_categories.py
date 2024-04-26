@@ -1,21 +1,20 @@
 import json
-import logging
 import os
 
 import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE, DATA_FOLDER, DEFAULT_HTTP_WORDLIST,
-								 DEFAULT_SKIP_CVE_SEARCH, DELAY, DEPTH, DESCRIPTION, FILTER_CODES, FILTER_REGEX,
-								 FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, MATCH_CODES, MATCH_REGEX,
-								 MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT, USERNAME, WORDLIST)
+from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
+								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
+								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
-from secator.rich import console
+from secator.config import CONFIG
 from secator.runners import Command
+from secator.utils import debug
 
-logger = logging.getLogger(__name__)
 
 OPTS = {
 	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
@@ -37,7 +36,7 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_HTTP_WORDLIST, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.http, 'help': 'Wordlist to use'}
 }
 
 OPTS_HTTP = [
@@ -121,7 +120,7 @@ class Vuln(Command):
 
 	@staticmethod
 	def lookup_local_cve(cve_id):
-		cve_path = f'{DATA_FOLDER}/cves/{cve_id}.json'
+		cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
 		if os.path.exists(cve_path):
 			with open(cve_path, 'r') as f:
 				return json.load(f)
@@ -131,12 +130,53 @@ class Vuln(Command):
 	# def lookup_exploitdb(exploit_id):
 	# 	print('looking up exploit')
 	# 	try:
-	# 		cve_info = requests.get(f'https://exploit-db.com/exploits/{exploit_id}', timeout=5).content
-	# 		print(cve_info)
-	# 	except Exception:
+	# 		resp = requests.get(f'https://exploit-db.com/exploits/{exploit_id}', timeout=5)
+	#		resp.raise_for_status()
+	#		content = resp.content
+	# 	except requests.RequestException as e:
+	#		debug(f'Failed remote query for {exploit_id} ({str(e)}).', sub='cve')
 	# 		logger.error(f'Could not fetch exploit info for exploit {exploit_id}. Skipping.')
 	# 		return None
 	# 	return cve_info
+
+	@staticmethod
+	def create_cpe_string(product_name, version):
+		"""
+		Generate a CPE string for a given product and version.
+
+		Args:
+			product_name (str): The name of the product.
+			version (str): The version of the product.
+
+		Returns:
+			str: A CPE string formatted according to the CPE 2.3 specification.
+		"""
+		cpe_version = "2.3"  # CPE Specification version
+		part = "a"           # 'a' for application
+		vendor = product_name.lower()  # Vendor name, using product name
+		product = product_name.lower()  # Product name
+		version = version  # Product version
+		cpe_string = f"cpe:{cpe_version}:{part}:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
+		return cpe_string
+
+	@staticmethod
+	def match_cpes(fs1, fs2):
+		"""Check if two CPEs match. Partial matches consisting of <vendor>:<product>:<version> are considered a match.
+
+		Args:
+			fs1 (str): Format string 1.
+			fs2 (str): Format string 2.
+
+		Returns:
+			bool: True if the two CPEs match, False otherwise.
+		"""
+		if fs1 == fs2:
+			return True
+		split_fs1 = fs1.split(':')
+		split_fs2 = fs2.split(':')
+		tup1 = split_fs1[3], split_fs1[4], split_fs1[5]
+		tup2 = split_fs2[3], split_fs2[4], split_fs2[5]
+		return tup1 == tup2
 
 	@staticmethod
 	def lookup_cve(cve_id, cpes=[]):
@@ -150,18 +190,21 @@ class Vuln(Command):
 			dict: vulnerability data.
 		"""
 		cve_info = Vuln.lookup_local_cve(cve_id)
+
+		# Online CVE lookup
 		if not cve_info:
-			if DEFAULT_SKIP_CVE_SEARCH:
-				logger.debug(f'{cve_id} not found locally, and DEFAULT_SKIP_CVE_SEARCH is set: ignoring online search.')
+			if CONFIG.runners.skip_cve_search:
+				debug(f'Skip remote query for {cve_id} since config.runners.skip_cve_search is set.', sub='cve')
 				return None
-			# logger.debug(f'{cve_id} not found locally. Use `secator install cves` to install CVEs locally.')
+			if CONFIG.offline_mode:
+				debug(f'Skip remote query for {cve_id} since config.offline_mode is set.', sub='cve')
+				return None
 			try:
-				cve_info = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5).json()
-				if not cve_info:
-					console.print(f'Could not fetch CVE info for cve {cve_id}. Skipping.', highlight=False)
-					return None
-			except Exception:
-				console.print(f'Could not fetch CVE info for cve {cve_id}. Skipping.', highlight=False)
+				resp = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5)
+				resp.raise_for_status()
+				cve_info = resp.json()
+			except requests.RequestException as e:
+				debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
 				return None
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.
@@ -177,14 +220,15 @@ class Vuln(Command):
 				cpe_fs = cpe_obj.as_fs()
 				# cpe_version = cpe_obj.get_version()[0]
 				vulnerable_fs = cve_info['vulnerable_product']
-				# logger.debug(f'Matching CPE {cpe} against {len(vulnerable_fs)} vulnerable products for {cve_id}')
 				for fs in vulnerable_fs:
-					if fs == cpe_fs:
-						# logger.debug(f'Found matching CPE FS {cpe_fs} ! The CPE is vulnerable to CVE {cve_id}')
+					# debug(f'{cve_id}: Testing {cpe_fs} against {fs}', sub='cve')  # for hardcore debugging
+					if Vuln.match_cpes(cpe_fs, fs):
+						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
 						cpe_match = True
 						tags.append('cpe-match')
-			if not cpe_match:
-				return None
+						break
+				if not cpe_match:
+					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve')
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
@@ -223,17 +267,9 @@ class Vuln(Command):
 		# Set vulnerability severity based on CVSS score
 		severity = None
 		if cvss:
-			if cvss < 4:
-				severity = 'low'
-			elif cvss < 7:
-				severity = 'medium'
-			elif cvss < 9:
-				severity = 'high'
-			else:
-				severity = 'critical'
+			severity = Vuln.cvss_to_severity(cvss)
 
 		# Set confidence
-		confidence = 'low' if not cpe_match else 'high'
 		vuln = {
 			ID: id,
 			NAME: name,
@@ -243,7 +279,6 @@ class Vuln(Command):
 			TAGS: tags,
 			REFERENCES: [f'https://cve.circl.lu/cve/{id}'] + references,
 			DESCRIPTION: description,
-			CONFIDENCE: confidence
 		}
 		return vuln
 
@@ -257,16 +292,32 @@ class Vuln(Command):
 		Returns:
 			dict: vulnerability data.
 		"""
-		reference = f'https://github.com/advisories/{ghsa_id}'
-		response = requests.get(reference)
-		soup = BeautifulSoup(response.text, 'lxml')
+		try:
+			resp = requests.get(f'https://github.com/advisories/{ghsa_id}', timeout=5)
+			resp.raise_for_status()
+		except requests.RequestException as e:
+			debug(f'Failed remote query for {ghsa_id} ({str(e)}).', sub='cve')
+			return None
+		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
-		data = Vuln.lookup_cve(cve_id)
-		if data:
-			data[TAGS].append('ghsa')
-			return data
+		vuln = Vuln.lookup_cve(cve_id)
+		if vuln:
+			vuln[TAGS].append('ghsa')
+			return vuln
 		return None
+
+	@staticmethod
+	def cvss_to_severity(cvss):
+		if cvss < 4:
+			severity = 'low'
+		elif cvss < 7:
+			severity = 'medium'
+		elif cvss < 9:
+			severity = 'high'
+		else:
+			severity = 'critical'
+		return severity
 
 
 class VulnHttp(Vuln):

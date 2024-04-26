@@ -85,8 +85,12 @@ class nuclei(VulnMulti):
 	def extra_data_extractor(item):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
+		data['type'] = item.get('type', '')
 		data['template_id'] = item['template-id']
 		data['template_url'] = item.get('template-url', '')
+		for k, v in item.get('meta', {}).items():
+			data['data'].append(f'{k}: {v}')
+		data['metadata'] = item.get('metadata', {})
 		return data
 
 	@staticmethod

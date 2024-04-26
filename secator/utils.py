@@ -1,4 +1,3 @@
-import importlib
 import inspect
 import itertools
 import logging
@@ -15,11 +14,13 @@ from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse, quote
 
+
 import ifaddr
 import yaml
 from rich.markdown import Markdown
 
-from secator.definitions import DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT
+from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ def expand_input(input):
 	"""
 	if input is None:  # read from stdin
 		console.print('Waiting for input on stdin ...', style='bold yellow')
-		rlist, _, _ = select.select([sys.stdin], [], [], DEFAULT_STDIN_TIMEOUT)
+		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 		if rlist:
 			data = sys.stdin.read().splitlines()
 		else:
@@ -193,7 +194,7 @@ def import_dynamic(cls_path, cls_root='Command'):
 	"""
 	try:
 		package, name = cls_path.rsplit(".", maxsplit=1)
-		cls = getattr(importlib.import_module(package), name)
+		cls = getattr(import_module(package), name)
 		root_cls = inspect.getmro(cls)[-2]
 		if root_cls.__name__ == cls_root:
 			return cls
@@ -311,10 +312,6 @@ def detect_host(interface=None):
 	return None
 
 
-def find_list_item(array, val, key='id', default=None):
-	return next((item for item in array if item[key] == val), default)
-
-
 def print_results_table(results, title=None, exclude_fields=[], log=False):
 	from secator.output_types import OUTPUT_TYPES
 	from secator.rich import build_table
@@ -402,3 +399,25 @@ def escape_mongodb_url(url):
 		user, password = quote(user), quote(password)
 		return f'mongodb://{user}:{password}@{url}'
 	return url
+
+
+def print_version():
+	"""Print secator version information."""
+	from secator.installer import get_version_info
+	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False, end='')
+	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
+	latest_version = info['latest_version']
+	status = info['status']
+	location = info['location']
+	if status == 'outdated':
+		console.print('[bold red] (outdated)[/]')
+	else:
+		console.print('')
+	console.print(f'[bold gold3]Latest version[/]: {latest_version}', highlight=False)
+	console.print(f'[bold gold3]Location[/]: {location}')
+	console.print(f'[bold gold3]Python binary[/]: {sys.executable}')
+	if DEV_PACKAGE:
+		console.print(f'[bold gold3]Root folder[/]: {ROOT_FOLDER}')
+	console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
+	if status == 'outdated':
+		console.print('[bold red]secator is outdated, run "secator update" to install the latest version.')

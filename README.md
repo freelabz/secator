@@ -29,7 +29,7 @@ and it is designed to improve productivity for pentesters and security researche
 
 # Features
 
-![](images/short_demo.gif)
+![](images/demo.gif)
 
 * **Curated list of commands**
 
@@ -116,7 +116,19 @@ wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/instal
 	<summary>Docker</summary>
 
 ```sh
-docker run -it freelabz/secator --help
+docker run -it --rm --net=host -v ~/.secator:/root/.secator freelabz/secator --help
+```
+
+The volume mount -v is necessary to save all secator reports to your host machine, and--net=host is recommended to grant full access to the host network.
+
+You can alias this command to run it easier:
+```sh
+alias secator="docker run -it --rm --net=host -v ~/.secator:/root/.secator freelabz/secator"
+```
+
+Now you can run secator like if it was installed on baremetal:
+```
+secator --help
 ```
 
 </details>

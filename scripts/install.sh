@@ -7,9 +7,9 @@ echo -e "🗄 ${YELLOW}Running apt update ...${NC}"
 sudo apt update
 echo -e "🗄 ${GREEN}Ran apt update successfully !${NC}\n"
 
-echo -e "🗄 ${YELLOW}Installing Python and pipx ...${NC}"
-sudo apt install -y python3-pip pipx
-echo -e "🗄 ${GREEN}pipx installed successfully !${NC}\n"
+echo -e "🗄 ${YELLOW}Installing pipx and git ...${NC}"
+sudo apt install -y pipx git
+echo -e "🗄 ${GREEN}pipx and git installed successfully !${NC}\n"
 
 echo -e "🗄 ${YELLOW}Setting \$PATH ...${NC}"
 export PATH=$PATH:~/.local/bin:~/go/bin
@@ -28,5 +28,5 @@ echo -e "🗄 ${GREEN}secator installed successfully !${NC}\n"
 
 echo -e "🗄 ${YELLOW}Adding ~/go/bin and ~/.local/bin to \$PATH in .bashrc ...${NC}"
 echo "export PATH=$PATH:~/go/bin:~/.local/bin" >> ~/.bashrc
-source ~/.bashrc
+. ~/.bashrc
 echo -e "🗄 ${GREEN}\$PATH modified successfully !${NC}\n"

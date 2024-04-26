@@ -11,18 +11,12 @@ from time import sleep
 
 from fp.fp import FreeProxy
 
-from secator.config import ConfigLoader
-from secator.definitions import (DEFAULT_HTTP_PROXY,
-							   DEFAULT_FREEPROXY_TIMEOUT,
-							   DEFAULT_PROXYCHAINS_COMMAND,
-							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, DEFAULT_INPUT_CHUNK_SIZE)
+from secator.template import TemplateLoader
+from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
+from secator.config import CONFIG
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
 from secator.utils import debug
-
-# from rich.markup import escape
-# from rich.text import Text
 
 
 logger = logging.getLogger(__name__)
@@ -70,7 +64,7 @@ class Command(Runner):
 	input_path = None
 
 	# Input chunk size (default None)
-	input_chunk_size = DEFAULT_INPUT_CHUNK_SIZE
+	input_chunk_size = CONFIG.runners.input_chunk_size
 
 	# Flag to take a file as input
 	file_flag = None
@@ -111,7 +105,7 @@ class Command(Runner):
 
 	def __init__(self, input=None, **run_opts):
 		# Build runnerconfig on-the-fly
-		config = ConfigLoader(input={
+		config = TemplateLoader(input={
 			'name': self.__class__.__name__,
 			'type': 'task',
 			'description': run_opts.get('description', None)
@@ -271,14 +265,16 @@ class Command(Runner):
 			secator.runners.Command: instance of the Command.
 		"""
 		name = name or cmd.split(' ')[0]
-		kwargs['no_process'] = True
+		kwargs['no_process'] = kwargs.get('no_process', True)
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_item'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = not kwargs.get('quiet', False)
+		delay_run = kwargs.pop('delay_run', False)
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
-		cmd_instance.run()
+		if not delay_run:
+			cmd_instance.run()
 		return cmd_instance
 
 	def configure_proxy(self):
@@ -291,7 +287,7 @@ class Command(Runner):
 		opt_key_map = self.opt_key_map
 		proxy_opt = opt_key_map.get('proxy', False)
 		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
-		proxychains_flavor = getattr(self, 'proxychains_flavor', DEFAULT_PROXYCHAINS_COMMAND)
+		proxychains_flavor = getattr(self, 'proxychains_flavor', CONFIG.http.proxychains_command)
 		proxy = False
 
 		if self.proxy in ['auto', 'proxychains'] and self.proxychains:
@@ -299,12 +295,12 @@ class Command(Runner):
 			proxy = 'proxychains'
 
 		elif self.proxy and support_proxy_opt:
-			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and DEFAULT_SOCKS5_PROXY:
-				proxy = DEFAULT_SOCKS5_PROXY
-			elif self.proxy in ['auto', 'http'] and self.proxy_http and DEFAULT_HTTP_PROXY:
-				proxy = DEFAULT_HTTP_PROXY
+			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and CONFIG.http.socks5_proxy:
+				proxy = CONFIG.http.socks5_proxy
+			elif self.proxy in ['auto', 'http'] and self.proxy_http and CONFIG.http.http_proxy:
+				proxy = CONFIG.http.http_proxy
 			elif self.proxy == 'random':
-				proxy = FreeProxy(timeout=DEFAULT_FREEPROXY_TIMEOUT, rand=True, anonym=True).get()
+				proxy = FreeProxy(timeout=CONFIG.http.freeproxy_timeout, rand=True, anonym=True).get()
 			elif self.proxy.startswith(('http://', 'socks5://')):
 				proxy = self.proxy
 
@@ -375,7 +371,7 @@ class Command(Runner):
 
 			# No capture mode, wait for command to finish and return
 			if self.no_capture:
-				self._wait_for_end(self.process)
+				self._wait_for_end()
 				return
 
 			# Process the output in real-time
