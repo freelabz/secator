@@ -309,15 +309,24 @@ class Config(DotMap):
 		config.apply_env_overrides(print_errors=print_errors)
 
 		# Validate config
-		config.validate(print_errors=print_errors)
+		updated = config.validate(partial=False, print_errors=print_errors)
+		if updated:
+			print('updated config')
+			config = updated
+			config.set_extras(data, path)
 
 		return config
 
-	def validate(self, print_errors=True):
+	def json(self):
+		"""Render config as JSON."""
+		return {k: v for k, v in self.toDict().items() if not k.startswith('_')}
+
+	def validate(self, partial=True, print_errors=True):
 		"""Validate config."""
+		data = self._partial.json() if partial else self.json()
 		return Config.load(
 			SecatorConfig,
-			data=self._partial.toDict(),
+			data=data,
 			print_errors=print_errors)
 
 	def set_extras(self, original_data, original_path):
@@ -422,18 +431,14 @@ class Config(DotMap):
 		LineBreakDumper.add_representer(WindowsPath, posix_path_representer)
 
 		# Get data dict
-		data = config.toDict()
+		data = config.json()
 
 		# HACK: Replace home dir in result_backend
 		if isinstance(config, Config):
 			data['celery']['result_backend'] = data['celery']['result_backend'].replace(home, '~')
-			del data['_path']
 			if partial:
-				data = data['_partial']
-			else:
-				del data['_partial']
+				data = config.partial.json()
 
-		data = {k: v for k, v in data.items() if not k.startswith('_')}
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 	@staticmethod
