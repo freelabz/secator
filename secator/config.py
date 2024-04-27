@@ -188,12 +188,13 @@ class Config(DotMap):
 			Config.print_yaml(yaml_str)
 		return value
 
-	def set(self, key, value):
+	def set(self, key, value, set_partial=True):
 		"""Set a value in the configuration using a dotted path.
 
 		Args:
 			key (str | None): Dotted key path.
 			value (Any): Value.
+			set_partial (bool): Set in partial config.
 		"""
 		# Get existing value
 		existing_value = self.get(key, print=False)
@@ -224,6 +225,10 @@ class Config(DotMap):
 						value = value[1:-1]
 					if ',' in value:
 						value = [c.strip() for c in value.split(',')]
+					elif value:
+						value = [value]
+					else:
+						value = []
 			elif isinstance(existing_value, dict):
 				if isinstance(value, str):
 					if value.startswith('{') and value.endswith('}'):
@@ -240,11 +245,14 @@ class Config(DotMap):
 				value = float(value)
 			elif isinstance(existing_value, Path):
 				value = Path(value)
-		except ValueError:
+		except ValueError as e:
+			from secator.utils import debug
+			debug(f'Could not cast value {value} to expected type {type(existing_value).__name__}: {str(e)}', sub='config')
 			pass
 		finally:
 			target[final_key] = value
-			partial[final_key] = value
+			if set_partial:
+				partial[final_key] = value
 
 	def save(self, target_path: Path = None, partial=True):
 		"""Save config as YAML on disk.
@@ -450,7 +458,7 @@ class Config(DotMap):
 				if key in self._keymap:
 					path = '.'.join(k.lower() for k in self._keymap[key])
 					value = os.environ[var]
-					self.set(path, value)
+					self.set(path, value, set_partial=False)
 					if not self.validate(print_errors=False) and print_errors:
 						console.print(f'[bold red]{var} (override failed)[/]')
 				elif print_errors:
