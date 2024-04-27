@@ -3,23 +3,23 @@ version: "3.7"
 services:
 
   secator:
-    image: secator
+    image: freelabz/secator:latest
     restart: unless-stopped
     entrypoint: ""
     command: tail -F anything
     environment:
-    - CELERY_BROKER_URL=redis://redis:6379/0
-    - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    - SECATOR_CELERY_BROKER_URL=redis://redis:6379/0
+    - SECATOR_CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       - redis
 
   worker:
-    image: secator
+    image: freelabz/secator:latest
     restart: unless-stopped
     command: worker
     environment:
-    - CELERY_BROKER_URL=redis://redis:6379/0
-    - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    - SECATOR_CELERY_BROKER_URL=redis://redis:6379/0
+    - SECATOR_CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       - redis
 
