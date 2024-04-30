@@ -248,7 +248,7 @@ class Config(DotMap):
 				value = float(value)
 			elif isinstance(existing_value, Path):
 				value = Path(value)
-		except ValueError as e:
+		except ValueError:
 			# from secator.utils import debug
 			# debug(f'Could not cast value {value} to expected type {type(existing_value).__name__}: {str(e)}', sub='config')
 			pass
