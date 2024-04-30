@@ -536,17 +536,70 @@ def report():
 
 @report.command('show')
 @click.argument('json_path')
+@click.option('-o', '--output', type=str, default='console', help='Format')
 @click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
-def report_show(json_path, exclude_fields):
-	"""Show a JSON report as a nicely-formatted table."""
+def report_show(json_path, output, exclude_fields):
+	"""Show a JSON report."""
 	with open(json_path, 'r') as f:
 		report = loads_dataclass(f.read())
 		results = flatten(list(report['results'].values()))
-	exclude_fields = exclude_fields.split(',')
-	print_results_table(
-		results,
-		title=report['info']['title'],
-		exclude_fields=exclude_fields)
+	if output == 'console':
+		for result in results:
+			console.print(result)
+	elif output == 'table':
+		exclude_fields = exclude_fields.split(',')
+		print_results_table(
+			results,
+			title=report['info']['title'],
+			exclude_fields=exclude_fields)
+
+@report.command('list')
+@click.option('-ws', '--workspace', type=str)
+def report_list(workspace):
+	reports_dir = CONFIG.dirs.reports
+	json_reports = reports_dir.glob("**/**/report.json")
+	ws_reports = {}
+	for report in json_reports:
+		ws, runner, number = str(report).split('/')[-4:-1]
+		if not ws in ws_reports:
+			ws_reports[ws] = []
+		with open(report, 'r') as f:
+			content = json.loads(f.read())
+			data = {'path': report, 'name': content['info']['name'], 'runner': runner}
+			ws_reports[ws].append(data)
+
+	for ws in ws_reports:
+		if workspace and not ws == workspace:
+			continue
+		console.print(f'[bold gold3]{ws}:')
+		for data in sorted(ws_reports[ws], key=lambda x: x['path']):
+			console.print(f'   • {data["path"]} ([bold blue]{data["name"]}[/] [dim]{data["runner"][:-1]}[/])')
+
+
+@report.command('export')
+@click.argument('json_path', type=str)
+@click.option('--output-folder', '-of', type=str)
+@click.option('-output', '-o', type=str)
+def report_export(json_path, output_folder, output):
+	with open(json_path, 'r') as f:
+		data = loads_dataclass(f.read())
+		flatten(list(data['results'].values()))
+
+	runner_instance = DotMap({
+		"config": {
+			"name": data['info']['name']
+		},
+		"workspace_name": json_path.split('/')[-4],
+		"reports_folder": output_folder or Path.cwd(),
+		"data": data,
+		"results": flatten(list(data['results'].values()))
+	})
+	from secator.runners import Runner
+	from secator.report import Report
+	exporters = Runner.resolve_exporters(output)
+	report = Report(runner_instance, title=data['info']['title'], exporters=exporters)
+	report.data = data
+	report.send()
 
 
 #--------#

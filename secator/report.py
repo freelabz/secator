@@ -22,9 +22,6 @@ class Report:
 		self.workspace_name = runner.workspace_name
 		self.output_folder = runner.reports_folder
 
-	def as_table(self):
-		print_results_table(self.results, self.title)
-
 	def send(self):
 		for report_cls in self.exporters:
 			try:
