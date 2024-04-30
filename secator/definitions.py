@@ -2,12 +2,10 @@
 
 import os
 
-from dotenv import find_dotenv, load_dotenv
 from importlib.metadata import version
 
 from secator.config import CONFIG, ROOT_FOLDER
 
-load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # Globals
 VERSION = version('secator')
