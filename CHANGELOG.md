@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/freelabz/secator/compare/v0.4.0...v0.4.1) (2024-04-30)
+
+
+### Bug Fixes
+
+* failed addons import ([#368](https://github.com/freelabz/secator/issues/368)) ([aee7ede](https://github.com/freelabz/secator/commit/aee7edeee1e96292e637b9161034f0d628a1f386))
+* load dotenv before config import ([#370](https://github.com/freelabz/secator/issues/370)) ([ba2ea8e](https://github.com/freelabz/secator/commit/ba2ea8e3624dda7268d3788c0541fc0d37195358))
+
 ## [0.4.0](https://github.com/freelabz/secator/compare/v0.3.6...v0.4.0) (2024-04-27)
 
 
