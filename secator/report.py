@@ -1,7 +1,7 @@
 import operator
 
 from secator.output_types import OUTPUT_TYPES, OutputType
-from secator.utils import merge_opts, get_file_timestamp, print_results_table
+from secator.utils import merge_opts, get_file_timestamp
 from secator.rich import console
 
 

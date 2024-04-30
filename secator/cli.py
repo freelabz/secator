@@ -553,6 +553,7 @@ def report_show(json_path, output, exclude_fields):
 			title=report['info']['title'],
 			exclude_fields=exclude_fields)
 
+
 @report.command('list')
 @click.option('-ws', '--workspace', type=str)
 def report_list(workspace):
@@ -561,7 +562,7 @@ def report_list(workspace):
 	ws_reports = {}
 	for report in json_reports:
 		ws, runner, number = str(report).split('/')[-4:-1]
-		if not ws in ws_reports:
+		if ws not in ws_reports:
 			ws_reports[ws] = []
 		with open(report, 'r') as f:
 			content = json.loads(f.read())
