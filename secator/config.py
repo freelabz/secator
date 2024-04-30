@@ -568,3 +568,15 @@ download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_m
 # Print config
 if CONFIG.debug.component == 'config':
 	CONFIG.print()
+
+
+def is_enabled(module_to_import):
+	import importlib
+	try:
+		importlib.import_module(module_to_import)
+		return True
+	except ModuleNotFoundError:
+		return False
+	except Exception as e:
+		console.print(f'[bold red]Failed trying to import {module_to_import}: {str(e)}')
+		return False

@@ -592,6 +592,24 @@ def health(json, debug):
 		table.add_row(*row)
 	status['secator'] = info
 
+	# Check addons
+	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	table = get_health_table()
+	with Live(table, console=console):
+		for addon in ['worker', 'google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
+			addon_var = ADDONS_ENABLED[addon]
+			info = {
+				'name': addon,
+				'version': None,
+				'status': 'ok' if addon_var else 'missing',
+				'latest_version': None,
+				'installed': addon_var,
+				'location': None
+			}
+			row = fmt_health_table_row(info, 'addons')
+			table.add_row(*row)
+			status['addons'][addon] = info
+
 	# Check languages
 	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
 	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
@@ -615,24 +633,6 @@ def health(json, debug):
 			row = fmt_health_table_row(info, 'tools')
 			table.add_row(*row)
 			status['tools'][tool.__name__] = info
-
-	# # Check addons
-	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
-	table = get_health_table()
-	with Live(table, console=console):
-		for addon in ['worker', 'google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
-			addon_var = ADDONS_ENABLED[addon]
-			info = {
-				'name': addon,
-				'version': None,
-				'status': 'ok' if addon_var else 'missing',
-				'latest_version': None,
-				'installed': addon_var,
-				'location': None
-			}
-			row = fmt_health_table_row(info, 'addons')
-			table.add_row(*row)
-			status['addons'][addon] = info
 
 	# Print JSON health
 	if json:
