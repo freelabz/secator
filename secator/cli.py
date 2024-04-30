@@ -20,7 +20,8 @@ from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
 from secator.rich import console
-from secator.runners import Command
+from secator.runners import Command, Runner
+from secator.report import Report
 from secator.serializers.dataclass import loads_dataclass
 from secator.utils import debug, detect_host, discover_tasks, flatten, print_results_table, print_version
 
@@ -595,8 +596,6 @@ def report_export(json_path, output_folder, output):
 		"data": data,
 		"results": flatten(list(data['results'].values()))
 	})
-	from secator.runners import Runner
-	from secator.report import Report
 	exporters = Runner.resolve_exporters(output)
 	report = Report(runner_instance, title=data['info']['title'], exporters=exporters)
 	report.data = data
