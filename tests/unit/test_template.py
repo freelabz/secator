@@ -22,7 +22,7 @@ class TestTemplate(unittest.TestCase):
 			severity='high',
 			confidence='high',
 			provider='ls',
-			matched_at=f'/home/osboxes/.secator/templates/test.txt',
+			matched_at=f'{str(self.writeable_file)}',
 			_source='ls',
 		)
 		clear_modules()
