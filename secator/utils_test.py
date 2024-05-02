@@ -1,6 +1,7 @@
 import contextlib
 import json
 import os
+import sys
 import unittest.mock
 
 from fp.fp import FreeProxy
@@ -182,3 +183,15 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			raise
 
 		console.print('[bold green] ok[/]')
+
+
+def clear_modules():
+	"""Clear all secator modules imports.
+	See https://stackoverflow.com/questions/7460363/re-import-module-under-test-to-lose-context for context.
+	"""
+	keys_to_delete = []
+	for k, _ in sys.modules.items():
+		if k.startswith('secator'):
+			keys_to_delete.append(k)
+	for k in keys_to_delete:
+		del sys.modules[k]
