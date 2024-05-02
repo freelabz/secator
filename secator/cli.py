@@ -1052,5 +1052,5 @@ def integration(tasks, workflows, scans, test, debug):
 @test.command()
 def coverage():
 	"""Run coverage report."""
-	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*'
+	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*,*/templates/*'
 	run_test(cmd, 'coverage')
