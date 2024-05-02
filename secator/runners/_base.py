@@ -741,6 +741,16 @@ class Runner:
 		# output type based on the schema
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
+		output_discriminator = getattr(self, 'output_discriminator', None)
+		if output_discriminator:
+			result = output_discriminator(item)
+			if result:
+				debug(f'Discriminated output type {result.__name__}', sub='klass.load', level=5)
+				output_types = [result]
+			else:
+				new_item = DotMap(item)
+				new_item._type = 'unknown'
+				return new_item
 		debug(f'Input item: {item}', sub='klass.load', level=5)
 		debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load', level=5)
 		for klass in output_types:
