@@ -1,7 +1,7 @@
 import operator
 
 from secator.output_types import OUTPUT_TYPES, OutputType
-from secator.utils import merge_opts, get_file_timestamp, print_results_table
+from secator.utils import merge_opts, get_file_timestamp
 from secator.rich import console
 
 
@@ -21,9 +21,6 @@ class Report:
 		self.exporters = exporters
 		self.workspace_name = runner.workspace_name
 		self.output_folder = runner.reports_folder
-
-	def as_table(self):
-		print_results_table(self.results, self.title)
 
 	def send(self):
 		for report_cls in self.exporters:
