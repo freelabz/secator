@@ -561,14 +561,17 @@ def report_list(workspace):
 	reports_dir = CONFIG.dirs.reports
 	json_reports = reports_dir.glob("**/**/report.json")
 	ws_reports = {}
-	for report in json_reports:
-		ws, runner, number = str(report).split('/')[-4:-1]
+	for path in json_reports:
+		ws, runner, number = str(path).split('/')[-4:-1]
 		if ws not in ws_reports:
 			ws_reports[ws] = []
-		with open(report, 'r') as f:
-			content = json.loads(f.read())
-			data = {'path': report, 'name': content['info']['name'], 'runner': runner}
-			ws_reports[ws].append(data)
+		with open(path, 'r') as f:
+			try:
+				content = json.loads(f.read())
+				data = {'path': path, 'name': content['info']['name'], 'runner': runner}
+				ws_reports[ws].append(data)
+			except json.JSONDecodeError as e:
+				console.print(f'[bold red]Could not load {path}: {str(e)}')
 
 	for ws in ws_reports:
 		if workspace and not ws == workspace:
