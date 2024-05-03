@@ -14,7 +14,8 @@ from rich.panel import Panel
 from rich.progress import Progress as RichProgress
 from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY, REPORTS_FOLDER
+from secator.definitions import DEBUG
+from secator.config import CONFIG
 from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
@@ -48,7 +49,7 @@ class Runner:
 	"""Runner class.
 
 	Args:
-		config (secator.config.ConfigLoader): Loaded config.
+		config (secator.config.TemplateLoader): Loaded config.
 		targets (list): List of targets to run task on.
 		results (list): List of existing results to re-use.
 		workspace_name (str): Workspace name.
@@ -91,7 +92,6 @@ class Runner:
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
-		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.last_updated = None
@@ -108,11 +108,14 @@ class Runner:
 		self.uuids = []
 		self.celery_result = None
 
+		# Determine exporters
+		exporters_str = self.run_opts.get('output') or self.default_exporters
+		self.exporters = Runner.resolve_exporters(exporters_str)
+
 		# Determine report folder
-		default_reports_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
+		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
 		_id = get_task_folder_id(default_reports_folder_base)
-		default_report_folder = f'{default_reports_folder_base}/{_id}'
-		self.reports_folder = run_opts.get('reports_folder') or default_report_folder
+		self.reports_folder = f'{default_reports_folder_base}/{_id}'
 
 		# Make reports folders
 		os.makedirs(self.reports_folder, exist_ok=True)
@@ -390,19 +393,19 @@ class Runner:
 				return False
 		return True
 
-	def resolve_exporters(self):
+	@staticmethod
+	def resolve_exporters(exporters):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.get('output', '')
-		if output == '':
-			return self.default_exporters
-		elif output is False:
+		if not exporters or exporters in ['false', 'False']:
 			return []
-		exporters = [
+		if isinstance(exporters, str):
+			exporters = exporters.split(',')
+		classes = [
 			import_dynamic(f'secator.exporters.{o.capitalize()}Exporter', 'Exporter')
-			for o in output.split(',')
+			for o in exporters
 			if o
 		]
-		return [e for e in exporters if e]
+		return [cls for cls in classes if cls]
 
 	def log_start(self):
 		"""Log runner start."""
@@ -851,7 +854,8 @@ class Runner:
 
 		if item._type == 'progress' and item._source == self.config.name:
 			self.progress = item.percent
-			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < DEFAULT_PROGRESS_UPDATE_FREQUENCY:
+			update_frequency = CONFIG.runners.progress_update_frequency
+			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:
 				return None
 			elif int(item.percent) in [0, 100]:
 				return None

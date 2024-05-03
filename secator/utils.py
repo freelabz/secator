@@ -1,5 +1,5 @@
-import importlib
 import inspect
+import importlib
 import itertools
 import logging
 import operator
@@ -9,7 +9,7 @@ import select
 import sys
 import warnings
 from datetime import datetime
-from importlib import import_module
+
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
@@ -20,8 +20,8 @@ import ifaddr
 import yaml
 from rich.markdown import Markdown
 
-from secator.definitions import (DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT, VERSION, DEV_PACKAGE, ROOT_FOLDER,
-								 LIB_FOLDER)
+from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ def expand_input(input):
 	"""
 	if input is None:  # read from stdin
 		console.print('Waiting for input on stdin ...', style='bold yellow')
-		rlist, _, _ = select.select([sys.stdin], [], [], DEFAULT_STDIN_TIMEOUT)
+		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 		if rlist:
 			data = sys.stdin.read().splitlines()
 		else:
@@ -139,7 +139,7 @@ def discover_internal_tasks():
 		if module_name.startswith('_'):
 			continue
 		try:
-			module = import_module(f'secator.tasks.{module_name}')
+			module = importlib.import_module(f'secator.tasks.{module_name}')
 		except ImportError as e:
 			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
 			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
@@ -161,17 +161,32 @@ def discover_internal_tasks():
 
 def discover_external_tasks():
 	"""Find external secator tasks."""
-	if not os.path.exists('config.secator'):
-		return []
-	with open('config.secator', 'r') as f:
-		classes = f.read().splitlines()
 	output = []
-	for cls_path in classes:
-		cls = import_dynamic(cls_path, cls_root='Command')
-		if not cls:
-			continue
-		# logger.warning(f'Added external tool {cls_path}')
-		output.append(cls)
+	sys.dont_write_bytecode = True
+	for path in CONFIG.dirs.templates.glob('**/*.py'):
+		try:
+			task_name = path.stem
+			module_name = f'secator.tasks.{task_name}'
+
+			# console.print(f'Importing module {module_name} from {path}')
+			spec = importlib.util.spec_from_file_location(module_name, path)
+			module = importlib.util.module_from_spec(spec)
+			# console.print(f'Adding module "{module_name}" to sys path')
+			sys.modules[module_name] = module
+
+			# console.print(f'Executing module "{module}"')
+			spec.loader.exec_module(module)
+
+			# console.print(f'Checking that {module} contains task {task_name}')
+			if not hasattr(module, task_name):
+				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
+				continue
+			cls = getattr(module, task_name)
+			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
+			output.append(cls)
+		except Exception as e:
+			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
+	sys.dont_write_bytecode = False
 	return output
 
 
@@ -311,10 +326,6 @@ def detect_host(interface=None):
 			continue
 		return adapter.ips[0].ip
 	return None
-
-
-def find_list_item(array, val, key='id', default=None):
-	return next((item for item in array if item[key] == val), default)
 
 
 def print_results_table(results, title=None, exclude_fields=[], log=False):

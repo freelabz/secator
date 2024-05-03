@@ -9,12 +9,7 @@ from celery.result import AsyncResult, allow_join_result
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
-from secator.definitions import (CELERY_BROKER_CONNECTION_TIMEOUT,
-								 CELERY_BROKER_POOL_LIMIT, CELERY_BROKER_URL,
-								 CELERY_BROKER_VISIBILITY_TIMEOUT,
-								 CELERY_DATA_FOLDER,
-								 CELERY_OVERRIDE_DEFAULT_LOGGING,
-								 CELERY_RESULT_BACKEND, DEBUG)
+from secator.config import CONFIG
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
@@ -33,7 +28,7 @@ logging.basicConfig(
 	handlers=[rich_handler],
 	force=True)
 logging.getLogger('kombu').setLevel(logging.ERROR)
-logging.getLogger('celery').setLevel(logging.INFO if DEBUG > 6 else logging.WARNING)
+logging.getLogger('celery').setLevel(logging.INFO if CONFIG.debug.level > 6 else logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +44,19 @@ app.conf.update({
 	'worker_max_tasks_per_child': 10,
 
 	# Broker config
-	'broker_url': CELERY_BROKER_URL,
+	'broker_url': CONFIG.celery.broker_url,
 	'broker_transport_options': {
-		'data_folder_in': CELERY_DATA_FOLDER,
-		'data_folder_out': CELERY_DATA_FOLDER,
-		'visibility_timeout': CELERY_BROKER_VISIBILITY_TIMEOUT,
+		'data_folder_in': CONFIG.dirs.celery_data,
+		'data_folder_out': CONFIG.dirs.celery_data,
+		'control_folder': CONFIG.dirs.celery_data,
+		'visibility_timeout': CONFIG.celery.broker_visibility_timeout,
 	},
 	'broker_connection_retry_on_startup': True,
-	'broker_pool_limit': CELERY_BROKER_POOL_LIMIT,
-	'broker_connection_timeout': CELERY_BROKER_CONNECTION_TIMEOUT,
+	'broker_pool_limit': CONFIG.celery.broker_pool_limit,
+	'broker_connection_timeout': CONFIG.celery.broker_connection_timeout,
 
 	# Backend config
-	'result_backend': CELERY_RESULT_BACKEND,
+	'result_backend': CONFIG.celery.result_backend,
 	'result_extended': True,
 	'result_backend_thread_safe': True,
 	# 'result_backend_transport_options': {'master_name': 'mymaster'}, # for Redis HA backend
@@ -89,7 +85,7 @@ app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 
 def maybe_override_logging():
 	def decorator(func):
-		if CELERY_OVERRIDE_DEFAULT_LOGGING:
+		if CONFIG.celery.override_default_logging:
 			return signals.setup_logging.connect(func)
 		else:
 			return func
@@ -150,7 +146,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
-	if DEBUG > 1:
+	if CONFIG.debug.level > 1:
 		logger.info(f'Received task with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
@@ -161,7 +157,7 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
-	if DEBUG > 1:
+	if CONFIG.debug.level > 1:
 		logger.info(f'Received workflow with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
@@ -172,7 +168,7 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
-	if DEBUG > 1:
+	if CONFIG.debug.level > 1:
 		logger.info(f'Received scan with args {args} and kwargs {kwargs}')
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
@@ -416,6 +412,6 @@ def is_celery_worker_alive():
 	result = bool(result)
 	if result:
 		console.print('Celery worker is alive !', style='bold green')
-	# else:
-		# console.print('No Celery worker alive.', style='bold red')
+	else:
+		console.print('No Celery worker alive.', style='bold orange1')
 	return result

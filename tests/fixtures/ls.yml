@@ -1,0 +1,4 @@
+type: workflow
+name: ls
+tasks:
+  ls:
