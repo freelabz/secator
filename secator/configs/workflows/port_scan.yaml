@@ -26,9 +26,8 @@ tasks:
           field: '{host}:{port}'
           condition: item._source == 'nmap'
 results:
+  - type: vulnerability
   - type: port
-
+  - type: exploit
   - type: url
     condition: item.status_code != 0
-
-  - type: vulnerability
