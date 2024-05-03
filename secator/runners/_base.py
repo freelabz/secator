@@ -92,7 +92,6 @@ class Runner:
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
-		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.last_updated = None
@@ -108,6 +107,10 @@ class Runner:
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
 		self.celery_result = None
+
+		# Determine exporters
+		exporters_str = self.run_opts.get('output') or self.default_exporters
+		self.exporters = Runner.resolve_exporters(exporters_str)
 
 		# Determine report folder
 		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
@@ -390,19 +393,19 @@ class Runner:
 				return False
 		return True
 
-	def resolve_exporters(self):
+	@staticmethod
+	def resolve_exporters(exporters):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.get('output') or self.default_exporters
-		if not output or output in ['false', 'False']:
+		if not exporters or exporters in ['false', 'False']:
 			return []
-		if isinstance(output, str):
-			output = output.split(',')
-		exporters = [
+		if isinstance(exporters, str):
+			exporters = exporters.split(',')
+		classes = [
 			import_dynamic(f'secator.exporters.{o.capitalize()}Exporter', 'Exporter')
-			for o in output
+			for o in exporters
 			if o
 		]
-		return [e for e in exporters if e]
+		return [cls for cls in classes if cls]
 
 	def log_start(self):
 		"""Log runner start."""

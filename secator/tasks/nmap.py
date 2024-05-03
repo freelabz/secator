@@ -51,7 +51,8 @@ class nmap(VulnMulti):
 
 		# Nmap opts
 		PORTS: '-p',
-		'output_path': '-oX'
+		'output_path': '-oX',
+		'tcp_syn_stealth': '-sS'
 	}
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
@@ -73,6 +74,10 @@ class nmap(VulnMulti):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
+		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
+		if tcp_syn_stealth:
+			self.cmd = f'sudo {self.cmd}'
+			self.cmd = self.cmd.replace('-sT', '')
 
 	def yielder(self):
 		yield from super().yielder()

@@ -2,12 +2,10 @@
 
 import os
 
-from dotenv import find_dotenv, load_dotenv
 from importlib.metadata import version
 
 from secator.config import CONFIG, ROOT_FOLDER
 
-load_dotenv(find_dotenv(usecwd=True), override=False)
 
 # Globals
 VERSION = version('secator')
@@ -105,56 +103,30 @@ WORDLIST = 'wordlist'
 WORDS = 'words'
 
 
+def is_importable(module_to_import):
+	import importlib
+	try:
+		importlib.import_module(module_to_import)
+		return True
+	except ModuleNotFoundError:
+		return False
+	except Exception as e:
+		print(f'Failed trying to import {module_to_import}: {str(e)}')
+		return False
+
+
 ADDONS_ENABLED = {}
 
-# Check worker addon
-try:
-	import eventlet  # noqa: F401
-	ADDONS_ENABLED['worker'] = True
-except ModuleNotFoundError:
-	ADDONS_ENABLED['worker'] = False
-
-# Check google addon
-try:
-	import gspread  # noqa: F401
-	ADDONS_ENABLED['google'] = True
-except ModuleNotFoundError:
-	ADDONS_ENABLED['google'] = False
-
-# Check mongodb addon
-try:
-	import pymongo  # noqa: F401
-	ADDONS_ENABLED['mongodb'] = True
-except ModuleNotFoundError:
-	ADDONS_ENABLED['mongodb'] = False
-
-# Check redis addon
-try:
-	import redis  # noqa: F401
-	ADDONS_ENABLED['redis'] = True
-except ModuleNotFoundError:
-	ADDONS_ENABLED['redis'] = False
-
-# Check dev addon
-try:
-	import flake8  # noqa: F401
-	ADDONS_ENABLED['dev'] = True
-except ModuleNotFoundError:
-	ADDONS_ENABLED['dev'] = False
-
-# Check build addon
-try:
-	import hatch  # noqa: F401
-	ADDONS_ENABLED['build'] = True
-except ModuleNotFoundError:
-	ADDONS_ENABLED['build'] = False
-
-# Check trace addon
-try:
-	import memray  # noqa: F401
-	ADDONS_ENABLED['trace'] = True
-except ModuleNotFoundError:
-	ADDONS_ENABLED['trace'] = False
+for addon, module in [
+	('worker', 'eventlet'),
+	('google', 'gspread'),
+	('mongodb', 'pymongo'),
+	('redis', 'redis'),
+	('dev', 'flake8'),
+	('trace', 'memray'),
+	('build', 'hatch')
+]:
+	ADDONS_ENABLED[addon] = is_importable(module)
 
 # Check dev package
 if os.path.exists(f'{ROOT_FOLDER}/pyproject.toml'):
