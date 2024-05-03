@@ -1,8 +1,13 @@
+import re
+
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
 								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
 from secator.output_types import Exploit
 from secator.runners import Command
+
+
+SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*)$')
 
 
 @task()
@@ -26,7 +31,7 @@ class searchsploit(Command):
 			REFERENCE: lambda x: f'https://exploit-db.com/exploits/{x["EDB-ID"]}',
 			TAGS: lambda x: searchsploit.tags_extractor(x),
 			EXTRA_DATA: lambda x: {
-				k.lower(): v for k, v in x.items() if k not in ['Title', 'EDB-ID', 'Codes', 'Tags', 'Source'] and v != ''
+				k.lower().replace('date_', ''): v for k, v in x.items() if k not in ['Title', 'EDB-ID', 'Codes', 'Tags', 'Source'] and v != ''  # noqa: E501
 			}
 		}
 	}
@@ -68,6 +73,19 @@ class searchsploit(Command):
 
 	@staticmethod
 	def on_item(self, item):
+		match = SEARCHSPLOIT_TITLE_REGEX.match(item.name)
+		# if not match:
+		# 	self._print(f'[bold red]{item.name} ({item.reference}) did not match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
+		if match:
+			group = match.groups()
+			product = '-'.join(group[0].strip().split(' '))
+			if len(group[1]) > 1:
+				versions, title = tuple(group[1].split(' - '))
+				item.name = title
+				product_info = [f'{product.lower()} {v.strip()}' for v in versions.split('/')]
+				item.tags = product_info + item.tags
+			# else:
+			# 	self._print(f'[bold red]{item.name} ({item.reference}) did not quite match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
 		input_tag = '-'.join(self.input.replace('\'', '').split(' '))
 		item.tags = [input_tag] + item.tags
 		return item
