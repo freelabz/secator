@@ -306,7 +306,7 @@ class Runner:
 				main._related.extend([dupe._uuid for dupe in dupes])
 				main._related = list(dict.fromkeys(main._related))
 				if main._uuid != item._uuid:
-					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
+					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
 					item._duplicate = True
 					item = self.run_hooks('on_item', item)
 					if item._uuid not in main._related:
