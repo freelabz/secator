@@ -29,7 +29,7 @@ and it is designed to improve productivity for pentesters and security researche
 
 # Features
 
-![](images/short_demo.gif)
+![](images/demo.gif)
 
 * **Curated list of commands**
 

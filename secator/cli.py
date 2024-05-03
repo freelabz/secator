@@ -20,7 +20,8 @@ from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
 from secator.rich import console
-from secator.runners import Command
+from secator.runners import Command, Runner
+from secator.report import Report
 from secator.serializers.dataclass import loads_dataclass
 from secator.utils import debug, detect_host, discover_tasks, flatten, print_results_table, print_version
 
@@ -461,7 +462,8 @@ def config():
 def config_get(full, key=None):
 	"""Get config value."""
 	if key is None:
-		CONFIG.print(partial=not full)
+		partial = not full and CONFIG != default_config
+		CONFIG.print(partial=partial)
 		return
 	CONFIG.get(key)
 
@@ -471,13 +473,16 @@ def config_get(full, key=None):
 @click.argument('value')
 def config_set(key, value):
 	"""Set config value."""
-	success = CONFIG.set(key, value)
-	if success:
+	CONFIG.set(key, value)
+	config = CONFIG.validate()
+	if config:
 		CONFIG.get(key)
 		saved = CONFIG.save()
 		if not saved:
 			return
 		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
+	else:
+		console.print('[bold red]:x: Invalid config, not saving it.')
 
 
 @config.command('edit')
@@ -489,7 +494,7 @@ def config_edit(resume):
 		shutil.copyfile(config_path, tmp_config)
 	click.edit(filename=tmp_config)
 	config = Config.parse(path=tmp_config)
-	if config._valid:
+	if config:
 		config.save(config_path)
 		console.print(f'\n[bold green]:tada: Saved config to [/]{config_path}.')
 		tmp_config.unlink()
@@ -532,17 +537,72 @@ def report():
 
 @report.command('show')
 @click.argument('json_path')
+@click.option('-o', '--output', type=str, default='console', help='Format')
 @click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
-def report_show(json_path, exclude_fields):
-	"""Show a JSON report as a nicely-formatted table."""
+def report_show(json_path, output, exclude_fields):
+	"""Show a JSON report."""
 	with open(json_path, 'r') as f:
 		report = loads_dataclass(f.read())
 		results = flatten(list(report['results'].values()))
-	exclude_fields = exclude_fields.split(',')
-	print_results_table(
-		results,
-		title=report['info']['title'],
-		exclude_fields=exclude_fields)
+	if output == 'console':
+		for result in results:
+			console.print(result)
+	elif output == 'table':
+		exclude_fields = exclude_fields.split(',')
+		print_results_table(
+			results,
+			title=report['info']['title'],
+			exclude_fields=exclude_fields)
+
+
+@report.command('list')
+@click.option('-ws', '--workspace', type=str)
+def report_list(workspace):
+	reports_dir = CONFIG.dirs.reports
+	json_reports = reports_dir.glob("**/**/report.json")
+	ws_reports = {}
+	for path in json_reports:
+		ws, runner, number = str(path).split('/')[-4:-1]
+		if ws not in ws_reports:
+			ws_reports[ws] = []
+		with open(path, 'r') as f:
+			try:
+				content = json.loads(f.read())
+				data = {'path': path, 'name': content['info']['name'], 'runner': runner}
+				ws_reports[ws].append(data)
+			except json.JSONDecodeError as e:
+				console.print(f'[bold red]Could not load {path}: {str(e)}')
+
+	for ws in ws_reports:
+		if workspace and not ws == workspace:
+			continue
+		console.print(f'[bold gold3]{ws}:')
+		for data in sorted(ws_reports[ws], key=lambda x: x['path']):
+			console.print(f'   • {data["path"]} ([bold blue]{data["name"]}[/] [dim]{data["runner"][:-1]}[/])')
+
+
+@report.command('export')
+@click.argument('json_path', type=str)
+@click.option('--output-folder', '-of', type=str)
+@click.option('-output', '-o', type=str)
+def report_export(json_path, output_folder, output):
+	with open(json_path, 'r') as f:
+		data = loads_dataclass(f.read())
+		flatten(list(data['results'].values()))
+
+	runner_instance = DotMap({
+		"config": {
+			"name": data['info']['name']
+		},
+		"workspace_name": json_path.split('/')[-4],
+		"reports_folder": output_folder or Path.cwd(),
+		"data": data,
+		"results": flatten(list(data['results'].values()))
+	})
+	exporters = Runner.resolve_exporters(output)
+	report = Report(runner_instance, title=data['info']['title'], exporters=exporters)
+	report.data = data
+	report.send()
 
 
 #--------#
@@ -588,6 +648,24 @@ def health(json, debug):
 		table.add_row(*row)
 	status['secator'] = info
 
+	# Check addons
+	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	table = get_health_table()
+	with Live(table, console=console):
+		for addon in ['worker', 'google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
+			addon_var = ADDONS_ENABLED[addon]
+			info = {
+				'name': addon,
+				'version': None,
+				'status': 'ok' if addon_var else 'missing',
+				'latest_version': None,
+				'installed': addon_var,
+				'location': None
+			}
+			row = fmt_health_table_row(info, 'addons')
+			table.add_row(*row)
+			status['addons'][addon] = info
+
 	# Check languages
 	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
 	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
@@ -611,24 +689,6 @@ def health(json, debug):
 			row = fmt_health_table_row(info, 'tools')
 			table.add_row(*row)
 			status['tools'][tool.__name__] = info
-
-	# # Check addons
-	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
-	table = get_health_table()
-	with Live(table, console=console):
-		for addon in ['worker', 'google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
-			addon_var = ADDONS_ENABLED[addon]
-			info = {
-				'name': addon,
-				'version': None,
-				'status': 'ok' if addon_var else 'missing',
-				'latest_version': None,
-				'installed': addon_var,
-				'location': None
-			}
-			row = fmt_health_table_row(info, 'addons')
-			table.add_row(*row)
-			status['addons'][addon] = info
 
 	# Print JSON health
 	if json:
@@ -1048,5 +1108,5 @@ def integration(tasks, workflows, scans, test, debug):
 @test.command()
 def coverage():
 	"""Run coverage report."""
-	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*'
+	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*,*/templates/*'
 	run_test(cmd, 'coverage')
