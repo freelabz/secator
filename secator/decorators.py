@@ -305,7 +305,10 @@ def register_runner(cli_endpoint, config):
 				sys.exit(1)
 			from secator.hooks.mongodb import MONGODB_HOOKS
 			hooks = MONGODB_HOOKS
-
+		# Hook sql
+		elif driver == 'mysql':
+			from secator.hooks.mysql import MYSQL_HOOKS
+			hooks = MYSQL_HOOKS
 		# Build exporters
 		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()

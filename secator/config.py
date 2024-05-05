@@ -128,11 +128,20 @@ class MongodbAddon(StrictModel):
 	url: str = 'mongodb://localhost'
 	update_frequency: int = 60
 
+class mysqldbAddon(StrictModel):
+	enabled: bool = False
+	update_frequency: int = 60
+	host: str = "127.0.0.1"
+	port: int = 3306
+	database: str = "secator"
+	user: str = "root"
+	password: str = ""
 
 class Addons(StrictModel):
 	google: GoogleAddon = GoogleAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	mysqldb: mysqldbAddon = mysqldbAddon()
 
 
 class SecatorConfig(StrictModel):
