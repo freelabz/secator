@@ -23,6 +23,7 @@ class Url(OutputType):
 	lines: int = field(default=0, compare=False)
 	screenshot_path: str = field(default='', compare=False)
 	stored_response_path: str = field(default='', compare=False)
+	headers: dict = field(default_factory=dict, repr=True, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='url', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
