@@ -1,11 +1,10 @@
 import gc
 import logging
 import traceback
-from time import sleep
 
 from celery import Celery, chain, chord, signals
 from celery.app import trace
-from celery.result import AsyncResult, allow_join_result
+from celery.result import allow_join_result
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
@@ -357,6 +356,7 @@ def forward_results(results):
 #--------------#
 # Celery utils #
 #--------------#
+
 
 def is_celery_worker_alive():
 	"""Check if a Celery worker is available."""
