@@ -55,6 +55,8 @@ class Url(OutputType):
 
 	def __repr__(self):
 		s = f'🔗 [white]{self.url}'
+		if self.method and self.method != 'GET':
+			s += f' \[[turquoise4]{self.method}[/]]'
 		if self.status_code and self.status_code != 0:
 			if self.status_code < 400:
 				s += f' \[[green]{self.status_code}[/]]'
