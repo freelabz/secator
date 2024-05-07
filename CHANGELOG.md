@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/freelabz/secator/compare/v0.5.1...v0.5.2) (2024-05-07)
+
+
+### Bug Fixes
+
+* **nuclei,katana:** add -sr flag and write http responses and screenshot to correct folder ([#395](https://github.com/freelabz/secator/issues/395)) ([1a51790](https://github.com/freelabz/secator/commit/1a51790c9231f593631c2780b6d5e0fa89f1aa55))
+
 ## [0.5.1](https://github.com/freelabz/secator/compare/v0.5.0...v0.5.1) (2024-05-06)
 
 
