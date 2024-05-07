@@ -13,29 +13,32 @@ tasks:
     description: Search for vulnerabilities on open ports
     targets_: port.host
     ports_: port.port
-  httpx:
-    description: Probe HTTP services on open ports
-    targets_:
-      - type: port
-        field: '{host}:{port}'
-        condition: item._source == 'nmap'
   _group:
+    searchsploit:
+      description: Search for related exploits
+      targets_:
+      - type: port
+        field: '{host}~{service_name}'
+        condition: item._source == 'nmap' and len(item.service_name.split('/')) > 1
+    httpx:
+      description: Probe HTTP services on open ports
+      targets_:
+        - type: port
+          field: '{host}:{port}'
+          condition: item._source == 'nmap'
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
-    nuclei/url:
-      description: Search for vulnerabilities on alive HTTP services
-      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
-      targets_:
-        - type: url
-          field: url
-          condition: item.status_code != 0
+  nuclei/url:
+    description: Search for vulnerabilities on alive HTTP services
+    exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
+    targets_:
+      - type: url
+        field: url
+        condition: item.status_code != 0
 results:
-  - type: port
-    condition: item._source == 'nmap'
-
   - type: vulnerability
-  #   condition: item.confidence == 'high'
-
+  - type: port
+  - type: exploit
   - type: url
     condition: item.status_code != 0
