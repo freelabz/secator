@@ -8,7 +8,7 @@ from secator.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
 								 RATE_LIMIT, RETRIES, THREADS,
 								 TIMEOUT, URL, USER_AGENT)
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.tasks._categories import Http
 from secator.utils import sanitize_url
 
@@ -31,6 +31,7 @@ class httpx(Http):
 		'cdn': {'is_flag': True, 'default': False, 'help': 'CDN detection'},
 		'debug_resp': {'is_flag': True, 'default': False, 'help': 'Debug response'},
 		'vhost': {'is_flag': True, 'default': False, 'help': 'Probe and display server supporting VHOST'},
+		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Save HTTP responses'},  # noqa: E501
 		'screenshot': {'is_flag': True, 'short': 'ss', 'default': False, 'help': 'Screenshot response'},
 		'system_chrome': {'is_flag': True, 'default': False, 'help': 'Use local installed Chrome for screenshot'},
 		'headless_options': {'is_flag': False, 'short': 'ho', 'default': None, 'help': 'Headless Chrome additional options'},
@@ -55,6 +56,7 @@ class httpx(Http):
 		THREADS: 'threads',
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		'store_responses': 'sr',
 	}
 	opt_value_map = {
 		DELAY: lambda x: str(x) + 's' if x else None,
@@ -71,15 +73,10 @@ class httpx(Http):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
-		if CONFIG.http.store_responses:
-			self.output_response_path = f'{self.reports_folder}/response'
-			self.output_screenshot_path = f'{self.reports_folder}/screenshot'
-			os.makedirs(self.output_response_path, exist_ok=True)
-			os.makedirs(self.output_screenshot_path, exist_ok=True)
-			self.cmd += f' -sr -srd {self.reports_folder}'
-
-		# Remove screenshot bytes and body bytes when screenshot
 		screenshot = self.get_opt_value('screenshot')
+		store_responses = self.get_opt_value('store_responses')
+		if store_responses or screenshot:
+			self.cmd += f' -srd {self.reports_folder}/.outputs'
 		if screenshot:
 			self.cmd += ' -esb -ehb'
 
@@ -98,8 +95,15 @@ class httpx(Http):
 
 	@staticmethod
 	def on_end(self):
-		if CONFIG.http.store_responses:
-			if os.path.exists(self.output_response_path + '/index.txt'):
-				os.remove(self.output_response_path + '/index.txt')
-			if os.path.exists(self.output_screenshot_path + '/index.txt'):
-				os.remove(self.output_screenshot_path + '/index_screenshot.txt')
+		store_responses = self.get_opt_value('store_responses')
+		response_dir = f'{self.reports_folder}/.outputs'
+		if store_responses:
+			index_rpath = f'{response_dir}/response/index.txt'
+			index_spath = f'{response_dir}/screenshot/index_screenshot.txt'
+			index_spath2 = f'{response_dir}/screenshot/screenshot.html'
+			if os.path.exists(index_rpath):
+				os.remove(index_rpath)
+			if os.path.exists(index_spath):
+				os.remove(index_spath)
+			if os.path.exists(index_spath2):
+				os.remove(index_spath2)

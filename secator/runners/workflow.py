@@ -1,6 +1,6 @@
 from secator.definitions import DEBUG
 from secator.output_types import Target
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
@@ -81,7 +81,7 @@ class Workflow(Runner):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
-			obj (secator.config.ConfigLoader): Config.
+			obj (secator.config.TemplateLoader): Config.
 			targets (list): List of targets.
 			workflow_opts (dict): Workflow options.
 			run_opts (dict): Run options.

@@ -1,7 +1,8 @@
 import operator
 
+from secator.config import CONFIG
 from secator.output_types import OUTPUT_TYPES, OutputType
-from secator.utils import merge_opts, get_file_timestamp, print_results_table
+from secator.utils import merge_opts, get_file_timestamp
 from secator.rich import console
 
 
@@ -21,9 +22,6 @@ class Report:
 		self.exporters = exporters
 		self.workspace_name = runner.workspace_name
 		self.output_folder = runner.reports_folder
-
-	def as_table(self):
-		print_results_table(self.results, self.title)
 
 	def send(self):
 		for report_cls in self.exporters:
@@ -67,8 +65,10 @@ class Report:
 			sort_by, _ = get_table_fields(output_type)
 			items = [
 				item for item in self.runner.results
-				if isinstance(item, OutputType) and item._type == output_name and not item._duplicate
+				if isinstance(item, OutputType) and item._type == output_name
 			]
+			if CONFIG.runners.remove_duplicates:
+				items = [item for item in items if not item._duplicate]
 			if items:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))

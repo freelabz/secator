@@ -5,13 +5,13 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CONFIDENCE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
 								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
 								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
 								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.runners import Command
 from secator.utils import debug
 
@@ -140,6 +140,26 @@ class Vuln(Command):
 	# 	return cve_info
 
 	@staticmethod
+	def create_cpe_string(product_name, version):
+		"""
+		Generate a CPE string for a given product and version.
+
+		Args:
+			product_name (str): The name of the product.
+			version (str): The version of the product.
+
+		Returns:
+			str: A CPE string formatted according to the CPE 2.3 specification.
+		"""
+		cpe_version = "2.3"  # CPE Specification version
+		part = "a"           # 'a' for application
+		vendor = product_name.lower()  # Vendor name, using product name
+		product = product_name.lower()  # Product name
+		version = version  # Product version
+		cpe_string = f"cpe:{cpe_version}:{part}:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
+		return cpe_string
+
+	@staticmethod
 	def match_cpes(fs1, fs2):
 		"""Check if two CPEs match. Partial matches consisting of <vendor>:<product>:<version> are considered a match.
 
@@ -250,7 +270,6 @@ class Vuln(Command):
 			severity = Vuln.cvss_to_severity(cvss)
 
 		# Set confidence
-		confidence = 'low' if not cpe_match else 'high'
 		vuln = {
 			ID: id,
 			NAME: name,
@@ -260,7 +279,6 @@ class Vuln(Command):
 			TAGS: tags,
 			REFERENCES: [f'https://cve.circl.lu/cve/{id}'] + references,
 			DESCRIPTION: description,
-			CONFIDENCE: confidence
 		}
 		return vuln
 
@@ -283,10 +301,10 @@ class Vuln(Command):
 		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
-		data = Vuln.lookup_cve(cve_id)
-		if data:
-			data[TAGS].append('ghsa')
-			return data
+		vuln = Vuln.lookup_cve(cve_id)
+		if vuln:
+			vuln[TAGS].append('ghsa')
+			return vuln
 		return None
 
 	@staticmethod

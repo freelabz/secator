@@ -1,6 +1,6 @@
 from secator.definitions import DEBUG
 from secator.output_types import Target
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.runners import Runner
 from secator.utils import discover_tasks
 

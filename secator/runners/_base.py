@@ -15,7 +15,7 @@ from rich.progress import Progress as RichProgress
 from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from secator.definitions import DEBUG
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
@@ -49,7 +49,7 @@ class Runner:
 	"""Runner class.
 
 	Args:
-		config (secator.config.ConfigLoader): Loaded config.
+		config (secator.config.TemplateLoader): Loaded config.
 		targets (list): List of targets to run task on.
 		results (list): List of existing results to re-use.
 		workspace_name (str): Workspace name.
@@ -92,7 +92,6 @@ class Runner:
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
-		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.last_updated = None
@@ -108,6 +107,10 @@ class Runner:
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
 		self.celery_result = None
+
+		# Determine exporters
+		exporters_str = self.run_opts.get('output') or self.default_exporters
+		self.exporters = Runner.resolve_exporters(exporters_str)
 
 		# Determine report folder
 		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
@@ -294,7 +297,7 @@ class Runner:
 		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
 		dupe_count = 0
 		for item in self.results:
-			debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
+			# debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -303,6 +306,7 @@ class Runner:
 				main._related.extend([dupe._uuid for dupe in dupes])
 				main._related = list(dict.fromkeys(main._related))
 				if main._uuid != item._uuid:
+					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
 					item._duplicate = True
 					item = self.run_hooks('on_item', item)
 					if item._uuid not in main._related:
@@ -390,19 +394,19 @@ class Runner:
 				return False
 		return True
 
-	def resolve_exporters(self):
+	@staticmethod
+	def resolve_exporters(exporters):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.get('output') or self.default_exporters
-		if not output or output in ['false', 'False']:
+		if not exporters or exporters in ['false', 'False']:
 			return []
-		if isinstance(output, str):
-			output = output.split(',')
-		exporters = [
+		if isinstance(exporters, str):
+			exporters = exporters.split(',')
+		classes = [
 			import_dynamic(f'secator.exporters.{o.capitalize()}Exporter', 'Exporter')
-			for o in output
+			for o in exporters
 			if o
 		]
-		return [e for e in exporters if e]
+		return [cls for cls in classes if cls]
 
 	def log_start(self):
 		"""Log runner start."""

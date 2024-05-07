@@ -1,17 +1,12 @@
 import os
-import sys
 import unittest
+
+from secator.utils_test import clear_modules
 
 
 class TestOffline(unittest.TestCase):
 	def setUp(self):
-		try:
-			# This allows to drop the secator module loaded from other tests in order to reload the config with modified
-   			# environment variables.
-			# See https://stackoverflow.com/questions/7460363/re-import-module-under-test-to-lose-context for context.
-			del sys.modules['secator']
-		except KeyError:
-			pass
+		clear_modules()
 		os.environ['SECATOR_OFFLINE_MODE'] = '1'
 
 	def test_offline_cve_lookup(self):
@@ -20,7 +15,7 @@ class TestOffline(unittest.TestCase):
 		self.assertEqual(result, None)
 
 	def test_offline_downloads(self):
-		from secator import download_files, CONFIG
+		from secator.config import download_files, CONFIG
 		download_files(
 			{'pyproject.toml': 'https://raw.githubusercontent.com/freelabz/secator/main/pyproject.toml'},
 			CONFIG.dirs.data,

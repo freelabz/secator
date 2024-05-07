@@ -4,6 +4,7 @@ import re
 
 import xmltodict
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
@@ -13,6 +14,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability
+from secator.rich import console
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug
 
@@ -49,7 +51,8 @@ class nmap(VulnMulti):
 
 		# Nmap opts
 		PORTS: '-p',
-		'output_path': '-oX'
+		'output_path': '-oX',
+		'tcp_syn_stealth': '-sS'
 	}
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
@@ -71,6 +74,10 @@ class nmap(VulnMulti):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
+		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
+		if tcp_syn_stealth:
+			self.cmd = f'sudo {self.cmd}'
+			self.cmd = self.cmd.replace('-sT', '')
 
 	def yielder(self):
 		yield from super().yielder()
@@ -116,19 +123,17 @@ class nmapData(dict):
 
 				# Get extra data
 				extra_data = self._get_extra_data(port)
+				service_name = extra_data['service_name']
+				version_exact = extra_data.get('version_exact', False)
+				conf = extra_data.get('confidence')
+				if not version_exact:
+					console.print(
+						f'[bold orange1]nmap could not identify an exact version for {service_name} '
+						f'(detection confidence is {conf}): do not blindy trust the results ![/]'
+					)
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
-
-				# Grab service name
-				service_name = ''
-				if 'product' in extra_data:
-					service_name = extra_data['product']
-				elif 'name' in extra_data:
-					service_name = extra_data['name']
-				if 'version' in extra_data:
-					version = extra_data['version']
-					service_name += f'/{version}'
 
 				# Get script output
 				scripts = self._get_scripts(port)
@@ -166,6 +171,13 @@ class nmapData(dict):
 						continue
 					for vuln in func(output, cpes=cpes):
 						vuln.update(metadata)
+						confidence = 'low'
+						if 'cpe-match' in vuln[TAGS]:
+							confidence = 'high' if version_exact else 'medium'
+						vuln[CONFIDENCE] = confidence
+						if (CONFIG.runners.skip_cve_low_confidence and vuln[CONFIDENCE] == 'low'):
+							debug(f'{vuln[ID]}: ignored (low confidence).', sub='cve')
+							continue
 						yield vuln
 
 	#---------------------#
@@ -200,40 +212,74 @@ class nmapData(dict):
 		return host_cfg.get('address', {}).get('@addr', None)
 
 	def _get_extra_data(self, port_cfg):
-		extra_datas = {
+		extra_data = {
 			k.lstrip('@'): v
 			for k, v in port_cfg.get('service', {}).items()
 		}
 
 		# Strip product / version strings
-		if 'product' in extra_datas:
-			extra_datas['product'] = extra_datas['product'].lower()
+		if 'product' in extra_data:
+			extra_data['product'] = extra_data['product'].lower()
 
-		if 'version' in extra_datas:
-			version_split = extra_datas['version'].split(' ')
-			version = None
+		# Get version and post-process it
+		version = None
+		if 'version' in extra_data:
+			vsplit = extra_data['version'].split(' ')
+			version_exact = True
 			os = None
-			if len(version_split) == 3:
-				version, os, extra_version = tuple(version_split)
+			if len(vsplit) == 3:
+				version, os, extra_version = tuple(vsplit)
+				if os == 'or' and extra_version == 'later':
+					version_exact = False
+					os = None
 				version = f'{version}-{extra_version}'
-			elif len(version_split) == 2:
-				version, os = tuple(version_split)
-			elif len(version_split) == 1:
-				version = version_split[0]
+			elif len(vsplit) == 2:
+				version, os = tuple(vsplit)
+			elif len(vsplit) == 1:
+				version = vsplit[0]
 			else:
-				version = extra_datas['version']
+				version = extra_data['version']
 			if os:
-				extra_datas['os'] = os
+				extra_data['os'] = os
 			if version:
-				extra_datas['version'] = version
+				extra_data['version'] = version
+			extra_data['version_exact'] = version_exact
+
+		# Grap service name
+		product = extra_data.get('name', None) or extra_data.get('product', None)
+		if product:
+			service_name = product
+			if version:
+				service_name += f'/{version}'
+			extra_data['service_name'] = service_name
 
 		# Grab CPEs
-		cpes = extra_datas.get('cpe', [])
+		cpes = extra_data.get('cpe', [])
 		if not isinstance(cpes, list):
 			cpes = [cpes]
-			extra_datas['cpe'] = cpes
+			extra_data['cpe'] = cpes
+		debug(f'Found CPEs: {",".join(cpes)}', sub='cve')
 
-		return extra_datas
+		# Grab confidence
+		conf = int(extra_data.get('conf', 0))
+		if conf > 7:
+			confidence = 'high'
+		elif conf > 4:
+			confidence = 'medium'
+		else:
+			confidence = 'low'
+		extra_data['confidence'] = confidence
+
+		# Build custom CPE
+		if product and version:
+			vsplit = version.split('-')
+			version_cpe = vsplit[0] if not version_exact else version
+			cpe = VulnMulti.create_cpe_string(product, version_cpe)
+			if cpe not in cpes:
+				cpes.append(cpe)
+				debug(f'Added new CPE from identified product and version: {cpe}', sub='cve')
+
+		return extra_data
 
 	def _get_scripts(self, port_cfg):
 		scripts = port_cfg.get('script', [])
@@ -278,16 +324,16 @@ class nmapData(dict):
 				TAGS: [vuln_id, provider_name]
 			}
 			if provider_name == 'MITRE CVE':
-				vuln_data = VulnMulti.lookup_cve(vuln['id'], cpes=cpes)
-				if vuln_data:
-					vuln.update(vuln_data)
+				data = VulnMulti.lookup_cve(vuln['id'], cpes=cpes)
+				if data:
+					vuln.update(data)
 				yield vuln
 			else:
 				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve')
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
-		cpes = []
+		cpes = kwargs.get('cpes', [])
 		provider_name = 'vulners'
 		for line in out.splitlines():
 			if not line:
@@ -309,7 +355,8 @@ class nmapData(dict):
 					NAME: name,
 					PROVIDER: provider_name,
 					REFERENCE: reference_url,
-					'_type': 'exploit'
+					'_type': 'exploit',
+					TAGS: [exploit_id, provider_name]
 					# CVSS_SCORE: cvss_score,
 					# CONFIDENCE: 'low'
 				}
@@ -331,14 +378,14 @@ class nmapData(dict):
 					CVSS_SCORE: vuln_cvss,
 					SEVERITY: VulnMulti.cvss_to_severity(vuln_cvss),
 					REFERENCES: [reference_url],
-					TAGS: [],
+					TAGS: [vuln_id, provider_name],
 					CONFIDENCE: 'low'
 				}
 				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
 					vuln[TAGS].append('cve')
-					vuln_data = VulnMulti.lookup_cve(vuln_id, cpes=cpes)
-					if vuln_data:
-						vuln.update(vuln_data)
+					data = VulnMulti.lookup_cve(vuln_id, cpes=cpes)
+					if data:
+						vuln.update(data)
 					yield vuln
 				else:
 					debug(f'Vulners parser for "{vuln_type}" is not implemented YET.', sub='cve')

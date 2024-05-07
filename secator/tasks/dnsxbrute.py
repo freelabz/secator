@@ -1,6 +1,6 @@
 from secator.decorators import task
 from secator.definitions import (DOMAIN, HOST, RATE_LIMIT, RETRIES, THREADS, WORDLIST, EXTRA_DATA)
-from secator import CONFIG
+from secator.config import CONFIG
 from secator.output_types import Subdomain
 from secator.tasks._categories import ReconDns
 
