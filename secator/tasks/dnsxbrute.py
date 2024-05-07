@@ -20,6 +20,7 @@ class dnsxbrute(ReconDns):
     opts = {
         WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.dns, 'help': 'Wordlist'},
         'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
+        'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Use wildcard domain to exclude false positives'}
     }
     output_map = {
         Subdomain: {

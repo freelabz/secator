@@ -31,7 +31,7 @@ DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-
 
 # Constants
 OPT_NOT_SUPPORTED = -1
-OPT_PIPE_INPUT = -1
+OPT_PIPE_INPUT = -2
 
 # Vocab
 ALIVE = 'alive'
