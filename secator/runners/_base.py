@@ -93,6 +93,7 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.done = False
+		self.reports_folder = run_opts.get('reports_folder', None)
 		self.start_time = datetime.fromtimestamp(time())
 		self.last_updated = None
 		self.last_updated_progress = None
@@ -113,9 +114,10 @@ class Runner:
 		self.exporters = Runner.resolve_exporters(exporters_str)
 
 		# Determine report folder
-		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
-		_id = get_task_folder_id(default_reports_folder_base)
-		self.reports_folder = f'{default_reports_folder_base}/{_id}'
+		if not self.reports_folder:
+			default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
+			_id = get_task_folder_id(default_reports_folder_base)
+			self.reports_folder = f'{default_reports_folder_base}/{_id}'
 
 		# Make reports folders
 		os.makedirs(self.reports_folder, exist_ok=True)

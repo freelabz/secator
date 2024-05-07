@@ -50,6 +50,10 @@ class Scan(Runner):
 			}
 			run_opts.update(fmt_opts)
 
+			# Set reports folder
+			if self.sync:
+				run_opts['reports_folder'] = self.reports_folder
+
 			# Run workflow
 			workflow = Workflow(
 				TemplateLoader(name=f'workflows/{name}'),
