@@ -399,11 +399,7 @@ class Command(Runner):
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
-					# ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
-					# line = re.sub(ansi_regex, '', line.strip())
-					ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-					line = ansi_escape.sub('', line)
-					line = line.replace('\\x0d\\x0a', '\n')
+					line = Runner.strip_ansi_codes(line)
 
 				# Run on_line hooks
 				line = self.run_hooks('on_line', line)
