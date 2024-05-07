@@ -114,7 +114,7 @@ class Runner:
 		self.exporters = Runner.resolve_exporters(exporters_str)
 
 		# Determine report folder
-		if not self.reports_folder:
+		if not self.reports_folder or not os.path.exists(self.reports_folder):
 			default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
 			_id = get_task_folder_id(default_reports_folder_base)
 			self.reports_folder = f'{default_reports_folder_base}/{_id}'
