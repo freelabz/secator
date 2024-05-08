@@ -1,3 +1,4 @@
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -74,6 +75,6 @@ class Url(OutputType):
 			s += f' \[[magenta]{self.content_type}[/]]'
 		if self.content_length:
 			s += f' \[[magenta]{self.content_length}[/]]'
-		if self.screenshot_path:
+		if self.screenshot_path and os.path.exists(self.screenshot_path):
 			s += f' \[[magenta]{self.screenshot_path}[/]]'
 		return rich_to_ansi(s)
