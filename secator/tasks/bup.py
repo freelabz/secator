@@ -20,7 +20,7 @@ class bup(Http):
 	opts = {
 		'spoofport': {'type': int, 'short': 'sp', 'help': 'Port(s) to inject in port-specific headers'},
 		'spoofip': {'type': str, 'short': 'si', 'help': 'IP(s) to inject in ip-specific headers'},
-		'mode': {'type': str, 'help': 'Bypass modes.'}
+		'mode': {'type': str, 'help': 'Bypass modes.'},
 	}
 	opt_key_map = {
 		HEADER: 'header',
