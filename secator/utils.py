@@ -343,8 +343,10 @@ def print_results_table(results, title=None, exclude_fields=[], log=False):
 		if output_type.__name__ == 'Progress':
 			continue
 		items = [
-			item for item in results if item._type == output_type.get_name() and not item._duplicate
+			item for item in results if item._type == output_type.get_name()
 		]
+		if CONFIG.runners.remove_duplicates:
+			items = [item for item in items if not item._duplicate]
 		if items:
 			_table = build_table(
 				items,

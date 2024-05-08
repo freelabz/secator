@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.1](https://github.com/freelabz/secator/compare/v0.5.0...v0.5.1) (2024-05-06)
+
+
+### Bug Fixes
+
+* **output:** add headers to Url and print HTTP method when not GET ([#390](https://github.com/freelabz/secator/issues/390)) ([5a87d7b](https://github.com/freelabz/secator/commit/5a87d7b8bc1dd098999f3864952e98068fd32efc))
+* **report:** do not remove duplicate in reports by default ([#392](https://github.com/freelabz/secator/issues/392)) ([7d74ae8](https://github.com/freelabz/secator/commit/7d74ae80bfd99c31714a5e7e25f2bd1caa642eb4))
+
+## [0.5.0](https://github.com/freelabz/secator/compare/v0.4.1...v0.5.0) (2024-05-03)
+
+
+### Features
+
+* add searchsploit output fields ([#278](https://github.com/freelabz/secator/issues/278)) ([00872c4](https://github.com/freelabz/secator/commit/00872c4a7f9b1ec76ee1bfd7a00919d53cbdb30a))
+* **cli:** add report list / export commands ([#367](https://github.com/freelabz/secator/issues/367)) ([ab396a3](https://github.com/freelabz/secator/commit/ab396a3098c6d4c46cf9c9b29bd5c54579421646))
+* **config:** load external tasks from template dir ([#373](https://github.com/freelabz/secator/issues/373)) ([0c63c02](https://github.com/freelabz/secator/commit/0c63c02c8eca477a6752f4af466c4303801019de))
+
+
+### Bug Fixes
+
+* **cli:** catch JSON parse errors ([#378](https://github.com/freelabz/secator/issues/378)) ([5e3d7f2](https://github.com/freelabz/secator/commit/5e3d7f2d2938a857e7599a429a6cfabf3b12347b))
+* **nmap:** resolve -sS tcp syn stealth issue ([#376](https://github.com/freelabz/secator/issues/376)) ([a3efc65](https://github.com/freelabz/secator/commit/a3efc651dfa4d8fa34d611b9aea2e156352fdc45))
+
 ## [0.4.1](https://github.com/freelabz/secator/compare/v0.4.0...v0.4.1) (2024-04-30)
 
 
