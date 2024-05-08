@@ -5,7 +5,7 @@ from secator.output_types import Url
 from secator.tasks._categories import Http
 from secator.definitions import (
 	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT,
-	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
+	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS,
 	MATCH_CODES, OPT_NOT_SUPPORTED, URL
 )
 
@@ -61,6 +61,10 @@ class bup(Http):
 		}
 	}
 	install_cmd = 'pipx install bypass-url-parser==0.4.2b'
+
+	@staticmethod
+	def on_init(self):
+		self.cmd += f' -o {self.reports_folder}/.outputs/response'
 
 	@staticmethod
 	def method_extractor(item):
