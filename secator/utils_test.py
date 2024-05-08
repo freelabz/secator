@@ -88,6 +88,7 @@ META_OPTS = {
 	USER_AGENT: 'Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
 
 	# Individual tasks options
+	'bup.mode': 'http_methods',
 	'gf.pattern': 'xss',
 	'nmap.output_path': load_fixture('nmap_output', FIXTURES_DIR, only_path=True, ext='.xml'),  # nmap XML fixture
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
