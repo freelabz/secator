@@ -29,7 +29,7 @@ class fping(ReconIp):
 	}
 	input_type = IP
 	output_types = [Ip]
-	install_cmd = 'sudo apt install -y fping'
+	install_cmd = 'sudo apk add fping'
 
 	@staticmethod
 	def item_loader(self, line):

@@ -1,34 +1,37 @@
-FROM kalilinux/kali-rolling
+FROM alpine:latest
+
+ARG GITHUB_TOKEN
 
 ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
+ENV GITHUB_TOKEN=${GITHUB_TOKEN}
 
-RUN apt update -y && \
-    apt install -y \
+RUN apk add --no-cache \
 	curl \
+	freetype-dev \
 	gcc \
 	git \
-	golang-go \
+	go \
+	libc6-compat \
+	libpcap-dev \
     make \
 	pipx \
-	python3 \
-	python3-pip \
-	python3-venv \
-	ruby-full \
-	rubygems \
+	python3-dev \
+	ruby-dev \
+	linux-headers \
 	sudo \
 	vim \
     wget \
 	chromium \
-    jq \
     openssl \
-	proxychains \
-	proxychains-ng \
-	&& rm -rf /var/lib/apt/lists/*
+	proxychains-ng
+
+# Fix for https://github.com/projectdiscovery/naabu/discussions/238
+RUN ln -s /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8
 
 # Install Metasploit framework
-RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
-RUN chmod 755 msfinstall
-RUN ./msfinstall
+# RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
+# RUN chmod 755 msfinstall
+# RUN ./msfinstall
 
 # Copy code
 WORKDIR /code
