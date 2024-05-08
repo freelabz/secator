@@ -1,61 +1,82 @@
 import re
 
 from secator.decorators import task
+from secator.output_types import Url
 from secator.tasks._categories import Http
-from secator.definitions import OPT_NOT_SUPPORTED
-from secator.output_types import Url, Vulnerability
-from urllib.parse import urlparse
+from secator.definitions import (
+	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT,
+	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
+	MATCH_CODES, OPT_NOT_SUPPORTED, URL
+)
 
 
 @task()
 class bup(Http):
-	"""Tool that tests MANY url bypasses to reach a 40X protected page."""
-	cmd = 'bup -S 2'
+	cmd = 'bup'
+	input_flag = '-u'
+	input_type = URL
 	json_flag = '--jsonl'
-	input_flag = '--url'
-	install_cmd = 'pipx install bypass-url-parser==0.4.2b0'
-	opt_key_map = {
-		'threads': '--threads',
-		'depth': OPT_NOT_SUPPORTED,
+	opt_prefix = '--'
+	opts = {
+		'spoofport': {'type': int, 'short': 'sp', 'help': 'Port(s) to inject in port-specific headers'},
+		'spoofip': {'type': str, 'short': 'si', 'help': 'IP(s) to inject in ip-specific headers'},
+		'mode': {'type': str, 'help': 'Bypass modes.'}
 	}
-	output_types = [Url, Vulnerability]
+	opt_key_map = {
+		HEADER: 'header',
+		DELAY: OPT_NOT_SUPPORTED,
+		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		METHOD: OPT_NOT_SUPPORTED,
+		RATE_LIMIT: OPT_NOT_SUPPORTED,
+		RETRIES: 'retry',
+		THREADS: 'threads',
+		TIMEOUT: 'timeout',
+		USER_AGENT: OPT_NOT_SUPPORTED,
+		DEPTH: OPT_NOT_SUPPORTED,
+		MATCH_REGEX: OPT_NOT_SUPPORTED,
+		MATCH_SIZE: OPT_NOT_SUPPORTED,
+		MATCH_WORDS: OPT_NOT_SUPPORTED,
+		FILTER_REGEX: OPT_NOT_SUPPORTED,
+		FILTER_CODES: OPT_NOT_SUPPORTED,
+		FILTER_SIZE: OPT_NOT_SUPPORTED,
+		FILTER_WORDS: OPT_NOT_SUPPORTED,
+		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		MATCH_CODES: OPT_NOT_SUPPORTED,
+		PROXY: OPT_NOT_SUPPORTED,
+	}
+	output_types = [Url]
 	output_map = {
 		Url: {
 			'url': 'request_url',
-			'host': lambda x: urlparse(x['request_url']).netloc,
 			'method': lambda x: bup.method_extractor(x),
+			'headers': lambda x: bup.headers_extractor(x),
 			'status_code': 'response_status_code',
-			'title': 'response_title',
-			'lines': 'response_lines_count',
-			'words': 'response_words_count',
-			'webserver': 'response_server_type',
 			'content_type': 'response_content_type',
 			'content_length': 'response_content_length',
-			'stored_response_path': 'response_html_filename'
+			'title': 'response_title',
+			'server': 'response_server_type',
+			'lines': 'response_lines_count',
+			'words': 'response_words_count',
+			'stored_response_path': 'response_html_filename',
 		}
 	}
-
-	@staticmethod
-	def on_item_pre_convert(self, item):
-		if self.orig:
-			return item
-		if item.get('response_status_code', 0) == 200:
-			payload = item['request_curl_payload']
-			return Vulnerability(
-				name='Bypassed 4xx',
-				matched_at=self.input,
-				confidence='high',
-				severity='medium',
-				tags=['bypass-4xx'],
-				extra_data={'payload': payload}
-			)
-		return item
+	install_cmd = 'pipx install bypass-url-parser==0.4.2b'
 
 	@staticmethod
 	def method_extractor(item):
 		payload = item['request_curl_payload']
 		match = re.match(r'-X\s+(\w+)', payload)
 		if match:
-			return match.group(0)
-		else:
-			return 'GET'
+			return match.group(1)
+		return 'GET'
+
+	@staticmethod
+	def headers_extractor(item):
+		headers_list = item['response_headers'].split('\n')[1:]
+		headers = {}
+		for header in headers_list:
+			split_headers = header.split(':')
+			key = split_headers[0]
+			value = ':'.join(split_headers[1:])
+			headers[key] = value
+		return headers
