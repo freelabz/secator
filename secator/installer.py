@@ -4,8 +4,11 @@ import os
 import platform
 import shutil
 import tarfile
+import tempfile
 import zipfile
 import io
+
+from pathlib import Path
 
 from rich.table import Table
 
@@ -36,7 +39,7 @@ class ToolInstaller:
 			return False
 
 		if tool_cls.install_github_handle:
-			success = GithubInstaller.install(tool_cls.install_github_handle)
+			success = GithubInstaller.install(tool_cls.install_github_handle, tool_cls.install_github_bin_only)
 
 		if tool_cls.install_cmd and not success:
 			success = SourceInstaller.install(tool_cls.install_cmd)
@@ -72,7 +75,7 @@ class GithubInstaller:
 	"""Install a tool from GitHub releases."""
 
 	@classmethod
-	def install(cls, github_handle):
+	def install(cls, github_handle, bin_only=True):
 		"""Find and install a release from a GitHub handle {user}/{repo}.
 
 		Args:
@@ -95,7 +98,7 @@ class GithubInstaller:
 
 		# Download and unpack asset
 		console.print(f'Found release URL: {download_url}')
-		cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
+		cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo, bin_only=bin_only)
 		return True
 
 	@classmethod
@@ -146,11 +149,11 @@ class GithubInstaller:
 
 		# Enhanced architecture mapping to avoid conflicts
 		arch_mapping = {
-			'x86_64': ['amd64', 'x86_64'],
-			'amd64': ['amd64', 'x86_64'],
-			'aarch64': ['arm64', 'aarch64'],
-			'armv7l': ['armv7', 'arm'],
-			'386': ['386', 'x86', 'i386'],
+			'x86_64': ['amd64', 'x86_64', '64bit'],
+			'amd64': ['amd64', 'x86_64', '64bit'],
+			'aarch64': ['arm64', 'aarch64', '64bit'],
+			'armv7l': ['armv7', 'arm', '32bit'],
+			'386': ['386', 'x86', 'i386', '32bit'],
 		}
 
 		os_identifiers = os_mapping.get(system, [])
@@ -180,16 +183,17 @@ class GithubInstaller:
 			return potential_matches[0]
 
 	@classmethod
-	def _download_and_unpack(cls, url, destination, repo_name):
+	def _download_and_unpack(cls, url, destination, repo_name, bin_only=True):
 		"""Download and unpack a release asset."""
 		console.print(f'Downloading and unpacking to {destination}...')
 		response = requests.get(url, timeout=5)
 		response.raise_for_status()
 
 		# Create a temporary directory to extract the archive
-		temp_dir = os.path.join("/tmp", repo_name)
+		temp_dir = Path(tempfile.gettempdir()) / repo_name
 		os.makedirs(temp_dir, exist_ok=True)
 
+		# Extract the archive
 		if url.endswith('.zip'):
 			with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
 				zip_ref.extractall(temp_dir)
@@ -197,13 +201,25 @@ class GithubInstaller:
 			with tarfile.open(fileobj=io.BytesIO(response.content), mode='r:gz') as tar:
 				tar.extractall(path=temp_dir)
 
-		# For archives, find and move the binary that matches the repo name
-		binary_path = cls._find_binary_in_directory(temp_dir, repo_name)
-		if binary_path:
-			os.chmod(binary_path, 0o755)  # Make it executable
-			shutil.move(binary_path, os.path.join(destination, repo_name))  # Move the binary
-		else:
+		# If not bin_only, extract whole folder to /opt and symlink binary
+		location = temp_dir
+		if not bin_only:
+			location = CONFIG.dirs.share
+			shutil.move(temp_dir, CONFIG.dirs.share)
+
+		# Find binary path in folder
+		binary_path = cls._find_binary_in_directory(location, repo_name)
+		if not binary_path:
 			console.print('[bold red]Binary matching the repository name was not found in the archive.[/]')
+			return
+
+		# Make binary executable and move / symlink binary
+		os.chmod(binary_path, 0o755)
+		binary_dest = destination / repo_name
+		if bin_only:
+			shutil.move(binary_path, binary_dest)
+		else:
+			os.symlink(binary_path, binary_dest)
 
 	@classmethod
 	def _find_binary_in_directory(cls, directory, binary_name):

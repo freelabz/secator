@@ -77,6 +77,7 @@ class Command(Runner):
 	# Install
 	install_cmd = None
 	install_github_handle = None
+	install_github_bin_only = True
 
 	# Serializer
 	item_loader = None
