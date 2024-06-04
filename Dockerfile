@@ -25,9 +25,9 @@ RUN apt update -y && \
 	proxychains-ng
 
 # Install Metasploit framework
-# RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
-# RUN chmod 755 msfinstall
-# RUN ./msfinstall
+RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
+RUN chmod 755 msfinstall
+RUN ./msfinstall
 
 # Copy code
 WORKDIR /code
