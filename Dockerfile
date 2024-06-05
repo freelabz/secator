@@ -22,8 +22,7 @@ RUN apt update -y && \
     jq \
     openssl \
 	proxychains \
-	proxychains-ng \
-	&& rm -rf /var/lib/apt/lists/*
+	proxychains-ng
 
 # Install Metasploit framework
 RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
@@ -42,6 +41,9 @@ RUN secator install addons google
 RUN secator install addons mongodb
 RUN secator install addons redis
 RUN secator install addons dev
+
+# Cleanup
+RUN rm -rf /var/lib/apt/lists/*
 
 # Set entrypoint
 ENTRYPOINT ["secator"]
