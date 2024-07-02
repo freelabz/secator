@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/freelabz/secator/compare/v0.5.2...v0.6.0) (2024-07-02)
+
+
+### Features
+
+* add duplicate finder to mongodb hooks ([#409](https://github.com/freelabz/secator/issues/409)) ([fb0e11c](https://github.com/freelabz/secator/commit/fb0e11cd2b64bf51bc862f47243c8c0602d3d5e9))
+
+
+### Bug Fixes
+
+* Dockerfile broken apt install ([#407](https://github.com/freelabz/secator/issues/407)) ([c023279](https://github.com/freelabz/secator/commit/c02327968ecea816004636801684b336735df439))
+* **tasks:** duplicate meta opt entry ([#401](https://github.com/freelabz/secator/issues/401)) ([ae56aa6](https://github.com/freelabz/secator/commit/ae56aa62f5a18936a1787547e37bbe636e6e43c3))
+
 ## [0.5.2](https://github.com/freelabz/secator/compare/v0.5.1...v0.5.2) (2024-05-07)
 
 
