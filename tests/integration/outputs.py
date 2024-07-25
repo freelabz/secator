@@ -3,6 +3,22 @@ from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability, Record)
 
 OUTPUTS_TASKS = {
+	'bup': [
+        Url(
+            url='http://localhost:3000/ftp/coupons_2013.md.bak',
+            status_code=403,
+            content_length=164,
+            content_type='text/html',
+            method='GET',
+            _source='bup'
+        ),
+        Url(
+            url='http://localhost:3000/ftp/coupons_2013.md.bak',
+            status_code=405,
+            method='SEARCH',
+            _source='bup'
+        )
+	],
     'cariddi': [
         Url(
             url='http://localhost:3000/robots.txt',
