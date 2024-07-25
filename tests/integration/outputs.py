@@ -59,7 +59,7 @@ OUTPUTS_TASKS = {
             _source='dnsx'
 		),
         Record(
-            name='v=spf1 -all',
+            name='v=spf1 include:_cidrs.wikimedia.org ~all',
             type='TXT',
             host='wikipedia.org',
             _source='dnsx'
