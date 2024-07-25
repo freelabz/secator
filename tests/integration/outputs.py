@@ -59,7 +59,7 @@ OUTPUTS_TASKS = {
             _source='dnsx'
 		),
         Record(
-            name='v=spf1 include:wikimedia.org ~all',
+            name='v=spf1 include:_cidrs.wikimedia.org ~all',
             type='TXT',
             host='wikipedia.org',
             _source='dnsx'
@@ -217,7 +217,7 @@ OUTPUTS_TASKS = {
     ],
     'wpscan': [
         Tag(
-            name='Wordpress theme - twentytwentyfour 1.1',
+            name='Wordpress theme - twentytwentyfour 1.2',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(

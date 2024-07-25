@@ -29,7 +29,8 @@ class katana(HttpCrawler):
 	opts = {
 		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
 		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'},
-		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'}
+		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'},
+		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'}
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -50,7 +51,8 @@ class katana(HttpCrawler):
 		RETRIES: 'retry',
 		THREADS: 'concurrency',
 		TIMEOUT: 'timeout',
-		USER_AGENT: OPT_NOT_SUPPORTED
+		USER_AGENT: OPT_NOT_SUPPORTED,
+		'store_responses': 'sr'
 	}
 	opt_value_map = {
 		DELAY: lambda x: int(x) if isinstance(x, float) else x
@@ -107,14 +109,16 @@ class katana(HttpCrawler):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
-		if CONFIG.http.store_responses:
-			self.cmd += f' -sr -srd {self.reports_folder}'
+		store_responses = self.get_opt_value('store_responses')
+		if store_responses:
+			self.cmd += f' -srd {self.reports_folder}/.outputs'
 
 	@staticmethod
 	def on_item(self, item):
 		if not isinstance(item, Url):
 			return item
-		if CONFIG.http.store_responses and os.path.exists(item.stored_response_path):
+		store_responses = self.get_opt_value('store_responses')
+		if store_responses and os.path.exists(item.stored_response_path):
 			with open(item.stored_response_path, 'r', encoding='latin-1') as fin:
 				data = fin.read().splitlines(True)
 				first_line = data[0]
@@ -126,5 +130,7 @@ class katana(HttpCrawler):
 
 	@staticmethod
 	def on_end(self):
-		if CONFIG.http.store_responses and os.path.exists(self.reports_folder + '/index.txt'):
-			os.remove(self.reports_folder + '/index.txt')
+		store_responses = self.get_opt_value('store_responses')
+		index_rpath = f'{self.reports_folder}/.outputs/index.txt'
+		if store_responses and os.path.exists(index_rpath):
+			os.remove(index_rpath)

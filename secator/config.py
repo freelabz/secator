@@ -74,6 +74,7 @@ class Runners(StrictModel):
 	progress_update_frequency: int = 60
 	skip_cve_search: bool = False
 	skip_cve_low_confidence: bool = True
+	remove_duplicates: bool = False
 
 
 class HTTP(StrictModel):
