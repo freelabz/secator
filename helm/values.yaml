@@ -1,0 +1,34 @@
+# Default values for Secator
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+namespace: secator
+
+secatorManager:
+  name: secator-manager
+  image: "freelabz/secator"
+
+  # Empty if using default repository
+  repository:
+  # Empty if using tag "latest"
+  tag:
+
+secatorWorker:
+  name: secator-worker
+  image: "freelabz/secator"
+
+  # Empty if using default repository
+  repository:
+  # Empty if using tag "latest"
+  tag:
+
+redis:
+  name: redis
+  image: "redis"
+
+  # Empty if using default repository
+  repository:
+  # Empty if using tag "latest"
+  tag:
+  replicas: 1
+  port: 6379
