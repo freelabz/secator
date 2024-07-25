@@ -30,7 +30,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-  "bs4 < 1",
+  "beautifulsoup4 <= 5",
   'celery < 6',
   "cpe < 2",
   "dotmap < 2",

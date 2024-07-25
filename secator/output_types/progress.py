@@ -8,7 +8,7 @@ from secator.utils import rich_to_ansi
 @dataclass
 class Progress(OutputType):
 	duration: str
-	percent: int
+	percent: int = 0
 	errors: list = field(default_factory=list)
 	extra_data: dict = field(default_factory=dict)
 	_source: str = field(default='', repr=True)
