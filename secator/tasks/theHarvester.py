@@ -22,7 +22,7 @@ class theHarvester(ReconUser):
 	opt_prefix = '--'
 
 	opts = {
-		'source': {'type': str, 'short': 'b', 'help': 'bevigil, censys, fullhunt, securityTrails'},
+		'source': {'type': str, 'short': 'b', 'help': 'Modules to use (cf https://github.com/laramies/theHarvester)', 'default': 'all'},
 	}
 
 	opt_key_map = {
