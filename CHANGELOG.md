@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/freelabz/secator/compare/v0.6.0...v0.6.1) (2024-08-09)
+
+
+### Documentation
+
+* add package json ([#415](https://github.com/freelabz/secator/issues/415)) ([f9a7c2f](https://github.com/freelabz/secator/commit/f9a7c2fc5df11506cce0d81babf1f7790b80465a))
+
 ## [0.6.0](https://github.com/freelabz/secator/compare/v0.5.2...v0.6.0) (2024-07-25)
 
 
