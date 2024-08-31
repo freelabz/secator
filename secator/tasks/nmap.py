@@ -8,7 +8,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
-								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
+								 HEADER, HOST, ID, IP, PORT_TYPE, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
@@ -37,6 +37,7 @@ class nmap(VulnMulti):
 		# 'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
 		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
+		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'Run nmap in udp mode (Will not run any TCP scan)'},
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
@@ -52,7 +53,8 @@ class nmap(VulnMulti):
 		# Nmap opts
 		PORTS: '-p',
 		'output_path': '-oX',
-		'tcp_syn_stealth': '-sS'
+		'tcp_syn_stealth': '-sS',
+		'udp_scan': '-sU'
 	}
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
@@ -74,10 +76,16 @@ class nmap(VulnMulti):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
-		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
-		if tcp_syn_stealth:
+		udp_scan = self.get_opt_value('udp_scan')
+		if not(udp_scan):
+			tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
+			if tcp_syn_stealth:
+				self.cmd = f'sudo {self.cmd}'
+				self.cmd = self.cmd.replace('-sT', '')
+		else:
 			self.cmd = f'sudo {self.cmd}'
 			self.cmd = self.cmd.replace('-sT', '')
+		
 
 	def yielder(self):
 		yield from super().yielder()
@@ -138,6 +146,9 @@ class nmapData(dict):
 				# Get script output
 				scripts = self._get_scripts(port)
 
+				# Get port type 
+				port_type = port['@protocol'].upper()
+
 				# Yield port data
 				port = {
 					PORT: port_number,
@@ -145,6 +156,7 @@ class nmapData(dict):
 					STATE: state,
 					SERVICE_NAME: service_name,
 					IP: ip,
+					PORT_TYPE: port_type,
 					EXTRA_DATA: extra_data
 				}
 				yield port
@@ -205,11 +217,19 @@ class nmapData(dict):
 			if hostnames:
 				hostname = hostnames[0]['@name']
 		else:
-			hostname = host_cfg.get('address', {}).get('@addr', None)
+			hostname = self._get_address(host_cfg).get('@addr', None)
 		return hostname
 
+	def _get_address(self, host_cfg):
+		if isinstance(host_cfg.get('address', {}), list):
+			addresses = host_cfg.get('address', {})
+			for address in addresses:
+				if address.get('@addrtype') == "ipv4":
+					return address
+		return host_cfg.get('address', {})
+
 	def _get_ip(self, host_cfg):
-		return host_cfg.get('address', {}).get('@addr', None)
+		return self._get_address(host_cfg).get('@addr', None)
 
 	def _get_extra_data(self, port_cfg):
 		extra_data = {

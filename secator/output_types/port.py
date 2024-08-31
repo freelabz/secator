@@ -14,6 +14,7 @@ class Port(OutputType):
 	service_name: str = field(default='', compare=False)
 	cpes: list = field(default_factory=list, compare=False)
 	host: str = field(default='', repr=True, compare=False)
+	type: str = field(default='TCP', repr=True,compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_source: str = field(default='', repr=True, compare=False)
@@ -37,7 +38,7 @@ class Port(OutputType):
 		return f'{self.host}:{self.port}'
 
 	def __repr__(self) -> str:
-		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
+		s = f'🔓 {self.type} {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
 		if self.service_name:
 			s += f' \[[bold purple]{self.service_name}[/]]'
 		if self.host:
