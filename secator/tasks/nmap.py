@@ -156,7 +156,7 @@ class nmapData(dict):
 					STATE: state,
 					SERVICE_NAME: service_name,
 					IP: ip,
-					PORT_TYPE: port_type,
+					PROTOCOL: protocol,
 					EXTRA_DATA: extra_data
 				}
 				yield port
