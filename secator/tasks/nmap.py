@@ -77,7 +77,7 @@ class nmap(VulnMulti):
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
 		udp_scan = self.get_opt_value('udp_scan')
-		if not(udp_scan):
+		if not udp_scan:
 			tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
 			if tcp_syn_stealth:
 				self.cmd = f'sudo {self.cmd}'
