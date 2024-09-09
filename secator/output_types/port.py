@@ -14,7 +14,7 @@ class Port(OutputType):
 	service_name: str = field(default='', compare=False)
 	cpes: list = field(default_factory=list, compare=False)
 	host: str = field(default='', repr=True, compare=False)
-	type: str = field(default='TCP', repr=True,compare=False)
+	protocol: str = field(default='TCP', repr=True,compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_source: str = field(default='', repr=True, compare=False)
