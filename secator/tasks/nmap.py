@@ -37,7 +37,7 @@ class nmap(VulnMulti):
 		# 'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
 		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
-		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'Run nmap in udp mode (Will not run any TCP scan)'},
+		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan'},
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
