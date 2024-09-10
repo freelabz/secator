@@ -85,6 +85,7 @@ class nmap(VulnMulti):
 		else:
 			self.cmd = f'sudo {self.cmd}'
 			self.cmd = self.cmd.replace('-sT', '')
+
 	def yielder(self):
 		yield from super().yielder()
 		if self.return_code != 0:
