@@ -85,7 +85,7 @@ class katana(HttpCrawler):
 		try:
 			item = json.loads(item)
 		except json.JSONDecodeError:
-			return None
+			return
 
 		# form detection
 		forms = item.get('response', {}).get('forms', [])
