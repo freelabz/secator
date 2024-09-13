@@ -35,6 +35,7 @@ class httpx(Http):
 		'screenshot': {'is_flag': True, 'short': 'ss', 'default': False, 'help': 'Screenshot response'},
 		'system_chrome': {'is_flag': True, 'default': False, 'help': 'Use local installed Chrome for screenshot'},
 		'headless_options': {'is_flag': False, 'short': 'ho', 'default': None, 'help': 'Headless Chrome additional options'},
+		'follow_host_redirects': {'is_flag': True, 'short': 'fhr', 'default': None, 'help': 'Follow redirects on the same host'}  # noqa: E501
 	}
 	opt_key_map = {
 		HEADER: 'header',
