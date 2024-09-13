@@ -32,7 +32,7 @@ class dnsx(ReconDns):
 	def item_loader(self, line):
 		try:
 			item = json.loads(line)
-		except json.JSONEncoder:
+		except json.JSONDecodeError:
 			return
 		if self.orig:  # original dnsx JSON output
 			yield item
