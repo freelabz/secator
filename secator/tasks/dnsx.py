@@ -50,8 +50,8 @@ class dnsx(ReconDns):
 				# Handling specific records that can produce some other output types
 				if _type == 'a':
 					yield {
-					'host': host,
-					'ip': name
+						'host': host,
+						'ip': name
 					}
 				yield {
 					'host': host,
