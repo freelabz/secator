@@ -433,7 +433,7 @@ class Command(Runner):
 				yield from item_loader(self, line)
 			elif item_loader:
 				name = item_loader.__class__.__name__.replace('Serializer', '').lower()
-				default_callback = lambda self, x: [(yield x)]
+				default_callback = lambda self, x: [(yield x)]  # noqa: E731
 				callback = getattr(self, f'on_{name}_loaded', None) or default_callback
 				for item in item_loader.run(line):
 					yield from callback(self, item)
