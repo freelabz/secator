@@ -1,5 +1,4 @@
 import os
-import json
 from urllib.parse import urlparse
 
 from secator.decorators import task
