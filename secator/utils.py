@@ -439,3 +439,26 @@ def print_version():
 	console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
 	if status == 'outdated':
 		console.print('[bold red]secator is outdated, run "secator update" to install the latest version.')
+
+
+def extract_root_domain_from_domain(domain):
+	"""Extract the root domain from a given domain in input
+	Regex for domain validation taken and adapted from :
+	https://www.geeksforgeeks.org/how-to-validate-a-domain-name-using-regular-expression/
+	For example :
+	test.example.org will return example.org
+
+	Args:
+		domain (str): a domain name (like dns.google.com or wikipedia.org)
+
+	Returns:
+		str: The root domain.
+	"""
+	match = re.search(r"^([A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,6}$", domain)
+	if not match:
+		raise TypeError(f'Given domain {domain} is malformed')
+	domain_parts = domain.split('.')
+	if len(domain_parts) >= 2:
+		return '.'.join(domain_parts[-2:])
+	else:
+		raise TypeError(f'Fatal error this should never append, error caused by {domain}')
