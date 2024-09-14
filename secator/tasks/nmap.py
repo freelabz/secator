@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 @task()
 class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
-	cmd = 'nmap -sT -sV -Pn'
+	cmd = 'nmap'
 	input_flag = None
 	input_chunk_size = 1
 	file_flag = '-iL'
@@ -34,10 +34,12 @@ class nmap(VulnMulti):
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan'},
 		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [full, 100, 1000]'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
-		# 'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
-		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
-		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
+		'skip_host_discovery': {'type': bool, 'short': 'Pn', 'default': True, 'help': 'Skip host discovery (no ping)'},
+		'version_detection': {'type': bool, 'short': 'sV', 'default': True, 'help': 'Version detection'},
+		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': True, 'help': 'TCP SYN Stealth'},
+		'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
 		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan'},
+		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
@@ -52,9 +54,12 @@ class nmap(VulnMulti):
 
 		# Nmap opts
 		PORTS: '-p',
-		'output_path': '-oX',
+		'skip_host_discovery': '-Pn',
+		'version_detection': '-sV',
+		'tcp_connect': '-sT',
 		'tcp_syn_stealth': '-sS',
-		'udp_scan': '-sU'
+		'udp_scan': '-sU',
+		'output_path': '-oX',
 	}
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
@@ -76,15 +81,9 @@ class nmap(VulnMulti):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
-		udp_scan = self.get_opt_value('udp_scan')
-		if not udp_scan:
-			tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
-			if tcp_syn_stealth:
-				self.cmd = f'sudo {self.cmd}'
-				self.cmd = self.cmd.replace('-sT', '')
-		else:
+		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
+		if tcp_syn_stealth:
 			self.cmd = f'sudo {self.cmd}'
-			self.cmd = self.cmd.replace('-sT', '')
 
 	def yielder(self):
 		yield from super().yielder()
