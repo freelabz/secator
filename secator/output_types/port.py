@@ -38,7 +38,9 @@ class Port(OutputType):
 		return f'{self.host}:{self.port}'
 
 	def __repr__(self) -> str:
-		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/] ([dim blue]{self.protocol}[/])'
+		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
+		if self.protocol != 'TCP':
+			s += f' \[[yellow3](self.protocol)[/]]'
 		if self.service_name:
 			s += f' \[[bold purple]{self.service_name}[/]]'
 		if self.host:
