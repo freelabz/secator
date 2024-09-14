@@ -40,7 +40,7 @@ class Port(OutputType):
 	def __repr__(self) -> str:
 		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
 		if self.protocol != 'TCP':
-			s += f' \[[yellow3](self.protocol)[/]]'
+			s += f' \[[yellow3]{self.protocol}[/]]'
 		if self.service_name:
 			s += f' \[[bold purple]{self.service_name}[/]]'
 		if self.host:
