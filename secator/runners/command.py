@@ -82,6 +82,14 @@ class Command(Runner):
 	item_loader = None
 	item_loaders = [JSONSerializer(),]
 
+	# Hooks
+	hooks = [
+		'on_start',
+		'on_cmd',
+		'on_line',
+		'on_error',
+	]
+
 	# Ignore return code
 	ignore_return_code = False
 
@@ -140,6 +148,9 @@ class Command(Runner):
 
 		# Build command
 		self._build_cmd()
+
+		# Run on_cmd hook
+		self.run_hooks('on_cmd')
 
 		# Build item loaders
 		instance_func = getattr(self, 'item_loader', None)
@@ -577,7 +588,15 @@ class Command(Runner):
 		return opts_str.strip()
 
 	@staticmethod
+	def _get_opt_default(opt_name, opts_conf):
+		for k, v in opts_conf.items():
+			if k == opt_name:
+				return v.get('default', None)
+		return None
+
+	@staticmethod
 	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
+		default = default or Command._get_opt_default(opt_name, opts_conf)
 		aliases = [
 			opts.get(f'{opt_prefix}_{opt_name}'),
 			opts.get(f'{opt_prefix}.{opt_name}'),
