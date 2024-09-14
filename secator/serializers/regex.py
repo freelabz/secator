@@ -7,7 +7,7 @@ class RegexSerializer:
 		self.regex = re.compile(regex)
 		self.fields = fields
 
-	def yielder(self, line):
+	def run(self, line):
 		match = self.regex.match(line)
 		output = {}
 		if not match:
