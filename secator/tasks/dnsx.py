@@ -1,6 +1,6 @@
 from secator.decorators import task
 from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
-from secator.output_types import Record
+from secator.output_types import Record, Ip
 from secator.tasks._categories import ReconDns
 
 
@@ -11,7 +11,7 @@ class dnsx(ReconDns):
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
-	output_types = [Record]
+	output_types = [Record, Ip]
 	opt_key_map = {
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retry',
@@ -38,6 +38,11 @@ class dnsx(ReconDns):
 				if isinstance(value, dict):
 					name = value['name']
 					extra_data = {k: v for k, v in value.items() if k != 'name'}
+				if _type == 'a':
+					yield {
+						'host': host,
+						'ip': name
+					}
 				yield {
 					'host': host,
 					'name': name,
