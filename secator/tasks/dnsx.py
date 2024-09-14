@@ -47,7 +47,6 @@ class dnsx(ReconDns):
 				if isinstance(value, dict):
 					name = value['name']
 					extra_data = {k: v for k, v in value.items() if k != 'name'}
-				# Handling specific records that can produce some other output types
 				if _type == 'a':
 					yield {
 						'host': host,
