@@ -90,6 +90,7 @@ META_OPTS = {
 	# Individual tasks options
 	'gf.pattern': 'xss',
 	'nmap.output_path': load_fixture('nmap_output', FIXTURES_DIR, only_path=True, ext='.xml'),  # nmap XML fixture
+	'nmap.tcp_connect': True,
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
 	'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
 	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True),
