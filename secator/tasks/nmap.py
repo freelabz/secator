@@ -82,7 +82,11 @@ class nmap(VulnMulti):
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
-		if tcp_syn_stealth:
+		tcp_connect = self.get_opt_value('tcp_connect')
+		udp_scan = self.get_opt_value('udp_scan')
+		if tcp_connect or udp_scan:
+			self.cmd = self.cmd.replace('-sS', '')
+		elif tcp_syn_stealth:
 			self.cmd = f'sudo {self.cmd}'
 
 	def yielder(self):
