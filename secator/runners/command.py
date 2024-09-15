@@ -477,8 +477,12 @@ class Command(Runner):
 			return None
 
 		# Check if sudo can be executed without a password
-		if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
-			return None
+		try:
+		        if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
+			        return None
+		except ValueError:
+			error = "Could not run sudo check test"
+			self.errors.append(error)
 
 		# Check if we have a tty
 		if not os.isatty(sys.stdin.fileno()):
