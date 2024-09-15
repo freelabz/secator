@@ -49,6 +49,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'feroxbuster.filter_size': 1987,
 			'h8mail.local_breach': load_fixture('h8mail_breach', INTEGRATION_DIR, only_path=True),
 			'nmap.port': '3000,8080',
+			'nmap.tcp_connect': True,
 			'match_codes': '200',
 			'maigret.site': 'github',
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
