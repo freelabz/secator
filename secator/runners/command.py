@@ -349,6 +349,8 @@ class Command(Runner):
 
 		# Check for sudo requirements and prepare the password if needed
 		sudo_password = self._prompt_sudo(self.cmd)
+		if sudo_password and sudo_password == -1:
+			return
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -475,13 +477,14 @@ class Command(Runner):
 			return None
 
 		# Check if sudo can be executed without a password
-		if subprocess.run(['sudo', '-n', 'true'], capture_output=True).returncode == 0:
+		if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
 			return None
 
 		# Check if we have a tty
 		if not os.isatty(sys.stdin.fileno()):
-			self._print("No TTY detected. Sudo password prompt requires a TTY to proceed.", color='bold red')
-			sys.exit(1)
+			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
+			self.errors.append(error)
+			return -1
 
 		# If not, prompt the user for a password
 		self._print('[bold red]Please enter sudo password to continue.[/]')
@@ -497,8 +500,9 @@ class Command(Runner):
 			if result.returncode == 0:
 				return sudo_password  # Password is correct
 			self._print("Sorry, try again.")
-		self._print("Sudo password verification failed after 3 attempts.")
-		return None
+		error = "Sudo password verification failed after 3 attempts."
+		self.errors.append(error)
+		return -1
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
