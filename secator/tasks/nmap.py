@@ -34,10 +34,10 @@ class nmap(VulnMulti):
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan'},
 		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [full, 100, 1000]'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
-		'skip_host_discovery': {'type': bool, 'short': 'Pn', 'default': True, 'help': 'Skip host discovery (no ping)'},
-		'version_detection': {'type': bool, 'short': 'sV', 'default': True, 'help': 'Version detection'},
-		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': True, 'help': 'TCP SYN Stealth'},
-		'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
+		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
+		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Version detection'},
+		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
+		'tcp_connect': {'is_flag': True, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
 		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
 	}
@@ -83,11 +83,16 @@ class nmap(VulnMulti):
 		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
 		tcp_connect = self.get_opt_value('tcp_connect')
-		udp_scan = self.get_opt_value('udp_scan')
-		if tcp_connect or udp_scan:
-			self.cmd = self.cmd.replace('-sS', '')
-		elif tcp_syn_stealth:
+		print(tcp_syn_stealth)
+		print(tcp_connect)
+		if tcp_syn_stealth:
 			self.cmd = f'sudo {self.cmd}'
+		if tcp_connect and tcp_syn_stealth:
+			self._print(
+				'Options -sT (SYN stealth scan) and -sS (CONNECT scan) are conflicting. Keeping only -sT.',
+				'bold gold3')
+			self.cmd = self.cmd.replace('-sT ', '')
+
 
 	def yielder(self):
 		yield from super().yielder()
