@@ -83,8 +83,6 @@ class nmap(VulnMulti):
 		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
 		tcp_connect = self.get_opt_value('tcp_connect')
-		print(tcp_syn_stealth)
-		print(tcp_connect)
 		if tcp_syn_stealth:
 			self.cmd = f'sudo {self.cmd}'
 		if tcp_connect and tcp_syn_stealth:
