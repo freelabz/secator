@@ -91,7 +91,6 @@ class nmap(VulnMulti):
 				'bold gold3')
 			self.cmd = self.cmd.replace('-sT ', '')
 
-
 	def yielder(self):
 		yield from super().yielder()
 		if self.return_code != 0:
