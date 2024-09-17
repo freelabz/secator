@@ -29,14 +29,11 @@ logger = logging.getLogger(__name__)
 HOOKS = [
 	'before_init',
 	'on_init',
-	'on_start',
 	'on_end',
 	'on_item_pre_convert',
 	'on_item',
 	'on_duplicate',
-	'on_line',
 	'on_iter',
-	'on_error',
 ]
 
 VALIDATORS = [
@@ -158,10 +155,10 @@ class Runner:
 
 		# Hooks
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
-		self.hooks = {name: [] for name in HOOKS}
+		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		for key in self.hooks:
 
-			# Register class specific hooks
+			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
 			if class_hook:
 				name = f'{self.__class__.__name__}.{key}'
