@@ -422,21 +422,15 @@ class Command(Runner):
 				line = self.run_hooks('on_line', line)
 
 				# Run item_loader to try parsing as dict
-				items = None
+				item_count = 0
 				if self.output_json:
-					items = self.run_item_loaders(line)
+					for item in self.run_item_loaders(line):
+						yield item
+						item_count += 1
 
-				# Yield line if no items parsed
-				if not items:
+				# Yield line if no items were yielded
+				if item_count == 0:
 					yield line
-
-				# Turn results into list if not already a list
-				elif not isinstance(items, list):
-					items = [items]
-
-				# Yield items
-				if items:
-					yield from items
 
 		except KeyboardInterrupt:
 			self.process.kill()
@@ -446,19 +440,16 @@ class Command(Runner):
 		self._wait_for_end()
 
 	def run_item_loaders(self, line):
-		"""Run item loaders on a string."""
-		items = []
+		"""Run item loaders against an output line."""
 		for item_loader in self.item_loaders:
-			result = None
 			if (callable(item_loader)):
-				result = item_loader(self, line)
+				yield from item_loader(self, line)
 			elif item_loader:
-				result = item_loader.run(line)
-			if isinstance(result, dict):
-				result = [result]
-			if result:
-				items.extend(result)
-		return items
+				name = item_loader.__class__.__name__.replace('Serializer', '').lower()
+				default_callback = lambda self, x: [(yield x)]  # noqa: E731
+				callback = getattr(self, f'on_{name}_loaded', None) or default_callback
+				for item in item_loader.run(line):
+					yield from callback(self, item)
 
 	def _prompt_sudo(self, command):
 		"""

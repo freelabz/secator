@@ -23,10 +23,11 @@ class gf(Tagger):
 		'git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true'
 	)
 	output_types = [Tag]
+	item_loaders = []
 
 	@staticmethod
 	def item_loader(self, line):
-		return {'match': line, 'name': self.get_opt_value('pattern').rstrip() + ' pattern'}  # noqa: E731,E501
+		yield {'match': line, 'name': self.get_opt_value('pattern').rstrip() + ' pattern'}  # noqa: E731,E501
 
 	@staticmethod
 	def on_item(self, item):
