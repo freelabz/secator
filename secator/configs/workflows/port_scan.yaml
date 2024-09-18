@@ -12,6 +12,8 @@ tasks:
     description: Search for vulnerabilities on open ports
     targets_: port.host
     ports_: port.port
+    skip_host_discovery: True
+    version_detection: True
   _group:
     searchsploit:
       description: Search for related exploits
