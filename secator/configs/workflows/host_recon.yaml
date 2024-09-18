@@ -11,6 +11,8 @@ tasks:
     description: Find open ports
   nmap:
     description: Search for vulnerabilities on open ports
+    skip_host_discovery: True
+    version_detection: True
     targets_: port.host
     ports_: port.port
   httpx:

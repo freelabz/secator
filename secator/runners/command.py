@@ -478,8 +478,8 @@ class Command(Runner):
 
 		# Check if sudo can be executed without a password
 		try:
-		        if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
-			        return None
+			if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
+				return None
 		except ValueError:
 			error = "Could not run sudo check test"
 			self.errors.append(error)
