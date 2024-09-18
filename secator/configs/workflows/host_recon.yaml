@@ -12,7 +12,6 @@ tasks:
   nmap:
     description: Search for vulnerabilities on open ports
     skip_host_discovery: True
-    syn_stealth_scan: True
     version_detection: True
     targets_: port.host
     ports_: port.port
