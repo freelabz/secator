@@ -135,7 +135,7 @@ class nmapData(dict):
 
 				# Get extra data
 				extra_data = self._get_extra_data(port)
-				service_name = extra_data['service_name']
+				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				conf = extra_data.get('confidence')
 				if not version_exact:
