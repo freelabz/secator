@@ -1,6 +1,7 @@
 from secator.decorators import task
 from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
 from secator.output_types import Record, Ip, Subdomain
+from secator.output_types.ip import IpProtocol
 from secator.tasks._categories import ReconDns
 from secator.utils import extract_root_domain_from_domain
 
@@ -42,7 +43,14 @@ class dnsx(ReconDns):
 				if _type == 'a':
 					yield Ip(
 						host=host,
-						ip=name
+						ip=name,
+						protocol=IpProtocol.IPv4
+					)
+				elif type == 'aaaa':
+					yield Ip(
+						host=host,
+						ip=name,
+						protocol=IpProtocol.IPv6
 					)
 				elif _type == 'ptr':
 					yield Subdomain(
