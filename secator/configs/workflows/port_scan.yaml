@@ -5,6 +5,7 @@ description: Port scan
 tags: [recon, network, http, vuln]
 input_types:
   - host
+  - cidr_range
 tasks:
   naabu:
     description: Find open ports
