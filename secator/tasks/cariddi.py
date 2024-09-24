@@ -50,8 +50,8 @@ class cariddi(HttpCrawler):
 	@staticmethod
 	def on_json_loaded(self, item):
 		url_item = {k: v for k, v in item.items() if k != 'matches'}
+		yield Url(**url_item)
 		url = url_item[URL]
-		yield url_item
 		matches = item.get('matches', {})
 		params = matches.get('parameters', [])
 		errors = matches.get('errors', [])
@@ -62,25 +62,24 @@ class cariddi(HttpCrawler):
 			param_name = param['name']
 			for attack in param['attacks']:
 				extra_data = {'param': param_name, 'source': 'url'}
-				parameter = {
-					'name': attack + ' param',
-					'match': url,
-					'extra_data': extra_data
-				}
-				yield parameter
+				yield Tag(
+					name=f'{attack} param',
+					match=url,
+					extra_data=extra_data
+				)
 
 		for error in errors:
 			match = error['match']
 			match = (match[:1000] + '...TRUNCATED') if len(match) > 1000 else match  # truncate as this can be a very long match
 			error['extra_data'] = {'error': match, 'source': 'body'}
 			error['match'] = url
-			yield error
+			yield Tag(**error)
 
 		for secret in secrets:
 			match = secret['match']
 			secret['extra_data'] = {'secret': match, 'source': 'body'}
 			secret['match'] = url
-			yield secret
+			yield Tag(**secret)
 
 		for info in infos:
 			CARIDDI_IGNORE_LIST = ['BTC address']  # TODO: make this a config option
@@ -89,4 +88,4 @@ class cariddi(HttpCrawler):
 			match = info['match']
 			info['extra_data'] = {'info': match, 'source': 'body'}
 			info['match'] = url
-			yield info
+			yield Tag(**info)
