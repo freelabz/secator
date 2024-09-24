@@ -50,8 +50,8 @@ class cariddi(HttpCrawler):
 	@staticmethod
 	def on_json_loaded(self, item):
 		url_item = {k: v for k, v in item.items() if k != 'matches'}
-		url = url_item[URL]
 		yield Url(**url_item)
+		url = url_item[URL]
 		matches = item.get('matches', {})
 		params = matches.get('parameters', [])
 		errors = matches.get('errors', [])
