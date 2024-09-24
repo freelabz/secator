@@ -14,7 +14,6 @@ from secator.tasks._categories import Http
 from secator.utils import (sanitize_url,
 						   extract_root_domain_from_domain,
 						   remove_first_subdomain)
-import json
 
 
 @task()
@@ -74,7 +73,6 @@ class httpx(Http):
 	proxy_http = True
 	profile = 'cpu'
 	output_types = [Url, Subdomain]
-	founded_domain_in_certificates = []
 
 	@staticmethod
 	def on_init(self):
@@ -87,49 +85,36 @@ class httpx(Http):
 			self.cmd += f' -srd {self.reports_folder}/.outputs'
 		if screenshot:
 			self.cmd += ' -esb -ehb'
+		self.domains = []
 
 	@staticmethod
 	def on_item_pre_convert(self, item):
-		try:
-			for k, v in item.items():
-				if k == 'time':
-					response_time = float(''.join(ch for ch in v if not ch.isalpha()))
-					if v[-2:] == 'ms':
-						response_time = response_time / 1000
-					item[k] = response_time
-				elif k == URL:
-					item[k] = sanitize_url(v)
-			item[URL] = item.get('final_url') or item[URL]
-		# Because item can also be a domain
-		except KeyError as e:
-			if not ('url' in e.args):
-				raise e
+		for k, v in item.items():
+			if k == 'time':
+				response_time = float(''.join(ch for ch in v if not ch.isalpha()))
+				if v[-2:] == 'ms':
+					response_time = response_time / 1000
+				item[k] = response_time
+			elif k == URL:
+				item[k] = sanitize_url(v)
+		item[URL] = item.get('final_url') or item[URL]
 		return item
-
-	def _create_subdomain_from_tls(self, domain_in_certificate):
-		if domain_in_certificate.startswith('*'):
-			domain_in_certificate = remove_first_subdomain(domain_in_certificate)
-		if not (domain_in_certificate in self.founded_domain_in_certificates):
-			self.founded_domain_in_certificates.append(domain_in_certificate)
-			return {
-				'host': domain_in_certificate,
-				'domain': extract_root_domain_from_domain(domain_in_certificate),
-			}
 
 	@staticmethod
 	def on_json_loaded(self, item):
-	    """Extract domain from TLS certificate and yield a Subdomain if present."""
-	    yield item
-	    tls = item.get('tls', None)
-	    if tls:
-		    for key, value in tls.items():
-			    if key== 'subject_cn':
-				    domain = self._create_subdomain_from_tls(value)
-				    yield Subdomain(**domain)
-			    if key== 'subject_an':
-				    for alternative_name in value:
-					    domain = self._create_subdomain_from_tls(alternative_name)
-					    yield Subdomain(**domain)
+		"""Extract domain from TLS certificate and yield a Subdomain if present."""
+		yield item
+		tls = item.get('tls', None)
+		if tls:
+			subject_cn = tls.get('subject_cn', None)
+			subject_an = tls.get('subject_an', [])
+			cert_domains = subject_an
+			if subject_cn:
+				cert_domains.append(subject_cn)
+			for cert_domain in cert_domains:
+				subdomain = self._create_subdomain_from_tls_cert(cert_domain)
+				if subdomain:
+					yield subdomain
 
 	@staticmethod
 	def on_end(self):
@@ -145,3 +130,15 @@ class httpx(Http):
 				os.remove(index_spath)
 			if os.path.exists(index_spath2):
 				os.remove(index_spath2)
+
+	def _create_subdomain_from_tls_cert(self, cert_domain):
+		"""Extract subdomains from TLS certificate."""
+		if cert_domain.startswith('*'):
+			cert_domain = remove_first_subdomain(cert_domain)
+		if cert_domain in self.domains:
+			return None
+		self.domains.append(cert_domain)
+		return Subdomain(
+			host=cert_domain,
+			domain=extract_root_domain_from_domain(cert_domain)
+		)
