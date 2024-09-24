@@ -9,6 +9,7 @@ import json
 @task()
 class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
+  cmd = 'dnsx -resp -a -aaaa -cname -mx -ns -txt -srv -ptr -soa -axfr -caa'
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
@@ -25,28 +26,13 @@ class dnsx(ReconDns):
 		'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Domain name for wildcard filtering'},
 		'reverse': {'is_flag': True, 'default': False, 'help': 'Perform reverse dns lookup'},
 	}
-	item_loaders = []
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
 	install_github_handle = 'projectdiscovery/dnsx'
 	profile = 'io'
 
-	@staticmethod
-	def on_init(self):
-		reverse = self.get_opt_value('reverse')
-		if reverse:
-			self.cmd = 'dnsx -ptr'
-		else:
-			self.cmd = 'dnsx -resp -a -aaaa -cname -mx -ns -txt -srv -soa -axfr -caa'
 
 	@staticmethod
-	def item_loader(self, line):
-		try:
-			item = json.loads(line)
-		except json.JSONDecodeError:
-			return
-		if self.orig:  # original dnsx JSON output
-			yield item
-			return
+	def on_json_loaded(self, item):
 		host = item['host']
 		record_types = ['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'srv', 'ptr', 'soa', 'axfr', 'caa']
 		for _type in record_types:

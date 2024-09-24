@@ -82,6 +82,14 @@ class Command(Runner):
 	item_loader = None
 	item_loaders = [JSONSerializer(),]
 
+	# Hooks
+	hooks = [
+		'on_start',
+		'on_cmd',
+		'on_line',
+		'on_error',
+	]
+
 	# Ignore return code
 	ignore_return_code = False
 
@@ -140,6 +148,9 @@ class Command(Runner):
 
 		# Build command
 		self._build_cmd()
+
+		# Run on_cmd hook
+		self.run_hooks('on_cmd')
 
 		# Build item loaders
 		instance_func = getattr(self, 'item_loader', None)
@@ -338,6 +349,8 @@ class Command(Runner):
 
 		# Check for sudo requirements and prepare the password if needed
 		sudo_password = self._prompt_sudo(self.cmd)
+		if sudo_password and sudo_password == -1:
+			return
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -409,21 +422,15 @@ class Command(Runner):
 				line = self.run_hooks('on_line', line)
 
 				# Run item_loader to try parsing as dict
-				items = None
+				item_count = 0
 				if self.output_json:
-					items = self.run_item_loaders(line)
+					for item in self.run_item_loaders(line):
+						yield item
+						item_count += 1
 
-				# Yield line if no items parsed
-				if not items:
+				# Yield line if no items were yielded
+				if item_count == 0:
 					yield line
-
-				# Turn results into list if not already a list
-				elif not isinstance(items, list):
-					items = [items]
-
-				# Yield items
-				if items:
-					yield from items
 
 		except KeyboardInterrupt:
 			self.process.kill()
@@ -433,19 +440,16 @@ class Command(Runner):
 		self._wait_for_end()
 
 	def run_item_loaders(self, line):
-		"""Run item loaders on a string."""
-		items = []
+		"""Run item loaders against an output line."""
 		for item_loader in self.item_loaders:
-			result = None
 			if (callable(item_loader)):
-				result = item_loader(self, line)
+				yield from item_loader(self, line)
 			elif item_loader:
-				result = item_loader.run(line)
-			if isinstance(result, dict):
-				result = [result]
-			if result:
-				items.extend(result)
-		return items
+				name = item_loader.__class__.__name__.replace('Serializer', '').lower()
+				default_callback = lambda self, x: [(yield x)]  # noqa: E731
+				callback = getattr(self, f'on_{name}_loaded', None) or default_callback
+				for item in item_loader.run(line):
+					yield from callback(self, item)
 
 	def _prompt_sudo(self, command):
 		"""
@@ -464,13 +468,18 @@ class Command(Runner):
 			return None
 
 		# Check if sudo can be executed without a password
-		if subprocess.run(['sudo', '-n', 'true'], capture_output=True).returncode == 0:
-			return None
+		try:
+			if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
+				return None
+		except ValueError:
+			error = "Could not run sudo check test"
+			self.errors.append(error)
 
 		# Check if we have a tty
 		if not os.isatty(sys.stdin.fileno()):
-			self._print("No TTY detected. Sudo password prompt requires a TTY to proceed.", color='bold red')
-			sys.exit(1)
+			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
+			self.errors.append(error)
+			return -1
 
 		# If not, prompt the user for a password
 		self._print('[bold red]Please enter sudo password to continue.[/]')
@@ -486,8 +495,9 @@ class Command(Runner):
 			if result.returncode == 0:
 				return sudo_password  # Password is correct
 			self._print("Sorry, try again.")
-		self._print("Sudo password verification failed after 3 attempts.")
-		return None
+		error = "Sudo password verification failed after 3 attempts."
+		self.errors.append(error)
+		return -1
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
@@ -577,7 +587,15 @@ class Command(Runner):
 		return opts_str.strip()
 
 	@staticmethod
+	def _get_opt_default(opt_name, opts_conf):
+		for k, v in opts_conf.items():
+			if k == opt_name:
+				return v.get('default', None)
+		return None
+
+	@staticmethod
 	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
+		default = default or Command._get_opt_default(opt_name, opts_conf)
 		aliases = [
 			opts.get(f'{opt_prefix}_{opt_name}'),
 			opts.get(f'{opt_prefix}.{opt_name}'),
