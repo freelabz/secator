@@ -46,7 +46,7 @@ class dnsx(ReconDns):
 						ip=name,
 						protocol=IpProtocol.IPv4
 					)
-				elif type == 'aaaa':
+				elif _type == 'aaaa':
 					yield Ip(
 						host=host,
 						ip=name,
