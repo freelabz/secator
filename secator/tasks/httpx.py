@@ -117,21 +117,19 @@ class httpx(Http):
 			}
 
 	@staticmethod
-	def item_loader(self, line):
-		try:
-			item = json.loads(line)
-		except json.JSONDecodeError:
-			return
-		for k, v in item.items():
-			if k == 'tls':
-				for tls_k, tls_v in v.items():
-					if tls_k == 'subject_cn':
-						domain = self._create_subdomain_from_tls(tls_v)
-						yield domain
-					if tls_k == 'subject_an':
-						for alternative_name in tls_v:
-							domain = self._create_subdomain_from_tls(alternative_name)
-							yield domain
+	def on_json_loaded(self, item):
+	    """Extract domain from TLS certificate and yield a Subdomain if present."""
+	    yield item
+	    tls = item.get('tls', None)
+	    if tls:
+		    for key, value in tls.items():
+			    if key== 'subject_cn':
+				    domain = self._create_subdomain_from_tls(value)
+				    yield Subdomain(**domain)
+			    if key== 'subject_an':
+				    for alternative_name in value:
+					    domain = self._create_subdomain_from_tls(alternative_name)
+					    yield Subdomain(**domain)
 
 	@staticmethod
 	def on_end(self):
