@@ -3,13 +3,12 @@ from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
 from secator.output_types import Record, Ip, Subdomain
 from secator.tasks._categories import ReconDns
 from secator.utils import extract_root_domain_from_domain
-import json
 
 
 @task()
 class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
-  	cmd = 'dnsx -resp -a -aaaa -cname -mx -ns -txt -srv -ptr -soa -axfr -caa'
+	cmd = 'dnsx -resp -a -aaaa -cname -mx -ns -txt -srv -ptr -soa -axfr -caa'
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
@@ -27,7 +26,6 @@ class dnsx(ReconDns):
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
 	install_github_handle = 'projectdiscovery/dnsx'
 	profile = 'io'
-
 
 	@staticmethod
 	def on_json_loaded(self, item):
