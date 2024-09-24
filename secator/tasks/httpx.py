@@ -88,21 +88,8 @@ class httpx(Http):
 		self.domains = []
 
 	@staticmethod
-	def on_item_pre_convert(self, item):
-		for k, v in item.items():
-			if k == 'time':
-				response_time = float(''.join(ch for ch in v if not ch.isalpha()))
-				if v[-2:] == 'ms':
-					response_time = response_time / 1000
-				item[k] = response_time
-			elif k == URL:
-				item[k] = sanitize_url(v)
-		item[URL] = item.get('final_url') or item[URL]
-		return item
-
-	@staticmethod
 	def on_json_loaded(self, item):
-		"""Extract domain from TLS certificate and yield a Subdomain if present."""
+		item = self._preprocess_url(item)
 		yield item
 		tls = item.get('tls', None)
 		if tls:
@@ -130,6 +117,19 @@ class httpx(Http):
 				os.remove(index_spath)
 			if os.path.exists(index_spath2):
 				os.remove(index_spath2)
+
+	def _preprocess_url(self, item):
+		"""Replace time string by float, sanitize URL, get final redirect URL."""
+		for k, v in item.items():
+			if k == 'time':
+				response_time = float(''.join(ch for ch in v if not ch.isalpha()))
+				if v[-2:] == 'ms':
+					response_time = response_time / 1000
+				item[k] = response_time
+			elif k == URL:
+				item[k] = sanitize_url(v)
+		item[URL] = item.get('final_url') or item[URL]
+		return item
 
 	def _create_subdomain_from_tls_cert(self, cert_domain):
 		"""Extract subdomains from TLS certificate."""
