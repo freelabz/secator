@@ -73,7 +73,6 @@ class httpx(Http):
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'cpu'
-	# Overriding the output_type to add Subdomains
 	output_types = [Url, Subdomain]
 	founded_domain_in_certificates = []
 
