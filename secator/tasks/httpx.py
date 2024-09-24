@@ -114,7 +114,6 @@ class httpx(Http):
 			return {
 				'host': domain_in_certificate,
 				'domain': extract_root_domain_from_domain(domain_in_certificate),
-				'_source': 'httpx'
 			}
 
 	@staticmethod
