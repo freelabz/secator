@@ -11,10 +11,10 @@ tasks:
     ports: "-"  # scan all ports
   nmap:
     description: Search for vulnerabilities on open ports
-    targets_: port.host
-    ports_: port.port
     skip_host_discovery: True
     version_detection: True
+    targets_: port.host
+    ports_: port.port
   _group:
     searchsploit:
       description: Search for related exploits
