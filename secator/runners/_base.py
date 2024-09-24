@@ -828,9 +828,7 @@ class Runner:
 			return None
 
 		# Convert output dict to another schema
-		if isinstance(item, OutputType):
-			pass
-		elif isinstance(item, dict):
+		if isinstance(item, dict):
 			item = self.run_hooks('on_item_pre_convert', item)
 			if not item:
 				return None
