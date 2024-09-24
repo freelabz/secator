@@ -262,8 +262,8 @@ def merge_opts(*options):
 	all_opts = {}
 	for opts in options:
 		if opts:
-			opts_noemtpy = {k: v for k, v in opts.items() if v is not None}
-			all_opts.update(opts_noemtpy)
+			opts_noempty = {k: v for k, v in opts.items() if v is not None}
+			all_opts.update(opts_noempty)
 	return all_opts
 
 

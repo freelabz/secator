@@ -1,5 +1,4 @@
 import os
-import json
 from urllib.parse import urlparse
 
 from secator.decorators import task
@@ -74,7 +73,6 @@ class katana(HttpCrawler):
 			# TAGS: lambda x: x['response'].get('server')
 		}
 	}
-	item_loaders = []
 	install_cmd = 'sudo apt install build-essential && go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
 	install_github_handle = 'projectdiscovery/katana'
 	proxychains = False
@@ -83,12 +81,7 @@ class katana(HttpCrawler):
 	profile = 'io'
 
 	@staticmethod
-	def item_loader(self, item):
-		try:
-			item = json.loads(item)
-		except json.JSONDecodeError:
-			return None
-
+	def on_json_loaded(self, item):
 		# form detection
 		forms = item.get('response', {}).get('forms', [])
 		if forms:

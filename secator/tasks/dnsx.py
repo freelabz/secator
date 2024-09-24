@@ -2,7 +2,6 @@ from secator.decorators import task
 from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
 from secator.output_types import Record, Ip
 from secator.tasks._categories import ReconDns
-import json
 
 
 @task()
@@ -23,20 +22,12 @@ class dnsx(ReconDns):
 		'resolver': {'type': str, 'short': 'r', 'help': 'List of resolvers to use (file or comma separated)'},
 		'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Domain name for wildcard filtering'},
 	}
-	item_loaders = []
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
 	install_github_handle = 'projectdiscovery/dnsx'
 	profile = 'io'
 
 	@staticmethod
-	def item_loader(self, line):
-		try:
-			item = json.loads(line)
-		except json.JSONDecodeError:
-			return
-		if self.orig:  # original dnsx JSON output
-			yield item
-			return
+	def on_json_loaded(self, item):
 		host = item['host']
 		record_types = ['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'srv', 'ptr', 'soa', 'axfr', 'caa']
 		for _type in record_types:
