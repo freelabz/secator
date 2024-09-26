@@ -21,6 +21,7 @@ class gitleaks(Command):
 	opt_key_map = {
 		"ignore_path": "i"
 	}
+	input_type = "folder"
 	output_types = [Tag]
 	output_map = {
 		Tag: {
