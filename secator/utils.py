@@ -419,6 +419,10 @@ def escape_mongodb_url(url):
 	return url
 
 
+def caml_to_snake(s):
+	return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
+
+
 def print_version():
 	"""Print secator version information."""
 	from secator.installer import get_version_info

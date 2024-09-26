@@ -37,7 +37,7 @@ class Tag(OutputType):
 				sep = ' '
 				if not v:
 					continue
-				if len(v) >= 80:
+				if isinstance(v, str) and len(v) >= 80:
 					v = v.replace('\n', '\n' + '  ').replace('...TRUNCATED', '\n[italic bold red]...truncated to 1000 chars[/]')
 					sep = '\n    '
 				ed += f'\n    [dim red]{k}[/]:{sep}[dim yellow]{v}[/]'
