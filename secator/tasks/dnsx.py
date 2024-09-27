@@ -9,7 +9,7 @@ from secator.utils import extract_domain_info
 @task()
 class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
-	cmd = 'dnsx -resp -a -aaaa -cname -mx -ns -txt -srv -ptr -soa -axfr -caa'
+	cmd = 'dnsx -resp -recon'
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
@@ -30,8 +30,17 @@ class dnsx(ReconDns):
 
 	@staticmethod
 	def on_json_loaded(self, item):
-		host = item['host']
+		# Show full DNS response
+		quiet = self.get_opt_value('quiet')
+		if not quiet:
+			all = item['all']
+			for line in all:
+				yield line
+			yield '\n'
+
+		# Loop through record types and yield records
 		record_types = ['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'srv', 'ptr', 'soa', 'axfr', 'caa']
+		host = item['host']
 		for _type in record_types:
 			values = item.get(_type, [])
 			for value in values:
