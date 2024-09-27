@@ -827,12 +827,16 @@ class Runner:
 		if not self.run_validators('item', item):
 			return None
 
-		# Run item hooks
-		item = self.run_hooks('on_item_pre_convert', item)
-		if not item:
-			return None
-
 		# Convert output dict to another schema
+		if isinstance(item, dict):
+			item = self.run_hooks('on_item_pre_convert', item)
+			if not item:
+				return None
+			if not self.orig:
+				item = self._convert_item_schema(item)
+			else:
+				item = DotMap(item)
+
 		if isinstance(item, dict) and not self.orig:
 			item = self._convert_item_schema(item)
 		elif isinstance(item, OutputType):

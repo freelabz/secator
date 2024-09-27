@@ -4,12 +4,14 @@ import itertools
 import logging
 import operator
 import os
+import tldextract
 import re
 import select
 import sys
+import validators
 import warnings
-from datetime import datetime
 
+from datetime import datetime
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
@@ -443,3 +445,54 @@ def print_version():
 	console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
 	if status == 'outdated':
 		console.print('[bold red]secator is outdated, run "secator update" to install the latest version.')
+
+
+def extract_domain_info(input, domain_only=False):
+	"""Extracts domain info from a given any URL or FQDN.
+
+	Args:
+		input (str): An URL or FQDN.
+
+	Returns:
+		tldextract.ExtractResult: Extracted info.
+		str | None: Registered domain name or None if invalid domain (only if domain_only is set).
+	"""
+	result = tldextract.extract(input)
+	if not result or not result.domain or not result.suffix:
+		return None
+	if domain_only:
+		if not validators.domain(result.registered_domain):
+			return None
+		return result.registered_domain
+	return result
+
+
+def extract_subdomains_from_fqdn(fqdn, domain, suffix):
+    """
+    Generates a list of subdomains up to the root domain from a fully qualified domain name (FQDN).
+
+    Args:
+        fqdn (str): The full domain name, e.g., 'console.cloud.google.com'.
+        domain (str): The main domain, e.g., 'google'.
+        suffix (str): The top-level domain (TLD), e.g., 'com'.
+
+    Returns:
+        List[str]: A list containing the FQDN and all its subdomains down to the root domain.
+    """
+    # Start with the full domain and prepare to break it down
+    parts = fqdn.split('.')
+
+    # Initialize the list of subdomains with the full domain
+    subdomains = [fqdn]
+
+    # Continue stripping subdomains until reaching the base domain (domain + suffix)
+    base_domain = f"{domain}.{suffix}"
+    current = fqdn
+
+    while current != base_domain:
+        # Remove the leftmost part of the domain
+        parts = parts[1:]
+        current = '.'.join(parts)
+        subdomains.append(current)
+
+    return subdomains
