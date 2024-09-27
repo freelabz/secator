@@ -4,12 +4,14 @@ import itertools
 import logging
 import operator
 import os
+import tldextract
 import re
 import select
 import sys
+import validators
 import warnings
-from datetime import datetime
 
+from datetime import datetime
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
@@ -441,24 +443,21 @@ def print_version():
 		console.print('[bold red]secator is outdated, run "secator update" to install the latest version.')
 
 
-def extract_root_domain_from_domain(domain):
-	"""Extract the root domain from a given domain in input
-	Regex for domain validation taken and adapted from :
-	https://www.geeksforgeeks.org/how-to-validate-a-domain-name-using-regular-expression/
-	For example :
-	test.example.org will return example.org
+def extract_domain_info(input, domain_only=False):
+	"""Extracts the root domain from a given any URL or FQDN.
 
 	Args:
-		domain (str): a domain name (like dns.google.com or wikipedia.org)
+		input (str): An URL or FQDN.
 
 	Returns:
-		str: The root domain.
+		tldextract.ExtractResult: Extracted info.
+		str: Registered domain name (if domain_only is True).
 	"""
-	match = re.search(r"^([A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,6}$", domain)
-	if not match:
-		raise TypeError(f'Given domain {domain} is malformed')
-	domain_parts = domain.split('.')
-	if len(domain_parts) >= 2:
-		return '.'.join(domain_parts[-2:])
-	else:
-		raise TypeError(f'Fatal error this should never append, error caused by {domain}')
+	result = tldextract.extract(input)
+	if not result or not result.domain or not result.suffix:
+		return None
+	if not validators.domain(result.registered_domain):
+		return None
+	if domain_only:
+		return result.registered_domain
+	return result
