@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import sys
 import uuid
 from contextlib import nullcontext
@@ -118,6 +119,9 @@ class Runner:
 		os.makedirs(self.reports_folder, exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
+
+		# Output log path
+		self.output_log_path = f'{self.reports_folder}/.outputs/logs.txt'
 
 		# Process input
 		self.input = targets
@@ -492,6 +496,14 @@ class Runner:
 			for info in self.infos:
 				self._print(f'   • {info}', color='bold green', rich=True)
 
+		# Save logs to file
+		with open(self.output_log_path, 'w') as f:
+			f.write(self.output)
+
+		# Catch additional errors from output
+		for error in Runner.parse_errors(self.output):
+			self.errors.append(error)
+
 		# Log runner errors
 		if self.errors and self.print_errors:
 			self._print(
@@ -499,6 +511,8 @@ class Runner:
 				color='bold red', rich=True)
 			for error in self.errors:
 				self._print(f'   • {error}', color='bold red', rich=True)
+			if self.sync:
+				self._print(f'   • Check {self.output_log_path} for details.', color='bold red', rich=True)
 
 		# Build and send report
 		if self.results:
@@ -518,6 +532,48 @@ class Runner:
 					for name, count in count_map.items()
 				]) + '.'
 				self._print(results_str, color='bold green', rich=True)
+
+	@staticmethod
+	def parse_errors(output):
+		"""Searches for error messages in the provided multi-line string.
+		Errors can be indicated by specific keywords or red ANSI color codes.
+
+		Args:
+			output (str): Multi-line string containing the output of many commands.
+
+		Returns:
+			list: A list of strings, each an identified error message.
+		"""
+		error_messages = []
+
+		# Define a regex pattern for error indicators and ANSI red text
+		error_pattern = re.compile(
+			r'^(.*(?:err|error|ftl|fatal|traceback|exception[s]?|exc|\x1b\[31m.*\x1b\[0m).*)$',
+			re.IGNORECASE | re.MULTILINE
+		)
+
+		# Search the output for any matches to the error pattern
+		matches = error_pattern.findall(output)
+		for match in matches:
+			if match not in error_messages:
+				error_messages.append(Runner.strip_ansi_codes(match))
+
+		return error_messages
+
+	@staticmethod
+	def strip_ansi_codes(string):
+		"""Strip ANSI codes from a string.
+
+		Args:
+			string (str): Input string.
+
+		Returns:
+			str: Returns stripped output.
+		"""
+		ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+		string = ansi_escape.sub('', string)
+		string = string.replace('\\x0d\\x0a', '\n')
+		return string
 
 	@staticmethod
 	def get_live_results(result):

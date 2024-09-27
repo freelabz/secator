@@ -291,7 +291,7 @@ def run_command(self, results, name, targets, opts={}):
 				task_exc = None
 			else:
 				task_state = 'FAILURE'
-				task_exc = TaskError('\n'.join(task.errors))
+				task_exc = TaskError(' '.join(task.errors))  # TODO: refactor this
 
 	except BaseException as exc:
 		task_state = 'FAILURE'
