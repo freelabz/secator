@@ -31,6 +31,13 @@ class gitleaks(Command):
 		}
 	}
 
+	install_cmd = (
+		'export GITLEAKS_VERSION="8.19.3" && '
+		'wget https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz -O gitleaks_latest.tar.gz &&'
+		'tar -zxvf gitleaks_latest.tar.gz gitleaks && mv gitleaks /usr/local/bin/gitleaks &&'
+		'rm gitleaks_latest.tar.gz'
+	)
+
 	@staticmethod
 	def on_cmd(self):
 		# replace fake -mode opt by subcommand
