@@ -444,20 +444,20 @@ def print_version():
 
 
 def extract_domain_info(input, domain_only=False):
-	"""Extracts the root domain from a given any URL or FQDN.
+	"""Extracts domain info from a given any URL or FQDN.
 
 	Args:
 		input (str): An URL or FQDN.
 
 	Returns:
 		tldextract.ExtractResult: Extracted info.
-		str: Registered domain name (if domain_only is True).
+		str | None: Registered domain name or None if invalid domain (only if domain_only is set).
 	"""
 	result = tldextract.extract(input)
 	if not result or not result.domain or not result.suffix:
 		return None
-	if not validators.domain(result.registered_domain):
-		return None
 	if domain_only:
+		if not validators.domain(result.registered_domain):
+			return None
 		return result.registered_domain
 	return result
