@@ -4,12 +4,14 @@ import itertools
 import logging
 import operator
 import os
+import tldextract
 import re
 import select
 import sys
+import validators
 import warnings
-from datetime import datetime
 
+from datetime import datetime
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
@@ -439,3 +441,23 @@ def print_version():
 	console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
 	if status == 'outdated':
 		console.print('[bold red]secator is outdated, run "secator update" to install the latest version.')
+
+
+def extract_domain_info(input, domain_only=False):
+	"""Extracts domain info from a given any URL or FQDN.
+
+	Args:
+		input (str): An URL or FQDN.
+
+	Returns:
+		tldextract.ExtractResult: Extracted info.
+		str | None: Registered domain name or None if invalid domain (only if domain_only is set).
+	"""
+	result = tldextract.extract(input)
+	if not result or not result.domain or not result.suffix:
+		return None
+	if domain_only:
+		if not validators.domain(result.registered_domain):
+			return None
+		return result.registered_domain
+	return result
