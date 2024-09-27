@@ -443,49 +443,6 @@ def print_version():
 		console.print('[bold red]secator is outdated, run "secator update" to install the latest version.')
 
 
-def extract_root_domain_from_domain(domain):
-	"""Extract the root domain from a given domain in input
-	Regex for domain validation taken and adapted from :
-	https://www.geeksforgeeks.org/how-to-validate-a-domain-name-using-regular-expression/
-	For example :
-	test.example.org will return example.org
-	Args:
-		domain (str): a domain name (like dns.google.com or wikipedia.org)
-	Returns:
-		str: The root domain.
-	"""
-	match = re.search(r"^([A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,6}$", domain)
-	if not match:
-		raise TypeError(f'Given domain {domain} is malformed')
-	domain_parts = domain.split('.')
-	if len(domain_parts) >= 2:
-		return '.'.join(domain_parts[-2:])
-	else:
-		raise TypeError(f'Fatal error this should never append, error caused by {domain}')
-
-
-def remove_first_subdomain(domain):
-	"""Remove the first subdomain
-	Regex for domain validation taken and adapted from :
-	https://www.geeksforgeeks.org/how-to-validate-a-domain-name-using-regular-expression/
-	For example :
-	test.example.org will return example.org
-	tata.toto.titi.example.org will return toto.titi.example.org
-	Args:
-		domain (str): a domain name (like dns.google.com or wikipedia.org)
-	Returns:
-		str: The domain without the first subdomain
-	"""
-	match = re.search(r"^(\*\.)?([A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,6}$", domain)
-	if not match:
-		raise TypeError(f'Given domain {domain} is malformed')
-	domain_parts = domain.split('.')
-	if len(domain_parts) >= 3:
-		return '.'.join(domain_parts[1:])
-	else:
-		raise TypeError(f'The domain {domain} does not contain a subdomain')
-
-    
 def extract_domain_info(input, domain_only=False):
 	"""Extracts domain info from a given any URL or FQDN.
 
@@ -504,3 +461,34 @@ def extract_domain_info(input, domain_only=False):
 			return None
 		return result.registered_domain
 	return result
+
+
+def extract_subdomains_from_fqdn(fqdn, domain, suffix):
+    """
+    Generates a list of subdomains up to the root domain from a fully qualified domain name (FQDN).
+
+    Args:
+        fqdn (str): The full domain name, e.g., 'console.cloud.google.com'.
+        domain (str): The main domain, e.g., 'google'.
+        suffix (str): The top-level domain (TLD), e.g., 'com'.
+
+    Returns:
+        List[str]: A list containing the FQDN and all its subdomains down to the root domain.
+    """
+    # Start with the full domain and prepare to break it down
+    parts = fqdn.split('.')
+
+    # Initialize the list of subdomains with the full domain
+    subdomains = [fqdn]
+
+    # Continue stripping subdomains until reaching the base domain (domain + suffix)
+    base_domain = f"{domain}.{suffix}"
+    current = fqdn
+
+    while current != base_domain:
+        # Remove the leftmost part of the domain
+        parts = parts[1:]
+        current = '.'.join(parts)
+        subdomains.append(current)
+
+    return subdomains

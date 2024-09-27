@@ -11,9 +11,7 @@ from secator.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH,
 from secator.config import CONFIG
 from secator.output_types import Url, Subdomain
 from secator.tasks._categories import Http
-from secator.utils import (sanitize_url,
-						   extract_root_domain_from_domain,
-						   remove_first_subdomain)
+from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
 
 
 @task()
@@ -99,7 +97,7 @@ class httpx(Http):
 			if subject_cn:
 				cert_domains.append(subject_cn)
 			for cert_domain in cert_domains:
-				subdomain = self._create_subdomain_from_tls_cert(cert_domain)
+				subdomain = self._create_subdomain_from_tls_cert(cert_domain, item['url'])
 				if subdomain:
 					yield subdomain
 
@@ -131,14 +129,18 @@ class httpx(Http):
 		item[URL] = item.get('final_url') or item[URL]
 		return item
 
-	def _create_subdomain_from_tls_cert(self, cert_domain):
+	def _create_subdomain_from_tls_cert(self, domain, url):
 		"""Extract subdomains from TLS certificate."""
-		if cert_domain.startswith('*'):
-			cert_domain = remove_first_subdomain(cert_domain)
-		if cert_domain in self.domains:
+		if domain.startswith('*.'):
+			domain = domain.lstrip('*.')
+		if domain in self.domains:
 			return None
-		self.domains.append(cert_domain)
+		url_domain = extract_domain_info(url)
+		url_domains = extract_subdomains_from_fqdn(url_domain.fqdn, url_domain.domain, url_domain.suffix)
+		if not url_domain or domain not in url_domains:
+			return None
+		self.domains.append(domain)
 		return Subdomain(
-			host=cert_domain,
-			domain=extract_root_domain_from_domain(cert_domain)
+			host=domain,
+			domain=extract_domain_info(domain, domain_only=True)
 		)
