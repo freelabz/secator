@@ -1,6 +1,7 @@
 import logging
 import re
 from dataclasses import _MISSING_TYPE, dataclass, fields
+from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,12 @@ class OutputType:
 			if key in output_map:
 				mapped_key = output_map[key]
 				if callable(mapped_key):
-					mapped_val = mapped_key(item)
+					try:
+						mapped_val = mapped_key(item)
+					except Exception as e:
+						pass
+						# console.print_exception()
+						# raise TypeError(f'Fail to map value for "{key}".')
 				else:
 					mapped_val = item.get(mapped_key)
 				new_item[key] = mapped_val
