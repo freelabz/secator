@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.secatorWorker.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: secator-worker
+  template:
+    metadata:
+      labels:
+        app: secator-worker
+    spec:
+      containers:
+      - name: {{ .Values.secatorWorker.name }}
+        image: {{ .Values.secatorWorker.image }}
+        command: ["secator"]
+        args: ["worker"]
+        env:
+        - name: SECATOR_CELERY_BROKER_URL
+          value: "redis://{{ .Values.redis.name }}:6379/0"
+        - name: SECATOR_CELERY_RESULT_BACKEND
+          value: "redis://{{ .Values.redis.name }}:6379/0"

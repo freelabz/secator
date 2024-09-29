@@ -145,8 +145,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
-	if CONFIG.debug.level > 1:
-		logger.info(f'Received task with args {args} and kwargs {kwargs}')
+	debug(f'Received task with args {args} and kwargs {kwargs}', sub="celery", level=2)
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -156,8 +155,7 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
-	if CONFIG.debug.level > 1:
-		logger.info(f'Received workflow with args {args} and kwargs {kwargs}')
+	debug(f'Received workflow with args {args} and kwargs {kwargs}', sub="celery", level=2)
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -167,8 +165,7 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
-	if CONFIG.debug.level > 1:
-		logger.info(f'Received scan with args {args} and kwargs {kwargs}')
+	debug(f'Received scan with args {args} and kwargs {kwargs}', sub="celery", level=2)
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id

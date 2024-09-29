@@ -269,9 +269,17 @@ def register_runner(cli_endpoint, config):
 		driver = opts.pop('driver', '')
 		show = opts['show']
 		context = {'workspace_name': ws}
+
+		# Remove options whose values are default values
+		for k, v in options.items():
+			opt_name = k.replace('-', '_')
+			if opt_name in opts and opts[opt_name] == v.get('default', None):
+				del opts[opt_name]
+
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
+
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
 		if sync or show:

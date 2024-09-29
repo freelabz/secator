@@ -7,9 +7,9 @@ class JSONSerializer:
 		start_index = line.find('{')
 		end_index = line.rfind('}')
 		if start_index == -1 or end_index == -1:
-			return None
+			return
 		try:
 			json_obj = line[start_index:end_index+1]
-			return yaml.safe_load(json_obj)
+			yield yaml.safe_load(json_obj)
 		except yaml.YAMLError:
-			return None
+			return

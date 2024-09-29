@@ -8,7 +8,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
-								 HEADER, HOST, ID, IP, MATCHED_AT, NAME,
+								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
@@ -24,18 +24,21 @@ logger = logging.getLogger(__name__)
 @task()
 class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
-	cmd = 'nmap -sT -sV -Pn'
+	cmd = 'nmap'
 	input_flag = None
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
 	output_types = [Port, Vulnerability, Exploit]
 	opts = {
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan'},
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (default: most common 1000 ports for each protocol)'},
 		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [full, 100, 1000]'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
-		# 'tcp_connect': {'type': bool, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
+		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
+		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Version detection'},
 		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
+		'tcp_connect': {'is_flag': True, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
+		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
 	}
 	opt_key_map = {
@@ -51,8 +54,12 @@ class nmap(VulnMulti):
 
 		# Nmap opts
 		PORTS: '-p',
+		'skip_host_discovery': '-Pn',
+		'version_detection': '-sV',
+		'tcp_connect': '-sT',
+		'tcp_syn_stealth': '-sS',
+		'udp_scan': '-sU',
 		'output_path': '-oX',
-		'tcp_syn_stealth': '-sS'
 	}
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
@@ -75,9 +82,14 @@ class nmap(VulnMulti):
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
+		tcp_connect = self.get_opt_value('tcp_connect')
 		if tcp_syn_stealth:
 			self.cmd = f'sudo {self.cmd}'
-			self.cmd = self.cmd.replace('-sT', '')
+		if tcp_connect and tcp_syn_stealth:
+			self._print(
+				'Options -sT (SYN stealth scan) and -sS (CONNECT scan) are conflicting. Keeping only -sT.',
+				'bold gold3')
+			self.cmd = self.cmd.replace('-sT ', '')
 
 	def yielder(self):
 		yield from super().yielder()
@@ -123,7 +135,7 @@ class nmapData(dict):
 
 				# Get extra data
 				extra_data = self._get_extra_data(port)
-				service_name = extra_data['service_name']
+				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				conf = extra_data.get('confidence')
 				if not version_exact:
@@ -138,6 +150,9 @@ class nmapData(dict):
 				# Get script output
 				scripts = self._get_scripts(port)
 
+				# Get port protocol
+				protocol = port['@protocol'].upper()
+
 				# Yield port data
 				port = {
 					PORT: port_number,
@@ -145,6 +160,7 @@ class nmapData(dict):
 					STATE: state,
 					SERVICE_NAME: service_name,
 					IP: ip,
+					PROTOCOL: protocol,
 					EXTRA_DATA: extra_data
 				}
 				yield port
@@ -205,11 +221,19 @@ class nmapData(dict):
 			if hostnames:
 				hostname = hostnames[0]['@name']
 		else:
-			hostname = host_cfg.get('address', {}).get('@addr', None)
+			hostname = self._get_address(host_cfg).get('@addr', None)
 		return hostname
 
+	def _get_address(self, host_cfg):
+		if isinstance(host_cfg.get('address', {}), list):
+			addresses = host_cfg.get('address', {})
+			for address in addresses:
+				if address.get('@addrtype') == "ipv4":
+					return address
+		return host_cfg.get('address', {})
+
 	def _get_ip(self, host_cfg):
-		return host_cfg.get('address', {}).get('@addr', None)
+		return self._get_address(host_cfg).get('@addr', None)
 
 	def _get_extra_data(self, port_cfg):
 		extra_data = {

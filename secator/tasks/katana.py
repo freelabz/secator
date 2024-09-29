@@ -1,5 +1,4 @@
 import os
-import json
 from urllib.parse import urlparse
 
 from secator.decorators import task
@@ -30,7 +29,8 @@ class katana(HttpCrawler):
 		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
 		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'},
 		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'},
-		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'}
+		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'},  # noqa: E501
+		'form_fill': {'type': bool, 'short': 'ff', 'help': 'Enable form filling'}
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -52,7 +52,8 @@ class katana(HttpCrawler):
 		THREADS: 'concurrency',
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
-		'store_responses': 'sr'
+		'store_responses': 'sr',
+		'form_fill': 'aff'
 	}
 	opt_value_map = {
 		DELAY: lambda x: int(x) if isinstance(x, float) else x
@@ -72,7 +73,6 @@ class katana(HttpCrawler):
 			# TAGS: lambda x: x['response'].get('server')
 		}
 	}
-	item_loaders = []
 	install_cmd = 'sudo apt install build-essential && go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
 	install_github_handle = 'projectdiscovery/katana'
 	proxychains = False
@@ -81,12 +81,7 @@ class katana(HttpCrawler):
 	profile = 'io'
 
 	@staticmethod
-	def item_loader(self, item):
-		try:
-			item = json.loads(item)
-		except json.JSONDecodeError:
-			return None
-
+	def on_json_loaded(self, item):
 		# form detection
 		forms = item.get('response', {}).get('forms', [])
 		if forms:

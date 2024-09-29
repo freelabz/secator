@@ -49,6 +49,7 @@ class Report:
 				'title': self.title,
 				'runner': self.runner.__class__.__name__,
 				'name': self.runner.config.name,
+				'status': self.runner.status,
 				'targets': self.runner.targets,
 				'total_time': str(self.runner.elapsed),
 				'total_human': self.runner.elapsed_human,

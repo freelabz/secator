@@ -1,9 +1,15 @@
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 
 from secator.definitions import ALIVE, IP
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi
+
+
+class IpProtocol(str, Enum):
+	IPv6 = 'IPv6'
+	IPv4 = 'IPv4'
 
 
 @dataclass
@@ -11,6 +17,7 @@ class Ip(OutputType):
 	ip: str
 	host: str = ''
 	alive: bool = False
+	protocol: str = field(default=IpProtocol.IPv4)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='ip', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
