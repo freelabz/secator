@@ -1,7 +1,8 @@
+import json
 import re
 
 from secator.decorators import task
-from secator.output_types import Url
+from secator.output_types import Url, Progress
 from secator.tasks._categories import Http
 from secator.definitions import (
 	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT,
@@ -44,7 +45,7 @@ class bup(Http):
 		MATCH_CODES: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 	}
-	output_types = [Url]
+	output_types = [Url, Progress]
 	output_map = {
 		Url: {
 			'url': 'request_url',
@@ -65,6 +66,14 @@ class bup(Http):
 	@staticmethod
 	def on_init(self):
 		self.cmd += f' -o {self.reports_folder}/.outputs/response'
+
+	@staticmethod
+	def on_line(self, line):
+		if 'Doing' in line:
+			progress_indicator = line.split(':')[-1]
+			current, total = tuple([int(c.strip()) for c in progress_indicator.split('/')])
+			return json.dumps({"duration": "unknown", "percent": int((current / total) * 100)})
+		return line
 
 	@staticmethod
 	def method_extractor(item):
