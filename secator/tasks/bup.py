@@ -42,7 +42,7 @@ class bup(Http):
 		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
 		MATCH_CODES: OPT_NOT_SUPPORTED,
-		PROXY: OPT_NOT_SUPPORTED,
+		PROXY: 'proxy',
 	}
 	output_types = [Url]
 	output_map = {
