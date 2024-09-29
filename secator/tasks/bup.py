@@ -60,7 +60,7 @@ class bup(Http):
 			'stored_response_path': 'response_html_filename',
 		}
 	}
-	install_cmd = 'pipx install bypass-url-parser==0.4.2b'
+	install_cmd = 'pipx install bypass-url-parser && pipx upgrade bypass-url-parser'
 
 	@staticmethod
 	def on_init(self):
