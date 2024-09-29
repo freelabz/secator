@@ -11,7 +11,7 @@ class RegexSerializer:
 		match = self.regex.match(line)
 		output = {}
 		if not match:
-			return None
+			return
 		for field in self.fields:
 			output[field] = match.group(field)
-		return output
+		yield output

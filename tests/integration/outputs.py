@@ -3,6 +3,22 @@ from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability, Record)
 
 OUTPUTS_TASKS = {
+	'bup': [
+        Url(
+            url='http://localhost:3000/ftp/coupons_2013.md.bak',
+            status_code=403,
+            content_length=164,
+            content_type='text/html',
+            method='GET',
+            _source='bup'
+        ),
+        Url(
+            url='http://localhost:3000/ftp/coupons_2013.md.bak',
+            status_code=405,
+            method='SEARCH',
+            _source='bup'
+        )
+	],
     'cariddi': [
         Url(
             url='http://localhost:3000/robots.txt',
@@ -59,7 +75,7 @@ OUTPUTS_TASKS = {
             _source='dnsx'
 		),
         Record(
-            name='v=spf1 include:wikimedia.org ~all',
+            name='v=spf1 include:_cidrs.wikimedia.org ~all',
             type='TXT',
             host='wikipedia.org',
             _source='dnsx'
@@ -217,7 +233,7 @@ OUTPUTS_TASKS = {
     ],
     'wpscan': [
         Tag(
-            name='Wordpress theme - twentytwentyfour 1.1',
+            name='Wordpress theme - twentytwentyfour 1.2',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(

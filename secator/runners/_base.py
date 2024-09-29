@@ -29,14 +29,11 @@ logger = logging.getLogger(__name__)
 HOOKS = [
 	'before_init',
 	'on_init',
-	'on_start',
 	'on_end',
 	'on_item_pre_convert',
 	'on_item',
 	'on_duplicate',
-	'on_line',
 	'on_iter',
-	'on_error',
 ]
 
 VALIDATORS = [
@@ -158,10 +155,10 @@ class Runner:
 
 		# Hooks
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
-		self.hooks = {name: [] for name in HOOKS}
+		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		for key in self.hooks:
 
-			# Register class specific hooks
+			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
 			if class_hook:
 				name = f'{self.__class__.__name__}.{key}'
@@ -297,7 +294,7 @@ class Runner:
 		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
 		dupe_count = 0
 		for item in self.results:
-			debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
+			# debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -306,6 +303,7 @@ class Runner:
 				main._related.extend([dupe._uuid for dupe in dupes])
 				main._related = list(dict.fromkeys(main._related))
 				if main._uuid != item._uuid:
+					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
 					item._duplicate = True
 					item = self.run_hooks('on_item', item)
 					if item._uuid not in main._related:
@@ -839,12 +837,16 @@ class Runner:
 		if not self.run_validators('item', item):
 			return None
 
-		# Run item hooks
-		item = self.run_hooks('on_item_pre_convert', item)
-		if not item:
-			return None
-
 		# Convert output dict to another schema
+		if isinstance(item, dict):
+			item = self.run_hooks('on_item_pre_convert', item)
+			if not item:
+				return None
+			if not self.orig:
+				item = self._convert_item_schema(item)
+			else:
+				item = DotMap(item)
+
 		if isinstance(item, dict) and not self.orig:
 			item = self._convert_item_schema(item)
 		elif isinstance(item, OutputType):

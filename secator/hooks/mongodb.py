@@ -206,6 +206,6 @@ MONGODB_HOOKS = {
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_iter': [update_runner],
-		'on_end': [update_runner]
+		'on_end': [update_runner, find_duplicates]
 	}
 }

@@ -1,0 +1,16 @@
+{
+  "request_curl_cmd": "/usr/bin/curl -sS -kgi -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.41 Safari/537.36' --path-as-is -X TRACE https://example.com",
+  "request_curl_payload": "-X TRACE https://example.com",
+  "response_headers": "HTTP/1.1 200 OK\nDate: Fri, 03 May 2024 14:24:50 GMT\nServer: Apache/2.4.56 (Debian) mod_fcgid/2.3.9 OpenSSL/1.1.1w\nConnection: close\nTransfer-Encoding: chunked\nContent-Type: message/http",
+  "response_data": "TRACE / HTTP/1.1\nHost: example.com\nAccept: */*\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.41 Safari/537.36",
+  "response_status_code": 200,
+  "response_content_type": "message/http",
+  "response_content_length": "",
+  "response_lines_count": 3,
+  "response_words_count": 14,
+  "response_title": "",
+  "response_server_type": "Apache/2.4.56 (Debian) mod_fcgid/2.3.9 OpenSSL/1.1.1w",
+  "response_redirect_url": "",
+  "response_html_filename": "bypass-81890dda67871d1d84165e46c6ab89fc.html",
+  "request_url": "https://example.com"
+}
