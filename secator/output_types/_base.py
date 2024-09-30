@@ -70,6 +70,8 @@ class OutputType:
 					try:
 						mapped_val = mapped_key(item)
 					except Exception as e:
+						mapped_val = None
+						console.print(f'Fail to map value for "{key}" on type "{_type}.')
 						pass
 						# console.print_exception()
 						# raise TypeError(f'Fail to map value for "{key}".')

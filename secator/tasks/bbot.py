@@ -1,5 +1,6 @@
 from secator.decorators import task
 from secator.runners import Command
+from secator.serializers import RegexSerializer
 from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag
 
 
@@ -13,12 +14,12 @@ BBOT_MODULES = [
 	"badsecrets",
 	"bevigil",
 	"binaryedge",
-	"bucket_aws",
+	# "bucket_aws",
 	"bucket_azure",
 	"bucket_digitalocean",
 	# "bucket_file_enum",
 	"bucket_firebase",
-	"bucket_gcp",
+	"bucket_google",
 	"builtwith",
 	"bypass403",
 	"c99",
@@ -27,14 +28,14 @@ BBOT_MODULES = [
 	# "chaos",
 	"columbus",
 	# "credshed",
-	"crobat",
+	# "crobat",
 	"crt",
 	# "dastardly",
 	# "dehashed",
 	"digitorus",
 	"dnscommonsrv",
 	"dnsdumpster",
-	"dnszonetransfer",
+	# "dnszonetransfer",
 	"emailformat",
 	"ffuf",
 	"ffuf_shortnames",
@@ -44,8 +45,7 @@ BBOT_MODULES = [
 	"generic_ssrf",
 	"git",
 	# "github_codesearch",
-	"github",
-	# "github_org",
+	"github_org",
 	"gowitness",
 	"hackertarget",
 	"host_header",
@@ -58,12 +58,12 @@ BBOT_MODULES = [
 	"ipneighbor",
 	"ipstack",
 	"leakix",
-	"masscan",
-	"massdns",
+	# "masscan",
+	# "massdns",
 	"myssl",
 	# "newsletters",
-	"nmap",
-	"nsec",
+	# "nmap",
+	# "nsec",
 	"ntlm",
 	"nuclei",
 	"oauth",
@@ -75,7 +75,7 @@ BBOT_MODULES = [
 	"pgp",
 	# "postman",
 	"rapiddns",
-	"riddler",
+	# "riddler",
 	"robots",
 	"secretsdb",
 	"securitytrails",
@@ -85,11 +85,11 @@ BBOT_MODULES = [
 	"smuggler",
 	"social",
 	"sslcert",
-	"subdomain_hijack",
+	# "subdomain_hijack",
 	"subdomaincenter",
-	"sublist3r",
+	# "sublist3r",
 	"telerik",
-	"threatminer",
+	# "threatminer",
 	"url_manipulation",
 	"urlscan",
 	"vhost",
@@ -101,29 +101,34 @@ BBOT_MODULES = [
 	"zoomeye"
 ]
 BBOT_MODULES_STR = ' '.join(BBOT_MODULES)
+BBOT_MAP_TYPES = {
+	'IP_ADDRESS': Ip,
+	'PROTOCOL': Port,
+	'OPEN_TCP_PORT': Port,
+	'URL': Url,
+	'TECHNOLOGY': Tag,
+	# 'DNS_NAME': Record,
+	'VULNERABILITY': Vulnerability,
+	'FINDING': Tag
+}
+NUCLEI_DATA_REGEX = RegexSerializer(
+	regex=r'template: \[(?P<template>[\w?-]+)\], name: \[(?P<name>[\w ]+)\]( Extracted Data: \[(?P<extracted_data>.*))?',
+	fields=['template', 'name', 'extracted_data']
+)
+
 
 def output_discriminator(self, item):
-	map_types = {
-		'IP_ADDRESS': Ip,
-		'PROTOCOL': Port,
-		'OPEN_TCP_PORT': Port,
-		'URL': Url,
-		'TECHNOLOGY': Tag,
-		# 'DNS_NAME': Record,
-		'VULNERABILITY': Vulnerability,
-		'FINDING': Tag
-	}
 	type_ = item.get('type')
-	if not type_ in map_types:
+	if not type_ in BBOT_MAP_TYPES:
 		self._print(f'Found unsupported bbot type: {type_}', 'bold orange3')
 		return None
-	return map_types[item['type']]
+	return BBOT_MAP_TYPES[item['type']]
 
 
 @task()
 class bbot(Command):
-	cmd = f'bbot -y --allow-deadly'
-	json_flag = '-om json'
+	cmd = f'bbot -y --allow-deadly --force'
+	json_flag = '--json'
 	input_flag = '-t'
 	file_flag = None
 	opts = {
@@ -139,11 +144,12 @@ class bbot(Command):
 			'ip': lambda x: x['data'],
 			'host': lambda x: x['data'],
 			'alive': lambda x: True,
+			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Tag: {
-			'name': lambda x: x['data'].get('technology') or x['data']['description'],
+			'name': lambda x: x['data']['name'],
 			'match': lambda x: x['data']['url'],
-			'extra_data': lambda x: {'host': x['data']['host']},
+			'extra_data': lambda x: x['data'],
 			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Url: {
@@ -159,43 +165,40 @@ class bbot(Command):
 			'state': lambda x: 'OPEN',
 			'service_name': lambda x: x['data']['protocol'] if 'protocol' in x['data'] else '',
 			'cpes': lambda x: [],
-			'host': lambda x: x['data']['host'] if isinstance(x['data'], dict) else x['data'],
+			'host': lambda x: x['data']['host'] if isinstance(x['data'], dict) else x['data'].split(':')[0],
 			'extra_data': lambda x: {},
+			'_source': lambda x: 'bbot-' + x['module']
 		},
-		# Vulnerability: {
-		# 	'name':
-		# 	'provider':
-		# 	'id':
-		# 	'matched_at':
-		# 	'ip':
-		# 	'confidence':
-		# 	'severity':
-		# 	'cvss_score':
-		# 	'tags':
-		# 	'extra_data':
-		# 	'description':
-		# 	'references':
-		# 	'reference':
-		# 	'confidence_nb':
-		# 	'severity_nb':
-		# }
+		Vulnerability: {
+			'name': lambda x: x['data']['name'],
+			'extra_data': lambda x: x['data']
+		}
 	}
+	install_cmd = 'pipx install bbot && pipx upgrade bbot'
 
-	# @staticmethod
-	# def item_loader(self, line):
-	# 	import json
-	# 	item = json.loads(line)
-	# 	print(item)
-	# 	return item
-
-# ASN
-# AZURE_TENANT
-# DNS_NAME
-# FINDING
-# FINDING
-# IP_ADDRESS
-# OPEN_TCP_PORT
-# ORG_STUB
-# SCAN
-# TECHNOLOGY
-# URL
+	@staticmethod
+	def on_json_loaded(self, item):
+		if not isinstance(item['data'], dict):
+			yield item
+			return
+		if not item['type'] in BBOT_MAP_TYPES:
+			yield item
+			return
+		if item['module'] == 'nuclei':
+			description = item['data']['description']
+			output = list(NUCLEI_DATA_REGEX.run(description))[0]
+			name = output['name']
+			template = output['template']
+			extracted_data = output['extracted_data']
+			if extracted_data:
+				if ',' in extracted_data:
+					extracted_data = extracted_data.split(',')
+				item['data']['data'] = extracted_data
+			item['name'] = name
+			item['data']['template_id'] = template
+			del item['data']['description']
+		elif 'technology' in item['data']:
+			item['name'] = item['data']['technology']
+		else:
+			item['name'] = item['data']['description']
+		yield item
