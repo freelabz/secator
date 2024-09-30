@@ -774,8 +774,8 @@ class Runner:
 					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
 					sub='klass.load',
 					level=5)
-				# if DEBUG == 6:
-				console.print_exception(show_locals=False)
+				if DEBUG == 6:
+					console.print_exception(show_locals=False)
 				continue
 
 		# No output type was found, so make no conversion
