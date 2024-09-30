@@ -107,13 +107,15 @@ BBOT_MAP_TYPES = {
 	'OPEN_TCP_PORT': Port,
 	'URL': Url,
 	'TECHNOLOGY': Tag,
-	# 'DNS_NAME': Record,
+	'ASN': Record,
+	'DNS_NAME': Record,
+	'WEBSCREENSHOT': Url,
 	'VULNERABILITY': Vulnerability,
 	'FINDING': Tag
 }
-NUCLEI_DATA_REGEX = RegexSerializer(
-	regex=r'template: \[(?P<template>[\w?-]+)\], name: \[(?P<name>[\w ]+)\]( Extracted Data: \[(?P<extracted_data>.*))?',
-	fields=['template', 'name', 'extracted_data']
+BBOT_DESCRIPTION_REGEX = RegexSerializer(
+	regex=r'(?P<name>[\w ]+): \[(?P<value>[^\[\]]+)\]',
+	findall=True
 )
 
 
@@ -147,16 +149,17 @@ class bbot(Command):
 			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Tag: {
-			'name': lambda x: x['data']['name'],
+			'name': 'name',
 			'match': lambda x: x['data']['url'],
-			'extra_data': lambda x: x['data'],
+			'extra_data': 'extra_data',
 			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Url: {
-			'url': 'data',
+			'url': lambda x: x['data'].get('url') if isinstance(x['data'], dict) else x['data'],
 			'host': lambda x: x['resolved_hosts'][0],
-			'status_code': lambda x: int([c.split('-')[-1] for c in x['tags'] if 'status-' in c][0]),
-			'title': lambda x: [' '.join(c.split('-')[2:]) for c in x['tags'] if 'http-title-' in c][0],
+			'status_code': lambda x: bbot.extract_status_code(x),
+			'title': lambda x: bbot.extract_title(x),
+			'screenshot_path': lambda x: x['data']['path'],
 			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Port: {
@@ -166,39 +169,80 @@ class bbot(Command):
 			'service_name': lambda x: x['data']['protocol'] if 'protocol' in x['data'] else '',
 			'cpes': lambda x: [],
 			'host': lambda x: x['data']['host'] if isinstance(x['data'], dict) else x['data'].split(':')[0],
-			'extra_data': lambda x: {},
+			'extra_data': 'extra_data',
 			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Vulnerability: {
-			'name': lambda x: x['data']['name'],
-			'extra_data': lambda x: x['data']
+			'name': 'name',
+			'extra_data': 'extra_data'
+		},
+		Record: {
+			'name': 'name',
+			'type': 'type',
+			'extra_data': 'extra_data'
 		}
 	}
 	install_cmd = 'pipx install bbot && pipx upgrade bbot'
 
 	@staticmethod
 	def on_json_loaded(self, item):
-		if not isinstance(item['data'], dict):
+		if not 'data' in item or not isinstance(item['data'], dict):
 			yield item
 			return
+
 		if not item['type'] in BBOT_MAP_TYPES:
 			yield item
 			return
-		if item['module'] == 'nuclei':
-			description = item['data']['description']
-			output = list(NUCLEI_DATA_REGEX.run(description))[0]
-			name = output['name']
-			template = output['template']
-			extracted_data = output['extracted_data']
-			if extracted_data:
-				if ',' in extracted_data:
-					extracted_data = extracted_data.split(',')
-				item['data']['data'] = extracted_data
-			item['name'] = name
-			item['data']['template_id'] = template
+
+		# Parse bbot description into extra_data
+		description = item['data'].get('description')
+		if description:
 			del item['data']['description']
-		elif 'technology' in item['data']:
+			item['extra_data'] = item['data']
+			match = BBOT_DESCRIPTION_REGEX.run(description)
+			for chunk in match:
+				key, val = tuple([c.strip() for c in chunk])
+				if ',' in val:
+					val = val.split(',')
+				key = '_'.join(key.split(' ')).lower()
+				item['extra_data'][key] = val
+			if isinstance(item['data'], dict):
+				item['extra_data'].update(item['data'])
+			elif isinstance(item['data'], str):
+				item['extra_data']['data'] = item['data']
+
+		# Set technology as name for Tag
+		if item['type'] == 'TECHNOLOGY':
 			item['name'] = item['data']['technology']
+			del item['data']['technology']
+
+		# If 'name' key is present in 'data', set it as name
+		elif 'name' in item['data'].keys():
+			item['name'] = item['data']['name']
+			del item['data']['name']
+
+		# If 'name' key is present in 'extra_data', set it as name
+		elif 'extra_data' in item and 'name' in item['extra_data'].keys():
+			item['name'] = item['extra_data']['name']
+			del item['extra_data']['name']
+
+		# If 'discovery_context' and no name set yet, set it as name
 		else:
-			item['name'] = item['data']['description']
+			item['name'] = item['discovery_context']
+
 		yield item
+
+	@staticmethod
+	def extract_title(item):
+		for tag in item['tags']:
+			if 'http-title' in tag:
+				title = ' '.join(tag.split('-')[2:])
+				return title
+		return ''
+	
+	@staticmethod
+	def extract_status_code(item):
+		for tag in item['tags']:
+			if 'status-' in tag:
+				return int([tag.split('-')[-1]][0])
+		return 0

@@ -71,10 +71,15 @@ class OutputType:
 						mapped_val = mapped_key(item)
 					except Exception as e:
 						mapped_val = None
-						console.print(f'Fail to map value for "{key}" on type "{_type}.')
+						console.print(f'[bold red]Fail to transform value for "{key}" using output mapper function. Exception: {type(e).__name__}: {str(e)}.[/] [bold green]Setting value to None.[/]')
+						import json
+						console.print(json.dumps(item))
+						from secator.definitions import DEBUG
+						console.print(f'Set SECATOR_DEBUG_LEVEL to a value > 0 to see the detailed stacktrace.')
+						if DEBUG > 0:
+							print(item)
+							console.print_exception()
 						pass
-						# console.print_exception()
-						# raise TypeError(f'Fail to map value for "{key}".')
 				else:
 					mapped_val = item.get(mapped_key)
 				new_item[key] = mapped_val
