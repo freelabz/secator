@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from dataclasses import _MISSING_TYPE, dataclass, fields
@@ -73,14 +72,11 @@ class OutputType:
 						mapped_val = mapped_key(item)
 					except Exception as e:
 						mapped_val = None
-						console.print(
-							f'[bold red]Fail to transform value for "{key}" using output_map function. Exception: '
-							f'{type(e).__name__}: {str(e)}.[/] [bold green]Setting value to None.[/]')
-						console.print(json.dumps(item))
-						console.print('Set SECATOR_DEBUG_LEVEL to a value > 0 to see the detailed stacktrace.')
 						if DEBUG > 0:
-							console.print_exception()
-						pass
+							console.print_exception(show_locals=True)
+						raise TypeError(
+							f'Fail to transform value for "{key}" using output_map function. Exception: '
+							f'{type(e).__name__}: {str(e)}')
 				else:
 					mapped_val = item.get(mapped_key)
 				new_item[key] = mapped_val

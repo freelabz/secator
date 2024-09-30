@@ -174,6 +174,7 @@ def decorate_command_options(opts):
 			short = conf.pop('short', None)
 			conf.pop('internal', False)
 			conf.pop('prefix', None)
+			conf.pop('shlex', True)
 			long = f'--{opt_name}'
 			short = f'-{short}' if short else f'-{opt_name}'
 			f = click.option(long, short, **conf)(f)

@@ -46,6 +46,7 @@ BBOT_MODULES = [
 	"fullhunt",
 	"generic_ssrf",
 	"git",
+	"telerik",
 	# "github_codesearch",
 	"github_org",
 	"gowitness",
@@ -102,6 +103,22 @@ BBOT_MODULES = [
 	"wayback",
 	"zoomeye"
 ]
+BBOT_PRESETS = [
+	'cloud-enum',
+	'code-enum',
+	'dirbust-heavy',
+	'dirbust-light',
+	'dotnet-audit',
+	'email-enum',
+	'iis-shortnames',
+	'kitchen-sink',
+	'paramminer',
+	'spider',
+	'subdomain-enum',
+	'web-basic',
+	'web-screenshots',
+	'web-thorough'
+]
 BBOT_MODULES_STR = ' '.join(BBOT_MODULES)
 BBOT_MAP_TYPES = {
 	'IP_ADDRESS': Ip,
@@ -135,10 +152,15 @@ class bbot(Command):
 	input_flag = '-t'
 	file_flag = None
 	opts = {
-		'modules': {'type': str, 'short': 'm', 'default': ','.join(BBOT_MODULES)}
+		'modules': {'type': str, 'short': 'm', 'default': '', 'help': ','.join(BBOT_MODULES)},
+		'presets': {'type': str, 'short': 'ps', 'default': 'kitchen-sink', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
 	}
 	opt_key_map = {
-		'modules': 'm'
+		'modules': 'm',
+		'presets': 'p'
+	}
+	opt_value_map = {
+		'presets': lambda x: ' '.join(x.split(','))
 	}
 	output_types = [Vulnerability, Port, Url, Record, Ip]
 	output_discriminator = output_discriminator
@@ -151,7 +173,7 @@ class bbot(Command):
 		},
 		Tag: {
 			'name': 'name',
-			'match': lambda x: x['data']['url'],
+			'match': lambda x: x['data'].get('url') or x['data'].get('host'),
 			'extra_data': 'extra_data',
 			'_source': lambda x: 'bbot-' + x['module']
 		},
@@ -177,7 +199,7 @@ class bbot(Command):
 			'name': 'name',
 			'match': lambda x: x['data'].get('url') or x['data']['host'],
 			'extra_data': 'extra_data',
-			'severity': lambda x: x['data']['severity']
+			'severity': lambda x: x['data']['severity'].lower()
 		},
 		Record: {
 			'name': 'name',

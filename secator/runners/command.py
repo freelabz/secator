@@ -580,8 +580,10 @@ class Command(Runner):
 			# Append opt name + opt value to option string.
 			# Note: does not append opt value if value is True (flag)
 			opts_str += f' {opt_name}'
+			shlex_quote = opt_conf.get('shlex', True)
 			if opt_val is not True:
-				opt_val = shlex.quote(str(opt_val))
+				if shlex_quote:
+					opt_val = shlex.quote(str(opt_val))
 				opts_str += f' {opt_val}'
 
 		return opts_str.strip()
