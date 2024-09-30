@@ -1,6 +1,8 @@
+import json
 import logging
 import re
 from dataclasses import _MISSING_TYPE, dataclass, fields
+from secator.definitions import DEBUG
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -71,13 +73,12 @@ class OutputType:
 						mapped_val = mapped_key(item)
 					except Exception as e:
 						mapped_val = None
-						console.print(f'[bold red]Fail to transform value for "{key}" using output mapper function. Exception: {type(e).__name__}: {str(e)}.[/] [bold green]Setting value to None.[/]')
-						import json
+						console.print(
+							f'[bold red]Fail to transform value for "{key}" using output_map function. Exception: '
+							f'{type(e).__name__}: {str(e)}.[/] [bold green]Setting value to None.[/]')
 						console.print(json.dumps(item))
-						from secator.definitions import DEBUG
-						console.print(f'Set SECATOR_DEBUG_LEVEL to a value > 0 to see the detailed stacktrace.')
+						console.print('Set SECATOR_DEBUG_LEVEL to a value > 0 to see the detailed stacktrace.')
 						if DEBUG > 0:
-							print(item)
 							console.print_exception()
 						pass
 				else:

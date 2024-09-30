@@ -1,3 +1,5 @@
+import shutil
+
 from secator.decorators import task
 from secator.runners import Command
 from secator.serializers import RegexSerializer
@@ -120,16 +122,15 @@ BBOT_DESCRIPTION_REGEX = RegexSerializer(
 
 
 def output_discriminator(self, item):
-	type_ = item.get('type')
-	if not type_ in BBOT_MAP_TYPES:
-		self._print(f'Found unsupported bbot type: {type_}', 'bold orange3')
+	_type = item.get('type')
+	if _type not in BBOT_MAP_TYPES:
 		return None
-	return BBOT_MAP_TYPES[item['type']]
+	return BBOT_MAP_TYPES[_type]
 
 
 @task()
 class bbot(Command):
-	cmd = f'bbot -y --allow-deadly --force'
+	cmd = 'bbot -y --allow-deadly --force'
 	json_flag = '--json'
 	input_flag = '-t'
 	file_flag = None
@@ -156,10 +157,10 @@ class bbot(Command):
 		},
 		Url: {
 			'url': lambda x: x['data'].get('url') if isinstance(x['data'], dict) else x['data'],
-			'host': lambda x: x['resolved_hosts'][0],
+			'host': lambda x: x['resolved_hosts'][0] if 'resolved_hosts' in x else '',
 			'status_code': lambda x: bbot.extract_status_code(x),
 			'title': lambda x: bbot.extract_title(x),
-			'screenshot_path': lambda x: x['data']['path'],
+			'screenshot_path': lambda x: x['data']['path'] if isinstance(x['data'], dict) else '',
 			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Port: {
@@ -174,7 +175,9 @@ class bbot(Command):
 		},
 		Vulnerability: {
 			'name': 'name',
-			'extra_data': 'extra_data'
+			'match': lambda x: x['data'].get('url') or x['data']['host'],
+			'extra_data': 'extra_data',
+			'severity': lambda x: x['data']['severity']
 		},
 		Record: {
 			'name': 'name',
@@ -186,19 +189,27 @@ class bbot(Command):
 
 	@staticmethod
 	def on_json_loaded(self, item):
-		if not 'data' in item or not isinstance(item['data'], dict):
+		_type = item.get('type')
+
+		if not _type:
 			yield item
 			return
 
-		if not item['type'] in BBOT_MAP_TYPES:
+		if _type not in BBOT_MAP_TYPES:
+			self._print(f'[bold orange3]Found unsupported bbot type: {_type}.[/] [bold green]Skipping.[/]')
+			return
+
+		if isinstance(item['data'], str):
+			item['name'] = item['data']
 			yield item
 			return
+
+		item['extra_data'] = item['data']
 
 		# Parse bbot description into extra_data
 		description = item['data'].get('description')
 		if description:
 			del item['data']['description']
-			item['extra_data'] = item['data']
 			match = BBOT_DESCRIPTION_REGEX.run(description)
 			for chunk in match:
 				key, val = tuple([c.strip() for c in chunk])
@@ -206,10 +217,6 @@ class bbot(Command):
 					val = val.split(',')
 				key = '_'.join(key.split(' ')).lower()
 				item['extra_data'][key] = val
-			if isinstance(item['data'], dict):
-				item['extra_data'].update(item['data'])
-			elif isinstance(item['data'], str):
-				item['extra_data']['data'] = item['data']
 
 		# Set technology as name for Tag
 		if item['type'] == 'TECHNOLOGY':
@@ -230,6 +237,14 @@ class bbot(Command):
 		else:
 			item['name'] = item['discovery_context']
 
+		# If a screenshot was saved, move it to secator output folder
+		if item['type'] == 'WEBSCREENSHOT':
+			path = item['data']['path']
+			name = path.split('/')[-1]
+			secator_path = f'{self.reports_folder}/.outputs/{name}'
+			shutil.copy(path, secator_path)
+			item['data']['path'] = secator_path
+
 		yield item
 
 	@staticmethod
@@ -239,7 +254,7 @@ class bbot(Command):
 				title = ' '.join(tag.split('-')[2:])
 				return title
 		return ''
-	
+
 	@staticmethod
 	def extract_status_code(item):
 		for tag in item['tags']:
