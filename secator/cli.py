@@ -19,11 +19,16 @@ from secator.template import TemplateLoader
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
-from secator.rich import console
+from secator.output_types import OUTPUT_TYPES
+from secator.rich import console, console_stdout
 from secator.runners import Command, Runner
+from secator.runners._helpers import extract_from_results
 from secator.report import Report
 from secator.serializers.dataclass import loads_dataclass
-from secator.utils import debug, detect_host, discover_tasks, flatten, print_results_table, print_version
+from secator.utils import (
+	debug, detect_host, discover_tasks, flatten, print_results_table, print_version, match_file_by_pattern,
+	get_file_date, deduplicate, sort_files_by_date
+)
 
 click.rich_click.USE_RICH_MARKUP = True
 
@@ -31,6 +36,7 @@ ALL_TASKS = discover_tasks()
 ALL_CONFIGS = TemplateLoader.load_all()
 ALL_WORKFLOWS = ALL_CONFIGS.workflow
 ALL_SCANS = ALL_CONFIGS.scan
+OUTPUT_TYPES_LOWER = [c.__name__.lower() for c in OUTPUT_TYPES]
 
 
 #-----#
@@ -536,27 +542,109 @@ def report():
 
 
 @report.command('show')
-@click.argument('json_path')
-@click.option('-o', '--output', type=str, default='console', help='Format')
+@click.argument('report_query', required=False)
+@click.option('-f', '--format', type=click.Choice(['console', 'table']), default='console', help='Output format')
 @click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
-def report_show(json_path, output, exclude_fields):
-	"""Show a JSON report."""
-	with open(json_path, 'r') as f:
-		report = loads_dataclass(f.read())
-		results = flatten(list(report['results'].values()))
-	if output == 'console':
-		for result in results:
-			console.print(result)
-	elif output == 'table':
-		exclude_fields = exclude_fields.split(',')
-		print_results_table(
-			results,
-			title=report['info']['title'],
-			exclude_fields=exclude_fields)
+@click.option('-t', '--type', type=str, default='', help=f'Filter by output type. Choices: {OUTPUT_TYPES_LOWER}')
+@click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
+@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('-d', '--dedupe', is_flag=True, default=False, help='De-duplicate results (show only new results)')
+@click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
+def report_show(report_query, format, exclude_fields, type, query, workspace, dedupe, unified):
+	"""Show report results and filter on them."""
+
+	# Load all report paths
+	reports_dir = CONFIG.dirs.reports
+	if workspace:
+		all_reports = reports_dir.glob(f"{workspace}/**/report.json")
+	else:
+		all_reports = reports_dir.glob("**/**/report.json")
+
+	# Build report queries from fuzzy input
+	paths = []
+	if report_query:
+		report_queries = report_query.split(',')
+	else:
+		report_queries = all_reports
+	for report_query in report_queries:
+		path = Path(report_query)
+		if not path.exists():
+			matches = match_file_by_pattern(all_reports, report_query)
+			if not matches:
+				console.print(
+					f'[bold orange3]Query {report_query} did not return any matches. [/][bold green]Ignoring.[/]')
+			paths.extend(matches)
+		else:
+			paths.append(path)
+	paths = sort_files_by_date(paths)
+
+	# Load reports, extract results
+	all_results = []
+	for path in paths:
+		with open(path, 'r') as f:
+			report = loads_dataclass(f.read())
+			ws, runner, number = str(path).split('/')[-4:-1]
+			results = flatten(list(report['results'].values()))
+			if type:
+				if '.' in type:
+					_type, _field = tuple(type.split('.'))
+				else:
+					_type = type
+					_field = None
+				extractor = {
+					'type': _type,
+					'field': _field,
+					'condition': query or 'True'
+				}
+				results = extract_from_results(results, extractors=[extractor])
+			if len(results) > 0:
+				if not unified:
+					file_date = get_file_date(path)
+					runner_name = report['info']['name']
+					console.print(
+						f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner[:-1]}[/]) ([dim]{file_date}[/]):')
+				if dedupe or unified:
+					results = [r for r in results if r not in all_results]
+					if not results and not unified:
+						console.print('[bold orange4]No new results since previous scan.[/]')
+			all_results.extend(results)
+			if unified:
+				continue
+			if format == 'console':
+				for result in results:
+					console_stdout.print(result)
+			elif format == 'table':
+				if _field is not None:
+					console.print(
+						'[bold red]Cannot show as table if filter has a field component (e.g: `-f \[type].\[field]`). '
+						'Please use only -f \[type] to show a table[/]')
+					return
+				exclude_fields = exclude_fields.split(',')
+				print_results_table(
+					results,
+					title=report['info']['title'],
+					exclude_fields=exclude_fields)
+
+	if unified:
+		all_results = deduplicate(all_results, attr='_uuid')
+		if format == 'console':
+			for result in all_results:
+				console_stdout.print(result)
+		elif format == 'table':
+			if _field is not None:
+				console.print(
+					'[bold red]Cannot show as table if filter has a field component (e.g: `-f \[type].\[field]`). '
+					'Please use only -f \[type] to show a table[/]')
+				return
+			exclude_fields = exclude_fields.split(',')
+			print_results_table(
+				results,
+				title=report['info']['title'],
+				exclude_fields=exclude_fields)
 
 
 @report.command('list')
-@click.option('-ws', '--workspace', type=str)
+@click.option('-ws', '-w', '--workspace', type=str)
 def report_list(workspace):
 	reports_dir = CONFIG.dirs.reports
 	json_reports = reports_dir.glob("**/**/report.json")
@@ -578,7 +666,11 @@ def report_list(workspace):
 			continue
 		console.print(f'[bold gold3]{ws}:')
 		for data in sorted(ws_reports[ws], key=lambda x: x['path']):
-			console.print(f'   • {data["path"]} ([bold blue]{data["name"]}[/] [dim]{data["runner"][:-1]}[/])')
+			runner_name = data["runner"][:-1]
+			name = data["name"]
+			path = data["path"]
+			file_date = get_file_date(path)
+			console.print(f'   • {path} ([bold blue]{name}[/] [dim]{runner_name}[/]) ([dim]{file_date}[/]):')
 
 
 @report.command('export')
