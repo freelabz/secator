@@ -1,3 +1,4 @@
+import fnmatch
 import inspect
 import importlib
 import itertools
@@ -17,7 +18,7 @@ from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse, quote
 
-
+import humanize
 import ifaddr
 import yaml
 from rich.markdown import Markdown
@@ -464,31 +465,115 @@ def extract_domain_info(input, domain_only=False):
 
 
 def extract_subdomains_from_fqdn(fqdn, domain, suffix):
-    """
-    Generates a list of subdomains up to the root domain from a fully qualified domain name (FQDN).
+	"""Generates a list of subdomains up to the root domain from a fully qualified domain name (FQDN).
 
-    Args:
-        fqdn (str): The full domain name, e.g., 'console.cloud.google.com'.
-        domain (str): The main domain, e.g., 'google'.
-        suffix (str): The top-level domain (TLD), e.g., 'com'.
+	Args:
+		fqdn (str): The full domain name, e.g., 'console.cloud.google.com'.
+		domain (str): The main domain, e.g., 'google'.
+		suffix (str): The top-level domain (TLD), e.g., 'com'.
 
-    Returns:
-        List[str]: A list containing the FQDN and all its subdomains down to the root domain.
-    """
-    # Start with the full domain and prepare to break it down
-    parts = fqdn.split('.')
+	Returns:
+		List[str]: A list containing the FQDN and all its subdomains down to the root domain.
+	"""
+	# Start with the full domain and prepare to break it down
+	parts = fqdn.split('.')
 
-    # Initialize the list of subdomains with the full domain
-    subdomains = [fqdn]
+	# Initialize the list of subdomains with the full domain
+	subdomains = [fqdn]
 
-    # Continue stripping subdomains until reaching the base domain (domain + suffix)
-    base_domain = f"{domain}.{suffix}"
-    current = fqdn
+	# Continue stripping subdomains until reaching the base domain (domain + suffix)
+	base_domain = f"{domain}.{suffix}"
+	current = fqdn
 
-    while current != base_domain:
-        # Remove the leftmost part of the domain
-        parts = parts[1:]
-        current = '.'.join(parts)
-        subdomains.append(current)
+	while current != base_domain:
+		# Remove the leftmost part of the domain
+		parts = parts[1:]
+		current = '.'.join(parts)
+		subdomains.append(current)
 
-    return subdomains
+	return subdomains
+
+
+def match_file_by_pattern(paths, pattern, type='both'):
+	"""Match pattern on a set of paths.
+
+	Args:
+		paths (iterable): An iterable of Path objects to be searched.
+		pattern (str): The pattern to search for in file names or directory names, supports Unix shell-style wildcards.
+		type (str): Specifies the type to search for; 'file', 'directory', or 'both'.
+
+	Returns:
+		list of Path: A list of Path objects that match the given pattern.
+	"""
+	matches = []
+	for path in paths:
+		full_path = str(path.resolve())
+		if path.is_dir() and type in ['directory', 'both'] and fnmatch.fnmatch(full_path, f'*{pattern}*'):
+			matches.append(path)
+		elif path.is_file() and type in ['file', 'both'] and fnmatch.fnmatch(full_path, f'*{pattern}*'):
+			matches.append(path)
+
+	return matches
+
+
+def get_file_date(file_path):
+	"""Retrieves the last modification date of the file and returns it in a human-readable format.
+
+	Args:
+		file_path (Path): Path object pointing to the file.
+
+	Returns:
+		str: Human-readable time format.
+	"""
+	# Get the last modified time of the file
+	mod_timestamp = file_path.stat().st_mtime
+	mod_date = datetime.fromtimestamp(mod_timestamp)
+
+	# Determine how to display the date based on how long ago it was modified
+	now = datetime.now()
+	if (now - mod_date).days < 7:
+		# If the modification was less than a week ago, use natural time
+		return humanize.naturaltime(now - mod_date) + mod_date.strftime(" @ %H:%m")
+	else:
+		# Otherwise, return the date in "on %B %d" format
+		return f"{mod_date.strftime('%B %d @ %H:%m')}"
+
+
+def trim_string(s, max_length=30):
+	"""
+	Trims a long string to include the beginning and the end, with an ellipsis in the middle.
+	The output string will not exceed the specified maximum length.
+
+	Args:
+		s (str): The string to be trimmed.
+		max_length (int): The maximum allowed length of the trimmed string.
+
+	Returns:
+	str: The trimmed string.
+	"""
+	if len(s) <= max_length:
+		return s  # Return the original string if it's short enough
+
+	# Calculate the lengths of the start and end parts
+	end_length = 30  # Default end length
+	if max_length - end_length - 5 < 0:  # 5 accounts for the length of '[...] '
+		end_length = max_length - 5  # Adjust end length if total max_length is too small
+	start_length = max_length - end_length - 5  # Subtract the space for '[...] '
+
+	# Build the trimmed string
+	start_part = s[:start_length]
+	end_part = s[-end_length:]
+	return f"{start_part} [...] {end_part}"
+
+
+def sort_files_by_date(file_list):
+	"""Sorts a list of file paths by their modification date.
+
+	Args:
+		file_list (list): A list of file paths (strings or Path objects).
+
+	Returns:
+		list: The list of file paths sorted by modification date.
+	"""
+	file_list.sort(key=lambda x: x.stat().st_mtime)
+	return file_list

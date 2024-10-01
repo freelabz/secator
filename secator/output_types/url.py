@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TIME, TITLE, URL, WEBSERVER)
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, trim_string
 
 
 @dataclass
@@ -64,7 +64,7 @@ class Url(OutputType):
 			else:
 				s += f' \[[red]{self.status_code}[/]]'
 		if self.title:
-			s += f' \[[green]{self.title}[/]]'
+			s += f' \[[green]{trim_string(self.title)}[/]]'
 		if self.webserver:
 			s += f' \[[magenta]{self.webserver}[/]]'
 		if self.tech:

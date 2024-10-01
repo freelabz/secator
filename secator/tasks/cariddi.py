@@ -70,7 +70,6 @@ class cariddi(HttpCrawler):
 
 		for error in errors:
 			match = error['match']
-			match = (match[:1000] + '...TRUNCATED') if len(match) > 1000 else match  # truncate as this can be a very long match
 			error['extra_data'] = {'error': match, 'source': 'body'}
 			error['match'] = url
 			yield Tag(**error)

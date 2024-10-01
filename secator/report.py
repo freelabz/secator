@@ -1,9 +1,11 @@
 import operator
 
 from secator.config import CONFIG
+from secator.definitions import DEBUG
 from secator.output_types import OUTPUT_TYPES, OutputType
 from secator.utils import merge_opts, get_file_timestamp
 from secator.rich import console
+from secator.runners._helpers import extract_from_results
 
 
 # TODO: initialize from data, not from runner
@@ -31,8 +33,10 @@ class Report:
 				console.print(
 					f'Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}',
 					style='bold red')
+				if DEBUG > 1:
+					console.print_exception()
 
-	def build(self):
+	def build(self, extractors=[], dedupe_from=[]):
 		# Trim options
 		from secator.decorators import DEFAULT_CLI_OPTIONS
 		opts = merge_opts(self.runner.config.options, self.runner.run_opts)
@@ -55,8 +59,9 @@ class Report:
 				'total_human': self.runner.elapsed_human,
 				'opts': opts,
 			},
-			'results': {},
+			'results': {}
 		}
+		self.raw_results = {}
 
 		# Fill report
 		for output_type in OUTPUT_TYPES:
@@ -68,15 +73,21 @@ class Report:
 				item for item in self.runner.results
 				if isinstance(item, OutputType) and item._type == output_name
 			]
-			if CONFIG.runners.remove_duplicates:
-				items = [item for item in items if not item._duplicate]
 			if items:
+				self.raw_results[output_name] = items
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))
+				if CONFIG.runners.remove_duplicates:
+					items = [item for item in items if not item._duplicate and item not in dedupe_from]
+				for extractor in extractors:
+					items = extract_from_results(items, extractors=[extractor])
 				data['results'][output_name] = items
 
 		# Save data
 		self.data = data
+
+	def is_empty(self):
+		return all(not items for items in self.data['results'].values())
 
 
 def get_table_fields(output_type):
