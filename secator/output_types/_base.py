@@ -1,6 +1,8 @@
 import logging
 import re
 from dataclasses import _MISSING_TYPE, dataclass, fields
+from secator.definitions import DEBUG
+from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,15 @@ class OutputType:
 			if key in output_map:
 				mapped_key = output_map[key]
 				if callable(mapped_key):
-					mapped_val = mapped_key(item)
+					try:
+						mapped_val = mapped_key(item)
+					except Exception as e:
+						mapped_val = None
+						if DEBUG > 0:
+							console.print_exception(show_locals=True)
+						raise TypeError(
+							f'Fail to transform value for "{key}" using output_map function. Exception: '
+							f'{type(e).__name__}: {str(e)}')
 				else:
 					mapped_val = item.get(mapped_key)
 				new_item[key] = mapped_val
