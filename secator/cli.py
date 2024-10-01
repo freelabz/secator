@@ -20,14 +20,13 @@ from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
 from secator.output_types import OUTPUT_TYPES
-from secator.rich import console, console_stdout
+from secator.rich import console
 from secator.runners import Command, Runner
-from secator.runners._helpers import extract_from_results
 from secator.report import Report
 from secator.serializers.dataclass import loads_dataclass
 from secator.utils import (
-	debug, detect_host, discover_tasks, flatten, print_results_table, print_version, match_file_by_pattern,
-	get_file_date, deduplicate, sort_files_by_date
+	debug, detect_host, discover_tasks, flatten, print_version, match_file_by_pattern, get_file_date,
+	sort_files_by_date, get_file_timestamp
 )
 
 click.rich_click.USE_RICH_MARKUP = True
@@ -543,15 +542,33 @@ def report():
 
 @report.command('show')
 @click.argument('report_query', required=False)
-@click.option('-f', '--format', type=click.Choice(['console', 'table']), default='console', help='Output format')
+@click.option('-o', '--output', type=str, default='console', help='Exporters')
 @click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
 @click.option('-t', '--type', type=str, default='', help=f'Filter by output type. Choices: {OUTPUT_TYPES_LOWER}')
 @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('-d', '--dedupe', is_flag=True, default=False, help='De-duplicate results (show only new results)')
 @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
-def report_show(report_query, format, exclude_fields, type, query, workspace, dedupe, unified):
+def report_show(report_query, output, exclude_fields, type, query, workspace, unified):
 	"""Show report results and filter on them."""
+
+	# Get exporters
+	exporters = Runner.resolve_exporters(output)
+
+	# Get extractors
+	extractors = []
+	type = type.split(',')
+	for typedef in type:
+		if typedef:
+			if '.' in typedef:
+				_type, _field = tuple(typedef.split('.'))
+			else:
+				_type = typedef
+				_field = None
+			extractors.append({
+				'type': _type,
+				'field': _field,
+				'condition': query or 'True'
+			})
 
 	# Load all report paths
 	reports_dir = CONFIG.dirs.reports
@@ -559,6 +576,17 @@ def report_show(report_query, format, exclude_fields, type, query, workspace, de
 		all_reports = reports_dir.glob(f"{workspace}/**/report.json")
 	else:
 		all_reports = reports_dir.glob("**/**/report.json")
+
+	# Build runner instance
+	current = get_file_timestamp()
+	runner = DotMap({
+		"config": {
+			"name": f"consolidated_report_{current}"
+		},
+		"workspace_name": "_consolidated",
+		"reports_folder": Path.cwd(),
+	})
+	exporters = Runner.resolve_exporters(output)
 
 	# Build report queries from fuzzy input
 	paths = []
@@ -582,65 +610,30 @@ def report_show(report_query, format, exclude_fields, type, query, workspace, de
 	all_results = []
 	for path in paths:
 		with open(path, 'r') as f:
-			report = loads_dataclass(f.read())
-			ws, runner, number = str(path).split('/')[-4:-1]
-			results = flatten(list(report['results'].values()))
-			if type:
-				if '.' in type:
-					_type, _field = tuple(type.split('.'))
-				else:
-					_type = type
-					_field = None
-				extractor = {
-					'type': _type,
-					'field': _field,
-					'condition': query or 'True'
-				}
-				results = extract_from_results(results, extractors=[extractor])
-			if len(results) > 0:
-				if not unified:
-					file_date = get_file_date(path)
-					runner_name = report['info']['name']
-					console.print(
-						f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner[:-1]}[/]) ([dim]{file_date}[/]):')
-				if dedupe or unified:
-					results = [r for r in results if r not in all_results]
-					if not results and not unified:
-						console.print('[bold orange4]No new results since previous scan.[/]')
-			all_results.extend(results)
-			if unified:
-				continue
-			if format == 'console':
-				for result in results:
-					console_stdout.print(result)
-			elif format == 'table':
-				if _field is not None:
-					console.print(
-						'[bold red]Cannot show as table if filter has a field component (e.g: `-f \[type].\[field]`). '
-						'Please use only -f \[type] to show a table[/]')
-					return
-				exclude_fields = exclude_fields.split(',')
-				print_results_table(
-					results,
-					title=report['info']['title'],
-					exclude_fields=exclude_fields)
+			data = loads_dataclass(f.read())
+			ws, runner_type, number = str(path).split('/')[-4:-1]
+			runner_type = runner_type[:-1]
+			runner.results = flatten(list(data['results'].values()))
+			report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
+			report.build(extractors=extractors, dedupe_from=all_results)
+			all_results.extend(flatten(list(report.data['results'].values())))
+
+			# Print report path and info if results
+			if not unified:
+				file_date = get_file_date(path)
+				runner_name = data['info']['name']
+				console.print(
+					f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner_type}[/]) ([dim]{file_date}[/]):')
+				if report.is_empty():
+					console.print('[bold orange4]No new results since previous scan.[/]')
+					continue
+				report.send()
 
 	if unified:
-		all_results = deduplicate(all_results, attr='_uuid')
-		if format == 'console':
-			for result in all_results:
-				console_stdout.print(result)
-		elif format == 'table':
-			if _field is not None:
-				console.print(
-					'[bold red]Cannot show as table if filter has a field component (e.g: `-f \[type].\[field]`). '
-					'Please use only -f \[type] to show a table[/]')
-				return
-			exclude_fields = exclude_fields.split(',')
-			print_results_table(
-				results,
-				title=report['info']['title'],
-				exclude_fields=exclude_fields)
+		runner.results = all_results
+		report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
+		report.build(extractors=extractors)
+		report.send()
 
 
 @report.command('list')
