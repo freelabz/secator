@@ -67,7 +67,7 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		items = sorted(items, key=operator.attrgetter(*sort_by))
 
 	# Create rich table
-	box_style = box.ROUNDED
+	box_style = box.SIMPLE
 	table = Table(show_lines=True, box=box_style)
 
 	# Get table schema if any, default to first item keys
