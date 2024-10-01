@@ -673,7 +673,6 @@ def report_list(workspace):
 def report_export(json_path, output_folder, output):
 	with open(json_path, 'r') as f:
 		data = loads_dataclass(f.read())
-		flatten(list(data['results'].values()))
 
 	runner_instance = DotMap({
 		"config": {
