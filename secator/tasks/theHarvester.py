@@ -5,7 +5,7 @@ import validators
 
 from secator.decorators import task
 from secator.definitions import (DELAY, LIMIT, OPT_NOT_SUPPORTED, PROXY,
-								 RATE_LIMIT, RETRIES, SCREENSHOT, TEMP_FOLDER,
+								 RATE_LIMIT, RETRIES, SCREENSHOT,
 								 THREADS, TIMEOUT)
 from secator.output_types import Ip, Subdomain, Url, UserAccount
 from secator.tasks._categories import ReconUser
@@ -41,7 +41,7 @@ class theHarvester(ReconUser):
 		output_path = self.get_opt_value('output_path')
 		if not output_path:
 			timestr = get_file_timestamp()
-			output_path = f'{TEMP_FOLDER}/theHarvester_{timestr}.json'
+			output_path = f'{self.reports_folder}/theHarvester_{timestr}.json'
 		self.output_path = output_path
 		self.cmd = self.cmd.replace('--filename', f'--filename {self.output_path}')
 
