@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+from typing import Dict, List, Generator
 
 import xmltodict
 
@@ -62,7 +63,7 @@ class nmap(VulnMulti):
 		'output_path': '-oX',
 	}
 	opt_value_map = {
-		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
+		PORTS: lambda x: ','.join(map(str, x)) if isinstance(x, list) else x
 	}
 	install_cmd = (
 		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
@@ -76,10 +77,7 @@ class nmap(VulnMulti):
 
 	@staticmethod
 	def on_init(self):
-		output_path = self.get_opt_value(OUTPUT_PATH)
-		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
-		self.output_path = output_path
+		self.output_path = self.get_opt_value(OUTPUT_PATH) or f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
 		tcp_connect = self.get_opt_value('tcp_connect')
@@ -91,30 +89,28 @@ class nmap(VulnMulti):
 				'bold gold3')
 			self.cmd = self.cmd.replace('-sT ', '')
 
-	def yielder(self):
+	def yielder(self) -> Generator:
 		yield from super().yielder()
 		if self.return_code != 0:
 			return
-		self.results = []
-		note = f'nmap XML results saved to {self.output_path}'
+		
 		if self.print_line:
-			self._print(note)
+			self._print(f'nmap XML results saved to {self.output_path}')
+		
 		if os.path.exists(self.output_path):
-			nmap_data = self.xml_to_json()
-			yield from nmap_data
+			yield from self.parse_nmap_output()
 
-	def xml_to_json(self):
-		results = []
+	def parse_nmap_output(self) -> Generator:
 		with open(self.output_path, 'r') as f:
-			content = f.read()
 			try:
-				results = xmltodict.parse(content)  # parse XML to dict
+				nmap_data = xmltodict.parse(f.read())
 			except Exception as e:
 				logger.exception(e)
-				logger.error(
-					f'Cannot parse nmap XML output {self.output_path} to valid JSON.')
-		results['_host'] = self.input
-		return nmapData(results)
+				logger.error(f'Cannot parse nmap XML output {self.output_path} to valid JSON.')
+				return
+		
+		nmap_data['_host'] = self.input
+		return nmapData(nmap_data)
 
 
 class nmapData(dict):
@@ -124,118 +120,59 @@ class nmapData(dict):
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
 			for port in self._get_ports(host):
-				# Get port number
-				port_number = port['@portid']
-				if not port_number or not port_number.isdigit():
-					continue
-				port_number = int(port_number)
+				yield from self._process_port(port, hostname, ip)
 
-				# Get port state
-				state = port.get('state', {}).get('@state', '')
-
-				# Get extra data
-				extra_data = self._get_extra_data(port)
-				service_name = extra_data.get('service_name', '')
-				version_exact = extra_data.get('version_exact', False)
-				conf = extra_data.get('confidence')
-				if not version_exact:
-					console.print(
-						f'[bold orange1]nmap could not identify an exact version for {service_name} '
-						f'(detection confidence is {conf}): do not blindy trust the results ![/]'
-					)
-
-				# Grab CPEs
-				cpes = extra_data.get('cpe', [])
-
-				# Get script output
-				scripts = self._get_scripts(port)
-
-				# Get port protocol
-				protocol = port['@protocol'].upper()
-
-				# Yield port data
-				port = {
-					PORT: port_number,
-					HOST: hostname,
-					STATE: state,
-					SERVICE_NAME: service_name,
-					IP: ip,
-					PROTOCOL: protocol,
-					EXTRA_DATA: extra_data
-				}
-				yield port
-
-				# Parse each script output to get vulns
-				for script in scripts:
-					script_id = script['id']
-					output = script['output']
-					extra_data = {'script': script_id}
-					if service_name:
-						extra_data['service_name'] = service_name
-					funcmap = {
-						'vulscan': self._parse_vulscan_output,
-						'vulners': self._parse_vulners_output,
-					}
-					func = funcmap.get(script_id)
-					metadata = {
-						MATCHED_AT: f'{hostname}:{port_number}',
-						IP: ip,
-						EXTRA_DATA: extra_data,
-					}
-					if not func:
-						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve')
-						continue
-					for vuln in func(output, cpes=cpes):
-						vuln.update(metadata)
-						confidence = 'low'
-						if 'cpe-match' in vuln[TAGS]:
-							confidence = 'high' if version_exact else 'medium'
-						vuln[CONFIDENCE] = confidence
-						if (CONFIG.runners.skip_cve_low_confidence and vuln[CONFIDENCE] == 'low'):
-							debug(f'{vuln[ID]}: ignored (low confidence).', sub='cve')
-							continue
-						yield vuln
-
-	#---------------------#
-	# XML FILE EXTRACTORS #
-	#---------------------#
-	def _get_hosts(self):
+	def _get_hosts(self) -> List[Dict]:
 		hosts = self.get('nmaprun', {}).get('host', {})
-		if isinstance(hosts, dict):
-			hosts = [hosts]
-		return hosts
+		return [hosts] if isinstance(hosts, dict) else hosts
 
-	def _get_ports(self, host_cfg):
+	def _get_ports(self, host_cfg: Dict) -> List[Dict]:
 		ports = host_cfg.get('ports', {}).get('port', [])
-		if isinstance(ports, dict):
-			ports = [ports]
-		return ports
+		return [ports] if isinstance(ports, dict) else ports
 
-	def _get_hostname(self, host_cfg):
+	def _get_hostname(self, host_cfg: Dict) -> str:
 		hostnames = host_cfg.get('hostnames', {})
-		hostname = self['_host']
 		if hostnames:
 			hostnames = hostnames.get('hostname', [])
-			if isinstance(hostnames, dict):
-				hostnames = [hostnames]
-			if hostnames:
-				hostname = hostnames[0]['@name']
-		else:
-			hostname = self._get_address(host_cfg).get('@addr', None)
-		return hostname
+			hostnames = [hostnames] if isinstance(hostnames, dict) else hostnames
+			return hostnames[0]['@name'] if hostnames else self['_host']
+		return self._get_address(host_cfg).get('@addr', self['_host'])
 
-	def _get_address(self, host_cfg):
-		if isinstance(host_cfg.get('address', {}), list):
-			addresses = host_cfg.get('address', {})
-			for address in addresses:
-				if address.get('@addrtype') == "ipv4":
-					return address
-		return host_cfg.get('address', {})
+	def _get_address(self, host_cfg: Dict) -> Dict:
+		addresses = host_cfg.get('address', {})
+		if isinstance(addresses, list):
+			return next((addr for addr in addresses if addr.get('@addrtype') == "ipv4"), {})
+		return addresses
 
-	def _get_ip(self, host_cfg):
-		return self._get_address(host_cfg).get('@addr', None)
+	def _get_ip(self, host_cfg: Dict) -> str:
+		return self._get_address(host_cfg).get('@addr')
 
-	def _get_extra_data(self, port_cfg):
+	def _process_port(self, port: Dict, hostname: str, ip: str) -> Generator:
+		port_number = port['@portid']
+		if not port_number or not port_number.isdigit():
+			return
+		
+		port_number = int(port_number)
+		state = port.get('state', {}).get('@state', '')
+		extra_data = self._get_extra_data(port)
+		service_name = extra_data.get('service_name', '')
+		protocol = port['@protocol'].upper()
+
+		port_data = {
+			PORT: port_number,
+			HOST: hostname,
+			STATE: state,
+			SERVICE_NAME: service_name,
+			IP: ip,
+			PROTOCOL: protocol,
+			EXTRA_DATA: extra_data
+		}
+		yield port_data
+
+		scripts = self._get_scripts(port)
+		yield from self._process_scripts(scripts, hostname, ip, port_number, service_name, extra_data)
+
+	def _get_extra_data(self, port_cfg: Dict) -> Dict:
 		extra_data = {
 			k.lstrip('@'): v
 			for k, v in port_cfg.get('service', {}).items()
@@ -305,20 +242,45 @@ class nmapData(dict):
 
 		return extra_data
 
-	def _get_scripts(self, port_cfg):
+	def _get_scripts(self, port_cfg: Dict) -> List[Dict]:
 		scripts = port_cfg.get('script', [])
 		if isinstance(scripts, dict):
 			scripts = [scripts]
-		scripts = [
-			{k.lstrip('@'): v for k, v in script.items()}
-			for script in scripts
-		]
-		return scripts
+		return [{k.lstrip('@'): v for k, v in script.items()} for script in scripts]
 
-	#--------------#
-	# VULN PARSERS #
-	#--------------#
-	def _parse_vulscan_output(self, out, cpes=[]):
+	def _process_scripts(self, scripts: List[Dict], hostname: str, ip: str, port_number: int, service_name: str, extra_data: Dict) -> Generator:
+		for script in scripts:
+			script_id = script['id']
+			output = script['output']
+			metadata = {
+				MATCHED_AT: f'{hostname}:{port_number}',
+				IP: ip,
+				EXTRA_DATA: {'script': script_id, 'service_name': service_name} if service_name else {'script': script_id},
+			}
+			
+			parser_func = getattr(self, f'_parse_{script_id}_output', None)
+			if not parser_func:
+				debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve')
+				continue
+			
+			cpes = extra_data.get('cpe', [])
+			for vuln in parser_func(output, cpes=cpes):
+				vuln.update(metadata)
+				confidence = self._determine_confidence(vuln, extra_data)
+				vuln[CONFIDENCE] = confidence
+				
+				if CONFIG.runners.skip_cve_low_confidence and confidence == 'low':
+					debug(f'{vuln[ID]}: ignored (low confidence).', sub='cve')
+					continue
+				
+				yield vuln
+
+	def _determine_confidence(self, vuln: Dict, extra_data: Dict) -> str:
+		if 'cpe-match' in vuln[TAGS]:
+			return 'high' if extra_data.get('version_exact', False) else 'medium'
+		return 'low'
+
+	def _parse_vulscan_output(self, out: str, cpes: List[str]) -> Generator:
 		"""Parse nmap vulscan script output.
 
 		Args:
@@ -356,8 +318,7 @@ class nmapData(dict):
 				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve')
 				continue
 
-	def _parse_vulners_output(self, out, **kwargs):
-		cpes = kwargs.get('cpes', [])
+	def _parse_vulners_output(self, out: str, cpes: List[str]) -> Generator:
 		provider_name = 'vulners'
 		for line in out.splitlines():
 			if not line:
