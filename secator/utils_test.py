@@ -1,6 +1,7 @@
 import contextlib
 import json
 import os
+import sys
 import unittest.mock
 
 from fp.fp import FreeProxy
@@ -87,11 +88,16 @@ META_OPTS = {
 	USER_AGENT: 'Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
 
 	# Individual tasks options
+	'bup.mode': 'http_methods',
 	'gf.pattern': 'xss',
 	'nmap.output_path': load_fixture('nmap_output', FIXTURES_DIR, only_path=True, ext='.xml'),  # nmap XML fixture
+	'nmap.tcp_connect': True,
+	'nmap.version_detection': True,
+	'nmap.skip_host_discovery': True,
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
 	'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
 	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True),
+	'nuclei.template_id': 'prometheus-metrics',
 	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
 	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
 	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True)
@@ -181,3 +187,15 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			raise
 
 		console.print('[bold green] ok[/]')
+
+
+def clear_modules():
+	"""Clear all secator modules imports.
+	See https://stackoverflow.com/questions/7460363/re-import-module-under-test-to-lose-context for context.
+	"""
+	keys_to_delete = []
+	for k, _ in sys.modules.items():
+		if k.startswith('secator'):
+			keys_to_delete.append(k)
+	for k in keys_to_delete:
+		del sys.modules[k]

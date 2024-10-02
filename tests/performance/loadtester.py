@@ -1,10 +1,9 @@
 import eventlet
 eventlet.monkey_patch()
 from secator.runners import Workflow
-from secator.config import ConfigLoader
+from secator.template import TemplateLoader
 from secator.rich import console
 from secator.celery import *
-import _thread
 import os
 import sys
 import json
@@ -30,7 +29,7 @@ console.log(f'Targets: {targets}')
 
 def create_runner(index):
 	register('json', json.dumps, json.loads, content_type='application/json', content_encoding='utf-8')
-	config = ConfigLoader(name='workflows/subdomain_recon')
+	config = TemplateLoader(name='workflows/subdomain_recon')
 	run_opts = {
 		'sync': False,
 		# 'print_start': True,

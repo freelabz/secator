@@ -1,0 +1,29 @@
+{
+	"name": "secator-worker",
+	"version": "0.0.1",
+	"description": "Secator worker",
+	"main": "",
+	"scripts": {
+		"solo": "npm run venv && venv/bin/secator worker -r",
+		"dev": "npm run venv && SECATOR_CELERY_BROKER_URL=redis://localhost:6379 SECATOR_CELERY_RESULT_BACKEND=redis://localhost:6379 venv/bin/secator worker -r",
+		"venv": "pip install virtualenv --break-system-packages && virtualenv venv && chmod +x venv/bin/activate && . venv/bin/activate && venv/bin/pip install -e .[dev,worker,redis,mongodb,trace]",
+		"generate": "rm -r venv && npm run venv && venv/bin/pip install fastapi uvicorn && venv/bin/pip freeze > requirements.txt",
+		"docker:build": "docker build -t secator .",
+		"docker:push": "gcloud builds submit .",
+		"docker:logs": "docker logs -f secator",
+		"docker:start": "docker run --name=secator-worker --network=host -e SECATOR_CELERY_BROKER_URL=redis://localhost:6379 -e SECATOR_CELERY_RESULT_BACKEND=redis://localhost:6379 -d secator worker",
+		"docker:stop": "docker stop secator-worker; docker rm secator-worker",
+		"docker:start-redis": "docker run --name redis -p 6379:6379 -d redis",
+		"docker:stop-redis": "docker stop redis; docker rm redis",
+		"docker:start-mongodb": "docker run --name mongodb -p 27017:27017 -d mongo:latest",
+		"docker:stop-mongodb": "docker stop mongodb; docker rm mongodb",
+		"docker:start-deps": "npm run docker:start-mongodb; npm run docker:start-redis",
+		"docker:stop-deps": "npm run docker:stop-mongodb; npm run docker:stop-redis",
+		"docker:start-all": "npm run docker:start-deps; npm run docker:start",
+		"docker:stop-all": "npm run docker:stop-deps; npm run docker:stop"
+	},
+	"keywords": [],
+	"author": "ocervello@freelabz.com",
+	"license": "",
+	"dependencies": {}
+}

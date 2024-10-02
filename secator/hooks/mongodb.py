@@ -1,12 +1,11 @@
 import logging
-import os
 import time
 
 import pymongo
 from bson.objectid import ObjectId
 from celery import shared_task
 
-from secator.definitions import DEFAULT_PROGRESS_UPDATE_FREQUENCY
+from secator.config import CONFIG
 from secator.output_types import OUTPUT_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
@@ -14,8 +13,8 @@ from secator.utils import debug, escape_mongodb_url
 # import gevent.monkey
 # gevent.monkey.patch_all()
 
-MONGODB_URL = os.environ.get('MONGODB_URL', 'mongodb://localhost')
-MONGODB_UPDATE_FREQUENCY = int(os.environ.get('MONGODB_UPDATE_FREQUENCY', DEFAULT_PROGRESS_UPDATE_FREQUENCY))
+MONGODB_URL = CONFIG.addons.mongodb.url
+MONGODB_UPDATE_FREQUENCY = CONFIG.addons.mongodb.update_frequency
 MAX_POOL_SIZE = 100
 
 logger = logging.getLogger(__name__)
@@ -28,14 +27,16 @@ def update_runner(self):
 	type = self.config.type
 	collection = f'{type}s'
 	update = self.toDict()
+	debug_obj = {'type': 'runner', 'name': self.name, 'status': self.status}
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
+	debug('update', sub='hooks.mongodb', id=_id, obj=update, obj_after=True, level=4)
 	start_time = time.time()
 	if _id:
 		delta = start_time - self.last_updated if self.last_updated else MONGODB_UPDATE_FREQUENCY
 		if self.last_updated and delta < MONGODB_UPDATE_FREQUENCY and self.status == 'RUNNING':
 			debug(f'skipped ({delta:>.2f}s < {MONGODB_UPDATE_FREQUENCY}s)',
-		 		  sub='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=3)
+				  sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=3)
 			return
 		db = client.main
 		start_time = time.time()
@@ -43,8 +44,7 @@ def update_runner(self):
 		end_time = time.time()
 		elapsed = end_time - start_time
 		debug(
-			f'[dim gold4]updated in {elapsed:.4f}s[/]',
-			sub='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=2)
+			f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=2)
 		self.last_updated = start_time
 	else:  # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
@@ -55,9 +55,7 @@ def update_runner(self):
 			self.context[f'{type}_id'] = _id
 		end_time = time.time()
 		elapsed = end_time - start_time
-		debug(
-			f'created in {elapsed:.4f}s',
-			sub='hooks.mongodb', id=_id, obj={self.name: self.status}, obj_after=False, level=2)
+		debug(f'created in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=2)
 
 
 def update_finding(self, item):
@@ -208,6 +206,6 @@ MONGODB_HOOKS = {
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_iter': [update_runner],
-		'on_end': [update_runner]
+		'on_end': [update_runner, find_duplicates]
 	}
 }

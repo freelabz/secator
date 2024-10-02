@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "secator"
-version = "0.0.1"
+version = "0.6.0"
 authors = [{ name = "FreeLabz", email = "sales@freelabz.com" }]
 readme = "README.md"
 description = "The pentester's swiss knife."
-requires_python = ">=3.8"
+requires-python = ">=3.8"
 keywords = [
   'cybersecurity',
   'recon',
@@ -30,7 +30,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-  "bs4 < 1",
+  "beautifulsoup4 <= 5",
   'celery < 6',
   "cpe < 2",
   "dotmap < 2",
@@ -39,11 +39,15 @@ dependencies = [
   "humanize < 5",
   "ifaddr < 1",
   "jinja2 < 4",
+  "packaging < 25",
   "python-dotenv < 2",
   "pyyaml < 7",
+  "pydantic < 3",
   "requests < 3",
   "rich < 14",
   "rich-click < 1.7",
+  "tldextract < 6",
+  "typing_extensions < 5",
   "validators < 1",
   "xmltodict < 1"
 ]
@@ -54,6 +58,9 @@ dev = [
   'flake8 < 8',
   'watchdog < 3',
   'asciinema-automation < 1',
+]
+build = [
+  'hatch < 2',
 ]
 trace = [
   'memray < 2',

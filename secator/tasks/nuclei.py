@@ -68,6 +68,7 @@ class nuclei(VulnMulti):
 	}
 	ignore_return_code = True
 	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest && nuclei update-templates'
+	install_github_handle = 'projectdiscovery/nuclei'
 	proxychains = False
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
@@ -84,8 +85,12 @@ class nuclei(VulnMulti):
 	def extra_data_extractor(item):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
+		data['type'] = item.get('type', '')
 		data['template_id'] = item['template-id']
 		data['template_url'] = item.get('template-url', '')
+		for k, v in item.get('meta', {}).items():
+			data['data'].append(f'{k}: {v}')
+		data['metadata'] = item.get('metadata', {})
 		return data
 
 	@staticmethod

@@ -14,7 +14,7 @@ class naabu(ReconPort):
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports'},
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports (default: nmap\'s top 100 ports'},
 		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'},
 		'scan_type': {'type': str, 'help': 'Scan type (SYN (s)/CONNECT(c))'},
 		# 'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
@@ -45,7 +45,8 @@ class naabu(ReconPort):
 		}
 	}
 	output_types = [Port]
-	install_cmd = 'sudo apt install -y libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'
+	install_cmd = 'sudo apt install -y build-essential libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest'  # noqa: E501
+	install_github_handle = 'projectdiscovery/naabu'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = False

@@ -5,14 +5,14 @@ import rich_click as click
 from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
-from secator.definitions import (MONGODB_ADDON_ENABLED, OPT_NOT_SUPPORTED,
-								 WORKER_ADDON_ENABLED)
+from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
+from secator.config import CONFIG
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)
 
 RUNNER_OPTS = {
-	'output': {'type': str, 'default': '', 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
+	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
@@ -25,7 +25,6 @@ RUNNER_OPTS = {
 
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
-	'worker': {'is_flag': True, 'help': 'Run tasks in worker (automatic if worker is alive)'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
 	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
@@ -53,7 +52,7 @@ class OrderedGroup(RichGroup):
 				if not name:
 					raise click.UsageError("`name` command argument is required when using aliases.")
 
-				f.__doc__ = f.__doc__ or 'N/A'
+				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
 				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
 				base_command = super(OrderedGroup, self).command(
 					name, *args, **kwargs
@@ -79,7 +78,7 @@ class OrderedGroup(RichGroup):
 				max_width = _get_rich_console().width
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
-				f.__doc__ = f.__doc__ or 'N/A'
+				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
 				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
 				for alias in aliases:
 					grp = super(OrderedGroup, self).group(
@@ -173,7 +172,9 @@ def decorate_command_options(opts):
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
 			short = conf.pop('short', None)
+			conf.pop('internal', False)
 			conf.pop('prefix', None)
+			conf.pop('shlex', True)
 			long = f'--{opt_name}'
 			short = f'-{short}' if short else f'-{opt_name}'
 			f = click.option(long, short, **conf)(f)
@@ -264,24 +265,39 @@ def register_runner(cli_endpoint, config):
 	def func(ctx, **opts):
 		opts.update(fmt_opts)
 		sync = opts['sync']
-		worker = opts['worker']
 		# debug = opts['debug']
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
 		show = opts['show']
 		context = {'workspace_name': ws}
+
+		# Remove options whose values are default values
+		for k, v in options.items():
+			opt_name = k.replace('-', '_')
+			if opt_name in opts and opts[opt_name] == v.get('default', None):
+				del opts[opt_name]
+
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
+
 		targets = opts.pop(input_type)
 		targets = expand_input(targets)
-		if sync or show or not WORKER_ADDON_ENABLED:
+		if sync or show:
 			sync = True
-		elif worker:
-			sync = False
-		else:  # automatically run in worker if it's alive
+		else:
 			from secator.celery import is_celery_worker_alive
-			sync = not is_celery_worker_alive()
+			worker_alive = is_celery_worker_alive()
+			if not worker_alive:
+				sync = True
+			else:
+				sync = False
+				broker_protocol = CONFIG.celery.broker_url.split('://')[0]
+				backend_protocol = CONFIG.celery.result_backend.split('://')[0]
+				if CONFIG.celery.broker_url:
+					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
+						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
+						sys.exit(1)
 		opts['sync'] = sync
 		opts.update({
 			'print_item': not sync,
@@ -293,8 +309,8 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = {}
 		if driver == 'mongodb':
-			if not MONGODB_ADDON_ENABLED:
-				_get_rich_console().print('[bold red]Missing MongoDB dependencies: please run `secator install addons mongodb`[/].')
+			if not ADDONS_ENABLED['mongodb']:
+				_get_rich_console().print('[bold red]Missing `mongodb` addon: please run `secator install addons mongodb`[/].')
 				sys.exit(1)
 			from secator.hooks.mongodb import MONGODB_HOOKS
 			hooks = MONGODB_HOOKS

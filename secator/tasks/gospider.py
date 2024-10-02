@@ -52,6 +52,7 @@ class gospider(HttpCrawler):
 		}
 	}
 	install_cmd = 'go install -v github.com/jaeles-project/gospider@latest'
+	install_github_handle = 'jaeles-project/gospider'
 	ignore_return_code = True
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61

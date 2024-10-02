@@ -4,7 +4,7 @@ import unittest
 import warnings
 from time import sleep
 
-from secator.config import ConfigLoader
+from secator.template import TemplateLoader
 from secator.runners import Task
 from secator.output_types import Target, Port, Url
 from secator.definitions import DEBUG
@@ -38,14 +38,14 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 	def setUp(self):
 		warnings.simplefilter('ignore', category=ResourceWarning)
 		warnings.simplefilter('ignore', category=DeprecationWarning)
-		Command.run_command(
+		Command.execute(
 			f'sh {INTEGRATION_DIR}/setup.sh',
 			cwd=INTEGRATION_DIR
 		)
 		sleep(15)
 
 	def tearDown(self):
-		Command.run_command(
+		Command.execute(
 			f'sh {INTEGRATION_DIR}/teardown.sh',
 			cwd=INTEGRATION_DIR
 		)
@@ -128,7 +128,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 				}
 			}
 		}
-		config = ConfigLoader(conf)
+		config = TemplateLoader(conf)
 		workflow = Workflow(
 			config,
 			targets=['localhost'],

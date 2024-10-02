@@ -1,6 +1,6 @@
 from secator.definitions import DEBUG
-from secator.exporters import CsvExporter, JsonExporter
 from secator.output_types import Target
+from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
@@ -8,10 +8,7 @@ from secator.utils import merge_opts
 
 class Workflow(Runner):
 
-	default_exporters = [
-		JsonExporter,
-		CsvExporter
-	]
+	default_exporters = CONFIG.workflows.exporters
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
@@ -47,7 +44,6 @@ class Workflow(Runner):
 
 		# Construct run opts
 		task_run_opts['hooks'] = self._hooks.get(Task, {})
-		task_run_opts['reports_folder'] = self.reports_folder
 		task_run_opts.update(task_fmt_opts)
 
 		# Build Celery workflow
@@ -58,7 +54,7 @@ class Workflow(Runner):
 			results = workflow.apply().get()
 		else:
 			result = workflow()
-			self.result = result
+			self.celery_result = result
 			results = self.process_live_tasks(result, results_only=True, print_remote_status=self.print_remote_status)
 
 		# Get workflow results
@@ -85,7 +81,7 @@ class Workflow(Runner):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
-			obj (secator.config.ConfigLoader): Config.
+			obj (secator.config.TemplateLoader): Config.
 			targets (list): List of targets.
 			workflow_opts (dict): Workflow options.
 			run_opts (dict): Run options.

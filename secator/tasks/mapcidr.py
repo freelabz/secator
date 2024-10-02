@@ -14,8 +14,10 @@ class mapcidr(ReconIp):
 	input_flag = '-cidr'
 	file_flag = '-cl'
 	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest'
+	install_github_handle = 'projectdiscovery/mapcidr'
 	input_type = CIDR_RANGE
 	output_types = [Ip]
+	item_loaders = []
 	opt_key_map = {
 		THREADS: OPT_NOT_SUPPORTED,
 		PROXY: OPT_NOT_SUPPORTED,
@@ -28,5 +30,5 @@ class mapcidr(ReconIp):
 	@staticmethod
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):
-			return {'ip': line, 'alive': False}
-		return None
+			yield {'ip': line, 'alive': False}
+		return

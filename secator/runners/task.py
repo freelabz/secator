@@ -1,11 +1,12 @@
 from secator.definitions import DEBUG
 from secator.output_types import Target
+from secator.config import CONFIG
 from secator.runners import Runner
 from secator.utils import discover_tasks
 
 
 class Task(Runner):
-	default_exporters = []
+	default_exporters = CONFIG.tasks.exporters
 	enable_hooks = False
 
 	def delay(cls, *args, **kwargs):
@@ -39,6 +40,7 @@ class Task(Runner):
 			'print_input_file': DEBUG > 0,
 			'print_item': True,
 			'print_item_count': not self.sync and not dry_run,
+			# 'print_line': True
 			'print_line': self.sync and not self.output_quiet,
 		}
 		# self.print_item = not self.sync  # enable print_item for base Task only if running remote
@@ -51,7 +53,6 @@ class Task(Runner):
 		hooks = {task_cls: self.hooks}
 		run_opts['hooks'] = hooks
 		run_opts['context'] = self.context
-		run_opts['reports_folder'] = self.reports_folder
 
 		# Run task
 		if self.sync:
@@ -59,9 +60,9 @@ class Task(Runner):
 			if dry_run:  # don't run
 				return
 		else:
-			result = task_cls.delay(self.targets, **run_opts)
+			self.celery_result = task_cls.delay(self.targets, **run_opts)
 			task = self.process_live_tasks(
-				result,
+				self.celery_result,
 				description=False,
 				results_only=True,
 				print_remote_status=self.print_remote_status)

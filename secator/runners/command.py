@@ -10,19 +10,12 @@ from time import sleep
 
 from fp.fp import FreeProxy
 
-from secator.config import ConfigLoader
-from secator.definitions import (DEFAULT_HTTP_PROXY,
-							   DEFAULT_FREEPROXY_TIMEOUT,
-							   DEFAULT_PROXYCHAINS_COMMAND,
-							   DEFAULT_SOCKS5_PROXY, OPT_NOT_SUPPORTED,
-							   OPT_PIPE_INPUT, DEFAULT_INPUT_CHUNK_SIZE)
-from secator.rich import console
+from secator.template import TemplateLoader
+from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
+from secator.config import CONFIG
 from secator.runners import Runner
 from secator.serializers import JSONSerializer
 from secator.utils import debug
-
-# from rich.markup import escape
-# from rich.text import Text
 
 
 logger = logging.getLogger(__name__)
@@ -70,7 +63,7 @@ class Command(Runner):
 	input_path = None
 
 	# Input chunk size (default None)
-	input_chunk_size = DEFAULT_INPUT_CHUNK_SIZE
+	input_chunk_size = CONFIG.runners.input_chunk_size
 
 	# Flag to take a file as input
 	file_flag = None
@@ -81,12 +74,21 @@ class Command(Runner):
 	# Flag to show version
 	version_flag = None
 
-	# Install command
+	# Install
 	install_cmd = None
+	install_github_handle = None
 
 	# Serializer
 	item_loader = None
 	item_loaders = [JSONSerializer(),]
+
+	# Hooks
+	hooks = [
+		'on_start',
+		'on_cmd',
+		'on_line',
+		'on_error',
+	]
 
 	# Ignore return code
 	ignore_return_code = False
@@ -100,9 +102,6 @@ class Command(Runner):
 	# Output
 	output = ''
 
-	# Default run opts
-	default_run_opts = {}
-
 	# Proxy options
 	proxychains = False
 	proxy_socks5 = False
@@ -113,7 +112,7 @@ class Command(Runner):
 
 	def __init__(self, input=None, **run_opts):
 		# Build runnerconfig on-the-fly
-		config = ConfigLoader(input={
+		config = TemplateLoader(input={
 			'name': self.__class__.__name__,
 			'type': 'task',
 			'description': run_opts.get('description', None)
@@ -137,6 +136,9 @@ class Command(Runner):
 		# No capturing of stdout / stderr.
 		self.no_capture = self.run_opts.get('no_capture', False)
 
+		# No processing of output lines.
+		self.no_process = self.run_opts.get('no_process', False)
+
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
@@ -146,6 +148,9 @@ class Command(Runner):
 
 		# Build command
 		self._build_cmd()
+
+		# Run on_cmd hook
+		self.run_hooks('on_cmd')
 
 		# Build item loaders
 		instance_func = getattr(self, 'item_loader', None)
@@ -158,7 +163,7 @@ class Command(Runner):
 		if self.print_cmd and not self.has_children:
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-			self._print(self.cmd, color='bold cyan', rich=True)
+			self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
 		# Print built input
 		if self.print_input_file and self.input_path:
@@ -253,37 +258,33 @@ class Command(Runner):
 	#---------------#
 
 	@classmethod
-	def install(cls):
-		"""Install command by running the content of cls.install_cmd."""
-		console.print(f':heavy_check_mark: Installing {cls.__name__}...', style='bold yellow')
-		if not cls.install_cmd:
-			console.print(f'{cls.__name__} install is not supported yet. Please install it manually.', style='bold red')
-			return
-		ret = cls.run_command(
-			cls.install_cmd,
-			name=cls.__name__,
-			print_cmd=True,
-			print_line=True,
-			cls_attributes={'shell': True}
-		)
-		if ret.return_code != 0:
-			console.print(f':exclamation_mark: Failed to install {cls.__name__}.', style='bold red')
-		else:
-			console.print(f':tada: {cls.__name__} installed successfully !', style='bold green')
-		return ret
+	def execute(cls, cmd, name=None, cls_attributes={}, **kwargs):
+		"""Execute an ad-hoc command.
 
-	@classmethod
-	def run_command(cls, cmd, name=None, cls_attributes={}, **kwargs):
-		"""Run adhoc command. Can be used without defining an inherited class to run a command, while still enjoying
-		all the good stuff in this class.
+		Can be used without defining an inherited class to run a command, while still enjoying all the good stuff in
+		this class.
+
+		Args:
+			cls (object): Class.
+			cmd (str): Command.
+			name (str): Printed name.
+			cls_attributes (dict): Class attributes.
+			kwargs (dict): Options.
+
+		Returns:
+			secator.runners.Command: instance of the Command.
 		"""
 		name = name or cmd.split(' ')[0]
+		kwargs['no_process'] = kwargs.get('no_process', True)
+		kwargs['print_cmd'] = not kwargs.get('quiet', False)
+		kwargs['print_item'] = not kwargs.get('quiet', False)
+		kwargs['print_line'] = not kwargs.get('quiet', False)
+		delay_run = kwargs.pop('delay_run', False)
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
-		cmd_instance.print_line = not kwargs.get('quiet', False)
-		cmd_instance.print_item = not kwargs.get('quiet', False)
-		cmd_instance.run()
+		if not delay_run:
+			cmd_instance.run()
 		return cmd_instance
 
 	def configure_proxy(self):
@@ -296,7 +297,7 @@ class Command(Runner):
 		opt_key_map = self.opt_key_map
 		proxy_opt = opt_key_map.get('proxy', False)
 		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
-		proxychains_flavor = getattr(self, 'proxychains_flavor', DEFAULT_PROXYCHAINS_COMMAND)
+		proxychains_flavor = getattr(self, 'proxychains_flavor', CONFIG.http.proxychains_command)
 		proxy = False
 
 		if self.proxy in ['auto', 'proxychains'] and self.proxychains:
@@ -304,12 +305,12 @@ class Command(Runner):
 			proxy = 'proxychains'
 
 		elif self.proxy and support_proxy_opt:
-			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and DEFAULT_SOCKS5_PROXY:
-				proxy = DEFAULT_SOCKS5_PROXY
-			elif self.proxy in ['auto', 'http'] and self.proxy_http and DEFAULT_HTTP_PROXY:
-				proxy = DEFAULT_HTTP_PROXY
+			if self.proxy in ['auto', 'socks5'] and self.proxy_socks5 and CONFIG.http.socks5_proxy:
+				proxy = CONFIG.http.socks5_proxy
+			elif self.proxy in ['auto', 'http'] and self.proxy_http and CONFIG.http.http_proxy:
+				proxy = CONFIG.http.http_proxy
 			elif self.proxy == 'random':
-				proxy = FreeProxy(timeout=DEFAULT_FREEPROXY_TIMEOUT, rand=True, anonym=True).get()
+				proxy = FreeProxy(timeout=CONFIG.http.freeproxy_timeout, rand=True, anonym=True).get()
 			elif self.proxy.startswith(('http://', 'socks5://')):
 				proxy = self.proxy
 
@@ -348,6 +349,8 @@ class Command(Runner):
 
 		# Check for sudo requirements and prepare the password if needed
 		sudo_password = self._prompt_sudo(self.cmd)
+		if sudo_password and sudo_password == -1:
+			return
 
 		# Prepare cmds
 		command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -360,7 +363,7 @@ class Command(Runner):
 		try:
 			env = os.environ
 			env.update(self.env)
-			process = subprocess.Popen(
+			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
 				stdout=sys.stdout if self.no_capture else subprocess.PIPE,
@@ -372,8 +375,8 @@ class Command(Runner):
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
-				process.stdin.write(f"{sudo_password}\n")
-				process.stdin.flush()
+				self.process.stdin.write(f"{sudo_password}\n")
+				self.process.stdin.flush()
 
 		except FileNotFoundError as e:
 			if self.config.name in str(e):
@@ -392,17 +395,20 @@ class Command(Runner):
 		try:
 			# No capture mode, wait for command to finish and return
 			if self.no_capture:
-				self._wait_for_end(process)
+				self._wait_for_end()
 				return
 
 			# Process the output in real-time
-			for line in iter(lambda: process.stdout.readline(), b''):
+			for line in iter(lambda: self.process.stdout.readline(), b''):
 				sleep(0)  # for async to give up control
 				if not line:
 					break
 
 				# Strip line endings
 				line = line.rstrip()
+				if self.no_process:
+					yield line
+					continue
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
@@ -416,43 +422,34 @@ class Command(Runner):
 				line = self.run_hooks('on_line', line)
 
 				# Run item_loader to try parsing as dict
-				items = None
+				item_count = 0
 				if self.output_json:
-					items = self.run_item_loaders(line)
+					for item in self.run_item_loaders(line):
+						yield item
+						item_count += 1
 
-				# Yield line if no items parsed
-				if not items:
+				# Yield line if no items were yielded
+				if item_count == 0:
 					yield line
 
-				# Turn results into list if not already a list
-				elif not isinstance(items, list):
-					items = [items]
-
-				# Yield items
-				if items:
-					yield from items
-
 		except KeyboardInterrupt:
-			process.kill()
+			self.process.kill()
 			self.killed = True
 
 		# Retrieve the return code and output
-		self._wait_for_end(process)
+		self._wait_for_end()
 
 	def run_item_loaders(self, line):
-		"""Run item loaders on a string."""
-		items = []
+		"""Run item loaders against an output line."""
 		for item_loader in self.item_loaders:
-			result = None
 			if (callable(item_loader)):
-				result = item_loader(self, line)
+				yield from item_loader(self, line)
 			elif item_loader:
-				result = item_loader.run(line)
-			if isinstance(result, dict):
-				result = [result]
-			if result:
-				items.extend(result)
-		return items
+				name = item_loader.__class__.__name__.replace('Serializer', '').lower()
+				default_callback = lambda self, x: [(yield x)]  # noqa: E731
+				callback = getattr(self, f'on_{name}_loaded', None) or default_callback
+				for item in item_loader.run(line):
+					yield from callback(self, item)
 
 	def _prompt_sudo(self, command):
 		"""
@@ -471,13 +468,18 @@ class Command(Runner):
 			return None
 
 		# Check if sudo can be executed without a password
-		if subprocess.run(['sudo', '-n', 'true'], capture_output=True).returncode == 0:
-			return None
+		try:
+			if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
+				return None
+		except ValueError:
+			error = "Could not run sudo check test"
+			self.errors.append(error)
 
 		# Check if we have a tty
 		if not os.isatty(sys.stdin.fileno()):
-			self._print("No TTY detected. Sudo password prompt requires a TTY to proceed.", color='bold red')
-			sys.exit(1)
+			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
+			self.errors.append(error)
+			return -1
 
 		# If not, prompt the user for a password
 		self._print('[bold red]Please enter sudo password to continue.[/]')
@@ -493,19 +495,20 @@ class Command(Runner):
 			if result.returncode == 0:
 				return sudo_password  # Password is correct
 			self._print("Sorry, try again.")
-		self._print("Sudo password verification failed after 3 attempts.")
-		return None
+		error = "Sudo password verification failed after 3 attempts."
+		self.errors.append(error)
+		return -1
 
-	def _wait_for_end(self, process):
+	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
-		process.wait()
-		self.return_code = process.returncode
+		self.process.wait()
+		self.return_code = self.process.returncode
 
 		if self.no_capture:
 			self.output = ''
 		else:
 			self.output = self.output.strip()
-			process.stdout.close()
+			self.process.stdout.close()
 
 		if self.ignore_return_code:
 			self.return_code = 0
@@ -577,14 +580,24 @@ class Command(Runner):
 			# Append opt name + opt value to option string.
 			# Note: does not append opt value if value is True (flag)
 			opts_str += f' {opt_name}'
+			shlex_quote = opt_conf.get('shlex', True)
 			if opt_val is not True:
-				opt_val = shlex.quote(str(opt_val))
+				if shlex_quote:
+					opt_val = shlex.quote(str(opt_val))
 				opts_str += f' {opt_val}'
 
 		return opts_str.strip()
 
 	@staticmethod
+	def _get_opt_default(opt_name, opts_conf):
+		for k, v in opts_conf.items():
+			if k == opt_name:
+				return v.get('default', None)
+		return None
+
+	@staticmethod
 	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
+		default = default or Command._get_opt_default(opt_name, opts_conf)
 		aliases = [
 			opts.get(f'{opt_prefix}_{opt_name}'),
 			opts.get(f'{opt_prefix}.{opt_name}'),

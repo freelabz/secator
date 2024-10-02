@@ -2,7 +2,7 @@ import os
 import csv
 import yaml
 
-from secator.definitions import GOOGLE_CREDENTIALS_PATH, GOOGLE_DRIVE_PARENT_FOLDER_ID
+from secator.config import CONFIG
 from secator.exporters._base import Exporter
 from secator.rich import console
 from secator.utils import pluralize
@@ -16,20 +16,20 @@ class GdriveExporter(Exporter):
 		title = self.report.data['info']['title']
 		sheet_title = f'{self.report.data["info"]["title"]}_{self.report.timestamp}'
 		results = self.report.data['results']
-		if not GOOGLE_CREDENTIALS_PATH:
-			console.print(':file_cabinet: Missing GOOGLE_CREDENTIALS_PATH to save to Google Sheets', style='red')
+		if not CONFIG.addons.google.credentials_path:
+			console.print(':file_cabinet: Missing CONFIG.addons.google.credentials_path to save to Google Sheets', style='red')
 			return
-		if not GOOGLE_DRIVE_PARENT_FOLDER_ID:
-			console.print(':file_cabinet: Missing GOOGLE_DRIVE_PARENT_FOLDER_ID to save to Google Sheets.', style='red')
+		if not CONFIG.addons.google.drive_parent_folder_id:
+			console.print(':file_cabinet: Missing CONFIG.addons.google.drive_parent_folder_id to save to Google Sheets.', style='red')  # noqa: E501
 			return
-		client = gspread.service_account(GOOGLE_CREDENTIALS_PATH)
+		client = gspread.service_account(CONFIG.addons.google.credentials_path)
 
 		# Create workspace folder if it doesn't exist
-		folder_id = self.get_folder_by_name(ws, parent_id=GOOGLE_DRIVE_PARENT_FOLDER_ID)
+		folder_id = self.get_folder_by_name(ws, parent_id=CONFIG.addons.google.drive_parent_folder_id)
 		if ws and not folder_id:
 			folder_id = self.create_folder(
 				folder_name=ws,
-				parent_id=GOOGLE_DRIVE_PARENT_FOLDER_ID)
+				parent_id=CONFIG.addons.google.drive_parent_folder_id)
 
 		# Create worksheet
 		sheet = client.create(title, folder_id=folder_id)
@@ -84,7 +84,7 @@ class GdriveExporter(Exporter):
 	def create_folder(self, folder_name, parent_id=None):
 		from googleapiclient.discovery import build
 		from google.oauth2 import service_account
-		creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH)
+		creds = service_account.Credentials.from_service_account_file(CONFIG.addons.google.credentials_path)
 		service = build('drive', 'v3', credentials=creds)
 		body = {
 			'name': folder_name,
@@ -98,7 +98,7 @@ class GdriveExporter(Exporter):
 	def list_folders(self, parent_id):
 		from googleapiclient.discovery import build
 		from google.oauth2 import service_account
-		creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH)
+		creds = service_account.Credentials.from_service_account_file(CONFIG.addons.google.credentials_path)
 		service = build('drive', 'v3', credentials=creds)
 		driveid = service.files().get(fileId='root').execute()['id']
 		response = service.files().list(

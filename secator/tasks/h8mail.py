@@ -2,7 +2,7 @@ import os
 import json
 
 from secator.decorators import task
-from secator.definitions import EMAIL
+from secator.definitions import EMAIL, OUTPUT_PATH
 from secator.tasks._categories import OSInt
 from secator.output_types import UserAccount
 
@@ -31,7 +31,7 @@ class h8mail(OSInt):
 
 	@staticmethod
 	def on_start(self):
-		output_path = self.get_opt_value('output_path')
+		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path

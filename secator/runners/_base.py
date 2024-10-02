@@ -14,7 +14,8 @@ from rich.panel import Panel
 from rich.progress import Progress as RichProgress
 from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from secator.definitions import DEBUG, DEFAULT_PROGRESS_UPDATE_FREQUENCY, REPORTS_FOLDER
+from secator.definitions import DEBUG
+from secator.config import CONFIG
 from secator.output_types import OUTPUT_TYPES, OutputType, Progress
 from secator.report import Report
 from secator.rich import console, console_stdout
@@ -28,14 +29,11 @@ logger = logging.getLogger(__name__)
 HOOKS = [
 	'before_init',
 	'on_init',
-	'on_start',
 	'on_end',
 	'on_item_pre_convert',
 	'on_item',
 	'on_duplicate',
-	'on_line',
 	'on_iter',
-	'on_error',
 ]
 
 VALIDATORS = [
@@ -48,7 +46,7 @@ class Runner:
 	"""Runner class.
 
 	Args:
-		config (secator.config.ConfigLoader): Loaded config.
+		config (secator.config.TemplateLoader): Loaded config.
 		targets (list): List of targets to run task on.
 		results (list): List of existing results to re-use.
 		workspace_name (str): Workspace name.
@@ -91,7 +89,6 @@ class Runner:
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
-		self.exporters = self.resolve_exporters()
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
 		self.last_updated = None
@@ -106,13 +103,16 @@ class Runner:
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
-		self.result = None
+		self.celery_result = None
+
+		# Determine exporters
+		exporters_str = self.run_opts.get('output') or self.default_exporters
+		self.exporters = Runner.resolve_exporters(exporters_str)
 
 		# Determine report folder
-		default_reports_folder_base = f'{REPORTS_FOLDER}/{self.workspace_name}/{self.config.type}s'
+		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
 		_id = get_task_folder_id(default_reports_folder_base)
-		default_report_folder = f'{default_reports_folder_base}/{_id}'
-		self.reports_folder = run_opts.get('reports_folder') or default_report_folder
+		self.reports_folder = f'{default_reports_folder_base}/{_id}'
 
 		# Make reports folders
 		os.makedirs(self.reports_folder, exist_ok=True)
@@ -155,23 +155,23 @@ class Runner:
 
 		# Hooks
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
-		self.hooks = {name: [] for name in HOOKS}
+		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		for key in self.hooks:
 
-			# Register class specific hooks
-			instance_func = getattr(self, key, None)
-			if instance_func:
+			# Register class + derived class hooks
+			class_hook = getattr(self, key, None)
+			if class_hook:
 				name = f'{self.__class__.__name__}.{key}'
-				fun = f'{instance_func.__module__}.{instance_func.__name__}'
+				fun = self.get_func_path(class_hook)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks', level=3)
-				self.hooks[key].append(instance_func)
+				self.hooks[key].append(class_hook)
 
 			# Register user hooks
 			user_hooks = hooks.get(self.__class__, {}).get(key, [])
 			user_hooks.extend(hooks.get(key, []))
 			for hook in user_hooks:
 				name = f'{self.__class__.__name__}.{key}'
-				fun = f'{hook.__module__}.{hook.__name__}'
+				fun = self.get_func_path(hook)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks', level=3)
 			self.hooks[key].extend(user_hooks)
 
@@ -280,9 +280,9 @@ class Runner:
 
 		except KeyboardInterrupt:
 			self._print('Process was killed manually (CTRL+C / CTRL+X).', color='bold red', rich=True)
-			if self.result:
+			if self.celery_result:
 				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
-				self.stop_live_tasks(self.result)
+				self.stop_live_tasks(self.celery_result)
 
 		# Filter results and log info
 		self.mark_duplicates()
@@ -291,9 +291,10 @@ class Runner:
 		self.run_hooks('on_end')
 
 	def mark_duplicates(self):
-		debug('duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		dupe_count = 0
 		for item in self.results:
-			debug('duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=2)
+			# debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -302,6 +303,7 @@ class Runner:
 				main._related.extend([dupe._uuid for dupe in dupes])
 				main._related = list(dict.fromkeys(main._related))
 				if main._uuid != item._uuid:
+					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
 					item._duplicate = True
 					item = self.run_hooks('on_item', item)
 					if item._uuid not in main._related:
@@ -313,13 +315,16 @@ class Runner:
 					if not dupe._duplicate:
 						debug(
 							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-							sub='runner.mark_duplicates', level=2)
+							sub='runner.mark_duplicates', level=5)
+						dupe_count += 1
 						dupe._duplicate = True
 						dupe = self.run_hooks('on_duplicate', dupe)
 
-		debug('Duplicates:', sub='runner.mark_duplicates', level=2)
-		debug('\n\t'.join([repr(i) for i in self.results if i._duplicate]), sub='runner.mark_duplicates', level=2)
-		debug('duplicate check completed', id=self.config.name, sub='runner.mark_duplicates')
+		duplicates = [repr(i) for i in self.results if i._duplicate]
+		if duplicates:
+			duplicates_str = '\n\t'.join(duplicates)
+			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='runner.mark_duplicates', level=5)
+		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.mark_duplicates')
 
 	def yielder(self):
 		raise NotImplementedError()
@@ -356,7 +361,7 @@ class Runner:
 			return result
 		for hook in self.hooks[hook_type]:
 			name = f'{self.__class__.__name__}.{hook_type}'
-			fun = f'{hook.__module__}.{hook.__name__}'
+			fun = self.get_func_path(hook)
 			try:
 				_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
@@ -386,19 +391,19 @@ class Runner:
 				return False
 		return True
 
-	def resolve_exporters(self):
+	@staticmethod
+	def resolve_exporters(exporters):
 		"""Resolve exporters from output options."""
-		output = self.run_opts.get('output', '')
-		if output == '':
-			return self.default_exporters
-		elif output is False:
+		if not exporters or exporters in ['false', 'False']:
 			return []
-		exporters = [
+		if isinstance(exporters, str):
+			exporters = exporters.split(',')
+		classes = [
 			import_dynamic(f'secator.exporters.{o.capitalize()}Exporter', 'Exporter')
-			for o in output.split(',')
+			for o in exporters
 			if o
 		]
-		return [e for e in exporters if e]
+		return [cls for cls in classes if cls]
 
 	def log_start(self):
 		"""Log runner start."""
@@ -738,6 +743,23 @@ class Runner:
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
 		debug(f'Input item: {item}', sub='klass.load', level=5)
+
+		# Skip if already converted
+		if isinstance(item, DotMap) or isinstance(item, OutputType):
+			return item
+
+		# Use output discriminator to let user arbiter between output types to pick
+		output_discriminator = getattr(self, 'output_discriminator', None)
+		if output_discriminator:
+			result = output_discriminator(item)
+			if result:
+				debug(f'Discriminated output type: {result.__name__}', sub='klass.load', level=5)
+				output_types = [result]
+			else:
+				new_item = DotMap(item)
+				new_item._type = 'unknown'
+				return new_item
+
 		debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load', level=5)
 		for klass in output_types:
 			debug(f'Loading item as {klass.__name__}', sub='klass.load', level=5)
@@ -822,12 +844,16 @@ class Runner:
 		if not self.run_validators('item', item):
 			return None
 
-		# Run item hooks
-		item = self.run_hooks('on_item_pre_convert', item)
-		if not item:
-			return None
-
 		# Convert output dict to another schema
+		if isinstance(item, dict):
+			item = self.run_hooks('on_item_pre_convert', item)
+			if not item:
+				return None
+			if not self.orig:
+				item = self._convert_item_schema(item)
+			else:
+				item = DotMap(item)
+
 		if isinstance(item, dict) and not self.orig:
 			item = self._convert_item_schema(item)
 		elif isinstance(item, OutputType):
@@ -847,7 +873,8 @@ class Runner:
 
 		if item._type == 'progress' and item._source == self.config.name:
 			self.progress = item.percent
-			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < DEFAULT_PROGRESS_UPDATE_FREQUENCY:
+			update_frequency = CONFIG.runners.progress_update_frequency
+			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:
 				return None
 			elif int(item.percent) in [0, 100]:
 				return None
@@ -871,3 +898,31 @@ class Runner:
 		elif isinstance(item, OutputType):
 			item = repr(item)
 		return item
+
+	@classmethod
+	def get_func_path(cls, func):
+		"""
+		Get the full symbolic path of a function or method, including staticmethods,
+		using function and method attributes.
+
+		Args:
+			func (function, method, or staticmethod): A function or method object.
+		"""
+		if hasattr(func, '__self__'):
+			if func.__self__ is not None:
+				# It's a method bound to an instance
+				class_name = func.__self__.__class__.__name__
+				return f"{func.__module__}.{class_name}.{func.__name__}"
+			else:
+				# It's a method bound to a class (class method)
+				class_name = func.__qualname__.rsplit('.', 1)[0]
+				return f"{func.__module__}.{class_name}.{func.__name__}"
+		else:
+			# Handle static and regular functions
+			if '.' in func.__qualname__:
+				# Static method or a function defined inside a class
+				class_name, func_name = func.__qualname__.rsplit('.', 1)
+				return f"{func.__module__}.{class_name}.{func_name}"
+			else:
+				# Regular function not attached to a class
+				return f"{func.__module__}.{func.__name__}"

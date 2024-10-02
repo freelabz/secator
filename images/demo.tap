@@ -1,0 +1,47 @@
+secator --help
+clear
+
+# Run tasks ...
+secator x katana http://testphp.vulnweb.com -rl 100 -timeout 10 -header Accept:text/html
+clear
+
+# ... with mutualized input options and output types !
+Up 3
+Left 72
+Backspace 6
+dirsearch # noenter
+
+Up 1
+Backspace 9
+cariddi # noenter
+
+Up 1
+Backspace 7
+feroxbuster # nowait
+Sleep 5s
+Ctrl+C
+Sleep 3s
+
+Up 1
+Left 72
+Backspace 11
+nmap # noenter
+Right 8
+Backspace 7
+Right 19
+Space 1
+-p 80,443 # noenter
+Right 45
+Backspace 25
+Sleep 2s
+Enter
+Wait
+Sleep 3s
+clear
+
+# Run workflows ...
+secator w host_recon --help
+
+Up 1
+Backspace 6
+localhost -rl 1000 -ss -p 6379,8080 -tid redis-info,exposed-redis,CVE-2021-44228

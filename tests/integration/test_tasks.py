@@ -22,14 +22,14 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 	def setUp(self):
 		warnings.simplefilter('ignore', category=ResourceWarning)
 		warnings.simplefilter('ignore', category=DeprecationWarning)
-		Command.run_command(
+		Command.execute(
 			f'sh {INTEGRATION_DIR}/setup.sh',
 			cwd=INTEGRATION_DIR
 		)
 		sleep(15)
 
 	def tearDown(self):
-		Command.run_command(
+		Command.execute(
 			f'sh {INTEGRATION_DIR}/teardown.sh',
 			cwd=INTEGRATION_DIR
 		)
@@ -49,6 +49,9 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'feroxbuster.filter_size': 1987,
 			'h8mail.local_breach': load_fixture('h8mail_breach', INTEGRATION_DIR, only_path=True),
 			'nmap.port': '3000,8080',
+			'nmap.tcp_connect': True,
+			'nmap.version_detection': True,
+			'nmap.skip_host_discovery': True,
 			'match_codes': '200',
 			'maigret.site': 'github',
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),

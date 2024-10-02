@@ -1,26 +1,30 @@
-import importlib
+import fnmatch
 import inspect
+import importlib
 import itertools
 import logging
-import mimetypes
 import operator
 import os
+import tldextract
 import re
 import select
 import sys
+import validators
 import warnings
+
 from datetime import datetime
-from importlib import import_module
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
 from urllib.parse import urlparse, quote
 
+import humanize
 import ifaddr
 import yaml
 from rich.markdown import Markdown
 
-from secator.definitions import DEBUG, DEBUG_COMPONENT, DEFAULT_STDIN_TIMEOUT
+from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -65,7 +69,7 @@ def expand_input(input):
 	"""
 	if input is None:  # read from stdin
 		console.print('Waiting for input on stdin ...', style='bold yellow')
-		rlist, _, _ = select.select([sys.stdin], [], [], DEFAULT_STDIN_TIMEOUT)
+		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 		if rlist:
 			data = sys.stdin.read().splitlines()
 		else:
@@ -108,24 +112,6 @@ def sanitize_url(http_url):
 	return url.geturl().rstrip('/')
 
 
-def match_extensions(response, allowed_ext=['.html']):
-	"""Check if a URL is a file from the HTTP response by looking at the content_type and the URL.
-
-	Args:
-		response (dict): httpx response.
-
-	Returns:
-		bool: True if is a file, False otherwise.
-	"""
-	content_type = response.get('content_type', '').split(';')[0]
-	url = response.get('final_url') or response['url']
-	ext = mimetypes.guess_extension(content_type)
-	ext2 = os.path.splitext(urlparse(url).path)[1]
-	if (ext and ext in allowed_ext) or (ext2 and ext2 in allowed_ext):
-		return True
-	return False
-
-
 def deduplicate(array, attr=None):
 	"""Deduplicate list of OutputType items.
 
@@ -147,17 +133,6 @@ def deduplicate(array, attr=None):
 	return sorted(list(dict.fromkeys(array)))
 
 
-def setup_logger(level='info', format='%(message)s'):
-	logger = logging.getLogger('secator')
-	level = logging.getLevelName(level.upper())
-	logger.setLevel(level)
-	handler = logging.StreamHandler()
-	formatter = logging.Formatter(format)
-	handler.setFormatter(formatter)
-	logger.addHandler(handler)
-	return logger
-
-
 def discover_internal_tasks():
 	"""Find internal secator tasks."""
 	from secator.runners import Runner
@@ -167,7 +142,7 @@ def discover_internal_tasks():
 		if module_name.startswith('_'):
 			continue
 		try:
-			module = import_module(f'secator.tasks.{module_name}')
+			module = importlib.import_module(f'secator.tasks.{module_name}')
 		except ImportError as e:
 			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
 			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
@@ -189,17 +164,32 @@ def discover_internal_tasks():
 
 def discover_external_tasks():
 	"""Find external secator tasks."""
-	if not os.path.exists('config.secator'):
-		return []
-	with open('config.secator', 'r') as f:
-		classes = f.read().splitlines()
 	output = []
-	for cls_path in classes:
-		cls = import_dynamic(cls_path, cls_root='Command')
-		if not cls:
-			continue
-		# logger.warning(f'Added external tool {cls_path}')
-		output.append(cls)
+	sys.dont_write_bytecode = True
+	for path in CONFIG.dirs.templates.glob('**/*.py'):
+		try:
+			task_name = path.stem
+			module_name = f'secator.tasks.{task_name}'
+
+			# console.print(f'Importing module {module_name} from {path}')
+			spec = importlib.util.spec_from_file_location(module_name, path)
+			module = importlib.util.module_from_spec(spec)
+			# console.print(f'Adding module "{module_name}" to sys path')
+			sys.modules[module_name] = module
+
+			# console.print(f'Executing module "{module}"')
+			spec.loader.exec_module(module)
+
+			# console.print(f'Checking that {module} contains task {task_name}')
+			if not hasattr(module, task_name):
+				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
+				continue
+			cls = getattr(module, task_name)
+			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
+			output.append(cls)
+		except Exception as e:
+			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
+	sys.dont_write_bytecode = False
 	return output
 
 
@@ -275,8 +265,8 @@ def merge_opts(*options):
 	all_opts = {}
 	for opts in options:
 		if opts:
-			opts_noemtpy = {k: v for k, v in opts.items() if v is not None}
-			all_opts.update(opts_noemtpy)
+			opts_noempty = {k: v for k, v in opts.items() if v is not None}
+			all_opts.update(opts_noempty)
 	return all_opts
 
 
@@ -307,12 +297,6 @@ def pluralize(word):
 		return word.rstrip('y') + 'ies'
 	else:
 		return f'{word}s'
-
-
-def get_task_name_padding(classes=None):
-	all_tasks = discover_tasks()
-	classes = classes or all_tasks
-	return max([len(cls.__name__) for cls in all_tasks if cls in classes]) + 2
 
 
 def load_fixture(name, fixtures_dir, ext=None, only_path=False):
@@ -347,10 +331,6 @@ def detect_host(interface=None):
 	return None
 
 
-def find_list_item(array, val, key='id', default=None):
-	return next((item for item in array if item[key] == val), default)
-
-
 def print_results_table(results, title=None, exclude_fields=[], log=False):
 	from secator.output_types import OUTPUT_TYPES
 	from secator.rich import build_table
@@ -366,8 +346,10 @@ def print_results_table(results, title=None, exclude_fields=[], log=False):
 		if output_type.__name__ == 'Progress':
 			continue
 		items = [
-			item for item in results if item._type == output_type.get_name() and not item._duplicate
+			item for item in results if item._type == output_type.get_name()
 		]
+		if CONFIG.runners.remove_duplicates:
+			items = [item for item in items if not item._duplicate]
 		if items:
 			_table = build_table(
 				items,
@@ -438,3 +420,160 @@ def escape_mongodb_url(url):
 		user, password = quote(user), quote(password)
 		return f'mongodb://{user}:{password}@{url}'
 	return url
+
+
+def print_version():
+	"""Print secator version information."""
+	from secator.installer import get_version_info
+	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False, end='')
+	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
+	latest_version = info['latest_version']
+	status = info['status']
+	location = info['location']
+	if status == 'outdated':
+		console.print('[bold red] (outdated)[/]')
+	else:
+		console.print('')
+	console.print(f'[bold gold3]Latest version[/]: {latest_version}', highlight=False)
+	console.print(f'[bold gold3]Location[/]: {location}')
+	console.print(f'[bold gold3]Python binary[/]: {sys.executable}')
+	if DEV_PACKAGE:
+		console.print(f'[bold gold3]Root folder[/]: {ROOT_FOLDER}')
+	console.print(f'[bold gold3]Lib folder[/]: {LIB_FOLDER}')
+	if status == 'outdated':
+		console.print('[bold red]secator is outdated, run "secator update" to install the latest version.')
+
+
+def extract_domain_info(input, domain_only=False):
+	"""Extracts domain info from a given any URL or FQDN.
+
+	Args:
+		input (str): An URL or FQDN.
+
+	Returns:
+		tldextract.ExtractResult: Extracted info.
+		str | None: Registered domain name or None if invalid domain (only if domain_only is set).
+	"""
+	result = tldextract.extract(input)
+	if not result or not result.domain or not result.suffix:
+		return None
+	if domain_only:
+		if not validators.domain(result.registered_domain):
+			return None
+		return result.registered_domain
+	return result
+
+
+def extract_subdomains_from_fqdn(fqdn, domain, suffix):
+	"""Generates a list of subdomains up to the root domain from a fully qualified domain name (FQDN).
+
+	Args:
+		fqdn (str): The full domain name, e.g., 'console.cloud.google.com'.
+		domain (str): The main domain, e.g., 'google'.
+		suffix (str): The top-level domain (TLD), e.g., 'com'.
+
+	Returns:
+		List[str]: A list containing the FQDN and all its subdomains down to the root domain.
+	"""
+	# Start with the full domain and prepare to break it down
+	parts = fqdn.split('.')
+
+	# Initialize the list of subdomains with the full domain
+	subdomains = [fqdn]
+
+	# Continue stripping subdomains until reaching the base domain (domain + suffix)
+	base_domain = f"{domain}.{suffix}"
+	current = fqdn
+
+	while current != base_domain:
+		# Remove the leftmost part of the domain
+		parts = parts[1:]
+		current = '.'.join(parts)
+		subdomains.append(current)
+
+	return subdomains
+
+
+def match_file_by_pattern(paths, pattern, type='both'):
+	"""Match pattern on a set of paths.
+
+	Args:
+		paths (iterable): An iterable of Path objects to be searched.
+		pattern (str): The pattern to search for in file names or directory names, supports Unix shell-style wildcards.
+		type (str): Specifies the type to search for; 'file', 'directory', or 'both'.
+
+	Returns:
+		list of Path: A list of Path objects that match the given pattern.
+	"""
+	matches = []
+	for path in paths:
+		full_path = str(path.resolve())
+		if path.is_dir() and type in ['directory', 'both'] and fnmatch.fnmatch(full_path, f'*{pattern}*'):
+			matches.append(path)
+		elif path.is_file() and type in ['file', 'both'] and fnmatch.fnmatch(full_path, f'*{pattern}*'):
+			matches.append(path)
+
+	return matches
+
+
+def get_file_date(file_path):
+	"""Retrieves the last modification date of the file and returns it in a human-readable format.
+
+	Args:
+		file_path (Path): Path object pointing to the file.
+
+	Returns:
+		str: Human-readable time format.
+	"""
+	# Get the last modified time of the file
+	mod_timestamp = file_path.stat().st_mtime
+	mod_date = datetime.fromtimestamp(mod_timestamp)
+
+	# Determine how to display the date based on how long ago it was modified
+	now = datetime.now()
+	if (now - mod_date).days < 7:
+		# If the modification was less than a week ago, use natural time
+		return humanize.naturaltime(now - mod_date) + mod_date.strftime(" @ %H:%m")
+	else:
+		# Otherwise, return the date in "on %B %d" format
+		return f"{mod_date.strftime('%B %d @ %H:%m')}"
+
+
+def trim_string(s, max_length=30):
+	"""
+	Trims a long string to include the beginning and the end, with an ellipsis in the middle.
+	The output string will not exceed the specified maximum length.
+
+	Args:
+		s (str): The string to be trimmed.
+		max_length (int): The maximum allowed length of the trimmed string.
+
+	Returns:
+	str: The trimmed string.
+	"""
+	if len(s) <= max_length:
+		return s  # Return the original string if it's short enough
+
+	# Calculate the lengths of the start and end parts
+	end_length = 30  # Default end length
+	if max_length - end_length - 5 < 0:  # 5 accounts for the length of '[...] '
+		end_length = max_length - 5  # Adjust end length if total max_length is too small
+	start_length = max_length - end_length - 5  # Subtract the space for '[...] '
+
+	# Build the trimmed string
+	start_part = s[:start_length]
+	end_part = s[-end_length:]
+	return f"{start_part} [...] {end_part}"
+
+
+def sort_files_by_date(file_list):
+	"""Sorts a list of file paths by their modification date.
+
+	Args:
+		file_list (list): A list of file paths (strings or Path objects).
+
+	Returns:
+		list: The list of file paths sorted by modification date.
+	"""
+	file_list.sort(key=lambda x: x.stat().st_mtime)
+	return file_list

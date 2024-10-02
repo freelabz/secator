@@ -73,23 +73,3 @@ class TestAdHocWorkflow(unittest.TestCase):
 	# 	urls = [r['url'] for r in results]
 	# 	print(urls)
 	# 	return workflow
-
-
-	# def test_nested_collect():
-	# 	console.log(task)
-	# 	workflow = task.delay()
-	# 	results = workflow.get()
-	# 	console.print_item(json.dumps(results))
-	# 	# results = get_results(workflow)
-	# 	# console.log(results)
-	# 	# console.log([r['url'] for r in results])
-	# 	# urls = [r['url'] for r in results]
-	# 	# for target in targets:
-	# 	#     assert any(target in url for url in urls)
-	# 	return workflow
-
-	# 	# Polling approach
-	# 	# for task_id, name, result in poll_task(find_root_task(workflow), seen):
-	# 	#     print(task_id, name, result)
-	# 	#     results.append(result)
-	# 	# print([r for r in results if r._type == 'url'])
