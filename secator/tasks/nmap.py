@@ -93,10 +93,10 @@ class nmap(VulnMulti):
 		yield from super().yielder()
 		if self.return_code != 0:
 			return
-		
+
 		if self.print_line:
 			self._print(f'nmap XML results saved to {self.output_path}')
-		
+
 		if os.path.exists(self.output_path):
 			yield from self.parse_nmap_output()
 
@@ -151,7 +151,7 @@ class nmapData(dict):
 		port_number = port['@portid']
 		if not port_number or not port_number.isdigit():
 			return
-		
+
 		port_number = int(port_number)
 		state = port.get('state', {}).get('@state', '')
 		extra_data = self._get_extra_data(port)
@@ -257,22 +257,22 @@ class nmapData(dict):
 				IP: ip,
 				EXTRA_DATA: {'script': script_id, 'service_name': service_name} if service_name else {'script': script_id},
 			}
-			
+
 			parser_func = getattr(self, f'_parse_{script_id}_output', None)
 			if not parser_func:
 				debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve')
 				continue
-			
+
 			cpes = extra_data.get('cpe', [])
 			for vuln in parser_func(output, cpes=cpes):
 				vuln.update(metadata)
 				confidence = self._determine_confidence(vuln, extra_data)
 				vuln[CONFIDENCE] = confidence
-				
+
 				if CONFIG.runners.skip_cve_low_confidence and confidence == 'low':
 					debug(f'{vuln[ID]}: ignored (low confidence).', sub='cve')
 					continue
-				
+
 				yield vuln
 
 	def _determine_confidence(self, vuln: Dict, extra_data: Dict) -> str:
