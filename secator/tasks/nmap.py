@@ -15,7 +15,6 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability
-from secator.rich import console
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug
 
@@ -108,7 +107,7 @@ class nmap(VulnMulti):
 				logger.exception(e)
 				logger.error(f'Cannot parse nmap XML output {self.output_path} to valid JSON.')
 				return
-		
+
 		nmap_data['_host'] = self.input
 		return nmapData(nmap_data)
 
@@ -248,7 +247,7 @@ class nmapData(dict):
 			scripts = [scripts]
 		return [{k.lstrip('@'): v for k, v in script.items()} for script in scripts]
 
-	def _process_scripts(self, scripts: List[Dict], hostname: str, ip: str, port_number: int, service_name: str, extra_data: Dict) -> Generator:
+	def _process_scripts(self, scripts: List[Dict], hostname: str, ip: str, port_number: int, service_name: str, extra_data: Dict) -> Generator:  # noqa: E501
 		for script in scripts:
 			script_id = script['id']
 			output = script['output']
