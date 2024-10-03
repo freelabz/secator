@@ -163,7 +163,9 @@ class nmapData(dict):
 					PROTOCOL: protocol,
 					EXTRA_DATA: extra_data
 				}
+				from time import sleep
 				yield port
+				sleep(2)
 
 				# Parse each script output to get vulns
 				for script in scripts:

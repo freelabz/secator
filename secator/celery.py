@@ -250,18 +250,44 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 			result = workflow.apply() if sync else workflow.apply_async()
-			debug(
-				'waiting for subtasks', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
-				obj_after=False, level=2)
-			if not sync:
-				list(task.__class__.get_live_results(result))
-			with allow_join_result():
-				task_results = result.get()
-				results.extend(task_results)
-				task_state = 'SUCCESS'
-			debug(
-				'all subtasks done', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
-		 		obj_after=False, level=2)
+			uuids = []
+			while not result.ready():
+				for data in task.__class__.get_live_results(result):
+					from secator.output_types import Progress
+					if isinstance(data, Progress):
+						state['meta']['progress'] = data.percent
+						self.update_state(**state)
+						task_results.append(data)
+					else:
+						new_results = [r for r in data['results'] if r._uuid not in uuids]
+						if not new_results:
+							continue
+						for item in new_results:
+							if item._type == 'progress':
+								state['meta']['progress'] = item.percent
+						debug('got new results', obj={'results': new_results}, obj_after=True, sub='celery.state')
+						task_results.extend(new_results)
+						results.extend(new_results)
+						state['meta']['task_results'] = task_results
+						state['meta']['results'] = results
+						state['meta']['count'] = len(task_results)
+						self.update_state(**state)
+						uuids.extend([r._uuid for r in new_results])
+				from time import sleep
+				sleep(1)
+			task_state = 'SUCCESS'
+			# debug(
+			# 	'waiting for subtasks', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
+			# 	obj_after=False, level=2)
+			# if not sync:
+			# 	list(task.__class__.get_live_results(result))
+			# with allow_join_result():
+			# 	task_results = result.get()
+			# 	results.extend(task_results)
+			# 	task_state = 'SUCCESS'
+			# debug(
+			# 	'all subtasks done', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
+		 	# 	obj_after=False, level=2)
 
 		# otherwise, run normally
 		else:
