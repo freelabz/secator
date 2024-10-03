@@ -8,21 +8,10 @@ input_types:
 tasks:
   mapcidr:
     description: Find CIDR range IPs
+    # record_results: False
   fping:
     description: Check for alive IPs
     targets_: ip.ip
-  naabu:
-    description: Scan alive IPs' ports
-    targets_:
-    - type: ip
-      field: ip
-      condition: item.alive
-  httpx:
-    description: Probe HTTP services on open ports
-    targets_:
-    - type: port
-      field: '{ip}:{port}'
 results:
   - type: ip
     condition: item.alive
-  - type: url

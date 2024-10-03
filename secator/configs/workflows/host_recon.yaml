@@ -14,6 +14,7 @@ tasks:
     description: Search for vulnerabilities on open ports
     skip_host_discovery: True
     version_detection: True
+    script: vulners
     targets_: port.host
     ports_: port.port
   httpx:
@@ -33,6 +34,20 @@ tasks:
         - type: url
           field: url
           condition: item.status_code != 0
+  # _group:
+  #   searchsploit/port:
+  #     description: Search for related exploits (port service)
+  #     targets_:
+  #     - type: port
+  #       field: '{host}~{service_name}'
+  #       condition: item._source == 'nmap' and len(item.service_name.split('/')) > 1
+  #   searchsploit/vuln:
+  #     description: Search for related exploits (vulns)
+  #     targets_:
+  #     - type: vulnerability
+  #       field: '{matched_at}~{id}'
+  #       condition: item.id
+
 results:
   - type: port
     condition: item._source == 'nmap'
