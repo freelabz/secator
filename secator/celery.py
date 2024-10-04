@@ -14,6 +14,7 @@ from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (TaskError, debug, deduplicate,
 						   flatten)
+from secator.celery_utils import CeleryData
 
 # from pathlib import Path
 # import memray  # TODO: conditional memray tracing
@@ -256,7 +257,7 @@ def run_command(self, results, name, targets, opts={}):
 			result = workflow.apply() if sync else workflow.apply_async()
 			uuids = []
 			celery_chunk_ids = []
-			for data in task.__class__.get_live_results(result):
+			for data in CeleryData.get_live_results(result):
 				from secator.output_types import Progress
 				if isinstance(data, Progress):
 					state['meta']['progress'] = data.percent

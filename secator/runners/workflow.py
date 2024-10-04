@@ -4,6 +4,7 @@ from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
+from secator.celery_utils import CeleryData
 
 
 class Workflow(Runner):
@@ -55,10 +56,11 @@ class Workflow(Runner):
 		else:
 			result = workflow()
 			self.celery_result = result
-			results = self.process_live_tasks(
+			results = CeleryData.process_live_tasks(
 				result,
 				results_only=True,
-				print_remote_status=self.print_remote_status
+				print_remote_status=self.print_remote_status,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
 			)
 
 		# Get workflow results

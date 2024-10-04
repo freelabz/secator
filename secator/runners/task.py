@@ -3,6 +3,7 @@ from secator.output_types import Target
 from secator.config import CONFIG
 from secator.runners import Runner
 from secator.utils import discover_tasks
+from secator.celery_utils import CeleryData
 
 
 class Task(Runner):
@@ -61,11 +62,12 @@ class Task(Runner):
 				return
 		else:
 			self.celery_result = task_cls.delay(self.targets, **run_opts)
-			task = self.process_live_tasks(
+			task = CeleryData.process_live_tasks(
 				self.celery_result,
 				description=False,
 				results_only=True,
-				print_remote_status=self.print_remote_status)
+				print_remote_status=self.print_remote_status,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
 
 		# Yield task results
 		yield from task

@@ -5,7 +5,7 @@ import sys
 import uuid
 from contextlib import nullcontext
 from datetime import datetime
-from time import sleep, time
+from time import time
 
 import humanize
 from dotmap import DotMap
@@ -16,11 +16,10 @@ from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from secator.definitions import DEBUG
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES, OutputType, Progress
+from secator.output_types import OUTPUT_TYPES, OutputType
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_data, get_task_ids, get_task_folder_id,
-									  process_extractor)
+from secator.runners._helpers import (get_task_folder_id, process_extractor)
 from secator.utils import (debug, import_dynamic, merge_opts, pluralize,
 						   rich_to_ansi)
 
@@ -525,186 +524,16 @@ class Runner:
 				]) + '.'
 				self._print(results_str, color='bold green', rich=True)
 
-	@staticmethod
-	def get_live_results(result):
-		"""Poll Celery subtasks results in real-time. Fetch task metadata and partial results from each task that runs.
-
-		Args:
-			result (celery.result.AsyncResult): Result object.
-
-		Yields:
-			dict: Subtasks state and results.
-		"""
-		from celery.result import AsyncResult
-		res = AsyncResult(result.id)
-		while True:
-			# Yield results
-			yield from Runner.get_celery_results(result)
-
-			# Break out of while loop
-			if res.ready():
-				yield from Runner.get_celery_results(result)
-				break
-
-			# Sleep between updates
-			sleep(1)
-
-	@staticmethod
-	def get_celery_results(result):
-		"""Get Celery results from main result object, including any subtasks results.
-
-		Args:
-			result (celery.result.AsyncResult): Result object.
-
-		Yields:
-			dict: Subtasks state and results, Progress objects.
-		"""
-		task_ids = []
-		get_task_ids(result, ids=task_ids)
-		datas = []
-		for task_id in task_ids:
-			data = get_task_data(task_id)
-			if not data:
-				continue
-			debug('', sub='celery.runner', id=data['id'], obj={data['full_name']: data['state']}, level=4)
-			yield data
-			datas.append(data)
-
-		# Calculate and yield progress
-		total = len(datas)
-		count_finished = sum([i['ready'] for i in datas if i])
-		percent = int(count_finished * 100 / total) if total > 0 else 0
-		if percent > 0:
-			yield Progress(duration='unknown', percent=percent)
-
 	def stop_live_tasks(self):
 		"""Stop all tasks running in Celery worker."""
 		task_ids = []
-		get_task_ids(self.celery_result, ids=task_ids)
+		from secator.celery_utils import CeleryData
+		CeleryData.get_task_ids(self.celery_result, ids=task_ids)
 		all_ids = list(set(task_ids + self.celery_ids))
 		debug(f'stopping task ids: {all_ids}', sub='celery.state')
 		for task_id in all_ids:
 			from secator.celery import revoke_task
 			revoke_task(task_id)
-
-	def process_live_tasks(self, result, description=True, results_only=True, print_remote_status=True):
-		"""Rich progress indicator showing live tasks statuses.
-
-		Args:
-			result (AsyncResult | GroupResult): Celery result.
-			results_only (bool): Yield only results, no task state.
-
-		Yields:
-			dict: Subtasks state and results.
-		"""
-		config_name = self.config.name
-		runner_name = self.__class__.__name__.capitalize()
-
-		# Display live results if print_remote_status is set
-		if print_remote_status:
-			class PanelProgress(RichProgress):
-				def get_renderables(self):
-					yield Padding(Panel(
-						self.make_tasks_table(self.tasks),
-						title=f'[bold gold3]{runner_name}[/] [bold magenta]{config_name}[/] results',
-						border_style='bold gold3',
-						expand=False,
-						highlight=True), pad=(2, 0, 0, 0))
-
-			tasks_progress = PanelProgress(
-				SpinnerColumn('dots'),
-				TextColumn('{task.fields[descr]}  ') if description else '',
-				TextColumn('[bold cyan]{task.fields[name]}[/]'),
-				TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
-				TextColumn('{task.fields[state]:<20}'),
-				TimeElapsedColumn(),
-				TextColumn('{task.fields[count]}'),
-				# TextColumn('{task.fields[progress]}%'),
-				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
-				refresh_per_second=1,
-				transient=False,
-				# console=console,
-				# redirect_stderr=True,
-				# redirect_stdout=False
-			)
-			state_colors = {
-				'RUNNING': 'bold yellow',
-				'SUCCESS': 'bold green',
-				'FAILURE': 'bold red',
-				'REVOKED': 'bold magenta'
-			}
-		else:
-			tasks_progress = nullcontext()
-
-		with tasks_progress as progress:
-
-			# Make progress tasks
-			tasks_progress = {}
-
-			# Get live results and print progress
-			for data in Runner.get_live_results(result):
-
-				# If progress object, yield progress and ignore tracking
-				if isinstance(data, OutputType) and data._type == 'progress':
-					yield data
-					continue
-
-				# TODO: add error output type and yield errors in get_celery_results
-				# if isinstance(data, OutputType) and data._type == 'error':
-				# 	yield data
-				# 	continue
-
-				# Re-yield so that we can consume it externally
-				if results_only:
-					yield from data['results']
-				else:
-					yield data
-
-				if not print_remote_status:
-					continue
-
-				# Handle messages if any
-				state = data['state']
-				error = data.get('error')
-				info = data.get('info')
-				full_name = data['name']
-				chunk_info = data.get('chunk_info', '')
-				celery_chunk_ids = data.get('celery_chunk_ids', [])
-				celery_id = data['celery_id']
-				task_ids = [celery_id] + celery_chunk_ids
-				new_ids = [_ for _ in task_ids if _ not in self.celery_ids]
-				if new_ids:
-					debug(f'added new task ids {new_ids} to runner', sub='celery.state')
-					self.celery_ids.extend(new_ids)
-				if chunk_info:
-					full_name += f' {chunk_info}'
-				if error:
-					state = 'FAILURE'
-					error = f'{full_name}: {error}'
-					if error not in self.errors:
-						self.errors.append(error)
-				if info:
-					info = f'{full_name}: {info}'
-					if info not in self.infos:
-						self.infos.append(info)
-
-				task_id = data['id']
-				state_str = f'[{state_colors[state]}]{state}[/]'
-				data['state'] = state_str
-
-				if task_id not in tasks_progress:
-					id = progress.add_task('', **data)
-					tasks_progress[task_id] = id
-				else:
-					progress_id = tasks_progress[task_id]
-					if state in ['SUCCESS', 'FAILURE']:
-						progress.update(progress_id, advance=100, **data)
-					elif data['progress'] != 0:
-						progress.update(progress_id, advance=data['progress'], **data)
-
-			# Update all tasks to 100 %
-			for progress_id in tasks_progress.values():
-				progress.update(progress_id, advance=100)
 
 	def filter_results(self):
 		"""Filter runner results using extractors defined in config."""
