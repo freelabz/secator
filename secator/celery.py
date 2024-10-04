@@ -118,6 +118,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 	chunks = targets
 	if chunk_size > 1:
 		chunks = list(chunker(targets, chunk_size))
+	debug('', obj={task_cls.__name__: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks)}, obj_after=False, sub='celery.state')
 
 	# Clone opts
 	opts = task_opts.copy()
@@ -202,16 +203,20 @@ def run_command(self, results, name, targets, opts={}):
 		'state': task_state,
 		'meta': {
 			'name': name,
+			'full_name': full_name,
 			'progress': 0,
 			'results': [],
 			'chunk': chunk,
 			'chunk_count': chunk_count,
+			'chunk_info': f'{chunk}/{chunk_count}' if chunk and chunk_count else '',
+			'celery_chunk_ids': [],
+			'celery_id': self.request.id,
 			'count': count,
-			'description': description
+			'descr': description,
 		}
 	}
 	self.update_state(**state)
-	debug('updated', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
+	debug('', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
 	# profile_root = Path('/code/.profiles')
 	# profile_root.mkdir(exist_ok=True)
 	# profile_path = f'/code/.profiles/{self.request.id}.bin'
@@ -242,7 +247,6 @@ def run_command(self, results, name, targets, opts={}):
 			# Initiate main task and set context for sub-tasks
 			task = task_cls(targets, parent=parent, has_children=True, **opts)
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
-			debug(f'breaking task by chunks of size {chunk_size}.', id=self.request.id, sub='celery.state')
 			workflow = break_task(
 				task_cls,
 				opts,
@@ -251,43 +255,38 @@ def run_command(self, results, name, targets, opts={}):
 				chunk_size=chunk_size)
 			result = workflow.apply() if sync else workflow.apply_async()
 			uuids = []
-			while not result.ready():
-				for data in task.__class__.get_live_results(result):
-					from secator.output_types import Progress
-					if isinstance(data, Progress):
-						state['meta']['progress'] = data.percent
-						self.update_state(**state)
-						task_results.append(data)
-					else:
-						new_results = [r for r in data['results'] if r._uuid not in uuids]
-						if not new_results:
-							continue
-						for item in new_results:
-							if item._type == 'progress':
-								state['meta']['progress'] = item.percent
-						debug('got new results', obj={'results': new_results}, obj_after=True, sub='celery.state')
-						task_results.extend(new_results)
-						results.extend(new_results)
-						state['meta']['task_results'] = task_results
-						state['meta']['results'] = results
-						state['meta']['count'] = len(task_results)
-						self.update_state(**state)
-						uuids.extend([r._uuid for r in new_results])
-				from time import sleep
-				sleep(1)
+			celery_chunk_ids = []
+			for data in task.__class__.get_live_results(result):
+				from secator.output_types import Progress
+				if isinstance(data, Progress):
+					state['meta']['progress'] = data.percent
+					self.update_state(**state)
+					task_results.append(data)
+				else:
+					if data['celery_id'] not in celery_chunk_ids:
+						celery_chunk_ids.append(data['celery_id'])
+						state['meta']['celery_chunk_ids'] = celery_chunk_ids
+					new_results = [r for r in data['results'] if r._uuid not in uuids]
+					if not new_results:
+						continue
+					for item in new_results:
+						if item._type == 'progress':
+							state['meta']['progress'] = item.percent
+					task_results.extend(new_results)
+					results.extend(new_results)
+					state['meta']['task_results'] = task_results
+					state['meta']['results'] = results
+					state['meta']['count'] = len(task_results)
+					count_summary = {
+						full_name: 'POLL_RESULTS',
+						'new': len(new_results),
+						'task': len(task_results),
+						'total': len(results)
+					}
+					debug('', obj=count_summary, id=self.request.id, obj_after=False, sub='celery.state')
+					self.update_state(**state)
+					uuids.extend([r._uuid for r in new_results])
 			task_state = 'SUCCESS'
-			# debug(
-			# 	'waiting for subtasks', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
-			# 	obj_after=False, level=2)
-			# if not sync:
-			# 	list(task.__class__.get_live_results(result))
-			# with allow_join_result():
-			# 	task_results = result.get()
-			# 	results.extend(task_results)
-			# 	task_state = 'SUCCESS'
-			# debug(
-			# 	'all subtasks done', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
-		 	# 	obj_after=False, level=2)
 
 		# otherwise, run normally
 		else:
@@ -340,7 +339,7 @@ def run_command(self, results, name, targets, opts={}):
 
 		# Update task state with final status
 		self.update_state(**state)
-		debug('updated', sub='celery.state', id=self.request.id, obj={full_name: task_state}, obj_after=False, level=2)
+		debug('', sub='celery.state', id=self.request.id, obj={full_name: task_state}, obj_after=False, level=2)
 
 		# Update parent task if necessary
 		if task and task.has_children:

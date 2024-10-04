@@ -667,8 +667,11 @@ class Command(Runner):
 				cmd = f'cat {fpath} | {cmd}'
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
-			else:
-				self._print(f'{self.__class__.__name__} does not support multiple inputs.', color='bold red')
+			elif self.sync:
+				self._print(
+					f'{self.__class__.__name__} does not support multiple inputs. '
+					'You can use worker mode to enable task chunking.',
+					color='bold red')
 				self.input_valid = False
 
 			self.input_path = fpath

@@ -130,6 +130,7 @@ def get_task_data(task_id):
 	data = {
 		'id': task_id,
 		'name': task_name,
+		'full_name': task_name,
 		'state': state,
 		'chunk_info': '',
 		'count': 0,
@@ -137,7 +138,9 @@ def get_task_data(task_id):
 		'ready': False,
 		'descr': '',
 		'progress': 0,
-		'results': []
+		'results': [],
+		'celery_id': '',
+		'celery_chunk_ids': [],
 	}
 
 	# Set ready flag
@@ -147,11 +150,7 @@ def get_task_data(task_id):
 	# Set task data
 	if info and not isinstance(info, list):
 		data.update(info)
-		chunk = data.get('chunk')
-		chunk_count = data.get('chunk_count')
-		if chunk and chunk_count:
-			data['chunk_info'] = f'{chunk}/{chunk_count}'
-		data['descr'] = data.pop('description', '')
+
 	return data
 
 

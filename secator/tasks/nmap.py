@@ -138,11 +138,6 @@ class nmapData(dict):
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				conf = extra_data.get('confidence')
-				if not version_exact:
-					console.print(
-						f'[bold orange1]nmap could not identify an exact version for {service_name} '
-						f'(detection confidence is {conf}): do not blindy trust the results ![/]'
-					)
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
@@ -161,10 +156,13 @@ class nmapData(dict):
 					SERVICE_NAME: service_name,
 					IP: ip,
 					PROTOCOL: protocol,
-					EXTRA_DATA: extra_data
+					EXTRA_DATA: extra_data,
+					CONFIDENCE: conf
 				}
 				from time import sleep
 				yield port
+				if port_number == 5357:
+					raise Exception('test')
 				sleep(2)
 
 				# Parse each script output to get vulns

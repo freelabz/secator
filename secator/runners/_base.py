@@ -104,6 +104,7 @@ class Runner:
 		self.delay = run_opts.get('delay', False)
 		self.uuids = []
 		self.celery_result = None
+		self.celery_ids = []
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -241,6 +242,11 @@ class Runner:
 						self.results.append(item)
 						self.results_count += 1
 						self.uuids.append(item._uuid)
+						debug('yield item', obj={
+							'runner': self.__class__.__name__,
+							'item': str(item),
+							'results_count': self.results_count
+						}, sub='celery.state')
 						yield item
 
 					# Print JSON or raw item
@@ -282,7 +288,7 @@ class Runner:
 			self._print('Process was killed manually (CTRL+C / CTRL+X).', color='bold red', rich=True)
 			if self.celery_result:
 				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
-				self.stop_live_tasks(self.celery_result)
+				self.stop_live_tasks()
 
 		# Filter results and log info
 		self.mark_duplicates()
@@ -558,13 +564,9 @@ class Runner:
 		datas = []
 		for task_id in task_ids:
 			data = get_task_data(task_id)
-			if data and DEBUG > 1:
-				full_name = data['name']
-				if data['chunk_info']:
-					full_name += ' ' + data['chunk_info']
-				debug('', sub='celery.runner', id=data['id'], obj={full_name: data['state']}, level=4)
 			if not data:
 				continue
+			debug('', sub='celery.runner', id=data['id'], obj={data['full_name']: data['state']}, level=4)
 			yield data
 			datas.append(data)
 
@@ -575,15 +577,13 @@ class Runner:
 		if percent > 0:
 			yield Progress(duration='unknown', percent=percent)
 
-	def stop_live_tasks(self, result):
-		"""Stop live tasks running in Celery worker.
-
-		Args:
-			result (AsyncResult | GroupResult): Celery result.
-		"""
+	def stop_live_tasks(self):
+		"""Stop all tasks running in Celery worker."""
 		task_ids = []
-		get_task_ids(result, ids=task_ids)
-		for task_id in task_ids:
+		get_task_ids(self.celery_result, ids=task_ids)
+		all_ids = list(set(task_ids + self.celery_ids))
+		debug(f'stopping task ids: {all_ids}', sub='celery.state')
+		for task_id in all_ids:
 			from secator.celery import revoke_task
 			revoke_task(task_id)
 
@@ -663,17 +663,19 @@ class Runner:
 				if not print_remote_status:
 					continue
 
- 				# Ignore partials in output unless DEBUG > 1
-				# TODO: weird to change behavior based on debug flag, could cause issues
-				# if data['chunk'] and not DEBUG > 1:
-				# 	continue
-
 				# Handle messages if any
 				state = data['state']
 				error = data.get('error')
 				info = data.get('info')
 				full_name = data['name']
 				chunk_info = data.get('chunk_info', '')
+				celery_chunk_ids = data.get('celery_chunk_ids', [])
+				celery_id = data['celery_id']
+				task_ids = [celery_id] + celery_chunk_ids
+				new_ids = [_ for _ in task_ids if _ not in self.celery_ids]
+				if new_ids:
+					debug(f'added new task ids {new_ids} to runner', sub='celery.state')
+					self.celery_ids.extend(new_ids)
 				if chunk_info:
 					full_name += f' {chunk_info}'
 				if error:

@@ -55,7 +55,11 @@ class Workflow(Runner):
 		else:
 			result = workflow()
 			self.celery_result = result
-			results = self.process_live_tasks(result, results_only=True, print_remote_status=self.print_remote_status)
+			results = self.process_live_tasks(
+				result,
+				results_only=True,
+				print_remote_status=self.print_remote_status
+			)
 
 		# Get workflow results
 		yield from results
