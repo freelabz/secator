@@ -468,14 +468,16 @@ class Runner:
 				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
 
 		# Log runner infos
+		self.infos = [c for c in self.results if c._type == 'info']
 		if self.infos:
 			self._print(
 				f':heavy_check_mark: [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
 				color='bold green', rich=True)
 			for info in self.infos:
-				self._print(f'   • {info}', color='bold green', rich=True)
+				self._print(f'   • \[{info._source}] {info.message}', color='bold green', rich=True)
 
 		# Log runner errors
+		self.errors = [c for c in self.results if c._type == 'error']
 		if self.errors and self.print_errors:
 			self._print(
 				f':exclamation_mark:[bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
