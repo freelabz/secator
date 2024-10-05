@@ -160,8 +160,6 @@ class nmapData(dict):
 					CONFIDENCE: conf
 				}
 				yield port
-				if port_number == 5357:
-					raise Exception('test')
 
 				# Parse each script output to get vulns
 				for script in scripts:
