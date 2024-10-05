@@ -522,7 +522,6 @@ class Command(Runner):
 		if self.return_code == -2 or self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			yield Error(message=error)
-			self.errors.append(error)
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}.'
 			last_lines = self.output.split('\n')
