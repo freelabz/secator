@@ -159,11 +159,9 @@ class nmapData(dict):
 					EXTRA_DATA: extra_data,
 					CONFIDENCE: conf
 				}
-				from time import sleep
 				yield port
 				if port_number == 5357:
 					raise Exception('test')
-				sleep(2)
 
 				# Parse each script output to get vulns
 				for script in scripts:

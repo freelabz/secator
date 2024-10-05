@@ -14,7 +14,7 @@ from time import sleep
 class CeleryData(object):
 	"""Utility to simplify tracking a Celery task and all of its subtasks."""
 
-	def iter_results(result, description=True, results_only=True, print_remote_status=True, print_remote_title='Results'):
+	def iter_results(result, description=True, results_only=True, refresh_interval=1, print_remote_status=True, print_remote_title='Results'):
 		"""Generator to get results from Celery task.
 
 		Args:
@@ -67,7 +67,7 @@ class CeleryData(object):
 			tasks_progress = {}
 
 			# Get live results and print progress
-			for data in CeleryData.poll(result):
+			for data in CeleryData.poll(result, refresh_interval=refresh_interval):
 				# Re-yield so that we can consume it externally
 				if results_only:
 					yield from data['results']
@@ -90,16 +90,16 @@ class CeleryData(object):
 				else:
 					progress_id = tasks_progress[task_id]
 					if state in ['SUCCESS', 'FAILURE']:
-						progress.update(progress_id, advance=100, **data)
+						progress.update(progress_id, advance=100, **progress_data)
 					elif progress_obj:
-						progress.update(progress_id, advance=progress_obj.percent, **data)
+						progress.update(progress_id, advance=progress_obj.percent, **progress_data)
 
 			# Update all tasks to 100 %
 			for progress_id in tasks_progress.values():
 				progress.update(progress_id, advance=100)
 
 	@staticmethod
-	def poll(result):
+	def poll(result, refresh_interval=1):
 		"""Poll Celery subtasks results in real-time. Fetch task metadata and partial results from each task that runs.
 
 		Yields:
@@ -111,7 +111,7 @@ class CeleryData(object):
 				debug('RESULT READY', sub='celery.runner', id=result.id)
 				yield from CeleryData.get_all_data(result)
 				break
-			sleep(1)
+			sleep(refresh_interval)
 
 	@staticmethod
 	def get_all_data(result):

@@ -183,7 +183,7 @@ def update_state(celery_task, **state):
 def run_command(self, results, name, targets, opts={}):
 	chunk = opts.get('chunk')
 	chunk_count = opts.get('chunk_count')
-	description = opts.get('description')
+	description = opts.get('description', '')
 	sync = opts.get('sync', True)
 
 	# Set Celery request id in context
