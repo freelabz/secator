@@ -3,45 +3,29 @@ from rich.panel import Panel
 from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from contextlib import nullcontext
-from secator.output_types import OutputType
+from secator.output_types import OutputType, Progress
 from secator.utils import debug
 from secator.rich import console
-from secator.output_types import Progress
 import kombu
 import kombu.exceptions
 from time import sleep
 
 
 class CeleryData(object):
-	"""Utility to simplify tracking a Celery task and all of it's subtasks."""
+	"""Utility to simplify tracking a Celery task and all of its subtasks."""
 
-	# def __init__(self, result):
-	# 	self._result = result
-	# 	self.chunk_ids = []
-	# 	self.errors = []
-	# 	self.infos = []
-	# 	self.progress = {}
-
-	# def toDict(self):
-	# 	return {
-	# 		'id': self._result.id,
-	# 		'chunk_ids': self.chunk_ids,
-	# 		'task_ids': self.task_ids,
-	# 		'progress': self.progress,
-	# 	}
-
-	@staticmethod
 	def process_live_tasks(result, description=True, results_only=True, print_remote_status=True, print_remote_title='Results'):
 		"""Rich progress indicator showing live tasks statuses.
 
 		Args:
-			result (AsyncResult | GroupResult): Celery result.
+			description (bool): Whether to show task description.
 			results_only (bool): Yield only results, no task state.
+			print_remote_status (bool): Whether to display live results.
+			print_remote_title (str): Title for the progress panel.
 
 		Yields:
 			dict: Subtasks state and results.
 		"""
-
 		# Display live results if print_remote_status is set
 		if print_remote_status:
 			class PanelProgress(RichProgress):
@@ -79,23 +63,14 @@ class CeleryData(object):
 			tasks_progress = nullcontext()
 
 		with tasks_progress as progress:
-
 			# Make progress tasks
 			tasks_progress = {}
 
 			# Get live results and print progress
-			from secator.celery_utils import CeleryData
 			for data in CeleryData.get_live_results(result):
-
-				# If progress object, yield progress and ignore tracking
 				if isinstance(data, OutputType) and data._type == 'progress':
 					yield data
 					continue
-
-				# TODO: add error output type and yield errors in get_celery_results
-				# if isinstance(data, OutputType) and data._type == 'error':
-				# 	yield data
-				# 	continue
 
 				# Re-yield so that we can consume it externally
 				if results_only:
@@ -108,29 +83,6 @@ class CeleryData(object):
 
 				# Handle messages if any
 				state = data['state']
-				error = data.get('error')
-				info = data.get('info')
-				full_name = data['name']
-				chunk_info = data.get('chunk_info', '')
-				# celery_chunk_ids = data.get('celery_chunk_ids', [])
-				# celery_id = data['celery_id']
-				# task_ids = [celery_id] + celery_chunk_ids
-				# new_ids = [_ for _ in task_ids if _ not in self.celery_ids]
-				# if new_ids:
-					# debug(f'added new task ids {new_ids} to runner', sub='celery.state')
-					# self.celery_ids.extend(new_ids)
-				if chunk_info:
-					full_name += f' {chunk_info}'
-				if error:
-					state = 'FAILURE'
-					error = f'{full_name}: {error}'
-					# if error not in self.errors:
-						# self.errors.append(error)
-				if info:
-					info = f'{full_name}: {info}'
-					# if info not in self.infos:
-						# self.infos.append(info)
-
 				task_id = data['id']
 				state_str = f'[{state_colors[state]}]{state}[/]'
 				data['state'] = state_str
@@ -149,12 +101,10 @@ class CeleryData(object):
 			for progress_id in tasks_progress.values():
 				progress.update(progress_id, advance=100)
 
+
 	@staticmethod
 	def get_live_results(result):
 		"""Poll Celery subtasks results in real-time. Fetch task metadata and partial results from each task that runs.
-
-		Args:
-			result (celery.result.AsyncResult): Result object.
 
 		Yields:
 			dict: Subtasks state and results.
@@ -162,11 +112,12 @@ class CeleryData(object):
 		res = AsyncResult(result.id)
 		while True:
 			# Yield results
-			yield from CeleryData.get_celery_results(result)
+			yield from CeleryData.get_celery_results(res)
 
 			# Break out of while loop
 			if res.ready():
-				yield from CeleryData.get_celery_results(result)
+				debug('RESULT READY', sub='celery.runner', id=res.id)
+				yield from CeleryData.get_celery_results(res)
 				break
 
 			# Sleep between updates
@@ -175,9 +126,6 @@ class CeleryData(object):
 	@staticmethod
 	def get_celery_results(result):
 		"""Get Celery results from main result object, including any subtasks results.
-
-		Args:
-			result (celery.result.AsyncResult): Result object.
 
 		Yields:
 			dict: Subtasks state and results, Progress objects.
@@ -189,7 +137,7 @@ class CeleryData(object):
 			data = CeleryData.get_task_data(task_id)
 			if not data:
 				continue
-			debug('', sub='celery.runner', id=data['id'], obj={data['full_name']: data['state']}, level=4)
+			debug('POLL', sub='celery.runner', id=data['id'], obj={data['full_name']: data['state'], 'results_count': data['count']}, level=4)
 			yield data
 			datas.append(data)
 
@@ -199,7 +147,6 @@ class CeleryData(object):
 		percent = int(count_finished * 100 / total) if total > 0 else 0
 		if percent > 0:
 			yield Progress(duration='unknown', percent=percent)
-
 
 	@staticmethod
 	def get_task_ids(result, ids=[]):
@@ -230,7 +177,6 @@ class CeleryData(object):
 		except kombu.exceptions.DecodeError as e:
 			console.print(f'[bold red]{str(e)}. Aborting get_task_ids.[/]')
 			return
-
 
 	@staticmethod
 	def get_task_data(task_id):
@@ -268,7 +214,6 @@ class CeleryData(object):
 			'progress': 0,
 			'results': [],
 			'celery_id': '',
-			'celery_chunk_ids': [],
 		}
 
 		# Set ready flag

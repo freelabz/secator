@@ -64,7 +64,7 @@ class Task(Runner):
 			self.celery_result = task_cls.delay(self.targets, **run_opts)
 			task = CeleryData.process_live_tasks(
 				self.celery_result,
-				description=False,
+				description=True,
 				results_only=True,
 				print_remote_status=self.print_remote_status,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')

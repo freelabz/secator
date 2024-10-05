@@ -222,34 +222,30 @@ class Runner:
 
 		if not self.input_valid:
 			return
+
 		try:
 			for item in self.yielder():
-
 				if isinstance(item, (OutputType, DotMap, dict)):
-
-					# Handle direct yield of item
 					item = self._process_item(item)
-					if not item:
+					if not item or item._uuid in self.uuids:
 						continue
 
-					# Discard item if needed
-					if item._uuid in self.uuids:
-						continue
-
-					# Add item to results
 					if isinstance(item, OutputType) or self.orig:
 						self.results.append(item)
 						self.results_count += 1
 						self.uuids.append(item._uuid)
-						debug('yield item', obj={
-							'runner': self.__class__.__name__,
-							'item': str(item),
-							'results_count': self.results_count
-						}, sub='celery.state')
 						yield item
 
-					# Print JSON or raw item
-					if self.print_item and item._type != 'target':
+					# Handle item output
+					if item._type == 'target':
+						continue
+					elif item._type == 'error':
+						self.errors.append(item.message)
+						self._print(self.get_repr(item), out=sys.stdout)
+					elif item._type == 'info':
+						self.infos.append(item.message)
+						self._print(self.get_repr(item), out=sys.stdout)
+					elif self.print_item:
 						if not isinstance(item, OutputType) and not self.orig:
 							item_str = rich_to_ansi(
 								f'[dim red]❌ Failed to load item as output type:\n  {item.toDict()}[/]'
@@ -264,22 +260,15 @@ class Runner:
 							item_str = self.get_repr(item)
 							if self.print_remote_status or DEBUG > 1:
 								item_str += f' [{item._source}]'
-							if item._type == 'progress' and not self.print_progress:
-								continue
-							self._print(item_str, out=sys.stdout)
+							if item._type != 'progress' or self.print_progress:
+								self._print(item_str, out=sys.stdout)
 
 				elif item and isinstance(item, str):
 					if self.print_line:
 						self._print(item, out=sys.stderr, end='\n')
-					if not self.output_json:
-						self.results.append(item)
-						yield item
 
 				if item:
-					if isinstance(item, OutputType):
-						self.output += self.get_repr(item) + '\n'
-					else:
-						self.output += str(item) + '\n'
+					self.output += self.get_repr(item) + '\n' if isinstance(item, OutputType) else str(item) + '\n'
 
 				self.run_hooks('on_iter')
 
@@ -299,7 +288,7 @@ class Runner:
 		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
 		dupe_count = 0
 		for item in self.results:
-			# debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)
+			debug('running duplicate check', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)

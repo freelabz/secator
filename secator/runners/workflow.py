@@ -57,7 +57,8 @@ class Workflow(Runner):
 			result = workflow()
 			self.celery_result = result
 			results = CeleryData.process_live_tasks(
-				result,
+				self.celery_result,
+				description=True,
 				results_only=True,
 				print_remote_status=self.print_remote_status,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'

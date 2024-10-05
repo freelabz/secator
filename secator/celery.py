@@ -4,7 +4,6 @@ import traceback
 
 from celery import Celery, chain, chord, signals
 from celery.app import trace
-from celery.result import allow_join_result
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
@@ -12,8 +11,7 @@ from secator.config import CONFIG
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
-from secator.utils import (TaskError, debug, deduplicate,
-						   flatten)
+from secator.utils import (debug, deduplicate, flatten)
 from secator.celery_utils import CeleryData
 
 # from pathlib import Path
@@ -175,10 +173,13 @@ def run_scan(self, args=[], kwargs={}):
 	scan.run()
 
 
+def update_state(celery_task, **state):
+	debug('', sub='celery.state', id=celery_task.request.id, obj={state['meta']['full_name']: 'RUNNING', 'count': state['meta']['count']}, obj_after=False, level=2)
+	return celery_task.update_state(**state)
+
+
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
-	# profiler = Profiler(interval=0.0001)
-	# profiler.start()
 	chunk = opts.get('chunk')
 	chunk_count = opts.get('chunk_count')
 	description = opts.get('description')
@@ -195,7 +196,6 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Update task state in backend
 	count = 0
-	msg_type = 'error'
 	task_results = []
 	task_state = 'RUNNING'
 	task = None
@@ -205,23 +205,18 @@ def run_command(self, results, name, targets, opts={}):
 		'meta': {
 			'name': name,
 			'full_name': full_name,
+			'status': task_state,
 			'progress': 0,
 			'results': [],
 			'chunk': chunk,
 			'chunk_count': chunk_count,
 			'chunk_info': f'{chunk}/{chunk_count}' if chunk and chunk_count else '',
-			'celery_chunk_ids': [],
 			'celery_id': self.request.id,
 			'count': count,
 			'descr': description,
 		}
 	}
-	self.update_state(**state)
-	debug('', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
-	# profile_root = Path('/code/.profiles')
-	# profile_root.mkdir(exist_ok=True)
-	# profile_path = f'/code/.profiles/{self.request.id}.bin'
-	# with memray.Tracker(profile_path):
+	update_state(self, **state)
 	try:
 		# Flatten + dedupe results
 		results = flatten(results)
@@ -231,8 +226,7 @@ def run_command(self, results, name, targets, opts={}):
 		if not chunk:
 			targets, opts = run_extractors(results, opts, targets)
 			if not targets:
-				msg_type = 'info'
-				raise TaskError(f'No targets were specified as input. Skipping. [{self.request.id}]')
+				raise ValueError(f'No targets were specified as input. Skipping. [{self.request.id}]')
 
 		# Get task class
 		task_cls = Task.get_task_class(name)
@@ -256,38 +250,18 @@ def run_command(self, results, name, targets, opts={}):
 				chunk_size=chunk_size)
 			result = workflow.apply() if sync else workflow.apply_async()
 			uuids = []
-			celery_chunk_ids = []
 			for data in CeleryData.get_live_results(result):
-				from secator.output_types import Progress
-				if isinstance(data, Progress):
-					state['meta']['progress'] = data.percent
-					self.update_state(**state)
-					task_results.append(data)
-				else:
-					if data['celery_id'] not in celery_chunk_ids:
-						celery_chunk_ids.append(data['celery_id'])
-						state['meta']['celery_chunk_ids'] = celery_chunk_ids
-					new_results = [r for r in data['results'] if r._uuid not in uuids]
-					if not new_results:
-						continue
-					for item in new_results:
-						if item._type == 'progress':
-							state['meta']['progress'] = item.percent
-					task_results.extend(new_results)
-					results.extend(new_results)
-					state['meta']['task_results'] = task_results
-					state['meta']['results'] = results
-					state['meta']['count'] = len(task_results)
-					count_summary = {
-						full_name: 'POLL_RESULTS',
-						'new': len(new_results),
-						'task': len(task_results),
-						'total': len(results)
-					}
-					debug('', obj=count_summary, id=self.request.id, obj_after=False, sub='celery.state')
-					self.update_state(**state)
-					uuids.extend([r._uuid for r in new_results])
-			task_state = 'SUCCESS'
+				new_results = [r for r in data.get('results', []) if r._uuid not in uuids]
+				if not new_results:
+					continue
+				task_results.extend(new_results)
+				results.extend(new_results)
+				state['meta']['task_results'] = task_results
+				state['meta']['results'] = results
+				state['meta']['count'] = len(task_results)
+				update_state(self, **state)
+				uuids.extend([r._uuid for r in new_results])
+			state['meta']['status'] = 'SUCCESS'
 
 		# otherwise, run normally
 		else:
@@ -304,60 +278,22 @@ def run_command(self, results, name, targets, opts={}):
 				state['meta']['task_results'] = task_results
 				state['meta']['results'] = results
 				state['meta']['count'] = len(task_results)
-				if item._type == 'progress':
-					state['meta']['progress'] = item.percent
-				self.update_state(**state)
-				debug(
-					'items found', sub='celery.state', id=self.request.id, obj={full_name: len(task_results)},
-					obj_after=False, level=4)
-
-			# Update task state based on task return code
-			if task.return_code == 0:
-				task_state = 'SUCCESS'
-				task_exc = None
-			else:
-				task_state = 'FAILURE'
-				task_exc = TaskError('\n'.join(task.errors))
+				update_state(self, **state)
+			state['meta']['status'] = task.status
 
 	except BaseException as exc:
-		task_state = 'FAILURE'
-		task_exc = exc
-
-	finally:
-		# Set task state and exception
-		state['state'] = 'SUCCESS'  # force task success to serialize exception
-		state['meta']['results'] = results
+		from secator.output_types import Error
+		error = Error(
+			message=str(exc),
+			traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
+		)
+		task_results.append(error)
+		results.append(error)
 		state['meta']['task_results'] = task_results
-		state['meta']['progress'] = 100
-
-		# Handle task failure
-		if task_state == 'FAILURE':
-			if isinstance(task_exc, TaskError):
-				exc_str = str(task_exc)
-			else:  # full traceback
-				exc_str = ' '.join(traceback.format_exception(task_exc, value=task_exc, tb=task_exc.__traceback__))
-			state['meta'][msg_type] = exc_str
-
-		# Update task state with final status
-		self.update_state(**state)
-		debug('', sub='celery.state', id=self.request.id, obj={full_name: task_state}, obj_after=False, level=2)
-
-		# Update parent task if necessary
-		if task and task.has_children:
-			task.log_results()
-			task.run_hooks('on_end')
-
-		# profiler.stop()
-		# from pathlib import Path
-		# logger.info('Stopped profiling')
-		# profile_root = Path('/code/.profiles')
-		# profile_root.mkdir(exist_ok=True)
-		# profile_path = f'/code/.profiles/{self.request.id}.html'
-		# logger.info(f'Saving profile to {profile_path}')
-		# with open(profile_path, 'w', encoding='utf-8') as f_html:
-		# 	f_html.write(profiler.output_html())
-
-		# TODO: fix memory leak instead of running a garbage collector
+		state['meta']['results'] = results
+	finally:
+		state['state'] = 'SUCCESS'
+		update_state(self, **state)
 		gc.collect()
 
 		# If running in chunk mode, only return chunk result, not all results
