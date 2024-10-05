@@ -1,6 +1,7 @@
 import gc
 import logging
 import traceback
+import uuid
 
 from celery import Celery, chain, chord, signals
 from celery.app import trace
@@ -235,8 +236,6 @@ def run_command(self, results, name, targets, opts={}):
 		# Get expanded targets
 		if not chunk:
 			targets, opts = run_extractors(results, opts, targets)
-			if not targets:
-				raise ValueError(f'No targets were specified as input. Skipping. [{self.request.id}]')
 
 		# Get task class
 		task_cls = Task.get_task_class(name)
@@ -294,7 +293,9 @@ def run_command(self, results, name, targets, opts={}):
 	except BaseException as exc:
 		error = Error(
 			message=str(exc),
-			traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
+			traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__)),
+			_source=full_name,
+			_uuid=str(uuid.uuid4())
 		)
 		task_results.append(error)
 		results.append(error)

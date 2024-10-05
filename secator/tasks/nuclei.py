@@ -62,7 +62,7 @@ class nuclei(VulnMulti):
 			PROVIDER: 'nuclei',
 		},
 		Progress: {
-			PERCENT: lambda x: int(x['percent']),
+			PERCENT: lambda x: int(x['percent']) if int(x['percent']) < 100 else 0,
 			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
 		}
 	}

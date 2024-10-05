@@ -225,47 +225,15 @@ class Runner:
 					item = self._process_item(item)
 					if not item or item._uuid in self.uuids:
 						continue
-
-					if isinstance(item, OutputType) or self.orig:
-						self.results.append(item)
-						self.results_count += 1
-						self.uuids.append(item._uuid)
-						yield item
-
-					# Handle item output
-					if item._type == 'target':
+					if not isinstance(item, OutputType) and not self.orig:
 						continue
-					elif item._type == 'error':
-						self.errors.append(item.message)
-						self._print(self.get_repr(item), out=sys.stdout)
-					elif item._type == 'info':
-						self.infos.append(item.message)
-						self._print(self.get_repr(item), out=sys.stdout)
-					elif self.print_item:
-						if not isinstance(item, OutputType) and not self.orig:
-							item_str = rich_to_ansi(
-								f'[dim red]❌ Failed to load item as output type:\n  {item.toDict()}[/]'
-							)
-							self.output += item_str + '\n'
-							self._print(item_str, rich=True)
-						elif self.print_json:
-							self._print(item, out=sys.stdout)
-						elif self.print_raw:
-							self._print(str(item), out=sys.stdout)
-						else:
-							item_str = self.get_repr(item)
-							if self.print_remote_status or DEBUG > 1:
-								item_str += f' [{item._source}]'
-							if item._type != 'progress' or self.print_progress:
-								self._print(item_str, out=sys.stdout)
 
-				elif item and isinstance(item, str):
-					if self.print_line:
-						self._print(item, out=sys.stderr, end='\n')
+					self.results.append(item)
+					self.results_count += 1
+					self.uuids.append(item._uuid)
+					yield item
 
-				if item:
-					self.output += self.get_repr(item) + '\n' if isinstance(item, OutputType) else str(item) + '\n'
-
+				self._print_item(item)
 				self.run_hooks('on_iter')
 
 		except KeyboardInterrupt:
@@ -279,6 +247,31 @@ class Runner:
 		self.results = self.filter_results()
 		self.log_results()
 		self.run_hooks('on_end')
+
+	def _print_item(self, item):
+		if not self.print_item or not item:
+			return
+		item_str = self.get_repr(item)
+		if self.print_item and isinstance(item, (OutputType, DotMap)):
+			if self.print_remote_status or DEBUG > 1:
+				item_str += f' [{item._source}] [{item._uuid}]'
+			if not isinstance(item, OutputType) and not self.orig:
+				message = rich_to_ansi(
+					f'[dim red]❌ Failed to load item as output type:\n  {item.toDict()}[/]'
+				)
+				self.output += message + '\n'
+				self._print(message, rich=True)
+			elif self.print_json:
+				self._print(item, out=sys.stdout)
+			elif self.print_raw:
+				self._print(str(item), out=sys.stdout)
+			elif self.print_progress and item._type != 'progress':
+				self._print(item_str, out=sys.stdout)
+			else:
+				self._print(item_str, out=sys.stdout)
+			self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
+		elif self.print_line and isinstance(item, str):
+			self._print(item, out=sys.stderr, end='\n')
 
 	def mark_duplicates(self):
 		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
@@ -488,7 +481,7 @@ class Runner:
 				f':exclamation_mark:[bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)
 			for error in self.errors:
-				self._print(f'   • {error}', color='bold red', rich=True)
+				self._print(f'   • \[{error._source}] {error.message}', color='bold red', rich=True)
 
 		# Build and send report
 		if self.results:

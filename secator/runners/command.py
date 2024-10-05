@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import sys
 import traceback
+import uuid
 
 from time import sleep
 
@@ -352,7 +353,7 @@ class Command(Runner):
 		# Check for sudo requirements and prepare the password if needed
 		sudo_password, error = self._prompt_sudo(self.cmd)
 		if error:
-			yield Error(message=error)
+			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 			return
 
 		# Prepare cmds
@@ -391,7 +392,7 @@ class Command(Runner):
 			celery_id = self.context.get('celery_id', '')
 			if celery_id:
 				error += f' [{celery_id}]'
-			yield Error(message=error)
+			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 			self.return_code = 1
 			return
 
@@ -442,7 +443,9 @@ class Command(Runner):
 		except Exception as e:
 			yield Error(
 				message=str(e),
-				traceback=' '.join(traceback.format_exception(e, value=e, tb=e.__traceback__))
+				traceback=' '.join(traceback.format_exception(e, value=e, tb=e.__traceback__)),
+				_source=self.config.name,
+				_uuid=str(uuid.uuid4())
 			)
 
 		# Retrieve the return code and output
@@ -521,12 +524,12 @@ class Command(Runner):
 
 		if self.return_code == -2 or self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(message=error)
+			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}.'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
-			yield Error(message=error, traceback='\n'.join(last_lines))
+			yield Error(message=error, traceback='\n'.join(last_lines), _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 	@staticmethod
 	def _process_opts(
