@@ -56,7 +56,7 @@ class Workflow(Runner):
 		else:
 			result = workflow()
 			self.celery_result = result
-			results = CeleryData.process_live_tasks(
+			results = CeleryData.iter_results(
 				self.celery_result,
 				description=True,
 				results_only=True,

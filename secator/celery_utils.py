@@ -14,8 +14,8 @@ from time import sleep
 class CeleryData(object):
 	"""Utility to simplify tracking a Celery task and all of its subtasks."""
 
-	def process_live_tasks(result, description=True, results_only=True, print_remote_status=True, print_remote_title='Results'):
-		"""Rich progress indicator showing live tasks statuses.
+	def iter_results(result, description=True, results_only=True, print_remote_status=True, print_remote_title='Results'):
+		"""Generator to get results from Celery task.
 
 		Args:
 			description (bool): Whether to show task description.
@@ -67,11 +67,7 @@ class CeleryData(object):
 			tasks_progress = {}
 
 			# Get live results and print progress
-			for data in CeleryData.get_live_results(result):
-				if isinstance(data, OutputType) and data._type == 'progress':
-					yield data
-					continue
-
+			for data in CeleryData.poll(result):
 				# Re-yield so that we can consume it externally
 				if results_only:
 					yield from data['results']
@@ -84,51 +80,46 @@ class CeleryData(object):
 				# Handle messages if any
 				state = data['state']
 				task_id = data['id']
-				state_str = f'[{state_colors[state]}]{state}[/]'
-				data['state'] = state_str
+				progress_obj = data.get('progress', None)
+				progress_data = data.copy()
+				progress_data['state'] = f'[{state_colors[state]}]{state}[/]'
 
 				if task_id not in tasks_progress:
-					id = progress.add_task('', **data)
+					id = progress.add_task('', **progress_data)
 					tasks_progress[task_id] = id
 				else:
 					progress_id = tasks_progress[task_id]
 					if state in ['SUCCESS', 'FAILURE']:
 						progress.update(progress_id, advance=100, **data)
-					elif data['progress'] != 0:
-						progress.update(progress_id, advance=data['progress'], **data)
+					elif progress_obj:
+						progress.update(progress_id, advance=progress_obj.percent, **data)
 
 			# Update all tasks to 100 %
 			for progress_id in tasks_progress.values():
 				progress.update(progress_id, advance=100)
 
-
 	@staticmethod
-	def get_live_results(result):
+	def poll(result):
 		"""Poll Celery subtasks results in real-time. Fetch task metadata and partial results from each task that runs.
 
 		Yields:
 			dict: Subtasks state and results.
 		"""
-		res = AsyncResult(result.id)
 		while True:
-			# Yield results
-			yield from CeleryData.get_celery_results(res)
-
-			# Break out of while loop
-			if res.ready():
-				debug('RESULT READY', sub='celery.runner', id=res.id)
-				yield from CeleryData.get_celery_results(res)
+			yield from CeleryData.get_all_data(result)
+			if result.ready():
+				debug('RESULT READY', sub='celery.runner', id=result.id)
+				yield from CeleryData.get_all_data(result)
 				break
-
-			# Sleep between updates
 			sleep(1)
 
 	@staticmethod
-	def get_celery_results(result):
-		"""Get Celery results from main result object, including any subtasks results.
+	def get_all_data(result):
+		"""Get Celery results from main result object, AND all subtasks results.
 
 		Yields:
-			dict: Subtasks state and results, Progress objects.
+			dict: Subtasks state and results
+			secator.output_types.Progress: Progress objects.
 		"""
 		task_ids = []
 		CeleryData.get_task_ids(result, ids=task_ids)
@@ -142,41 +133,15 @@ class CeleryData(object):
 			datas.append(data)
 
 		# Calculate and yield progress
+		if not datas:
+			return
 		total = len(datas)
 		count_finished = sum([i['ready'] for i in datas if i])
 		percent = int(count_finished * 100 / total) if total > 0 else 0
-		if percent > 0:
-			yield Progress(duration='unknown', percent=percent)
-
-	@staticmethod
-	def get_task_ids(result, ids=[]):
-		"""Get all Celery task ids recursively.
-
-		Args:
-			result (Union[AsyncResult, GroupResult]): Celery result object.
-			ids (list): List of ids.
-		"""
-		if result is None:
-			return
-
-		try:
-			if isinstance(result, GroupResult):
-				CeleryData.get_task_ids(result.parent, ids=ids)
-
-			elif isinstance(result, AsyncResult):
-				if result.id not in ids:
-					ids.append(result.id)
-
-			if hasattr(result, 'children') and result.children:
-				for child in result.children:
-					CeleryData.get_task_ids(child, ids=ids)
-
-			# Browse parent
-			if hasattr(result, 'parent') and result.parent:
-				CeleryData.get_task_ids(result.parent, ids=ids)
-		except kombu.exceptions.DecodeError as e:
-			console.print(f'[bold red]{str(e)}. Aborting get_task_ids.[/]')
-			return
+		data = datas[-1]
+		data['progress'] = Progress(duration='unknown', percent=percent)
+		data['results'] = []
+		yield data
 
 	@staticmethod
 	def get_task_data(task_id):
@@ -225,3 +190,33 @@ class CeleryData(object):
 			data.update(info)
 
 		return data
+
+	@staticmethod
+	def get_task_ids(result, ids=[]):
+		"""Get all Celery task ids recursively.
+
+		Args:
+			result (Union[AsyncResult, GroupResult]): Celery result object.
+			ids (list): List of ids.
+		"""
+		if result is None:
+			return
+
+		try:
+			if isinstance(result, GroupResult):
+				CeleryData.get_task_ids(result.parent, ids=ids)
+
+			elif isinstance(result, AsyncResult):
+				if result.id not in ids:
+					ids.append(result.id)
+
+			if hasattr(result, 'children') and result.children:
+				for child in result.children:
+					CeleryData.get_task_ids(child, ids=ids)
+
+			# Browse parent
+			if hasattr(result, 'parent') and result.parent:
+				CeleryData.get_task_ids(result.parent, ids=ids)
+		except kombu.exceptions.DecodeError as e:
+			console.print(f'[bold red]{str(e)}. Aborting get_task_ids.[/]')
+			return

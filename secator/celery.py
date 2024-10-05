@@ -8,6 +8,7 @@ from celery.app import trace
 from rich.logging import RichHandler
 
 from secator.config import CONFIG
+from secator.output_types import Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
@@ -205,7 +206,7 @@ def run_command(self, results, name, targets, opts={}):
 		'meta': {
 			'name': name,
 			'full_name': full_name,
-			'status': task_state,
+			'state': task_state,
 			'progress': 0,
 			'results': [],
 			'chunk': chunk,
@@ -250,7 +251,7 @@ def run_command(self, results, name, targets, opts={}):
 				chunk_size=chunk_size)
 			result = workflow.apply() if sync else workflow.apply_async()
 			uuids = []
-			for data in CeleryData.get_live_results(result):
+			for data in CeleryData.poll(result):
 				new_results = [r for r in data.get('results', []) if r._uuid not in uuids]
 				if not new_results:
 					continue
@@ -261,7 +262,7 @@ def run_command(self, results, name, targets, opts={}):
 				state['meta']['count'] = len(task_results)
 				update_state(self, **state)
 				uuids.extend([r._uuid for r in new_results])
-			state['meta']['status'] = 'SUCCESS'
+			state['meta']['state'] = 'SUCCESS'
 
 		# otherwise, run normally
 		else:
@@ -279,10 +280,9 @@ def run_command(self, results, name, targets, opts={}):
 				state['meta']['results'] = results
 				state['meta']['count'] = len(task_results)
 				update_state(self, **state)
-			state['meta']['status'] = task.status
+			state['meta']['state'] = task.status
 
 	except BaseException as exc:
-		from secator.output_types import Error
 		error = Error(
 			message=str(exc),
 			traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
@@ -291,6 +291,7 @@ def run_command(self, results, name, targets, opts={}):
 		results.append(error)
 		state['meta']['task_results'] = task_results
 		state['meta']['results'] = results
+		state['meta']['state'] = 'FAILURE'
 	finally:
 		state['state'] = 'SUCCESS'
 		update_state(self, **state)

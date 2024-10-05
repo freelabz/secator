@@ -62,7 +62,7 @@ class Task(Runner):
 				return
 		else:
 			self.celery_result = task_cls.delay(self.targets, **run_opts)
-			task = CeleryData.process_live_tasks(
+			task = CeleryData.iter_results(
 				self.celery_result,
 				description=True,
 				results_only=True,
