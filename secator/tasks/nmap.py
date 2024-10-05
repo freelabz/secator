@@ -145,7 +145,7 @@ class nmapData(dict):
 				scripts = self._get_scripts(port)
 
 				# Get port protocol
-				protocol = port['@protocol'].upper()
+				protocol = port['@protocol'].lower()
 
 				# Yield port data
 				port = {

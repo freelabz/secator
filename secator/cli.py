@@ -649,7 +649,13 @@ def report_list(workspace):
 		with open(path, 'r') as f:
 			try:
 				content = json.loads(f.read())
-				data = {'path': path, 'name': content['info']['name'], 'runner': runner, 'date': get_file_date(path), 'date_sort': path.stat().st_mtime}
+				data = {
+					'path': path,
+					'name': content['info']['name'],
+					'runner': runner,
+					'date': get_file_date(path),
+					'date_sort': path.stat().st_mtime
+				}
 				ws_reports[ws].append(data)
 			except json.JSONDecodeError as e:
 				console.print(f'[bold red]Could not load {path}: {str(e)}')
