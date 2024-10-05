@@ -31,9 +31,7 @@ logging.getLogger('celery').setLevel(logging.INFO if CONFIG.debug.level > 6 else
 
 logger = logging.getLogger(__name__)
 
-trace.LOG_SUCCESS = """\
-Task %(name)s[%(id)s] succeeded in %(runtime)ss\
-"""
+trace.LOG_SUCCESS = "Task %(name)s[%(id)s] succeeded in %(runtime)ss"
 
 app = Celery(__name__)
 app.conf.update({
@@ -118,7 +116,12 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 	chunks = targets
 	if chunk_size > 1:
 		chunks = list(chunker(targets, chunk_size))
-	debug('', obj={task_cls.__name__: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks)}, obj_after=False, sub='celery.state')
+	debug(
+		'',
+		obj={task_cls.__name__: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks)},
+		obj_after=False,
+		sub='celery.state'
+	)
 
 	# Clone opts
 	opts = task_opts.copy()
@@ -175,7 +178,13 @@ def run_scan(self, args=[], kwargs={}):
 
 
 def update_state(celery_task, **state):
-	debug('', sub='celery.state', id=celery_task.request.id, obj={state['meta']['full_name']: 'RUNNING', 'count': state['meta']['count']}, obj_after=False, level=2)
+	debug(
+		'',
+		sub='celery.state',
+		id=celery_task.request.id,
+		obj={state['meta']['full_name']: 'RUNNING', 'count': state['meta']['count']},
+		obj_after=False
+	)
 	return celery_task.update_state(**state)
 
 

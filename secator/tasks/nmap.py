@@ -14,7 +14,6 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability
-from secator.rich import console
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug
 

@@ -1,10 +1,6 @@
 import os
 
-import kombu
-import kombu.exceptions
-
 from secator.utils import deduplicate
-from secator.rich import console
 
 
 def run_extractors(results, opts, targets=[]):

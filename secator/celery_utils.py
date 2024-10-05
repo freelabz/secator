@@ -3,7 +3,7 @@ from rich.panel import Panel
 from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from contextlib import nullcontext
-from secator.output_types import OutputType, Progress
+from secator.output_types import Progress
 from secator.utils import debug
 from secator.rich import console
 import kombu
@@ -14,7 +14,14 @@ from time import sleep
 class CeleryData(object):
 	"""Utility to simplify tracking a Celery task and all of its subtasks."""
 
-	def iter_results(result, description=True, results_only=True, refresh_interval=1, print_remote_status=True, print_remote_title='Results'):
+	def iter_results(
+			result,
+			description=True,
+			results_only=True,
+			refresh_interval=1,
+			print_remote_status=True,
+			print_remote_title='Results'
+		):
 		"""Generator to get results from Celery task.
 
 		Args:
@@ -118,8 +125,7 @@ class CeleryData(object):
 		"""Get Celery results from main result object, AND all subtasks results.
 
 		Yields:
-			dict: Subtasks state and results
-			secator.output_types.Progress: Progress objects.
+			dict: Subtasks state and results.
 		"""
 		task_ids = []
 		CeleryData.get_task_ids(result, ids=task_ids)
@@ -128,7 +134,13 @@ class CeleryData(object):
 			data = CeleryData.get_task_data(task_id)
 			if not data:
 				continue
-			debug('POLL', sub='celery.runner', id=data['id'], obj={data['full_name']: data['state'], 'results_count': data['count']}, level=4)
+			debug(
+				'POLL',
+				sub='celery.runner',
+				id=data['id'],
+				obj={data['full_name']: data['state'], 'results_count': data['count']},
+				level=4
+			)
 			yield data
 			datas.append(data)
 

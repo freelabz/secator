@@ -1,7 +1,8 @@
-import time
 from dataclasses import dataclass, field
+import time
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi
+
 
 @dataclass
 class Info(OutputType):

@@ -3,16 +3,12 @@ import logging
 import os
 import sys
 import uuid
-from contextlib import nullcontext
 from datetime import datetime
 from time import time
 
 import humanize
 from dotmap import DotMap
-from rich.padding import Padding
 from rich.panel import Panel
-from rich.progress import Progress as RichProgress
-from rich.progress import SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from secator.definitions import DEBUG
 from secator.config import CONFIG

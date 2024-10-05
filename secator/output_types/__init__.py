@@ -25,4 +25,6 @@ from secator.output_types.record import Record
 from secator.output_types.error import Error
 from secator.output_types.info import Info
 
-OUTPUT_TYPES = [Target, Progress, Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Record, Error, Info]
+OUTPUT_TYPES = [
+	Target, Progress, Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Record, Error, Info
+]
