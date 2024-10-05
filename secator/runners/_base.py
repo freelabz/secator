@@ -463,7 +463,7 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.results_count = len(self.results)
-		self.status = 'SUCCESS' if not self.errors else 'FAILED'
+		self.status = 'SUCCESS' if not self.errors else 'FAILURE'
 		self.end_time = datetime.fromtimestamp(time())
 
 		# Log execution results
