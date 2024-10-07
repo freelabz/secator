@@ -69,10 +69,10 @@ class dirsearch(HttpFuzzer):
 	@staticmethod
 	def on_cmd_done(self):
 		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find dirsearch JSON results in {self.output_path}')
+			yield Error(message=f'Could not find JSON results in {self.output_path}')
 			return
 
-		yield Info(message=f'🗄 [bold green]dirsearch JSON results saved to {self.output_path}[/]')
+		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read()).get('results', [])
 		yield from results

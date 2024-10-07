@@ -62,10 +62,10 @@ class maigret(ReconUser):
 			self.output_path = match.group(1)
 
 		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find maigret JSON results in {self.output_path}')
+			yield Error(message=f'Could not find JSON results in {self.output_path}')
 			return
 
-		yield Info(message=f'🗄 [bold green]maigret JSON results saved to {self.output_path}[/]')
+		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
 			data = [json.loads(line) for line in f.read().splitlines()]
 		for item in data:

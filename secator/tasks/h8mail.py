@@ -4,7 +4,7 @@ import json
 from secator.decorators import task
 from secator.definitions import EMAIL, OUTPUT_PATH
 from secator.tasks._categories import OSInt
-from secator.output_types import UserAccount, Error
+from secator.output_types import UserAccount, Info, Error
 
 
 @task()
@@ -35,10 +35,10 @@ class h8mail(OSInt):
 	@staticmethod
 	def on_cmd_done(self):
 		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find wpscan JSON results in {self.output_path}')
+			yield Error(message=f'Could not find JSON results in {self.output_path}')
 			return
 
-		self._print(f'🗄 [bold green]wpscan JSON results saved to {self.output_path}[/]')
+		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
 			data = json.load(f)
 

@@ -270,20 +270,22 @@ class Runner:
 		self.run_hooks('on_end')
 
 	def _print_item(self, item):
-		if self.print_item and isinstance(item, (OutputType, DotMap)):
-			if self.print_json:
-				self._print(item, out=sys.stdout)
-			elif self.print_raw:
-				self._print(str(item), out=sys.stdout)
-			else:
-				item_str = self.get_repr(item)
-				if self.print_remote_status or DEBUG > 1:
-					item_str += rich_to_ansi(f' \[[dim]{item._source}[/]]')
-				self._print(item_str, out=sys.stdout)
-			self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
-		elif self.print_line and isinstance(item, str):
-			self._print(item, out=sys.stderr, end='\n')
-			self.output += item + '\n'
+		item_str = self.get_repr(item)
+		if isinstance(item, (OutputType, DotMap)):
+			if self.print_item:
+				if self.print_json:
+					self._print(item, out=sys.stdout)
+				elif self.print_raw:
+					self._print(str(item), out=sys.stdout)
+				else:
+					item_repr = item_str
+					if self.print_remote_status or DEBUG > 1:
+						item_repr += rich_to_ansi(f' \[[dim]{item._source}[/]]')
+					self._print(item_repr, out=sys.stdout)
+		elif isinstance(item, str):
+			if self.print_line:
+				self._print(item, out=sys.stderr, end='\n')
+		self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
 
 	def mark_duplicates(self):
 		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
@@ -481,7 +483,7 @@ class Runner:
 
 		# Log runner infos
 		self.infos = [c for c in self.results if c._type == 'info']
-		if self.infos:
+		if self.infos and not self.sync:
 			self._print(
 				f':heavy_check_mark: [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
 				color='bold green', rich=True)
@@ -490,7 +492,7 @@ class Runner:
 
 		# Log runner warnings
 		self.warnings = [c for c in self.results if c._type == 'warning']
-		if self.warnings:
+		if self.warnings and not self.sync:
 			self._print(
 				f':exclamation: [bold magenta]{self.config.name}[/] warnings ({len(self.warnings)}):',
 				color='bold green', rich=True)
@@ -499,7 +501,7 @@ class Runner:
 
 		# Log runner errors
 		self.errors = [c for c in self.results if c._type == 'error']
-		if self.errors and self.print_errors:
+		if self.errors and self.print_errors and not self.sync:
 			self._print(
 				f':cross_mark: [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)

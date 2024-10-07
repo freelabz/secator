@@ -95,9 +95,9 @@ class nmap(VulnMulti):
 	@staticmethod
 	def on_cmd_done(self):
 		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find nmap JSON results in {self.output_path}')
+			yield Error(message=f'Could not find XML results in {self.output_path}')
 			return
-		yield Info(message=f'🗄 [bold green]nmap JSON results saved to {self.output_path}[/]')
+		yield Info(message=f'XML results saved to {self.output_path}')
 		yield from self.xml_to_json()
 
 	def xml_to_json(self):
@@ -108,11 +108,11 @@ class nmap(VulnMulti):
 				results = xmltodict.parse(content)  # parse XML to dict
 			except Exception as exc:
 				yield Error(
-					message=f'Cannot parse nmap XML output {self.output_path} to valid JSON.',
+					message=f'Cannot parse XML output {self.output_path} to valid JSON.',
 					traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
 				)
 		results['_host'] = self.input
-		return nmapData(results)
+		yield from nmapData(results)
 
 
 class nmapData(dict):
