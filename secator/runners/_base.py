@@ -13,6 +13,7 @@ from rich.panel import Panel
 
 from secator.definitions import DEBUG
 from secator.config import CONFIG
+from secator.celery_utils import CeleryData
 from secator.output_types import OUTPUT_TYPES, OutputType, Error
 from secator.report import Report
 from secator.rich import console, console_stdout
@@ -230,8 +231,11 @@ class Runner:
 						}
 						item = Error(
 							message=f'Failed to load item as output type:\n  {orig_item}',
-							_source=self.config.name
+							_source=self.config.name,
+							_uuid=str(uuid.uuid4())
 						)
+					if item._type == 'info' and item.task_id:
+						self.celery_ids.append(item.task_id)
 					self.results.append(item)
 					self.results_count += 1
 					self.uuids.append(item._uuid)
@@ -513,14 +517,16 @@ class Runner:
 
 	def stop_live_tasks(self):
 		"""Stop all tasks running in Celery worker."""
+		from secator.celery import revoke_task
 		task_ids = []
-		from secator.celery_utils import CeleryData
 		CeleryData.get_task_ids(self.celery_result, ids=task_ids)
 		all_ids = list(set(task_ids + self.celery_ids))
 		debug(f'stopping task ids: {all_ids}', sub='celery.state')
 		for task_id in all_ids:
-			from secator.celery import revoke_task
-			revoke_task(task_id)
+			data = CeleryData.get_task_data(task_id)
+			if not data:
+				data = {'id': task_id}
+			revoke_task(data)
 
 	def filter_results(self):
 		"""Filter runner results using extractors defined in config."""

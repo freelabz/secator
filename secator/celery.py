@@ -9,7 +9,7 @@ from celery.app import trace
 from rich.logging import RichHandler
 
 from secator.config import CONFIG
-from secator.output_types import Error
+from secator.output_types import Info, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
@@ -98,8 +98,13 @@ def void(*args, **kwargs):
 	pass
 
 
-def revoke_task(task_id):
-	console.print(f'Revoking task {task_id}')
+def revoke_task(data):
+	task_id = data['id']
+	full_name = data.get('full_name')
+	message = f'Revoking task {task_id}'
+	if full_name:
+		message += f' ({full_name})'
+	console.print(message)
 	return app.control.revoke(task_id, terminate=True, signal='SIGINT')
 
 
@@ -259,6 +264,17 @@ def run_command(self, results, name, targets, opts={}):
 				chunk_size=chunk_size)
 			result = workflow.apply() if sync else workflow.apply_async()
 			uuids = []
+			chunk_ids = []
+			CeleryData.get_task_ids(result, chunk_ids)
+			for chunk_id in chunk_ids:
+				info = Info(
+					message=f'Chunked task created: {chunk_id}',
+					task_id=chunk_id,
+					_source=full_name,
+					_uuid=str(uuid.uuid4())
+				)
+				task_results.append(info)
+				results.append(info)
 			for data in CeleryData.poll(result):
 				new_results = [r for r in data.get('results', []) if r._uuid not in uuids]
 				if not new_results:
