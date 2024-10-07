@@ -198,7 +198,7 @@ class CeleryData(object):
 			data['ready'] = True
 
 		# Set task data
-		if info and not isinstance(info, list):
+		if info and isinstance(info, dict):
 			data.update(info)
 
 		return data

@@ -521,7 +521,6 @@ class Runner:
 		task_ids = []
 		CeleryData.get_task_ids(self.celery_result, ids=task_ids)
 		all_ids = list(set(task_ids + self.celery_ids))
-		debug(f'stopping task ids: {all_ids}', sub='celery.state')
 		for task_id in all_ids:
 			data = CeleryData.get_task_data(task_id)
 			if not data:
