@@ -8,6 +8,7 @@ import warnings
 from secator.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   MATCH_CODES, OPT_NOT_SUPPORTED, RATE_LIMIT,
 							   THREADS, TIMEOUT, DEFAULT_HTTPX_FLAGS)
+from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
 from secator.tasks import httpx
@@ -250,7 +251,8 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 				with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
 					self._test_task_output(
 						results,
-						expected_output_types=cls.output_types)
+						expected_output_types=cls.output_types + [Info, Warning, Error]
+					)
 
 	def test_cmd_original_schema(self):
 		console.print('')
@@ -284,7 +286,8 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 						return
 					self._test_task_output(
 						results,
-						expected_output_keys=expected_output_keys)
+						expected_output_keys=expected_output_keys
+					)
 
 
 class TestCommandHooks(unittest.TestCase):
