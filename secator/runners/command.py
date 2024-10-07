@@ -89,6 +89,7 @@ class Command(Runner):
 	hooks = [
 		'on_start',
 		'on_cmd',
+		'on_cmd_done',
 		'on_line',
 		'on_error',
 	]
@@ -441,6 +442,10 @@ class Command(Runner):
 				# Yield line if no items were yielded
 				if item_count == 0:
 					yield line
+
+			result = self.run_hooks('on_cmd_done')
+			if result:
+				yield from result
 
 		except KeyboardInterrupt:
 			self.process.kill()

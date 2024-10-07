@@ -270,10 +270,10 @@ class Runner:
 		self.run_hooks('on_end')
 
 	def _print_item(self, item):
-		item_str = self.get_repr(item)
-		if self.print_remote_status or DEBUG > 1:
-			item_str += rich_to_ansi(f' \[[dim]{item._source}[/]]')
 		if self.print_item and isinstance(item, (OutputType, DotMap)):
+			item_str = self.get_repr(item)
+			if self.print_remote_status or DEBUG > 1:
+				item_str += rich_to_ansi(f' \[[dim]{item._source}[/]]')
 			if self.print_json:
 				self._print(item, out=sys.stdout)
 			elif self.print_raw:

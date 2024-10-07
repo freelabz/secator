@@ -13,7 +13,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability
+from secator.output_types import Exploit, Port, Vulnerability, Error
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug
 
@@ -90,17 +90,13 @@ class nmap(VulnMulti):
 				'bold gold3')
 			self.cmd = self.cmd.replace('-sT ', '')
 
-	def yielder(self):
-		yield from super().yielder()
-		if self.return_code != 0:
+	@staticmethod
+	def on_cmd_done(self):
+		self._print(f'🗄 [bold green]nmap JSON results saved to {self.output_path}[/]')
+		if not os.path.exists(self.output_path):
+			yield Error(message=f'Could not find nmap JSON results in {self.output_path}')
 			return
-		self.results = []
-		note = f'nmap XML results saved to {self.output_path}'
-		if self.print_line:
-			self._print(note)
-		if os.path.exists(self.output_path):
-			nmap_data = self.xml_to_json()
-			yield from nmap_data
+		yield from self.xml_to_json()
 
 	def xml_to_json(self):
 		results = []
@@ -158,8 +154,6 @@ class nmapData(dict):
 					EXTRA_DATA: extra_data,
 					CONFIDENCE: conf
 				}
-				if port_number == 443:
-					raise Exception('nmap failed with an error on port 443')
 				yield port
 
 				# Parse each script output to get vulns

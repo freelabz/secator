@@ -151,7 +151,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(opt_value, None)
 
 	def test_httpx_build_cmd_defaults(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 		run_opts = {}
 		host = 'test.synology.me'
@@ -167,7 +167,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls.output_json, True)
 
 	def test_httpx_build_cmd_with_opts(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 		run_opts = {
 			FOLLOW_REDIRECT: False,
@@ -192,7 +192,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls.output_json, True)
 
 	def test_httpx_build_cmd_with_opts_with_prefix(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 		run_opts = {
 			FOLLOW_REDIRECT: False,
@@ -229,7 +229,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 		if not fixture:
 			if len(FIXTURES_TASKS.keys()) == 1: # make test fail.
 				raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory (must not be an empty file / empty json / empty list).')
-			console.print(f'[dim gold3] skipped (no fixture)[/]')
+			console.print('[dim gold3] skipped (no fixture)[/]')
 			return False
 		return True
 
@@ -280,7 +280,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 				})
 				with mock_command(cls, targets, opts, fixture, 'run') as results:
 					if not len(cls.output_types) == 1:
-						console.print(f'[dim gold3] skipped (multi-output task with single schema)[/]')
+						console.print('[dim gold3] skipped (multi-output task with single schema)[/]')
 						return
 					self._test_task_output(
 						results,
@@ -290,7 +290,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 class TestCommandHooks(unittest.TestCase):
 
 	def test_cmd_hooks(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 
 		def on_item_pre_convert(self, item):
@@ -317,7 +317,6 @@ class TestCommandHooks(unittest.TestCase):
 			'on_end': [on_end],
 			'on_item_pre_convert': [on_item_pre_convert],
 			'on_item': [on_item],
-			'on_end': [on_end],
 		}
 		fixture = load_fixture('httpx_output', FIXTURES_DIR)
 		with mock_subprocess_popen([json.dumps(fixture)]):
@@ -332,7 +331,7 @@ class TestCommandHooks(unittest.TestCase):
 			self.assertEqual(cls.results, [{'url': 'test_changed_result'}])
 
 	def test_cmd_failed_hook(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 
 		def raise_exc(self):

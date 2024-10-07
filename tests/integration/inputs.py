@@ -1,7 +1,7 @@
 from secator.definitions import CIDR_RANGE, HOST, IP, ROOT_FOLDER, URL, USERNAME
 
 INPUTS_TASKS = {
-    URL: f'http://localhost:3000/',
+    URL: 'http://localhost:3000/',
     HOST: 'localhost',
     USERNAME: 'ocervell',
     IP: '127.0.0.1',
