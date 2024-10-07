@@ -21,5 +21,5 @@ class Info(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
-		s = f"[bold blue]ⓘ {self.task_name}: {self.message}[/]"
+		s = f"[dim]ⓘ {self.task_name}: {self.message}[/]"
 		return rich_to_ansi(s)

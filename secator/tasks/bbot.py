@@ -3,7 +3,7 @@ import shutil
 from secator.decorators import task
 from secator.runners import Command
 from secator.serializers import RegexSerializer
-from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag
+from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Error
 
 
 BBOT_MODULES = [
@@ -140,7 +140,10 @@ BBOT_DESCRIPTION_REGEX = RegexSerializer(
 
 def output_discriminator(self, item):
 	_type = item.get('type')
-	if _type not in BBOT_MAP_TYPES:
+	_message = item.get('message')
+	if not _type and _message:
+		return Error
+	elif _type not in BBOT_MAP_TYPES:
 		return None
 	return BBOT_MAP_TYPES[_type]
 
@@ -162,7 +165,7 @@ class bbot(Command):
 	opt_value_map = {
 		'presets': lambda x: ' '.join(x.split(','))
 	}
-	output_types = [Vulnerability, Port, Url, Record, Ip]
+	output_types = [Vulnerability, Port, Url, Record, Ip, Error]
 	output_discriminator = output_discriminator
 	output_map = {
 		Ip: {
@@ -205,6 +208,9 @@ class bbot(Command):
 			'name': 'name',
 			'type': 'type',
 			'extra_data': 'extra_data'
+		},
+		Error: {
+			'message': 'message'
 		}
 	}
 	install_cmd = 'pipx install bbot && pipx upgrade bbot'

@@ -392,7 +392,11 @@ class Command(Runner):
 			celery_id = self.context.get('celery_id', '')
 			if celery_id:
 				error += f' [{celery_id}]'
-			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error(
+				message=error,
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
 			self.return_code = 1
 			return
 

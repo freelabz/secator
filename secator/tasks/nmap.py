@@ -158,6 +158,8 @@ class nmapData(dict):
 					EXTRA_DATA: extra_data,
 					CONFIDENCE: conf
 				}
+				if port_number == 443:
+					raise Exception('nmap failed with an error on port 443')
 				yield port
 
 				# Parse each script output to get vulns

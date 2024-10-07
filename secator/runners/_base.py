@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+import traceback
 import uuid
 from datetime import datetime
 from time import time
@@ -12,12 +13,11 @@ from rich.panel import Panel
 
 from secator.definitions import DEBUG
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES, OutputType
+from secator.output_types import OUTPUT_TYPES, OutputType, Error
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
-from secator.utils import (debug, import_dynamic, merge_opts, pluralize,
-						   rich_to_ansi)
+from secator.utils import (debug, import_dynamic, merge_opts, pluralize, rich_to_ansi)
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,6 @@ class Runner:
 		self.print_fmt_opts = self.run_opts.pop('print_fmt_opts', DEBUG > 1)
 		self.print_input_file = self.run_opts.pop('print_input_file', False)
 		self.print_hooks = self.run_opts.pop('print_hooks', DEBUG > 1)
-		self.print_progress = self.run_opts.pop('print_progress', not self.output_quiet)
 		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
 		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
 		self.print_run_summary = self.run_opts.pop('print_run_summary', False)
@@ -225,9 +224,14 @@ class Runner:
 					item = self._process_item(item)
 					if not item or item._uuid in self.uuids:
 						continue
-					if not isinstance(item, OutputType) and not self.orig:
-						continue
-
+					elif isinstance(item, DotMap) and not self.orig:
+						orig_item = {
+							k: v for k, v in item.toDict().items() if k not in ['_type', '_context', '_source', '_uuid']
+						}
+						item = Error(
+							message=f'Failed to load item as output type:\n  {orig_item}',
+							_source=self.config.name
+						)
 					self.results.append(item)
 					self.results_count += 1
 					self.uuids.append(item._uuid)
@@ -242,6 +246,19 @@ class Runner:
 				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
 				self.stop_live_tasks()
 
+		except Exception as e:
+			error = Error(
+				message=str(e),
+				traceback=' '.join(traceback.format_exception(e, value=e, tb=e.__traceback__)),
+				_source=self.config.name,
+				_uuid=str(uuid.uuid4())
+			)
+			self.results.append(error)
+			self.results_count += 1
+			self.uuids.append(error._uuid)
+			self._print_item(error)
+			yield error
+
 		# Filter results and log info
 		self.mark_duplicates()
 		self.results = self.filter_results()
@@ -249,24 +266,14 @@ class Runner:
 		self.run_hooks('on_end')
 
 	def _print_item(self, item):
-		if not self.print_item or not item:
-			return
 		item_str = self.get_repr(item)
+		if self.print_remote_status or DEBUG > 1:
+			item_str += rich_to_ansi(f' \[[dim]{item._source}[/]]')
 		if self.print_item and isinstance(item, (OutputType, DotMap)):
-			if self.print_remote_status or DEBUG > 1:
-				item_str += f' [{item._source}] [{item._uuid}]'
-			if not isinstance(item, OutputType) and not self.orig:
-				message = rich_to_ansi(
-					f'[dim red]❌ Failed to load item as output type:\n  {item.toDict()}[/]'
-				)
-				self.output += message + '\n'
-				self._print(message, rich=True)
-			elif self.print_json:
+			if self.print_json:
 				self._print(item, out=sys.stdout)
 			elif self.print_raw:
 				self._print(str(item), out=sys.stdout)
-			elif self.print_progress and item._type != 'progress':
-				self._print(item_str, out=sys.stdout)
 			else:
 				self._print(item_str, out=sys.stdout)
 			self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'

@@ -40,7 +40,6 @@ class Workflow(Runner):
 			'print_item': True,
 			'print_item_count': True,
 			'print_line': not self.sync,
-			'print_progress': self.sync,
 		}
 
 		# Construct run opts
