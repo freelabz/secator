@@ -73,6 +73,8 @@ class bup(Http):
 			progress_indicator = line.split(':')[-1]
 			current, total = tuple([int(c.strip()) for c in progress_indicator.split('/')])
 			return json.dumps({"duration": "unknown", "percent": int((current / total) * 100)})
+		elif 'batcat' in line:  # ignore batcat lines as they're loaded as JSON
+			return None
 		return line
 
 	@staticmethod

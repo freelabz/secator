@@ -428,6 +428,8 @@ class Command(Runner):
 
 				# Run on_line hooks
 				line = self.run_hooks('on_line', line)
+				if line is None:
+					continue
 
 				# Run item_loader to try parsing as dict
 				item_count = 0
