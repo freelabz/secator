@@ -14,7 +14,7 @@ from rich.panel import Panel
 from secator.definitions import DEBUG
 from secator.config import CONFIG
 from secator.celery_utils import CeleryData
-from secator.output_types import OUTPUT_TYPES, OutputType, Error
+from secator.output_types import OUTPUT_TYPES, OutputType, Warning, Error
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
@@ -229,12 +229,12 @@ class Runner:
 						orig_item = {
 							k: v for k, v in item.toDict().items() if k not in ['_type', '_context', '_source', '_uuid']
 						}
-						item = Error(
+						item = Warning(
 							message=f'Failed to load item as output type:\n  {orig_item}',
 							_source=self.config.name,
 							_uuid=str(uuid.uuid4())
 						)
-					if item._type == 'info' and item.task_id:
+					if item._type == 'info' and item.task_id and item.task_id not in self.celery_ids:
 						self.celery_ids.append(item.task_id)
 					self.results.append(item)
 					self.results_count += 1
@@ -271,18 +271,19 @@ class Runner:
 
 	def _print_item(self, item):
 		if self.print_item and isinstance(item, (OutputType, DotMap)):
-			item_str = self.get_repr(item)
-			if self.print_remote_status or DEBUG > 1:
-				item_str += rich_to_ansi(f' \[[dim]{item._source}[/]]')
 			if self.print_json:
 				self._print(item, out=sys.stdout)
 			elif self.print_raw:
 				self._print(str(item), out=sys.stdout)
 			else:
+				item_str = self.get_repr(item)
+				if self.print_remote_status or DEBUG > 1:
+					item_str += rich_to_ansi(f' \[[dim]{item._source}[/]]')
 				self._print(item_str, out=sys.stdout)
 			self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
 		elif self.print_line and isinstance(item, str):
 			self._print(item, out=sys.stderr, end='\n')
+			self.output += item + '\n'
 
 	def mark_duplicates(self):
 		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
@@ -487,11 +488,20 @@ class Runner:
 			for info in self.infos:
 				self._print(f'   • \[{info._source}] {info.message}', color='bold green', rich=True)
 
+		# Log runner warnings
+		self.warnings = [c for c in self.results if c._type == 'warning']
+		if self.warnings:
+			self._print(
+				f':exclamation: [bold magenta]{self.config.name}[/] warnings ({len(self.warnings)}):',
+				color='bold green', rich=True)
+			for warning in self.warnings:
+				self._print(f'   • \[{warning._source}] {warning.message}', color='bold orange3', rich=True)
+
 		# Log runner errors
 		self.errors = [c for c in self.results if c._type == 'error']
 		if self.errors and self.print_errors:
 			self._print(
-				f':exclamation_mark:[bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
+				f':cross_mark: [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)
 			for error in self.errors:
 				self._print(f'   • \[{error._source}] {error.message}', color='bold red', rich=True)

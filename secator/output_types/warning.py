@@ -5,9 +5,10 @@ from secator.utils import rich_to_ansi
 
 
 @dataclass
-class Error(OutputType):
+class Warning(OutputType):
 	message: str
-	traceback: str = field(default='', compare=False)
+	task_name: str = field(default='', compare=False)
+	task_id: str = field(default='', compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='error', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -16,11 +17,12 @@ class Error(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = ['task_name', 'message', 'traceback']
+	_table_fields = ['task_name', 'message']
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
-		s = f'[bold red]❌ {self._source}: {self.message}[/]'
-		if self.traceback:
-			s += f'\n[dim]{self.traceback}[/]'
+		s = '[bold red]❌ '
+		if self.task_name:
+			s += f'{self.task_name}: '
+		s += f'{self.message}[/]'
 		return rich_to_ansi(s)

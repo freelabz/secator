@@ -7,7 +7,6 @@ from secator.utils import rich_to_ansi
 @dataclass
 class Info(OutputType):
 	message: str
-	task_name: str = field(default='', compare=False)
 	task_id: str = field(default='', compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='info', repr=True)
@@ -21,5 +20,5 @@ class Info(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
-		s = f"[dim]ⓘ {self.task_name}: {self.message}[/]"
+		s = f"[dim]ⓘ {self._source}: {self.message}[/]"
 		return rich_to_ansi(s)

@@ -10,7 +10,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST)
-from secator.output_types import Url, Error
+from secator.output_types import Url, Info, Error
 from secator.tasks._categories import HttpFuzzer
 
 
@@ -72,7 +72,7 @@ class dirsearch(HttpFuzzer):
 			yield Error(message=f'Could not find dirsearch JSON results in {self.output_path}')
 			return
 
-		self._print(f'🗄 [bold green]dirsearch JSON results saved to {self.output_path}[/]')
+		yield Info(message=f'🗄 [bold green]dirsearch JSON results saved to {self.output_path}[/]')
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read()).get('results', [])
 		yield from results

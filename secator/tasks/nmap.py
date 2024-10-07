@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import traceback
 
 import xmltodict
 
@@ -13,7 +14,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability, Error
+from secator.output_types import Exploit, Port, Vulnerability, Info, Error
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug
 
@@ -28,6 +29,7 @@ class nmap(VulnMulti):
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
+	item_loaders = []
 	output_types = [Port, Vulnerability, Exploit]
 	opts = {
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (default: most common 1000 ports for each protocol)'},
@@ -92,10 +94,10 @@ class nmap(VulnMulti):
 
 	@staticmethod
 	def on_cmd_done(self):
-		self._print(f'🗄 [bold green]nmap JSON results saved to {self.output_path}[/]')
 		if not os.path.exists(self.output_path):
 			yield Error(message=f'Could not find nmap JSON results in {self.output_path}')
 			return
+		yield Info(message=f'🗄 [bold green]nmap JSON results saved to {self.output_path}[/]')
 		yield from self.xml_to_json()
 
 	def xml_to_json(self):
@@ -104,10 +106,11 @@ class nmap(VulnMulti):
 			content = f.read()
 			try:
 				results = xmltodict.parse(content)  # parse XML to dict
-			except Exception as e:
-				logger.exception(e)
-				logger.error(
-					f'Cannot parse nmap XML output {self.output_path} to valid JSON.')
+			except Exception as exc:
+				yield Error(
+					message=f'Cannot parse nmap XML output {self.output_path} to valid JSON.',
+					traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
+				)
 		results['_host'] = self.input
 		return nmapData(results)
 

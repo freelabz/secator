@@ -8,8 +8,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
 							   SEVERITY, TAGS, THREADS, TIMEOUT,
 							   URL, USER_AGENT)
-from secator.output_types import Tag, Vulnerability, Error
-from secator.serializers import RegexSerializer
+from secator.output_types import Tag, Vulnerability, Info, Error
 from secator.tasks._categories import VulnHttp
 
 
@@ -89,7 +88,7 @@ class wpscan(VulnHttp):
 			yield Error(message=f'Could not find wpscan JSON results in {self.output_path}')
 			return
 
-		self._print(f'🗄 [bold green]wpscan JSON results saved to {self.output_path}[/]')
+		yield Info(message=f'🗄 [bold green]wpscan JSON results saved to {self.output_path}[/]')
 		with open(self.output_path, 'r') as f:
 			data = json.load(f)
 
@@ -167,4 +166,3 @@ class wpscan(VulnHttp):
 						name=f'Wordpress plugin - {slug} {number} outdated',
 						severity='info'
 					)
-
