@@ -213,7 +213,7 @@ OUTPUTS_TASKS = {
     ],
     'nmap': [
         Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca',  _source='nmap'),
+        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca', _source='nmap'),
     ],
     'nuclei': [
         Vulnerability(

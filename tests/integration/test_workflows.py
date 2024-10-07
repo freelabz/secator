@@ -71,7 +71,8 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			'rate_limit': 1000,
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 			'timeout': 7,
-			'depth': 2
+			'depth': 2,
+			'ports': '9999,3000,8080'
 		}
 		opts = merge_opts(opts, fmt_opts)
 

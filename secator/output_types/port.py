@@ -16,7 +16,7 @@ class Port(OutputType):
 	host: str = field(default='', repr=True, compare=False)
 	protocol: str = field(default='tcp', repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
-	confidence: str = 'low'
+	confidence: str = field(default='low', repr=False, compare=False)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='port', repr=True)
