@@ -27,7 +27,6 @@ class grype(VulnCode):
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Vulnerability]
-	item_loaders = []
 	install_cmd = (
 		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
 	)
@@ -37,7 +36,7 @@ class grype(VulnCode):
 	def item_loader(self, line):
 		"""Load vulnerabilty dicts from grype line output."""
 		split = [i for i in line.split(' ') if i]
-		if not len(split) in [5, 6] or split[0] == 'NAME':
+		if len(split) not in [5, 6] or split[0] == 'NAME':
 			return
 		version_fixed = None
 		if len(split) == 5:  # no version fixed

@@ -13,6 +13,7 @@ from secator.definitions import (CONTENT_TYPE, DEFAULT_KATANA_FLAGS,
 								 THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER, CONTENT_LENGTH)
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
 
@@ -58,6 +59,7 @@ class katana(HttpCrawler):
 	opt_value_map = {
 		DELAY: lambda x: int(x) if isinstance(x, float) else x
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Url: {
 			URL: lambda x: x['request']['endpoint'],

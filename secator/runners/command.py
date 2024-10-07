@@ -16,7 +16,6 @@ from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
 from secator.output_types import Error
 from secator.runners import Runner
-from secator.serializers import JSONSerializer
 from secator.template import TemplateLoader
 from secator.utils import debug
 
@@ -83,7 +82,7 @@ class Command(Runner):
 
 	# Serializer
 	item_loader = None
-	item_loaders = [JSONSerializer(),]
+	item_loaders = []
 
 	# Hooks
 	hooks = [

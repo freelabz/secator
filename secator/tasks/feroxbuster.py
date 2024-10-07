@@ -10,6 +10,7 @@ from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, DEFAULT_FEROXBUSTER_FLAGS)
 from secator.output_types import Url
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpFuzzer
 
 
@@ -51,6 +52,7 @@ class feroxbuster(HttpFuzzer):
 		USER_AGENT: 'user-agent',
 		WORDLIST: 'wordlist'
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Url: {
 			STATUS_CODE: 'status',

@@ -40,7 +40,6 @@ class msfconsole(VulnMulti):
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
-		THREADS: OPT_NOT_SUPPORTED,
 	}
 	encoding = 'ansi'
 	ignore_return_code = True

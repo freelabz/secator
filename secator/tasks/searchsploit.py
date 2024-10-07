@@ -5,6 +5,7 @@ from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
 								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
 from secator.output_types import Exploit
 from secator.runners import Command
+from secator.serializers import JSONSerializer
 
 
 SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*)$')
@@ -21,6 +22,7 @@ class searchsploit(Command):
 		'strict': {'short': 's', 'is_flag': True, 'default': False, 'help': 'Strict match'}
 	}
 	opt_key_map = {}
+	item_loaders = [JSONSerializer()]
 	output_types = [Exploit]
 	output_map = {
 		Exploit: {

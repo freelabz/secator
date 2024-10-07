@@ -23,7 +23,6 @@ class dirsearch(HttpFuzzer):
 	json_flag = '--format json'
 	opt_prefix = '--'
 	encoding = 'ansi'
-	item_loaders = []
 	opt_key_map = {
 		HEADER: 'header',
 		DELAY: 'delay',

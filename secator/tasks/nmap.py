@@ -29,7 +29,6 @@ class nmap(VulnMulti):
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
-	item_loaders = []
 	output_types = [Port, Vulnerability, Exploit]
 	opts = {
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (default: most common 1000 ports for each protocol)'},

@@ -10,6 +10,7 @@ from secator.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH,
 								 TIMEOUT, URL, USER_AGENT)
 from secator.config import CONFIG
 from secator.output_types import Url, Subdomain
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
 from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
 
@@ -64,13 +65,14 @@ class httpx(Http):
 	opt_value_map = {
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
+	item_loaders = [JSONSerializer()]
+	output_types = [Url, Subdomain]
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
 	install_github_handle = 'projectdiscovery/httpx'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'cpu'
-	output_types = [Url, Subdomain]
 
 	@staticmethod
 	def on_init(self):

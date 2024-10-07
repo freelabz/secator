@@ -4,6 +4,7 @@ from secator.decorators import task
 from secator.runners import Command
 from secator.serializers import RegexSerializer
 from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Error
+from secator.serializers import JSONSerializer
 
 
 BBOT_MODULES = [
@@ -165,6 +166,7 @@ class bbot(Command):
 	opt_value_map = {
 		'presets': lambda x: ' '.join(x.split(','))
 	}
+	item_loaders = [JSONSerializer()]
 	output_types = [Vulnerability, Port, Url, Record, Ip, Error]
 	output_discriminator = output_discriminator
 	output_map = {

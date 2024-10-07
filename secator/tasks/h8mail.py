@@ -21,7 +21,6 @@ class h8mail(OSInt):
 		'config': {'type': str, 'help': 'Configuration file for API keys'},
 		'local_breach': {'type': str, 'short': 'lb', 'help': 'Local breach file'}
 	}
-	item_loaders = []
 	install_cmd = 'pipx install h8mail'
 
 	@staticmethod
