@@ -144,17 +144,13 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'gau': [
-        Url(url='http://testphp.vulnweb.com/login.php', _source='gau'),
-        Url(url='http://testphp.vulnweb.com/index.php', _source='gau'),
-        Url(url='http://testphp.vulnweb.com/guestbook.php', _source='gau'),
+        Url(url='http://www.danielmiessler.com/wp-content/uploads/2010/03/self_discipline.jpeg', _source='gau')
     ],
     'gf': [
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
     'gospider': [
-        Url(url='http://testphp.vulnweb.com', status_code=200, content_length=109, _source='gospider'),
-        Url(url='http://testphp.vulnweb.com/index.php', status_code=200, content_length=109, _source='gospider'),
-        Url(url='http://testphp.vulnweb.com/artists.php', status_code=200, content_length=104, _source='gospider'),
+        Url(url='https://danielmiessler.com/t/Newsletter', status_code=200, content_length=92, _source='gospider')
     ],
     'grype': [
 		Vulnerability(
