@@ -104,7 +104,7 @@ class Workflow(Runner):
 			task_opts = task_opts or {}
 
 			# If it's a group, process the sublevel tasks as a Celery chord.
-			if task_name == '_group':
+			if task_name.startswith('_group'):
 				tasks = self.get_tasks(
 					task_opts,
 					targets,

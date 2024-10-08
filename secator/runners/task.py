@@ -99,7 +99,7 @@ class Task(Runner):
 		"""
 		tasks = []
 		for name, opts in config.items():
-			if name == '_group':
+			if name.startswith('_group'):
 				tasks.extend(Task.get_tasks_from_conf(opts))
 			elif name == '_chain':
 				tasks.extend(Task.get_tasks_from_conf(opts))
