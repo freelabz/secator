@@ -26,6 +26,10 @@ class Task(Runner):
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
+
 		# Run opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
@@ -71,10 +75,6 @@ class Task(Runner):
 
 		# Yield task results
 		yield from task
-
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
 	@staticmethod
 	def get_task_class(name):
