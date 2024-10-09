@@ -150,7 +150,7 @@ class Runner:
 		self.opts_to_print = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Hooks
-		self.raise_on_error = self.run_opts.get('raise_on_error', False)
+		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		for key in self.hooks:
 
@@ -364,18 +364,16 @@ class Runner:
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
 				result = hook(self, *args)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'ended'}, id=_id, sub='hooks', level=3)
-			except Exception as e:
-				if self.raise_on_error:
-					raise e
-				else:
-					if DEBUG > 1:
-						logger.exception(e)
-					else:
-						self._print(
-							f'{fun} failed: "{e.__class__.__name__}: {str(e)}". Skipping',
-							color='bold red',
-							rich=True)
-						self._print('Set DEBUG to > 1 to see the detailed exception.', color='dim red', rich=True)
+			except Exception as exc:
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='hooks', level=3)
+				error = Error(
+					message='Hook execution failed.',
+					traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__)),
+					_source=fun
+				)
+				self._print_item(error)
+				if self.raise_on_error or not self.sync:
+					raise exc
 		return result
 
 	def run_validators(self, validator_type, *args):
@@ -470,16 +468,7 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.results_count = len(self.results)
-		self.status = 'SUCCESS' if not self.errors else 'FAILURE'
 		self.end_time = datetime.fromtimestamp(time())
-
-		# Log execution results
-		status = 'succeeded' if not self.errors else '[bold red]failed[/]'
-		if self.print_run_summary:
-			self._print('\n')
-			self._print(
-				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
-				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
 
 		# Log runner infos
 		self.infos = [c for c in self.results if c._type == 'info']
@@ -508,8 +497,17 @@ class Runner:
 			for error in self.errors:
 				self._print(f'   • \[{error._source}] {error.message}', color='bold red', rich=True)
 
+		# Log execution results
+		self.status = 'SUCCESS' if not self.errors else 'FAILURE'
+		status = 'succeeded' if not self.errors else '[bold red]failed[/]'
+		if self.print_run_summary:
+			self._print('\n')
+			self._print(
+				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
+				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
+
 		# Build and send report
-		if self.results:
+		if self.results and self.exporters:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()

@@ -89,8 +89,7 @@ class Command(Runner):
 		'on_start',
 		'on_cmd',
 		'on_cmd_done',
-		'on_line',
-		'on_error',
+		'on_line'
 	]
 
 	# Ignore return code
