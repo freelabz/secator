@@ -110,7 +110,6 @@ class nmap(VulnMulti):
 					message=f'Cannot parse XML output {self.output_path} to valid JSON.',
 					traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
 				)
-		results['_host'] = self.input
 		yield from nmapData(results)
 
 
@@ -206,7 +205,6 @@ class nmapData(dict):
 
 	def _get_hostname(self, host_cfg):
 		hostnames = host_cfg.get('hostnames', {})
-		hostname = self['_host']
 		if hostnames:
 			hostnames = hostnames.get('hostname', [])
 			if isinstance(hostnames, dict):
