@@ -46,7 +46,6 @@ class Scan(Runner):
 				'print_item': False,
 				'print_start': True,
 				'print_run_summary': True,
-				'print_progress': self.sync
 			}
 			run_opts.update(fmt_opts)
 

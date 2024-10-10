@@ -1,19 +1,20 @@
 import gc
 import logging
 import traceback
+import uuid
 
 from celery import Celery, chain, chord, signals
 from celery.app import trace
-from celery.result import allow_join_result
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
 from secator.config import CONFIG
+from secator.output_types import Info, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
-from secator.utils import (TaskError, debug, deduplicate,
-						   flatten)
+from secator.utils import (debug, deduplicate, flatten)
+from secator.celery_utils import CeleryData
 
 # from pathlib import Path
 # import memray  # TODO: conditional memray tracing
@@ -31,9 +32,7 @@ logging.getLogger('celery').setLevel(logging.INFO if CONFIG.debug.level > 6 else
 
 logger = logging.getLogger(__name__)
 
-trace.LOG_SUCCESS = """\
-Task %(name)s[%(id)s] succeeded in %(runtime)ss\
-"""
+trace.LOG_SUCCESS = "Task %(name)s[%(id)s] succeeded in %(runtime)ss"
 
 app = Celery(__name__)
 app.conf.update({
@@ -99,8 +98,13 @@ def void(*args, **kwargs):
 	pass
 
 
-def revoke_task(task_id):
-	console.print(f'Revoking task {task_id}')
+def revoke_task(data):
+	task_id = data['id']
+	full_name = data.get('full_name')
+	message = f'Revoking task {task_id}'
+	if full_name:
+		message += f' ({full_name})'
+	console.print(message)
 	return app.control.revoke(task_id, terminate=True, signal='SIGINT')
 
 
@@ -118,6 +122,12 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 	chunks = targets
 	if chunk_size > 1:
 		chunks = list(chunker(targets, chunk_size))
+	debug(
+		'',
+		obj={task_cls.__name__: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks)},
+		obj_after=False,
+		sub='celery.state'
+	)
 
 	# Clone opts
 	opts = task_opts.copy()
@@ -173,13 +183,22 @@ def run_scan(self, args=[], kwargs={}):
 	scan.run()
 
 
+def update_state(celery_task, **state):
+	debug(
+		'',
+		sub='celery.state',
+		id=celery_task.request.id,
+		obj={state['meta']['full_name']: 'RUNNING', 'count': state['meta']['count']},
+		obj_after=False
+	)
+	return celery_task.update_state(**state)
+
+
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
-	# profiler = Profiler(interval=0.0001)
-	# profiler.start()
 	chunk = opts.get('chunk')
 	chunk_count = opts.get('chunk_count')
-	description = opts.get('description')
+	description = opts.get('description', '')
 	sync = opts.get('sync', True)
 
 	# Set Celery request id in context
@@ -193,7 +212,6 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Update task state in backend
 	count = 0
-	msg_type = 'error'
 	task_results = []
 	task_state = 'RUNNING'
 	task = None
@@ -202,20 +220,19 @@ def run_command(self, results, name, targets, opts={}):
 		'state': task_state,
 		'meta': {
 			'name': name,
+			'full_name': full_name,
+			'state': task_state,
 			'progress': 0,
 			'results': [],
 			'chunk': chunk,
 			'chunk_count': chunk_count,
+			'chunk_info': f'{chunk}/{chunk_count}' if chunk and chunk_count else '',
+			'celery_id': self.request.id,
 			'count': count,
-			'description': description
+			'descr': description,
 		}
 	}
-	self.update_state(**state)
-	debug('updated', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'}, obj_after=False, level=2)
-	# profile_root = Path('/code/.profiles')
-	# profile_root.mkdir(exist_ok=True)
-	# profile_path = f'/code/.profiles/{self.request.id}.bin'
-	# with memray.Tracker(profile_path):
+	update_state(self, **state)
 	try:
 		# Flatten + dedupe results
 		results = flatten(results)
@@ -224,9 +241,6 @@ def run_command(self, results, name, targets, opts={}):
 		# Get expanded targets
 		if not chunk:
 			targets, opts = run_extractors(results, opts, targets)
-			if not targets:
-				msg_type = 'info'
-				raise TaskError(f'No targets were specified as input. Skipping. [{self.request.id}]')
 
 		# Get task class
 		task_cls = Task.get_task_class(name)
@@ -242,7 +256,6 @@ def run_command(self, results, name, targets, opts={}):
 			# Initiate main task and set context for sub-tasks
 			task = task_cls(targets, parent=parent, has_children=True, **opts)
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
-			debug(f'breaking task by chunks of size {chunk_size}.', id=self.request.id, sub='celery.state')
 			workflow = break_task(
 				task_cls,
 				opts,
@@ -250,25 +263,33 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 			result = workflow.apply() if sync else workflow.apply_async()
-			debug(
-				'waiting for subtasks', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
-				obj_after=False, level=2)
-			if not sync:
-				list(task.__class__.get_live_results(result))
-			with allow_join_result():
-				task_results = result.get()
-				results.extend(task_results)
-				task_state = 'SUCCESS'
-			debug(
-				'all subtasks done', sub='celery.state', id=self.request.id, obj={full_name: 'RUNNING'},
-		 		obj_after=False, level=2)
+			uuids = []
+			chunk_ids = []
+			CeleryData.get_task_ids(result, chunk_ids)
+			for chunk_id in chunk_ids:
+				info = Info(
+					message=f'Chunked task created: {chunk_id}',
+					task_id=chunk_id,
+					_source=full_name,
+					_uuid=str(uuid.uuid4())
+				)
+				task_results.append(info)
+				results.append(info)
+			for data in CeleryData.poll(result):
+				new_results = [r for r in data.get('results', []) if r._uuid not in uuids]
+				if not new_results:
+					continue
+				task_results.extend(new_results)
+				results.extend(new_results)
+				state['meta']['task_results'] = task_results
+				state['meta']['results'] = results
+				state['meta']['count'] = len(task_results)
+				update_state(self, **state)
+				uuids.extend([r._uuid for r in new_results])
+			state['meta']['state'] = 'SUCCESS'
 
 		# otherwise, run normally
 		else:
-			# If list with 1 element
-			if isinstance(targets, list) and len(targets) == 1:
-				targets = targets[0]
-
 			# Run task
 			task = task_cls(targets, **opts)
 			for item in task:
@@ -278,60 +299,24 @@ def run_command(self, results, name, targets, opts={}):
 				state['meta']['task_results'] = task_results
 				state['meta']['results'] = results
 				state['meta']['count'] = len(task_results)
-				if item._type == 'progress':
-					state['meta']['progress'] = item.percent
-				self.update_state(**state)
-				debug(
-					'items found', sub='celery.state', id=self.request.id, obj={full_name: len(task_results)},
-					obj_after=False, level=4)
-
-			# Update task state based on task return code
-			if task.return_code == 0:
-				task_state = 'SUCCESS'
-				task_exc = None
-			else:
-				task_state = 'FAILURE'
-				task_exc = TaskError('\n'.join(task.errors))
+				update_state(self, **state)
+			state['meta']['state'] = task.status
 
 	except BaseException as exc:
-		task_state = 'FAILURE'
-		task_exc = exc
-
-	finally:
-		# Set task state and exception
-		state['state'] = 'SUCCESS'  # force task success to serialize exception
-		state['meta']['results'] = results
+		error = Error(
+			message=str(exc),
+			traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__)),
+			_source=full_name,
+			_uuid=str(uuid.uuid4())
+		)
+		task_results.append(error)
+		results.append(error)
 		state['meta']['task_results'] = task_results
-		state['meta']['progress'] = 100
-
-		# Handle task failure
-		if task_state == 'FAILURE':
-			if isinstance(task_exc, TaskError):
-				exc_str = str(task_exc)
-			else:  # full traceback
-				exc_str = ' '.join(traceback.format_exception(task_exc, value=task_exc, tb=task_exc.__traceback__))
-			state['meta'][msg_type] = exc_str
-
-		# Update task state with final status
-		self.update_state(**state)
-		debug('updated', sub='celery.state', id=self.request.id, obj={full_name: task_state}, obj_after=False, level=2)
-
-		# Update parent task if necessary
-		if task and task.has_children:
-			task.log_results()
-			task.run_hooks('on_end')
-
-		# profiler.stop()
-		# from pathlib import Path
-		# logger.info('Stopped profiling')
-		# profile_root = Path('/code/.profiles')
-		# profile_root.mkdir(exist_ok=True)
-		# profile_path = f'/code/.profiles/{self.request.id}.html'
-		# logger.info(f'Saving profile to {profile_path}')
-		# with open(profile_path, 'w', encoding='utf-8') as f_html:
-		# 	f_html.write(profiler.output_html())
-
-		# TODO: fix memory leak instead of running a garbage collector
+		state['meta']['results'] = results
+		state['meta']['state'] = 'FAILURE'
+	finally:
+		state['state'] = 'SUCCESS'
+		update_state(self, **state)
 		gc.collect()
 
 		# If running in chunk mode, only return chunk result, not all results

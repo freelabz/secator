@@ -88,7 +88,7 @@ class TemplateLoader(DotMap):
 		from secator.runners import Task
 		tasks = []
 		for name, conf in self.tasks.items():
-			if name == '_group':
+			if name.startswith('_group'):
 				group_conf = TemplateLoader(input={'tasks': conf})
 				tasks.extend(group_conf.get_tasks_class())
 			else:

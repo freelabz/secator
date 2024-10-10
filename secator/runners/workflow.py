@@ -4,6 +4,7 @@ from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
+from secator.celery_utils import CeleryData
 
 
 class Workflow(Runner):
@@ -39,7 +40,6 @@ class Workflow(Runner):
 			'print_item': True,
 			'print_item_count': True,
 			'print_line': not self.sync,
-			'print_progress': self.sync,
 		}
 
 		# Construct run opts
@@ -55,7 +55,13 @@ class Workflow(Runner):
 		else:
 			result = workflow()
 			self.celery_result = result
-			results = self.process_live_tasks(result, results_only=True, print_remote_status=self.print_remote_status)
+			results = CeleryData.iter_results(
+				self.celery_result,
+				description=True,
+				results_only=True,
+				print_remote_status=self.print_remote_status,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
+			)
 
 		# Get workflow results
 		yield from results
@@ -98,7 +104,7 @@ class Workflow(Runner):
 			task_opts = task_opts or {}
 
 			# If it's a group, process the sublevel tasks as a Celery chord.
-			if task_name == '_group':
+			if task_name.startswith('_group'):
 				tasks = self.get_tasks(
 					task_opts,
 					targets,

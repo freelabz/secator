@@ -23,7 +23,6 @@ class gf(Tagger):
 		'git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true'
 	)
 	output_types = [Tag]
-	item_loaders = []
 
 	@staticmethod
 	def item_loader(self, line):

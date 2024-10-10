@@ -37,6 +37,7 @@ class TestTemplate(unittest.TestCase):
 		from secator.tasks import ls
 		results = ls(str(self.template_dir)).run()
 		self.assertEqual(len(results), 1)
+		print(results)
 		self.assertTrue(self.expected_vuln == Vulnerability.load(results[0].toDict()))
 
 	def test_external_workflow(self):

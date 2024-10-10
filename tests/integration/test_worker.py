@@ -1,5 +1,7 @@
 import unittest
+from secator.output_types import Url, Target
 from secator.runners import Command
+from secator.serializers import JSONSerializer
 from time import sleep
 from threading import Thread
 import queue
@@ -20,14 +22,14 @@ class TestWorker(unittest.TestCase):
 		cls.thread.join()
 
 	def test_httpx(self):
-		from secator.output_types import Url
 		cmd = Command.execute(
 			'secator x httpx testphp.vulnweb.com -json',
 			no_process=False,
-			cls_attributes={'output_types': [Url]}
+			cls_attributes={'output_types': [Target, Url], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
-		self.assertEqual(len(cmd.results), 1)
+		self.assertEqual(len(cmd.results), 2)
+		target = Target(name='testphp.vulnweb.com', _source='httpx')
 		url = Url(
 			'http://testphp.vulnweb.com',
 			status_code=200,
@@ -35,16 +37,18 @@ class TestWorker(unittest.TestCase):
 			webserver='nginx',
 			tech=['DreamWeaver', 'Nginx:1.19.0', 'PHP:5.6.40', 'Ubuntu'],
 			content_type='text/html',
-			content_length=4958
+			content_length=4958,
+			_source='httpx'
 		)
-		self.assertEqual(cmd.results[0], url)
+		self.assertIn(target, cmd.results)
+		self.assertIn(url, cmd.results)
 
 	def test_host_recon(self):
 		from secator.output_types import Url, Port, Vulnerability
 		cmd = Command.execute(
 			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',
 			no_process=False,
-			cls_attributes={'output_types': [Url, Port, Vulnerability]}
+			cls_attributes={'output_types': [Target, Url, Port, Vulnerability], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
 		self.assertGreater(len(cmd.results), 0)

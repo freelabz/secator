@@ -5,6 +5,7 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, USER_AGENT)
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
 
@@ -36,6 +37,7 @@ class gau(HttpCrawler):
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
+	item_loaders = [JSONSerializer()]
 	install_cmd = 'go install -v github.com/lc/gau/v2/cmd/gau@latest'
 	install_github_handle = 'lc/gau'
 	proxychains = False

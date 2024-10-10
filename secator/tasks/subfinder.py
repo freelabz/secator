@@ -2,6 +2,7 @@ from secator.decorators import task
 from secator.definitions import (DELAY, DOMAIN, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secator.output_types import Subdomain
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import ReconDns
 
 
@@ -23,6 +24,7 @@ class subfinder(ReconDns):
 	opt_value_map = {
 		PROXY: lambda x: x.replace('http://', '').replace('https://', '') if x else None
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Subdomain: {
 			DOMAIN: 'input',

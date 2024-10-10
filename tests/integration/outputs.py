@@ -200,7 +200,12 @@ OUTPUTS_TASKS = {
         )
     ],
     'maigret': [
-        UserAccount(site_name='GitHub', username='ocervell', url='https://github.com/ocervell', _source='maigret')
+        UserAccount(
+			site_name='GitHubGist',
+			username='ocervell',
+			url='https://gist.github.com/ocervell',
+			_source='maigret'
+		)
     ],
     'mapcidr': [
         Ip(ip='192.168.1.0', alive=False, _source='mapcidr'),
@@ -213,7 +218,7 @@ OUTPUTS_TASKS = {
     ],
     'nmap': [
         Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca',  _source='nmap'),
+        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca', _source='nmap'),
     ],
     'nuclei': [
         Vulnerability(

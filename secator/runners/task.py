@@ -3,6 +3,7 @@ from secator.output_types import Target
 from secator.config import CONFIG
 from secator.runners import Runner
 from secator.utils import discover_tasks
+from secator.celery_utils import CeleryData
 
 
 class Task(Runner):
@@ -24,6 +25,10 @@ class Task(Runner):
 		"""
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
+
+		# Yield targets
+		for target in self.targets:
+			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
 		# Run opts
 		run_opts = self.run_opts.copy()
@@ -61,18 +66,15 @@ class Task(Runner):
 				return
 		else:
 			self.celery_result = task_cls.delay(self.targets, **run_opts)
-			task = self.process_live_tasks(
+			task = CeleryData.iter_results(
 				self.celery_result,
-				description=False,
+				description=True,
 				results_only=True,
-				print_remote_status=self.print_remote_status)
+				print_remote_status=self.print_remote_status,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
 
 		# Yield task results
 		yield from task
-
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
 
 	@staticmethod
 	def get_task_class(name):
@@ -97,7 +99,7 @@ class Task(Runner):
 		"""
 		tasks = []
 		for name, opts in config.items():
-			if name == '_group':
+			if name.startswith('_group'):
 				tasks.extend(Task.get_tasks_from_conf(opts))
 			elif name == '_chain':
 				tasks.extend(Task.get_tasks_from_conf(opts))

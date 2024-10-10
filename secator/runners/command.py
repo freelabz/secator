@@ -5,16 +5,18 @@ import re
 import shlex
 import subprocess
 import sys
+import traceback
+import uuid
 
 from time import sleep
 
 from fp.fp import FreeProxy
 
-from secator.template import TemplateLoader
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
+from secator.output_types import Error
 from secator.runners import Runner
-from secator.serializers import JSONSerializer
+from secator.template import TemplateLoader
 from secator.utils import debug
 
 
@@ -65,6 +67,9 @@ class Command(Runner):
 	# Input chunk size (default None)
 	input_chunk_size = CONFIG.runners.input_chunk_size
 
+	# Input required
+	input_required = True
+
 	# Flag to take a file as input
 	file_flag = None
 
@@ -80,14 +85,14 @@ class Command(Runner):
 
 	# Serializer
 	item_loader = None
-	item_loaders = [JSONSerializer(),]
+	item_loaders = []
 
 	# Hooks
 	hooks = [
 		'on_start',
 		'on_cmd',
-		'on_line',
-		'on_error',
+		'on_cmd_done',
+		'on_line'
 	]
 
 	# Ignore return code
@@ -95,9 +100,6 @@ class Command(Runner):
 
 	# Return code
 	return_code = -1
-
-	# Error
-	error = ''
 
 	# Output
 	output = ''
@@ -120,6 +122,7 @@ class Command(Runner):
 
 		# Run parent init
 		hooks = run_opts.pop('hooks', {})
+		validators = {'validate_input': [self._validate_input_nonempty, self._validate_chunked_input]}
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
 		super().__init__(
@@ -128,7 +131,10 @@ class Command(Runner):
 			results=results,
 			run_opts=run_opts,
 			hooks=hooks,
+			validators=validators,
 			context=context)
+		if not self.input_valid:
+			return
 
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
@@ -280,7 +286,7 @@ class Command(Runner):
 		kwargs['print_item'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = not kwargs.get('quiet', False)
 		delay_run = kwargs.pop('delay_run', False)
-		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
+		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
 		if not delay_run:
@@ -348,8 +354,9 @@ class Command(Runner):
 		self.run_hooks('on_start')
 
 		# Check for sudo requirements and prepare the password if needed
-		sudo_password = self._prompt_sudo(self.cmd)
-		if sudo_password and sudo_password == -1:
+		sudo_password, error = self._prompt_sudo(self.cmd)
+		if error:
+			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 			return
 
 		# Prepare cmds
@@ -388,14 +395,18 @@ class Command(Runner):
 			celery_id = self.context.get('celery_id', '')
 			if celery_id:
 				error += f' [{celery_id}]'
-			self.errors.append(error)
+			yield Error(
+				message=error,
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
 			self.return_code = 1
 			return
 
 		try:
 			# No capture mode, wait for command to finish and return
 			if self.no_capture:
-				self._wait_for_end()
+				yield from self._wait_for_end()
 				return
 
 			# Process the output in real-time
@@ -420,24 +431,37 @@ class Command(Runner):
 
 				# Run on_line hooks
 				line = self.run_hooks('on_line', line)
+				if line is None:
+					continue
 
 				# Run item_loader to try parsing as dict
 				item_count = 0
-				if self.output_json:
-					for item in self.run_item_loaders(line):
-						yield item
-						item_count += 1
+				for item in self.run_item_loaders(line):
+					yield item
+					item_count += 1
 
 				# Yield line if no items were yielded
 				if item_count == 0:
 					yield line
 
+			result = self.run_hooks('on_cmd_done')
+			if result:
+				yield from result
+
 		except KeyboardInterrupt:
 			self.process.kill()
 			self.killed = True
 
+		except Exception as e:
+			yield Error(
+				message=str(e),
+				traceback=' '.join(traceback.format_exception(e, value=e, tb=e.__traceback__)),
+				_source=self.config.name,
+				_uuid=str(uuid.uuid4())
+			)
+
 		# Retrieve the return code and output
-		self._wait_for_end()
+		yield from self._wait_for_end()
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line."""
@@ -459,27 +483,25 @@ class Command(Runner):
 			command (str): The initial command to be executed.
 
 		Returns:
-			str or None: The sudo password if required; otherwise, None.
+			tuple: (sudo password, error).
 		"""
 		sudo_password = None
 
 		# Check if sudo is required by the command
 		if not re.search(r'\bsudo\b', command):
-			return None
+			return None, []
 
 		# Check if sudo can be executed without a password
 		try:
 			if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
-				return None
+				return None, None
 		except ValueError:
-			error = "Could not run sudo check test"
-			self.errors.append(error)
+			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
 		if not os.isatty(sys.stdin.fileno()):
 			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
-			self.errors.append(error)
-			return -1
+			return -1, error
 
 		# If not, prompt the user for a password
 		self._print('[bold red]Please enter sudo password to continue.[/]')
@@ -493,11 +515,10 @@ class Command(Runner):
 				capture_output=True
 			)
 			if result.returncode == 0:
-				return sudo_password  # Password is correct
+				return sudo_password, None  # Password is correct
 			self._print("Sorry, try again.")
 		error = "Sudo password verification failed after 3 attempts."
-		self.errors.append(error)
-		return -1
+		return -1, error
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
@@ -515,10 +536,12 @@ class Command(Runner):
 
 		if self.return_code == -2 or self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			self.errors.append(error)
+			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}.'
-			self.errors.append(error)
+			last_lines = self.output.split('\n')
+			last_lines = last_lines[max(0, len(last_lines) - 2):]
+			yield Error(message=error, traceback='\n'.join(last_lines), _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 	@staticmethod
 	def _process_opts(
@@ -589,6 +612,26 @@ class Command(Runner):
 		return opts_str.strip()
 
 	@staticmethod
+	def _validate_chunked_input(self, input):
+		"""Multiple input passed in non-worker mode."""
+		if len(input) > 1 and self.sync and self.file_flag is None:
+			return False
+		return True
+
+	@staticmethod
+	def _validate_input_nonempty(self, input):
+		"""Input is empty."""
+		if not self.input_required:
+			return True
+		if not self.input or len(self.input) == 0:
+			return False
+		return True
+
+	# @staticmethod
+	# def _validate_input_types_valid(self, input):
+	# 	pass
+
+	@staticmethod
 	def _get_opt_default(opt_name, opts_conf):
 		for k, v in opts_conf.items():
 			if k == opt_name:
@@ -614,7 +657,7 @@ class Command(Runner):
 		"""Build command string."""
 
 		# Add JSON flag to cmd
-		if self.output_json and self.json_flag:
+		if self.json_flag:
 			self.cmd += f' {self.json_flag}'
 
 		# Add options to cmd
@@ -667,16 +710,13 @@ class Command(Runner):
 				cmd = f'cat {fpath} | {cmd}'
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
-			else:
-				self._print(f'{self.__class__.__name__} does not support multiple inputs.', color='bold red')
-				self.input_valid = False
 
 			self.input_path = fpath
 
 		# If input is a string but the tool does not support an input flag, use echo-piped input.
 		# If the tool's input flag is set to None, assume it is a positional argument at the end of the command.
 		# Otherwise use the input flag to pass the input.
-		else:
+		elif input:
 			input = shlex.quote(input)
 			if self.input_flag == OPT_PIPE_INPUT:
 				cmd = f'echo {input} | {cmd}'
@@ -687,4 +727,3 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
-		self.input = input

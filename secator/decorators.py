@@ -216,7 +216,6 @@ def register_runner(cli_endpoint, config):
 			short_help += f' [dim]alias: {config.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
-		fmt_opts['print_progress'] = False
 		runner_cls = Scan
 
 	elif cli_endpoint.name == 'workflow':
@@ -231,7 +230,6 @@ def register_runner(cli_endpoint, config):
 			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
 		fmt_opts['print_start'] = True
 		fmt_opts['print_run_summary'] = True
-		fmt_opts['print_progress'] = False
 		runner_cls = Workflow
 
 	elif cli_endpoint.name == 'task':

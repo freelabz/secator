@@ -10,7 +10,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST)
-from secator.output_types import Url
+from secator.output_types import Url, Info, Error
 from secator.tasks._categories import HttpFuzzer
 
 
@@ -58,31 +58,20 @@ class dirsearch(HttpFuzzer):
 	proxy_http = True
 	profile = 'io'
 
-	def yielder(self):
-		prev = self.print_item_count
-		self.print_item_count = False
-		list(super().yielder())
-		if self.return_code != 0:
-			return
-		self.results = []
-		if not self.output_json:
-			return
-		note = f'dirsearch JSON results saved to {self.output_path}'
-		if self.print_line:
-			self._print(note)
-		if os.path.exists(self.output_path):
-			with open(self.output_path, 'r') as f:
-				results = yaml.safe_load(f.read()).get('results', [])
-			for item in results:
-				item = self._process_item(item)
-				if not item:
-					continue
-				yield item
-		self.print_item_count = prev
-
 	@staticmethod
 	def on_init(self):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.cmd += f' -o {self.output_path}'
+
+	@staticmethod
+	def on_cmd_done(self):
+		if not os.path.exists(self.output_path):
+			yield Error(message=f'Could not find JSON results in {self.output_path}')
+			return
+
+		yield Info(message=f'JSON results saved to {self.output_path}')
+		with open(self.output_path, 'r') as f:
+			results = yaml.safe_load(f.read()).get('results', [])
+		yield from results

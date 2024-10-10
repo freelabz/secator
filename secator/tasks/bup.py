@@ -3,12 +3,13 @@ import re
 
 from secator.decorators import task
 from secator.output_types import Url, Progress
-from secator.tasks._categories import Http
 from secator.definitions import (
 	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT,
 	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS,
 	MATCH_CODES, OPT_NOT_SUPPORTED, URL
 )
+from secator.serializers import JSONSerializer
+from secator.tasks._categories import Http
 
 
 @task()
@@ -41,10 +42,10 @@ class bup(Http):
 		FILTER_CODES: OPT_NOT_SUPPORTED,
 		FILTER_SIZE: OPT_NOT_SUPPORTED,
 		FILTER_WORDS: OPT_NOT_SUPPORTED,
-		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
 		MATCH_CODES: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 	}
+	item_loaders = [JSONSerializer()]
 	output_types = [Url, Progress]
 	output_map = {
 		Url: {
@@ -73,6 +74,8 @@ class bup(Http):
 			progress_indicator = line.split(':')[-1]
 			current, total = tuple([int(c.strip()) for c in progress_indicator.split('/')])
 			return json.dumps({"duration": "unknown", "percent": int((current / total) * 100)})
+		elif 'batcat' in line:  # ignore batcat lines as they're loaded as JSON
+			return None
 		return line
 
 	@staticmethod
