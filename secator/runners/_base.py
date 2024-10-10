@@ -331,7 +331,7 @@ class Runner:
 			'last_updated': self.last_updated,
 			'elapsed': self.elapsed.total_seconds(),
 			'elapsed_human': self.elapsed_human,
-			'errors': self.errors,
+			'errors': [e.toDict() for e in self.errors],
 			'context': self.context
 		}
 
