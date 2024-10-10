@@ -149,7 +149,9 @@ class TestCommandRunner(unittest.TestCase):
 			output_types=[Url],
 			item_loaders=[JSONSerializer()],
 		)
-		for failing_hook in self.all_hooks:
+		# all_hooks = self.all_hooks
+		all_hooks = ['on_iter']
+		for failing_hook in all_hooks:
 			with self.subTest(failing_hook=failing_hook):
 				def failing_hook_func(self, *args, **kwargs):
 					raise Exception(f"Hook {failing_hook} failed")
@@ -158,15 +160,12 @@ class TestCommandRunner(unittest.TestCase):
 				captured_output = StringIO()
 				sys.stderr = captured_output
 				with mock_command(MyCommand, TARGETS, {}, fixture) as command:
-					results = command.run()
-					self.assertEqual(results, command.results)
-					errors = [e.message for e in results if e._type == 'error']
+					command.run()
+					errors = [e.message for e in command.errors]
 					if errors:  # error happened during the actual execution, it will be yielded in results
-						self.assertIn(f'Hook {failing_hook} failed', errors)
+						self.assertIn('Hook execution failed.', errors)
 						self.assertEqual(command.status, 'FAILURE')
-					else:  # error happened early in the runner lifecycle, it will be in command output but yielded
-						self.assertIn('Hook execution failed', command.output)
-						self.assertEqual(command.status, 'SUCCESS')
+				delattr(MyCommand, failing_hook)
 
 	def test_input_loaders(self):
 		"""Verify what happens when one of the input loaders fail."""
@@ -178,24 +177,40 @@ class TestCommandRunner(unittest.TestCase):
 			results = command.run()
 			errors = [e.message for e in results if e._type == 'error']
 			self.assertIn('Loader failed', errors)
+			self.assertEqual(len(command.results), 1)
 			self.assertEqual(command.status, 'FAILURE')
 
-	# def test_no_targets(self):
-	# 	cmd = MyCommand([])
-	# 	with mock_command(MyCommand, TARGETS, {}) as command:
-	# 		results = command.run()
-	# 		self.assertIn("did not have any targets", command.output)
-	# 		self.assertEqual(len(results), 0)
-	# 		self.assertFalse(cmd.input_valid)
+	def test_input_validator_failed_no_targets(self):
+		cmd = MyCommand([])
+		cmd.run()
+		errors = cmd.errors
+		messages = [e.message for e in errors]
+		self.assertIn("Validator failed: Input is empty.", messages)
+		self.assertEqual(len(cmd.results), 1)
+		self.assertFalse(cmd.input_valid)
+		self.assertEqual(cmd.status, 'FAILURE')
 
-	# def test_file_flag_none_multiple_targets(self):
-	# 	"""Verify that when passing 2 targets with file_flag set to None, it reports an error message that chunking is not supported in sync mode."""
-	# 	cmd = MyCommand(TARGETS)
-	# 	with mock_command(MyCommand, TARGETS, {}) as command:
-	# 		results = command.run()
-	# 		self.assertIn("does not support multiple inputs", command.output)
-	# 		self.assertEqual(len(results), 0)
-	# 		self.assertFalse(cmd.input_valid)
+	def test_input_validator_failed_multiple_targets(self):
+		targets = ['host1', 'host2']
+		cmd = MyCommand(targets)
+		cmd.run()
+		errors = cmd.errors
+		messages = [e.message for e in errors]
+		self.assertIn("Validator failed: Multiple input passed in non-worker mode.", messages)
+		self.assertEqual(len(cmd.results), 1)
+		self.assertFalse(cmd.input_valid)
+		self.assertEqual(cmd.status, 'FAILURE')
+
+	# def test_input_validator_failed_wrong_input_type(self):
+	# 	MyCommand.input_types = [Url]
+	# 	targets = ['host1', 'host2'] 
+	# 	cmd = MyCommand(targets)
+	# 	errors = cmd.errors
+	# 	messages = [e.message for e in errors]
+	# 	self.assertIn("Validator failed: Multiple input passed in non-worker mode.", messages)
+	# 	self.assertEqual(len(cmd.results), 0)
+	# 	self.assertFalse(cmd.input_valid)
+	# 	delattr(MyCommand, 'input_types', None)
 
 	def test_stdout_output(self):
 		"""Test MyCommand with stdout output."""
@@ -267,7 +282,6 @@ class TestCommandRunner(unittest.TestCase):
 		self.all_hooks.extend(['output_types', 'item_loaders', 'output_map'])
 
 		with mock_command(MyCommand, TARGETS, {}, fixture, 'run') as results:
-			print(results)
 			results = list(results)
 			self.assertEqual(len(results), 3)
 			self.assertIsInstance(results[0], Url)

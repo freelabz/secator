@@ -67,6 +67,9 @@ class Command(Runner):
 	# Input chunk size (default None)
 	input_chunk_size = CONFIG.runners.input_chunk_size
 
+	# Input required
+	input_required = True
+
 	# Flag to take a file as input
 	file_flag = None
 
@@ -98,9 +101,6 @@ class Command(Runner):
 	# Return code
 	return_code = -1
 
-	# Error
-	error = ''
-
 	# Output
 	output = ''
 
@@ -122,6 +122,7 @@ class Command(Runner):
 
 		# Run parent init
 		hooks = run_opts.pop('hooks', {})
+		validators = {'validate_input': [self._validate_input_nonempty, self._validate_chunked_input]}
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
 		super().__init__(
@@ -130,7 +131,10 @@ class Command(Runner):
 			results=results,
 			run_opts=run_opts,
 			hooks=hooks,
+			validators=validators,
 			context=context)
+		if not self.input_valid:
+			return
 
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
@@ -282,7 +286,7 @@ class Command(Runner):
 		kwargs['print_item'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = not kwargs.get('quiet', False)
 		delay_run = kwargs.pop('delay_run', False)
-		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
+		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
 		if not delay_run:
@@ -432,10 +436,9 @@ class Command(Runner):
 
 				# Run item_loader to try parsing as dict
 				item_count = 0
-				if self.output_json:
-					for item in self.run_item_loaders(line):
-						yield item
-						item_count += 1
+				for item in self.run_item_loaders(line):
+					yield item
+					item_count += 1
 
 				# Yield line if no items were yielded
 				if item_count == 0:
@@ -609,6 +612,26 @@ class Command(Runner):
 		return opts_str.strip()
 
 	@staticmethod
+	def _validate_chunked_input(self, input):
+		"""Multiple input passed in non-worker mode."""
+		if len(input) > 1 and self.sync and self.file_flag is None:
+			return False
+		return True
+
+	@staticmethod
+	def _validate_input_nonempty(self, input):
+		"""Input is empty."""
+		if not self.input_required:
+			return True
+		if not self.input or len(self.input) == 0:
+			return False
+		return True
+
+	# @staticmethod
+	# def _validate_input_types_valid(self, input):
+	# 	pass
+
+	@staticmethod
 	def _get_opt_default(opt_name, opts_conf):
 		for k, v in opts_conf.items():
 			if k == opt_name:
@@ -634,7 +657,7 @@ class Command(Runner):
 		"""Build command string."""
 
 		# Add JSON flag to cmd
-		if self.output_json and self.json_flag:
+		if self.json_flag:
 			self.cmd += f' {self.json_flag}'
 
 		# Add options to cmd
@@ -687,19 +710,13 @@ class Command(Runner):
 				cmd = f'cat {fpath} | {cmd}'
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
-			elif self.sync:
-				self._print(
-					f'{self.__class__.__name__} does not support multiple inputs. '
-					'You can use worker mode to enable task chunking.',
-					color='bold red')
-				self.input_valid = False
 
 			self.input_path = fpath
 
 		# If input is a string but the tool does not support an input flag, use echo-piped input.
 		# If the tool's input flag is set to None, assume it is a positional argument at the end of the command.
 		# Otherwise use the input flag to pass the input.
-		else:
+		elif input:
 			input = shlex.quote(input)
 			if self.input_flag == OPT_PIPE_INPUT:
 				cmd = f'echo {input} | {cmd}'
@@ -710,4 +727,3 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
-		self.input = input

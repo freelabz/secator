@@ -165,7 +165,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls.print_item_count, False)
 		self.assertEqual(cls.print_cmd, False)
 		self.assertEqual(cls.print_cmd_prefix, False)
-		self.assertEqual(cls.output_json, True)
 
 	def test_httpx_build_cmd_with_opts(self):
 		if httpx not in TEST_TASKS:
@@ -190,7 +189,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls.print_item_count, False)
 		self.assertEqual(cls.print_cmd, False)
 		self.assertEqual(cls.print_cmd_prefix, False)
-		self.assertEqual(cls.output_json, True)
 
 	def test_httpx_build_cmd_with_opts_with_prefix(self):
 		if httpx not in TEST_TASKS:
@@ -217,7 +215,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls.print_item_count, False)
 		self.assertEqual(cls.print_cmd, False)
 		self.assertEqual(cls.print_cmd_prefix, False)
-		self.assertEqual(cls.output_json, True)
 
 
 class TestCommandRun(unittest.TestCase, CommandOutputTester):

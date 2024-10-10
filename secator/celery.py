@@ -290,10 +290,6 @@ def run_command(self, results, name, targets, opts={}):
 
 		# otherwise, run normally
 		else:
-			# If list with 1 element
-			if isinstance(targets, list) and len(targets) == 1:
-				targets = targets[0]
-
 			# Run task
 			task = task_cls(targets, **opts)
 			for item in task:

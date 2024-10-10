@@ -21,7 +21,6 @@ class msfconsole(VulnMulti):
 	input_type = HOST
 	input_chunk_size = 1
 	output_types = []
-	output_return_type = str
 	opt_prefix = '--'
 	opts = {
 		'resource': {'type': str, 'help': 'Metasploit resource script.', 'short': 'r'},
@@ -46,13 +45,6 @@ class msfconsole(VulnMulti):
 	# install_cmd = 'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/msfinstall.sh | sh'
 
 	@staticmethod
-	def validate_input(self, input):
-		"""No list input supported for this command. Pass a single input instead."""
-		if isinstance(input, list):
-			return False
-		return True
-
-	@staticmethod
 	def on_init(self):
 		command = self.get_opt_value('execute_command')
 		script_path = self.get_opt_value('resource')
@@ -60,14 +52,14 @@ class msfconsole(VulnMulti):
 		env_vars = {}
 		if environment:
 			env_vars = dict(map(lambda x: x.split('='), environment.strip().split(',')))
-		env_vars['RHOST'] = self.input
-		env_vars['RHOSTS'] = self.input
+		env_vars['RHOST'] = self.input[0]
+		env_vars['RHOSTS'] = self.input[0]
 
 		# Passing msfconsole command directly, simply add RHOST / RHOSTS from host input and run then exit
 		if command:
 			self.run_opts['msfconsole.execute_command'] = (
-				f'setg RHOST {self.input}; '
-				f'setg RHOSTS {self.input}; '
+				f'setg RHOST {self.input[0]}; '
+				f'setg RHOSTS {self.input[0]}; '
 				f'{command.format(**env_vars)}; '
 				f'exit;'
 			)
@@ -99,9 +91,6 @@ class msfconsole(VulnMulti):
 		# Nothing passed, error out
 		else:
 			raise ValueError('At least one of "inline_script" or "resource_script" must be passed.')
-
-		# Clear host input
-		self.input = ''
 
 
 # TODO: This is better as it goes through an RPC API to communicate with

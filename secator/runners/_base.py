@@ -33,8 +33,8 @@ HOOKS = [
 ]
 
 VALIDATORS = [
-	'input',
-	'item'
+	'validate_input',
+	'validate_item'
 ]
 
 
@@ -61,9 +61,6 @@ class Runner:
 	# Output types
 	output_types = []
 
-	# Dict return
-	output_return_type = dict  # TODO: deprecate this
-
 	# Default exporters
 	default_exporters = []
 
@@ -73,7 +70,7 @@ class Runner:
 	# Reports folder
 	reports_folder = None
 
-	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
+	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, validators={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
@@ -81,7 +78,6 @@ class Runner:
 			targets = [targets]
 		self.targets = targets
 		self.results = results
-		self.results_count = 0
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
@@ -91,8 +87,6 @@ class Runner:
 		self.last_updated_progress = None
 		self.end_time = None
 		self._hooks = hooks
-		self.errors = []
-		self.infos = []
 		self.output = ''
 		self.status = 'RUNNING'
 		self.progress = 0
@@ -118,17 +112,10 @@ class Runner:
 
 		# Process input
 		self.input = targets
-		if isinstance(self.input, list) and len(self.input) == 1:
-			self.input = self.input[0]
-
-		# Yield dicts if CLI supports JSON
-		if self.output_return_type is dict or (self.json_flag is not None):
-			self.output_return_type = dict
 
 		# Output options
 		self.output_fmt = self.run_opts.get('format', False)
 		self.output_quiet = self.run_opts.get('quiet', False)
-		self.output_json = self.output_return_type == dict
 
 		# Print options
 		self.print_start = self.run_opts.pop('print_start', False)
@@ -152,32 +139,11 @@ class Runner:
 		# Hooks
 		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
-		for key in self.hooks:
-
-			# Register class + derived class hooks
-			class_hook = getattr(self, key, None)
-			if class_hook:
-				name = f'{self.__class__.__name__}.{key}'
-				fun = self.get_func_path(class_hook)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks', level=3)
-				self.hooks[key].append(class_hook)
-
-			# Register user hooks
-			user_hooks = hooks.get(self.__class__, {}).get(key, [])
-			user_hooks.extend(hooks.get(key, []))
-			for hook in user_hooks:
-				name = f'{self.__class__.__name__}.{key}'
-				fun = self.get_func_path(hook)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks', level=3)
-			self.hooks[key].extend(user_hooks)
+		self.register_hooks(hooks)
 
 		# Validators
-		self.validators = {name: [] for name in VALIDATORS}
-		for key in self.validators:
-			instance_func = getattr(self, f'validate_{key}', None)
-			if instance_func:
-				self.validators[key].append(instance_func)
-			self.validators[key].extend(self.validators.get(self.__class__, {}).get(key, []))
+		self.validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
+		self.register_validators(validators)
 
 		# Chunks
 		self.parent = self.run_opts.get('parent', True)
@@ -191,10 +157,8 @@ class Runner:
 		# Input post-process
 		self.run_hooks('before_init')
 
-		# Abort if inputs are invalid
-		self.input_valid = True
-		if not self.run_validators('input', self.input):
-			self.input_valid = False
+		# Check if input is valid
+		self.input_valid = self.run_validators('validate_input', self.input)
 
 		# Run hooks
 		self.run_hooks('on_init')
@@ -209,17 +173,38 @@ class Runner:
 	def elapsed_human(self):
 		return humanize.naturaldelta(self.elapsed)
 
+	@property
+	def infos(self):
+		return [e for e in self.results if e._type == 'info']
+
+	@property
+	def warnings(self):
+		return [e for e in self.results if e._type == 'warning']
+
+	@property
+	def errors(self):
+		return [e for e in self.results if e._type == 'error']
+
+	@property
+	def results_count(self):
+		return len(self.results)
+
 	def run(self):
 		return list(self.__iter__())
 
 	def __iter__(self):
-		if self.print_start:
-			self.log_start()
-
-		if not self.input_valid:
-			return
-
 		try:
+			if self.print_start:
+				self.log_start()
+
+			# If any errors happened during validation, exit
+			if self.errors:
+				for error in self.errors:
+					yield error
+				self.log_results()
+				self.run_hooks('on_end')
+				return
+
 			for item in self.yielder():
 				if isinstance(item, (OutputType, DotMap, dict)):
 					item = self._process_item(item)
@@ -237,11 +222,10 @@ class Runner:
 					if item._type == 'info' and item.task_id and item.task_id not in self.celery_ids:
 						self.celery_ids.append(item.task_id)
 					self.results.append(item)
-					self.results_count += 1
 					self.uuids.append(item._uuid)
 					yield item
 
-				self._print_item(item)
+				self._print_item(item) if item else ''
 				self.run_hooks('on_iter')
 
 		except KeyboardInterrupt:
@@ -258,7 +242,6 @@ class Runner:
 				_uuid=str(uuid.uuid4())
 			)
 			self.results.append(error)
-			self.results_count += 1
 			self.uuids.append(error._uuid)
 			self._print_item(error)
 			yield error
@@ -356,21 +339,23 @@ class Runner:
 		result = args[0] if len(args) > 0 else None
 		if not self.enable_hooks:
 			return result
+		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 		for hook in self.hooks[hook_type]:
 			name = f'{self.__class__.__name__}.{hook_type}'
 			fun = self.get_func_path(hook)
 			try:
-				_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
 				result = hook(self, *args)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'ended'}, id=_id, sub='hooks', level=3)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='hooks', level=3)
 			except Exception as exc:
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='hooks', level=3)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failure'}, id=_id, sub='hooks', level=3)
 				error = Error(
 					message='Hook execution failed.',
 					traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__)),
-					_source=fun
+					_source=fun,
+					_uuid=str(uuid.uuid4())
 				)
+				self.results.append(error)
 				self._print_item(error)
 				if self.raise_on_error or not self.sync:
 					raise exc
@@ -378,13 +363,64 @@ class Runner:
 
 	def run_validators(self, validator_type, *args):
 		# logger.debug(f'Running validators of type {validator_type}')
+		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 		for validator in self.validators[validator_type]:
-			# logger.debug(validator)
+			name = f'{self.__class__.__name__}.{validator_type}'
+			fun = self.get_func_path(validator)
+			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='validators', level=3)
 			if not validator(self, *args):
-				if validator_type == 'input':
-					self._print(f'{validator.__doc__}', color='bold red', rich=True)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators', level=3)
+				doc = validator.__doc__
+				message = 'Validator failed'
+				if doc:
+					message += f': {doc}'
+				error = Error(
+					message=message,
+					_source=self.config.name,
+					_uuid=str(uuid.uuid4())
+				)
+				self.results.append(error)
+				self._print_item(error)
 				return False
+			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators', level=3)
 		return True
+
+	def register_hooks(self, hooks):
+		for key in self.hooks:
+			# Register class + derived class hooks
+			class_hook = getattr(self, key, None)
+			if class_hook:
+				name = f'{self.__class__.__name__}.{key}'
+				fun = self.get_func_path(class_hook)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks', level=3)
+				self.hooks[key].append(class_hook)
+
+			# Register user hooks
+			user_hooks = hooks.get(self.__class__, {}).get(key, [])
+			user_hooks.extend(hooks.get(key, []))
+			for hook in user_hooks:
+				name = f'{self.__class__.__name__}.{key}'
+				fun = self.get_func_path(hook)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks', level=3)
+			self.hooks[key].extend(user_hooks)
+
+	def register_validators(self, validators):
+		# Register class + derived class hooks
+		for key in self.validators:
+			class_validator = getattr(self, key, None)
+			if class_validator:
+				name = f'{self.__class__.__name__}.{key}'
+				fun = self.get_func_path(class_validator)
+				self.validators[key].append(class_validator)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='validators', level=3)
+
+			# Register user hooks
+			user_validators = validators.get(key, [])
+			for validator in user_validators:
+				name = f'{self.__class__.__name__}.{key}'
+				fun = self.get_func_path(validator)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators', level=3)
+			self.validators[key].extend(user_validators)
 
 	@staticmethod
 	def resolve_exporters(exporters):
@@ -467,11 +503,9 @@ class Runner:
 		"""
 		self.done = True
 		self.progress = 100
-		self.results_count = len(self.results)
 		self.end_time = datetime.fromtimestamp(time())
 
 		# Log runner infos
-		self.infos = [c for c in self.results if c._type == 'info']
 		if self.infos and not self.sync:
 			self._print(
 				f':heavy_check_mark: [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
@@ -480,7 +514,6 @@ class Runner:
 				self._print(f'   • \[{info._source}] {info.message}', color='bold green', rich=True)
 
 		# Log runner warnings
-		self.warnings = [c for c in self.results if c._type == 'warning']
 		if self.warnings and not self.sync:
 			self._print(
 				f':exclamation: [bold magenta]{self.config.name}[/] warnings ({len(self.warnings)}):',
@@ -489,7 +522,6 @@ class Runner:
 				self._print(f'   • \[{warning._source}] {warning.message}', color='bold orange3', rich=True)
 
 		# Log runner errors
-		self.errors = [c for c in self.results if c._type == 'error']
 		if self.errors and self.print_errors and not self.sync:
 			self._print(
 				f':cross_mark: [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
@@ -674,7 +706,7 @@ class Runner:
 
 	def _process_item(self, item: dict):
 		# Run item validators
-		if not self.run_validators('item', item):
+		if not self.run_validators('validate_item', item):
 			return None
 
 		# Convert output dict to another schema
@@ -686,13 +718,6 @@ class Runner:
 				item = self._convert_item_schema(item)
 			else:
 				item = DotMap(item)
-
-		if isinstance(item, dict) and not self.orig:
-			item = self._convert_item_schema(item)
-		elif isinstance(item, OutputType):
-			pass
-		else:
-			item = DotMap(item)
 
 		# Update item context
 		item._context.update(self.context)
