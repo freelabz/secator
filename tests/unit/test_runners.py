@@ -23,13 +23,13 @@ FIXTURE = ['test_fixture']
 class TestCommandRunner(unittest.TestCase):
 
 	def setUp(self):
-		self.print_original_output_types = MyCommand.output_types
-		self.print_original_item_loaders = MyCommand.item_loaders
-		self.all_hooks = list(set(Command.hooks + HOOKS))  # Remove 'on_json_loaded' from here
+		self.original_output_types = MyCommand.output_types
+		self.original_item_loaders = MyCommand.item_loaders
+		self.all_hooks = list(set(Command.hooks + HOOKS))
 
 	def tearDown(self):
-		MyCommand.output_types = self.print_original_output_types
-		MyCommand.item_loaders = self.print_original_item_loaders
+		MyCommand.output_types = self.original_output_types
+		MyCommand.item_loaders = self.original_item_loaders
 		self.cleanup_hooks()
 
 	def mock_hooks(self, output_types=[], item_loaders=[]):
