@@ -37,20 +37,6 @@ class Task(Runner):
 		if dry_run:
 			self.print_item_count = False
 
-		# Fmt opts
-		fmt_opts = {
-			'json': run_opts.get('json', False),
-			'print_cmd': True,
-			'print_cmd_prefix': not self.sync,
-			'print_input_file': DEBUG > 0,
-			'print_item': True,
-			'print_item_count': not self.sync and not dry_run,
-			# 'print_line': True
-			'print_line': self.sync and not self.output_quiet,
-		}
-		# self.print_item = not self.sync  # enable print_item for base Task only if running remote
-		run_opts.update(fmt_opts)
-
 		# Set task output types
 		self.output_types = task_cls.output_types
 
@@ -70,7 +56,7 @@ class Task(Runner):
 				self.celery_result,
 				description=True,
 				results_only=True,
-				print_remote_status=self.print_remote_status,
+				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
 
 		# Yield task results

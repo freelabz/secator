@@ -70,7 +70,7 @@ class Runner:
 	# Reports folder
 	reports_folder = None
 
-	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, validators={}, context={}):
+	def __init__(self, config, targets=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
@@ -118,26 +118,20 @@ class Runner:
 		self.output_quiet = self.run_opts.get('quiet', False)
 
 		# Print options
-		self.print_start = self.run_opts.pop('print_start', False)
-		self.print_item = self.run_opts.pop('print_item', False)
-		self.print_line = self.run_opts.pop('print_line', False)
-		self.print_errors = self.run_opts.pop('print_errors', True)
-		self.print_item_count = self.run_opts.pop('print_item_count', False)
-		self.print_cmd = self.run_opts.pop('print_cmd', False)
-		self.print_run_opts = self.run_opts.pop('print_run_opts', DEBUG > 1)
-		self.print_fmt_opts = self.run_opts.pop('print_fmt_opts', DEBUG > 1)
-		self.print_input_file = self.run_opts.pop('print_input_file', False)
-		self.print_hooks = self.run_opts.pop('print_hooks', DEBUG > 1)
-		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
-		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
-		self.print_run_summary = self.run_opts.pop('print_run_summary', False)
+		self.print_start = self.run_opts.get('print_start', False)
+		self.print_run_summary = self.run_opts.get('print_run_summary', False)
+		self.print_item = self.run_opts.get('print_item', False)
+		self.print_line = self.run_opts.get('print_line', False)
+		self.print_item_count = self.run_opts.get('print_item_count', False)
+		self.print_cmd = self.run_opts.get('print_cmd', False)
+		self.print_remote_info = self.run_opts.get('print_remote_info', False)
 		self.print_json = self.run_opts.get('json', False)
 		self.print_raw = self.run_opts.get('raw', False)
 		self.orig = self.run_opts.get('orig', False)
 		self.opts_to_print = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
+		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
 
 		# Hooks
-		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.register_hooks(hooks)
 
@@ -152,7 +146,6 @@ class Runner:
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
-		self._set_print_prefix()
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -199,8 +192,7 @@ class Runner:
 
 			# If any errors happened during validation, exit
 			if self.errors:
-				for error in self.errors:
-					yield error
+				yield from self.errors
 				self.log_results()
 				self.run_hooks('on_end')
 				return
@@ -262,7 +254,7 @@ class Runner:
 					self._print(str(item), out=sys.stdout)
 				else:
 					item_repr = item_str
-					if self.print_remote_status or DEBUG > 1:
+					if isinstance(item, OutputType) and self.print_remote_info or DEBUG > 1:
 						item_repr += rich_to_ansi(f' \[[dim]{item._source}[/]]')
 					self._print(item_repr, out=sys.stdout)
 		elif isinstance(item, str):
@@ -357,7 +349,7 @@ class Runner:
 				)
 				self.results.append(error)
 				self._print_item(error)
-				if self.raise_on_error or not self.sync:
+				if self.raise_on_error:
 					raise exc
 		return result
 
@@ -443,7 +435,7 @@ class Runner:
 		self.log_header()
 		self._print(
 			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True)
-		if not self.sync and self.print_remote_status and self.__class__.__name__ != 'Scan':
+		if not self.sync and self.print_remote_info and self.__class__.__name__ != 'Scan':
 			self._print('\n🏆 [bold gold3]Live results:[/]', rich=True)
 
 	def log_header(self):
@@ -522,7 +514,7 @@ class Runner:
 				self._print(f'   • \[{warning._source}] {warning.message}', color='bold orange3', rich=True)
 
 		# Log runner errors
-		if self.errors and self.print_errors and not self.sync:
+		if self.errors and not self.sync:
 			self._print(
 				f':cross_mark: [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)
@@ -539,14 +531,14 @@ class Runner:
 				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
 
 		# Build and send report
-		if self.results and self.exporters:
+		if self.exporters:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()
 			self.report = report
 
 		# Log results count
-		if self.print_item_count and not self.print_raw and not self.orig:
+		if self.print_item_count:
 			count_map = self._get_results_count()
 			if all(count == 0 for count in count_map.values()):
 				self._print(':exclamation_mark:Found 0 results.', color='bold red', rich=True)
@@ -664,7 +656,6 @@ class Runner:
 			if getattr(data, 'toDict', None):
 				data = data.toDict()
 			data = json.dumps(data)
-			data = f'{self.prefix:>15} {data}' if self.prefix and not self.print_item else data
 
 		if self.sync or rich:
 			_console = console_stdout if out == sys.stdout else console
@@ -686,13 +677,6 @@ class Runner:
 		# # Print a line raw
 		# else:
 		# 	print(data, file=out)
-
-	def _set_print_prefix(self):
-		self.prefix = ''
-		if self.print_cmd_prefix:
-			self.prefix = f'[bold gold3]({self.config.name})[/]'
-		if self.chunk and self.chunk_count:
-			self.prefix += f' [{self.chunk}/{self.chunk_count}]'
 
 	def _get_results_count(self):
 		count_map = {}
@@ -751,10 +735,13 @@ class Runner:
 				self.get_repr(item)
 				for item in self.results
 			]
-		if self.output_fmt:
-			item = self.output_fmt.format(**item.toDict())
-		elif isinstance(item, OutputType):
-			item = repr(item)
+		if isinstance(item, OutputType):
+			if self.output_fmt:
+				item = self.output_fmt.format(**item.toDict())
+			else:
+				item = repr(item)
+		elif isinstance(item, DotMap):
+			item = json.dumps(item.toDict())
 		return item
 
 	@classmethod

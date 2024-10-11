@@ -19,7 +19,7 @@ class CeleryData(object):
 			description=True,
 			results_only=True,
 			refresh_interval=1,
-			print_remote_status=True,
+			print_remote_info=True,
 			print_remote_title='Results'
 		):
 		"""Generator to get results from Celery task.
@@ -27,14 +27,14 @@ class CeleryData(object):
 		Args:
 			description (bool): Whether to show task description.
 			results_only (bool): Yield only results, no task state.
-			print_remote_status (bool): Whether to display live results.
+			print_remote_info (bool): Whether to display live results.
 			print_remote_title (str): Title for the progress panel.
 
 		Yields:
 			dict: Subtasks state and results.
 		"""
-		# Display live results if print_remote_status is set
-		if print_remote_status:
+		# Display live results if print_remote_info is set
+		if print_remote_info:
 			class PanelProgress(RichProgress):
 				def get_renderables(self):
 					yield Padding(Panel(
@@ -81,7 +81,7 @@ class CeleryData(object):
 				else:
 					yield data
 
-				if not print_remote_status:
+				if not print_remote_info:
 					continue
 
 				# Handle messages if any

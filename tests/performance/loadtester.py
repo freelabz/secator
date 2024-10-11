@@ -34,7 +34,7 @@ def create_runner(index):
 		'sync': False,
 		# 'print_start': True,
 		'print_item': True,
-		# 'print_remote_status': True,
+		# 'print_remote_info': True,
 		# 'print_run_summary': True,
 		'json': False
 	}

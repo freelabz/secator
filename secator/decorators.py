@@ -189,62 +189,70 @@ def task():
 	return decorator
 
 
+def generate_cli_subcommand(cli_endpoint, func, **opts):
+	return cli_endpoint.command(**opts)(func)
+
+
 def register_runner(cli_endpoint, config):
-	fmt_opts = {
-		'print_cmd': True,
-	}
-	short_help = ''
-	input_type = 'targets'
+	name = config.name
 	input_required = True
-	runner_cls = None
-	tasks = []
-	no_args_is_help = True
+	input_type = 'targets'
+	command_opts = {
+		'no_args_is_help': True,
+		'context_settings': {
+			'ignore_unknown_options': False,
+			'allow_extra_args': False
+		}
+	}
 
 	if cli_endpoint.name == 'scan':
 		# TODO: this should be refactored to scan.get_tasks_from_conf() or scan.tasks
 		from secator.cli import ALL_CONFIGS
+		runner_cls = Scan
 		tasks = [
 			get_command_cls(task)
 			for workflow in ALL_CONFIGS.workflow
 			for task in Task.get_tasks_from_conf(workflow.tasks)
 			if workflow.name in list(config.workflows.keys())
 		]
-		input_type = 'targets'
-		name = config.name
 		short_help = config.description or ''
-		if config.alias:
-			short_help += f' [dim]alias: {config.alias}'
-		fmt_opts['print_start'] = True
-		fmt_opts['print_run_summary'] = True
-		runner_cls = Scan
+		short_help += f' [dim]alias: {config.alias}' if config.alias else ''
+		command_opts.update({
+			'name': name,
+			'short_help': short_help
+		})
 
 	elif cli_endpoint.name == 'workflow':
 		# TODO: this should be refactored to workflow.get_tasks_from_conf() or workflow.tasks
+		runner_cls = Workflow
 		tasks = [
 			get_command_cls(task) for task in Task.get_tasks_from_conf(config.tasks)
 		]
-		input_type = 'targets'
-		name = config.name
 		short_help = config.description or ''
-		if config.alias:
-			short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}'
-		fmt_opts['print_start'] = True
-		fmt_opts['print_run_summary'] = True
-		runner_cls = Workflow
+		short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}' if config.alias else ''
+		command_opts.update({
+			'name': name,
+			'short_help': short_help
+		})
 
 	elif cli_endpoint.name == 'task':
+		runner_cls = Task
+		input_required = False  # allow targets from stdin
 		tasks = [
 			get_command_cls(config.name)
 		]
 		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
 		input_type = task_cls.input_type or 'targets'
-		name = config.name
 		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
-		fmt_opts['print_item_count'] = True
-		runner_cls = Task
-		no_args_is_help = False
-		input_required = False
+		command_opts.update({
+			'name': name,
+			'short_help': short_help,
+			'no_args_is_help': False
+		})
+
+	else:
+		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 
 	options = get_command_options(*tasks)
 
@@ -261,9 +269,7 @@ def register_runner(cli_endpoint, config):
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, **opts):
-		opts.update(fmt_opts)
 		sync = opts['sync']
-		# debug = opts['debug']
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
 		show = opts['show']
@@ -298,9 +304,10 @@ def register_runner(cli_endpoint, config):
 						sys.exit(1)
 		opts['sync'] = sync
 		opts.update({
-			'print_item': not sync,
-			'print_line': sync,
-			'print_remote_status': not sync,
+			'print_cmd': True,
+			'print_item': True,
+			'print_line': True,
+			'print_remote_info': not sync,
 			'print_start': not sync
 		})
 
@@ -317,13 +324,7 @@ def register_runner(cli_endpoint, config):
 		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 
-	settings = {'ignore_unknown_options': False, 'allow_extra_args': False}
-	cli_endpoint.command(
-		name=config.name,
-		context_settings=settings,
-		no_args_is_help=no_args_is_help,
-		short_help=short_help)(func)
-
+	generate_cli_subcommand(cli_endpoint, func, **command_opts)
 	generate_rich_click_opt_groups(cli_endpoint, name, input_type, options)
 
 

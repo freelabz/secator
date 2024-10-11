@@ -34,7 +34,6 @@ class Workflow(Runner):
 		task_fmt_opts = {
 			'json': task_run_opts.get('json', False),
 			'print_cmd': True,
-			'print_cmd_prefix': not self.sync,
 			'print_description': self.sync,
 			'print_input_file': DEBUG > 0,
 			'print_item': True,
@@ -59,7 +58,7 @@ class Workflow(Runner):
 				self.celery_result,
 				description=True,
 				results_only=True,
-				print_remote_status=self.print_remote_status,
+				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
 			)
 
