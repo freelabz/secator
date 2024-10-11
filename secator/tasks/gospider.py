@@ -64,6 +64,8 @@ class gospider(HttpCrawler):
 	@staticmethod
 	def validate_item(self, item):
 		"""Keep only items that match the same host."""
+		if not isinstance(item, dict):
+			return False
 		try:
 			netloc_in = furl(item['input']).netloc
 			netloc_out = furl(item['output']).netloc

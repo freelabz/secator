@@ -3,7 +3,6 @@ from rich.panel import Panel
 from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from contextlib import nullcontext
-from secator.output_types import Progress
 from secator.utils import debug
 from secator.rich import console
 import kombu
@@ -43,7 +42,8 @@ class CeleryData(object):
 						border_style='bold gold3',
 						expand=False,
 						highlight=True), pad=(2, 0, 0, 0))
-
+			from rich.console import Console
+			console = Console()
 			tasks_progress = PanelProgress(
 				SpinnerColumn('dots'),
 				TextColumn('{task.fields[descr]}  ') if description else '',
@@ -52,11 +52,11 @@ class CeleryData(object):
 				TextColumn('{task.fields[state]:<20}'),
 				TimeElapsedColumn(),
 				TextColumn('{task.fields[count]}'),
-				# TextColumn('{task.fields[progress]}%'),
+				TextColumn('{task.fields[progress]}'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
 				refresh_per_second=1,
 				transient=False,
-				# console=console,
+				console=console,
 				# redirect_stderr=True,
 				# redirect_stdout=False
 			)
@@ -129,7 +129,7 @@ class CeleryData(object):
 		"""
 		task_ids = []
 		CeleryData.get_task_ids(result, ids=task_ids)
-		datas = []
+		# datas = []
 		for task_id in task_ids:
 			data = CeleryData.get_task_data(task_id)
 			if not data:
@@ -142,18 +142,18 @@ class CeleryData(object):
 				level=4
 			)
 			yield data
-			datas.append(data)
+			# datas.append(data)
 
 		# Calculate and yield progress
-		if not datas:
-			return
-		total = len(datas)
-		count_finished = sum([i['ready'] for i in datas if i])
-		percent = int(count_finished * 100 / total) if total > 0 else 0
-		data = datas[-1]
-		data['progress'] = Progress(duration='unknown', percent=percent)
-		data['results'] = []
-		yield data
+		# if not datas:
+		# 	return
+		# total = len(datas)
+		# count_finished = sum([i['ready'] for i in datas if i])
+		# percent = int(count_finished * 100 / total) if total > 0 else 0
+		# data = datas[-1]
+		# data['progress'] = Progress(duration='unknown', percent=percent)
+		# data['results'] = []
+		# yield data
 
 	@staticmethod
 	def get_task_data(task_id):

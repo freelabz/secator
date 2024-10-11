@@ -14,7 +14,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error
+from secator.output_types import Error, Target
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug
@@ -166,7 +166,7 @@ class Command(Runner):
 		self.item_loaders = item_loaders
 
 		# Print built cmd
-		if self.print_cmd and not self.has_children:
+		if not self.has_children:
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
 			self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
@@ -182,7 +182,7 @@ class Command(Runner):
 
 		# Debug format options
 		fmt_opts_str = '\n '.join([
-			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.opts_to_print.items() if v is not None]).strip()
+			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.print_opts.items() if v is not None]).strip()
 		debug(f'[dim magenta]Print opts:[/]\n {fmt_opts_str}', sub='runner.init')
 
 		# Debug hooks
@@ -278,7 +278,6 @@ class Command(Runner):
 		"""
 		name = name or cmd.split(' ')[0]
 		kwargs['no_process'] = kwargs.get('no_process', True)
-		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_item'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = not kwargs.get('quiet', False)
 		delay_run = kwargs.pop('delay_run', False)
@@ -348,6 +347,10 @@ class Command(Runner):
 
 		# Callback before running command
 		self.run_hooks('on_start')
+
+		# Yield targets
+		for target in self.input:
+			yield Target(name=target, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 		# Check for sudo requirements and prepare the password if needed
 		sudo_password, error = self._prompt_sudo(self.cmd)

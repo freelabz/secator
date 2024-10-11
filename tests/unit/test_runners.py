@@ -5,7 +5,7 @@ import sys
 from secator.runners import Command
 from secator.runners._base import HOOKS
 from secator.utils_test import mock_command
-from secator.output_types import OutputType, Url, Vulnerability, Tag, Warning
+from secator.output_types import OutputType, Url, Vulnerability, Tag, Target
 from secator.serializers.regex import RegexSerializer
 from secator.serializers.json import JSONSerializer
 
@@ -23,13 +23,13 @@ FIXTURE = ['test_fixture']
 class TestCommandRunner(unittest.TestCase):
 
 	def setUp(self):
-		self.original_output_types = MyCommand.output_types
-		self.original_item_loaders = MyCommand.item_loaders
+		self.print_original_output_types = MyCommand.output_types
+		self.print_original_item_loaders = MyCommand.item_loaders
 		self.all_hooks = list(set(Command.hooks + HOOKS))  # Remove 'on_json_loaded' from here
 
 	def tearDown(self):
-		MyCommand.output_types = self.original_output_types
-		MyCommand.item_loaders = self.original_item_loaders
+		MyCommand.output_types = self.print_original_output_types
+		MyCommand.item_loaders = self.print_original_item_loaders
 		self.cleanup_hooks()
 
 	def mock_hooks(self, output_types=[], item_loaders=[]):
@@ -177,7 +177,7 @@ class TestCommandRunner(unittest.TestCase):
 			results = command.run()
 			errors = [e.message for e in results if e._type == 'error']
 			self.assertIn('Loader failed', errors)
-			self.assertEqual(len(command.results), 1)
+			self.assertEqual(len(command.results), 2)
 			self.assertEqual(command.status, 'FAILURE')
 
 	def test_input_validator_failed_no_targets(self):
@@ -244,15 +244,17 @@ class TestCommandRunner(unittest.TestCase):
 
 		with mock_command(MyCommand, TARGETS, {}, fixture, 'run') as results:
 			results = list(results)
-			self.assertEqual(len(results), 3)
-			self.assertIsInstance(results[0], Url)
-			self.assertIsInstance(results[1], Vulnerability)
-			self.assertIsInstance(results[2], Tag)
+			self.assertEqual(len(results), 4)
+			self.assertIsInstance(results[0], Target)
+			self.assertIsInstance(results[1], Url)
+			self.assertIsInstance(results[2], Vulnerability)
+			self.assertIsInstance(results[3], Tag)
 
 			# Check specific attributes
-			self.assertEqual(results[0].url, "http://example.com")
-			self.assertEqual(results[1].id, "CVE-2021-1234")
-			self.assertEqual(results[2].name, "AWS_KEY")
+			self.assertEqual(results[0].name, "host1")
+			self.assertEqual(results[1].url, "http://example.com")
+			self.assertEqual(results[2].id, "CVE-2021-1234")
+			self.assertEqual(results[3].name, "AWS_KEY")
 
 	def test_jsonlines_output(self):
 		"""Test MyCommand with JSON-lines output."""
@@ -283,16 +285,18 @@ class TestCommandRunner(unittest.TestCase):
 
 		with mock_command(MyCommand, TARGETS, {}, fixture, 'run') as results:
 			results = list(results)
-			self.assertEqual(len(results), 3)
-			self.assertIsInstance(results[0], Url)
-			self.assertIsInstance(results[1], Vulnerability)
-			self.assertIsInstance(results[2], Tag)
-			
+			self.assertEqual(len(results), 4)
+			self.assertIsInstance(results[0], Target)
+			self.assertIsInstance(results[1], Url)
+			self.assertIsInstance(results[2], Vulnerability)
+			self.assertIsInstance(results[3], Tag)
+
 			# Check specific attributes
-			self.assertEqual(results[0].url, "http://host1:5000/api/")
-			self.assertEqual(results[1].name, "myvuln")
-			self.assertEqual(results[2].name, "mytag")
-			self.assertEqual(results[2].extra_data['tag_type'], "AWS_API_KEY")
+			self.assertEqual(results[0].name, "host1")
+			self.assertEqual(results[1].url, "http://host1:5000/api/")
+			self.assertEqual(results[2].name, "myvuln")
+			self.assertEqual(results[3].name, "mytag")
+			self.assertEqual(results[3].extra_data['tag_type'], "AWS_API_KEY")
 
 	def test_json_file_output(self):
 		"""Test MyCommand with JSON file output."""
@@ -322,15 +326,17 @@ class TestCommandRunner(unittest.TestCase):
 		self.all_hooks.extend(['on_cmd_done'])
 
 		with mock_command(MyCommand, TARGETS, {}, json_output, 'run') as results:
-			self.assertEqual(len(results), 3)
-			self.assertIsInstance(results[0], Url)
-			self.assertIsInstance(results[1], Vulnerability)
-			self.assertIsInstance(results[2], Tag)
+			self.assertEqual(len(results), 4)
+			self.assertIsInstance(results[0], Target)
+			self.assertIsInstance(results[1], Url)
+			self.assertIsInstance(results[2], Vulnerability)
+			self.assertIsInstance(results[3], Tag)
 	
 			# Check specific attributes
-			self.assertEqual(results[0].url, "http://example.com")
-			self.assertEqual(results[1].name, "SQL Injection")
-			self.assertEqual(results[2].name, "sensitive_data")
+			self.assertEqual(results[0].name, "host1")
+			self.assertEqual(results[1].url, "http://example.com")
+			self.assertEqual(results[2].name, "SQL Injection")
+			self.assertEqual(results[3].name, "sensitive_data")
 
 		# Clean up the temporary file
 		import os

@@ -144,7 +144,7 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'gau': [
-        Url(url='http://www.danielmiessler.com/wp-content/uploads/2010/03/self_discipline.jpeg', _source='gau')
+        Url(url='https://danielmiessler.com/robots.txt', _source='gau')
     ],
     'gf': [
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
@@ -154,21 +154,17 @@ OUTPUTS_TASKS = {
     ],
     'grype': [
 		Vulnerability(
-            matched_at=ROOT_FOLDER,
-            name='GHSA-mq26-g339-26xf',
-            provider='cve.circl.lu',
-            severity='medium',
-            tags=['ghsa'],
-			id='CVE-2023-5752',
-            extra_data={
-				'lang': 'python',
-                'product': 'pip',
-                'version': '23.0.1',
-				'version_fixed': '23.3',
-                'ghsa_id': 'GHSA-mq26-g339-26xf'
-            },
-            _source='grype',
-        )
+			name='CVE-2024-24790',
+			provider='grype',
+			id='CVE-2024-24790',
+			matched_at='redis:7.4.1',
+			ip='',
+			confidence='medium',
+			severity='critical',
+			cvss_score=-1,
+			tags=[],
+			_source='grype',
+		)
     ],
     'h8mail': [
         UserAccount(

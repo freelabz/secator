@@ -205,6 +205,7 @@ def run_command(self, results, name, targets, opts={}):
 	context = opts.get('context', {})
 	context['celery_id'] = self.request.id
 	opts['context'] = context
+	opts['print_remote_info'] = False
 
 	# Debug task
 	full_name = name

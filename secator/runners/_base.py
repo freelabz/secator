@@ -113,23 +113,16 @@ class Runner:
 		# Process input
 		self.input = targets
 
-		# Output options
-		self.output_fmt = self.run_opts.get('format', False)
-		self.output_quiet = self.run_opts.get('quiet', False)
-
 		# Print options
-		self.print_start = self.run_opts.get('print_start', False)
-		self.print_run_summary = self.run_opts.get('print_run_summary', False)
+		self.quiet = self.run_opts.get('quiet', False)
 		self.print_item = self.run_opts.get('print_item', False)
-		self.print_line = self.run_opts.get('print_line', False)
-		self.print_item_count = self.run_opts.get('print_item_count', False)
-		self.print_cmd = self.run_opts.get('print_cmd', False)
+		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False)
 		self.print_json = self.run_opts.get('json', False)
 		self.print_raw = self.run_opts.get('raw', False)
-		self.orig = self.run_opts.get('orig', False)
-		self.opts_to_print = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
+		self.print_orig = self.run_opts.get('orig', False)
 		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
+		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
@@ -187,8 +180,7 @@ class Runner:
 
 	def __iter__(self):
 		try:
-			if self.print_start:
-				self.log_start()
+			self.log_start()
 
 			# If any errors happened during validation, exit
 			if self.errors:
@@ -202,7 +194,7 @@ class Runner:
 					item = self._process_item(item)
 					if not item or item._uuid in self.uuids:
 						continue
-					elif isinstance(item, DotMap) and not self.orig:
+					elif isinstance(item, DotMap) and not self.print_orig:
 						orig_item = {
 							k: v for k, v in item.toDict().items() if k not in ['_type', '_context', '_source', '_uuid']
 						}
@@ -430,16 +422,19 @@ class Runner:
 
 	def log_start(self):
 		"""Log runner start."""
+		if not self.print_remote_info:
+			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
 		runner_name = self.__class__.__name__
 		self.log_header()
 		self._print(
 			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True)
-		if not self.sync and self.print_remote_info and self.__class__.__name__ != 'Scan':
-			self._print('\n🏆 [bold gold3]Live results:[/]', rich=True)
+		self._print('\n🏆 [bold gold3]Live results:[/]', rich=True)
 
 	def log_header(self):
 		"""Log runner header."""
+		if not self.print_remote_info:
+			return
 		runner_name = self.__class__.__name__
 
 		# Description
@@ -462,7 +457,7 @@ class Runner:
 		items = [
 			f'[italic]{k}[/]: {v}'
 			for k, v in self.run_opts.items()
-			if k not in DISPLAY_OPTS_EXCLUDE
+			if k not in DISPLAY_OPTS_EXCLUDE and k not in self.print_opts
 			and v is not None
 		]
 		if items:
@@ -524,22 +519,16 @@ class Runner:
 		# Log execution results
 		self.status = 'SUCCESS' if not self.errors else 'FAILURE'
 		status = 'succeeded' if not self.errors else '[bold red]failed[/]'
-		if self.print_run_summary:
+		if self.print_remote_info:
 			self._print('\n')
 			self._print(
 				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
 				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
 
-		# Build and send report
-		if self.exporters:
-			report = Report(self, exporters=self.exporters)
-			report.build()
-			report.send()
-			self.report = report
-
 		# Log results count
-		if self.print_item_count:
+		if self.print_item:
 			count_map = self._get_results_count()
+			self._print('', rich=True)
 			if all(count == 0 for count in count_map.values()):
 				self._print(':exclamation_mark:Found 0 results.', color='bold red', rich=True)
 			else:
@@ -548,6 +537,14 @@ class Runner:
 					for name, count in count_map.items()
 				]) + '.'
 				self._print(results_str, color='bold green', rich=True)
+
+		# Build and send report
+		if self.exporters:
+			self._print('', rich=True)
+			report = Report(self, exporters=self.exporters)
+			report.build()
+			report.send()
+			self.report = report
 
 	def stop_live_tasks(self):
 		"""Stop all tasks running in Celery worker."""
@@ -651,32 +648,15 @@ class Runner:
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
 			rich (bool, Optional): Force rich output.
 		"""
-		# Print a JSON item
-		if isinstance(data, (OutputType, DotMap, dict)):
-			if getattr(data, 'toDict', None):
-				data = data.toDict()
-			data = json.dumps(data)
-
-		if self.sync or rich:
+		if rich:
 			_console = console_stdout if out == sys.stdout else console
 			_console.print(data, highlight=False, style=color, soft_wrap=True, end=end)
 		else:
+			if isinstance(data, (OutputType, DotMap, dict)):
+				if getattr(data, 'toDict', None):
+					data = data.toDict()
+				data = json.dumps(data)
 			print(data, file=out)
-
-		# # Print a line using Rich console
-		# if rich:
-		# 	_console = console_stdout if out == sys.stdout else console
-		# 	_console.print(data, highlight=False, style=color, soft_wrap=True)
-
-		# # Print a line using Rich markup
-		# elif markup:
-		# 	from rich import print as _print
-		# 	from rich.text import Text
-		# 	_print(Text.from_markup(data), file=out)
-
-		# # Print a line raw
-		# else:
-		# 	print(data, file=out)
 
 	def _get_results_count(self):
 		count_map = {}
@@ -698,7 +678,7 @@ class Runner:
 			item = self.run_hooks('on_item_pre_convert', item)
 			if not item:
 				return None
-			if not self.orig:
+			if not self.print_orig:
 				item = self._convert_item_schema(item)
 			else:
 				item = DotMap(item)
@@ -724,7 +704,7 @@ class Runner:
 				self.last_updated_progress = item._timestamp
 
 		# Run on_item hooks
-		if isinstance(item, OutputType) and not self.orig:
+		if isinstance(item, OutputType):
 			item = self.run_hooks('on_item', item)
 
 		return item
@@ -736,10 +716,7 @@ class Runner:
 				for item in self.results
 			]
 		if isinstance(item, OutputType):
-			if self.output_fmt:
-				item = self.output_fmt.format(**item.toDict())
-			else:
-				item = repr(item)
+			item = repr(item)
 		elif isinstance(item, DotMap):
 			item = json.dumps(item.toDict())
 		return item

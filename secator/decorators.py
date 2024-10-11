@@ -18,7 +18,7 @@ RUNNER_OPTS = {
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
 	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
-	'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
+	# 'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},  # TODO: rework this
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
@@ -304,11 +304,9 @@ def register_runner(cli_endpoint, config):
 						sys.exit(1)
 		opts['sync'] = sync
 		opts.update({
-			'print_cmd': True,
 			'print_item': True,
 			'print_line': True,
 			'print_remote_info': not sync,
-			'print_start': not sync
 		})
 
 		# Build hooks from driver name

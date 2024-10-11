@@ -52,7 +52,6 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 	def test_default_workflows(self):
 		fmt_opts = {
-			'print_cmd': DEBUG > 0,
 			'print_item': DEBUG > 1,
 			'print_line': DEBUG > 2,
 			'table': DEBUG > 1,

@@ -36,9 +36,9 @@ class TestTemplate(unittest.TestCase):
 	def test_external_task(self):
 		from secator.tasks import ls
 		results = ls(str(self.template_dir)).run()
-		self.assertEqual(len(results), 1)
+		self.assertEqual(len(results), 2)
 		print(results)
-		self.assertTrue(self.expected_vuln == Vulnerability.load(results[0].toDict()))
+		self.assertTrue(self.expected_vuln == Vulnerability.load(results[1].toDict()))
 
 	def test_external_workflow(self):
 		from secator.cli import ALL_WORKFLOWS
@@ -50,5 +50,5 @@ class TestTemplate(unittest.TestCase):
 		self.assertIsNotNone(ls_workflow)
 		results = Workflow(ls_workflow, targets=[str(self.template_dir)]).run()
 		self.assertEqual(len(results), 2)
-		self.assertTrue(self.expected_vuln == Vulnerability.load(results[1].toDict()))
-
+		vuln = [r for r in results if r._type == 'vulnerability'][0]
+		self.assertTrue(self.expected_vuln == Vulnerability.load(vuln.toDict()))

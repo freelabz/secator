@@ -1,5 +1,3 @@
-from secator.definitions import DEBUG
-from secator.output_types import Target
 from secator.config import CONFIG
 from secator.runners import Runner
 from secator.utils import discover_tasks
@@ -26,16 +24,10 @@ class Task(Runner):
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
-
 		# Run opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
 		dry_run = run_opts.get('show', False)
-		if dry_run:
-			self.print_item_count = False
 
 		# Set task output types
 		self.output_types = task_cls.output_types
@@ -47,6 +39,7 @@ class Task(Runner):
 
 		# Run task
 		if self.sync:
+			run_opts['print_item'] = False
 			task = task_cls(self.targets, **run_opts)
 			if dry_run:  # don't run
 				return
