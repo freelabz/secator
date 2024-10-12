@@ -8,7 +8,7 @@ import warnings
 from secator.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   MATCH_CODES, OPT_NOT_SUPPORTED, RATE_LIMIT,
 							   THREADS, TIMEOUT, DEFAULT_HTTPX_FLAGS)
-from secator.output_types import Info, Warning, Error
+from secator.output_types import Info, Warning, Error, Url, Target
 from secator.rich import console
 from secator.runners import Command
 from secator.tasks import httpx
@@ -162,9 +162,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
-		self.assertEqual(cls.print_item_count, False)
-		self.assertEqual(cls.print_cmd, False)
-		self.assertEqual(cls.print_cmd_prefix, False)
 
 	def test_httpx_build_cmd_with_opts(self):
 		if httpx not in TEST_TASKS:
@@ -186,9 +183,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
-		self.assertEqual(cls.print_item_count, False)
-		self.assertEqual(cls.print_cmd, False)
-		self.assertEqual(cls.print_cmd_prefix, False)
 
 	def test_httpx_build_cmd_with_opts_with_prefix(self):
 		if httpx not in TEST_TASKS:
@@ -212,9 +206,6 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
-		self.assertEqual(cls.print_item_count, False)
-		self.assertEqual(cls.print_cmd, False)
-		self.assertEqual(cls.print_cmd_prefix, False)
 
 
 class TestCommandRun(unittest.TestCase, CommandOutputTester):
@@ -248,7 +239,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 				with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
 					self._test_task_output(
 						results,
-						expected_output_types=cls.output_types + [Info, Warning, Error]
+						expected_output_types=cls.output_types + [Info, Warning, Error, Target]
 					)
 
 	def test_cmd_original_schema(self):
@@ -324,7 +315,8 @@ class TestCommandHooks(unittest.TestCase):
 			cls = httpx(input, hooks=hooks)
 			self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_init')
 			items = cls.run()
-			item = items[0]
+			item = items[1]
+			self.assertIsInstance(item, Url)
 			self.assertEqual(item.status_code, 500)
 			self.assertEqual(item.url, 'test_changed_url')
 			self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_start')

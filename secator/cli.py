@@ -795,7 +795,7 @@ def run_install(cmd, title, next_steps=None):
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
-		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_cmd=True, print_line=True)
+		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_line=True)
 		if ret.return_code != 0:
 			console.print(f':exclamation_mark: Failed to install {title}.', style='bold red')
 		else:

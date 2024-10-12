@@ -12,7 +12,7 @@ INPUTS_TASKS = {
     'gf': 'http://localhost:3000?q=test',
     'gau': 'https://danielmiessler.com/',
     'gospider': 'https://danielmiessler.com/',
-    'grype': str(ROOT_FOLDER),
+    'grype': 'redis:7.4.1',
     'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
     'subfinder': 'api.github.com',

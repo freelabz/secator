@@ -7,6 +7,8 @@ from secator.rich import console
 class CsvExporter(Exporter):
     def send(self):
         results = self.report.data['results']
+        if not results:
+            return
         csv_paths = []
 
         for output_type, items in results.items():

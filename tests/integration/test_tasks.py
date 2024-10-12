@@ -5,7 +5,7 @@ import warnings
 from time import sleep
 
 from secator.definitions import DEBUG
-from secator.output_types import Info, Warning, Error
+from secator.output_types import Info, Warning, Error, Target
 from secator.rich import console
 from secator.runners import Command
 from secator.utils import setup_logging, merge_opts
@@ -38,9 +38,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 	def test_tasks(self):
 		opts = META_OPTS.copy()
 		fmt_opts = {
-			'print_cmd': DEBUG > 0,
 			'print_item': DEBUG > 1,
-			'print_item_count': DEBUG > 0,
 			'json': DEBUG > 2
 		}
 		extra_opts = {
@@ -102,6 +100,6 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 				# Test result types
 				self._test_task_output(
 					results,
-					expected_output_types=cls.output_types + [Info, Warning, Error],
+					expected_output_types=cls.output_types + [Info, Warning, Error, Target],
 					expected_results=outputs,
 					empty_results_allowed=True)

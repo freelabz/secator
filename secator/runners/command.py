@@ -14,7 +14,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error
+from secator.output_types import Error, Target
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug
@@ -112,7 +112,7 @@ class Command(Runner):
 	# Profile
 	profile = 'cpu'
 
-	def __init__(self, input=None, **run_opts):
+	def __init__(self, input=[], **run_opts):
 		# Build runnerconfig on-the-fly
 		config = TemplateLoader(input={
 			'name': self.__class__.__name__,
@@ -166,38 +166,34 @@ class Command(Runner):
 		self.item_loaders = item_loaders
 
 		# Print built cmd
-		if self.print_cmd and not self.has_children:
+		if not self.has_children:
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
 			self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
-		# Print built input
-		if self.print_input_file and self.input_path:
-			input_str = '\n '.join(self.input).strip()
-			debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]')
+		# Debug built input
+		input_str = '\n '.join(self.input).strip()
+		debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', sub='runner.init')
 
-		# Print run options
-		if self.print_run_opts:
-			input_str = '\n '.join([
-				f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.run_opts.items() if v is not None]).strip()
-			debug(f'[dim magenta]Run opts:[/]\n {input_str}')
+		# Debug run options
+		run_opts_str = '\n '.join([
+			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.run_opts.items() if v is not None]).strip()
+		debug(f'[dim magenta]Run opts:[/]\n {run_opts_str}', sub='runner.init')
 
-		# Print format options
-		if self.print_fmt_opts:
-			input_str = '\n '.join([
-				f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.opts_to_print.items() if v is not None]).strip()
-			debug(f'[dim magenta]Print opts:[/]\n {input_str}')
+		# Debug format options
+		fmt_opts_str = '\n '.join([
+			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.print_opts.items() if v is not None]).strip()
+		debug(f'[dim magenta]Print opts:[/]\n {fmt_opts_str}', sub='runner.init')
 
-		# Print hooks
-		if self.print_hooks:
-			input_str = ''
-			for hook_name, hook_funcs in self.hooks.items():
-				hook_funcs_str = ', '.join([f'[dim green]{h.__module__}.{h.__qualname__}[/]' for h in hook_funcs])
-				if hook_funcs:
-					input_str += f'[dim blue]{hook_name}[/] -> {hook_funcs_str}\n '
-			input_str = input_str.strip()
-			if input_str:
-				debug(f'[dim magenta]Hooks:[/]\n {input_str}')
+		# Debug hooks
+		hooks_str = ''
+		for hook_name, hook_funcs in self.hooks.items():
+			hook_funcs_str = ', '.join([f'[dim green]{h.__module__}.{h.__qualname__}[/]' for h in hook_funcs])
+			if hook_funcs:
+				hooks_str += f'[dim blue]{hook_name}[/] -> {hook_funcs_str}\n '
+		hooks_str = hooks_str.strip()
+		if hooks_str:
+			debug(f'[dim magenta]Hooks:[/]\n {hooks_str}', sub='runner.init')
 
 	def toDict(self):
 		res = super().toDict()
@@ -282,7 +278,6 @@ class Command(Runner):
 		"""
 		name = name or cmd.split(' ')[0]
 		kwargs['no_process'] = kwargs.get('no_process', True)
-		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_item'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = not kwargs.get('quiet', False)
 		delay_run = kwargs.pop('delay_run', False)
@@ -352,6 +347,10 @@ class Command(Runner):
 
 		# Callback before running command
 		self.run_hooks('on_start')
+
+		# Yield targets
+		for target in self.input:
+			yield Target(name=target, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 		# Check for sudo requirements and prepare the password if needed
 		sudo_password, error = self._prompt_sudo(self.cmd)

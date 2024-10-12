@@ -40,4 +40,6 @@ class subfinder(ReconDns):
 
 	@staticmethod
 	def validate_item(self, item):
-		return item['input'] != 'localhost'
+		if isinstance(item, dict):
+			return item['input'] != 'localhost'
+		return True

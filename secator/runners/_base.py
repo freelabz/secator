@@ -70,7 +70,7 @@ class Runner:
 	# Reports folder
 	reports_folder = None
 
-	def __init__(self, config, targets, results=[], run_opts={}, hooks={}, validators={}, context={}):
+	def __init__(self, config, targets=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
@@ -113,31 +113,18 @@ class Runner:
 		# Process input
 		self.input = targets
 
-		# Output options
-		self.output_fmt = self.run_opts.get('format', False)
-		self.output_quiet = self.run_opts.get('quiet', False)
-
 		# Print options
-		self.print_start = self.run_opts.pop('print_start', False)
-		self.print_item = self.run_opts.pop('print_item', False)
-		self.print_line = self.run_opts.pop('print_line', False)
-		self.print_errors = self.run_opts.pop('print_errors', True)
-		self.print_item_count = self.run_opts.pop('print_item_count', False)
-		self.print_cmd = self.run_opts.pop('print_cmd', False)
-		self.print_run_opts = self.run_opts.pop('print_run_opts', DEBUG > 1)
-		self.print_fmt_opts = self.run_opts.pop('print_fmt_opts', DEBUG > 1)
-		self.print_input_file = self.run_opts.pop('print_input_file', False)
-		self.print_hooks = self.run_opts.pop('print_hooks', DEBUG > 1)
-		self.print_cmd_prefix = self.run_opts.pop('print_cmd_prefix', False)
-		self.print_remote_status = self.run_opts.pop('print_remote_status', False)
-		self.print_run_summary = self.run_opts.pop('print_run_summary', False)
+		self.quiet = self.run_opts.get('quiet', False)
+		self.print_item = self.run_opts.get('print_item', False)
+		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
+		self.print_remote_info = self.run_opts.get('print_remote_info', False)
 		self.print_json = self.run_opts.get('json', False)
 		self.print_raw = self.run_opts.get('raw', False)
-		self.orig = self.run_opts.get('orig', False)
-		self.opts_to_print = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
+		self.print_orig = self.run_opts.get('orig', False)
+		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
+		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Hooks
-		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.register_hooks(hooks)
 
@@ -152,7 +139,6 @@ class Runner:
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
-		self._set_print_prefix()
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -194,13 +180,11 @@ class Runner:
 
 	def __iter__(self):
 		try:
-			if self.print_start:
-				self.log_start()
+			self.log_start()
 
 			# If any errors happened during validation, exit
 			if self.errors:
-				for error in self.errors:
-					yield error
+				yield from self.errors
 				self.log_results()
 				self.run_hooks('on_end')
 				return
@@ -210,7 +194,7 @@ class Runner:
 					item = self._process_item(item)
 					if not item or item._uuid in self.uuids:
 						continue
-					elif isinstance(item, DotMap) and not self.orig:
+					elif isinstance(item, DotMap) and not self.print_orig:
 						orig_item = {
 							k: v for k, v in item.toDict().items() if k not in ['_type', '_context', '_source', '_uuid']
 						}
@@ -262,7 +246,7 @@ class Runner:
 					self._print(str(item), out=sys.stdout)
 				else:
 					item_repr = item_str
-					if self.print_remote_status or DEBUG > 1:
+					if isinstance(item, OutputType) and self.print_remote_info or DEBUG > 1:
 						item_repr += rich_to_ansi(f' \[[dim]{item._source}[/]]')
 					self._print(item_repr, out=sys.stdout)
 		elif isinstance(item, str):
@@ -357,7 +341,7 @@ class Runner:
 				)
 				self.results.append(error)
 				self._print_item(error)
-				if self.raise_on_error or not self.sync:
+				if self.raise_on_error:
 					raise exc
 		return result
 
@@ -438,16 +422,19 @@ class Runner:
 
 	def log_start(self):
 		"""Log runner start."""
+		if not self.print_remote_info:
+			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
 		runner_name = self.__class__.__name__
 		self.log_header()
 		self._print(
 			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True)
-		if not self.sync and self.print_remote_status and self.__class__.__name__ != 'Scan':
-			self._print('\n🏆 [bold gold3]Live results:[/]', rich=True)
+		self._print('\n🏆 [bold gold3]Live results:[/]', rich=True)
 
 	def log_header(self):
 		"""Log runner header."""
+		if not self.print_remote_info:
+			return
 		runner_name = self.__class__.__name__
 
 		# Description
@@ -470,7 +457,7 @@ class Runner:
 		items = [
 			f'[italic]{k}[/]: {v}'
 			for k, v in self.run_opts.items()
-			if k not in DISPLAY_OPTS_EXCLUDE
+			if k not in DISPLAY_OPTS_EXCLUDE and k not in self.print_opts
 			and v is not None
 		]
 		if items:
@@ -522,7 +509,7 @@ class Runner:
 				self._print(f'   • \[{warning._source}] {warning.message}', color='bold orange3', rich=True)
 
 		# Log runner errors
-		if self.errors and self.print_errors and not self.sync:
+		if self.errors and not self.sync:
 			self._print(
 				f':cross_mark: [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
 				color='bold red', rich=True)
@@ -532,22 +519,16 @@ class Runner:
 		# Log execution results
 		self.status = 'SUCCESS' if not self.errors else 'FAILURE'
 		status = 'succeeded' if not self.errors else '[bold red]failed[/]'
-		if self.print_run_summary:
+		if self.print_remote_info:
 			self._print('\n')
 			self._print(
 				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
 				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
 
-		# Build and send report
-		if self.results and self.exporters:
-			report = Report(self, exporters=self.exporters)
-			report.build()
-			report.send()
-			self.report = report
-
 		# Log results count
-		if self.print_item_count and not self.print_raw and not self.orig:
+		if self.print_item:
 			count_map = self._get_results_count()
+			self._print('', rich=True)
 			if all(count == 0 for count in count_map.values()):
 				self._print(':exclamation_mark:Found 0 results.', color='bold red', rich=True)
 			else:
@@ -556,6 +537,14 @@ class Runner:
 					for name, count in count_map.items()
 				]) + '.'
 				self._print(results_str, color='bold green', rich=True)
+
+		# Build and send report
+		if self.exporters:
+			self._print('', rich=True)
+			report = Report(self, exporters=self.exporters)
+			report.build()
+			report.send()
+			self.report = report
 
 	def stop_live_tasks(self):
 		"""Stop all tasks running in Celery worker."""
@@ -659,40 +648,15 @@ class Runner:
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
 			rich (bool, Optional): Force rich output.
 		"""
-		# Print a JSON item
-		if isinstance(data, (OutputType, DotMap, dict)):
-			if getattr(data, 'toDict', None):
-				data = data.toDict()
-			data = json.dumps(data)
-			data = f'{self.prefix:>15} {data}' if self.prefix and not self.print_item else data
-
-		if self.sync or rich:
+		if rich:
 			_console = console_stdout if out == sys.stdout else console
 			_console.print(data, highlight=False, style=color, soft_wrap=True, end=end)
 		else:
+			if isinstance(data, (OutputType, DotMap, dict)):
+				if getattr(data, 'toDict', None):
+					data = data.toDict()
+				data = json.dumps(data)
 			print(data, file=out)
-
-		# # Print a line using Rich console
-		# if rich:
-		# 	_console = console_stdout if out == sys.stdout else console
-		# 	_console.print(data, highlight=False, style=color, soft_wrap=True)
-
-		# # Print a line using Rich markup
-		# elif markup:
-		# 	from rich import print as _print
-		# 	from rich.text import Text
-		# 	_print(Text.from_markup(data), file=out)
-
-		# # Print a line raw
-		# else:
-		# 	print(data, file=out)
-
-	def _set_print_prefix(self):
-		self.prefix = ''
-		if self.print_cmd_prefix:
-			self.prefix = f'[bold gold3]({self.config.name})[/]'
-		if self.chunk and self.chunk_count:
-			self.prefix += f' [{self.chunk}/{self.chunk_count}]'
 
 	def _get_results_count(self):
 		count_map = {}
@@ -714,7 +678,7 @@ class Runner:
 			item = self.run_hooks('on_item_pre_convert', item)
 			if not item:
 				return None
-			if not self.orig:
+			if not self.print_orig:
 				item = self._convert_item_schema(item)
 			else:
 				item = DotMap(item)
@@ -740,7 +704,7 @@ class Runner:
 				self.last_updated_progress = item._timestamp
 
 		# Run on_item hooks
-		if isinstance(item, OutputType) and not self.orig:
+		if isinstance(item, OutputType):
 			item = self.run_hooks('on_item', item)
 
 		return item
@@ -751,10 +715,10 @@ class Runner:
 				self.get_repr(item)
 				for item in self.results
 			]
-		if self.output_fmt:
-			item = self.output_fmt.format(**item.toDict())
-		elif isinstance(item, OutputType):
+		if isinstance(item, OutputType):
 			item = repr(item)
+		elif isinstance(item, DotMap):
+			item = json.dumps(item.toDict())
 		return item
 
 	@classmethod
