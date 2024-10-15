@@ -64,8 +64,7 @@ class searchsploit(Command):
 			split = _in.split('~')
 			self.matched_at = split[0]
 			self.input[0] = split[1]
-		if isinstance(self.input[0], str):
-			self.input[0] = self.input[0].replace('httpd', '').replace('/', ' ')
+		self.input[0] = self.input[0].replace('httpd', '').replace('/', ' ')
 
 	@staticmethod
 	def on_item_pre_convert(self, item):
