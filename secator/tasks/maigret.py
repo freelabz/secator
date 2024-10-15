@@ -72,6 +72,6 @@ class maigret(ReconUser):
 
 	@staticmethod
 	def validate_item(self, item):
-		if isinstance(item, UserAccount):
+		if isinstance(item, dict):
 			return item['http_status'] == 200
 		return True
