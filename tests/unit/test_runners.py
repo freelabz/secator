@@ -325,7 +325,7 @@ class TestCommandRunner(unittest.TestCase):
 		MyCommand.on_cmd_done = staticmethod(on_cmd_done)
 		self.all_hooks.extend(['on_cmd_done'])
 
-		with mock_command(MyCommand, TARGETS, {}, json_output, 'run') as results:
+		with mock_command(MyCommand, TARGETS, {}, [], 'run') as results:
 			self.assertEqual(len(results), 4)
 			self.assertIsInstance(results[0], Target)
 			self.assertIsInstance(results[1], Url)
