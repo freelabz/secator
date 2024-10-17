@@ -92,7 +92,6 @@ class Runner:
 		self.progress = 0
 		self.context = context
 		self.delay = run_opts.get('delay', False)
-		self.uuids = []
 		self.celery_result = None
 		self.celery_ids = []
 
@@ -133,7 +132,6 @@ class Runner:
 		self.register_validators(validators)
 
 		# Chunks
-		self.parent = self.run_opts.get('parent', True)
 		self.has_children = self.run_opts.get('has_children', False)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
@@ -175,6 +173,26 @@ class Runner:
 	def results_count(self):
 		return len(self.results)
 
+	@property
+	def uuids(self):
+		return [_._uuid for _ in self.results]
+
+	@property
+	def celery_state(self):
+		return {
+			'name': self.config.name,
+			'full_name': self.unique_name,
+			'state': self.status,
+			'progress': self.progress,
+			'results': self.results,
+			'chunk': self.chunk,
+			'chunk_count': self.chunk_count,
+			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
+			'celery_id': self.context['celery_id'],
+			'count': self.results_count,
+			'descr': self.config.description,
+		}
+
 	def run(self):
 		return list(self.__iter__())
 
@@ -206,7 +224,6 @@ class Runner:
 					if item._type == 'info' and item.task_id and item.task_id not in self.celery_ids:
 						self.celery_ids.append(item.task_id)
 					self.results.append(item)
-					self.uuids.append(item._uuid)
 					yield item
 
 				self._print_item(item) if item else ''
@@ -226,7 +243,6 @@ class Runner:
 				_uuid=str(uuid.uuid4())
 			)
 			self.results.append(error)
-			self.uuids.append(error._uuid)
 			self._print_item(error)
 			yield error
 
@@ -300,7 +316,6 @@ class Runner:
 			'name': self.name,
 			'targets': self.targets,
 			'run_opts': self.run_opts,
-			'parent': self.parent,
 			'has_children': self.has_children,
 			'chunk': self.chunk,
 			'chunk_count': self.chunk_count,

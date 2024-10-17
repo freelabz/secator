@@ -188,7 +188,7 @@ def update_state(celery_task, **state):
 		'',
 		sub='celery.state',
 		id=celery_task.request.id,
-		obj={state['meta']['full_name']: 'RUNNING', 'count': state['meta']['count']},
+		obj={state['meta']['full_name']: state['meta']['state'], 'count': state['meta']['count']},
 		obj_after=False
 	)
 	return celery_task.update_state(**state)
@@ -197,9 +197,6 @@ def update_state(celery_task, **state):
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
 	chunk = opts.get('chunk')
-	chunk_count = opts.get('chunk_count')
-	description = opts.get('description', '')
-	sync = opts.get('sync', True)
 
 	# Set Celery request id in context
 	context = opts.get('context', {})
@@ -207,55 +204,35 @@ def run_command(self, results, name, targets, opts={}):
 	opts['context'] = context
 	opts['print_remote_info'] = False
 
-	# Debug task
-	full_name = name
-	full_name += f' {chunk}/{chunk_count}' if chunk_count else ''
-
-	# Update task state in backend
-	count = 0
-	task_results = []
-	task_state = 'RUNNING'
-	task = None
-	parent = True
+	# Set initial state
 	state = {
-		'state': task_state,
-		'meta': {
-			'name': name,
-			'full_name': full_name,
-			'state': task_state,
-			'progress': 0,
-			'results': [],
-			'chunk': chunk,
-			'chunk_count': chunk_count,
-			'chunk_info': f'{chunk}/{chunk_count}' if chunk and chunk_count else '',
-			'celery_id': self.request.id,
-			'count': count,
-			'descr': description,
-		}
+		'state': 'RUNNING',
+		'meta': {}
 	}
-	update_state(self, **state)
+
+	# Flatten + dedupe results
+	results = flatten(results)
+	results = deduplicate(results, attr='_uuid')
+
+	# Get expanded targets
+	if not chunk:
+		targets, opts = run_extractors(results, opts, targets)
+
+	# Get task class
+	task_cls = Task.get_task_class(name)
+	task = task_cls(targets, **opts)
+	iterator = task
+
 	try:
-		# Flatten + dedupe results
-		results = flatten(results)
-		results = deduplicate(results, attr='_uuid')
-
-		# Get expanded targets
-		if not chunk:
-			targets, opts = run_extractors(results, opts, targets)
-
-		# Get task class
-		task_cls = Task.get_task_class(name)
-
-		# Get split
+		# Check if chunkable
 		multiple_targets = isinstance(targets, list) and len(targets) > 1
 		single_target_only = multiple_targets and task_cls.file_flag is None
 		break_size_threshold = multiple_targets and task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
+		has_children = single_target_only or (not task.sync and break_size_threshold)
+		task.has_children = has_children
 
-		# If task doesn't support multiple targets, or if the number of targets is too big, split into multiple tasks
-		if single_target_only or (not sync and break_size_threshold):
-
-			# Initiate main task and set context for sub-tasks
-			task = task_cls(targets, parent=parent, has_children=True, **opts)
+		# Follow multiple chunked tasks
+		if task.has_children:
 			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
 			workflow = break_task(
 				task_cls,
@@ -263,65 +240,48 @@ def run_command(self, results, name, targets, opts={}):
 				targets,
 				results=results,
 				chunk_size=chunk_size)
-			result = workflow.apply() if sync else workflow.apply_async()
-			uuids = []
+			result = workflow.apply() if task.sync else workflow.apply_async()
 			chunk_ids = []
 			CeleryData.get_task_ids(result, chunk_ids)
 			for chunk_id in chunk_ids:
 				info = Info(
 					message=f'Chunked task created: {chunk_id}',
 					task_id=chunk_id,
-					_source=full_name,
+					_source=task.name,
 					_uuid=str(uuid.uuid4())
 				)
-				task_results.append(info)
-				results.append(info)
-			for data in CeleryData.poll(result):
-				new_results = [r for r in data.get('results', []) if r._uuid not in uuids]
-				if not new_results:
-					continue
-				task_results.extend(new_results)
-				results.extend(new_results)
-				state['meta']['task_results'] = task_results
-				state['meta']['results'] = results
-				state['meta']['count'] = len(task_results)
-				update_state(self, **state)
-				uuids.extend([r._uuid for r in new_results])
-			state['meta']['state'] = 'SUCCESS'
+				task.results.append(info)
+			iterator = CeleryData.iter_results(result, print_remote_info=False)
 
-		# otherwise, run normally
-		else:
-			# Run task
-			task = task_cls(targets, **opts)
-			for item in task:
-				task_results.append(item)
-				results.append(item)
-				count += 1
-				state['meta']['task_results'] = task_results
-				state['meta']['results'] = results
-				state['meta']['count'] = len(task_results)
-				update_state(self, **state)
-			state['meta']['state'] = task.status
+		for item in iterator:
+			if task.has_children:
+				if item._uuid in task.uuids:
+					continue
+				task.results.append(item)
+			state['meta'] = task.celery_state
+			update_state(self, **state)
 
 	except BaseException as exc:
 		error = Error(
 			message=str(exc),
 			traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__)),
-			_source=full_name,
+			_source=task.unique_name,
 			_uuid=str(uuid.uuid4())
 		)
-		task_results.append(error)
-		results.append(error)
-		state['meta']['task_results'] = task_results
-		state['meta']['results'] = results
-		state['meta']['state'] = 'FAILURE'
+		task.results.append(error)
+
 	finally:
-		state['state'] = 'SUCCESS'
+		state['meta'] = task.celery_state
 		update_state(self, **state)
 		gc.collect()
 
+		# Run on_end hooks for split tasks
+		if task.has_children:
+			task.log_results()
+			task.run_hooks('on_end')
+
 		# If running in chunk mode, only return chunk result, not all results
-		return results if parent else task_results
+		return task.results
 
 
 @app.task

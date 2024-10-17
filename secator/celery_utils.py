@@ -47,12 +47,12 @@ class CeleryData(object):
 			tasks_progress = PanelProgress(
 				SpinnerColumn('dots'),
 				TextColumn('{task.fields[descr]}  ') if description else '',
-				TextColumn('[bold cyan]{task.fields[name]}[/]'),
+				TextColumn('[bold cyan]{task.fields[full_name]}[/]'),
 				TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
 				TextColumn('{task.fields[state]:<20}'),
 				TimeElapsedColumn(),
 				TextColumn('{task.fields[count]}'),
-				TextColumn('{task.fields[progress]}'),
+				TextColumn('{task.fields[progress]}%'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
 				refresh_per_second=1,
 				transient=False,
@@ -87,7 +87,7 @@ class CeleryData(object):
 				# Handle messages if any
 				state = data['state']
 				task_id = data['id']
-				progress_obj = data.get('progress', None)
+				progress_int = data.get('progress', None)
 				progress_data = data.copy()
 				progress_data['state'] = f'[{state_colors[state]}]{state}[/]'
 
@@ -98,8 +98,8 @@ class CeleryData(object):
 					progress_id = tasks_progress[task_id]
 					if state in ['SUCCESS', 'FAILURE']:
 						progress.update(progress_id, advance=100, **progress_data)
-					elif progress_obj:
-						progress.update(progress_id, advance=progress_obj.percent, **progress_data)
+					elif progress_int:
+						progress.update(progress_id, advance=progress_int, **progress_data)
 
 			# Update all tasks to 100 %
 			for progress_id in tasks_progress.values():
@@ -129,7 +129,7 @@ class CeleryData(object):
 		"""
 		task_ids = []
 		CeleryData.get_task_ids(result, ids=task_ids)
-		# datas = []
+		datas = []
 		for task_id in task_ids:
 			data = CeleryData.get_task_data(task_id)
 			if not data:
@@ -138,22 +138,22 @@ class CeleryData(object):
 				'POLL',
 				sub='celery.runner',
 				id=data['id'],
-				obj={data['full_name']: data['state'], 'results_count': data['count']},
+				obj={data['full_name']: data['state'], 'count': data['count']},
 				level=4
 			)
 			yield data
-			# datas.append(data)
+			datas.append(data)
 
 		# Calculate and yield progress
-		# if not datas:
-		# 	return
-		# total = len(datas)
-		# count_finished = sum([i['ready'] for i in datas if i])
-		# percent = int(count_finished * 100 / total) if total > 0 else 0
-		# data = datas[-1]
-		# data['progress'] = Progress(duration='unknown', percent=percent)
-		# data['results'] = []
-		# yield data
+		if not datas:
+			return
+		total = len(datas)
+		count_finished = sum([i['ready'] for i in datas if i])
+		percent = int(count_finished * 100 / total) if total > 0 else 0
+		data = datas[-1]
+		data['progress'] = percent
+		data['results'] = []
+		yield data
 
 	@staticmethod
 	def get_task_data(task_id):

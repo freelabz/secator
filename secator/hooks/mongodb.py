@@ -30,7 +30,7 @@ def update_runner(self):
 	debug_obj = {'type': 'runner', 'name': self.name, 'status': self.status}
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
-	debug('update', sub='hooks.mongodb', id=_id, obj=update, obj_after=True, level=4)
+	debug('update', sub='hooks.mongodb', id=_id, obj=update, obj_after=True, obj_breaklines=True, level=4)
 	start_time = time.time()
 	if _id:
 		delta = start_time - self.last_updated if self.last_updated else MONGODB_UPDATE_FREQUENCY
