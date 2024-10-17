@@ -31,7 +31,7 @@ class katana(HttpCrawler):
 		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'},
 		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'},
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'},  # noqa: E501
-		'form_fill': {'type': bool, 'short': 'ff', 'help': 'Enable form filling'}
+		'form_fill': {'is_flag': True, 'short': 'ff', 'help': 'Enable form filling'}
 	}
 	opt_key_map = {
 		HEADER: 'headers',
