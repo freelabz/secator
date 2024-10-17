@@ -144,6 +144,8 @@ class Command(Runner):
 
 		# No processing of output lines.
 		self.no_process = self.run_opts.get('no_process', False)
+		if self.no_process:
+			self.print_item = False
 
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
