@@ -52,7 +52,6 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 	def test_default_workflows(self):
 		fmt_opts = {
-			'print_cmd': DEBUG > 0,
 			'print_item': DEBUG > 1,
 			'print_line': DEBUG > 2,
 			'table': DEBUG > 1,
@@ -71,7 +70,8 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			'rate_limit': 1000,
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 			'timeout': 7,
-			'depth': 2
+			'depth': 2,
+			'ports': '9999,3000,8080'
 		}
 		opts = merge_opts(opts, fmt_opts)
 

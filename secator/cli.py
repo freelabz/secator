@@ -649,7 +649,13 @@ def report_list(workspace):
 		with open(path, 'r') as f:
 			try:
 				content = json.loads(f.read())
-				data = {'path': path, 'name': content['info']['name'], 'runner': runner}
+				data = {
+					'path': path,
+					'name': content['info']['name'],
+					'runner': runner,
+					'date': get_file_date(path),
+					'date_sort': path.stat().st_mtime
+				}
 				ws_reports[ws].append(data)
 			except json.JSONDecodeError as e:
 				console.print(f'[bold red]Could not load {path}: {str(e)}')
@@ -658,11 +664,11 @@ def report_list(workspace):
 		if workspace and not ws == workspace:
 			continue
 		console.print(f'[bold gold3]{ws}:')
-		for data in sorted(ws_reports[ws], key=lambda x: x['path']):
+		for data in sorted(ws_reports[ws], key=lambda x: x['date_sort']):
 			runner_name = data["runner"][:-1]
 			name = data["name"]
 			path = data["path"]
-			file_date = get_file_date(path)
+			file_date = data["date"]
 			console.print(f'   • {path} ([bold blue]{name}[/] [dim]{runner_name}[/]) ([dim]{file_date}[/]):')
 
 
@@ -789,7 +795,7 @@ def run_install(cmd, title, next_steps=None):
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
-		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_cmd=True, print_line=True)
+		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_line=True)
 		if ret.return_code != 0:
 			console.print(f':exclamation_mark: Failed to install {title}.', style='bold red')
 		else:

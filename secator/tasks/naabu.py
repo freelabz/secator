@@ -3,6 +3,7 @@ from secator.definitions import (DELAY, HOST, OPT_NOT_SUPPORTED, PORT, PORTS,
 								 PROXY, RATE_LIMIT, RETRIES, STATE, THREADS,
 								 TIMEOUT, TOP_PORTS)
 from secator.output_types import Port
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import ReconPort
 
 
@@ -37,6 +38,7 @@ class naabu(ReconPort):
 		RETRIES: lambda x: 1 if x == 0 else x,
 		PROXY: lambda x: x.replace('socks5://', '')
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Port: {
 			PORT: lambda x: x['port'],

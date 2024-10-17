@@ -13,6 +13,7 @@ from secator.definitions import (CONTENT_TYPE, DEFAULT_KATANA_FLAGS,
 								 THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER, CONTENT_LENGTH)
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
 
@@ -30,7 +31,7 @@ class katana(HttpCrawler):
 		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'},
 		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'},
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'},  # noqa: E501
-		'form_fill': {'type': bool, 'short': 'ff', 'help': 'Enable form filling'}
+		'form_fill': {'is_flag': True, 'short': 'ff', 'help': 'Enable form filling'}
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -58,6 +59,7 @@ class katana(HttpCrawler):
 	opt_value_map = {
 		DELAY: lambda x: int(x) if isinstance(x, float) else x
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Url: {
 			URL: lambda x: x['request']['endpoint'],

@@ -29,7 +29,6 @@ class fping(ReconIp):
 	}
 	input_type = IP
 	output_types = [Ip]
-	item_loaders = []
 	install_cmd = 'sudo apt install -y fping'
 
 	@staticmethod

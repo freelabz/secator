@@ -6,6 +6,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
 								 USER_AGENT, DEFAULT_NUCLEI_FLAGS)
 from secator.output_types import Progress, Vulnerability
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
 
 
@@ -45,6 +46,7 @@ class nuclei(VulnMulti):
 		'templates': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
+	item_loaders = [JSONSerializer()]
 	output_types = [Vulnerability, Progress]
 	output_map = {
 		Vulnerability: {

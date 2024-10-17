@@ -8,6 +8,8 @@ from secator.output_types import OutputType
 class TableExporter(Exporter):
 	def send(self):
 		results = self.report.data['results']
+		if not results:
+			return
 		title = self.report.title
 		_print = console.print
 		_print()

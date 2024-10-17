@@ -3,6 +3,7 @@ from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
 from secator.output_types import Record, Ip, Subdomain
 from secator.output_types.ip import IpProtocol
 from secator.tasks._categories import ReconDns
+from secator.serializers import JSONSerializer
 from secator.utils import extract_domain_info
 
 
@@ -24,6 +25,7 @@ class dnsx(ReconDns):
 		'resolver': {'type': str, 'short': 'r', 'help': 'List of resolvers to use (file or comma separated)'},
 		'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Domain name for wildcard filtering'},
 	}
+	item_loaders = [JSONSerializer()]
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
 	install_github_handle = 'projectdiscovery/dnsx'
 	profile = 'io'

@@ -42,8 +42,7 @@ class Report:
 		opts = merge_opts(self.runner.config.options, self.runner.run_opts)
 		opts = {
 			k: v for k, v in opts.items()
-			if k not in DEFAULT_CLI_OPTIONS
-			and not k.startswith('print_')
+			if k not in DEFAULT_CLI_OPTIONS and k not in self.runner.print_opts
 			and v is not None
 		}
 

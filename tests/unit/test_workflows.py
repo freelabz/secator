@@ -11,7 +11,7 @@ TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'kar
 class TestAdHocWorkflow(unittest.TestCase):
 
 	def test_chain(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 
 		from celery import chain
@@ -23,7 +23,7 @@ class TestAdHocWorkflow(unittest.TestCase):
 			results = result.get()
 			if DEBUG > 1:
 				console.print_json(json.dumps(results))
-			urls = [r.url for r in results]
+			urls = [r.url for r in results if r._type == 'url']
 			self.assertEqual(len(urls), len(TARGETS))
 
 	# def test_chain_with_results(self):

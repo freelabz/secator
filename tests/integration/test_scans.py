@@ -35,13 +35,6 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 		)
 
 	def test_scans(self):
-		fmt_opts = {
-			'print_item': DEBUG > 1,
-			'print_cmd': DEBUG > 0,
-			'print_line': DEBUG > 1,
-			'table': DEBUG > 1,
-			'output': 'table' if DEBUG > 0 else ''
-		}
 		opts = {
 			'filter_size': 1987,
 			'follow_redirect': True,

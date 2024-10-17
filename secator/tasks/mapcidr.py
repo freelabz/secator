@@ -17,14 +17,12 @@ class mapcidr(ReconIp):
 	install_github_handle = 'projectdiscovery/mapcidr'
 	input_type = CIDR_RANGE
 	output_types = [Ip]
-	item_loaders = []
 	opt_key_map = {
 		THREADS: OPT_NOT_SUPPORTED,
 		PROXY: OPT_NOT_SUPPORTED,
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
-		THREADS: OPT_NOT_SUPPORTED,
 	}
 
 	@staticmethod
