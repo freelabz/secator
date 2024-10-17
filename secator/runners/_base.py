@@ -526,7 +526,7 @@ class Runner:
 				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
 
 		# Log results count
-		if self.print_item:
+		if self.print_item and not self.no_process:
 			count_map = self._get_results_count()
 			self._print('', rich=True)
 			if all(count == 0 for count in count_map.values()):
