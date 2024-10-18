@@ -584,6 +584,7 @@ def report_show(report_query, output, exclude_fields, type, query, workspace, un
 		"config": {
 			"name": f"consolidated_report_{current}"
 		},
+		"name": "runner",
 		"workspace_name": "_consolidated",
 		"reports_folder": Path.cwd(),
 	})
