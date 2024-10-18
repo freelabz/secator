@@ -16,7 +16,7 @@ class Info(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = ['task_name', 'message']
+	_table_fields = ['message', 'task_id']
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):

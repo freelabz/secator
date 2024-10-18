@@ -32,6 +32,13 @@ DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-
 # Constants
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
+STATE_COLORS = {
+	'PENDING': 'bold grey',
+	'RUNNING': 'bold yellow',
+	'SUCCESS': 'bold green',
+	'FAILURE': 'bold red',
+	'REVOKED': 'bold magenta'
+}
 
 # Vocab
 ALIVE = 'alive'

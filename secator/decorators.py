@@ -5,8 +5,8 @@ import rich_click as click
 from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
 
-from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
 from secator.config import CONFIG
+from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (deduplicate, expand_input, get_command_category,
 						   get_command_cls)

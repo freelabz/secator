@@ -2,6 +2,7 @@ from secator.config import CONFIG
 from secator.runners import Runner
 from secator.utils import discover_tasks
 from secator.celery_utils import CeleryData
+from secator.output_types import Info
 
 
 class Task(Runner):
@@ -45,6 +46,10 @@ class Task(Runner):
 				return
 		else:
 			self.celery_result = task_cls.delay(self.targets, **run_opts)
+			yield Info(
+				message=f'Celery task created: {self.celery_result.id}',
+				task_id=self.celery_result.id
+			)
 			task = CeleryData.iter_results(
 				self.celery_result,
 				description=True,

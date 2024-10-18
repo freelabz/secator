@@ -1,9 +1,8 @@
 import operator
 
 from secator.config import CONFIG
-from secator.definitions import DEBUG
 from secator.output_types import OUTPUT_TYPES, OutputType
-from secator.utils import merge_opts, get_file_timestamp
+from secator.utils import merge_opts, get_file_timestamp, traceback_as_string
 from secator.rich import console
 from secator.runners._helpers import extract_from_results
 
@@ -31,10 +30,9 @@ class Report:
 				report_cls(self).send()
 			except Exception as e:
 				console.print(
-					f'Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}',
-					style='bold red')
-				if DEBUG > 1:
-					console.print_exception()
+					f'[bold red]Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: '
+					f'{str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',
+				)
 
 	def build(self, extractors=[], dedupe_from=[]):
 		# Trim options
@@ -48,19 +46,12 @@ class Report:
 
 		# Prepare report structure
 		data = {
-			'info': {
-				'title': self.title,
-				'runner': self.runner.__class__.__name__,
-				'name': self.runner.config.name,
-				'status': self.runner.status,
-				'targets': self.runner.targets,
-				'total_time': str(self.runner.elapsed),
-				'total_human': self.runner.elapsed_human,
-				'opts': opts,
-			},
+			'info': self.runner.toDict(),
 			'results': {}
 		}
-		self.raw_results = {}
+		if 'results' in data['info']:
+			del data['info']['results']
+		data['info']['title'] = self.title
 
 		# Fill report
 		for output_type in OUTPUT_TYPES:
@@ -73,7 +64,6 @@ class Report:
 				if isinstance(item, OutputType) and item._type == output_name
 			]
 			if items:
-				self.raw_results[output_name] = items
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))
 				if CONFIG.runners.remove_duplicates:

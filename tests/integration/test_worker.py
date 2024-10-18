@@ -1,5 +1,5 @@
 import unittest
-from secator.output_types import Url, Target
+from secator.output_types import Url, Target, Port, Vulnerability
 from secator.runners import Command
 from secator.serializers import JSONSerializer
 from time import sleep
@@ -44,7 +44,6 @@ class TestWorker(unittest.TestCase):
 		self.assertIn(url, cmd.results)
 
 	def test_host_recon(self):
-		from secator.output_types import Url, Port, Vulnerability
 		cmd = Command.execute(
 			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',
 			no_process=False,

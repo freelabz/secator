@@ -16,6 +16,7 @@ from datetime import datetime
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
+import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
@@ -577,3 +578,15 @@ def sort_files_by_date(file_list):
 	"""
 	file_list.sort(key=lambda x: x.stat().st_mtime)
 	return file_list
+
+
+def traceback_as_string(exc):
+	"""Format an exception's traceback as a readable string.
+
+	Args:
+		Exception: an exception.
+
+	Returns:
+		string: readable traceback.
+	"""
+	return ' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
