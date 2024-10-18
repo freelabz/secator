@@ -3,7 +3,8 @@ from rich.panel import Panel
 from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from contextlib import nullcontext
-from secator.utils import debug
+from secator.definitions import STATE_COLORS
+from secator.utils import debug, traceback_as_string
 from secator.rich import console
 import kombu
 import kombu.exceptions
@@ -60,12 +61,6 @@ class CeleryData(object):
 				# redirect_stderr=True,
 				# redirect_stdout=False
 			)
-			state_colors = {
-				'RUNNING': 'bold yellow',
-				'SUCCESS': 'bold green',
-				'FAILURE': 'bold red',
-				'REVOKED': 'bold magenta'
-			}
 		else:
 			tasks_progress = nullcontext()
 
@@ -85,21 +80,25 @@ class CeleryData(object):
 					continue
 
 				# Handle messages if any
-				state = data['state']
 				task_id = data['id']
 				progress_int = data.get('progress', None)
 				progress_data = data.copy()
-				progress_data['state'] = f'[{state_colors[state]}]{state}[/]'
+
+				# Set state progress data
+				state = data['state']
+				if state in STATE_COLORS:
+					progress_data['state'] = f'[{STATE_COLORS[state]}]{state}[/]'
+				else:
+					progress_data['state'] = state
 
 				if task_id not in tasks_progress:
 					id = progress.add_task('', **progress_data)
 					tasks_progress[task_id] = id
 				else:
 					progress_id = tasks_progress[task_id]
-					if state in ['SUCCESS', 'FAILURE']:
-						progress.update(progress_id, advance=100, **progress_data)
-					elif progress_int:
-						progress.update(progress_id, advance=progress_int, **progress_data)
+					progress.update(progress_id, **progress_data)
+					if progress_int:
+						progress.update(progress_id, advance=progress_int)
 
 			# Update all tasks to 100 %
 			for progress_id in tasks_progress.values():
@@ -167,22 +166,35 @@ class CeleryData(object):
 		"""
 		res = AsyncResult(task_id)
 		if not res:
+			debug('empty response', sub='celerydebug', id=task_id)
 			return
+
+		# Try to get task metadata
 		try:
 			args = res.args
 			info = res.info
 			state = res.state
 		except kombu.exceptions.DecodeError as e:
+			debug('kombu decode error', sub='celerydebug', id=task_id)
 			console.print(f'[bold red]{str(e)}. Aborting get_task_data.[/]')
 			return
-		if not (args and len(args) > 1):
+
+		# When Celery has issues, it will convert the info dict to an exception
+		if isinstance(info, Exception):
+			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celerydebug', id=task_id)
+			raise info
+
+		# When the custom metadata is not updated manually, it will return an empty info list
+		if isinstance(info, list) or not info:
+			debug('empty metadata', sub='celerydebug', id=task_id)
 			return
-		task_name = args[1]
+
+		# Set default task data
 		data = {
 			'id': task_id,
-			'name': task_name,
-			'full_name': task_name,
-			'state': state,
+			'state': state if state else 'UNKNOWN',
+			'name': info['name'],
+			'full_name': info['full_name'],
 			'chunk_info': '',
 			'count': 0,
 			'error': None,
@@ -190,16 +202,28 @@ class CeleryData(object):
 			'descr': '',
 			'progress': 0,
 			'results': [],
-			'celery_id': '',
+			'celery_id': ''
 		}
 
-		# Set ready flag
-		if state in ['FAILURE', 'SUCCESS', 'REVOKED']:
-			data['ready'] = True
+		# Task is queued and does not yet have all the info
+		if not (args and len(args) > 1):
+			return data
 
-		# Set task data
+		# Task is running / done
+		task_name = args[1]
+		data.update({
+			'name': task_name,
+			'full_name': task_name,
+		})
+
+		# Update task data from info dict
 		if info and isinstance(info, dict):
 			data.update(info)
+
+		# Set ready flag and progress if done
+		data['ready'] = state in ['FAILURE', 'SUCCESS', 'REVOKED']
+		if data['ready']:
+			data['progress'] = 100
 
 		return data
 

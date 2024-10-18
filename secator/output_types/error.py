@@ -16,11 +16,12 @@ class Error(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = ['task_name', 'message', 'traceback']
+	_table_fields = ['message', 'traceback']
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
 		s = f'[bold red]❌ {self._source}: {self.message}[/]'
 		if self.traceback:
-			s += f'\n[dim]{self.traceback}[/]'
+			traceback_pretty = '   ' + self.traceback.replace('\n', '\n   ')
+			s += f'\n[dim]{traceback_pretty}[/]'
 		return rich_to_ansi(s)

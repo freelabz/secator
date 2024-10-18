@@ -1,10 +1,11 @@
 import gc
 import logging
-import traceback
 import uuid
 
-from celery import Celery, chain, chord, signals
+from celery import Celery, chain, chord, signals, states
 from celery.app import trace
+from celery.signals import after_task_publish, task_failure
+
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
@@ -13,11 +14,13 @@ from secator.output_types import Info, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
-from secator.utils import (debug, deduplicate, flatten)
+from secator.utils import (debug, deduplicate, flatten, traceback_as_string)
 from secator.celery_utils import CeleryData
 
-# from pathlib import Path
-# import memray  # TODO: conditional memray tracing
+
+#---------#
+# Logging #
+#---------#
 
 rich_handler = RichHandler(rich_tracebacks=True)
 rich_handler.setLevel(logging.INFO)
@@ -29,10 +32,13 @@ logging.basicConfig(
 	force=True)
 logging.getLogger('kombu').setLevel(logging.ERROR)
 logging.getLogger('celery').setLevel(logging.INFO if CONFIG.debug.level > 6 else logging.WARNING)
-
 logger = logging.getLogger(__name__)
-
 trace.LOG_SUCCESS = "Task %(name)s[%(id)s] succeeded in %(runtime)ss"
+
+
+#------------#
+# Celery app #
+#------------#
 
 app = Celery(__name__)
 app.conf.update({
@@ -98,6 +104,41 @@ def void(*args, **kwargs):
 	pass
 
 
+@after_task_publish.connect
+def handle_before_task_state(sender=None, headers=None, body=None, **kwargs):
+	"""Set Celery metadata after task is published to the queue."""
+	if sender == 'secator.celery.run_command':
+		task_id = headers['id']
+		task_name = body[0][1]
+		app.backend.store_result(
+			task_id,
+			{
+				'name': task_name,
+				'full_name': task_name
+			},
+			states.PENDING,
+			**kwargs
+		)
+
+
+@task_failure.connect
+def handle_task_failure(sender=None, **kwargs):
+	"""Set Celery metadata when task fails."""
+	if sender == 'secator.celery.run_command':
+		print(kwargs)
+		# task_id = headers['id']
+		# task_name = body[0][1]
+		# app.backend.store_result(
+		# 	task_id,
+		# 	{
+		# 		'name': task_name,
+		# 		'full_name': task_name
+		# 	},
+		# 	states.PENDING,
+		# 	**kwargs
+		# )
+
+
 def revoke_task(data):
 	task_id = data['id']
 	full_name = data.get('full_name')
@@ -117,14 +158,14 @@ def chunker(seq, size):
 	return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
-def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
+def break_task(task, task_opts, targets, results=[], chunk_size=1):
 	"""Break a task into multiple of the same type."""
 	chunks = targets
 	if chunk_size > 1:
 		chunks = list(chunker(targets, chunk_size))
 	debug(
 		'',
-		obj={task_cls.__name__: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks)},
+		obj={task.unique_name: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks)},
 		obj_after=False,
 		sub='celery.state'
 	)
@@ -134,12 +175,16 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 
 	# Build signatures
 	sigs = []
+	task_ids = []
 	for ix, chunk in enumerate(chunks):
+		if not isinstance(chunk, list):
+			chunk = [chunk]
 		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 			opts['parent'] = False
-		sig = task_cls.s(chunk, **opts).set(queue=task_cls.profile)
+		sig = type(task).s(chunk, **opts).set(queue=type(task).profile)
+		task_ids.append(str(sig.freeze()))
 		sigs.append(sig)
 
 	# Build Celery workflow
@@ -150,7 +195,7 @@ def break_task(task_cls, task_opts, targets, results=[], chunk_size=1):
 			forward_results.s().set(queue='io'),
 		)
 	)
-	return workflow
+	return workflow, task_ids
 
 
 @app.task(bind=True)
@@ -203,6 +248,7 @@ def run_command(self, results, name, targets, opts={}):
 	context['celery_id'] = self.request.id
 	opts['context'] = context
 	opts['print_remote_info'] = False
+	opts['results'] = results
 
 	# Set initial state
 	state = {
@@ -225,29 +271,40 @@ def run_command(self, results, name, targets, opts={}):
 
 	try:
 		# Check if chunkable
-		multiple_targets = isinstance(targets, list) and len(targets) > 1
-		single_target_only = multiple_targets and task_cls.file_flag is None
-		break_size_threshold = multiple_targets and task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
-		has_children = single_target_only or (not task.sync and break_size_threshold)
-		task.has_children = has_children
+		many_targets = len(targets) > 1
+		targets_over_chunk_size = task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
+		has_no_file_flag = task_cls.file_flag is None
+		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size) and not task.sync
+		debug(
+			'',
+			obj={
+				f'{task.unique_name}': 'CHUNK?',
+				'sync': task.sync,
+				'has_no_file_flag': has_no_file_flag,
+				'targets_over_chunk_size': targets_over_chunk_size,
+				'has_children': chunk_it
+			},
+			obj_after=False,
+			id=task.unique_name,
+			sub='celery.state'
+		)
+		task.has_children = chunk_it
 
 		# Follow multiple chunked tasks
-		if task.has_children:
-			chunk_size = 1 if single_target_only else task_cls.input_chunk_size
-			workflow = break_task(
-				task_cls,
+		if chunk_it:
+			chunk_size = 1 if has_no_file_flag else task_cls.input_chunk_size
+			workflow, task_ids = break_task(
+				task,
 				opts,
 				targets,
 				results=results,
 				chunk_size=chunk_size)
-			result = workflow.apply() if task.sync else workflow.apply_async()
-			chunk_ids = []
-			CeleryData.get_task_ids(result, chunk_ids)
-			for chunk_id in chunk_ids:
+			result = workflow.apply_async()
+			for task_id in task_ids:
 				info = Info(
-					message=f'Chunked task created: {chunk_id}',
-					task_id=chunk_id,
-					_source=task.name,
+					message=f'Celery chunked task created: {task_id}',
+					task_id=task_id,
+					_source=task.unique_name,
 					_uuid=str(uuid.uuid4())
 				)
 				task.results.append(info)
@@ -264,7 +321,7 @@ def run_command(self, results, name, targets, opts={}):
 	except BaseException as exc:
 		error = Error(
 			message=str(exc),
-			traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__)),
+			traceback=traceback_as_string(exc),
 			_source=task.unique_name,
 			_uuid=str(uuid.uuid4())
 		)

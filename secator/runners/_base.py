@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import sys
-import traceback
 import uuid
 from datetime import datetime
 from time import time
@@ -18,7 +17,7 @@ from secator.output_types import OUTPUT_TYPES, OutputType, Warning, Error
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
-from secator.utils import (debug, import_dynamic, merge_opts, pluralize, rich_to_ansi)
+from secator.utils import (debug, import_dynamic, merge_opts, pluralize, rich_to_ansi, traceback_as_string)
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +189,7 @@ class Runner:
 			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
 			'celery_id': self.context['celery_id'],
 			'count': self.results_count,
-			'descr': self.config.description,
+			'descr': self.config.description or '',
 		}
 
 	def run(self):
@@ -218,7 +217,7 @@ class Runner:
 						}
 						item = Warning(
 							message=f'Failed to load item as output type:\n  {orig_item}',
-							_source=self.config.name,
+							_source=self.unique_name,
 							_uuid=str(uuid.uuid4())
 						)
 					if item._type == 'info' and item.task_id and item.task_id not in self.celery_ids:
@@ -238,8 +237,8 @@ class Runner:
 		except Exception as e:
 			error = Error(
 				message=str(e),
-				traceback=' '.join(traceback.format_exception(e, value=e, tb=e.__traceback__)),
-				_source=self.config.name,
+				traceback=traceback_as_string(e),
+				_source=self.unique_name,
 				_uuid=str(uuid.uuid4())
 			)
 			self.results.append(error)
@@ -349,9 +348,9 @@ class Runner:
 			except Exception as exc:
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failure'}, id=_id, sub='hooks', level=3)
 				error = Error(
-					message='Hook execution failed.',
-					traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__)),
-					_source=fun,
+					message=f'Hook "{fun}" execution failed.',
+					traceback=traceback_as_string(exc),
+					_source=self.unique_name,
 					_uuid=str(uuid.uuid4())
 				)
 				self.results.append(error)
@@ -375,7 +374,7 @@ class Runner:
 					message += f': {doc}'
 				error = Error(
 					message=message,
-					_source=self.config.name,
+					_source=self.unique_name,
 					_uuid=str(uuid.uuid4())
 				)
 				self.results.append(error)
@@ -564,10 +563,7 @@ class Runner:
 	def stop_live_tasks(self):
 		"""Stop all tasks running in Celery worker."""
 		from secator.celery import revoke_task
-		task_ids = []
-		CeleryData.get_task_ids(self.celery_result, ids=task_ids)
-		all_ids = list(set(task_ids + self.celery_ids))
-		for task_id in all_ids:
+		for task_id in self.celery_ids:
 			data = CeleryData.get_task_data(task_id)
 			if not data:
 				data = {'id': task_id}
@@ -703,12 +699,12 @@ class Runner:
 
 		# Add context, uuid, progress to item
 		if not item._source:
-			item._source = self.config.name
+			item._source = self.unique_name
 
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
 
-		if item._type == 'progress' and item._source == self.config.name:
+		if item._type == 'progress' and item._source == self.unique_name:
 			self.progress = item.percent
 			update_frequency = CONFIG.runners.progress_update_frequency
 			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:

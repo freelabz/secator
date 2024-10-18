@@ -5,7 +5,6 @@ import re
 import shlex
 import subprocess
 import sys
-import traceback
 import uuid
 
 from time import sleep
@@ -17,7 +16,7 @@ from secator.config import CONFIG
 from secator.output_types import Error, Target
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug
+from secator.utils import debug, traceback_as_string
 
 
 logger = logging.getLogger(__name__)
@@ -64,7 +63,7 @@ class Command(Runner):
 	# Input path (if a file is constructed)
 	input_path = None
 
-	# Input chunk size (default None)
+	# Input chunk size
 	input_chunk_size = CONFIG.runners.input_chunk_size
 
 	# Input required
@@ -456,8 +455,8 @@ class Command(Runner):
 		except Exception as e:
 			yield Error(
 				message=str(e),
-				traceback=' '.join(traceback.format_exception(e, value=e, tb=e.__traceback__)),
-				_source=self.config.name,
+				traceback=traceback_as_string(e),
+				_source=self.unique_name,
 				_uuid=str(uuid.uuid4())
 			)
 

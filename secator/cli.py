@@ -13,17 +13,18 @@ from jinja2 import Template
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
+from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
-from secator.template import TemplateLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
+from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
 from secator.output_types import OUTPUT_TYPES
+from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.report import Report
 from secator.serializers.dataclass import loads_dataclass
+from secator.template import TemplateLoader
 from secator.utils import (
 	debug, detect_host, discover_tasks, flatten, print_version, match_file_by_pattern, get_file_date,
 	sort_files_by_date, get_file_timestamp
@@ -573,9 +574,9 @@ def report_show(report_query, output, exclude_fields, type, query, workspace, un
 	# Load all report paths
 	reports_dir = CONFIG.dirs.reports
 	if workspace:
-		all_reports = reports_dir.glob(f"{workspace}/**/report.json")
+		all_reports = list(reports_dir.glob(f"{workspace}/**/report.json"))
 	else:
-		all_reports = reports_dir.glob("**/**/report.json")
+		all_reports = list(reports_dir.glob("**/**/report.json"))
 
 	# Build runner instance
 	current = get_file_timestamp()
@@ -639,37 +640,57 @@ def report_show(report_query, output, exclude_fields, type, query, workspace, un
 @report.command('list')
 @click.option('-ws', '-w', '--workspace', type=str)
 def report_list(workspace):
-	reports_dir = CONFIG.dirs.reports
-	json_reports = reports_dir.glob("**/**/report.json")
-	ws_reports = {}
-	for path in json_reports:
-		ws, runner, number = str(path).split('/')[-4:-1]
-		if ws not in ws_reports:
-			ws_reports[ws] = []
-		with open(path, 'r') as f:
-			try:
-				content = json.loads(f.read())
-				data = {
-					'path': path,
-					'name': content['info']['name'],
-					'runner': runner,
-					'date': get_file_date(path),
-					'date_sort': path.stat().st_mtime
-				}
-				ws_reports[ws].append(data)
-			except json.JSONDecodeError as e:
-				console.print(f'[bold red]Could not load {path}: {str(e)}')
+	reports_dir = Path(CONFIG.dirs.reports)
+	if workspace:
+		json_reports = list(reports_dir.glob(f"{workspace}/**/report.json"))
+	else:
+		json_reports = list(reports_dir.glob("**/**/report.json"))
+	workspace_reports = {}
+	json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
 
-	for ws in ws_reports:
-		if workspace and not ws == workspace:
+	# Organize reports by workspace
+	for path in json_reports:
+		ws = path.parts[-4]
+		if workspace and ws != workspace:
 			continue
-		console.print(f'[bold gold3]{ws}:')
-		for data in sorted(ws_reports[ws], key=lambda x: x['date_sort']):
-			runner_name = data["runner"][:-1]
-			name = data["name"]
-			path = data["path"]
-			file_date = data["date"]
-			console.print(f'   • {path} ([bold blue]{name}[/] [dim]{runner_name}[/]) ([dim]{file_date}[/]):')
+		if ws not in workspace_reports:
+			workspace_reports[ws] = []
+		workspace_reports[ws].append(path)
+
+	table = Table()
+	table.add_column("Workspace", style="bold gold3")
+	table.add_column("Path", overflow="fold")
+	table.add_column("Name")
+	table.add_column("Id")
+	table.add_column("Date")
+	table.add_column("Status", style="green")
+
+	# Process each workspace and sort reports by modification time
+	for path in json_reports:
+		try:
+			with open(path, 'r') as f:
+				content = json.loads(f.read())
+			data = {
+				'workspace': path.parts[-4],
+				'name': f"[bold blue]{content['info']['name']}[/]",
+				'status': content['info'].get('status', ''),
+				'id': path.parts[-3] + '/' + path.parts[-2],
+				'date': get_file_date(path),  # Assuming get_file_date returns a readable date
+			}
+			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
+
+			# Update table dynamically as each file is processed
+			table.add_row(
+				data['workspace'],
+				str(path),
+				data['name'],
+				data['id'],
+				data['date'],
+				f"[{status_color}]{data['status']}[/]"
+			)
+		except json.JSONDecodeError as e:
+			console.print(f'[bold red]Could not load {path}: {str(e)}')
+	console.print(table)
 
 
 @report.command('export')
@@ -1143,21 +1164,21 @@ def lint():
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
-@click.option('--debug', '-d', type=int, default=0, help='Add debug information')
-def unit(tasks, workflows, scans, test, debug=False):
+def unit(tasks, workflows, scans, test):
 	"""Run unit tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
 	os.environ['SECATOR_HTTP_STORE_RESPONSES'] = '0'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
 	if test:
-		if not test.startswith('tests.unit'):
-			test = f'tests.unit.{test}'
-		cmd += f' {test}'
+		tests = test.split(',')
+		for test in tests:
+			if not test.startswith('tests.unit'):
+				test = f'tests.unit.{test}'
+			cmd += f' {test}'
 	else:
 		cmd += ' discover -v tests.unit'
 	run_test(cmd, 'unit')
@@ -1168,13 +1189,11 @@ def unit(tasks, workflows, scans, test, debug=False):
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
-@click.option('--debug', '-d', type=int, default=0, help='Add debug information')
-def integration(tasks, workflows, scans, test, debug):
+def integration(tasks, workflows, scans, test):
 	"""Run integration tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 	os.environ['SECATOR_DIRS_DATA'] = '/tmp/data'
 	os.environ['SECATOR_DIRS_REPORTS'] = '/tmp/data/reports'

@@ -163,7 +163,7 @@ class TestCommandRunner(unittest.TestCase):
 					command.run()
 					errors = [e.message for e in command.errors]
 					if errors:  # error happened during the actual execution, it will be yielded in results
-						self.assertIn('Hook execution failed.', errors)
+						self.assertIn(f'Hook "unittest.mock.{failing_hook}" execution failed.', errors)
 						self.assertEqual(command.status, 'FAILURE')
 				delattr(MyCommand, failing_hook)
 
