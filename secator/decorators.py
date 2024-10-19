@@ -304,6 +304,7 @@ def register_runner(cli_endpoint, config):
 						sys.exit(1)
 		opts['sync'] = sync
 		opts.update({
+			'print_cmd': True,
 			'print_item': True,
 			'print_line': True,
 			'print_remote_info': not sync,

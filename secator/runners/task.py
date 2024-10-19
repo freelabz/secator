@@ -41,7 +41,7 @@ class Task(Runner):
 		# Run task
 		if self.sync:
 			run_opts['print_item'] = False
-			task = task_cls(self.targets, **run_opts)
+			results = task_cls(self.targets, **run_opts)
 			if dry_run:  # don't run
 				return
 		else:
@@ -50,15 +50,14 @@ class Task(Runner):
 				message=f'Celery task created: {self.celery_result.id}',
 				task_id=self.celery_result.id
 			)
-			task = CeleryData.iter_results(
+			results = CeleryData.iter_results(
 				self.celery_result,
 				description=True,
-				results_only=True,
 				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
 
 		# Yield task results
-		yield from task
+		yield from results
 
 	@staticmethod
 	def get_task_class(name):

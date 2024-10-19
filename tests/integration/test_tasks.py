@@ -1,22 +1,18 @@
-import logging
 import os
 import unittest
 import warnings
 from time import sleep
 
-from secator.definitions import DEBUG
 from secator.output_types import Info, Warning, Error, Target
 from secator.rich import console
 from secator.runners import Command
-from secator.utils import setup_logging, merge_opts
+from secator.utils import merge_opts
 from secator.utils_test import (META_OPTS, TEST_TASKS, CommandOutputTester,
                               load_fixture)
 from tests.integration.inputs import INPUTS_TASKS
 from tests.integration.outputs import OUTPUTS_TASKS
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
-level = logging.DEBUG if DEBUG > 0 else logging.INFO
-setup_logging(level)
 
 
 class TestTasks(unittest.TestCase, CommandOutputTester):
@@ -37,10 +33,6 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 	def test_tasks(self):
 		opts = META_OPTS.copy()
-		fmt_opts = {
-			'print_item': DEBUG > 1,
-			'json': DEBUG > 2
-		}
 		extra_opts = {
 			'dirsearch.filter_size': 1987,
 			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
@@ -57,7 +49,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		}
 
 		# Merge opts
-		opts = merge_opts(opts, fmt_opts, extra_opts)
+		opts = merge_opts(opts, extra_opts)
 
 		# Remove unit tests options
 		del opts['nmap.output_path']
@@ -86,8 +78,6 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 				# Run task
 				results = task.run()
-				if DEBUG > 2:
-					console.print([list(r.toDict() for r in results)])
 
 				# Check return code
 				if not task.ignore_return_code:

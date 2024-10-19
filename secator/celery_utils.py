@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from secator.definitions import STATE_COLORS
 from secator.utils import debug, traceback_as_string
 from secator.rich import console
+from secator.config import CONFIG
 import kombu
 import kombu.exceptions
 from time import sleep
@@ -17,16 +18,16 @@ class CeleryData(object):
 	def iter_results(
 			result,
 			description=True,
-			results_only=True,
-			refresh_interval=1,
+			refresh_interval=CONFIG.runners.poll_frequency,
 			print_remote_info=True,
 			print_remote_title='Results'
 		):
 		"""Generator to get results from Celery task.
 
 		Args:
+			result (Union[AsyncResult, GroupResult]): Celery result.
 			description (bool): Whether to show task description.
-			results_only (bool): Yield only results, no task state.
+			refresh_interval (int): Refresh interval.
 			print_remote_info (bool): Whether to display live results.
 			print_remote_title (str): Title for the progress panel.
 
@@ -49,7 +50,6 @@ class CeleryData(object):
 				SpinnerColumn('dots'),
 				TextColumn('{task.fields[descr]}  ') if description else '',
 				TextColumn('[bold cyan]{task.fields[full_name]}[/]'),
-				TextColumn('[dim gold3]{task.fields[chunk_info]}[/]'),
 				TextColumn('{task.fields[state]:<20}'),
 				TimeElapsedColumn(),
 				TextColumn('{task.fields[count]}'),
@@ -69,12 +69,8 @@ class CeleryData(object):
 			tasks_progress = {}
 
 			# Get live results and print progress
-			for data in CeleryData.poll(result, refresh_interval=refresh_interval):
-				# Re-yield so that we can consume it externally
-				if results_only:
-					yield from data['results']
-				else:
-					yield data
+			for data in CeleryData.poll(result, refresh_interval):
+				yield from data['results']
 
 				if not print_remote_info:
 					continue
@@ -92,7 +88,7 @@ class CeleryData(object):
 					progress_data['state'] = state
 
 				if task_id not in tasks_progress:
-					id = progress.add_task('', **progress_data)
+					id = progress.add_task('', advance=0, **progress_data)
 					tasks_progress[task_id] = id
 				else:
 					progress_id = tasks_progress[task_id]
@@ -105,19 +101,24 @@ class CeleryData(object):
 				progress.update(progress_id, advance=100)
 
 	@staticmethod
-	def poll(result, refresh_interval=1):
+	def poll(result, refresh_interval):
 		"""Poll Celery subtasks results in real-time. Fetch task metadata and partial results from each task that runs.
 
 		Yields:
 			dict: Subtasks state and results.
 		"""
 		while True:
-			yield from CeleryData.get_all_data(result)
-			if result.ready():
-				debug('RESULT READY', sub='celery.runner', id=result.id)
+			try:
 				yield from CeleryData.get_all_data(result)
-				break
-			sleep(refresh_interval)
+				if result.ready():
+					debug('RESULT READY', sub='celery.runner', id=result.id)
+					yield from CeleryData.get_all_data(result)
+					break
+			except kombu.exceptions.DecodeError:
+				debug('kombu decode error', sub='celerydebug', id=result.id)
+				pass
+			finally:
+				sleep(refresh_interval)
 
 	@staticmethod
 	def get_all_data(result):
@@ -151,7 +152,6 @@ class CeleryData(object):
 		percent = int(count_finished * 100 / total) if total > 0 else 0
 		data = datas[-1]
 		data['progress'] = percent
-		data['results'] = []
 		yield data
 
 	@staticmethod
@@ -169,61 +169,61 @@ class CeleryData(object):
 			debug('empty response', sub='celerydebug', id=task_id)
 			return
 
-		# Try to get task metadata
-		try:
-			args = res.args
-			info = res.info
-			state = res.state
-		except kombu.exceptions.DecodeError as e:
-			debug('kombu decode error', sub='celerydebug', id=task_id)
-			console.print(f'[bold red]{str(e)}. Aborting get_task_data.[/]')
+		# Get task data
+		args = res.args
+		info = res.info
+		state = res.state
+
+		# Task data not ready yet
+		if not info:
+			debug('empty data', sub='celerydebug', id=task_id)
 			return
 
-		# When Celery has issues, it will convert the info dict to an exception
-		if isinstance(info, Exception):
-			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celerydebug', id=task_id)
-			raise info
-
-		# When the custom metadata is not updated manually, it will return an empty info list
-		if isinstance(info, list) or not info:
-			debug('empty metadata', sub='celerydebug', id=task_id)
-			return
-
-		# Set default task data
+		# Set up task data
 		data = {
 			'id': task_id,
-			'state': state if state else 'UNKNOWN',
-			'name': info['name'],
-			'full_name': info['full_name'],
-			'chunk_info': '',
+			'state': state,
+			'name': '',
+			'full_name': '',
 			'count': 0,
-			'error': None,
 			'ready': False,
 			'descr': '',
-			'progress': 0,
+			'progress': None,
 			'results': [],
-			'celery_id': ''
 		}
 
-		# Task is queued and does not yet have all the info
-		if not (args and len(args) > 1):
-			return data
+		# Depending on the task state, info will be either an Exception (FAILURE), a list (SUCCESS), or a dict (RUNNING).
+		# - If it's an Exception, it's an unhandled error.
+		# - If it's a list, it's the task results.
+		# - If it's a dict, it's the custom user metadata.
 
-		# Task is running / done
-		task_name = args[1]
-		data.update({
-			'name': task_name,
-			'full_name': task_name,
-		})
+		if isinstance(info, Exception):
+			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celerydebug', id=task_id)
+			data['state'] = state
+			raise info
 
-		# Update task data from info dict
-		if info and isinstance(info, dict):
+		elif isinstance(info, list):
+			data['results'] = info
+			errors = [e for e in info if e._type == 'error']
+			data['count'] = len(info)
+			data['state'] = 'FAILURE' if errors else 'SUCCESS'
+			if not args or len(args) < 2:
+				debug('got results but args is undefined', obj={'args': args}, sub='celerydebug', id=task_id)
+				return
+			data['name'] = args[1]
+			data['full_name'] = args[1]
+
+		elif isinstance(info, dict):
 			data.update(info)
 
-		# Set ready flag and progress if done
-		data['ready'] = state in ['FAILURE', 'SUCCESS', 'REVOKED']
+		# Set ready flag and progress
+		data['ready'] = data['state'] in ['FAILURE', 'SUCCESS', 'REVOKED']
 		if data['ready']:
 			data['progress'] = 100
+		elif data['results']:
+			progresses = [e for e in data['results'] if e._type == 'progress' and e._source == data['name']]
+			if progresses:
+				data['progress'] = progresses[-1].percent
 
 		return data
 
@@ -246,13 +246,16 @@ class CeleryData(object):
 				if result.id not in ids:
 					ids.append(result.id)
 
-			if hasattr(result, 'children') and result.children:
-				for child in result.children:
-					CeleryData.get_task_ids(child, ids=ids)
+			if hasattr(result, 'children'):
+				children = result.children
+				if isinstance(children, list):
+					for child in children:
+						CeleryData.get_task_ids(child, ids=ids)
 
 			# Browse parent
 			if hasattr(result, 'parent') and result.parent:
 				CeleryData.get_task_ids(result.parent, ids=ids)
+
 		except kombu.exceptions.DecodeError as e:
 			console.print(f'[bold red]{str(e)}. Aborting get_task_ids.[/]')
 			return

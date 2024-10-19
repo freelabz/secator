@@ -146,6 +146,9 @@ class Command(Runner):
 		if self.no_process:
 			self.print_item = False
 
+		# Print cmd
+		self.print_cmd = self.run_opts.get('print_cmd', False)
+
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
@@ -170,7 +173,8 @@ class Command(Runner):
 		if not self.has_children:
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-			self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
+			if self.print_cmd:
+				self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
 		# Debug built input
 		input_str = '\n '.join(self.input).strip()
@@ -279,6 +283,7 @@ class Command(Runner):
 		"""
 		name = name or cmd.split(' ')[0]
 		kwargs['no_process'] = kwargs.get('no_process', True)
+		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_item'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = not kwargs.get('quiet', False)
 		delay_run = kwargs.pop('delay_run', False)

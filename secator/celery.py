@@ -114,7 +114,8 @@ def handle_before_task_state(sender=None, headers=None, body=None, **kwargs):
 			task_id,
 			{
 				'name': task_name,
-				'full_name': task_name
+				'full_name': task_name,
+				'progress': 0
 			},
 			states.PENDING,
 			**kwargs
@@ -308,7 +309,10 @@ def run_command(self, results, name, targets, opts={}):
 					_uuid=str(uuid.uuid4())
 				)
 				task.results.append(info)
-			iterator = CeleryData.iter_results(result, print_remote_info=False)
+			iterator = CeleryData.iter_results(
+				result,
+				print_remote_info=False
+			)
 
 		for item in iterator:
 			if task.has_children:

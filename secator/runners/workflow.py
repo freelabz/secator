@@ -49,7 +49,6 @@ class Workflow(Runner):
 			results = CeleryData.iter_results(
 				self.celery_result,
 				description=True,
-				results_only=True,
 				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
 			)
