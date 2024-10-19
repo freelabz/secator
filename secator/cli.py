@@ -115,25 +115,35 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
+
+	# Check Celery addon is installed
 	if not ADDONS_ENABLED['worker']:
 		console.print('[bold red]Missing worker addon: please run [bold green4]secator install addons worker[/][/].')
 		sys.exit(1)
+
+	# Check broken / backend addon is installed
 	broker_protocol = CONFIG.celery.broker_url.split('://')[0]
 	backend_protocol = CONFIG.celery.result_backend.split('://')[0]
 	if CONFIG.celery.broker_url:
 		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 			console.print('[bold red]Missing `redis` addon: please run [bold green4]secator install addons redis[/][/].')
 			sys.exit(1)
+
+	# Debug Celery config
 	from secator.celery import app, is_celery_worker_alive
 	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
 	debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
+
 	if check:
 		is_celery_worker_alive()
 		return
+
 	if not queue:
 		queue = 'io,cpu,' + ','.join([r['queue'] for r in app.conf.task_routes.values()])
+
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'
+
 	if dev:
 		subcmd = 'stop' if stop else 'show' if show else 'start'
 		logfile = '%n.log'
@@ -144,13 +154,14 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 		cmd = f'{celery} -A {app_str} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
 		cmd = f'{celery} -A {app_str} worker -n {hostname} -Q {queue}'
-	if pool:
-		cmd += f' -P {pool}'
-	if concurrency:
-		cmd += f' -c {concurrency}'
+
+	cmd += f' -P {pool}' if pool else ''
+	cmd += f' -c {concurrency}' if concurrency else ''
+
 	if reload:
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
+
 	Command.execute(cmd, name='secator worker')
 
 
