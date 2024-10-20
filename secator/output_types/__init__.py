@@ -20,5 +20,19 @@ from secator.output_types.url import Url
 from secator.output_types.user_account import UserAccount
 from secator.output_types.vulnerability import Vulnerability
 from secator.output_types.record import Record
+from secator.output_types.certificate import Certificate
 
-OUTPUT_TYPES = [Target, Progress, Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Record]
+OUTPUT_TYPES = [
+    Target,
+    Progress,
+    Subdomain,
+    Ip,
+    Port,
+    Url,
+    Tag,
+    Exploit,
+    UserAccount,
+    Vulnerability,
+    Record,
+    Certificate
+    ]
