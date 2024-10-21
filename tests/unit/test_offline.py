@@ -1,13 +1,15 @@
 import os
 import unittest
+from unittest import mock
 
-from secator.utils_test import clear_modules
+from secator.config import download_files, CONFIG
 
 
 class TestOffline(unittest.TestCase):
+
+	@mock.patch.dict(os.environ, {"SECATOR_OFFLINE_MODE": "1"})
 	def setUp(self):
-		clear_modules()
-		os.environ['SECATOR_OFFLINE_MODE'] = '1'
+		pass
 
 	def test_offline_cve_lookup(self):
 		from secator.tasks._categories import Vuln
@@ -15,7 +17,6 @@ class TestOffline(unittest.TestCase):
 		self.assertEqual(result, None)
 
 	def test_offline_downloads(self):
-		from secator.config import download_files, CONFIG
 		download_files(
 			{'pyproject.toml': 'https://raw.githubusercontent.com/freelabz/secator/main/pyproject.toml'},
 			CONFIG.dirs.data,

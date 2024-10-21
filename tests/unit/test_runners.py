@@ -145,25 +145,21 @@ class TestCommandRunner(unittest.TestCase):
 			'{"url": "http://example.org"}',
 			'{"url": "http://example.com"}'  # Duplicate
 		]
-		mock_hooks = self.mock_hooks(
-			output_types=[Url],
-			item_loaders=[JSONSerializer()],
-		)
-		# all_hooks = self.all_hooks
-		all_hooks = ['on_iter']
+		MyCommand.output_types = [Url]
+		MyCommand.item_loaders = [JSONSerializer()]
+		all_hooks = self.all_hooks
 		for failing_hook in all_hooks:
 			with self.subTest(failing_hook=failing_hook):
 				def failing_hook_func(self, *args, **kwargs):
 					raise Exception(f"Hook {failing_hook} failed")
-				mock = self.mock_hook(failing_hook, failing_hook_func)
-				mock_hooks[failing_hook] = mock
+				self.mock_hook(failing_hook, failing_hook_func)
 				captured_output = StringIO()
 				sys.stderr = captured_output
 				with mock_command(MyCommand, TARGETS, {}, fixture) as command:
 					command.run()
 					errors = [e.message for e in command.errors]
 					if errors:  # error happened during the actual execution, it will be yielded in results
-						self.assertIn('Hook execution failed.', errors)
+						self.assertIn(f'Hook "unittest.mock.{failing_hook}" execution failed.', errors)
 						self.assertEqual(command.status, 'FAILURE')
 				delattr(MyCommand, failing_hook)
 

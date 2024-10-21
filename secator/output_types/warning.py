@@ -7,10 +7,9 @@ from secator.utils import rich_to_ansi
 @dataclass
 class Warning(OutputType):
 	message: str
-	task_name: str = field(default='', compare=False)
 	task_id: str = field(default='', compare=False)
 	_source: str = field(default='', repr=True)
-	_type: str = field(default='error', repr=True)
+	_type: str = field(default='warning', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
@@ -21,8 +20,5 @@ class Warning(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
-		s = '[bold red]❌ '
-		if self.task_name:
-			s += f'{self.task_name}: '
-		s += f'{self.message}[/]'
+		s = f"[orange4]⚠ {self.message}[/]"
 		return rich_to_ansi(s)

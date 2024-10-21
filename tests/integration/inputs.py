@@ -37,7 +37,7 @@ INPUTS_WORKFLOWS = {
 
 INPUTS_SCANS = {
     'domain': 'testphp.vulnweb.com',
-    'host': 'localhost',
+    'host': ['localhost', '127.0.0.1'],
     'network': '127.0.0.1/24',
     'url': ['http://localhost:3000', 'http://localhost:8080']
 }

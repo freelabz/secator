@@ -2,12 +2,14 @@ from secator.config import CONFIG
 from secator.runners import Runner
 from secator.utils import discover_tasks
 from secator.celery_utils import CeleryData
+from secator.output_types import Info
 
 
 class Task(Runner):
 	default_exporters = CONFIG.tasks.exporters
 	enable_hooks = False
 
+	@classmethod
 	def delay(cls, *args, **kwargs):
 		from secator.celery import run_task
 		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='celery')
@@ -40,20 +42,25 @@ class Task(Runner):
 		# Run task
 		if self.sync:
 			run_opts['print_item'] = False
-			task = task_cls(self.targets, **run_opts)
+			results = task_cls(self.targets, **run_opts)
 			if dry_run:  # don't run
 				return
 		else:
 			self.celery_result = task_cls.delay(self.targets, **run_opts)
-			task = CeleryData.iter_results(
+			self.add_subtask(self.celery_result.id, self.config.name, self.config.description or '')
+			yield Info(
+				message=f'Celery task created: {self.celery_result.id}',
+				task_id=self.celery_result.id
+			)
+			results = CeleryData.iter_results(
 				self.celery_result,
+				ids_map=self.celery_ids_map,
 				description=True,
-				results_only=True,
 				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
 
 		# Yield task results
-		yield from task
+		yield from results
 
 	@staticmethod
 	def get_task_class(name):

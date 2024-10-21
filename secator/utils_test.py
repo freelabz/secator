@@ -108,6 +108,7 @@ def mock_subprocess_popen(output_list):
 	mock_process = unittest.mock.MagicMock()
 	mock_process.wait.return_value = 0
 	mock_process.stdout.readline.side_effect = output_list
+	mock_process.pid = None
 	mock_process.returncode = 0
 
 	def mock_popen(*args, **kwargs):

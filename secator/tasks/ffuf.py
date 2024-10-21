@@ -25,7 +25,7 @@ class ffuf(HttpFuzzer):
 	json_flag = '-json'
 	version_flag = '-V'
 	item_loaders = [
-		JSONSerializer(),
+		JSONSerializer(strict=True),
 		RegexSerializer(FFUF_PROGRESS_REGEX, fields=['count', 'total', 'rps', 'duration', 'errors'])
 	]
 	opts = {
@@ -79,5 +79,6 @@ class ffuf(HttpFuzzer):
 
 	@staticmethod
 	def on_item(self, item):
-		item.method = self.get_opt_value(METHOD) or 'GET'
+		if isinstance(item, Url):
+			item.method = self.get_opt_value(METHOD) or 'GET'
 		return item
