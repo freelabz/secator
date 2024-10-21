@@ -82,6 +82,7 @@ class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
 	store_responses: bool = False
+	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
 
