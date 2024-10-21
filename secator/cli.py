@@ -187,7 +187,7 @@ def proxy(timeout, number):
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
 	for _ in range(number):
 		url = proxy.get()
-		print(url)
+		console.print(url)
 
 
 @util.command()
@@ -259,8 +259,7 @@ def revshell(name, host, port, interface, listen, force):
 		console.print(Rule(f'[bold gold3]{alias}[/] - [bold red]{name} REMOTE SHELL', style='bold red', align='left'))
 		lang = shell.get('lang') or 'sh'
 		if len(command.splitlines()) == 1:
-			console.print()
-			print(f'\033[0;36m{command_str}')
+			console.print(command_str, style='cyan', highlight=False, soft_wrap=True)
 		else:
 			md = Markdown(f'```{lang}\n{command_str}\n```')
 			console.print(md)

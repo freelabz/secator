@@ -9,7 +9,9 @@ import uuid
 
 from time import sleep
 
+import psutil
 from fp.fp import FreeProxy
+from rich.tree import Tree
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
@@ -141,11 +143,6 @@ class Command(Runner):
 		# No capturing of stdout / stderr.
 		self.no_capture = self.run_opts.get('no_capture', False)
 
-		# No processing of output lines.
-		self.no_process = self.run_opts.get('no_process', False)
-		if self.no_process:
-			self.print_item = False
-
 		# Print cmd
 		self.print_cmd = self.run_opts.get('print_cmd', False)
 
@@ -200,8 +197,8 @@ class Command(Runner):
 		if hooks_str:
 			debug(f'[dim magenta]Hooks:[/]\n {hooks_str}', sub='runner.init')
 
-	def toDict(self):
-		res = super().toDict()
+	def toDict(self, short=False):
+		res = super().toDict(short=short)
 		res.update({
 			'cmd': self.cmd,
 			'cwd': self.cwd,
@@ -283,14 +280,14 @@ class Command(Runner):
 		"""
 		name = name or cmd.split(' ')[0]
 		kwargs['no_process'] = kwargs.get('no_process', True)
-		kwargs['print_cmd'] = not kwargs.get('quiet', False)
-		kwargs['print_item'] = not kwargs.get('quiet', False)
-		kwargs['print_line'] = not kwargs.get('quiet', False)
-		delay_run = kwargs.pop('delay_run', False)
+		kwargs['print_cmd'] = kwargs.get('print_cmd', False) or not kwargs.get('quiet', False)
+		kwargs['print_item'] = kwargs.get('print_item', False) or not kwargs.get('quiet', False)
+		kwargs['print_line'] = kwargs.get('print_line', False) or not kwargs.get('quiet', False)
+		run = kwargs.pop('run', True)
 		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
-		if not delay_run:
+		if run:
 			cmd_instance.run()
 		return cmd_instance
 
@@ -348,9 +345,6 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
-		# Set status to 'RUNNING'
-		self.status = 'RUNNING'
-
 		# Callback before running command
 		self.run_hooks('on_start')
 
@@ -428,8 +422,6 @@ class Command(Runner):
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
-					# ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
-					# line = re.sub(ansi_regex, '', line.strip())
 					ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 					line = ansi_escape.sub('', line)
 					line = line.replace('\\x0d\\x0a', '\n')
@@ -454,8 +446,7 @@ class Command(Runner):
 				yield from result
 
 		except KeyboardInterrupt:
-			self.process.kill()
-			self.killed = True
+			self.kill()
 
 		except Exception as e:
 			yield Error(
@@ -465,8 +456,25 @@ class Command(Runner):
 				_uuid=str(uuid.uuid4())
 			)
 
-		# Retrieve the return code and output
-		yield from self._wait_for_end()
+		finally:
+			yield from self._wait_for_end()
+
+	def kill(self):
+		if not hasattr(self, 'process'):
+			return
+
+		pid = self.process.pid
+		if not pid:
+			return
+		proc = psutil.Process(pid)
+		root = Tree(f'[bold red]{proc.pid} ({proc.name()})[/]')
+		for subproc in proc.children(recursive=True):
+			subproc.kill()
+			root.add(f'[bold blue]{subproc.pid} ({subproc.name()})[/]')
+		proc.kill()
+		self._print("\n:high_brightness: [bold green]Killed processes:[/]", rich=True)
+		self._print(root, rich=True)
+		self.killed = True
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line."""
@@ -529,19 +537,15 @@ class Command(Runner):
 		"""Wait for process to finish and process output and return code."""
 		self.process.wait()
 		self.return_code = self.process.returncode
+		self.output = self.output.strip()
+		self.process.stdout.close()
+		self.return_code = 0 if self.ignore_return_code else self.return_code
+		self.killed = self.return_code == -2 or self.killed
 
-		if self.no_capture:
-			self.output = ''
-		else:
-			self.output = self.output.strip()
-			self.process.stdout.close()
-
-		if self.ignore_return_code:
-			self.return_code = 0
-
-		if self.return_code == -2 or self.killed:
+		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}.'
 			last_lines = self.output.split('\n')

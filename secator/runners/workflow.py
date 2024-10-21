@@ -1,3 +1,5 @@
+import uuid
+
 from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
@@ -29,11 +31,11 @@ class Workflow(Runner):
 		run_opts['hooks'] = self._hooks.get(Task, {})
 
 		# Build Celery workflow
-		workflow, task_ids = self.build_celery_workflow(
+		workflow = self.build_celery_workflow(
 			run_opts=run_opts,
 			results=self.results
 		)
-		self.celery_ids = task_ids
+		self.celery_ids = list(self.celery_ids_map.keys())
 
 		# Run Celery workflow and get results
 		if self.sync:
@@ -48,6 +50,7 @@ class Workflow(Runner):
 			)
 			results = CeleryData.iter_results(
 				self.celery_result,
+				ids_map=self.celery_ids_map,
 				description=True,
 				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
@@ -64,14 +67,14 @@ class Workflow(Runner):
 		"""
 		from celery import chain
 		from secator.celery import forward_results
-		sigs, task_ids = self.get_tasks(
+		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
 			self.targets,
 			self.config.options,
 			run_opts)
 		sigs = [forward_results.si(results).set(queue='io')] + sigs + [forward_results.s().set(queue='io')]
 		workflow = chain(*sigs)
-		return workflow, task_ids
+		return workflow
 
 	def get_tasks(self, obj, targets, workflow_opts, run_opts):
 		"""Get tasks recursively as Celery chains / chords.
@@ -89,14 +92,13 @@ class Workflow(Runner):
 		from celery import chain, chord
 		from secator.celery import forward_results
 		sigs = []
-		task_ids = []
 		for task_name, task_opts in obj.items():
 			# Task opts can be None
 			task_opts = task_opts or {}
 
 			# If it's a group, process the sublevel tasks as a Celery chord.
 			if task_name.startswith('_group'):
-				tasks, ids = self.get_tasks(
+				tasks = self.get_tasks(
 					task_opts,
 					targets,
 					workflow_opts,
@@ -104,7 +106,7 @@ class Workflow(Runner):
 				)
 				sig = chord((tasks), forward_results.s().set(queue='io'))
 			elif task_name == '_chain':
-				tasks, ids = self.get_tasks(
+				tasks = self.get_tasks(
 					task_opts,
 					targets,
 					workflow_opts,
@@ -124,9 +126,9 @@ class Workflow(Runner):
 				opts['name'] = task_name
 
 				# Create task signature
-				sig = task.s(targets, **opts).set(queue=task.profile)
-				ids = [str(sig.freeze())]
+				task_id = str(uuid.uuid4())
+				sig = task.s(targets, **opts).set(queue=task.profile, task_id=task_id)
+				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
 			sigs.append(sig)
-			task_ids.extend(ids)
-		return sigs, task_ids
+		return sigs

@@ -25,6 +25,7 @@ RUNNER_OPTS = {
 
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
+	'remote': {'is_flag': True, 'default': False, 'help': 'Run tasks in worker'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
 	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
@@ -270,6 +271,7 @@ def register_runner(cli_endpoint, config):
 	@click.pass_context
 	def func(ctx, **opts):
 		sync = opts['sync']
+		remote = opts.pop('remote')
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
 		show = opts['show']
@@ -292,7 +294,7 @@ def register_runner(cli_endpoint, config):
 		else:
 			from secator.celery import is_celery_worker_alive
 			worker_alive = is_celery_worker_alive()
-			if not worker_alive:
+			if not worker_alive and not remote:
 				sync = True
 			else:
 				sync = False

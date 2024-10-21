@@ -2,9 +2,8 @@ import gc
 import logging
 import uuid
 
-from celery import Celery, chain, chord, signals, states
+from celery import Celery, chain, chord, signals
 from celery.app import trace
-from celery.signals import after_task_publish, task_failure
 
 # from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
@@ -104,48 +103,22 @@ def void(*args, **kwargs):
 	pass
 
 
-@after_task_publish.connect
-def handle_before_task_state(sender=None, headers=None, body=None, **kwargs):
-	"""Set Celery metadata after task is published to the queue."""
-	if sender == 'secator.celery.run_command':
-		task_id = headers['id']
-		task_name = body[0][1]
-		app.backend.store_result(
-			task_id,
-			{
-				'name': task_name,
-				'full_name': task_name,
-				'progress': 0
-			},
-			states.PENDING,
-			**kwargs
-		)
+def update_state(celery_task, **state):
+	"""Update task state to add metadata information."""
+	debug(
+		'',
+		sub='celery.state',
+		id=celery_task.request.id,
+		obj={state['meta']['full_name']: state['meta']['state'], 'count': state['meta']['count']},
+		obj_after=False
+	)
+	return celery_task.update_state(**state)
 
 
-@task_failure.connect
-def handle_task_failure(sender=None, **kwargs):
-	"""Set Celery metadata when task fails."""
-	if sender == 'secator.celery.run_command':
-		print(kwargs)
-		# task_id = headers['id']
-		# task_name = body[0][1]
-		# app.backend.store_result(
-		# 	task_id,
-		# 	{
-		# 		'name': task_name,
-		# 		'full_name': task_name
-		# 	},
-		# 	states.PENDING,
-		# 	**kwargs
-		# )
-
-
-def revoke_task(data):
-	task_id = data['id']
-	full_name = data.get('full_name')
+def revoke_task(task_id, task_name=None):
 	message = f'Revoking task {task_id}'
-	if full_name:
-		message += f' ({full_name})'
+	if task_name:
+		message += f' ({task_name})'
 	console.print(message)
 	return app.control.revoke(task_id, terminate=True, signal='SIGINT')
 
@@ -166,7 +139,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 		chunks = list(chunker(targets, chunk_size))
 	debug(
 		'',
-		obj={task.unique_name: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks)},
+		obj={task.unique_name: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks), 'target_count': len(targets)},
 		obj_after=False,
 		sub='celery.state'
 	)
@@ -176,7 +149,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 
 	# Build signatures
 	sigs = []
-	task_ids = []
+	ids_map = {}
 	for ix, chunk in enumerate(chunks):
 		if not isinstance(chunk, list):
 			chunk = [chunk]
@@ -184,8 +157,17 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 			opts['parent'] = False
-		sig = type(task).s(chunk, **opts).set(queue=type(task).profile)
-		task_ids.append(str(sig.freeze()))
+		task_id = str(uuid.uuid4())
+		sig = type(task).s(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
+		ids_map[task_id] = {
+			'id': task_id,
+			'name': task.name,
+			'full_name': f'{task.name}_{ix + 1}',
+			'descr': task.config.description or '',
+			'state': 'PENDING',
+			'count': 0,
+			'progress': 0
+		}
 		sigs.append(sig)
 
 	# Build Celery workflow
@@ -196,7 +178,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			forward_results.s().set(queue='io'),
 		)
 	)
-	return workflow, task_ids
+	return workflow, ids_map
 
 
 @app.task(bind=True)
@@ -227,17 +209,6 @@ def run_scan(self, args=[], kwargs={}):
 	kwargs['context']['celery_id'] = self.request.id
 	scan = Scan(*args, **kwargs)
 	scan.run()
-
-
-def update_state(celery_task, **state):
-	debug(
-		'',
-		sub='celery.state',
-		id=celery_task.request.id,
-		obj={state['meta']['full_name']: state['meta']['state'], 'count': state['meta']['count']},
-		obj_after=False
-	)
-	return celery_task.update_state(**state)
 
 
 @app.task(bind=True)
@@ -280,10 +251,10 @@ def run_command(self, results, name, targets, opts={}):
 			'',
 			obj={
 				f'{task.unique_name}': 'CHUNK?',
+				'enabled': chunk_it,
 				'sync': task.sync,
 				'has_no_file_flag': has_no_file_flag,
 				'targets_over_chunk_size': targets_over_chunk_size,
-				'has_children': chunk_it
 			},
 			obj_after=False,
 			id=task.unique_name,
@@ -294,23 +265,24 @@ def run_command(self, results, name, targets, opts={}):
 		# Follow multiple chunked tasks
 		if chunk_it:
 			chunk_size = 1 if has_no_file_flag else task_cls.input_chunk_size
-			workflow, task_ids = break_task(
+			workflow, ids_map = break_task(
 				task,
 				opts,
 				targets,
 				results=results,
 				chunk_size=chunk_size)
 			result = workflow.apply_async()
-			for task_id in task_ids:
+			for task_id in ids_map:
 				info = Info(
 					message=f'Celery chunked task created: {task_id}',
 					task_id=task_id,
-					_source=task.unique_name,
+					_source=ids_map[task_id]['full_name'],
 					_uuid=str(uuid.uuid4())
 				)
 				task.results.append(info)
 			iterator = CeleryData.iter_results(
 				result,
+				ids_map=ids_map,
 				print_remote_info=False
 			)
 

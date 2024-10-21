@@ -43,10 +43,21 @@ class Report:
 			if k not in DEFAULT_CLI_OPTIONS and k not in self.runner.print_opts
 			and v is not None
 		}
+		runner_fields = {
+			'name',
+			'status',
+			'targets',
+			'start_time',
+			'end_time',
+			'elapsed',
+			'elapsed_human',
+			'run_opts',
+			'results_count'
+		}
 
 		# Prepare report structure
 		data = {
-			'info': self.runner.toDict(),
+			'info': {k: v for k, v in self.runner.toDict().items() if k in runner_fields},
 			'results': {}
 		}
 		if 'results' in data['info']:

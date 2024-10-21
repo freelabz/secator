@@ -154,6 +154,8 @@ class nmapData(dict):
 					EXTRA_DATA: extra_data,
 					CONFIDENCE: conf
 				}
+				if port_number == 80:
+					raise Exception('failed to process port 80 because of error')
 				yield port
 
 				# Parse each script output to get vulns

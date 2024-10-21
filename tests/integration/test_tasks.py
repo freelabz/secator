@@ -28,6 +28,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 	def tearDown(self):
 		Command.execute(
 			f'sh {INTEGRATION_DIR}/teardown.sh',
+			quiet=True,
 			cwd=INTEGRATION_DIR
 		)
 

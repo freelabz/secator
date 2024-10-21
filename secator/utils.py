@@ -393,14 +393,14 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		if isinstance(obj, dict):
 			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
 		elif isinstance(obj, list):
-			obj_str += sep.join(obj)
+			obj_str += f'[dim]{sep.join(obj)}[/]'
 	if obj_str and not obj_after:
 		s = f'{s} {obj_str} '
 	s += f'[dim yellow]{msg}[/] '
 	if obj_str and obj_after:
 		s = f'{s}: {obj_str}'
 	if id:
-		s += f' [italic dim white]\[{id}][/] '
+		s += f' [italic dim gray11]\[{id}][/] '
 	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
 	print(s)
 

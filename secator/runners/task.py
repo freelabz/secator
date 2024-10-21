@@ -9,6 +9,7 @@ class Task(Runner):
 	default_exporters = CONFIG.tasks.exporters
 	enable_hooks = False
 
+	@classmethod
 	def delay(cls, *args, **kwargs):
 		from secator.celery import run_task
 		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='celery')
@@ -46,12 +47,14 @@ class Task(Runner):
 				return
 		else:
 			self.celery_result = task_cls.delay(self.targets, **run_opts)
+			self.add_subtask(self.celery_result.id, self.config.name, self.config.description or '')
 			yield Info(
 				message=f'Celery task created: {self.celery_result.id}',
 				task_id=self.celery_result.id
 			)
 			results = CeleryData.iter_results(
 				self.celery_result,
+				ids_map=self.celery_ids_map,
 				description=True,
 				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')

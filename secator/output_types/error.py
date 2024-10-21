@@ -20,7 +20,7 @@ class Error(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
-		s = f'[bold red]❌ {self._source}: {self.message}[/]'
+		s = f'[bold red]❌ {self.message}[/]'
 		if self.traceback:
 			traceback_pretty = '   ' + self.traceback.replace('\n', '\n   ')
 			s += f'\n[dim]{traceback_pretty}[/]'
