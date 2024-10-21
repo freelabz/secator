@@ -82,7 +82,8 @@ class nmap(VulnMulti):
 		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
 		tcp_connect = self.get_opt_value('tcp_connect')
-		if tcp_syn_stealth:
+		udp_scan = self.get_opt_value('udp_scan')
+		if tcp_syn_stealth or udp_scan:
 			self.cmd = f'sudo {self.cmd}'
 		if tcp_connect and tcp_syn_stealth:
 			self._print(
@@ -154,8 +155,6 @@ class nmapData(dict):
 					EXTRA_DATA: extra_data,
 					CONFIDENCE: conf
 				}
-				if port_number == 80:
-					raise Exception('failed to process port 80 because of error')
 				yield port
 
 				# Parse each script output to get vulns
