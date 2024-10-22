@@ -13,7 +13,7 @@ from secator.output_types import Info, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
-from secator.utils import (debug, deduplicate, flatten, traceback_as_string)
+from secator.utils import (debug, deduplicate, flatten)
 from secator.celery_utils import CeleryData
 
 

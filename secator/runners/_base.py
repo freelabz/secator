@@ -16,7 +16,7 @@ from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warn
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
-from secator.utils import (debug, import_dynamic, merge_opts, pluralize, rich_to_ansi, traceback_as_string)
+from secator.utils import (debug, import_dynamic, merge_opts, pluralize, rich_to_ansi)
 
 logger = logging.getLogger(__name__)
 
