@@ -145,25 +145,21 @@ class TestCommandRunner(unittest.TestCase):
 			'{"url": "http://example.org"}',
 			'{"url": "http://example.com"}'  # Duplicate
 		]
-		mock_hooks = self.mock_hooks(
-			output_types=[Url],
-			item_loaders=[JSONSerializer()],
-		)
-		# all_hooks = self.all_hooks
-		all_hooks = ['on_iter']
+		MyCommand.output_types = [Url]
+		MyCommand.item_loaders = [JSONSerializer()]
+		all_hooks = self.all_hooks
 		for failing_hook in all_hooks:
 			with self.subTest(failing_hook=failing_hook):
 				def failing_hook_func(self, *args, **kwargs):
 					raise Exception(f"Hook {failing_hook} failed")
-				mock = self.mock_hook(failing_hook, failing_hook_func)
-				mock_hooks[failing_hook] = mock
+				self.mock_hook(failing_hook, failing_hook_func)
 				captured_output = StringIO()
 				sys.stderr = captured_output
 				with mock_command(MyCommand, TARGETS, {}, fixture) as command:
 					command.run()
 					errors = [e.message for e in command.errors]
 					if errors:  # error happened during the actual execution, it will be yielded in results
-						self.assertIn('Hook execution failed.', errors)
+						self.assertIn(f'Hook "unittest.mock.{failing_hook}" execution failed.', errors)
 						self.assertEqual(command.status, 'FAILURE')
 				delattr(MyCommand, failing_hook)
 
@@ -341,3 +337,99 @@ class TestCommandRunner(unittest.TestCase):
 		# Clean up the temporary file
 		import os
 		os.remove('output.json')
+
+	def test_convert_item_schema(self):
+		MyCommand.output_types = [Url, Tag, Vulnerability]
+		url = TARGETS[0]
+		items = [
+			{
+				'__test__': 'Item with _type hint should load properly and bypass other output types',
+				'url': url,
+				'_type': 'url',
+				'__expected__': {
+					'_type': 'url',
+				},
+			},
+			{
+				'__test__': 'Item with all the required fields should load properly',
+				'url': url,
+				'__expected__': {
+					'_type': 'url',
+				},
+			},
+			{
+				'__test__': 'Items with all the required fields AND fields outside schema should load properly',
+				'url': url,
+				'extra_field_not_in_schema': {'new': 'added', 'field': 'old'},
+				'__expected__': {
+					'_type': 'url',
+				},
+			},
+			{
+				'__test__': 'Items with missing required fields should fail to load',
+				'target': url,
+				'__expected__': {
+					'_type': 'warning',
+				},
+			},
+			{
+				'__test__': 'Items with missing required fields AND _type hint should fail to load',
+				'_type': 'vulnerability',
+				'__expected__': {
+					'_type': 'warning',
+				},
+			},
+			{
+				'__test__': 'Item with all the required fields should load properly',
+				'name': 'SQL Injection',
+				'severity': 'high',
+				'matched_at': 'http://example.com',
+				'__expected__': {
+					'_type': 'vulnerability'
+				},
+			},
+			{
+				'__test__': ' Trying to load a Vulnerability as a Tag should output a warning',
+				"name": "SQL Injection",
+				"severity": "high",
+				"matched_at": "http://example.com",
+				"_type": "tag",
+				'__expected__': {
+					'_type': 'warning'
+				},
+			},
+			{
+				'__test__': 'Item of type vulnerability with no _type hint should be incorrectly loaded as Tag',
+				'name': 'sensitive_data',
+				'match': 'http://example.com',
+				'extra_data': {
+					'tag_type': 'PII',
+					'value': 'SSN'
+				},
+				'__expected__': {
+					'_type': 'tag'
+				},
+			},
+			{
+				'__test__': 'Item of type vulnerability with _type hint will be loaded properly',
+				'name': 'sensitive_data',
+				'match': 'http://example.com',
+				'extra_data': {
+					'tag_type': 'PII',
+					'value': 'SSN'
+				},
+				'_type': 'vulnerability',
+				'__expected__': {
+					'_type': 'vulnerability',
+				}
+			}
+		]
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			for item in items:
+				msg = item.pop('__test__')
+				expected_fields = item.pop('__expected__')
+				converted = cmd._convert_item_schema(item)
+				with self.subTest(msg=msg, item=item, converted=converted.toDict()):
+					for k, v in expected_fields.items():
+						self.assertEqual(getattr(converted, k), v)
+		delattr(MyCommand, 'output_types')

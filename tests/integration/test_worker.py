@@ -1,5 +1,5 @@
 import unittest
-from secator.output_types import Url, Target
+from secator.output_types import Url, Target, Port, Vulnerability
 from secator.runners import Command
 from secator.serializers import JSONSerializer
 from time import sleep
@@ -11,24 +11,25 @@ class TestWorker(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
 		cls.queue = queue.Queue()
-		cls.cmd = Command.execute('secator worker', delay_run=True)
+		cls.cmd = Command.execute('secator worker', run=False)
 		cls.thread = Thread(target=cls.cmd.run)
 		cls.thread.start()
 		sleep(3)
 
 	@classmethod
 	def tearDownClass(cls) -> None:
-		cls.cmd.process.kill()
+		cls.cmd.kill()
 		cls.thread.join()
 
 	def test_httpx(self):
 		cmd = Command.execute(
 			'secator x httpx testphp.vulnweb.com -json',
 			no_process=False,
+			quiet=True,
 			cls_attributes={'output_types': [Target, Url], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
-		self.assertEqual(len(cmd.results), 2)
+		self.assertEqual(len(cmd.findings), 1)
 		target = Target(name='testphp.vulnweb.com', _source='httpx')
 		url = Url(
 			'http://testphp.vulnweb.com',
@@ -44,10 +45,10 @@ class TestWorker(unittest.TestCase):
 		self.assertIn(url, cmd.results)
 
 	def test_host_recon(self):
-		from secator.output_types import Url, Port, Vulnerability
 		cmd = Command.execute(
 			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',
 			no_process=False,
+			quiet=True,
 			cls_attributes={'output_types': [Target, Url, Port, Vulnerability], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
@@ -79,7 +80,7 @@ class TestWorker(unittest.TestCase):
 			severity_nb=4,
 			severity='info',
 			tags=['tech', 'nginx'],
-			_source='nuclei'
+			_source='nuclei_url'
 		)
 		self.assertIn(port, cmd.results)
 		self.assertIn(url, cmd.results)

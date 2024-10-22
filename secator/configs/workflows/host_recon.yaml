@@ -21,7 +21,7 @@ tasks:
     targets_:
       - type: port
         field: '{host}:{port}'
-        condition: item._source == 'nmap'
+        condition: item._source.startswith('nmap')
   _group:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
@@ -35,7 +35,7 @@ tasks:
           condition: item.status_code != 0
 results:
   - type: port
-    condition: item._source == 'nmap'
+    condition: item._source.startswith('nmap')
 
   - type: vulnerability
   #   condition: item.confidence == 'high'

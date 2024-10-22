@@ -1,7 +1,6 @@
 import logging
 import os
 import re
-import traceback
 
 import xmltodict
 
@@ -16,7 +15,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability, Info, Error
 from secator.tasks._categories import VulnMulti
-from secator.utils import debug
+from secator.utils import debug, traceback_as_string
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +82,8 @@ class nmap(VulnMulti):
 		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
 		tcp_connect = self.get_opt_value('tcp_connect')
-		if tcp_syn_stealth:
+		udp_scan = self.get_opt_value('udp_scan')
+		if tcp_syn_stealth or udp_scan:
 			self.cmd = f'sudo {self.cmd}'
 		if tcp_connect and tcp_syn_stealth:
 			self._print(
@@ -108,7 +108,7 @@ class nmap(VulnMulti):
 			except Exception as exc:
 				yield Error(
 					message=f'Cannot parse XML output {self.output_path} to valid JSON.',
-					traceback=' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
+					traceback=traceback_as_string(exc)
 				)
 		yield from nmapData(results)
 

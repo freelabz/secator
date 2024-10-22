@@ -1,8 +1,11 @@
+import uuid
+
 from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
 from secator.celery_utils import CeleryData
+from secator.output_types import Info
 
 
 class Workflow(Runner):
@@ -32,17 +35,23 @@ class Workflow(Runner):
 			run_opts=run_opts,
 			results=self.results
 		)
+		self.celery_ids = list(self.celery_ids_map.keys())
 
 		# Run Celery workflow and get results
 		if self.sync:
 			results = workflow.apply().get()
 		else:
 			result = workflow()
+			self.celery_ids.append(str(result.id))
 			self.celery_result = result
+			yield Info(
+				message=f'Celery task created: {self.celery_result.id}',
+				task_id=self.celery_result.id
+			)
 			results = CeleryData.iter_results(
 				self.celery_result,
+				ids_map=self.celery_ids_map,
 				description=True,
-				results_only=True,
 				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
 			)
@@ -54,7 +63,7 @@ class Workflow(Runner):
 		""""Build Celery workflow.
 
 		Returns:
-			celery.chain: Celery task chain.
+			tuple(celery.chain, List[str]): Celery task chain, Celery task ids.
 		"""
 		from celery import chain
 		from secator.celery import forward_results
@@ -78,7 +87,7 @@ class Workflow(Runner):
 			sync (bool): Synchronous mode (chain of tasks, no chords).
 
 		Returns:
-			list: List of signatures.
+			tuple (List[celery.Signature], List[str]): Celery signatures, Celery task ids.
 		"""
 		from celery import chain, chord
 		from secator.celery import forward_results
@@ -117,7 +126,9 @@ class Workflow(Runner):
 				opts['name'] = task_name
 
 				# Create task signature
-				sig = task.s(targets, **opts).set(queue=task.profile)
+				task_id = str(uuid.uuid4())
+				sig = task.s(targets, **opts).set(queue=task.profile, task_id=task_id)
+				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
 			sigs.append(sig)
 		return sigs

@@ -16,6 +16,7 @@ from datetime import datetime
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
+import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
@@ -332,7 +333,7 @@ def detect_host(interface=None):
 
 
 def print_results_table(results, title=None, exclude_fields=[], log=False):
-	from secator.output_types import OUTPUT_TYPES
+	from secator.output_types import FINDING_TYPES
 	from secator.rich import build_table
 	_print = console.log if log else console.print
 	_print()
@@ -342,9 +343,7 @@ def print_results_table(results, title=None, exclude_fields=[], log=False):
 		_print(h1, style='bold magenta', width=50)
 		_print()
 	tables = []
-	for output_type in OUTPUT_TYPES:
-		if output_type.__name__ == 'Progress':
-			continue
+	for output_type in FINDING_TYPES:
 		items = [
 			item for item in results if item._type == output_type.get_name()
 		]
@@ -392,14 +391,14 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		if isinstance(obj, dict):
 			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
 		elif isinstance(obj, list):
-			obj_str += sep.join(obj)
+			obj_str += f'[dim]{sep.join(obj)}[/]'
 	if obj_str and not obj_after:
 		s = f'{s} {obj_str} '
 	s += f'[dim yellow]{msg}[/] '
 	if obj_str and obj_after:
 		s = f'{s}: {obj_str}'
 	if id:
-		s += f' [italic dim white]\[{id}][/] '
+		s += f' [italic dim gray11]\[{id}][/] '
 	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
 	print(s)
 
@@ -577,3 +576,15 @@ def sort_files_by_date(file_list):
 	"""
 	file_list.sort(key=lambda x: x.stat().st_mtime)
 	return file_list
+
+
+def traceback_as_string(exc):
+	"""Format an exception's traceback as a readable string.
+
+	Args:
+		Exception: an exception.
+
+	Returns:
+		string: readable traceback.
+	"""
+	return ' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))

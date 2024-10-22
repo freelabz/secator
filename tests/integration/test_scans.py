@@ -31,6 +31,7 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 	def tearDown(self):
 		Command.execute(
 			f'sh {INTEGRATION_DIR}/teardown.sh',
+			quiet=True,
 			cwd=INTEGRATION_DIR
 		)
 
@@ -48,7 +49,6 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 			'timeout': 7,
 			'depth': 2
 		}
-		opts = merge_opts(opts, fmt_opts)
 
 		for conf in TEST_SCANS:
 			with self.subTest(name=conf.name):

@@ -167,7 +167,7 @@ class bbot(Command):
 		'presets': lambda x: ' '.join(x.split(','))
 	}
 	item_loaders = [JSONSerializer()]
-	output_types = [Vulnerability, Port, Url, Record, Ip, Error]
+	output_types = [Vulnerability, Port, Url, Record, Ip]
 	output_discriminator = output_discriminator
 	output_map = {
 		Ip: {

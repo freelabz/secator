@@ -5,19 +5,20 @@ import re
 import shlex
 import subprocess
 import sys
-import traceback
 import uuid
 
 from time import sleep
 
+import psutil
 from fp.fp import FreeProxy
+from rich.tree import Tree
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error, Target
+from secator.output_types import Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug
+from secator.utils import debug, traceback_as_string
 
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ class Command(Runner):
 	# Input path (if a file is constructed)
 	input_path = None
 
-	# Input chunk size (default None)
+	# Input chunk size
 	input_chunk_size = CONFIG.runners.input_chunk_size
 
 	# Input required
@@ -142,10 +143,8 @@ class Command(Runner):
 		# No capturing of stdout / stderr.
 		self.no_capture = self.run_opts.get('no_capture', False)
 
-		# No processing of output lines.
-		self.no_process = self.run_opts.get('no_process', False)
-		if self.no_process:
-			self.print_item = False
+		# Print cmd
+		self.print_cmd = self.run_opts.get('print_cmd', False)
 
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
@@ -171,7 +170,8 @@ class Command(Runner):
 		if not self.has_children:
 			if self.sync and self.description:
 				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-			self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
+			if self.print_cmd:
+				self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
 		# Debug built input
 		input_str = '\n '.join(self.input).strip()
@@ -197,8 +197,8 @@ class Command(Runner):
 		if hooks_str:
 			debug(f'[dim magenta]Hooks:[/]\n {hooks_str}', sub='runner.init')
 
-	def toDict(self):
-		res = super().toDict()
+	def toDict(self, short=False):
+		res = super().toDict(short=short)
 		res.update({
 			'cmd': self.cmd,
 			'cwd': self.cwd,
@@ -280,13 +280,14 @@ class Command(Runner):
 		"""
 		name = name or cmd.split(' ')[0]
 		kwargs['no_process'] = kwargs.get('no_process', True)
-		kwargs['print_item'] = not kwargs.get('quiet', False)
-		kwargs['print_line'] = not kwargs.get('quiet', False)
-		delay_run = kwargs.pop('delay_run', False)
+		kwargs['print_cmd'] = kwargs.get('print_cmd', False) or not kwargs.get('quiet', False)
+		kwargs['print_item'] = kwargs.get('print_item', False) or not kwargs.get('quiet', False)
+		kwargs['print_line'] = kwargs.get('print_line', False) or not kwargs.get('quiet', False)
+		run = kwargs.pop('run', True)
 		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
-		if not delay_run:
+		if run:
 			cmd_instance.run()
 		return cmd_instance
 
@@ -344,9 +345,6 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
-		# Set status to 'RUNNING'
-		self.status = 'RUNNING'
-
 		# Callback before running command
 		self.run_hooks('on_start')
 
@@ -357,7 +355,11 @@ class Command(Runner):
 		# Check for sudo requirements and prepare the password if needed
 		sudo_password, error = self._prompt_sudo(self.cmd)
 		if error:
-			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error(
+				message=error,
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
 			return
 
 		# Prepare cmds
@@ -424,8 +426,6 @@ class Command(Runner):
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
-					# ansi_regex = r'\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[K]?'
-					# line = re.sub(ansi_regex, '', line.strip())
 					ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 					line = ansi_escape.sub('', line)
 					line = line.replace('\\x0d\\x0a', '\n')
@@ -445,24 +445,79 @@ class Command(Runner):
 				if item_count == 0:
 					yield line
 
+				yield from self.stats()
+
 			result = self.run_hooks('on_cmd_done')
 			if result:
 				yield from result
 
 		except KeyboardInterrupt:
-			self.process.kill()
-			self.killed = True
+			self.kill()
 
 		except Exception as e:
 			yield Error(
 				message=str(e),
-				traceback=' '.join(traceback.format_exception(e, value=e, tb=e.__traceback__)),
-				_source=self.config.name,
+				traceback=traceback_as_string(e),
+				_source=self.unique_name,
 				_uuid=str(uuid.uuid4())
 			)
 
-		# Retrieve the return code and output
-		yield from self._wait_for_end()
+		finally:
+			yield from self._wait_for_end()
+
+	def kill(self):
+		if not hasattr(self, 'process'):
+			return
+		pid = self.process.pid
+		if not pid:
+			return
+		proc = psutil.Process(pid)
+		root = Tree(f'[bold red]{proc.pid} ({proc.name()})[/]')
+		for subproc in proc.children(recursive=True):
+			subproc.kill()
+			root.add(f'[bold blue]{subproc.pid} ({subproc.name()})[/]')
+		proc.kill()
+		self._print("\n:high_brightness: [bold green]Killed processes:[/]", rich=True)
+		self._print(root, rich=True)
+		self.killed = True
+
+	def stats(self):
+		if not hasattr(self, 'process'):
+			return
+		pid = self.process.pid
+		if not pid:
+			return
+		proc = psutil.Process(pid)
+		stats = Command.get_process_info(proc, children=True)
+		for info in stats:
+			name = proc.name()
+			cpu_percent = info['cpu_percent']
+			mem_percent = info['memory_percent']
+			net_conns = info.get('net_connections') or []
+			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+			yield Stat(
+				name=name,
+				pid=pid,
+				cpu=cpu_percent,
+				memory=mem_percent,
+				net_conns=len(net_conns),
+				extra_data=extra_data
+			)
+
+	@staticmethod
+	def get_process_info(process, children=False):
+		try:
+			data = {
+				k: v._asdict() if hasattr(v, '_asdict') else v
+				for k, v in process.as_dict().items()
+				if k not in ['memory_maps', 'open_files', 'environ']
+			}
+			yield data
+		except psutil.Error:
+			return
+		if children:
+			for subproc in process.children(recursive=True):
+				yield from Command.get_process_info(subproc, children=False)
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line."""
@@ -525,24 +580,29 @@ class Command(Runner):
 		"""Wait for process to finish and process output and return code."""
 		self.process.wait()
 		self.return_code = self.process.returncode
+		self.output = self.output.strip()
+		self.process.stdout.close()
+		self.return_code = 0 if self.ignore_return_code else self.return_code
+		self.killed = self.return_code == -2 or self.killed
 
-		if self.no_capture:
-			self.output = ''
-		else:
-			self.output = self.output.strip()
-			self.process.stdout.close()
-
-		if self.ignore_return_code:
-			self.return_code = 0
-
-		if self.return_code == -2 or self.killed:
+		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error(
+				message=error,
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
+
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}.'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
-			yield Error(message=error, traceback='\n'.join(last_lines), _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error(
+				message=error,
+				traceback='\n'.join(last_lines),
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
 
 	@staticmethod
 	def _process_opts(

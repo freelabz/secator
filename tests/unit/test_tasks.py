@@ -5,10 +5,11 @@ import unittest
 import unittest.mock
 import warnings
 
+from secator.config import CONFIG
 from secator.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   MATCH_CODES, OPT_NOT_SUPPORTED, RATE_LIMIT,
 							   THREADS, TIMEOUT, DEFAULT_HTTPX_FLAGS)
-from secator.output_types import Info, Warning, Error, Url, Target
+from secator.output_types import Url
 from secator.rich import console
 from secator.runners import Command
 from secator.tasks import httpx
@@ -158,7 +159,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		host = 'test.synology.me'
 		cls = httpx(host, **run_opts)
 		default_threads = cls.meta_opts[THREADS]['default']
-		expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -threads {default_threads}'
+		expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -threads {default_threads}'
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
@@ -179,7 +180,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		}
 		host = 'test.synology.me'
 		cls = httpx(host, **run_opts)
-		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
+		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
@@ -202,7 +203,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		}
 		host = 'test.synology.me'
 		cls = httpx(host, **run_opts)
-		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
+		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
@@ -239,7 +240,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 				with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
 					self._test_task_output(
 						results,
-						expected_output_types=cls.output_types + [Info, Warning, Error, Target]
+						expected_output_types=cls.output_types
 					)
 
 	def test_cmd_original_schema(self):

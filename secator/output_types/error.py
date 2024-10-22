@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import time
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, traceback_as_string
 
 
 @dataclass
@@ -16,11 +16,15 @@ class Error(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = ['task_name', 'message', 'traceback']
+	_table_fields = ['message', 'traceback']
 	_sort_by = ('_timestamp',)
 
+	def from_exception(e):
+		return Error(message=f'{type(e).__name__}: {str(e)}', traceback=traceback_as_string(e))
+
 	def __repr__(self):
-		s = f'[bold red]❌ {self._source}: {self.message}[/]'
+		s = f'[bold red]❌ {self.message}[/]'
 		if self.traceback:
-			s += f'\n[dim]{self.traceback}[/]'
+			traceback_pretty = '   ' + self.traceback.replace('\n', '\n   ')
+			s += f'\n[dim]{traceback_pretty}[/]'
 		return rich_to_ansi(s)
