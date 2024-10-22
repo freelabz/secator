@@ -445,7 +445,8 @@ class Command(Runner):
 				if item_count == 0:
 					yield line
 
-				yield from self.stats()
+				# TODO: enable stats support with timer
+				# yield from self.stats()
 
 			result = self.run_hooks('on_cmd_done')
 			if result:
