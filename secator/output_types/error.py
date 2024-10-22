@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import time
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, traceback_as_string
 
 
 @dataclass
@@ -18,6 +18,9 @@ class Error(OutputType):
 
 	_table_fields = ['message', 'traceback']
 	_sort_by = ('_timestamp',)
+
+	def from_exception(e):
+		return Error(message=f'{type(e).__name__}: {str(e)}', traceback=traceback_as_string(e))
 
 	def __repr__(self):
 		s = f'[bold red]❌ {self.message}[/]'

@@ -25,7 +25,15 @@ from secator.output_types.record import Record
 from secator.output_types.info import Info
 from secator.output_types.warning import Warning
 from secator.output_types.error import Error
+from secator.output_types.stat import Stat
 
-OUTPUT_TYPES = [
-	Target, Progress, Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Record, Info, Warning, Error
+EXECUTION_TYPES = [
+	Target, Info, Warning, Error
 ]
+STAT_TYPES = [
+	Stat
+]
+FINDING_TYPES = [
+	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability
+]
+OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES

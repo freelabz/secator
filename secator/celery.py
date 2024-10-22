@@ -294,13 +294,10 @@ def run_command(self, results, name, targets, opts={}):
 			state['meta'] = task.celery_state
 			update_state(self, **state)
 
-	except BaseException as exc:
-		error = Error(
-			message=str(exc),
-			traceback=traceback_as_string(exc),
-			_source=task.unique_name,
-			_uuid=str(uuid.uuid4())
-		)
+	except BaseException as e:
+		error = Error.from_exception(e)
+		error._source = task.unique_name
+		error._uuid = str(uuid.uuid4())
 		task.results.append(error)
 
 	finally:

@@ -19,7 +19,7 @@ from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_p
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
-from secator.output_types import OUTPUT_TYPES
+from secator.output_types import FINDING_TYPES
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
@@ -36,7 +36,7 @@ ALL_TASKS = discover_tasks()
 ALL_CONFIGS = TemplateLoader.load_all()
 ALL_WORKFLOWS = ALL_CONFIGS.workflow
 ALL_SCANS = ALL_CONFIGS.scan
-OUTPUT_TYPES_LOWER = [c.__name__.lower() for c in OUTPUT_TYPES]
+FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 
 
 #-----#
@@ -555,7 +555,7 @@ def report():
 @click.argument('report_query', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
 @click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
-@click.option('-t', '--type', type=str, default='', help=f'Filter by output type. Choices: {OUTPUT_TYPES_LOWER}')
+@click.option('-t', '--type', type=str, default='', help=f'Filter by output type. Choices: {FINDING_TYPES_LOWER}')
 @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501

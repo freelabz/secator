@@ -333,7 +333,7 @@ def detect_host(interface=None):
 
 
 def print_results_table(results, title=None, exclude_fields=[], log=False):
-	from secator.output_types import OUTPUT_TYPES
+	from secator.output_types import FINDING_TYPES
 	from secator.rich import build_table
 	_print = console.log if log else console.print
 	_print()
@@ -343,9 +343,7 @@ def print_results_table(results, title=None, exclude_fields=[], log=False):
 		_print(h1, style='bold magenta', width=50)
 		_print()
 	tables = []
-	for output_type in OUTPUT_TYPES:
-		if output_type.__name__ == 'Progress':
-			continue
+	for output_type in FINDING_TYPES:
 		items = [
 			item for item in results if item._type == output_type.get_name()
 		]

@@ -1,7 +1,7 @@
 import operator
 
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES, OutputType
+from secator.output_types import FINDING_TYPES, OutputType
 from secator.utils import merge_opts, get_file_timestamp, traceback_as_string
 from secator.rich import console
 from secator.runners._helpers import extract_from_results
@@ -65,9 +65,7 @@ class Report:
 		data['info']['title'] = self.title
 
 		# Fill report
-		for output_type in OUTPUT_TYPES:
-			if output_type.__name__ == 'Progress':
-				continue
+		for output_type in FINDING_TYPES:
 			output_name = output_type.get_name()
 			sort_by, _ = get_table_fields(output_type)
 			items = [
@@ -101,7 +99,7 @@ def get_table_fields(output_type):
 	"""
 	sort_by = ()
 	output_fields = []
-	if output_type in OUTPUT_TYPES:
+	if output_type in FINDING_TYPES:
 		sort_by = output_type._sort_by
 		output_fields = output_type._table_fields
 	return sort_by, output_fields

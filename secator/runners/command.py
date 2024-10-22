@@ -15,7 +15,7 @@ from rich.tree import Tree
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error, Target
+from secator.output_types import Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug, traceback_as_string
@@ -355,7 +355,11 @@ class Command(Runner):
 		# Check for sudo requirements and prepare the password if needed
 		sudo_password, error = self._prompt_sudo(self.cmd)
 		if error:
-			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error(
+				message=error,
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
 			return
 
 		# Prepare cmds
@@ -441,6 +445,8 @@ class Command(Runner):
 				if item_count == 0:
 					yield line
 
+				yield from self.stats()
+
 			result = self.run_hooks('on_cmd_done')
 			if result:
 				yield from result
@@ -462,7 +468,6 @@ class Command(Runner):
 	def kill(self):
 		if not hasattr(self, 'process'):
 			return
-
 		pid = self.process.pid
 		if not pid:
 			return
@@ -475,6 +480,44 @@ class Command(Runner):
 		self._print("\n:high_brightness: [bold green]Killed processes:[/]", rich=True)
 		self._print(root, rich=True)
 		self.killed = True
+
+	def stats(self):
+		if not hasattr(self, 'process'):
+			return
+		pid = self.process.pid
+		if not pid:
+			return
+		proc = psutil.Process(pid)
+		stats = Command.get_process_info(proc, children=True)
+		for info in stats:
+			name = proc.name()
+			cpu_percent = info['cpu_percent']
+			mem_percent = info['memory_percent']
+			net_conns = info.get('net_connections') or []
+			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+			yield Stat(
+				name=name,
+				pid=pid,
+				cpu=cpu_percent,
+				memory=mem_percent,
+				net_conns=len(net_conns),
+				extra_data=extra_data
+			)
+
+	@staticmethod
+	def get_process_info(process, children=False):
+		try:
+			data = {
+				k: v._asdict() if hasattr(v, '_asdict') else v
+				for k, v in process.as_dict().items()
+				if k not in ['memory_maps', 'open_files', 'environ']
+			}
+			yield data
+		except psutil.Error:
+			return
+		if children:
+			for subproc in process.children(recursive=True):
+				yield from Command.get_process_info(subproc, children=False)
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line."""
@@ -544,13 +587,22 @@ class Command(Runner):
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(message=error, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error(
+				message=error,
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}.'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
-			yield Error(message=error, traceback='\n'.join(last_lines), _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error(
+				message=error,
+				traceback='\n'.join(last_lines),
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
 
 	@staticmethod
 	def _process_opts(

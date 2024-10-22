@@ -12,7 +12,7 @@ from rich.panel import Panel
 
 from secator.definitions import DEBUG
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES, OutputType, Info, Warning, Error
+from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
@@ -115,6 +115,8 @@ class Runner:
 		self.no_process = self.run_opts.get('no_process', False)
 		self.print_item = self.run_opts.get('print_item', False) and not self.no_process
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
+		self.print_targets = self.run_opts.get('print_target', False) and not self.quiet
+		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False)
 		self.print_json = self.run_opts.get('json', False)
 		self.print_raw = self.run_opts.get('raw', False)
@@ -158,19 +160,31 @@ class Runner:
 
 	@property
 	def infos(self):
-		return [e for e in self.results if e._type == 'info']
+		return [r for r in self.results if isinstance(r, Info)]
 
 	@property
 	def warnings(self):
-		return [e for e in self.results if e._type == 'warning']
+		return [r for r in self.results if isinstance(r, Warning)]
 
 	@property
 	def errors(self):
-		return [e for e in self.results if e._type == 'error']
+		return [r for r in self.results if isinstance(r, Error)]
 
 	@property
-	def results_count(self):
-		return len([c for c in self.results if c._source == self.unique_name])
+	def findings(self):
+		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES))]
+
+	@property
+	def findings_count(self):
+		return len(self.findings)
+
+	@property
+	def self_findings(self):
+		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES)) if r._source == self.unique_name]
+
+	@property
+	def self_findings_count(self):
+		return len(self.self_findings)
 
 	@property
 	def uuids(self):
@@ -194,7 +208,7 @@ class Runner:
 			'chunk_count': self.chunk_count,
 			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
 			'celery_id': self.context['celery_id'],
-			'count': self.results_count,
+			'count': self.self_findings_count,
 			'descr': self.config.description or '',
 		}
 
@@ -221,9 +235,11 @@ class Runner:
 						continue
 
 					# Hack to get new Celery ids dynamically into self.celery_ids
-					if item._type == 'info' and item.task_id and item.task_id not in self.celery_ids:
+					# TODO: switch to using context.celery_id for any kind of item
+					if isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
 						self.celery_ids.append(item.task_id)
 
+					# Append item to results
 					self.results.append(item)
 					yield item
 
@@ -237,12 +253,9 @@ class Runner:
 				self.stop_live_tasks()
 
 		except Exception as e:
-			error = Error(
-				message=str(e),
-				traceback=traceback_as_string(e),
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			error = Error.from_exception(e)
+			error._source = self.unique_name
+			error._uuid = str(uuid.uuid4())
 			self.results.append(error)
 			self._print_item(error)
 			yield error
@@ -270,6 +283,9 @@ class Runner:
 	def _print_item(self, item):
 		item_str = self.get_repr(item)
 		if isinstance(item, (OutputType, DotMap)):
+			_type = item._type
+			if not getattr(self, f'print_{_type}', True):
+				return
 			if self.print_item:
 				if self.print_json:
 					self._print(item, out=sys.stdout)
@@ -334,7 +350,7 @@ class Runner:
 			'elapsed': self.elapsed.total_seconds(),
 			'elapsed_human': self.elapsed_human,
 			'run_opts': {k: v for k, v in self.run_opts.items() if k not in self.print_opts},
-			'results_count': self.results_count,
+			'results_count': self.findings_count,  # name kept for backwards compatibility
 		}
 		data.update({
 			'config': self.config.toDict(),
@@ -364,18 +380,16 @@ class Runner:
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
 				result = hook(self, *args)
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='hooks', level=3)
-			except Exception as exc:
+			except Exception as e:
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failure'}, id=_id, sub='hooks', level=3)
-				error = Error(
-					message=f'Hook "{fun}" execution failed.',
-					traceback=traceback_as_string(exc),
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
+				error = Error.from_exception(e)
+				error.message = f'Hook "{fun}" execution failed.'
+				error._source = self.unique_name
+				error._uuid = str(uuid.uuid4())
 				self.results.append(error)
 				self._print_item(error)
 				if self.raise_on_error:
-					raise exc
+					raise e
 		return result
 
 	def run_validators(self, validator_type, *args):
@@ -559,7 +573,7 @@ class Runner:
 
 		# Log results count
 		if self.print_item:
-			count_map = self._get_results_count()
+			count_map = self._get_findings_count()
 			self._print('', rich=True)
 			if all(count == 0 for count in count_map.values()):
 				self._print(':exclamation_mark:Found 0 results.', color='bold red', rich=True)
@@ -599,7 +613,7 @@ class Runner:
 			# Keep the field types in results not specified in the extractors.
 			extract_fields = [e['type'] for e in extractors]
 			keep_fields = [
-				_type for _type in OUTPUT_TYPES if _type.__name__ != 'Progress'
+				_type for _type in FINDING_TYPES
 				if _type not in extract_fields
 			]
 			results.extend([
@@ -617,14 +631,13 @@ class Runner:
 			item (dict): Item.
 
 		Returns:
-			dict: Item with new schema.
+			secator.output_types.OutputType: Loaded item.
 		"""
 		# Load item using available output types and get the first matching
 		# output type based on the schema
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
-		output_types.extend([Info, Warning, Error])
-		debug(f'Input item: {item}', sub='klass.load', level=5)
+		debug(f'Input item: {item}', sub='klass.load')
 
 		# Skip if already converted
 		if isinstance(item, DotMap) or isinstance(item, OutputType):
@@ -635,29 +648,34 @@ class Runner:
 		if output_discriminator:
 			result = output_discriminator(item)
 			if result:
-				debug(f'Discriminated output type: {result.__name__}', sub='klass.load', level=5)
+				debug(f'Discriminated output type: {result.__name__}', sub='klass.load')
 				output_types = [result]
 			else:
 				new_item = DotMap(item)
 				new_item._type = 'unknown'
 				return new_item
 
-		debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load', level=5)
+		elif '_type' in item:
+			otypes = [o for o in output_types if o.get_name() == item['_type']]
+			if otypes:
+				output_types = [otypes[0]]
+				debug(f'_type key is present in item and matches {otypes[0]}', sub='klass.load')
+
+		debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load')
 		for klass in output_types:
-			debug(f'Loading item as {klass.__name__}', sub='klass.load', level=5)
-			output_map = getattr(self, 'output_map', {})
-			output_map = output_map.get(klass, {})
+			debug(f'Loading item as {klass.__name__}', sub='klass.load')
+			output_map = getattr(self, 'output_map', {}).get(klass, {})
 			try:
 				new_item = klass.load(item, output_map)
-				debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', sub='klass.load', level=5)
+				debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', sub='klass.load')
 				break  # found an item that fits
 			except (TypeError, KeyError) as e:  # can't load using class
 				debug(
 					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
-					sub='klass.load',
-					level=5)
-				if DEBUG == 6:
-					console.print_exception(show_locals=False)
+					sub='klass.load')
+				if 'klass.debug' in CONFIG.debug.component:
+					error = Error.from_exception(e)
+					self._print(error)
 				continue
 
 		# No output type was found, so make no conversion
@@ -689,14 +707,13 @@ class Runner:
 				data = json.dumps(data)
 			print(data, file=out)
 
-	def _get_results_count(self):
+	def _get_findings_count(self):
 		count_map = {}
-		for output_type in self.output_types:
-			if output_type.__name__ == 'Progress':
-				continue
+		for output_type in FINDING_TYPES:
 			name = output_type.get_name()
-			count = len([r for r in self.results if r._type == name])
-			count_map[name] = count
+			count = len([r for r in self.results if isinstance(r, output_type)])
+			if count > 0:
+				count_map[name] = count
 		return count_map
 
 	def _process_item(self, item: dict):
@@ -721,7 +738,7 @@ class Runner:
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
 
-		if item._type == 'progress' and item._source == self.unique_name:
+		if isinstance(item, Progress) and item._source == self.unique_name:
 			self.progress = item.percent
 			update_frequency = CONFIG.runners.progress_update_frequency
 			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:

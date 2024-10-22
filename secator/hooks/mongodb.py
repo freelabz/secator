@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES
+from secator.output_types import FINDING_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
@@ -87,7 +87,7 @@ def find_duplicates(self):
 def load_finding(obj):
 	finding_type = obj['_type']
 	klass = None
-	for otype in OUTPUT_TYPES:
+	for otype in FINDING_TYPES:
 		if finding_type == otype.get_name():
 			klass = otype
 			item = klass.load(obj)
