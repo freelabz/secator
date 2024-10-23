@@ -115,12 +115,12 @@ class Runner:
 		self.no_process = self.run_opts.get('no_process', False)
 		self.print_item = self.run_opts.get('print_item', False) and not self.no_process
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
-		self.print_targets = self.run_opts.get('print_target', False) and not self.quiet
-		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False)
 		self.print_json = self.run_opts.get('json', False)
 		self.print_raw = self.run_opts.get('raw', False)
 		self.print_orig = self.run_opts.get('orig', False)
+		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
+		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
 		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
 		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
@@ -284,7 +284,8 @@ class Runner:
 		item_str = self.get_repr(item)
 		if isinstance(item, (OutputType, DotMap)):
 			_type = item._type
-			if not getattr(self, f'print_{_type}', True):
+			print_this_type = getattr(self, f'print_{_type}', True)
+			if not print_this_type:
 				return
 			if self.print_item:
 				if self.print_json:
