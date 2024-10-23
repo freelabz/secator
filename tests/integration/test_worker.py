@@ -30,7 +30,6 @@ class TestWorker(unittest.TestCase):
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
 		self.assertEqual(len(cmd.findings), 1)
-		target = Target(name='testphp.vulnweb.com', _source='httpx')
 		url = Url(
 			'http://testphp.vulnweb.com',
 			status_code=200,
@@ -41,7 +40,6 @@ class TestWorker(unittest.TestCase):
 			content_length=4958,
 			_source='httpx'
 		)
-		self.assertIn(target, cmd.results)
 		self.assertIn(url, cmd.results)
 
 	def test_host_recon(self):

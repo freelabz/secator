@@ -262,7 +262,7 @@ class Command(Runner):
 	#---------------#
 
 	@classmethod
-	def execute(cls, cmd, name=None, cls_attributes={}, **kwargs):
+	def execute(cls, cmd, name=None, cls_attributes={}, run=True, **kwargs):
 		"""Execute an ad-hoc command.
 
 		Can be used without defining an inherited class to run a command, while still enjoying all the good stuff in
@@ -280,10 +280,7 @@ class Command(Runner):
 		"""
 		name = name or cmd.split(' ')[0]
 		kwargs['no_process'] = kwargs.get('no_process', True)
-		kwargs['print_cmd'] = kwargs.get('print_cmd', False) or not kwargs.get('quiet', False)
-		kwargs['print_item'] = kwargs.get('print_item', False) or not kwargs.get('quiet', False)
 		kwargs['print_line'] = kwargs.get('print_line', False) or not kwargs.get('quiet', False)
-		run = kwargs.pop('run', True)
 		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
