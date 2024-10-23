@@ -1,3 +1,5 @@
+import os
+import yaml
 
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
@@ -5,6 +7,7 @@ from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   THREADS, TIMEOUT, USER_AGENT)
 from secator.output_types import Vulnerability
 from secator.tasks._categories import VulnCode
+from secator.definitions import (OUTPUT_PATH)
 
 
 @task()
@@ -13,7 +16,7 @@ class grype(VulnCode):
 	cmd = 'grype --quiet'
 	input_flag = ''
 	file_flag = OPT_NOT_SUPPORTED
-	json_flag = None
+	json_flag = '-o json'
 	opt_prefix = '--'
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
@@ -29,52 +32,54 @@ class grype(VulnCode):
 	output_types = [Vulnerability]
 	item_loaders = []
 	install_cmd = (
-		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
+		'$(curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin) || exit 1'
 	)
 	install_github_handle = 'anchore/grype'
 
+	output_map = {
+        Vulnerability: {
+            'name': lambda x: x['vulnerability']['id'],
+			'severity': lambda x: x['vulnerability']['severity'].lower(),
+			'cvss_score': lambda x: x['vulnerability']['cvss_score'],
+			'references': lambda x: x['vulnerability']['urls'],
+			'description': lambda x: x['vulnerability']['description']
+        }
+    }
+
 	@staticmethod
-	def item_loader(self, line):
-		"""Load vulnerabilty dicts from grype line output."""
-		split = [i for i in line.split(' ') if i]
-		if not len(split) in [5, 6] or split[0] == 'NAME':
+	def on_cmd(self):
+		output_path = self.get_opt_value(OUTPUT_PATH)
+		if not output_path:
+			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+		self.output_path = output_path
+		self.cmd = f'{self.cmd} --file {self.output_path}'
+
+	
+	def yielder(self):
+		prev = self.print_item_count
+		self.print_item_count = False
+		list(super().yielder())
+		if self.return_code != 0:
 			return
-		version_fixed = None
-		if len(split) == 5:  # no version fixed
-			product, version, product_type, vuln_id, severity = tuple(split)
-		elif len(split) == 6:
-			product, version, version_fixed, product_type, vuln_id, severity = tuple(split)
-		extra_data = {
-			'lang': product_type,
-			'product': product,
-			'version': version,
-		}
-		if version_fixed:
-			extra_data['version_fixed'] = version_fixed
-		data = {
-			'id': vuln_id,
-			'name': vuln_id,
-			'matched_at': self.input,
-			'confidence': 'medium',
-			'severity': severity.lower(),
-			'provider': 'grype',
-			'cvss_score': -1,
-			'tags': [],
-		}
-		if vuln_id.startswith('GHSA'):
-			data['provider'] = 'github.com'
-			data['references'] = [f'https://github.com/advisories/{vuln_id}']
-			data['tags'].extend(['cve', 'ghsa'])
-			vuln = VulnCode.lookup_ghsa(vuln_id)
-			if vuln:
-				data.update(vuln)
-				data['severity'] = data['severity'] or severity.lower()
-				extra_data['ghsa_id'] = vuln_id
-		elif vuln_id.startswith('CVE'):
-			vuln = VulnCode.lookup_cve(vuln_id)
-			if vuln:
-				vuln['tags'].append('cve')
-				data.update(vuln)
-				data['severity'] = data['severity'] or severity.lower()
-		data['extra_data'] = extra_data
-		yield data
+		self.results = []
+		if not self.output_json:
+			return
+		note = f'Trivy JSON result saved to {self.output_path}'
+		if self.print_line:
+			self._print(note)
+		if os.path.exists(self.output_path):
+			with open(self.output_path, 'r') as f:
+				results = yaml.safe_load(f.read())
+			for item in results['matches']:
+				for i in item['relatedVulnerabilities'][0]['cvss']:
+					item['vulnerability']['cvss_score'] = str(i['metrics']['baseScore'])
+				# severity Negligible to unknow
+				if item['vulnerability']['severity'] == 'Negligible':
+					item['vulnerability']['severity'] = 'unknown'
+
+				item = self._process_item(item)
+				if not item:
+					continue
+				yield item
+		self.print_item_count = prev
+
