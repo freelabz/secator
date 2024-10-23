@@ -1180,10 +1180,15 @@ def unit(tasks, workflows, scans, test):
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
+	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
+	os.environ['SECATOR_OFFLINE_MODE'] = "1"
 	os.environ['SECATOR_HTTP_STORE_RESPONSES'] = '0'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
+	import shutil
+	shutil.rmtree('/tmp/.secator', ignore_errors=True)
+
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m unittest'
 	if test:
 		tests = test.split(',')
 		for test in tests:
@@ -1205,28 +1210,35 @@ def integration(tasks, workflows, scans, test):
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
+	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
-	os.environ['SECATOR_DIRS_DATA'] = '/tmp/data'
-	os.environ['SECATOR_DIRS_REPORTS'] = '/tmp/data/reports'
-	os.environ['SECATOR_DIRS_CELERY'] = '/tmp/celery'
-	os.environ['SECATOR_DIRS_CELERY_DATA'] = '/tmp/celery/data'
-	os.environ['SECATOR_DIRS_CELERY_RESULTS'] = '/tmp/celery/results'
-	import shutil
-	for path in ['/tmp/data', '/tmp/celery', '/tmp/celery/data', '/tmp/celery/results']:
-		shutil.rmtree(path, ignore_errors=True)
 
-	cmd = f'{sys.executable} -m unittest'
+	import shutil
+	shutil.rmtree('/tmp/.secator', ignore_errors=True)
+
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.integration -m unittest'
 	if test:
-		if not test.startswith('tests.integration'):
-			test = f'tests.integration.{test}'
-		cmd += f' {test}'
+		if test:
+			tests = test.split(',')
+			for test in tests:
+				if not test.startswith('tests.integration'):
+					test = f'tests.integration.{test}'
+				cmd += f' {test}'
 	else:
 		cmd += ' discover -v tests.integration'
 	run_test(cmd, 'integration')
 
 
 @test.command()
-def coverage():
-	"""Run coverage report."""
+@click.option('--unit-only', '-u', is_flag=True, default=False, help='Only generate coverage for unit tests')
+@click.option('--integration-only', '-i', is_flag=True, default=False, help='Only generate coverage for integration tests')  # noqaa: E501
+def coverage(unit_only, integration_only):
+	"""Run coverage combine + coverage report."""
 	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*,*/templates/*'
+	if unit_only:
+		cmd += ' --data-file=.coverage.unit'
+	elif integration_only:
+		cmd += ' --data-file=.coverage.integration'
+	else:
+		Command.execute(f'{sys.executable} -m coverage combine --keep', name='coverage combine', cwd=ROOT_FOLDER)
 	run_test(cmd, 'coverage')

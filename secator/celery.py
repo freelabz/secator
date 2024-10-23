@@ -238,19 +238,20 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Get task class
 	task_cls = Task.get_task_class(name)
-	task = task_cls(targets, **opts)
-	iterator = task
 
 	try:
 		# Check if chunkable
 		many_targets = len(targets) > 1
 		targets_over_chunk_size = task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
 		has_no_file_flag = task_cls.file_flag is None
-		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size) and not task.sync
+		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size)
+		opts['has_children'] = chunk_it
+		task = task_cls(targets, **opts)
+		iterator = task
 		debug(
 			'',
 			obj={
-				f'{task.unique_name}': 'CHUNK?',
+				f'{name}': 'CHUNK?',
 				'enabled': chunk_it,
 				'sync': task.sync,
 				'has_no_file_flag': has_no_file_flag,
@@ -260,10 +261,9 @@ def run_command(self, results, name, targets, opts={}):
 			id=task.unique_name,
 			sub='celery.state'
 		)
-		task.has_children = chunk_it
 
 		# Follow multiple chunked tasks
-		if chunk_it:
+		if chunk_it and not task.sync:
 			chunk_size = 1 if has_no_file_flag else task_cls.input_chunk_size
 			workflow, ids_map = break_task(
 				task,

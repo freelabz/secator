@@ -197,8 +197,8 @@ class Command(Runner):
 		if hooks_str:
 			debug(f'[dim magenta]Hooks:[/]\n {hooks_str}', sub='runner.init')
 
-	def toDict(self, short=False):
-		res = super().toDict(short=short)
+	def toDict(self):
+		res = super().toDict()
 		res.update({
 			'cmd': self.cmd,
 			'cwd': self.cwd,
@@ -446,7 +446,7 @@ class Command(Runner):
 					yield line
 
 				# TODO: enable stats support with timer
-				# yield from self.stats()
+				yield from self.stats()
 
 			result = self.run_hooks('on_cmd_done')
 			if result:
@@ -514,7 +514,7 @@ class Command(Runner):
 				if k not in ['memory_maps', 'open_files', 'environ']
 			}
 			yield data
-		except psutil.Error:
+		except (psutil.Error, FileNotFoundError):
 			return
 		if children:
 			for subproc in process.children(recursive=True):

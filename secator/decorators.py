@@ -18,6 +18,7 @@ RUNNER_OPTS = {
 	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
 	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
 	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
+	'stats': {'is_flag': True, 'default': False, 'help': 'Show runtime statistics'},
 	# 'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},  # TODO: rework this
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
@@ -271,6 +272,7 @@ def register_runner(cli_endpoint, config):
 	@click.pass_context
 	def func(ctx, **opts):
 		sync = opts['sync']
+		stats = opts.pop('stats')
 		remote = opts.pop('remote')
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
@@ -310,6 +312,7 @@ def register_runner(cli_endpoint, config):
 			'print_item': True,
 			'print_line': True,
 			'print_remote_info': not sync,
+			'print_stat': stats
 		})
 
 		# Build hooks from driver name

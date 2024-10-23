@@ -20,6 +20,7 @@ StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.
 ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
+DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
 
 
 class StrictModel(BaseModel, extra='forbid'):
@@ -28,7 +29,7 @@ class StrictModel(BaseModel, extra='forbid'):
 
 class Directories(StrictModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
-	data: Directory = Path.home() / '.secator'
+	data: Directory = Path(DATA_FOLDER)
 	templates: Directory = ''
 	reports: Directory = ''
 	wordlists: Directory = ''
@@ -514,7 +515,7 @@ def download_files(data: dict, target_folder: Path, offline_mode: bool, type: st
 		else:
 			# Download file from URL
 			ext = url_or_path.split('.')[-1]
-			filename = f'{name}.{ext}'
+			filename = f'{name}.{ext}' if not name.endswith(ext) else name
 			target_path = target_folder / filename
 			if not target_path.exists():
 				try:
