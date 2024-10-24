@@ -140,7 +140,7 @@ secator --help
 git clone https://github.com/freelabz/secator
 cd secator
 docker-compose up -d
-docker-compose exec secator secator --help
+docker-compose exec secator-manager secator --help
 ```
 
 </details>
