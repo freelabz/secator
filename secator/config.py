@@ -73,6 +73,7 @@ class Cli(StrictModel):
 class Runners(StrictModel):
 	input_chunk_size: int = 100
 	progress_update_frequency: int = 20
+	stat_update_frequency: int = 20
 	poll_frequency: int = 5
 	skip_cve_search: bool = False
 	skip_cve_low_confidence: bool = True

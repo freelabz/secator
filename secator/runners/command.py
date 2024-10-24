@@ -7,7 +7,7 @@ import subprocess
 import sys
 import uuid
 
-from time import sleep
+from time import sleep, time
 
 import psutil
 from fp.fp import FreeProxy
@@ -145,6 +145,9 @@ class Command(Runner):
 
 		# Print cmd
 		self.print_cmd = self.run_opts.get('print_cmd', False)
+
+		# Stat update
+		self.last_updated_stat = None
 
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
@@ -442,8 +445,13 @@ class Command(Runner):
 				if item_count == 0:
 					yield line
 
+				# Yield command stats (CPU, memory, conns ...)
 				# TODO: enable stats support with timer
+				if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
+					continue
+
 				yield from self.stats()
+				self.last_updated_stat = time()
 
 			result = self.run_hooks('on_cmd_done')
 			if result:
@@ -480,15 +488,13 @@ class Command(Runner):
 		self.killed = True
 
 	def stats(self):
-		if not hasattr(self, 'process'):
+		if not hasattr(self, 'process') or not self.process.pid:
 			return
-		pid = self.process.pid
-		if not pid:
-			return
-		proc = psutil.Process(pid)
+		proc = psutil.Process(self.process.pid)
 		stats = Command.get_process_info(proc, children=True)
 		for info in stats:
-			name = proc.name()
+			name = info['name']
+			pid = info['pid']
 			cpu_percent = info['cpu_percent']
 			mem_percent = info['memory_percent']
 			net_conns = info.get('net_connections') or []
