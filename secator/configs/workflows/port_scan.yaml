@@ -22,13 +22,13 @@ tasks:
       targets_:
       - type: port
         field: '{host}~{service_name}'
-        condition: item._source == 'nmap' and len(item.service_name.split('/')) > 1
+        condition: item._source.startswith('nmap') and len(item.service_name.split('/')) > 1
     httpx:
       description: Probe HTTP services on open ports
       targets_:
         - type: port
           field: '{host}:{port}'
-          condition: item._source == 'nmap'
+          condition: item._source.startswith('nmap')
 results:
   - type: port
 

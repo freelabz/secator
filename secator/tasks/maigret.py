@@ -7,7 +7,7 @@ from secator.decorators import task
 from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
 								 TIMEOUT, URL, USERNAME)
-from secator.output_types import UserAccount
+from secator.output_types import UserAccount, Info, Error
 from secator.tasks._categories import ReconUser
 
 logger = logging.getLogger(__name__)
@@ -45,34 +45,33 @@ class maigret(ReconUser):
 	socks5_proxy = True
 	profile = 'io'
 
-	def yielder(self):
-		prev = self.print_item_count
-		self.print_item_count = False
-		yield from super().yielder()
-		if self.return_code != 0:
-			return
-		self.results = []
-		if not self.output_path:
-			match = re.search('JSON ndjson report for .* saved in (.*)', self.output)
-			if match is None:
-				logger.warning('JSON output file not found in command output.')
-				return
-			self.output_path = match.group(1)
-		note = f'maigret JSON results saved to {self.output_path}'
-		if self.print_line:
-			self._print(note)
-		if os.path.exists(self.output_path):
-			with open(self.output_path, 'r') as f:
-				data = [json.loads(line) for line in f.read().splitlines()]
-			for item in data:
-				yield item
-		self.print_item_count = prev
-
 	@staticmethod
 	def on_init(self):
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		self.output_path = output_path
 
 	@staticmethod
+	def on_cmd_done(self):
+		# Search output path in cmd output
+		if not self.output_path:
+			match = re.search('JSON ndjson report for .* saved in (.*)', self.output)
+			if match is None:
+				yield Error(message='JSON output file not found in command output.')
+				return
+			self.output_path = match.group(1)
+
+		if not os.path.exists(self.output_path):
+			yield Error(message=f'Could not find JSON results in {self.output_path}')
+			return
+
+		yield Info(message=f'JSON results saved to {self.output_path}')
+		with open(self.output_path, 'r') as f:
+			data = [json.loads(line) for line in f.read().splitlines()]
+		for item in data:
+			yield item
+
+	@staticmethod
 	def validate_item(self, item):
-		return item['http_status'] == 200
+		if isinstance(item, dict):
+			return item['http_status'] == 200
+		return True

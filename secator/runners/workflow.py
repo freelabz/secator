@@ -1,9 +1,11 @@
-from secator.definitions import DEBUG
-from secator.output_types import Target
+import uuid
+
 from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
+from secator.celery_utils import CeleryData
+from secator.output_types import Info
 
 
 class Workflow(Runner):
@@ -24,38 +26,35 @@ class Workflow(Runner):
 		Returns:
 			list: List of results.
 		"""
-		# Yield targets
-		for target in self.targets:
-			yield Target(name=target, _source=self.config.name, _type='target', _context=self.context)
-
 		# Task opts
-		task_run_opts = self.run_opts.copy()
-		task_fmt_opts = {
-			'json': task_run_opts.get('json', False),
-			'print_cmd': True,
-			'print_cmd_prefix': not self.sync,
-			'print_description': self.sync,
-			'print_input_file': DEBUG > 0,
-			'print_item': True,
-			'print_item_count': True,
-			'print_line': not self.sync,
-			'print_progress': self.sync,
-		}
-
-		# Construct run opts
-		task_run_opts['hooks'] = self._hooks.get(Task, {})
-		task_run_opts.update(task_fmt_opts)
+		run_opts = self.run_opts.copy()
+		run_opts['hooks'] = self._hooks.get(Task, {})
 
 		# Build Celery workflow
-		workflow = self.build_celery_workflow(run_opts=task_run_opts, results=self.results)
+		workflow = self.build_celery_workflow(
+			run_opts=run_opts,
+			results=self.results
+		)
+		self.celery_ids = list(self.celery_ids_map.keys())
 
 		# Run Celery workflow and get results
 		if self.sync:
 			results = workflow.apply().get()
 		else:
 			result = workflow()
+			self.celery_ids.append(str(result.id))
 			self.celery_result = result
-			results = self.process_live_tasks(result, results_only=True, print_remote_status=self.print_remote_status)
+			yield Info(
+				message=f'Celery task created: {self.celery_result.id}',
+				task_id=self.celery_result.id
+			)
+			results = CeleryData.iter_results(
+				self.celery_result,
+				ids_map=self.celery_ids_map,
+				description=True,
+				print_remote_info=self.print_remote_info,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
+			)
 
 		# Get workflow results
 		yield from results
@@ -64,7 +63,7 @@ class Workflow(Runner):
 		""""Build Celery workflow.
 
 		Returns:
-			celery.chain: Celery task chain.
+			tuple(celery.chain, List[str]): Celery task chain, Celery task ids.
 		"""
 		from celery import chain
 		from secator.celery import forward_results
@@ -88,7 +87,7 @@ class Workflow(Runner):
 			sync (bool): Synchronous mode (chain of tasks, no chords).
 
 		Returns:
-			list: List of signatures.
+			tuple (List[celery.Signature], List[str]): Celery signatures, Celery task ids.
 		"""
 		from celery import chain, chord
 		from secator.celery import forward_results
@@ -98,7 +97,7 @@ class Workflow(Runner):
 			task_opts = task_opts or {}
 
 			# If it's a group, process the sublevel tasks as a Celery chord.
-			if task_name == '_group':
+			if task_name.startswith('_group'):
 				tasks = self.get_tasks(
 					task_opts,
 					targets,
@@ -127,7 +126,9 @@ class Workflow(Runner):
 				opts['name'] = task_name
 
 				# Create task signature
-				sig = task.s(targets, **opts).set(queue=task.profile)
+				task_id = str(uuid.uuid4())
+				sig = task.s(targets, **opts).set(queue=task.profile, task_id=task_id)
+				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
 			sigs.append(sig)
 		return sigs

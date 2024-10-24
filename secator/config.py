@@ -20,6 +20,7 @@ StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.
 ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
+DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
 
 
 class StrictModel(BaseModel, extra='forbid'):
@@ -28,7 +29,7 @@ class StrictModel(BaseModel, extra='forbid'):
 
 class Directories(StrictModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
-	data: Directory = Path.home() / '.secator'
+	data: Directory = Path(DATA_FOLDER)
 	templates: Directory = ''
 	reports: Directory = ''
 	wordlists: Directory = ''
@@ -70,8 +71,10 @@ class Cli(StrictModel):
 
 
 class Runners(StrictModel):
-	input_chunk_size: int = 1000
-	progress_update_frequency: int = 60
+	input_chunk_size: int = 100
+	progress_update_frequency: int = 20
+	stat_update_frequency: int = 20
+	poll_frequency: int = 5
 	skip_cve_search: bool = False
 	skip_cve_low_confidence: bool = True
 	remove_duplicates: bool = False
@@ -81,6 +84,7 @@ class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
 	store_responses: bool = False
+	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
 
@@ -512,7 +516,7 @@ def download_files(data: dict, target_folder: Path, offline_mode: bool, type: st
 		else:
 			# Download file from URL
 			ext = url_or_path.split('.')[-1]
-			filename = f'{name}.{ext}'
+			filename = f'{name}.{ext}' if not name.endswith(ext) else name
 			target_path = target_folder / filename
 			if not target_path.exists():
 				try:

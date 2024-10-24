@@ -12,3 +12,4 @@ snippets
 styles.css
 video
 video/
+error

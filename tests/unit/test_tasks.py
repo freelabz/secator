@@ -5,9 +5,11 @@ import unittest
 import unittest.mock
 import warnings
 
+from secator.config import CONFIG
 from secator.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   MATCH_CODES, OPT_NOT_SUPPORTED, RATE_LIMIT,
 							   THREADS, TIMEOUT, DEFAULT_HTTPX_FLAGS)
+from secator.output_types import Url
 from secator.rich import console
 from secator.runners import Command
 from secator.tasks import httpx
@@ -151,23 +153,19 @@ class TestCommandProcessOpts(unittest.TestCase):
 		self.assertEqual(opt_value, None)
 
 	def test_httpx_build_cmd_defaults(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 		run_opts = {}
 		host = 'test.synology.me'
 		cls = httpx(host, **run_opts)
 		default_threads = cls.meta_opts[THREADS]['default']
-		expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -threads {default_threads}'
+		expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -threads {default_threads}'
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
-		self.assertEqual(cls.print_item_count, False)
-		self.assertEqual(cls.print_cmd, False)
-		self.assertEqual(cls.print_cmd_prefix, False)
-		self.assertEqual(cls.output_json, True)
 
 	def test_httpx_build_cmd_with_opts(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 		run_opts = {
 			FOLLOW_REDIRECT: False,
@@ -182,17 +180,13 @@ class TestCommandProcessOpts(unittest.TestCase):
 		}
 		host = 'test.synology.me'
 		cls = httpx(host, **run_opts)
-		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
+		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
-		self.assertEqual(cls.print_item_count, False)
-		self.assertEqual(cls.print_cmd, False)
-		self.assertEqual(cls.print_cmd_prefix, False)
-		self.assertEqual(cls.output_json, True)
 
 	def test_httpx_build_cmd_with_opts_with_prefix(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 		run_opts = {
 			FOLLOW_REDIRECT: False,
@@ -209,14 +203,10 @@ class TestCommandProcessOpts(unittest.TestCase):
 		}
 		host = 'test.synology.me'
 		cls = httpx(host, **run_opts)
-		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
+		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
 		self.assertEqual(cls.cmd, expected_cmd)
 		self.assertEqual(cls.print_line, False)
 		self.assertEqual(cls.print_item, False)
-		self.assertEqual(cls.print_item_count, False)
-		self.assertEqual(cls.print_cmd, False)
-		self.assertEqual(cls.print_cmd_prefix, False)
-		self.assertEqual(cls.output_json, True)
 
 
 class TestCommandRun(unittest.TestCase, CommandOutputTester):
@@ -229,7 +219,7 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 		if not fixture:
 			if len(FIXTURES_TASKS.keys()) == 1: # make test fail.
 				raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory (must not be an empty file / empty json / empty list).')
-			console.print(f'[dim gold3] skipped (no fixture)[/]')
+			console.print('[dim gold3] skipped (no fixture)[/]')
 			return False
 		return True
 
@@ -250,7 +240,8 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 				with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
 					self._test_task_output(
 						results,
-						expected_output_types=cls.output_types)
+						expected_output_types=cls.output_types
+					)
 
 	def test_cmd_original_schema(self):
 		console.print('')
@@ -280,17 +271,18 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 				})
 				with mock_command(cls, targets, opts, fixture, 'run') as results:
 					if not len(cls.output_types) == 1:
-						console.print(f'[dim gold3] skipped (multi-output task with single schema)[/]')
+						console.print('[dim gold3] skipped (multi-output task with single schema)[/]')
 						return
 					self._test_task_output(
 						results,
-						expected_output_keys=expected_output_keys)
+						expected_output_keys=expected_output_keys
+					)
 
 
 class TestCommandHooks(unittest.TestCase):
 
 	def test_cmd_hooks(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 
 		def on_item_pre_convert(self, item):
@@ -317,7 +309,6 @@ class TestCommandHooks(unittest.TestCase):
 			'on_end': [on_end],
 			'on_item_pre_convert': [on_item_pre_convert],
 			'on_item': [on_item],
-			'on_end': [on_end],
 		}
 		fixture = load_fixture('httpx_output', FIXTURES_DIR)
 		with mock_subprocess_popen([json.dumps(fixture)]):
@@ -325,14 +316,15 @@ class TestCommandHooks(unittest.TestCase):
 			cls = httpx(input, hooks=hooks)
 			self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_init')
 			items = cls.run()
-			item = items[0]
+			item = items[1]
+			self.assertIsInstance(item, Url)
 			self.assertEqual(item.status_code, 500)
 			self.assertEqual(item.url, 'test_changed_url')
 			self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_start')
 			self.assertEqual(cls.results, [{'url': 'test_changed_result'}])
 
 	def test_cmd_failed_hook(self):
-		if not httpx in TEST_TASKS:
+		if httpx not in TEST_TASKS:
 			return
 
 		def raise_exc(self):
