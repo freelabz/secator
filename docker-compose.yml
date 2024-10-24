@@ -4,9 +4,10 @@ services:
 
   secator:
     image: freelabz/secator:latest
+    container_name: secator-manager
     restart: unless-stopped
     entrypoint: ""
-    command: tail -F anything
+    command: ['tail', '-F', '/dev/null']
     environment:
     - SECATOR_CELERY_BROKER_URL=redis://redis:6379/0
     - SECATOR_CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -15,8 +16,9 @@ services:
 
   worker:
     image: freelabz/secator:latest
+    container_name: secator-worker
     restart: unless-stopped
-    command: worker
+    command: ['worker']
     environment:
     - SECATOR_CELERY_BROKER_URL=redis://redis:6379/0
     - SECATOR_CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -25,3 +27,4 @@ services:
 
   redis:
     image: redis:latest
+    container_name: secator-redis
