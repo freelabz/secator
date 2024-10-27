@@ -1,20 +1,20 @@
 __all__ = [
-    'Error',
-    'OutputType',
-    'Info',
-    'Ip',
-    'Port',
+	'Error',
+	'OutputType',
+	'Info',
+	'Ip',
+	'Port',
 	'Progress',
-    'Record',
+	'Record',
 	'Stat',
-    'Subdomain',
-    'Url',
-    'UserAccount',
-    'Vulnerability',
+	'Subdomain',
+	'Url',
+	'UserAccount',
+	'Vulnerability',
 	'Warning',
 ]
 from secator.output_types._base import OutputType
-from secator.output_types.progress import Progress 
+from secator.output_types.progress import Progress
 from secator.output_types.ip import Ip
 from secator.output_types.exploit import Exploit
 from secator.output_types.port import Port
