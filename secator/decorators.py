@@ -18,7 +18,7 @@ RUNNER_OPTS = {
 	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'print_json': {'is_flag': True, 'short': 'json', 'default': False, 'help': 'Print items as JSON lines'},
-	'print_orig': {'is_flag': True, 'short': 'orig', 'default': False, 'help': 'Print items as JSON lines keeping the original command output'},
+	'print_orig': {'is_flag': True, 'short': 'orig', 'default': False, 'help': 'Print items as JSON lines (original)'},
 	'print_raw': {'is_flag': True, 'short': 'raw', 'default': False, 'help': 'Print items in raw format'},
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},

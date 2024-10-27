@@ -160,8 +160,6 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
-	chunk = opts.get('chunk')
-
 	# Set Celery request id in context
 	context = opts.get('context', {})
 	context['celery_id'] = self.request.id
@@ -178,10 +176,6 @@ def run_command(self, results, name, targets, opts={}):
 	# Flatten + dedupe results
 	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
-
-	# Get expanded targets
-	if not chunk:
-		targets, opts = run_extractors(results, opts, targets)
 
 	# Get task class
 	task_cls = Task.get_task_class(name)
