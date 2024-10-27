@@ -15,7 +15,7 @@ from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_folder_id, process_extractor)
+from secator.runners._helpers import (get_task_folder_id, process_extractor, run_extractors)
 from secator.utils import (debug, import_dynamic, merge_opts, pluralize, rich_to_ansi)
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,6 @@ class Runner:
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.celery_result = None
-		self.celery_ids = []
 		self.celery_ids_map = {}
 
 		# Determine exporters
@@ -106,9 +105,6 @@ class Runner:
 		os.makedirs(self.reports_folder, exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
-
-		# Process input
-		self.input = targets
 
 		# Process opts
 		self.quiet = self.run_opts.get('quiet', False)
@@ -143,12 +139,14 @@ class Runner:
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
+		if not self.chunk:
+			self.targets, self.run_opts = run_extractors(results, self.run_opts, self.targets)
 
 		# Input post-process
 		self.run_hooks('before_init')
 
 		# Check if input is valid
-		self.input_valid = self.run_validators('validate_input', self.input)
+		self.targets_valid = self.run_validators('validate_input', self.targets)
 
 		# Run hooks
 		self.run_hooks('on_init')
@@ -216,6 +214,10 @@ class Runner:
 			'count': self.self_findings_count,
 			'descr': self.config.description or '',
 		}
+	
+	@property
+	def celery_ids(self):
+		return list(self.celery_ids_map.keys())
 
 	def run(self):
 		return list(self.__iter__())
@@ -238,13 +240,6 @@ class Runner:
 					item = self._process_item(item)
 					if not item or item._uuid in self.uuids:
 						continue
-
-					# Hack to get new Celery ids dynamically into self.celery_ids
-					# TODO: switch to using context.celery_id for any kind of item
-					if isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
-						self.celery_ids.append(item.task_id)
-
-					# Append item to results
 					self.results.append(item)
 					yield item
 
@@ -274,7 +269,6 @@ class Runner:
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes."""
-		self.celery_ids.append(task_id)
 		self.celery_ids_map[task_id] = {
 			'id': task_id,
 			'name': task_name,
@@ -284,6 +278,13 @@ class Runner:
 			'count': 0,
 			'progress': 0
 		}
+		info = Info(
+			message=f'Celery task created: {task_id}',
+			task_id=task_id,
+			_source=task_name,
+			_uuid=str(uuid.uuid4())
+		)
+		self.results.append(info)
 
 	def _print_item(self, item):
 		item_str = str(item)
@@ -316,7 +317,6 @@ class Runner:
 
 					# raw output is used to pipe, we should only pipe the first output type of a Runner.
 					if isinstance(item, OutputType) and not isinstance(item, self.output_types[0]):
-						print(f'not printing item type {item._type}', file=sys.stderr)
 						item_str = ''
 
 					if item_str:
@@ -337,10 +337,10 @@ class Runner:
 		self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
 
 	def mark_duplicates(self):
-		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		debug('running duplicate check', id=self.config.name, sub='runner.duplicates')
 		dupe_count = 0
 		for item in self.results.copy():
-			debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
+			debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -349,7 +349,7 @@ class Runner:
 				main._related.extend([dupe._uuid for dupe in dupes])
 				main._related = list(dict.fromkeys(main._related))
 				if main._uuid != item._uuid:
-					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
+					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
 					item._duplicate = True
 					item = self.run_hooks('on_item', item)
 					if item._uuid not in main._related:
@@ -361,7 +361,7 @@ class Runner:
 					if not dupe._duplicate:
 						debug(
 							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-							sub='runner.mark_duplicates', level=5)
+							sub='debug.runner.duplicates', level=5)
 						dupe_count += 1
 						dupe._duplicate = True
 						dupe = self.run_hooks('on_duplicate', dupe)
@@ -369,8 +369,8 @@ class Runner:
 		duplicates = [repr(i) for i in self.results if i._duplicate]
 		if duplicates:
 			duplicates_str = '\n\t'.join(duplicates)
-			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='runner.mark_duplicates', level=5)
-		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.mark_duplicates')
+			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='debug.runner.duplicates', level=5)
+		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.duplicates')
 
 	def yielder(self):
 		raise NotImplementedError()
@@ -630,9 +630,8 @@ class Runner:
 	def stop_live_tasks(self):
 		"""Stop all tasks running in Celery worker."""
 		from secator.celery import revoke_task
-		for task_id in self.celery_ids:
-			name = self.celery_ids_map.get(task_id, {}).get('full_name')
-			revoke_task(task_id, name)
+		for task_id, task_data in self.celery_ids_map.items():
+			revoke_task(task_id, task_data['full_name'])
 
 	def filter_results(self):
 		"""Filter runner results using extractors defined in config."""

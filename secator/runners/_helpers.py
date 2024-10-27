@@ -1,6 +1,6 @@
 import os
 
-from secator.utils import deduplicate
+from secator.utils import deduplicate, debug
 
 
 def run_extractors(results, opts, targets=[]):
@@ -15,6 +15,7 @@ def run_extractors(results, opts, targets=[]):
 		tuple: targets, options.
 	"""
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
+	debug('registered extractors', obj=extractors, sub='runner.extractors')
 	for key, val in extractors.items():
 		key = key.rstrip('_')
 		values = extract_from_results(results, val)
@@ -53,6 +54,7 @@ def process_extractor(results, extractor, ctx={}):
 	Returns:
 		list: List of extracted results.
 	"""
+	debug('extractor started', obj={'extractor': extractor, 'in_count': len(results)}, sub='runner.extractors')
 	if isinstance(extractor, dict):
 		_type = extractor['type']
 		_field = extractor.get('field')
@@ -66,6 +68,7 @@ def process_extractor(results, extractor, ctx={}):
 	if _field:
 		_field = '{' + _field + '}' if not _field.startswith('{') else _field
 		items = [_field.format(**item.toDict()) for item in items]
+	debug('extractor finished', obj={'in_count': len(results), 'out_count': len(items)}, sub='runner.extractors')
 	return items
 
 

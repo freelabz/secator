@@ -53,7 +53,7 @@ class grype(VulnCode):
 		data = {
 			'id': vuln_id,
 			'name': vuln_id,
-			'matched_at': self.input[0],
+			'matched_at': self.targets[0],
 			'confidence': 'medium',
 			'severity': severity.lower(),
 			'provider': 'grype',

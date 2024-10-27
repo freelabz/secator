@@ -128,59 +128,6 @@ def revoke_task(task_id, task_name=None):
 #--------------#
 
 
-def chunker(seq, size):
-	return (seq[pos:pos + size] for pos in range(0, len(seq), size))
-
-
-def break_task(task, task_opts, targets, results=[], chunk_size=1):
-	"""Break a task into multiple of the same type."""
-	chunks = targets
-	if chunk_size > 1:
-		chunks = list(chunker(targets, chunk_size))
-	debug(
-		'',
-		obj={task.unique_name: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks), 'target_count': len(targets)},
-		obj_after=False,
-		sub='celery.state'
-	)
-
-	# Clone opts
-	opts = task_opts.copy()
-
-	# Build signatures
-	sigs = []
-	ids_map = {}
-	for ix, chunk in enumerate(chunks):
-		if not isinstance(chunk, list):
-			chunk = [chunk]
-		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
-			opts['chunk'] = ix + 1
-			opts['chunk_count'] = len(chunks)
-			opts['parent'] = False
-		task_id = str(uuid.uuid4())
-		sig = type(task).s(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
-		ids_map[task_id] = {
-			'id': task_id,
-			'name': task.name,
-			'full_name': f'{task.name}_{ix + 1}',
-			'descr': task.config.description or '',
-			'state': 'PENDING',
-			'count': 0,
-			'progress': 0
-		}
-		sigs.append(sig)
-
-	# Build Celery workflow
-	workflow = chain(
-		forward_results.s(results).set(queue='io'),
-		chord(
-			tuple(sigs),
-			forward_results.s().set(queue='io'),
-		)
-	)
-	return workflow, ids_map
-
-
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
 	debug(f'Received task with args {args} and kwargs {kwargs}', sub="celery", level=2)
@@ -240,66 +187,10 @@ def run_command(self, results, name, targets, opts={}):
 	task_cls = Task.get_task_class(name)
 
 	try:
-		# Check if chunkable
-		many_targets = len(targets) > 1
-		targets_over_chunk_size = task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
-		has_no_file_flag = task_cls.file_flag is None
-		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size)
-		opts['has_children'] = chunk_it
-		print_opts = {
-			'print_cmd': True,
-			'print_item': True,
-			'print_line': True,
-			'print_target': True
-		}
-		opts.update(print_opts)
 		task = task_cls(targets, **opts)
-		iterator = task
-		chunk_enabled = chunk_it and not task.sync
-		debug(
-			'',
-			obj={
-				f'{task.unique_name}': 'CHUNK STATUS',
-				'chunk_enabled': chunk_enabled,
-				'chunk_it': chunk_it,
-				'sync': task.sync,
-				'has_no_file_flag': has_no_file_flag,
-				'targets_over_chunk_size': targets_over_chunk_size,
-			},
-			obj_after=False,
-			id=self.request.id,
-			sub='celery.state'
-		)
-
-		# Follow multiple chunked tasks
-		if chunk_enabled:
-			chunk_size = 1 if has_no_file_flag else task_cls.input_chunk_size
-			workflow, ids_map = break_task(
-				task,
-				opts,
-				targets,
-				results=results,
-				chunk_size=chunk_size)
-			result = workflow.apply_async()
-			for task_id in ids_map:
-				info = Info(
-					message=f'Celery chunked task created: {task_id}',
-					task_id=task_id,
-					_source=ids_map[task_id]['full_name'],
-					_uuid=str(uuid.uuid4())
-				)
-				task.results.append(info)
-			iterator = CeleryData.iter_results(
-				result,
-				ids_map=ids_map,
-				print_remote_info=False
-			)
-
-		for item in iterator:
-			if task.has_children:
-				if item._uuid in task.uuids:
-					continue
-				task.results.append(item)
+		state['meta'] = task.celery_state
+		update_state(self, **state)
+		for _ in task:
 			state['meta'] = task.celery_state
 			update_state(self, **state)
 
@@ -313,13 +204,6 @@ def run_command(self, results, name, targets, opts={}):
 		state['meta'] = task.celery_state
 		update_state(self, **state)
 		gc.collect()
-
-		# Run on_end hooks for split tasks
-		if task.has_children:
-			task.log_results()
-			task.run_hooks('on_end')
-
-		# Return task results
 		return task.results
 
 

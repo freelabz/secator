@@ -1,0 +1,107 @@
+type: workflow
+name: all
+description: Run all tasks
+input_types:
+  - cidr_range
+tasks:
+  mapcidr:
+  fping:
+    targets_: ip.ip
+  naabu:
+    description: Find open ports
+    targets_:
+    - type: ip
+      field: ip
+      condition: item.alive
+    # ports: "-"  # scan all ports
+  bbot:
+    targets_: port.host
+  nmap:
+    description: Search for vulnerabilities on open ports
+    skip_host_discovery: True
+    version_detection: True
+    targets_: port.host
+    ports_: port.port
+  httpx:
+    description: Probe HTTP services on open ports
+    targets_:
+      - type: port
+        field: '{host}:{port}'
+        condition: item._source.startswith('nmap')
+  _group/2:
+    nuclei/network:
+      description: Scan network and SSL vulnerabilities
+      tags: [network, ssl]
+      targets_: port.host
+    nuclei/url:
+      description: Search for vulnerabilities on alive HTTP services
+      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
+      targets_:
+        - type: url
+          field: url
+          condition: item.status_code != 0
+  _group/3:
+    cariddi:
+      targets_: url.url
+    katana:
+      targets_: url.url
+    dirsearch:
+      targets_: url.url
+    feroxbuster:
+      targets_: url.url
+    ffuf:
+      description: Search for HTTP directories
+      wordlist: /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt
+      targets_:
+        - type: url
+          field: '{url}/FUZZ'
+  _group/4:
+    gf/xss:
+      description: Hunt XSS params
+      pattern: xss
+      targets_: url.url
+    gf/lfi:
+      description: Hunt LFI params
+      pattern: lfi
+      targets_: url.url
+    gf/ssrf:
+      description: Hunt SSRF params
+      pattern: ssrf
+      targets_: url.url
+    gf/rce:
+      description: Hunt RCE params
+      pattern: rce
+      targets_: url.url
+    gf/interestingparams:
+      description: Hunt interest params
+      pattern: interestingparams
+      targets_: url.url
+    gf/idor:
+      description: Hunt Idor params
+      pattern: idor
+      targets_: url.url
+    gf/debug_logic:
+      description: Hunt debug params
+      pattern: debug_logic
+      targets_: url.url
+  dalfox:
+    description: Attack XSS vulnerabilities
+    targets_:
+      - type: tag
+        field: match
+        condition: item._source == "gf"
+  bup:
+    targets_:
+      - type: url
+        field: url
+        condition: item.status_code == 403
+
+# wpscan
+# h8mail
+# dnsx
+# dnsxbrute
+# subfinder
+# grype
+# searchsploit
+# gau
+# maigret

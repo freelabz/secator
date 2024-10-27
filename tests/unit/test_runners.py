@@ -183,7 +183,7 @@ class TestCommandRunner(unittest.TestCase):
 		messages = [e.message for e in errors]
 		self.assertIn("Validator failed: Input is empty.", messages)
 		self.assertEqual(len(cmd.results), 1)
-		self.assertFalse(cmd.input_valid)
+		self.assertFalse(cmd.targets_valid)
 		self.assertEqual(cmd.status, 'FAILURE')
 
 	def test_input_validator_failed_multiple_targets(self):
@@ -194,7 +194,7 @@ class TestCommandRunner(unittest.TestCase):
 		messages = [e.message for e in errors]
 		self.assertIn("Validator failed: Multiple input passed in non-worker mode.", messages)
 		self.assertEqual(len(cmd.results), 1)
-		self.assertFalse(cmd.input_valid)
+		self.assertFalse(cmd.targets_valid)
 		self.assertEqual(cmd.status, 'FAILURE')
 
 	# def test_input_validator_failed_wrong_input_type(self):
@@ -205,7 +205,7 @@ class TestCommandRunner(unittest.TestCase):
 	# 	messages = [e.message for e in errors]
 	# 	self.assertIn("Validator failed: Multiple input passed in non-worker mode.", messages)
 	# 	self.assertEqual(len(cmd.results), 0)
-	# 	self.assertFalse(cmd.input_valid)
+	# 	self.assertFalse(cmd.targets_valid)
 	# 	delattr(MyCommand, 'input_types', None)
 
 	def test_stdout_output(self):

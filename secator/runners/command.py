@@ -176,7 +176,7 @@ class Command(Runner):
 				self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
 		# Debug built input
-		input_str = '\n '.join(self.input).strip()
+		input_str = '\n '.join(self.targets).strip()
 		debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', sub='runner.init')
 
 		# Debug run options
@@ -348,7 +348,7 @@ class Command(Runner):
 		self.run_hooks('on_start')
 
 		# Yield targets
-		for target in self.input:
+		for target in self.targets:
 			yield Target(name=target, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 		# Check for sudo requirements and prepare the password if needed
@@ -687,7 +687,7 @@ class Command(Runner):
 		"""Input is empty."""
 		if not self.input_required:
 			return True
-		if not self.input or len(self.input) == 0:
+		if not self.targets or len(self.targets) == 0:
 			return False
 		return True
 
@@ -751,7 +751,7 @@ class Command(Runner):
 		string or a list to the cmd.
 		"""
 		cmd = self.cmd
-		input = self.input
+		input = self.targets
 
 		# If input is None, return the previous command
 		if not input:

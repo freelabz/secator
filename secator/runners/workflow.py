@@ -35,19 +35,13 @@ class Workflow(Runner):
 			run_opts=run_opts,
 			results=self.results
 		)
-		self.celery_ids = list(self.celery_ids_map.keys())
 
 		# Run Celery workflow and get results
 		if self.sync:
 			results = workflow.apply().get()
 		else:
-			result = workflow()
-			self.celery_ids.append(str(result.id))
-			self.celery_result = result
-			yield Info(
-				message=f'Celery task created: {self.celery_result.id}',
-				task_id=self.celery_result.id
-			)
+			self.celery_result = workflow()
+			self.add_subtask(self.celery_result.id, self.config.name, self.config.description or '')
 			results = CeleryData.iter_results(
 				self.celery_result,
 				ids_map=self.celery_ids_map,
