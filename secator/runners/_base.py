@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 HOOKS = [
 	'before_init',
 	'on_init',
+	'on_start',
 	'on_end',
 	'on_item_pre_convert',
 	'on_item',
@@ -223,6 +224,7 @@ class Runner:
 	def __iter__(self):
 		try:
 			self.log_start()
+			self.run_hooks('on_start')
 
 			# If any errors happened during validation, exit
 			if self.errors:

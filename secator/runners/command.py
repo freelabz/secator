@@ -90,7 +90,6 @@ class Command(Runner):
 
 	# Hooks
 	hooks = [
-		'on_start',
 		'on_cmd',
 		'on_cmd_done',
 		'on_line'
@@ -344,9 +343,6 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
-		# Callback before running command
-		self.run_hooks('on_start')
-
 		# Yield targets
 		for target in self.input:
 			yield Target(name=target, _source=self.unique_name, _uuid=str(uuid.uuid4()))

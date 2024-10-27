@@ -156,7 +156,6 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
-			opts['parent'] = False
 		task_id = str(uuid.uuid4())
 		sig = type(task).s(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
 		ids_map[task_id] = {
