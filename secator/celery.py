@@ -246,6 +246,13 @@ def run_command(self, results, name, targets, opts={}):
 		has_no_file_flag = task_cls.file_flag is None
 		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size)
 		opts['has_children'] = chunk_it
+		print_opts = {
+			'print_cmd': True,
+			'print_item': True,
+			'print_line': True,
+			'print_target': True
+		}
+		opts.update(print_opts)
 		task = task_cls(targets, **opts)
 		iterator = task
 		chunk_enabled = chunk_it and not task.sync
@@ -338,7 +345,7 @@ def is_celery_worker_alive():
 	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
 	result = bool(result)
 	if result:
-		console.print('Celery worker is alive !', style='bold green')
+		debug('[bold green]Celery worker is alive ![/]', sub='celery.worker')
 	else:
-		console.print('No Celery worker alive.', style='bold orange1')
+		debug('[bold orange1]No Celery worker alive.[/]', sub='celery.worker')
 	return result

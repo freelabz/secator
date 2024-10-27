@@ -42,6 +42,11 @@ class TestWorker(unittest.TestCase):
 		)
 		self.assertIn(url, cmd.results)
 
+	# def test_pd_pipe(self):
+	# 	cmd = Command.execute(
+	# 		'secator x subfinder vulnweb.com -raw'
+	# 	)
+
 	def test_host_recon(self):
 		cmd = Command.execute(
 			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',

@@ -1,5 +1,8 @@
+import os
 import sys
+
 from collections import OrderedDict
+from stat import S_ISFIFO
 
 import rich_click as click
 from rich_click.rich_click import _get_rich_console
@@ -14,12 +17,12 @@ from secator.utils import (deduplicate, expand_input, get_command_category,
 RUNNER_OPTS = {
 	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
-	'json': {'is_flag': True, 'default': False, 'help': 'Enable JSON mode'},
-	'orig': {'is_flag': True, 'default': False, 'help': 'Enable original output (no schema conversion)'},
-	'raw': {'is_flag': True, 'default': False, 'help': 'Enable text output for piping to other tools'},
+	'print_json': {'is_flag': True, 'short': 'json', 'default': False, 'help': 'Print items as JSON lines'},
+	'print_orig': {'is_flag': True, 'short': 'orig', 'default': False, 'help': 'Print items as JSON lines keeping the original command output'},
+	'print_raw': {'is_flag': True, 'short': 'raw', 'default': False, 'help': 'Print items in raw format'},
+	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
+	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
-	'stats': {'is_flag': True, 'default': False, 'help': 'Show runtime statistics'},
-	# 'format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},  # TODO: rework this
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
@@ -272,7 +275,6 @@ def register_runner(cli_endpoint, config):
 	@click.pass_context
 	def func(ctx, **opts):
 		sync = opts['sync']
-		stats = opts.pop('stats')
 		remote = opts.pop('remote')
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
@@ -290,7 +292,7 @@ def register_runner(cli_endpoint, config):
 		# opts.update(unknown_opts)
 
 		targets = opts.pop(input_type)
-		targets = expand_input(targets)
+		targets = expand_input(targets, ctx)
 		if sync or show:
 			sync = True
 		else:
@@ -306,14 +308,6 @@ def register_runner(cli_endpoint, config):
 					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 						sys.exit(1)
-		opts['sync'] = sync
-		opts.update({
-			'print_cmd': True,
-			'print_item': True,
-			'print_line': True,
-			'print_remote_info': not sync,
-			'print_stat': stats
-		})
 
 		# Build hooks from driver name
 		hooks = {}
@@ -323,6 +317,17 @@ def register_runner(cli_endpoint, config):
 				sys.exit(1)
 			from secator.hooks.mongodb import MONGODB_HOOKS
 			hooks = MONGODB_HOOKS
+
+		# Set run options
+		opts.update({
+			'print_cmd': True,
+			'print_item': True,
+			'print_line': True,
+			'print_remote_info': not sync,
+			'piped_input': ctx.obj['piped_input'],
+			'piped_output': ctx.obj['piped_output'],
+			'sync': sync,
+		})
 
 		# Build exporters
 		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)

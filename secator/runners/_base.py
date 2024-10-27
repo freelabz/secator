@@ -110,14 +110,19 @@ class Runner:
 		# Process input
 		self.input = targets
 
-		# Print options
+		# Process opts
 		self.quiet = self.run_opts.get('quiet', False)
 		self.no_process = self.run_opts.get('no_process', False)
+		self.piped_input = self.run_opts.get('piped_input', False)
+		self.piped_output = self.run_opts.get('piped_output', False)
+
+		# Print opts
 		self.print_item = self.run_opts.get('print_item', False) and not self.no_process
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False)
 		self.print_json = self.run_opts.get('json', False)
-		self.print_raw = self.run_opts.get('raw', False)
+		self.print_raw = self.run_opts.get('raw', False) or self.piped_output
+		self.print_fmt = self.run_opts.get('fmt', '')
 		self.print_orig = self.run_opts.get('orig', False)
 		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
 		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
@@ -281,25 +286,54 @@ class Runner:
 		}
 
 	def _print_item(self, item):
-		item_str = self.get_repr(item)
+		item_str = str(item)
+
+		# Item is an output type
 		if isinstance(item, (OutputType, DotMap)):
 			_type = item._type
 			print_this_type = getattr(self, f'print_{_type}', True)
 			if not print_this_type:
 				return
+
 			if self.print_item:
+				item_out = sys.stdout
+
+				# JSON lines output
 				if self.print_json:
 					self._print(item, out=sys.stdout)
+					item_out = None  # suppress item repr output to sdout
+
+				# Raw output
 				elif self.print_raw:
-					self._print(str(item), out=sys.stdout)
-				else:
-					item_repr = item_str
+					item_out = sys.stderr if self.piped_output else None
+
+					# Format raw output with custom item fields
+					if self.print_fmt:
+						try:
+							item_str = item.format(**self.print_fmt)
+						except KeyError:
+							item_str = ''
+
+					# raw output is used to pipe, we should only pipe the first output type of a Runner.
+					if isinstance(item, OutputType) and not isinstance(item, self.output_types[0]):
+						print(f'not printing item type {item._type}', file=sys.stderr)
+						item_str = ''
+
+					if item_str:
+						self._print(item_str, out=sys.stdout)
+
+				# Repr output
+				if item_out:
+					item_repr = self.get_repr(item)
 					if isinstance(item, OutputType) and self.print_remote_info or DEBUG > 1:
 						item_repr += rich_to_ansi(f' \[[dim]{item._source}[/]]')
-					self._print(item_repr, out=sys.stdout)
+					self._print(item_repr, out=item_out)
+
+		# Item is a line
 		elif isinstance(item, str):
 			if self.print_line:
 				self._print(item, out=sys.stderr, end='\n')
+
 		self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
 
 	def mark_duplicates(self):
