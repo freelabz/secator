@@ -151,15 +151,15 @@ class CeleryData(object):
 			yield data
 			datas.append(data)
 
-		# Calculate and yield progress
-		if not datas:
-			return
-		total = len(datas)
-		count_finished = sum([i['ready'] for i in datas if i])
-		percent = int(count_finished * 100 / total) if total > 0 else 0
-		data = datas[-1]
-		data['progress'] = percent
-		yield data
+		# Calculate and yield parent task progress
+		# if not datas:
+		# 	return
+		# total = len(datas)
+		# count_finished = sum([i['ready'] for i in datas if i])
+		# percent = int(count_finished * 100 / total) if total > 0 else 0
+		# parent_id = [c for c in ids_map.values() if c['full_name'] == datas[-1]]
+		# data['progress'] = percent
+		# yield data
 
 	@staticmethod
 	def get_task_data(task_id, ids_map):

@@ -1,9 +1,6 @@
 import unittest
-import json
 from secator.celery import app, forward_results
-from secator.definitions import DEBUG
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS, FIXTURES_DIR, load_fixture
-from secator.rich import console
 from secator.output_types import Url
 from celery import chain, chord
 
@@ -22,8 +19,6 @@ class TestCelery(unittest.TestCase):
 			workflow = chain(*sigs)
 			result = workflow.apply()
 			results = result.get()
-			if DEBUG > 1:
-				console.print_json(json.dumps(results))
 			urls = [r.url for r in results if r._type == 'url']
 			targets = [r.name for r in results if r._type == 'target']
 			self.assertEqual(len(urls), len(TARGETS))
@@ -53,8 +48,6 @@ class TestCelery(unittest.TestCase):
 			workflow = chain(*sigs)
 			result = workflow.apply()
 			results = result.get()
-			if DEBUG:
-				console.print_json(json.dumps(results))
 			urls = [r.url for r in results if r._type == 'url']
 			targets = [r.name for r in results if r._type == 'target']
 			self.assertEqual(len(urls), len(TARGETS) + 1)

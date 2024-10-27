@@ -185,7 +185,7 @@ class Runner:
 
 	@property
 	def self_findings(self):
-		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES)) if r._source == self.unique_name]
+		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES)) if r._source.startswith(self.unique_name)]
 
 	@property
 	def self_findings_count(self):
@@ -337,10 +337,10 @@ class Runner:
 		self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
 
 	def mark_duplicates(self):
-		debug('running duplicate check', id=self.config.name, sub='runner.mark_duplicates')
+		debug('running duplicate check', id=self.config.name, sub='runner.duplicates')
 		dupe_count = 0
 		for item in self.results.copy():
-			debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
+			debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
 			others = [f for f in self.results if f == item and f._uuid != item._uuid]
 			if others:
 				main = max(item, *others)
@@ -349,7 +349,7 @@ class Runner:
 				main._related.extend([dupe._uuid for dupe in dupes])
 				main._related = list(dict.fromkeys(main._related))
 				if main._uuid != item._uuid:
-					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='runner.mark_duplicates', level=5)  # noqa: E501
+					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
 					item._duplicate = True
 					item = self.run_hooks('on_item', item)
 					if item._uuid not in main._related:
@@ -361,7 +361,7 @@ class Runner:
 					if not dupe._duplicate:
 						debug(
 							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-							sub='runner.mark_duplicates', level=5)
+							sub='debug.runner.duplicates', level=5)
 						dupe_count += 1
 						dupe._duplicate = True
 						dupe = self.run_hooks('on_duplicate', dupe)
@@ -369,8 +369,8 @@ class Runner:
 		duplicates = [repr(i) for i in self.results if i._duplicate]
 		if duplicates:
 			duplicates_str = '\n\t'.join(duplicates)
-			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='runner.mark_duplicates', level=5)
-		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.mark_duplicates')
+			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='debug.runner.duplicates', level=5)
+		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.duplicates')
 
 	def yielder(self):
 		raise NotImplementedError()

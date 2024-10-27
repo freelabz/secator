@@ -246,13 +246,13 @@ def run_command(self, results, name, targets, opts={}):
 		has_no_file_flag = task_cls.file_flag is None
 		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size)
 		opts['has_children'] = chunk_it
-		print_opts = {
-			'print_cmd': True,
-			'print_item': True,
-			'print_line': True,
-			'print_target': True
-		}
-		opts.update(print_opts)
+		# print_opts = {
+		# 	'print_cmd': True,
+		# 	'print_item': True,
+		# 	'print_line': True,
+		# 	'print_target': True
+		# }
+		# opts.update(print_opts)
 		task = task_cls(targets, **opts)
 		iterator = task
 		chunk_enabled = chunk_it and not task.sync
@@ -271,7 +271,7 @@ def run_command(self, results, name, targets, opts={}):
 			sub='celery.state'
 		)
 
-		# Follow multiple chunked tasks
+		# Chunk task if needed
 		if chunk_enabled:
 			chunk_size = 1 if has_no_file_flag else task_cls.input_chunk_size
 			workflow, ids_map = break_task(
@@ -295,6 +295,7 @@ def run_command(self, results, name, targets, opts={}):
 				print_remote_info=False
 			)
 
+		# Update state for each item found
 		for item in iterator:
 			if task.has_children:
 				if item._uuid in task.uuids:
