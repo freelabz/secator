@@ -1,17 +1,20 @@
 __all__ = [
+    'Error',
     'OutputType',
+    'Info',
     'Ip',
     'Port',
+	'Progress',
     'Record',
+	'Stat',
     'Subdomain',
     'Url',
     'UserAccount',
     'Vulnerability',
-    'Error',
-    'Info'
+	'Warning',
 ]
-from secator.output_types._base import OutputType  # noqa: F401
-from secator.output_types.progress import Progress  # noqa: F401
+from secator.output_types._base import OutputType
+from secator.output_types.progress import Progress 
 from secator.output_types.ip import Ip
 from secator.output_types.exploit import Exploit
 from secator.output_types.port import Port
@@ -28,7 +31,7 @@ from secator.output_types.error import Error
 from secator.output_types.stat import Stat
 
 EXECUTION_TYPES = [
-	Target, Info, Warning, Error
+	Target, Progress, Info, Warning, Error
 ]
 STAT_TYPES = [
 	Stat

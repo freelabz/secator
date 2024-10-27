@@ -56,7 +56,7 @@ def setup_logging(level):
 	return logger
 
 
-def expand_input(input):
+def expand_input(input, ctx):
 	"""Expand user-provided input on the CLI:
 	- If input is a path, read the file and return the lines.
 	- If it's a comma-separated list, return the list.
@@ -64,12 +64,14 @@ def expand_input(input):
 
 	Args:
 		input (str): Input.
+		ctx (click.Context): Click context.
 
 	Returns:
 		str: Input.
 	"""
 	if input is None:  # read from stdin
-		console.print('Waiting for input on stdin ...', style='bold yellow')
+		if not ctx.obj['piped_input']:
+			console.print('Waiting for input on stdin ...', style='bold yellow')
 		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 		if rlist:
 			data = sys.stdin.read().splitlines()

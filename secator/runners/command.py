@@ -114,6 +114,7 @@ class Command(Runner):
 	profile = 'cpu'
 
 	def __init__(self, input=[], **run_opts):
+
 		# Build runnerconfig on-the-fly
 		config = TemplateLoader(input={
 			'name': self.__class__.__name__,
@@ -134,8 +135,6 @@ class Command(Runner):
 			hooks=hooks,
 			validators=validators,
 			context=context)
-		if not self.input_valid:
-			return
 
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
@@ -762,7 +761,7 @@ class Command(Runner):
 		if isinstance(input, list) and len(input) == 1:
 			input = input[0]
 
-		# If input is a list and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped input.
+		# If input is a list and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped_input input.
 		# Otherwise pass the file path to the tool.
 		if isinstance(input, list):
 			fpath = f'{self.reports_folder}/.inputs/{self.unique_name}.txt'
@@ -778,7 +777,7 @@ class Command(Runner):
 
 			self.input_path = fpath
 
-		# If input is a string but the tool does not support an input flag, use echo-piped input.
+		# If input is a string but the tool does not support an input flag, use echo-piped_input input.
 		# If the tool's input flag is set to None, assume it is a positional argument at the end of the command.
 		# Otherwise use the input flag to pass the input.
 		elif input:

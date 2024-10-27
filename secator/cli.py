@@ -5,6 +5,7 @@ import shutil
 import sys
 
 from pathlib import Path
+from stat import S_ISFIFO
 
 import rich_click as click
 from dotmap import DotMap
@@ -48,7 +49,12 @@ FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 @click.pass_context
 def cli(ctx, version):
 	"""Secator CLI."""
-	console.print(ASCII, highlight=False)
+	ctx.obj = {
+		'piped_input': S_ISFIFO(os.fstat(0).st_mode),
+		'piped_output': not sys.stdout.isatty()
+	}
+	if not ctx.obj['piped_output']:
+		console.print(ASCII, highlight=False)
 	if ctx.invoked_subcommand is None:
 		if version:
 			print_version()
@@ -61,7 +67,8 @@ def cli(ctx, version):
 #------#
 
 @cli.group(aliases=['x', 't'])
-def task():
+@click.pass_context
+def task(ctx):
 	"""Run a task."""
 	pass
 
@@ -76,7 +83,8 @@ for cls in ALL_TASKS:
 
 
 @cli.group(cls=OrderedGroup, aliases=['w'])
-def workflow():
+@click.pass_context
+def workflow(ctx):
 	"""Run a workflow."""
 	pass
 
@@ -90,7 +98,8 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 #------#
 
 @cli.group(cls=OrderedGroup, aliases=['s'])
-def scan():
+@click.pass_context
+def scan(ctx):
 	"""Run a scan."""
 	pass
 
