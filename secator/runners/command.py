@@ -18,7 +18,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug, traceback_as_string, rich_to_ansi
+from secator.utils import debug, rich_to_ansi
 
 
 logger = logging.getLogger(__name__)
@@ -351,7 +351,6 @@ class Command(Runner):
 			# Yield targets
 			for target in self.input:
 				yield Target(name=target, _source=self.unique_name, _uuid=str(uuid.uuid4()))
-				
 
 			# Check for sudo requirements and prepare the password if needed
 			sudo_password, error = self._prompt_sudo(self.cmd)
@@ -450,8 +449,8 @@ class Command(Runner):
 
 		except BaseException as e:
 			error = Error.from_exception(e)
-			error._source=self.unique_name,
-			error._uuid=str(uuid.uuid4())
+			error._source = self.unique_name,
+			error._uuid = str(uuid.uuid4())
 			yield error
 			self.kill()
 
