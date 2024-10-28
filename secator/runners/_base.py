@@ -680,13 +680,12 @@ class Runner:
 			new_item._type = 'unknown'
 			return new_item
 
-		# Load item using available output types and get the first matching
-		# output type based on the schema
+		# Init the new item and the list of output types to load from
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
 		debug(f'Input item: {item}', sub='klass.load')
 
-		# Use output discriminator to let user arbiter between output types to pick
+		# Use a function to pick proper output types
 		output_discriminator = getattr(self, 'output_discriminator', None)
 		if output_discriminator:
 			result = output_discriminator(item)
@@ -694,16 +693,16 @@ class Runner:
 				debug(f'Discriminated output type: {result.__name__}', sub='klass.load')
 				output_types = [result]
 			else:
-				new_item = DotMap(item)
-				new_item._type = 'unknown'
-				return new_item
+				output_types = []
 
+		# Use the _type key to pick proper output type
 		elif '_type' in item:
 			otypes = [o for o in output_types if o.get_name() == item['_type']]
 			if otypes:
 				output_types = [otypes[0]]
 				debug(f'_type key is present in item and matches {otypes[0]}', sub='klass.load')
 
+		# Load item using picked output types
 		debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load')
 		for klass in output_types:
 			debug(f'Loading item as {klass.__name__}', sub='klass.load')
@@ -711,8 +710,8 @@ class Runner:
 			try:
 				new_item = klass.load(item, output_map)
 				debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', sub='klass.load')
-				break  # found an item that fits
-			except (TypeError, KeyError) as e:  # can't load using class
+				break
+			except (TypeError, KeyError) as e:
 				debug(
 					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
 					sub='klass.load')
