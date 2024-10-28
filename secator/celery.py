@@ -9,7 +9,7 @@ from celery.app import trace
 from rich.logging import RichHandler
 
 from secator.config import CONFIG
-from secator.output_types import Info, Error
+from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
@@ -73,7 +73,7 @@ app.conf.update({
 		'secator.hooks.mongodb.tag_duplicates': {'queue': 'mongodb'}
 	},
 	'task_reject_on_worker_lost': True,
-	'task_acks_late': True,
+	'task_acks_late': False,
 	'task_create_missing_queues': True,
 	'task_send_sent_event': True,
 
@@ -116,11 +116,11 @@ def update_state(celery_task, **state):
 
 
 def revoke_task(task_id, task_name=None):
-	message = f'Revoking task {task_id}'
+	message = f'Revoked task {task_id}'
 	if task_name:
 		message += f' ({task_name})'
-	console.print(message)
-	return app.control.revoke(task_id, terminate=True, signal='SIGINT')
+	app.control.revoke(task_id, terminate=True)
+	console.print(Info(message=message))
 
 
 #--------------#
@@ -256,7 +256,6 @@ def run_command(self, results, name, targets, opts={}):
 		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size)
 		opts['has_children'] = chunk_it and not sync
 		task = task_cls(targets, **opts)
-		iterator = task
 		chunk_enabled = chunk_it and not task.sync
 		debug(
 			'',
@@ -283,26 +282,14 @@ def run_command(self, results, name, targets, opts={}):
 				results=results,
 				chunk_size=chunk_size)
 			result = workflow.apply_async()
-			for task_id in ids_map:
-				info = Info(
-					message=f'Celery chunked task created: {task_id}',
-					task_id=task_id,
-					_source=ids_map[task_id]['full_name'],
-					_uuid=str(uuid.uuid4())
-				)
-				task.results.append(info)
-			iterator = CeleryData.iter_results(
-				result,
-				ids_map=ids_map,
-				print_remote_info=False
-			)
+			task.celery_result = result
+			task.celery_ids_map = ids_map
+			task.celery_ids = list(ids_map.keys())
+			state['meta'] = task.celery_state
+			update_state(self, **state)
 
 		# Update state for each item found
-		for item in iterator:
-			if task.has_children:
-				if item._uuid in task.uuids:
-					continue
-				task.results.append(item)
+		for _ in task:
 			state['meta'] = task.celery_state
 			update_state(self, **state)
 
@@ -310,6 +297,8 @@ def run_command(self, results, name, targets, opts={}):
 		error = Error.from_exception(e)
 		error._source = task.unique_name
 		error._uuid = str(uuid.uuid4())
+		task._print_item(error)
+		task.stop_live_tasks()
 		task.results.append(error)
 
 	finally:
@@ -345,10 +334,10 @@ def forward_results(results):
 
 def is_celery_worker_alive():
 	"""Check if a Celery worker is available."""
-	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
+	result = app.control.broadcast('ping', reply=True, limit=1, timeout=5)
 	result = bool(result)
 	if result:
-		debug('[bold green]Celery worker is alive ![/]', sub='celery.worker')
+		console.print(Info(message='Celery worker is alive !'))
 	else:
-		debug('[bold orange1]No Celery worker alive.[/]', sub='celery.worker')
+		console.print(Warning(message='No Celery worker alive.'))
 	return result

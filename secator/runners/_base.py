@@ -252,17 +252,13 @@ class Runner:
 				self._print_item(item) if item else ''
 				self.run_hooks('on_iter')
 
-		except KeyboardInterrupt:
-			if self.celery_result:
-				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
-				self.stop_live_tasks()
-
-		except Exception as e:
+		except BaseException as e:
 			error = Error.from_exception(e)
 			error._source = self.unique_name
 			error._uuid = str(uuid.uuid4())
 			self.results.append(error)
 			self._print_item(error)
+			self.stop_live_tasks()
 			yield error
 
 		# Filter results and log info

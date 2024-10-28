@@ -343,29 +343,34 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
-		# Yield targets
-		for target in self.input:
-			yield Target(name=target, _source=self.unique_name, _uuid=str(uuid.uuid4()))
-
-		# Check for sudo requirements and prepare the password if needed
-		sudo_password, error = self._prompt_sudo(self.cmd)
-		if error:
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
-			return
-
-		# Prepare cmds
-		command = self.cmd if self.shell else shlex.split(self.cmd)
-
-		# Output and results
-		self.return_code = 0
-		self.killed = False
-
-		# Run the command using subprocess
 		try:
+			# Yield remote
+			if self.celery_result:
+				yield from self.yielder_remote()
+
+			# Yield targets
+			for target in self.input:
+				yield Target(name=target, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				
+
+			# Check for sudo requirements and prepare the password if needed
+			sudo_password, error = self._prompt_sudo(self.cmd)
+			if error:
+				yield Error(
+					message=error,
+					_source=self.unique_name,
+					_uuid=str(uuid.uuid4())
+				)
+				return
+
+			# Prepare cmds
+			command = self.cmd if self.shell else shlex.split(self.cmd)
+
+			# Output and results
+			self.return_code = 0
+			self.killed = False
+
+			# Run the command using subprocess
 			env = os.environ
 			env.update(self.env)
 			self.process = subprocess.Popen(
@@ -383,25 +388,6 @@ class Command(Runner):
 				self.process.stdin.write(f"{sudo_password}\n")
 				self.process.stdin.flush()
 
-		except FileNotFoundError as e:
-			if self.config.name in str(e):
-				error = 'Executable not found.'
-				if self.install_cmd:
-					error += f' Install it with `secator install tools {self.config.name}`.'
-			else:
-				error = str(e)
-			celery_id = self.context.get('celery_id', '')
-			if celery_id:
-				error += f' [{celery_id}]'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
-			self.return_code = 1
-			return
-
-		try:
 			# Process the output in real-time
 			for line in iter(lambda: self.process.stdout.readline(), b''):
 				sleep(0)  # for async to give up control
@@ -444,21 +430,43 @@ class Command(Runner):
 			if result:
 				yield from result
 
-		except KeyboardInterrupt:
-			self.kill()
-
-		except Exception as e:
+		except FileNotFoundError as e:
+			if self.config.name in str(e):
+				error = 'Executable not found.'
+				if self.install_cmd:
+					error += f' Install it with `secator install tools {self.config.name}`.'
+			else:
+				error = str(e)
+			celery_id = self.context.get('celery_id', '')
+			if celery_id:
+				error += f' [{celery_id}]'
 			yield Error(
-				message=str(e),
-				traceback=traceback_as_string(e),
+				message=error,
 				_source=self.unique_name,
 				_uuid=str(uuid.uuid4())
 			)
+			self.return_code = 1
+			return
+
+		except BaseException as e:
+			error = Error.from_exception(e)
+			error._source=self.unique_name,
+			error._uuid=str(uuid.uuid4())
+			yield error
+			self.kill()
 
 		finally:
 			yield from self._wait_for_end()
 
-	def kill(self):
+	def yielder_remote(self):
+		from secator.celery_utils import CeleryData
+		yield from CeleryData.iter_results(
+			self.celery_result,
+			ids_map=self.celery_ids_map,
+			print_remote_info=False
+		)
+
+	def kill(self, signum=None, frame=None):
 		if not hasattr(self, 'process'):
 			return
 		pid = self.process.pid
