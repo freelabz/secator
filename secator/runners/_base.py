@@ -121,10 +121,10 @@ class Runner:
 		self.print_item = self.run_opts.get('print_item', False) and not self.no_process
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False)
-		self.print_json = self.run_opts.get('json', False)
-		self.print_raw = self.run_opts.get('raw', False) or self.piped_output
+		self.print_orig = self.run_opts.get('print_orig', False)
+		self.print_json = self.run_opts.get('print_json', False) or self.print_orig
+		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
-		self.print_orig = self.run_opts.get('orig', False)
 		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
 		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
 		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
@@ -670,15 +670,21 @@ class Runner:
 		Returns:
 			secator.output_types.OutputType: Loaded item.
 		"""
+		# Skip if already converted
+		if isinstance(item, DotMap) or isinstance(item, OutputType):
+			return item
+
+		# Skip if print_orig is set
+		if self.print_orig:
+			new_item = DotMap(item)
+			new_item._type = 'unknown'
+			return new_item
+
 		# Load item using available output types and get the first matching
 		# output type based on the schema
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
 		debug(f'Input item: {item}', sub='klass.load')
-
-		# Skip if already converted
-		if isinstance(item, DotMap) or isinstance(item, OutputType):
-			return item
 
 		# Use output discriminator to let user arbiter between output types to pick
 		output_discriminator = getattr(self, 'output_discriminator', None)
@@ -715,13 +721,8 @@ class Runner:
 					self._print(error)
 				continue
 
-		# No output type was found, so make no conversion
-		if not new_item:
-			if self.print_orig:
-				new_item = DotMap(item)
-				new_item._type = 'unknown'
-			else:
-				new_item = Warning(message=f'Failed to load item as output type:\n  {item}')
+		if new_item:
+			new_item = Warning(message=f'Failed to load item as output type:\n  {item}')
 
 		return new_item
 
