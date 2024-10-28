@@ -25,7 +25,6 @@ class TestWorker(unittest.TestCase):
 		cmd = Command.execute(
 			'secator x httpx testphp.vulnweb.com -json',
 			no_process=False,
-			quiet=True,
 			cls_attributes={'output_types': [Target, Url], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
@@ -42,16 +41,10 @@ class TestWorker(unittest.TestCase):
 		)
 		self.assertIn(url, cmd.results)
 
-	# def test_pd_pipe(self):
-	# 	cmd = Command.execute(
-	# 		'secator x subfinder vulnweb.com -raw'
-	# 	)
-
 	def test_host_recon(self):
 		cmd = Command.execute(
 			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',
 			no_process=False,
-			quiet=True,
 			cls_attributes={'output_types': [Target, Url, Port, Vulnerability], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
@@ -88,3 +81,8 @@ class TestWorker(unittest.TestCase):
 		self.assertIn(port, cmd.results)
 		self.assertIn(url, cmd.results)
 		self.assertIn(vuln, cmd.results)
+
+	# def test_pd_pipe(self):
+	# 	cmd = Command.execute(
+	# 		'secator x subfinder vulnweb.com | secator x nmap | secator x httpx | secator x katana | secator x httpx | secator x gf --pattern lfi "{match}" | secator x dalfox'
+	# 	)

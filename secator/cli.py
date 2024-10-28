@@ -261,7 +261,7 @@ def revshell(name, host, port, interface, listen, force):
 		console.print('\n'.join(shells_str))
 	else:
 		shell = shell[0]
-		command = shell['command']
+		command = shell['command'].replace('[', '\[')
 		alias = shell['alias']
 		name = shell['name']
 		command_str = Template(command).render(ip=host, port=port, shell='bash')

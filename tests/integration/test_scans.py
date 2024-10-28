@@ -24,6 +24,7 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 		warnings.simplefilter('ignore', category=DeprecationWarning)
 		Command.execute(
 			f'sh {INTEGRATION_DIR}/setup.sh',
+			quiet=True,
 			cwd=INTEGRATION_DIR
 		)
 		sleep(15)

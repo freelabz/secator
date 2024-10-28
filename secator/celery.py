@@ -213,6 +213,7 @@ def run_scan(self, args=[], kwargs={}):
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
 	chunk = opts.get('chunk')
+	sync = opts.get('sync')
 
 	# Set Celery request id in context
 	context = opts.get('context', {})
@@ -238,20 +239,22 @@ def run_command(self, results, name, targets, opts={}):
 	# Get task class
 	task_cls = Task.get_task_class(name)
 
+	# Set task opts
+	# print_opts = {
+	# 	'print_cmd': True,
+	# 	'print_item': True,
+	# 	'print_line': True,
+	# 	'print_target': True
+	# }
+	# opts.update(print_opts)
+
 	try:
 		# Check if chunkable
 		many_targets = len(targets) > 1
 		targets_over_chunk_size = task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
 		has_no_file_flag = task_cls.file_flag is None
 		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size)
-		opts['has_children'] = chunk_it
-		# print_opts = {
-		# 	'print_cmd': True,
-		# 	'print_item': True,
-		# 	'print_line': True,
-		# 	'print_target': True
-		# }
-		# opts.update(print_opts)
+		opts['has_children'] = chunk_it and not sync
 		task = task_cls(targets, **opts)
 		iterator = task
 		chunk_enabled = chunk_it and not task.sync

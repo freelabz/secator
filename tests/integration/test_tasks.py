@@ -3,7 +3,6 @@ import unittest
 import warnings
 from time import sleep
 
-from secator.output_types import EXECUTION_TYPES, STAT_TYPES
 from secator.rich import console
 from secator.runners import Command
 from secator.utils import merge_opts
@@ -21,6 +20,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		warnings.simplefilter('ignore', category=DeprecationWarning)
 		Command.execute(
 			f'sh {INTEGRATION_DIR}/setup.sh',
+			quiet=True,
 			cwd=INTEGRATION_DIR
 		)
 		sleep(15)

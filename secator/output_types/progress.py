@@ -23,6 +23,11 @@ class Progress(OutputType):
 	_table_fields = ['percent', 'duration']
 	_sort_by = ('percent',)
 
+	def __post_init__(self):
+		super().__post_init__()
+		if self.percent not in [0, 100]:
+			self.percent = 0
+
 	def __str__(self) -> str:
 		return f'{self.percent}%'
 

@@ -6,7 +6,9 @@ import yaml
 from pathlib import Path
 from unittest import mock
 
+devnull = open(os.devnull, 'w')
 
+@mock.patch('sys.stderr', devnull)
 class TestConfig(unittest.TestCase):
 
 	def setUp(self):
@@ -84,6 +86,7 @@ class TestConfig(unittest.TestCase):
 		self.assertNotIn(str(self.home), data['dirs']['data'])
 
 
+@mock.patch('sys.stderr', devnull)
 class TestConfigEnv(unittest.TestCase):
 
 	def setUp(self):

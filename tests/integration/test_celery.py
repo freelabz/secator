@@ -43,7 +43,7 @@ class TestCelery(unittest.TestCase):
 			cwd=INTEGRATION_DIR
 		)
 		cls.queue = queue.Queue()
-		cls.cmd = Command.execute('secator worker', quiet=True, run=False)
+		cls.cmd = Command.execute('secator worker', run=False)
 		cls.thread = Thread(target=cls.cmd.run)
 		cls.thread.start()
 		sleep(5)

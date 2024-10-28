@@ -22,7 +22,6 @@ from urllib.parse import urlparse, quote
 import humanize
 import ifaddr
 import yaml
-from rich.markdown import Markdown
 
 from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
@@ -332,37 +331,6 @@ def detect_host(interface=None):
 			continue
 		return adapter.ips[0].ip
 	return None
-
-
-def print_results_table(results, title=None, exclude_fields=[], log=False):
-	from secator.output_types import FINDING_TYPES
-	from secator.rich import build_table
-	_print = console.log if log else console.print
-	_print()
-	if title:
-		title = ' '.join(title.capitalize().split('_')) + ' results'
-		h1 = Markdown(f'# {title}')
-		_print(h1, style='bold magenta', width=50)
-		_print()
-	tables = []
-	for output_type in FINDING_TYPES:
-		items = [
-			item for item in results if item._type == output_type.get_name()
-		]
-		if CONFIG.runners.remove_duplicates:
-			items = [item for item in items if not item._duplicate]
-		if items:
-			_table = build_table(
-				items,
-				output_fields=output_type._table_fields,
-				exclude_fields=exclude_fields,
-				sort_by=output_type._sort_by)
-			tables.append(_table)
-			title = pluralize(items[0]._type).upper()
-			_print(f':wrench: {title}', style='bold gold3', justify='left')
-			_print(_table)
-			_print()
-	return tables
 
 
 def rich_to_ansi(text):

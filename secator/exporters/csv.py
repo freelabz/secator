@@ -5,6 +5,7 @@ from dataclasses import fields
 from secator.exporters._base import Exporter
 from secator.rich import console
 from secator.output_types import FINDING_TYPES
+from secator.output_types import Info
 
 
 class CsvExporter(Exporter):
@@ -32,4 +33,5 @@ class CsvExporter(Exporter):
 		else:
 			csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
 
-		console.print(f':file_cabinet: Saved CSV reports to {csv_paths_str}')
+		info = Info(message=f'Saved CSV reports to {csv_paths_str}')
+		console.print(info)

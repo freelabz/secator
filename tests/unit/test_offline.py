@@ -1,9 +1,15 @@
+import os
 import unittest
+from unittest import mock
 
-from secator.config import download_files, CONFIG
-from secator.utils_test import clear_modules
+devnull = open(os.devnull, 'w')
+mock_stderr = mock.patch('sys.stderr', devnull)
+with mock_stderr:
+	from secator.config import download_files, CONFIG
+	from secator.utils_test import clear_modules
 
 
+@mock_stderr
 class TestOffline(unittest.TestCase):
 
 	@classmethod

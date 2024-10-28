@@ -15,10 +15,10 @@ from rich.tree import Tree
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error, Target, Stat
+from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug, traceback_as_string
+from secator.utils import debug, traceback_as_string, rich_to_ansi
 
 
 logger = logging.getLogger(__name__)
@@ -138,9 +138,6 @@ class Command(Runner):
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
 
-		# No capturing of stdout / stderr.
-		self.no_capture = self.run_opts.get('no_capture', False)
-
 		# Print cmd
 		self.print_cmd = self.run_opts.get('print_cmd', False)
 
@@ -169,8 +166,11 @@ class Command(Runner):
 
 		# Print built cmd
 		if not self.has_children:
-			if self.sync and self.description:
-				self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
+			if self.sync:
+				if self.description:
+					self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
+				elif self.print_cmd:
+					self._print('')
 			if self.print_cmd:
 				self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
@@ -280,8 +280,8 @@ class Command(Runner):
 			secator.runners.Command: instance of the Command.
 		"""
 		name = name or cmd.split(' ')[0]
-		kwargs['no_process'] = kwargs.get('no_process', True)
-		kwargs['print_line'] = kwargs.get('print_line', False) or not kwargs.get('quiet', False)
+		kwargs['print_cmd'] = not kwargs.get('quiet', False)
+		kwargs['print_line'] = True
 		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
@@ -371,8 +371,8 @@ class Command(Runner):
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
-				stdout=sys.stdout if self.no_capture else subprocess.PIPE,
-				stderr=sys.stderr if self.no_capture else subprocess.STDOUT,
+				stdout=subprocess.PIPE,
+				stderr=subprocess.STDOUT,
 				universal_newlines=True,
 				shell=self.shell,
 				env=env,
@@ -402,11 +402,6 @@ class Command(Runner):
 			return
 
 		try:
-			# No capture mode, wait for command to finish and return
-			if self.no_capture:
-				yield from self._wait_for_end()
-				return
-
 			# Process the output in real-time
 			for line in iter(lambda: self.process.stdout.readline(), b''):
 				sleep(0)  # for async to give up control
@@ -415,9 +410,6 @@ class Command(Runner):
 
 				# Strip line endings
 				line = line.rstrip()
-				if self.no_process:
-					yield line
-					continue
 
 				# Some commands output ANSI text, so we need to remove those ANSI chars
 				if self.encoding == 'ansi':
@@ -473,13 +465,13 @@ class Command(Runner):
 		if not pid:
 			return
 		proc = psutil.Process(pid)
-		root = Tree(f'[bold red]{proc.pid} ({proc.name()})[/]')
+		root = Tree(f'   [bold red]{proc.pid} ({proc.name()})[/]')
 		for subproc in proc.children(recursive=True):
 			subproc.kill()
-			root.add(f'[bold blue]{subproc.pid} ({subproc.name()})[/]')
+			root.add(f'    [bold blue]{subproc.pid} ({subproc.name()})[/]')
 		proc.kill()
-		self._print("\n:high_brightness: [bold green]Killed processes:[/]", rich=True)
-		self._print(root, rich=True)
+		info = Info(message=f'Killed processes:\n{rich_to_ansi(root)}')
+		self._print_item(info)
 		self.killed = True
 
 	def stats(self):
@@ -520,6 +512,8 @@ class Command(Runner):
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line."""
+		if self.no_process:
+			return
 		for item_loader in self.item_loaders:
 			if (callable(item_loader)):
 				yield from item_loader(self, line)

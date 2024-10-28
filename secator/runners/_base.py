@@ -8,7 +8,6 @@ from time import time
 
 import humanize
 from dotmap import DotMap
-from rich.panel import Panel
 
 from secator.definitions import DEBUG
 from secator.config import CONFIG
@@ -16,7 +15,7 @@ from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warn
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
-from secator.utils import (debug, import_dynamic, merge_opts, pluralize, rich_to_ansi)
+from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi)
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +117,9 @@ class Runner:
 		self.piped_output = self.run_opts.get('piped_output', False)
 
 		# Print opts
-		self.print_item = self.run_opts.get('print_item', False) and not self.no_process
+		self.print_item = self.run_opts.get('print_item', False)
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
-		self.print_remote_info = self.run_opts.get('print_remote_info', False)
+		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
 		self.print_orig = self.run_opts.get('print_orig', False)
 		self.print_json = self.run_opts.get('print_json', False) or self.print_orig
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
@@ -254,7 +253,6 @@ class Runner:
 				self.run_hooks('on_iter')
 
 		except KeyboardInterrupt:
-			self._print('Process was killed manually (CTRL+C / CTRL+X).', color='bold red', rich=True)
 			if self.celery_result:
 				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
 				self.stop_live_tasks()
@@ -318,7 +316,6 @@ class Runner:
 
 					# raw output is used to pipe, we should only pipe the first output type of a Runner.
 					if isinstance(item, OutputType) and not isinstance(item, self.output_types[0]):
-						print(f'not printing item type {item._type}', file=sys.stderr)
 						item_str = ''
 
 					if item_str:
@@ -406,6 +403,8 @@ class Runner:
 		return data
 
 	def run_hooks(self, hook_type, *args):
+		if self.no_process:
+			return
 		result = args[0] if len(args) > 0 else None
 		if not self.enable_hooks:
 			return result
@@ -430,7 +429,8 @@ class Runner:
 		return result
 
 	def run_validators(self, validator_type, *args):
-		# logger.debug(f'Running validators of type {validator_type}')
+		if self.no_process:
+			return True
 		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 		for validator in self.validators[validator_type]:
 			name = f'{self.__class__.__name__}.{validator_type}'
@@ -510,60 +510,8 @@ class Runner:
 			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
 		runner_name = self.__class__.__name__
-		self.log_header()
-		self._print(
-			f':tada: {runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', rich=True)
-		self._print('\n🏆 [bold gold3]Live results:[/]', rich=True)
-
-	def log_header(self):
-		"""Log runner header."""
-		if not self.print_remote_info:
-			return
-		runner_name = self.__class__.__name__
-
-		# Description
-		panel_str = f':scroll: [bold gold3]Description:[/] {self.config.description}'
-
-		# Workspace
-		if self.workspace_name:
-			panel_str += f'\n:construction_worker: [bold gold3]Workspace:[/] {self.workspace_name}'
-
-		# Targets
-		if self.targets:
-			panel_str += '\n:pear: [bold gold3]Targets:[/]'
-			for target in self.targets:
-				panel_str += f'\n   • {target}'
-
-		# Options
-		DISPLAY_OPTS_EXCLUDE = [
-			'sync', 'worker', 'debug', 'output', 'json', 'orig', 'raw', 'format', 'quiet'
-		]
-		items = [
-			f'[italic]{k}[/]: {v}'
-			for k, v in self.run_opts.items()
-			if k not in DISPLAY_OPTS_EXCLUDE and k not in self.print_opts
-			and v is not None
-		]
-		if items:
-			panel_str += '\n:pushpin: [bold gold3]Options:[/]'
-			for item in items:
-				panel_str += f'\n   • {item}'
-
-		if self.exporters:
-			panel_str += '\n:email:  [bold gold3]Exporters:[/]'
-			for exporter in self.exporters:
-				exporter_name = exporter.__name__.replace('Exporter', '').lower()
-				panel_str += f'\n   • {exporter_name}'
-
-		panel = Panel(
-			panel_str,
-			title=f'[bold gold3]{runner_name}[/] [bold magenta]{self.config.name}[/]',
-			border_style='bold gold3',
-			expand=False,
-			highlight=True
-		)
-		self._print('\n')
-		self._print(panel, rich=True)
+		info = Info(message=f'{runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', _source=self.unique_name)
+		self._print_item(info)
 
 	def log_results(self):
 		"""Log results.
@@ -575,55 +523,7 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-
-		# Log runner infos
-		if self.infos and self.print_remote_info:
-			self._print(
-				f'ℹ️ [bold magenta]{self.config.name}[/] infos ({len(self.infos)}):',
-				color='bold green', rich=True)
-			for info in self.infos:
-				self._print(f'   • \[{info._source}] {info.message}', color='bold green', rich=True)
-
-		# Log runner warnings
-		if self.warnings and self.print_remote_info:
-			self._print(
-				f'⚠ [bold magenta]{self.config.name}[/] warnings ({len(self.warnings)}):',
-				color='bold orange4', rich=True)
-			for warning in self.warnings:
-				self._print(f'   • \[{warning._source}] {warning.message}', color='bold orange3', rich=True)
-
-		# Log runner errors
-		if self.errors and self.print_remote_info:
-			self._print(
-				f'❌ [bold magenta]{self.config.name}[/] errors ({len(self.errors)}):',
-				color='bold red', rich=True)
-			for error in self.errors:
-				self._print(f'   • \[{error._source}] {error.message}', color='bold red', rich=True)
-
-		# Log execution results
-		status = 'succeeded' if not self.errors else '[bold red]failed[/]'
-		if self.print_remote_info:
-			self._print('\n')
-			self._print(
-				f':tada: [bold green]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.config.name}[/] '
-				f'[bold green]{status} in[/] [bold gold3]{self.elapsed_human}[/].', rich=True)
-
-		# Log results count
-		if self.print_item:
-			count_map = self._get_findings_count()
-			self._print('', rich=True)
-			if all(count == 0 for count in count_map.values()):
-				self._print(':exclamation_mark:Found 0 results.', color='bold red', rich=True)
-			else:
-				results_str = ':heavy_check_mark: Found ' + ' and '.join([
-					f'{count} {pluralize(name) if count > 1 or count == 0 else name}'
-					for name, count in count_map.items()
-				]) + '.'
-				self._print(results_str, color='bold green', rich=True)
-
-		# Build and send report
 		if self.exporters:
-			self._print('', rich=True)
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()
@@ -754,6 +654,10 @@ class Runner:
 		return count_map
 
 	def _process_item(self, item: dict):
+		# Abort if no_process is set
+		if self.no_process:
+			return None
+
 		# Run item validators
 		if not self.run_validators('validate_item', item):
 			return None
