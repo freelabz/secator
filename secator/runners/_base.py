@@ -721,7 +721,7 @@ class Runner:
 					self._print(error)
 				continue
 
-		if new_item:
+		if not new_item:
 			new_item = Warning(message=f'Failed to load item as output type:\n  {item}')
 
 		return new_item
