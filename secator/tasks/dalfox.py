@@ -7,6 +7,7 @@ from secator.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   SEVERITY, TAGS, THREADS, TIMEOUT, URL,
 							   USER_AGENT)
 from secator.output_types import Vulnerability
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnHttp
 
 DALFOX_TYPE_MAP = {
@@ -38,6 +39,7 @@ class dalfox(VulnHttp):
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent'
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: None,

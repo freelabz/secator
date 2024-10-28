@@ -11,7 +11,7 @@ from secator.definitions import DEBUG
 from secator.rich import console
 from secator.runners import Command, Workflow
 from secator.utils import setup_logging, merge_opts
-from secator.utils_test import TEST_WORKFLOWS, CommandOutputTester, load_fixture
+from secator.utils_test import TEST_WORKFLOWS, ALL_WORKFLOWS, CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_WORKFLOWS
 from tests.integration.outputs import OUTPUTS_WORKFLOWS
 
@@ -35,24 +35,27 @@ def hook_item(self, item):
 
 class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
-	def setUp(self):
+	@classmethod
+	def setUpClass(cls):
 		warnings.simplefilter('ignore', category=ResourceWarning)
 		warnings.simplefilter('ignore', category=DeprecationWarning)
 		Command.execute(
 			f'sh {INTEGRATION_DIR}/setup.sh',
+			quiet=True,
 			cwd=INTEGRATION_DIR
 		)
 		sleep(15)
 
-	def tearDown(self):
+	@classmethod
+	def tearDownClass(self):
 		Command.execute(
 			f'sh {INTEGRATION_DIR}/teardown.sh',
+			quiet=True,
 			cwd=INTEGRATION_DIR
 		)
 
 	def test_default_workflows(self):
 		fmt_opts = {
-			'print_cmd': DEBUG > 0,
 			'print_item': DEBUG > 1,
 			'print_line': DEBUG > 2,
 			'table': DEBUG > 1,
@@ -71,7 +74,8 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			'rate_limit': 1000,
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 			'timeout': 7,
-			'depth': 2
+			'depth': 2,
+			'ports': '9999,3000,8080'
 		}
 		opts = merge_opts(opts, fmt_opts)
 
@@ -99,14 +103,14 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 					results,
 					expected_results=outputs)
 
-	def test_adhoc_workflow(self):
+	def test_inline_workflow(self):
 		# Ignore if TEST_WORKFLOWS are defined
-		if TEST_WORKFLOWS:
+		if TEST_WORKFLOWS != ALL_WORKFLOWS:
 			return
 
 		# Expected results / context
 		expected_results = [
-			Port(port=9999, host='localhost', service_name='fake', _source='unknown'),
+			Port(port=9999, host='localhost', ip='127.0.0.1', service_name='fake', _source='unknown'),
 			Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
 			Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
 			Url(url='http://localhost:3000', host='127.0.0.1', status_code=200, title='OWASP Juice Shop', content_type='text/html', _source='httpx'),
@@ -133,7 +137,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			config,
 			targets=['localhost'],
 			results=[
-				Port(port=9999, host='localhost', service_name='fake', _source='unknown', _context=expected_context)
+				Port(port=9999, host='localhost', ip='127.0.0.1', service_name='fake', _source='unknown', _context=expected_context)
 			],
 			hooks = {
 				Workflow: {
@@ -154,6 +158,12 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			self.assertNotIn(result._uuid, uuids)
 			uuids.append(result._uuid)
 			results.append(result)
+
+		# Verify number of URLs is good
+		urls = [r.url for r in results if r._type == 'url']
+		ports = [r.port for r in results if r._type == 'port']
+		self.assertEqual(len(urls), 2)
+		self.assertEqual(len(ports), 3)
 
 		# Verify results yielded from workflow and workflow.results are equal
 		self.assertEqual(results, workflow.results)

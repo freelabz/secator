@@ -4,6 +4,7 @@ import yaml
 
 from secator.config import CONFIG
 from secator.exporters._base import Exporter
+from secator.output_types import Info
 from secator.rich import console
 from secator.utils import pluralize
 
@@ -79,7 +80,8 @@ class GdriveExporter(Exporter):
 		ws = sheet.get_worksheet(0)
 		sheet.del_worksheet(ws)
 
-		console.print(f':file_cabinet: Saved Google Sheets reports to [u magenta]{sheet.url}[/]')
+		info = Info(message=f'Saved Google Sheets reports to [u magenta]{sheet.url}')
+		console.print(info)
 
 	def create_folder(self, folder_name, parent_id=None):
 		from googleapiclient.discovery import build

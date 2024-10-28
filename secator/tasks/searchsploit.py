@@ -5,6 +5,7 @@ from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
 								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
 from secator.output_types import Exploit
 from secator.runners import Command
+from secator.serializers import JSONSerializer
 
 
 SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*)$')
@@ -21,6 +22,7 @@ class searchsploit(Command):
 		'strict': {'short': 's', 'is_flag': True, 'default': False, 'help': 'Strict match'}
 	}
 	opt_key_map = {}
+	item_loaders = [JSONSerializer()]
 	output_types = [Exploit]
 	output_map = {
 		Exploit: {
@@ -56,14 +58,13 @@ class searchsploit(Command):
 
 	@staticmethod
 	def before_init(self):
-		_in = self.input
+		_in = self.input[0]
 		self.matched_at = None
 		if '~' in _in:
 			split = _in.split('~')
 			self.matched_at = split[0]
-			self.input = split[1]
-		if isinstance(self.input, str):
-			self.input = self.input.replace('httpd', '').replace('/', ' ')
+			self.input[0] = split[1]
+		self.input[0] = self.input[0].replace('httpd', '').replace('/', ' ')
 
 	@staticmethod
 	def on_item_pre_convert(self, item):
@@ -86,6 +87,6 @@ class searchsploit(Command):
 				item.tags = product_info + item.tags
 			# else:
 			# 	self._print(f'[bold red]{item.name} ({item.reference}) did not quite match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
-		input_tag = '-'.join(self.input.replace('\'', '').split(' '))
+		input_tag = '-'.join(self.input[0].replace('\'', '').split(' '))
 		item.tags = [input_tag] + item.tags
 		return item

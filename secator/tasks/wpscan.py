@@ -8,7 +8,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
 							   SEVERITY, TAGS, THREADS, TIMEOUT,
 							   URL, USER_AGENT)
-from secator.output_types import Tag, Vulnerability
+from secator.output_types import Tag, Vulnerability, Info, Error
 from secator.tasks._categories import VulnHttp
 
 
@@ -73,101 +73,6 @@ class wpscan(VulnHttp):
 	ignore_return_code = True
 	profile = 'io'
 
-	def yielder(self):
-		prev = self.print_item_count
-		self.print_item_count = False
-		yield from super().yielder()
-		if self.return_code != 0:
-			return
-		self.results = []
-		if not self.output_json:
-			return
-
-		note = f'wpscan JSON results saved to {self.output_path}'
-		if self.print_line:
-			self._print(note)
-
-		if os.path.exists(self.output_path):
-			with open(self.output_path, 'r') as f:
-				data = json.load(f)
-
-			if self.orig:
-				yield data
-				return
-
-			# Get URL
-			target = data.get('target_url', self.targets)
-
-			# Wordpress version
-			version = data.get('version', {})
-			if version:
-				wp_version = version['number']
-				wp_version_status = version['status']
-				if wp_version_status == 'outdated':
-					vuln = version
-					vuln.update({
-						'url': target,
-						'to_s': 'Wordpress outdated version',
-						'type': wp_version,
-						'references': {},
-					})
-					yield vuln
-
-			# Main theme
-			main_theme = data.get('main_theme', {})
-			if main_theme:
-				version = main_theme.get('version', {})
-				slug = main_theme['slug']
-				location = main_theme['location']
-				if version:
-					number = version['number']
-					latest_version = main_theme.get('latest_version')
-					yield Tag(
-						name=f'Wordpress theme - {slug} {number}',
-						match=target,
-						extra_data={
-							'url': location,
-							'latest_version': latest_version
-						}
-					)
-					if (latest_version and number < latest_version):
-						yield Vulnerability(
-							matched_at=target,
-							name=f'Wordpress theme - {slug} {number} outdated',
-							severity='info'
-						)
-
-			# Interesting findings
-			interesting_findings = data.get('interesting_findings', [])
-			for item in interesting_findings:
-				yield item
-
-			# Plugins
-			plugins = data.get('plugins', {})
-			for _, data in plugins.items():
-				version = data.get('version', {})
-				slug = data['slug']
-				location = data['location']
-				if version:
-					number = version['number']
-					latest_version = data.get('latest_version')
-					yield Tag(
-						name=f'Wordpress plugin - {slug} {number}',
-						match=target,
-						extra_data={
-							'url': location,
-							'latest_version': latest_version
-						}
-					)
-					if (latest_version and number < latest_version):
-						yield Vulnerability(
-							matched_at=target,
-							name=f'Wordpress plugin - {slug} {number} outdated',
-							severity='info'
-						)
-
-		self.print_item_count = prev
-
 	@staticmethod
 	def on_init(self):
 		output_path = self.get_opt_value(OUTPUT_PATH)
@@ -175,3 +80,88 @@ class wpscan(VulnHttp):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
 		self.cmd += f' -o {self.output_path}'
+
+	@staticmethod
+	def on_cmd_done(self):
+		if not os.path.exists(self.output_path):
+			yield Error(message=f'Could not find JSON results in {self.output_path}')
+			return
+
+		yield Info(message=f'JSON results saved to {self.output_path}')
+		with open(self.output_path, 'r') as f:
+			data = json.load(f)
+
+		if self.print_orig:
+			yield data
+			return
+
+		# Get URL
+		target = data.get('target_url', self.targets)
+
+		# Wordpress version
+		version = data.get('version', {})
+		if version:
+			wp_version = version['number']
+			wp_version_status = version['status']
+			if wp_version_status == 'outdated':
+				vuln = version
+				vuln.update({
+					'url': target,
+					'to_s': 'Wordpress outdated version',
+					'type': wp_version,
+					'references': {},
+				})
+				yield vuln
+
+		# Main theme
+		main_theme = data.get('main_theme', {})
+		if main_theme:
+			version = main_theme.get('version', {})
+			slug = main_theme['slug']
+			location = main_theme['location']
+			if version:
+				number = version['number']
+				latest_version = main_theme.get('latest_version')
+				yield Tag(
+					name=f'Wordpress theme - {slug} {number}',
+					match=target,
+					extra_data={
+						'url': location,
+						'latest_version': latest_version
+					}
+				)
+				if (latest_version and number < latest_version):
+					yield Vulnerability(
+						matched_at=target,
+						name=f'Wordpress theme - {slug} {number} outdated',
+						severity='info'
+					)
+
+		# Interesting findings
+		interesting_findings = data.get('interesting_findings', [])
+		for item in interesting_findings:
+			yield item
+
+		# Plugins
+		plugins = data.get('plugins', {})
+		for _, data in plugins.items():
+			version = data.get('version', {})
+			slug = data['slug']
+			location = data['location']
+			if version:
+				number = version['number']
+				latest_version = data.get('latest_version')
+				yield Tag(
+					name=f'Wordpress plugin - {slug} {number}',
+					match=target,
+					extra_data={
+						'url': location,
+						'latest_version': latest_version
+					}
+				)
+				if (latest_version and number < latest_version):
+					yield Vulnerability(
+						matched_at=target,
+						name=f'Wordpress plugin - {slug} {number} outdated',
+						severity='info'
+					)
