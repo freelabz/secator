@@ -297,7 +297,7 @@ def run_command(self, results, name, targets, opts={}):
 	finally:
 		update_state(self, task, force=True)
 		gc.collect()
-		debug(f'', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
+		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
 		return task.results
 
 

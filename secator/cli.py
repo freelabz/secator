@@ -1199,7 +1199,7 @@ def unit(tasks, workflows, scans, test):
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/unit'
 	if test:
 		test_str = ' or '.join(test.split(','))
-		cmd += f' -k "{test_str}"' 
+		cmd += f' -k "{test_str}"'
 	run_test(cmd, 'unit')
 
 
@@ -1222,7 +1222,7 @@ def integration(tasks, workflows, scans, test):
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/integration'
 	if test:
 		test_str = ' or '.join(test.split(','))
-		cmd += f' -k "{test_str}"' 
+		cmd += f' -k "{test_str}"'
 	run_test(cmd, 'unit')
 
 

@@ -179,7 +179,6 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 				if not runner.ignore_return_code:
 					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code')
 
-
 			# Check results not empty
 			if not empty_results_allowed:
 				self.assertGreater(len(results), 0, f'{runner.name} should return at least 1 result')
@@ -191,7 +190,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			for item in results:
 
 				if expected_output_types:
-					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}"')
+					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}"')  # noqa: E501
 
 				if expected_output_keys:
 					keys = [k for k in list(item.keys()) if not k.startswith('_')]

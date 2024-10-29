@@ -132,7 +132,7 @@ class Command(Runner):
 			hooks=hooks,
 			validators=validators,
 			context=context)
-		
+
 		# Inputs path
 		self.inputs_path = None
 
@@ -793,4 +793,4 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
-		debug('Built input', obj={'inputs': self.inputs, 'inputs_path': self.inputs_path, 'shell': self.shell, 'cmd': self.cmd}, sub='runner.init')
+		debug('Built input', obj={'inputs': self.inputs, 'inputs_path': self.inputs_path, 'shell': self.shell, 'cmd': self.cmd}, sub='runner.init')  # noqa: E501
