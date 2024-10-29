@@ -1223,7 +1223,7 @@ def integration(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'unit')
+	run_test(cmd, 'integration')
 
 
 @test.command()
