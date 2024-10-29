@@ -1,5 +1,4 @@
 import queue
-import json
 import os
 import unittest
 import warnings
@@ -11,9 +10,7 @@ from celery import chain, chord
 
 from secator.celery import app, forward_results
 from secator.config import CONFIG
-from secator.definitions import DEBUG
 from secator.utils_test import TEST_TASKS, load_fixture
-from secator.rich import console
 from secator.runners import Command
 from secator.output_types import Url
 from tests.integration.inputs import INPUTS_SCANS
@@ -66,8 +63,6 @@ class TestCelery(unittest.TestCase):
 		workflow = chain(*sigs)
 		result = workflow.apply()
 		results = result.get()
-		if DEBUG > 1:
-			console.print_json(json.dumps(results))
 		urls = [r.url for r in results if r._type == 'url']
 		targets = [r.name for r in results if r._type == 'target']
 		self.assertEqual(len(urls), len(URL_TARGETS))
@@ -97,8 +92,6 @@ class TestCelery(unittest.TestCase):
 		workflow = chain(*sigs)
 		result = workflow.apply()
 		results = result.get()
-		if DEBUG:
-			console.print_json(json.dumps(results))
 		urls = [r.url for r in results if r._type == 'url']
 		targets = [r.name for r in results if r._type == 'target']
 		self.assertEqual(len(urls), len(URL_TARGETS) + 1)
@@ -109,7 +102,7 @@ class TestCelery(unittest.TestCase):
 		from secator.tasks import httpx
 		if httpx not in TEST_TASKS:
 			return
-		
+
 		existing_results = [Url(**{
 			"url": "https://example.synology.me",
 			"method": "GET",
