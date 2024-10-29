@@ -46,7 +46,7 @@ class TestTemplate(unittest.TestCase):
 		from secator.runners import Workflow
 		ls_workflow = [w for w in ALL_WORKFLOWS if w.name == 'ls'][0]
 		self.assertIsNotNone(ls_workflow)
-		workflow = Workflow(ls_workflow, targets=[str(self.template_dir)])
+		workflow = Workflow(ls_workflow, inputs=[str(self.template_dir)])
 		workflow.run()
 		findings = workflow.findings
 		self.assertEqual(len(findings), 1)

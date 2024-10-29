@@ -52,14 +52,14 @@ class msfconsole(VulnMulti):
 		env_vars = {}
 		if environment:
 			env_vars = dict(map(lambda x: x.split('='), environment.strip().split(',')))
-		env_vars['RHOST'] = self.input[0]
-		env_vars['RHOSTS'] = self.input[0]
+		env_vars['RHOST'] = self.inputs[0]
+		env_vars['RHOSTS'] = self.inputs[0]
 
 		# Passing msfconsole command directly, simply add RHOST / RHOSTS from host input and run then exit
 		if command:
 			self.run_opts['msfconsole.execute_command'] = (
-				f'setg RHOST {self.input[0]}; '
-				f'setg RHOSTS {self.input[0]}; '
+				f'setg RHOST {self.inputs[0]}; '
+				f'setg RHOSTS {self.inputs[0]}; '
 				f'{command.format(**env_vars)}; '
 				f'exit;'
 			)

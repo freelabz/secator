@@ -24,7 +24,7 @@ class ls(Command):
         # Output vulnerabilities
         permissions = data['permissions']
         path = data['path']
-        full_path = f'{self.input[0]}/{path}'
+        full_path = f'{self.inputs[0]}/{path}'
         if permissions[-2] == 'w':  # found a vulnerability !
             yield Vulnerability(
                 name='World-writeable path',

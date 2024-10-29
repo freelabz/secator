@@ -289,8 +289,8 @@ def register_runner(cli_endpoint, config):
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 
-		targets = opts.pop(input_type)
-		targets = expand_input(targets, ctx)
+		inputs = opts.pop(input_type)
+		inputs = expand_input(inputs, ctx)
 		if sync or show:
 			sync = True
 		else:
@@ -329,7 +329,7 @@ def register_runner(cli_endpoint, config):
 		})
 
 		# Build exporters
-		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
+		runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 
 	generate_cli_subcommand(cli_endpoint, func, **command_opts)

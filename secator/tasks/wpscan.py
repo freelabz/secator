@@ -96,7 +96,7 @@ class wpscan(VulnHttp):
 			return
 
 		# Get URL
-		target = data.get('target_url', self.targets)
+		target = data.get('target_url', self.inputs[0])
 
 		# Wordpress version
 		version = data.get('version', {})

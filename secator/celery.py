@@ -2,6 +2,8 @@ import gc
 import logging
 import uuid
 
+from time import time
+
 from celery import Celery, chain, chord, signals
 from celery.app import trace
 
@@ -13,7 +15,7 @@ from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
-from secator.utils import (debug, deduplicate, flatten)
+from secator.utils import (debug, deduplicate, flatten, should_update)
 
 
 #---------#
@@ -102,16 +104,22 @@ def void(*args, **kwargs):
 	pass
 
 
-def update_state(celery_task, **state):
+def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
+	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
+		return
+	task.last_updated_celery = time()
 	debug(
 		'',
 		sub='celery.state',
 		id=celery_task.request.id,
-		obj={state['meta']['full_name']: state['meta']['state'], 'count': state['meta']['count']},
+		obj={task.unique_name: task.status, 'count': task.self_findings_count},
 		obj_after=False
 	)
-	return celery_task.update_state(**state)
+	return celery_task.update_state(
+		state='RUNNING',
+		meta=task.celery_state
+	)
 
 
 def revoke_task(task_id, task_name=None):
@@ -148,7 +156,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 
 	# Build signatures
 	sigs = []
-	ids_map = {}
+	task.ids_map = {}
 	for ix, chunk in enumerate(chunks):
 		if not isinstance(chunk, list):
 			chunk = [chunk]
@@ -157,15 +165,10 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk_count'] = len(chunks)
 		task_id = str(uuid.uuid4())
 		sig = type(task).s(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
-		ids_map[task_id] = {
-			'id': task_id,
-			'name': task.name,
-			'full_name': f'{task.name}_{ix + 1}',
-			'descr': task.config.description or '',
-			'state': 'PENDING',
-			'count': 0,
-			'progress': 0
-		}
+		full_name = f'{task.name}_{ix + 1}'
+		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
+		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
+		task.results.append(info)
 		sigs.append(sig)
 
 	# Build Celery workflow
@@ -176,7 +179,8 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			forward_results.s().set(queue='io'),
 		)
 	)
-	return workflow, ids_map
+	result = workflow.apply_async()
+	task.celery_result = result
 
 
 @app.task(bind=True)
@@ -220,12 +224,6 @@ def run_command(self, results, name, targets, opts={}):
 	opts['context'] = context
 	opts['print_remote_info'] = False
 	opts['results'] = results
-
-	# Set initial state
-	state = {
-		'state': 'RUNNING',
-		'meta': {}
-	}
 
 	# Flatten + dedupe results
 	results = flatten(results)
@@ -274,23 +272,19 @@ def run_command(self, results, name, targets, opts={}):
 		# Chunk task if needed
 		if chunk_enabled:
 			chunk_size = 1 if has_no_file_flag else task_cls.input_chunk_size
-			workflow, ids_map = break_task(
+			break_task(
 				task,
 				opts,
 				targets,
 				results=results,
 				chunk_size=chunk_size)
-			result = workflow.apply_async()
-			task.celery_result = result
-			task.celery_ids_map = ids_map
-			task.celery_ids = list(ids_map.keys())
-			state['meta'] = task.celery_state
-			update_state(self, **state)
+
+		# Update state before starting
+		update_state(self, task)
 
 		# Update state for each item found
 		for _ in task:
-			state['meta'] = task.celery_state
-			update_state(self, **state)
+			update_state(self, task)
 
 	except BaseException as e:
 		error = Error.from_exception(e)
@@ -301,16 +295,9 @@ def run_command(self, results, name, targets, opts={}):
 		task.results.append(error)
 
 	finally:
-		state['meta'] = task.celery_state
-		update_state(self, **state)
+		update_state(self, task, force=True)
 		gc.collect()
-
-		# Run on_end hooks for split tasks
-		if task.has_children:
-			task.log_results()
-			task.run_hooks('on_end')
-
-		# Return task results
+		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
 		return task.results
 
 

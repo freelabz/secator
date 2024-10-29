@@ -11,7 +11,7 @@ from dotmap import DotMap
 
 from secator.definitions import DEBUG
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error
+from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
@@ -68,13 +68,13 @@ class Runner:
 	# Reports folder
 	reports_folder = None
 
-	def __init__(self, config, targets=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
+	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
-		if not isinstance(targets, list):
-			targets = [targets]
-		self.targets = targets
+		if not isinstance(inputs, list):
+			inputs = [inputs]
+		self.inputs = inputs
 		self.results = results
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
@@ -107,9 +107,6 @@ class Runner:
 		os.makedirs(self.reports_folder, exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
-
-		# Process input
-		self.input = targets
 
 		# Process opts
 		self.quiet = self.run_opts.get('quiet', False)
@@ -150,7 +147,7 @@ class Runner:
 		self.run_hooks('before_init')
 
 		# Check if input is valid
-		self.input_valid = self.run_validators('validate_input', self.input)
+		self.inputs_valid = self.run_validators('validate_input', self.inputs)
 
 		# Run hooks
 		self.run_hooks('on_init')
@@ -164,6 +161,10 @@ class Runner:
 	@property
 	def elapsed_human(self):
 		return humanize.naturaldelta(self.elapsed)
+
+	@property
+	def targets(self):
+		return [r for r in self.results if isinstance(r, Target)]
 
 	@property
 	def infos(self):
@@ -376,7 +377,7 @@ class Runner:
 		data = {
 			'name': self.name,
 			'status': self.status,
-			'targets': self.targets,
+			'targets': self.inputs,
 			'start_time': self.start_time,
 			'end_time': self.end_time,
 			'elapsed': self.elapsed.total_seconds(),
@@ -401,10 +402,8 @@ class Runner:
 		return data
 
 	def run_hooks(self, hook_type, *args):
-		if self.no_process:
-			return
 		result = args[0] if len(args) > 0 else None
-		if not self.enable_hooks:
+		if not self.enable_hooks or self.no_process:
 			return result
 		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 		for hook in self.hooks[hook_type]:
@@ -426,7 +425,7 @@ class Runner:
 					raise e
 		return result
 
-	def run_validators(self, validator_type, *args):
+	def run_validators(self, validator_type, *args, error=True):
 		if self.no_process:
 			return True
 		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
@@ -437,16 +436,17 @@ class Runner:
 			if not validator(self, *args):
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators', level=3)
 				doc = validator.__doc__
-				message = 'Validator failed'
-				if doc:
-					message += f': {doc}'
-				error = Error(
-					message=message,
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
-				self.results.append(error)
-				self._print_item(error)
+				if error:
+					message = 'Validator failed'
+					if doc:
+						message += f': {doc}'
+					error = Error(
+						message=message,
+						_source=self.unique_name,
+						_uuid=str(uuid.uuid4())
+					)
+					self.results.append(error)
+					self._print_item(error)
 				return False
 			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators', level=3)
 		return True
@@ -659,7 +659,7 @@ class Runner:
 			return None
 
 		# Run item validators
-		if not self.run_validators('validate_item', item):
+		if not self.run_validators('validate_item', item, error=False):
 			return None
 
 		# Convert output dict to another schema

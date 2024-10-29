@@ -1196,16 +1196,10 @@ def unit(tasks, workflows, scans, test):
 
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
-
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m unittest'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/unit'
 	if test:
-		tests = test.split(',')
-		for test in tests:
-			if not test.startswith('tests.unit'):
-				test = f'tests.unit.{test}'
-			cmd += f' {test}'
-	else:
-		cmd += ' discover -v tests.unit'
+		test_str = ' or '.join(test.split(','))
+		cmd += f' -k "{test_str}"'
 	run_test(cmd, 'unit')
 
 
@@ -1225,17 +1219,11 @@ def integration(tasks, workflows, scans, test):
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.integration -m unittest'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/integration'
 	if test:
-		if test:
-			tests = test.split(',')
-			for test in tests:
-				if not test.startswith('tests.integration'):
-					test = f'tests.integration.{test}'
-				cmd += f' {test}'
-	else:
-		cmd += ' discover -v tests.integration'
-	run_test(cmd, 'integration')
+		test_str = ' or '.join(test.split(','))
+		cmd += f' -k "{test_str}"'
+	run_test(cmd, 'unit')
 
 
 @test.command()

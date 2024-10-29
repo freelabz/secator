@@ -229,17 +229,15 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 		for cls, fixture in FIXTURES_TASKS.items():
 			console.print(f'\t[bold grey35]{cls.__name__} ...[/] ', end='')
 			with self.subTest(name=cls.__name__):
-
 				# Validate fixture
 				if not self._valid_fixture(cls, fixture):
 					continue
 
 				# Run command
 				targets = INPUTS_TASKS[cls.input_type]
-
-				with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
-					self._test_task_output(
-						results,
+				with mock_command(cls, targets, META_OPTS, fixture) as runner:
+					self._test_runner_output(
+						runner,
 						expected_output_types=cls.output_types
 					)
 
@@ -269,12 +267,12 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 					'orig': True,
 					'raw': isinstance(fixture, str)
 				})
-				with mock_command(cls, targets, opts, fixture, 'run') as results:
+				with mock_command(cls, targets, opts, fixture) as runner:
 					if not len(cls.output_types) == 1:
 						console.print('[dim gold3] skipped (multi-output task with single schema)[/]')
 						return
-					self._test_task_output(
-						results,
+					self._test_runner_output(
+						runner,
 						expected_output_keys=expected_output_keys
 					)
 
