@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.7", "3.11"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.11"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -55,8 +55,6 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11"]
-        test_type: ['tasks', 'worker', 'celery']
-        # test_type: ['tasks', 'workflows', 'scans']
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -86,6 +84,6 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
-    - name: Run integration tests (${{ matrix.test_type }})
+    - name: Run integration tests
       run: |
-        secator test integration --test tests.integration.test_${{ matrix.test_type }}
+        secator test integration --test test_celery,test_worker,test_tasks
