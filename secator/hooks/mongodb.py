@@ -27,7 +27,7 @@ def update_runner(self):
 	type = self.config.type
 	collection = f'{type}s'
 	update = self.toDict()
-	debug_obj = {self.unique_name: self.status, 'count': self.self_findings_count, 'type': type, 'caller': self.config.name}
+	debug_obj = {self.unique_name: self.status, 'count': self.self_findings_count, 'type': type, 'caller': self.config.name}  # noqa: E501
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
 	debug('maybe_update', sub='debug.hooks.mongodb', id=_id, obj=debug_obj, obj_after=True, obj_breaklines=False)
@@ -75,7 +75,7 @@ def update_finding(self, item):
 		status = 'CREATED'
 	end_time = time.time()
 	elapsed = end_time - start_time
-	debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=str(item._uuid), obj={_type: status, 'type': 'finding', 'caller': self.config.name}, obj_after=False)
+	debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=str(item._uuid), obj={_type: status, 'type': 'finding', 'caller': self.config.name}, obj_after=False)  # noqa: E501
 	return item
 
 

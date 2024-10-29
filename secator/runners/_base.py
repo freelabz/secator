@@ -521,7 +521,7 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-		debug(f'', obj={self.unique_name: self.status, 'count': self.self_findings_count, 'results': self.self_findings}, sub='debug.runner.results')
+		debug('', obj={self.unique_name: self.status, 'count': self.self_findings_count, 'results': self.self_findings}, sub='debug.runner.results')  # noqa: E501
 		if self.exporters:
 			report = Report(self, exporters=self.exporters)
 			report.build()
