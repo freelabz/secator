@@ -7,6 +7,25 @@ on:
     branches: [ main ]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+  
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Run lint tests
+      run: |
+        secator test lint
+
   unit:
     runs-on: ubuntu-latest
     strategy:
@@ -26,28 +45,11 @@ jobs:
       run: |
         secator test unit
 
-    - name: Run coverage report
-      run: |
-        secator test coverage
-
-  lint:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11"]
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-  
-    - name: Install secator
-      uses: ./.github/actions/install
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v4
       with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Run lint tests
-      run: |
-        secator test lint
+        name: coverage-unit
+        path: .coverage.unit
 
   integration:
     runs-on: ubuntu-latest
@@ -87,3 +89,23 @@ jobs:
     - name: Run integration tests
       run: |
         secator test integration --test test_celery,test_worker,test_tasks
+
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-integration
+        path: .coverage.integration
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v4
+
+    - name: Download integration coverage file
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-integration
+
+    - name: Run coverage report
+      run: |
+        secator test coverage
