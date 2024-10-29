@@ -13,10 +13,9 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability
-from secator.rich import console
+from secator.output_types import Exploit, Port, Vulnerability, Info, Error
 from secator.tasks._categories import VulnMulti
-from secator.utils import debug
+from secator.utils import debug, traceback_as_string
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +82,8 @@ class nmap(VulnMulti):
 		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
 		tcp_connect = self.get_opt_value('tcp_connect')
-		if tcp_syn_stealth:
+		udp_scan = self.get_opt_value('udp_scan')
+		if tcp_syn_stealth or udp_scan:
 			self.cmd = f'sudo {self.cmd}'
 		if tcp_connect and tcp_syn_stealth:
 			self._print(
@@ -91,17 +91,13 @@ class nmap(VulnMulti):
 				'bold gold3')
 			self.cmd = self.cmd.replace('-sT ', '')
 
-	def yielder(self):
-		yield from super().yielder()
-		if self.return_code != 0:
+	@staticmethod
+	def on_cmd_done(self):
+		if not os.path.exists(self.output_path):
+			yield Error(message=f'Could not find XML results in {self.output_path}')
 			return
-		self.results = []
-		note = f'nmap XML results saved to {self.output_path}'
-		if self.print_line:
-			self._print(note)
-		if os.path.exists(self.output_path):
-			nmap_data = self.xml_to_json()
-			yield from nmap_data
+		yield Info(message=f'XML results saved to {self.output_path}')
+		yield from self.xml_to_json()
 
 	def xml_to_json(self):
 		results = []
@@ -109,12 +105,12 @@ class nmap(VulnMulti):
 			content = f.read()
 			try:
 				results = xmltodict.parse(content)  # parse XML to dict
-			except Exception as e:
-				logger.exception(e)
-				logger.error(
-					f'Cannot parse nmap XML output {self.output_path} to valid JSON.')
-		results['_host'] = self.input
-		return nmapData(results)
+			except Exception as exc:
+				yield Error(
+					message=f'Cannot parse XML output {self.output_path} to valid JSON.',
+					traceback=traceback_as_string(exc)
+				)
+		yield from nmapData(results)
 
 
 class nmapData(dict):
@@ -138,11 +134,6 @@ class nmapData(dict):
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				conf = extra_data.get('confidence')
-				if not version_exact:
-					console.print(
-						f'[bold orange1]nmap could not identify an exact version for {service_name} '
-						f'(detection confidence is {conf}): do not blindy trust the results ![/]'
-					)
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
@@ -151,7 +142,7 @@ class nmapData(dict):
 				scripts = self._get_scripts(port)
 
 				# Get port protocol
-				protocol = port['@protocol'].upper()
+				protocol = port['@protocol'].lower()
 
 				# Yield port data
 				port = {
@@ -161,7 +152,8 @@ class nmapData(dict):
 					SERVICE_NAME: service_name,
 					IP: ip,
 					PROTOCOL: protocol,
-					EXTRA_DATA: extra_data
+					EXTRA_DATA: extra_data,
+					CONFIDENCE: conf
 				}
 				yield port
 
@@ -213,7 +205,6 @@ class nmapData(dict):
 
 	def _get_hostname(self, host_cfg):
 		hostnames = host_cfg.get('hostnames', {})
-		hostname = self['_host']
 		if hostnames:
 			hostnames = hostnames.get('hostname', [])
 			if isinstance(hostnames, dict):

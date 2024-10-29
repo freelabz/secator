@@ -11,7 +11,7 @@ from secator.definitions import (CIDR_RANGE, DEBUG, DELAY, DEPTH, EMAIL,
 							   METHOD, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
 from secator.cli import ALL_WORKFLOWS, ALL_TASKS, ALL_SCANS
-from secator.output_types import OutputType
+from secator.output_types import OutputType, EXECUTION_TYPES, STAT_TYPES
 from secator.rich import console
 from secator.utils import load_fixture
 
@@ -108,6 +108,7 @@ def mock_subprocess_popen(output_list):
 	mock_process = unittest.mock.MagicMock()
 	mock_process.wait.return_value = 0
 	mock_process.stdout.readline.side_effect = output_list
+	mock_process.pid = None
 	mock_process.returncode = 0
 
 	def mock_popen(*args, **kwargs):
@@ -156,6 +157,8 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 
 		if not isinstance(results, list):
 			results = [results]
+
+		expected_output_types.extend(EXECUTION_TYPES + STAT_TYPES)
 
 		try:
 			if not empty_results_allowed:

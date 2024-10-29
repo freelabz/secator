@@ -10,6 +10,7 @@ from secator.definitions import (DEFAULT_HTTPX_FLAGS, DELAY, DEPTH,
 								 TIMEOUT, URL, USER_AGENT)
 from secator.config import CONFIG
 from secator.output_types import Url, Subdomain
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
 from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
 
@@ -37,7 +38,9 @@ class httpx(Http):
 		'system_chrome': {'is_flag': True, 'default': False, 'help': 'Use local installed Chrome for screenshot'},
 		'headless_options': {'is_flag': False, 'short': 'ho', 'default': None, 'help': 'Headless Chrome additional options'},
 		'follow_host_redirects': {'is_flag': True, 'short': 'fhr', 'default': None, 'help': 'Follow redirects on the same host'},  # noqa: E501
-		'tls_grab': {'is_flag': True, 'default': False, 'help': 'Grab some informations from the tls certificate'}
+		'tls_grab': {'is_flag': True, 'default': False, 'help': 'Grab some informations from the tls certificate'},
+		'rstr': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},
+		'rsts': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to save (bytes)'}
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -64,13 +67,14 @@ class httpx(Http):
 	opt_value_map = {
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
+	item_loaders = [JSONSerializer()]
+	output_types = [Url, Subdomain]
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
 	install_github_handle = 'projectdiscovery/httpx'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'cpu'
-	output_types = [Url, Subdomain]
 
 	@staticmethod
 	def on_init(self):

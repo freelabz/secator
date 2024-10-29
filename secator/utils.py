@@ -16,12 +16,12 @@ from datetime import datetime
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
+import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
 import ifaddr
 import yaml
-from rich.markdown import Markdown
 
 from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
@@ -55,7 +55,7 @@ def setup_logging(level):
 	return logger
 
 
-def expand_input(input):
+def expand_input(input, ctx):
 	"""Expand user-provided input on the CLI:
 	- If input is a path, read the file and return the lines.
 	- If it's a comma-separated list, return the list.
@@ -63,12 +63,14 @@ def expand_input(input):
 
 	Args:
 		input (str): Input.
+		ctx (click.Context): Click context.
 
 	Returns:
 		str: Input.
 	"""
 	if input is None:  # read from stdin
-		console.print('Waiting for input on stdin ...', style='bold yellow')
+		if not ctx.obj['piped_input']:
+			console.print('Waiting for input on stdin ...', style='bold yellow')
 		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 		if rlist:
 			data = sys.stdin.read().splitlines()
@@ -331,39 +333,6 @@ def detect_host(interface=None):
 	return None
 
 
-def print_results_table(results, title=None, exclude_fields=[], log=False):
-	from secator.output_types import OUTPUT_TYPES
-	from secator.rich import build_table
-	_print = console.log if log else console.print
-	_print()
-	if title:
-		title = ' '.join(title.capitalize().split('_')) + ' results'
-		h1 = Markdown(f'# {title}')
-		_print(h1, style='bold magenta', width=50)
-		_print()
-	tables = []
-	for output_type in OUTPUT_TYPES:
-		if output_type.__name__ == 'Progress':
-			continue
-		items = [
-			item for item in results if item._type == output_type.get_name()
-		]
-		if CONFIG.runners.remove_duplicates:
-			items = [item for item in items if not item._duplicate]
-		if items:
-			_table = build_table(
-				items,
-				output_fields=output_type._table_fields,
-				exclude_fields=exclude_fields,
-				sort_by=output_type._sort_by)
-			tables.append(_table)
-			title = pluralize(items[0]._type).upper()
-			_print(f':wrench: {title}', style='bold gold3', justify='left')
-			_print(_table)
-			_print()
-	return tables
-
-
 def rich_to_ansi(text):
 	"""Convert text formatted with rich markup to standard string."""
 	from rich.console import Console
@@ -392,14 +361,14 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		if isinstance(obj, dict):
 			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
 		elif isinstance(obj, list):
-			obj_str += sep.join(obj)
+			obj_str += f'[dim]{sep.join(obj)}[/]'
 	if obj_str and not obj_after:
 		s = f'{s} {obj_str} '
 	s += f'[dim yellow]{msg}[/] '
 	if obj_str and obj_after:
 		s = f'{s}: {obj_str}'
 	if id:
-		s += f' [italic dim white]\[{id}][/] '
+		s += f' [italic dim gray11]\[{id}][/] '
 	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
 	print(s)
 
@@ -577,3 +546,15 @@ def sort_files_by_date(file_list):
 	"""
 	file_list.sort(key=lambda x: x.stat().st_mtime)
 	return file_list
+
+
+def traceback_as_string(exc):
+	"""Format an exception's traceback as a readable string.
+
+	Args:
+		Exception: an exception.
+
+	Returns:
+		string: readable traceback.
+	"""
+	return ' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))

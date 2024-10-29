@@ -6,13 +6,15 @@ from secator.utils import rich_to_ansi
 
 
 @dataclass
-class Progress(OutputType):
-	duration: str
-	percent: int = 0
-	errors: list = field(default_factory=list)
+class Stat(OutputType):
+	name: str
+	pid: int
+	cpu: int
+	memory: int
+	net_conns: int = field(default=None, repr=True)
 	extra_data: dict = field(default_factory=dict)
 	_source: str = field(default='', repr=True)
-	_type: str = field(default='progress', repr=True)
+	_type: str = field(default='stat', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)
@@ -20,21 +22,12 @@ class Progress(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = ['percent', 'duration']
-	_sort_by = ('percent',)
-
-	def __post_init__(self):
-		super().__post_init__()
-		if self.percent not in [0, 100]:
-			self.percent = 0
-
-	def __str__(self) -> str:
-		return f'{self.percent}%'
+	_table_fields = ['name', 'pid', 'cpu', 'memory']
+	_sort_by = ('name', 'pid')
 
 	def __repr__(self) -> str:
-		s = f'[dim]⏳ {self.percent}% ' + '█' * (self.percent // 10) + '[/]'
-		if self.errors:
-			s += f' [dim red]errors={self.errors}[/]'
-		ed = ' '.join([f'{k}={v}' for k, v in self.extra_data.items() if k != 'startedAt' and v])
-		s += f' [dim yellow]{ed}[/]'
+		s = f'[dim yellow3]📊 {self.name} \[pid={self.pid}] \[cpu={self.cpu:.2f}%] \[memory={self.memory:.2f}%]'
+		if self.net_conns:
+			s += f' \[connections={self.net_conns}]'
+		s += ' [/]'
 		return rich_to_ansi(s)

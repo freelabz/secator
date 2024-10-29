@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES
+from secator.output_types import FINDING_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
@@ -27,16 +27,17 @@ def update_runner(self):
 	type = self.config.type
 	collection = f'{type}s'
 	update = self.toDict()
-	debug_obj = {'type': 'runner', 'name': self.name, 'status': self.status}
+	debug_obj = {self.unique_name: self.status, 'count': self.self_findings_count, 'type': 'runner'}
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
-	debug('update', sub='hooks.mongodb', id=_id, obj=update, obj_after=True, level=4)
+	debug('update', sub='debug.hooks.mongodb', id=_id, obj=update, obj_after=True, obj_breaklines=True)
+	debug('update', sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=True, obj_breaklines=True)
 	start_time = time.time()
 	if _id:
 		delta = start_time - self.last_updated if self.last_updated else MONGODB_UPDATE_FREQUENCY
 		if self.last_updated and delta < MONGODB_UPDATE_FREQUENCY and self.status == 'RUNNING':
 			debug(f'skipped ({delta:>.2f}s < {MONGODB_UPDATE_FREQUENCY}s)',
-				  sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=3)
+				  sub='debug.hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=3)
 			return
 		db = client.main
 		start_time = time.time()
@@ -44,7 +45,7 @@ def update_runner(self):
 		end_time = time.time()
 		elapsed = end_time - start_time
 		debug(
-			f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=2)
+			f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='debug.hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=2)  # noqa: E501
 		self.last_updated = start_time
 	else:  # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
@@ -55,7 +56,7 @@ def update_runner(self):
 			self.context[f'{type}_id'] = _id
 		end_time = time.time()
 		elapsed = end_time - start_time
-		debug(f'created in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=2)
+		debug(f'created in {elapsed:.4f}s', sub='debug.hooks.mongodb', id=_id, obj=debug_obj, obj_after=False, level=2)
 
 
 def update_finding(self, item):
@@ -87,13 +88,12 @@ def find_duplicates(self):
 def load_finding(obj):
 	finding_type = obj['_type']
 	klass = None
-	for otype in OUTPUT_TYPES:
+	for otype in FINDING_TYPES:
 		if finding_type == otype.get_name():
 			klass = otype
 			item = klass.load(obj)
 			item._uuid = str(obj['_id'])
 			return item
-	debug('could not load Secator output type from MongoDB object', obj=obj, sub='hooks.mongodb')
 	return None
 
 
@@ -149,18 +149,18 @@ def tag_duplicates(ws_id: str = None):
 				'seen dupes': len(seen_dupes)
 			},
 			id=ws_id,
-			sub='hooks.mongodb')
+			sub='debug.hooks.mongodb')
 		tmp_duplicates_ids = list(dict.fromkeys([i._uuid for i in tmp_duplicates]))
-		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb')
+		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='debug.hooks.mongodb')
 
 		# Update latest object as non-duplicate
 		if tmp_duplicates:
 			duplicates.extend([f for f in tmp_duplicates])
 			db.findings.update_one({'_id': ObjectId(item._uuid)}, {'$set': {'_related': tmp_duplicates_ids}})
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb')
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='debug.hooks.mongodb')
 			non_duplicates.append(item)
 		else:
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb')
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='debug.hooks.mongodb')
 			non_duplicates.append(item)
 
 	# debug(f'found {len(duplicates)} total duplicates')
