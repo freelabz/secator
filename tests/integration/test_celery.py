@@ -11,7 +11,6 @@ from celery import chain, chord
 
 from secator.celery import app, forward_results
 from secator.config import CONFIG
-from secator.definitions import DEBUG
 from secator.utils_test import TEST_TASKS, load_fixture
 from secator.rich import console
 from secator.runners import Command
@@ -66,8 +65,6 @@ class TestCelery(unittest.TestCase):
 		workflow = chain(*sigs)
 		result = workflow.apply()
 		results = result.get()
-		if DEBUG > 1:
-			console.print_json(json.dumps(results))
 		urls = [r.url for r in results if r._type == 'url']
 		targets = [r.name for r in results if r._type == 'target']
 		self.assertEqual(len(urls), len(URL_TARGETS))
@@ -97,8 +94,6 @@ class TestCelery(unittest.TestCase):
 		workflow = chain(*sigs)
 		result = workflow.apply()
 		results = result.get()
-		if DEBUG:
-			console.print_json(json.dumps(results))
 		urls = [r.url for r in results if r._type == 'url']
 		targets = [r.name for r in results if r._type == 'target']
 		self.assertEqual(len(urls), len(URL_TARGETS) + 1)
@@ -159,6 +154,7 @@ class TestCelery(unittest.TestCase):
 		targets = [URL_TARGETS[0]] * size
 		result = httpx.delay(targets, sync=False)
 		results = result.get()
+		print(results)
 		urls = [r.url for r in results if r._type == 'url']
 		infos = [r.message for r in results if r._type == 'info']
 		self.assertEqual(len(urls), 2)  # same URL, but twice because 2 chunks and same input

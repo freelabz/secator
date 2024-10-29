@@ -2,6 +2,8 @@ import gc
 import logging
 import uuid
 
+from time import time
+
 from celery import Celery, chain, chord, signals
 from celery.app import trace
 
@@ -13,7 +15,7 @@ from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
-from secator.utils import (debug, deduplicate, flatten)
+from secator.utils import (debug, deduplicate, flatten, should_update)
 
 
 #---------#
@@ -102,16 +104,22 @@ def void(*args, **kwargs):
 	pass
 
 
-def update_state(celery_task, **state):
+def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
+	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
+		return
+	task.last_updated_celery = time()
 	debug(
 		'',
 		sub='celery.state',
 		id=celery_task.request.id,
-		obj={state['meta']['full_name']: state['meta']['state'], 'count': state['meta']['count']},
+		obj={task.unique_name: task.status, 'count': task.self_findings_count},
 		obj_after=False
 	)
-	return celery_task.update_state(**state)
+	return celery_task.update_state(
+		state='SUCCESS' if task.done else 'RUNNING',
+		meta=task.celery_state
+	)
 
 
 def revoke_task(task_id, task_name=None):
@@ -221,12 +229,6 @@ def run_command(self, results, name, targets, opts={}):
 	opts['print_remote_info'] = False
 	opts['results'] = results
 
-	# Set initial state
-	state = {
-		'state': 'RUNNING',
-		'meta': {}
-	}
-
 	# Flatten + dedupe results
 	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
@@ -284,13 +286,11 @@ def run_command(self, results, name, targets, opts={}):
 			task.celery_result = result
 			task.celery_ids_map = ids_map
 			task.celery_ids = list(ids_map.keys())
-			state['meta'] = task.celery_state
-			update_state(self, **state)
+			update_state(self, task)
 
 		# Update state for each item found
 		for _ in task:
-			state['meta'] = task.celery_state
-			update_state(self, **state)
+			update_state(self, task)
 
 	except BaseException as e:
 		error = Error.from_exception(e)
@@ -301,8 +301,7 @@ def run_command(self, results, name, targets, opts={}):
 		task.results.append(error)
 
 	finally:
-		state['meta'] = task.celery_state
-		update_state(self, **state)
+		update_state(self, task, force=True)
 		gc.collect()
 
 		# Run on_end hooks for split tasks
@@ -311,6 +310,7 @@ def run_command(self, results, name, targets, opts={}):
 			task.run_hooks('on_end')
 
 		# Return task results
+		debug(f'', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
 		return task.results
 
 
