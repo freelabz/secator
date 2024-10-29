@@ -1,5 +1,4 @@
 import queue
-import json
 import os
 import unittest
 import warnings
@@ -12,7 +11,6 @@ from celery import chain, chord
 from secator.celery import app, forward_results
 from secator.config import CONFIG
 from secator.utils_test import TEST_TASKS, load_fixture
-from secator.rich import console
 from secator.runners import Command
 from secator.output_types import Url
 from tests.integration.inputs import INPUTS_SCANS
@@ -104,7 +102,7 @@ class TestCelery(unittest.TestCase):
 		from secator.tasks import httpx
 		if httpx not in TEST_TASKS:
 			return
-		
+
 		existing_results = [Url(**{
 			"url": "https://example.synology.me",
 			"method": "GET",
