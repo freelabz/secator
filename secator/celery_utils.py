@@ -103,10 +103,7 @@ class CeleryData(object):
 		state = data['state']
 		pdata['state'] = f'[{STATE_COLORS[state]}]{state}[/]'
 		pdata = {k: v for k, v in pdata.items() if v}
-		progress_int = pdata.pop('progress', None)
 		progress.update(progress_id, **pdata)
-		if progress_int:
-			progress.update(progress_id, advance=progress_int, **pdata)
 
 	@staticmethod
 	def poll(result, ids_map, refresh_interval):
@@ -225,12 +222,11 @@ class CeleryData(object):
 		if data['ready']:
 			data['progress'] = 100
 		elif data['results']:
-			progresses = [e for e in data['results'] if e._type == 'progress']
+			progresses = [e for e in data['results'] if e._type == 'progress' and e._source == data['full_name']]
 			if progresses:
 				data['progress'] = progresses[-1].percent
-				# print(f'found progress for {data["full_name"]}: {data["progress"]}')
 
-		debug('data', obj=data, sub='debug.celery', id=task_id)
+		debug('data', obj=data, sub='debug.celery.data', id=task_id)
 		return data
 
 	@staticmethod

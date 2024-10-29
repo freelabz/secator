@@ -15,7 +15,7 @@ from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warn
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
-from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi)
+from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi, should_update)
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,8 @@ class Runner:
 		self.sync = run_opts.get('sync', True)
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
-		self.last_updated = None
+		self.last_updated_db = None
+		self.last_updated_celery = None
 		self.last_updated_progress = None
 		self.end_time = None
 		self._hooks = hooks
@@ -124,6 +125,7 @@ class Runner:
 		self.print_json = self.run_opts.get('print_json', False) or self.print_orig
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
+		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
 		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
 		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
 		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
@@ -392,7 +394,7 @@ class Runner:
 			'done': self.done,
 			'output': self.output,
 			'progress': self.progress,
-			'last_updated': self.last_updated,
+			'last_updated_db': self.last_updated_db,
 			'context': self.context,
 			'errors': [e.toDict() for e in self.errors],
 		})
@@ -519,6 +521,7 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
+		debug(f'', obj={self.unique_name: self.status, 'count': self.self_findings_count, 'results': self.self_findings}, sub='debug.runner.results')
 		if self.exporters:
 			report = Report(self, exporters=self.exporters)
 			report.build()
@@ -611,13 +614,14 @@ class Runner:
 				debug(
 					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
 					sub='klass.load')
-				if 'klass.debug' in CONFIG.debug.component:
-					error = Error.from_exception(e)
-					self._print(error)
+				error = Error.from_exception(e)
+				debug(repr(error), sub='debug.klass.load')
 				continue
 
 		if not new_item:
 			new_item = Warning(message=f'Failed to load item as output type:\n  {item}')
+
+		debug(f'Output item: {new_item.toDict()}', sub='klass.load')
 
 		return new_item
 
@@ -677,8 +681,7 @@ class Runner:
 
 		if isinstance(item, Progress) and item._source == self.unique_name:
 			self.progress = item.percent
-			update_frequency = CONFIG.runners.progress_update_frequency
-			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:
+			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
 				return None
 			elif int(item.percent) in [0, 100]:
 				return None

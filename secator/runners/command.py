@@ -144,6 +144,9 @@ class Command(Runner):
 		# Stat update
 		self.last_updated_stat = None
 
+		# Process
+		self.process = None
+
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
@@ -347,6 +350,7 @@ class Command(Runner):
 			# Yield remote
 			if self.celery_result:
 				yield from self.yielder_remote()
+				return
 
 			# Yield targets
 			for target in self.input:
@@ -466,7 +470,7 @@ class Command(Runner):
 		)
 
 	def kill(self, signum=None, frame=None):
-		if not hasattr(self, 'process'):
+		if not self.process:
 			return
 		pid = self.process.pid
 		if not pid:
@@ -482,7 +486,7 @@ class Command(Runner):
 		self.killed = True
 
 	def stats(self):
-		if not hasattr(self, 'process') or not self.process.pid:
+		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
 		stats = Command.get_process_info(proc, children=True)
@@ -578,11 +582,13 @@ class Command(Runner):
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
+		if not self.process:
+			return
 		self.process.wait()
 		self.return_code = self.process.returncode
-		self.output = self.output.strip()
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
+		self.output = self.output.strip()
 		self.killed = self.return_code == -2 or self.killed
 
 		if self.killed:
