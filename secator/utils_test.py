@@ -100,7 +100,8 @@ META_OPTS = {
 	'nuclei.template_id': 'prometheus-metrics',
 	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
 	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
-	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True)
+	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True),
+	'tfsec_output_path': load_fixture('tfsec_output', FIXTURES_DIR, only_path=True)
 }
 
 
