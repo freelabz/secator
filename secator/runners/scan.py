@@ -27,7 +27,7 @@ class Scan(Runner):
 		for name, workflow_opts in self.config.workflows.items():
 
 			# Extract opts and and expand target from previous workflows results
-			targets, workflow_opts = run_extractors(self.results, workflow_opts or {}, self.targets)
+			targets, workflow_opts = run_extractors(self.results, workflow_opts or {}, self.inputs)
 
 			# Run workflow
 			run_opts = self.run_opts.copy()

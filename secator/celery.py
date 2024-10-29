@@ -117,7 +117,7 @@ def update_state(celery_task, task, force=False):
 		obj_after=False
 	)
 	return celery_task.update_state(
-		state='SUCCESS' if task.done else 'RUNNING',
+		state='RUNNING',
 		meta=task.celery_state
 	)
 
@@ -156,7 +156,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 
 	# Build signatures
 	sigs = []
-	ids_map = {}
+	task.ids_map = {}
 	for ix, chunk in enumerate(chunks):
 		if not isinstance(chunk, list):
 			chunk = [chunk]
@@ -165,15 +165,10 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk_count'] = len(chunks)
 		task_id = str(uuid.uuid4())
 		sig = type(task).s(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
-		ids_map[task_id] = {
-			'id': task_id,
-			'name': task.name,
-			'full_name': f'{task.name}_{ix + 1}',
-			'descr': task.config.description or '',
-			'state': 'PENDING',
-			'count': 0,
-			'progress': 0
-		}
+		full_name = f'{task.name}_{ix + 1}'
+		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
+		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
+		task.results.append(info)
 		sigs.append(sig)
 
 	# Build Celery workflow
@@ -184,7 +179,8 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			forward_results.s().set(queue='io'),
 		)
 	)
-	return workflow, ids_map
+	result = workflow.apply_async()
+	task.celery_result = result
 
 
 @app.task(bind=True)
@@ -276,17 +272,15 @@ def run_command(self, results, name, targets, opts={}):
 		# Chunk task if needed
 		if chunk_enabled:
 			chunk_size = 1 if has_no_file_flag else task_cls.input_chunk_size
-			workflow, ids_map = break_task(
+			break_task(
 				task,
 				opts,
 				targets,
 				results=results,
 				chunk_size=chunk_size)
-			result = workflow.apply_async()
-			task.celery_result = result
-			task.celery_ids_map = ids_map
-			task.celery_ids = list(ids_map.keys())
-			update_state(self, task)
+
+		# Update state before starting
+		update_state(self, task)
 
 		# Update state for each item found
 		for _ in task:
@@ -303,13 +297,6 @@ def run_command(self, results, name, targets, opts={}):
 	finally:
 		update_state(self, task, force=True)
 		gc.collect()
-
-		# Run on_end hooks for split tasks
-		if task.has_children:
-			task.log_results()
-			task.run_hooks('on_end')
-
-		# Return task results
 		debug(f'', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
 		return task.results
 

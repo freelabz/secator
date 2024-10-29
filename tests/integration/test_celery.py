@@ -152,7 +152,6 @@ class TestCelery(unittest.TestCase):
 		targets = [URL_TARGETS[0]] * size
 		result = httpx.delay(targets, sync=False)
 		results = result.get()
-		print(results)
 		urls = [r.url for r in results if r._type == 'url']
 		infos = [r.message for r in results if r._type == 'info']
 		self.assertEqual(len(urls), 2)  # same URL, but twice because 2 chunks and same input

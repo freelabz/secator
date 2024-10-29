@@ -14,6 +14,7 @@ from fp.fp import FreeProxy
 from rich.tree import Tree
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
+from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
@@ -55,9 +56,6 @@ class Command(Runner):
 
 	# Output encoding
 	encoding = 'utf-8'
-
-	# Environment variables
-	env = {}
 
 	# Flag to take the input
 	input_flag = None
@@ -112,7 +110,7 @@ class Command(Runner):
 	# Profile
 	profile = 'cpu'
 
-	def __init__(self, input=[], **run_opts):
+	def __init__(self, inputs=[], **run_opts):
 
 		# Build runnerconfig on-the-fly
 		config = TemplateLoader(input={
@@ -128,12 +126,15 @@ class Command(Runner):
 		context = run_opts.pop('context', {})
 		super().__init__(
 			config=config,
-			targets=input,
+			inputs=inputs,
 			results=results,
 			run_opts=run_opts,
 			hooks=hooks,
 			validators=validators,
 			context=context)
+		
+		# Inputs path
+		self.inputs_path = None
 
 		# Current working directory for cmd
 		self.cwd = self.run_opts.get('cwd', None)
@@ -178,18 +179,18 @@ class Command(Runner):
 				self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
 
 		# Debug built input
-		input_str = '\n '.join(self.input).strip()
+		input_str = '\n '.join(self.inputs).strip()
 		debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', sub='runner.init')
 
 		# Debug run options
 		run_opts_str = '\n '.join([
 			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.run_opts.items() if v is not None]).strip()
-		debug(f'[dim magenta]Run opts:[/]\n {run_opts_str}', sub='runner.init')
+		debug(f'[dim magenta]Run opts:[/]\n {run_opts_str}', sub='debug.runner.init')
 
 		# Debug format options
 		fmt_opts_str = '\n '.join([
 			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.print_opts.items() if v is not None]).strip()
-		debug(f'[dim magenta]Print opts:[/]\n {fmt_opts_str}', sub='runner.init')
+		debug(f'[dim magenta]Print opts:[/]\n {fmt_opts_str}', sub='debug.runner.init')
 
 		# Debug hooks
 		hooks_str = ''
@@ -199,7 +200,7 @@ class Command(Runner):
 				hooks_str += f'[dim blue]{hook_name}[/] -> {hook_funcs_str}\n '
 		hooks_str = hooks_str.strip()
 		if hooks_str:
-			debug(f'[dim magenta]Hooks:[/]\n {hooks_str}', sub='runner.init')
+			debug(f'[dim magenta]Hooks:[/]\n {hooks_str}', sub='debug.runner.init')
 
 	def toDict(self):
 		res = super().toDict()
@@ -285,6 +286,7 @@ class Command(Runner):
 		name = name or cmd.split(' ')[0]
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
+		kwargs['no_process'] = kwargs.get('no_process', True)
 		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
@@ -349,12 +351,12 @@ class Command(Runner):
 		try:
 			# Yield remote
 			if self.celery_result:
-				yield from self.yielder_remote()
+				yield from self.yield_from_remote()
 				return
 
 			# Yield targets
-			for target in self.input:
-				yield Target(name=target, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			for input in self.inputs:
+				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 			# Check for sudo requirements and prepare the password if needed
 			sudo_password, error = self._prompt_sudo(self.cmd)
@@ -375,7 +377,6 @@ class Command(Runner):
 
 			# Run the command using subprocess
 			env = os.environ
-			env.update(self.env)
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
@@ -461,8 +462,7 @@ class Command(Runner):
 		finally:
 			yield from self._wait_for_end()
 
-	def yielder_remote(self):
-		from secator.celery_utils import CeleryData
+	def yield_from_remote(self):
 		yield from CeleryData.iter_results(
 			self.celery_result,
 			ids_map=self.celery_ids_map,
@@ -679,18 +679,18 @@ class Command(Runner):
 		return opts_str.strip()
 
 	@staticmethod
-	def _validate_chunked_input(self, input):
+	def _validate_chunked_input(self, inputs):
 		"""Multiple input passed in non-worker mode."""
-		if len(input) > 1 and self.sync and self.file_flag is None:
+		if len(inputs) > 1 and self.sync and self.file_flag is None:
 			return False
 		return True
 
 	@staticmethod
-	def _validate_input_nonempty(self, input):
+	def _validate_input_nonempty(self, inputs):
 		"""Input is empty."""
 		if not self.input_required:
 			return True
-		if not self.input or len(self.input) == 0:
+		if not self.inputs or len(self.inputs) == 0:
 			return False
 		return True
 
@@ -749,42 +749,25 @@ class Command(Runner):
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
 
+		# Debug
+		debug('Built cmd', obj={'cmd': self.cmd}, sub='runner.init')
+
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a
 		string or a list to the cmd.
 		"""
 		cmd = self.cmd
-		input = self.input
+		inputs = self.inputs
 
-		# If input is None, return the previous command
-		if not input:
+		# If inputs is empty, return the previous command
+		if not inputs:
 			return
 
-		# If input is a list but has one element, use the standard string input
-		if isinstance(input, list) and len(input) == 1:
-			input = input[0]
-
-		# If input is a list and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped_input input.
-		# Otherwise pass the file path to the tool.
-		if isinstance(input, list):
-			fpath = f'{self.reports_folder}/.inputs/{self.unique_name}.txt'
-
-			# Write the input to a file
-			with open(fpath, 'w') as f:
-				f.write('\n'.join(input))
-
-			if self.file_flag == OPT_PIPE_INPUT:
-				cmd = f'cat {fpath} | {cmd}'
-			elif self.file_flag:
-				cmd += f' {self.file_flag} {fpath}'
-
-			self.input_path = fpath
-
-		# If input is a string but the tool does not support an input flag, use echo-piped_input input.
+		# If inputs has a single element but the tool does not support an input flag, use echo-piped_input input.
 		# If the tool's input flag is set to None, assume it is a positional argument at the end of the command.
 		# Otherwise use the input flag to pass the input.
-		elif input:
-			input = shlex.quote(input)
+		if len(inputs) == 1:
+			input = shlex.quote(inputs[0])
 			if self.input_flag == OPT_PIPE_INPUT:
 				cmd = f'echo {input} | {cmd}'
 			elif not self.input_flag:
@@ -792,5 +775,22 @@ class Command(Runner):
 			else:
 				cmd += f' {self.input_flag} {input}'
 
+		# If inputs has multiple elements and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped_input input.
+		# Otherwise pass the file path to the tool.
+		else:
+			fpath = f'{self.reports_folder}/.inputs/{self.unique_name}.txt'
+
+			# Write the input to a file
+			with open(fpath, 'w') as f:
+				f.write('\n'.join(inputs))
+
+			if self.file_flag == OPT_PIPE_INPUT:
+				cmd = f'cat {fpath} | {cmd}'
+			elif self.file_flag:
+				cmd += f' {self.file_flag} {fpath}'
+
+			self.inputs_path = fpath
+
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
+		debug('Built input', obj={'inputs': self.inputs, 'inputs_path': self.inputs_path, 'shell': self.shell, 'cmd': self.cmd}, sub='runner.init')

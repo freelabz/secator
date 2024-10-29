@@ -42,11 +42,11 @@ class Task(Runner):
 		# Run task
 		if self.sync:
 			run_opts['print_item'] = False
-			results = task_cls(self.targets, **run_opts)
+			results = task_cls(self.inputs, **run_opts)
 			if dry_run:  # don't run
 				return
 		else:
-			self.celery_result = task_cls.delay(self.targets, **run_opts)
+			self.celery_result = task_cls.delay(self.inputs, **run_opts)
 			self.add_subtask(self.celery_result.id, self.config.name, self.config.description or '')
 			yield Info(
 				message=f'Celery task created: {self.celery_result.id}',

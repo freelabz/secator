@@ -370,7 +370,7 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		s = f'{s}: {obj_str}'
 	if id:
 		s += f' [italic dim gray11]\[{id}][/] '
-	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
+	s = rich_to_ansi(f'[dim red]🐛 {s}[/]')
 	print(s)
 
 
