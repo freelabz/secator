@@ -45,9 +45,6 @@ jobs:
       run: |
         secator test unit
 
-    - name: Display structure of downloaded files
-      run: ls -R
-
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
       if: ${{ matrix.python-version == '3.11' }}
@@ -95,9 +92,6 @@ jobs:
       run: |
         secator test integration --test test_celery,test_worker,test_tasks
 
-    - name: Display structure of downloaded files
-      run: ls -R
-
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
       with:
@@ -110,9 +104,6 @@ jobs:
     needs: [ unit, integration]
     steps:
     - uses: actions/download-artifact@v4
-    
-    - name: Display structure of downloaded files
-      run: ls -R
 
     - name: Run coverage report
       run: |
