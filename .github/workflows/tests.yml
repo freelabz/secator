@@ -116,6 +116,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - uses: actions/download-artifact@v4
+      with:
+        merge-multiple: true
 
     - name: Run coverage report
       run: |
