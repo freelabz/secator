@@ -422,6 +422,10 @@ class Command(Runner):
 				if item_count == 0:
 					yield line
 
+				# Skip rest of iteration (no process mode)
+				if self.no_process:
+					continue
+
 				# Yield command stats (CPU, memory, conns ...)
 				# TODO: enable stats support with timer
 				if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:

@@ -16,11 +16,12 @@ RUNNER_OPTS = {
 	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'print_json': {'is_flag': True, 'short': 'json', 'default': False, 'help': 'Print items as JSON lines'},
-	'print_orig': {'is_flag': True, 'short': 'orig', 'default': False, 'help': 'Print items as JSON lines (original)'},
 	'print_raw': {'is_flag': True, 'short': 'raw', 'default': False, 'help': 'Print items in raw format'},
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
+	'no_process': {'is_flag': True, 'default': False, 'help': 'Disable secator processing'},
+	'enable_profiling': {'is_flag': True, 'default': False, 'help': 'Run Python profiling'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
@@ -328,7 +329,7 @@ def register_runner(cli_endpoint, config):
 			'sync': sync,
 		})
 
-		# Build exporters
+		# Start runner
 		runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 

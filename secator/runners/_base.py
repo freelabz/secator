@@ -113,13 +113,14 @@ class Runner:
 		self.no_process = self.run_opts.get('no_process', False)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
+		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', False)
+		self.parent = self.run_opts.get('parent', False)
 
 		# Print opts
 		self.print_item = self.run_opts.get('print_item', False)
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
-		self.print_orig = self.run_opts.get('print_orig', False)
-		self.print_json = self.run_opts.get('print_json', False) or self.print_orig
+		self.print_json = self.run_opts.get('print_json', False)
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
 		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
@@ -335,6 +336,8 @@ class Runner:
 		self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
 
 	def mark_duplicates(self):
+		if not self.enable_duplicate_check:
+			return
 		debug('running duplicate check', id=self.config.name, sub='runner.duplicates')
 		dupe_count = 0
 		for item in self.results.copy():
@@ -572,12 +575,6 @@ class Runner:
 		# Skip if already converted
 		if isinstance(item, DotMap) or isinstance(item, OutputType):
 			return item
-
-		# Skip if print_orig is set
-		if self.print_orig:
-			new_item = DotMap(item)
-			new_item._type = 'unknown'
-			return new_item
 
 		# Init the new item and the list of output types to load from
 		new_item = None

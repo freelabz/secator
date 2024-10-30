@@ -91,10 +91,6 @@ class wpscan(VulnHttp):
 		with open(self.output_path, 'r') as f:
 			data = json.load(f)
 
-		if self.print_orig:
-			yield data
-			return
-
 		# Get URL
 		target = data.get('target_url', self.inputs[0])
 

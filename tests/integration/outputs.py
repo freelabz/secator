@@ -144,7 +144,7 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'gau': [
-        Url(url='https://danielmiessler.com/robots.txt', _source='gau')
+        Url(url='http://testphp.vulnweb.com:80/userinfo.php', _source='gau')
     ],
     'gf': [
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
