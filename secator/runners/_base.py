@@ -113,7 +113,7 @@ class Runner:
 		self.no_process = self.run_opts.get('no_process', False)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
-		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', False)
+		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
 		self.parent = self.run_opts.get('parent', False)
 
 		# Print opts
@@ -241,7 +241,10 @@ class Runner:
 
 				if isinstance(item, (OutputType, DotMap, dict)):
 					item = self._process_item(item)
-					if not item or item._uuid in self.uuids:
+					if not item:
+						continue
+
+					if self.enable_duplicate_check and item._uuid in self.uuids:
 						continue
 
 					# Hack to get new Celery ids dynamically into self.celery_ids
@@ -257,9 +260,7 @@ class Runner:
 				self.run_hooks('on_iter')
 
 		except BaseException as e:
-			error = Error.from_exception(e)
-			error._source = self.unique_name
-			error._uuid = str(uuid.uuid4())
+			error = Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 			self.results.append(error)
 			self._print_item(error)
 			self.stop_live_tasks()
@@ -418,10 +419,8 @@ class Runner:
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='hooks', level=3)
 			except Exception as e:
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failure'}, id=_id, sub='hooks', level=3)
-				error = Error.from_exception(e)
+				error = Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 				error.message = f'Hook "{fun}" execution failed.'
-				error._source = self.unique_name
-				error._uuid = str(uuid.uuid4())
 				self.results.append(error)
 				self._print_item(error)
 				if self.raise_on_error:

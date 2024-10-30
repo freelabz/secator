@@ -18,7 +18,7 @@ class TestWorker(unittest.TestCase):
 
 	@classmethod
 	def tearDownClass(cls) -> None:
-		cls.cmd.kill()
+		cls.cmd.stop_process()
 		cls.thread.join()
 
 	def test_httpx(self):

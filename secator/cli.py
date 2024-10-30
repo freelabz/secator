@@ -1227,6 +1227,29 @@ def integration(tasks, workflows, scans, test):
 
 
 @test.command()
+@click.option('--tasks', type=str, default='', help='Secator tasks to test (comma-separated)')
+@click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
+@click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
+@click.option('--test', '-t', type=str, help='Secator test to run')
+def performance(tasks, workflows, scans, test):
+	"""Run integration tests."""
+	os.environ['TEST_TASKS'] = tasks or ''
+	os.environ['TEST_WORKFLOWS'] = workflows or ''
+	os.environ['TEST_SCANS'] = scans or ''
+	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
+	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
+
+	# import shutil
+	# shutil.rmtree('/tmp/.secator', ignore_errors=True)
+
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.performance -m pytest -s -v tests/performance'  # noqa: E501
+	if test:
+		test_str = ' or '.join(test.split(','))
+		cmd += f' -k "{test_str}"'
+	run_test(cmd, 'performance')
+
+
+@test.command()
 @click.option('--unit-only', '-u', is_flag=True, default=False, help='Only generate coverage for unit tests')
 @click.option('--integration-only', '-i', is_flag=True, default=False, help='Only generate coverage for integration tests')  # noqa: E501
 def coverage(unit_only, integration_only):

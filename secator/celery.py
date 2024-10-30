@@ -7,7 +7,6 @@ from time import time
 from celery import Celery, chain, chord, signals
 from celery.app import trace
 
-# from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
 
 from secator.config import CONFIG
@@ -215,6 +214,9 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
+	from pyinstrument import Profiler
+	profiler = Profiler(interval=0.0001)
+	profiler.start()
 	chunk = opts.get('chunk')
 	sync = opts.get('sync')
 
@@ -287,9 +289,7 @@ def run_command(self, results, name, targets, opts={}):
 			update_state(self, task)
 
 	except BaseException as e:
-		error = Error.from_exception(e)
-		error._source = task.unique_name
-		error._uuid = str(uuid.uuid4())
+		error = Error.from_exception(e, _source=task.unique_name, _uuid=str(uuid.uuid4()))
 		task._print_item(error)
 		task.stop_live_tasks()
 		task.results.append(error)
@@ -298,6 +298,12 @@ def run_command(self, results, name, targets, opts={}):
 		update_state(self, task, force=True)
 		gc.collect()
 		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
+		profiler.stop()
+		from pathlib import Path
+		profile_path = Path(task.reports_folder) / 'prof.html'
+		print(f'Writing profile to {profile_path}')
+		with profile_path.open('w', encoding='utf-8') as f_html:
+			f_html.write(profiler.output_html())
 		return task.results
 
 

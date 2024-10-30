@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import uuid
@@ -348,35 +349,37 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Parsed JSONLine object.
 		"""
+		# Yield remote
+		if self.celery_result:
+			yield from self.yield_from_remote()
+			return
+
+		# Yield targets
+		for input in self.inputs:
+			yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+
+		# Check for sudo requirements and prepare the password if needed
+		sudo_password, error = self._prompt_sudo(self.cmd)
+		if error:
+			yield Error(
+				message=error,
+				_source=self.unique_name,
+				_uuid=str(uuid.uuid4())
+			)
+			return
+
+		# Prepare cmds
+		command = self.cmd if self.shell else shlex.split(self.cmd)
+
+		# Output and results
+		self.return_code = 0
+		self.killed = False
+
+		# Environment
+		env = os.environ
+
 		try:
-			# Yield remote
-			if self.celery_result:
-				yield from self.yield_from_remote()
-				return
-
-			# Yield targets
-			for input in self.inputs:
-				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
-
-			# Check for sudo requirements and prepare the password if needed
-			sudo_password, error = self._prompt_sudo(self.cmd)
-			if error:
-				yield Error(
-					message=error,
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
-				return
-
-			# Prepare cmds
-			command = self.cmd if self.shell else shlex.split(self.cmd)
-
-			# Output and results
-			self.return_code = 0
-			self.killed = False
-
 			# Run the command using subprocess
-			env = os.environ
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
@@ -394,77 +397,86 @@ class Command(Runner):
 
 			# Process the output in real-time
 			for line in iter(lambda: self.process.stdout.readline(), b''):
-				sleep(0)  # for async to give up control
+				# sleep(0)  # for async to give up control
 				if not line:
 					break
+				yield from self.process_line(line)
 
-				# Strip line endings
-				line = line.rstrip()
-
-				# Some commands output ANSI text, so we need to remove those ANSI chars
-				if self.encoding == 'ansi':
-					ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-					line = ansi_escape.sub('', line)
-					line = line.replace('\\x0d\\x0a', '\n')
-
-				# Run on_line hooks
-				line = self.run_hooks('on_line', line)
-				if line is None:
-					continue
-
-				# Run item_loader to try parsing as dict
-				item_count = 0
-				for item in self.run_item_loaders(line):
-					yield item
-					item_count += 1
-
-				# Yield line if no items were yielded
-				if item_count == 0:
-					yield line
-
-				# Skip rest of iteration (no process mode)
-				if self.no_process:
-					continue
-
-				# Yield command stats (CPU, memory, conns ...)
-				# TODO: enable stats support with timer
-				if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
-					continue
-
-				yield from self.stats()
-				self.last_updated_stat = time()
-
+			# Run hooks after cmd has completed successfully
 			result = self.run_hooks('on_cmd_done')
 			if result:
 				yield from result
 
 		except FileNotFoundError as e:
-			if self.config.name in str(e):
-				error = 'Executable not found.'
-				if self.install_cmd:
-					error += f' Install it with `secator install tools {self.config.name}`.'
-			else:
-				error = str(e)
-			celery_id = self.context.get('celery_id', '')
-			if celery_id:
-				error += f' [{celery_id}]'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
-			self.return_code = 1
-			return
+			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			error = Error.from_exception(e)
-			error._source = self.unique_name,
-			error._uuid = str(uuid.uuid4())
-			yield error
-			self.kill()
+			for line in self.process.stdout.readlines():
+				yield from self.process_line(line)
+			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 		finally:
 			yield from self._wait_for_end()
+
+	def process_line(self, line):
+		"""Process a single line of output emitted on stdout / stderr and yield results."""
+
+		# Strip line endings
+		line = line.rstrip()
+
+		# Some commands output ANSI text, so we need to remove those ANSI chars
+		if self.encoding == 'ansi':
+			ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+			line = ansi_escape.sub('', line)
+			line = line.replace('\\x0d\\x0a', '\n')
+
+		# Run on_line hooks
+		line = self.run_hooks('on_line', line)
+		if line is None:
+			return
+
+		# Run item_loader to try parsing as dict
+		item_count = 0
+		for item in self.run_item_loaders(line):
+			yield item
+			item_count += 1
+
+		# Yield line if no items were yielded
+		if item_count == 0:
+			yield line
+
+		# Skip rest of iteration (no process mode)
+		if self.no_process:
+			return
+
+		# Yield command stats (CPU, memory, conns ...)
+		# TODO: enable stats support with timer
+		if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
+			return
+
+		yield from self.stats()
+		self.last_updated_stat = time()
+
+	def handle_file_not_found(self, exc):
+		"""Handle case where binary is not found.
+
+		Args:
+			exc (FileNotFoundError): the exception.
+
+		Yields:
+			secator.output_types.Error: the error.
+		"""
+		self.return_code = 127
+		if self.config.name in str(exc):
+			message = 'Executable not found.'
+			if self.install_cmd:
+				message += f' Install it with `secator install tools {self.config.name}`.'
+			error = Error(message=message)
+		else:
+			error = Error.from_exception(exc)
+		error._source = self.unique_name
+		error._uuid = str(uuid.uuid4())
+		yield error
 
 	def yield_from_remote(self):
 		yield from CeleryData.iter_results(
@@ -473,21 +485,11 @@ class Command(Runner):
 			print_remote_info=False
 		)
 
-	def kill(self, signum=None, frame=None):
+	def stop_process(self):
+		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
-		pid = self.process.pid
-		if not pid:
-			return
-		proc = psutil.Process(pid)
-		root = Tree(f'   [bold red]{proc.pid} ({proc.name()})[/]')
-		for subproc in proc.children(recursive=True):
-			subproc.kill()
-			root.add(f'    [bold blue]{subproc.pid} ({subproc.name()})[/]')
-		proc.kill()
-		info = Info(message=f'Killed processes:\n{rich_to_ansi(root)}')
-		self._print_item(info)
-		self.killed = True
+		self.process.send_signal(signal.SIGINT)
 
 	def stats(self):
 		if not self.process or not self.process.pid:
