@@ -113,7 +113,7 @@ class Runner:
 		self.no_process = self.run_opts.get('no_process', False)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
-		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', False)
+		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
 		self.parent = self.run_opts.get('parent', False)
 
 		# Print opts
