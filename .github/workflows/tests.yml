@@ -49,6 +49,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: coverage-unit
+        include-hidden-files: true
         path: .coverage.unit
 
   integration:
@@ -94,6 +95,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: coverage-integration
+        include-hidden-files: true
         path: .coverage.integration
 
   coverage:

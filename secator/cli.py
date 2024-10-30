@@ -1219,7 +1219,7 @@ def integration(tasks, workflows, scans, test):
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/integration'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.integration -m pytest -s -v tests/integration'
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
