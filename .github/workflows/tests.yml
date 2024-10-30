@@ -109,6 +109,9 @@ jobs:
     needs: [ unit, integration]
     steps:
     - uses: actions/download-artifact@v4
+    
+    - name: Display structure of downloaded files
+      run: ls -R
 
     - name: Run coverage report
       run: |
