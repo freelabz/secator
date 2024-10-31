@@ -1,7 +1,9 @@
 from secator.cli import ALL_SCANS
 
+
 def generate_class(config):
 	from secator.runners import Workflow
+
 	class workflow(Workflow):
 		def __init__(self, inputs=[], **run_opts):
 			hooks = run_opts.pop('hooks', {})
@@ -15,6 +17,7 @@ def generate_class(config):
 				hooks=hooks,
 				context=context)
 	return workflow, config.name
+
 
 DYNAMIC_SCANS = {}
 for workflow in ALL_SCANS:
