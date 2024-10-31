@@ -392,10 +392,8 @@ class Command(Runner):
 			self.return_code = 0
 			self.killed = False
 
-			# Environment
-			env = os.environ
-	
 	        # Run the command using subprocess
+			env = os.environ
 	        self.process = subprocess.Popen(
 	          command,
 	          stdin=subprocess.PIPE if sudo_password else None,
