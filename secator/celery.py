@@ -1,5 +1,6 @@
 import gc
 import logging
+import sys
 import uuid
 
 from time import time
@@ -16,6 +17,7 @@ from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
 from secator.utils import (debug, deduplicate, flatten, should_update)
 
+IN_CELERY_WORKER_PROCESS = sys.argv and ('secator.celery.app' in sys.argv or 'worker' in sys.argv)
 
 #---------#
 # Logging #
@@ -105,6 +107,8 @@ def void(*args, **kwargs):
 
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
+	if task.sync:
+		return
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
 	task.last_updated_celery = time()
@@ -178,8 +182,12 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			forward_results.s().set(queue='io'),
 		)
 	)
-	result = workflow.apply_async()
-	task.celery_result = result
+	if task.sync:
+		task.print_item = False
+		task.results = workflow.apply().get()
+	else:
+		result = workflow.apply_async()
+		task.celery_result = result
 
 
 @app.task(bind=True)
@@ -218,7 +226,7 @@ def run_command(self, results, name, targets, opts={}):
 	profiler = Profiler(interval=0.0001)
 	profiler.start()
 	chunk = opts.get('chunk')
-	sync = opts.get('sync')
+	sync = opts.get('sync', True)
 
 	# Set Celery request id in context
 	context = opts.get('context', {})
@@ -226,6 +234,14 @@ def run_command(self, results, name, targets, opts={}):
 	opts['context'] = context
 	opts['print_remote_info'] = False
 	opts['results'] = results
+
+	# If we are in a Celery worker, print everything, always
+	if IN_CELERY_WORKER_PROCESS:
+		opts.update({
+			'print_item': True,
+			'print_line': True,
+			'print_cmd': True
+		})
 
 	# Flatten + dedupe results
 	results = flatten(results)
@@ -235,35 +251,30 @@ def run_command(self, results, name, targets, opts={}):
 	if not chunk:
 		targets, opts = run_extractors(results, opts, targets)
 
-	# Get task class
-	task_cls = Task.get_task_class(name)
-
-	# Set task opts
-	# print_opts = {
-	# 	'print_cmd': True,
-	# 	'print_item': True,
-	# 	'print_line': True,
-	# 	'print_target': True
-	# }
-	# opts.update(print_opts)
-
 	try:
+		# Get task class
+		task_cls = Task.get_task_class(name)
+
 		# Check if chunkable
 		many_targets = len(targets) > 1
 		targets_over_chunk_size = task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
-		has_no_file_flag = task_cls.file_flag is None
-		chunk_it = many_targets and (has_no_file_flag or targets_over_chunk_size)
-		opts['has_children'] = chunk_it and not sync
-		task = task_cls(targets, **opts)
-		chunk_enabled = chunk_it and not task.sync
+		has_file_flag = task_cls.file_flag is not None
+		chunk_it = (sync and many_targets and not has_file_flag) or (not sync and many_targets and targets_over_chunk_size)
+		task_opts = opts.copy()
+		task_opts.update({
+			'print_remote_info': False,
+			'has_children': chunk_it,
+		})
+		if chunk_it:
+			task_opts['print_cmd'] = False
+		task = task_cls(targets, **task_opts)
 		debug(
 			'',
 			obj={
 				f'{task.unique_name}': 'CHUNK STATUS',
-				'chunk_enabled': chunk_enabled,
 				'chunk_it': chunk_it,
 				'sync': task.sync,
-				'has_no_file_flag': has_no_file_flag,
+				'many_targets': many_targets,
 				'targets_over_chunk_size': targets_over_chunk_size,
 			},
 			obj_after=False,
@@ -272,8 +283,8 @@ def run_command(self, results, name, targets, opts={}):
 		)
 
 		# Chunk task if needed
-		if chunk_enabled:
-			chunk_size = 1 if has_no_file_flag else task_cls.input_chunk_size
+		if chunk_it:
+			chunk_size = task_cls.input_chunk_size if has_file_flag else 1
 			break_task(
 				task,
 				opts,
