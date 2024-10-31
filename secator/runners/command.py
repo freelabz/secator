@@ -119,11 +119,19 @@ class Command(Runner):
 			'description': run_opts.get('description', None)
 		})
 
-		# Run parent init
+		# Extract run opts
 		hooks = run_opts.pop('hooks', {})
-		validators = {'validate_input': [self._validate_input_nonempty, self._validate_chunked_input]}
+		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
+
+		# Prepare validators
+		input_validators = [self._validate_input_nonempty]
+		if not caller:
+			input_validators.append(self._validate_chunked_input)
+		validators = {'validate_input': input_validators}
+
+		# Call super().__init__
 		super().__init__(
 			config=config,
 			inputs=inputs,
@@ -171,12 +179,15 @@ class Command(Runner):
 		# Print built cmd
 		if not self.has_children:
 			if self.sync:
-				if self.description:
+				if self.caller and self.description:
 					self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
 				elif self.print_cmd:
 					self._print('')
-			if self.print_cmd:
-				self._print(self.cmd.replace('[', '\\['), color='bold cyan', rich=True)
+		if self.print_cmd:
+			cmd_str = self.cmd.replace('[', '\\[')
+			if self.sync and self.chunk and self.chunk_count:
+				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
+			self._print(cmd_str, color='bold cyan', rich=True)
 
 		# Debug built input
 		input_str = '\n '.join(self.inputs).strip()
@@ -216,6 +227,7 @@ class Command(Runner):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
 		results = kwargs.get('results', [])
+		kwargs['sync'] = False
 		name = cls.__name__
 		return run_command.apply_async(args=[results, name] + list(args), kwargs={'opts': kwargs}, queue=cls.profile)
 
@@ -226,7 +238,7 @@ class Command(Runner):
 		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
 
 	@classmethod
-	def si(cls, results, *args, **kwargs):
+	def si(cls, *args, results=[], **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
 		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
@@ -346,12 +358,16 @@ class Command(Runner):
 
 		Yields:
 			str: Command stdout / stderr.
-			dict: Parsed JSONLine object.
+			dict: Serialized object.
 		"""
 		try:
 			# Yield remote
 			if self.celery_result:
 				yield from self.yield_from_remote()
+				return
+
+			# Abort if it has children tasks
+			if self.has_children:
 				return
 
 			# Yield targets
@@ -684,7 +700,7 @@ class Command(Runner):
 
 	@staticmethod
 	def _validate_chunked_input(self, inputs):
-		"""Multiple input passed in non-worker mode."""
+		"""Command does not suport multiple inputs in non-worker mode. Consider using .delay() instead."""
 		if len(inputs) > 1 and self.sync and self.file_flag is None:
 			return False
 		return True

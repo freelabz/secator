@@ -139,6 +139,7 @@ class Runner:
 
 		# Chunks
 		self.has_children = self.run_opts.get('has_children', False)
+		self.caller = self.run_opts.get('caller', None)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')

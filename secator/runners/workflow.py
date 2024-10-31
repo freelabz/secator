@@ -20,11 +20,8 @@ class Workflow(Runner):
 	def yielder(self):
 		"""Run workflow.
 
-		Args:
-			sync (bool): Run in sync mode (main thread). If False, run in Celery worker in distributed mode.
-
-		Returns:
-			list: List of results.
+		Yields:
+			secator.output_types.OutputType: Secator output type.
 		"""
 		# Task opts
 		run_opts = self.run_opts.copy()
@@ -39,6 +36,7 @@ class Workflow(Runner):
 
 		# Run Celery workflow and get results
 		if self.sync:
+			self.print_item = False
 			results = workflow.apply().get()
 		else:
 			result = workflow()
