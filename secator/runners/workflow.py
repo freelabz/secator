@@ -20,11 +20,8 @@ class Workflow(Runner):
 	def yielder(self):
 		"""Run workflow.
 
-		Args:
-			sync (bool): Run in sync mode (main thread). If False, run in Celery worker in distributed mode.
-
-		Returns:
-			list: List of results.
+		Yields:
+			secator.output_types.OutputType: Secator output type.
 		"""
 		# Task opts
 		run_opts = self.run_opts.copy()
@@ -39,6 +36,7 @@ class Workflow(Runner):
 
 		# Run Celery workflow and get results
 		if self.sync:
+			self.print_item = False
 			results = workflow.apply().get()
 		else:
 			result = workflow()
@@ -69,19 +67,19 @@ class Workflow(Runner):
 		from secator.celery import forward_results
 		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
-			self.targets,
+			self.inputs,
 			self.config.options,
 			run_opts)
 		sigs = [forward_results.si(results).set(queue='io')] + sigs + [forward_results.s().set(queue='io')]
 		workflow = chain(*sigs)
 		return workflow
 
-	def get_tasks(self, obj, targets, workflow_opts, run_opts):
+	def get_tasks(self, obj, inputs, workflow_opts, run_opts):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
 			obj (secator.config.TemplateLoader): Config.
-			targets (list): List of targets.
+			inputs (list): Inputs.
 			workflow_opts (dict): Workflow options.
 			run_opts (dict): Run options.
 			sync (bool): Synchronous mode (chain of tasks, no chords).
@@ -100,7 +98,7 @@ class Workflow(Runner):
 			if task_name.startswith('_group'):
 				tasks = self.get_tasks(
 					task_opts,
-					targets,
+					inputs,
 					workflow_opts,
 					run_opts
 				)
@@ -108,7 +106,7 @@ class Workflow(Runner):
 			elif task_name == '_chain':
 				tasks = self.get_tasks(
 					task_opts,
-					targets,
+					inputs,
 					workflow_opts,
 					run_opts
 				)
@@ -127,7 +125,7 @@ class Workflow(Runner):
 
 				# Create task signature
 				task_id = str(uuid.uuid4())
-				sig = task.s(targets, **opts).set(queue=task.profile, task_id=task_id)
+				sig = task.s(inputs, **opts).set(queue=task.profile, task_id=task_id)
 				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
 			sigs.append(sig)

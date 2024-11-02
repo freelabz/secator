@@ -144,7 +144,7 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'gau': [
-        Url(url='https://danielmiessler.com/robots.txt', _source='gau')
+        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
     ],
     'gf': [
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
@@ -209,12 +209,12 @@ OUTPUTS_TASKS = {
     ],
     'msfconsole': [],
     'naabu': [
-        Port(port=3000, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
+        Port(port=3000, ip='127.0.0.1', state='open', _source='naabu'),
+        Port(port=8080, ip='127.0.0.1', state='open', _source='naabu'),
     ],
     'nmap': [
-        Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca', _source='nmap'),
+        Port(port=3000, ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
+        Port(port=8080, ip='127.0.0.1', state='open', service_name='nagios nsca', _source='nmap'),
     ],
     'nuclei': [
         Vulnerability(

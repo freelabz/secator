@@ -17,11 +17,8 @@ class Task(Runner):
 	def yielder(self):
 		"""Run task.
 
-		Args:
-			sync (bool): Run in sync mode (main thread). If False, run in Celery worker in distributed mode.
-
-		Returns:
-			list: List of results.
+		Yields:
+			secator.output_types.OutputType: Secator output type.
 		"""
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
@@ -29,7 +26,6 @@ class Task(Runner):
 		# Run opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
-		dry_run = run_opts.get('show', False)
 
 		# Set task output types
 		self.output_types = task_cls.output_types
@@ -41,12 +37,11 @@ class Task(Runner):
 
 		# Run task
 		if self.sync:
-			run_opts['print_item'] = False
-			results = task_cls(self.targets, **run_opts)
-			if dry_run:  # don't run
-				return
+			self.print_item = False
+			result = task_cls.si(self.inputs, **run_opts)
+			results = result.apply().get()
 		else:
-			self.celery_result = task_cls.delay(self.targets, **run_opts)
+			self.celery_result = task_cls.delay(self.inputs, **run_opts)
 			self.add_subtask(self.celery_result.id, self.config.name, self.config.description or '')
 			yield Info(
 				message=f'Celery task created: {self.celery_result.id}',

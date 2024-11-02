@@ -11,11 +11,11 @@ from dotmap import DotMap
 
 from secator.definitions import DEBUG
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error
+from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor)
-from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi)
+from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi, should_update)
 
 logger = logging.getLogger(__name__)
 
@@ -68,20 +68,21 @@ class Runner:
 	# Reports folder
 	reports_folder = None
 
-	def __init__(self, config, targets=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
+	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
-		if not isinstance(targets, list):
-			targets = [targets]
-		self.targets = targets
+		if not isinstance(inputs, list):
+			inputs = [inputs]
+		self.inputs = inputs
 		self.results = results
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
-		self.last_updated = None
+		self.last_updated_db = None
+		self.last_updated_celery = None
 		self.last_updated_progress = None
 		self.end_time = None
 		self._hooks = hooks
@@ -107,23 +108,22 @@ class Runner:
 		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
 
-		# Process input
-		self.input = targets
-
 		# Process opts
 		self.quiet = self.run_opts.get('quiet', False)
 		self.no_process = self.run_opts.get('no_process', False)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
+		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
+		self.parent = self.run_opts.get('parent', False)
 
 		# Print opts
 		self.print_item = self.run_opts.get('print_item', False)
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
-		self.print_orig = self.run_opts.get('print_orig', False)
-		self.print_json = self.run_opts.get('print_json', False) or self.print_orig
+		self.print_json = self.run_opts.get('print_json', False)
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
+		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
 		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
 		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
 		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
@@ -139,6 +139,7 @@ class Runner:
 
 		# Chunks
 		self.has_children = self.run_opts.get('has_children', False)
+		self.caller = self.run_opts.get('caller', None)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
@@ -148,7 +149,7 @@ class Runner:
 		self.run_hooks('before_init')
 
 		# Check if input is valid
-		self.input_valid = self.run_validators('validate_input', self.input)
+		self.inputs_valid = self.run_validators('validate_input', self.inputs)
 
 		# Run hooks
 		self.run_hooks('on_init')
@@ -162,6 +163,10 @@ class Runner:
 	@property
 	def elapsed_human(self):
 		return humanize.naturaldelta(self.elapsed)
+
+	@property
+	def targets(self):
+		return [r for r in self.results if isinstance(r, Target)]
 
 	@property
 	def infos(self):
@@ -252,25 +257,23 @@ class Runner:
 				self._print_item(item) if item else ''
 				self.run_hooks('on_iter')
 
-		except KeyboardInterrupt:
-			if self.celery_result:
-				self._print('Revoking remote Celery tasks ...', color='bold red', rich=True)
-				self.stop_live_tasks()
-
-		except Exception as e:
+		except BaseException as e:
 			error = Error.from_exception(e)
 			error._source = self.unique_name
 			error._uuid = str(uuid.uuid4())
 			self.results.append(error)
 			self._print_item(error)
+			self.stop_live_tasks()
 			yield error
 
-		# Filter results and log info
+		# Mark duplicates and filter results
 		if not self.no_process:
 			self.mark_duplicates()
 			self.results = self.filter_results()
-			self.log_results()
-			self.run_hooks('on_end')
+
+		# Finalize run
+		self.log_results()
+		self.run_hooks('on_end')
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes."""
@@ -336,6 +339,8 @@ class Runner:
 		self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
 
 	def mark_duplicates(self):
+		if not self.enable_duplicate_check:
+			return
 		debug('running duplicate check', id=self.config.name, sub='runner.duplicates')
 		dupe_count = 0
 		for item in self.results.copy():
@@ -378,7 +383,7 @@ class Runner:
 		data = {
 			'name': self.name,
 			'status': self.status,
-			'targets': self.targets,
+			'targets': self.inputs,
 			'start_time': self.start_time,
 			'end_time': self.end_time,
 			'elapsed': self.elapsed.total_seconds(),
@@ -396,17 +401,15 @@ class Runner:
 			'done': self.done,
 			'output': self.output,
 			'progress': self.progress,
-			'last_updated': self.last_updated,
+			'last_updated_db': self.last_updated_db,
 			'context': self.context,
 			'errors': [e.toDict() for e in self.errors],
 		})
 		return data
 
 	def run_hooks(self, hook_type, *args):
-		if self.no_process:
-			return
 		result = args[0] if len(args) > 0 else None
-		if not self.enable_hooks:
+		if not self.enable_hooks or self.no_process:
 			return result
 		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 		for hook in self.hooks[hook_type]:
@@ -428,7 +431,7 @@ class Runner:
 					raise e
 		return result
 
-	def run_validators(self, validator_type, *args):
+	def run_validators(self, validator_type, *args, error=True):
 		if self.no_process:
 			return True
 		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
@@ -439,16 +442,17 @@ class Runner:
 			if not validator(self, *args):
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators', level=3)
 				doc = validator.__doc__
-				message = 'Validator failed'
-				if doc:
-					message += f': {doc}'
-				error = Error(
-					message=message,
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
-				self.results.append(error)
-				self._print_item(error)
+				if error:
+					message = 'Validator failed'
+					if doc:
+						message += f': {doc}'
+					error = Error(
+						message=message,
+						_source=self.unique_name,
+						_uuid=str(uuid.uuid4())
+					)
+					self.results.append(error)
+					self._print_item(error)
 				return False
 			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators', level=3)
 		return True
@@ -523,7 +527,8 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-		if self.exporters:
+		debug('', obj={self.unique_name: self.status, 'count': self.self_findings_count, 'results': self.self_findings}, sub='debug.runner.results')  # noqa: E501
+		if self.exporters and not self.no_process:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()
@@ -574,12 +579,6 @@ class Runner:
 		if isinstance(item, DotMap) or isinstance(item, OutputType):
 			return item
 
-		# Skip if print_orig is set
-		if self.print_orig:
-			new_item = DotMap(item)
-			new_item._type = 'unknown'
-			return new_item
-
 		# Init the new item and the list of output types to load from
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
@@ -615,13 +614,14 @@ class Runner:
 				debug(
 					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
 					sub='klass.load')
-				if 'klass.debug' in CONFIG.debug.component:
-					error = Error.from_exception(e)
-					self._print(error)
+				error = Error.from_exception(e)
+				debug(repr(error), sub='debug.klass.load')
 				continue
 
 		if not new_item:
 			new_item = Warning(message=f'Failed to load item as output type:\n  {item}')
+
+		debug(f'Output item: {new_item.toDict()}', sub='klass.load')
 
 		return new_item
 
@@ -659,7 +659,7 @@ class Runner:
 			return None
 
 		# Run item validators
-		if not self.run_validators('validate_item', item):
+		if not self.run_validators('validate_item', item, error=False):
 			return None
 
 		# Convert output dict to another schema
@@ -681,8 +681,7 @@ class Runner:
 
 		if isinstance(item, Progress) and item._source == self.unique_name:
 			self.progress = item.percent
-			update_frequency = CONFIG.runners.progress_update_frequency
-			if self.last_updated_progress and (item._timestamp - self.last_updated_progress) < update_frequency:
+			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
 				return None
 			elif int(item.percent) in [0, 100]:
 				return None
@@ -690,7 +689,7 @@ class Runner:
 				self.last_updated_progress = item._timestamp
 
 		# Run on_item hooks
-		if isinstance(item, OutputType):
+		if isinstance(item, tuple(FINDING_TYPES)):
 			item = self.run_hooks('on_item', item)
 
 		return item

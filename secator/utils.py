@@ -16,6 +16,7 @@ from datetime import datetime
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
+from time import time
 import traceback
 from urllib.parse import urlparse, quote
 
@@ -369,7 +370,7 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		s = f'{s}: {obj_str}'
 	if id:
 		s += f' [italic dim gray11]\[{id}][/] '
-	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
+	s = rich_to_ansi(f'[dim red]🐛 {s}[/]')
 	print(s)
 
 
@@ -558,3 +559,21 @@ def traceback_as_string(exc):
 		string: readable traceback.
 	"""
 	return ' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
+
+
+def should_update(update_frequency, last_updated=None, timestamp=None):
+	"""Determine if an object should be updated based on the update frequency and the last updated UNIX timestamp.
+
+	Args:
+		update_frequency (int): Update frequency in seconds.
+		last_updated (Union[int, None]): UNIX timestamp or None if unset.
+		timestamp (int): Item timestamp.
+
+	Returns:
+		bool: Whether the object should be updated.
+	"""
+	if not timestamp:
+		timestamp = time()
+	if last_updated and (timestamp - last_updated) < update_frequency:
+		return False
+	return True

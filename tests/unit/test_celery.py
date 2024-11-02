@@ -114,4 +114,4 @@ class TestCelery(unittest.TestCase):
 			)
 			result = workflow.apply()
 			results = result.get()
-			self.assertEqual('Validator failed: Multiple input passed in non-worker mode.', results[0].message)
+			self.assertEqual(len(results), len(TARGETS))

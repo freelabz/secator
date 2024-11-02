@@ -22,16 +22,16 @@ class Scan(Runner):
 		"""Run scan.
 
 		Yields:
-			dict: Item yielded from individual workflow tasks.
+			secator.output_types.OutputType: Secator output type.
 		"""
+		self.print_item = False
 		for name, workflow_opts in self.config.workflows.items():
 
 			# Extract opts and and expand target from previous workflows results
-			targets, workflow_opts = run_extractors(self.results, workflow_opts or {}, self.targets)
+			targets, workflow_opts = run_extractors(self.results, workflow_opts or {}, self.inputs)
 
 			# Run workflow
 			run_opts = self.run_opts.copy()
-			run_opts['print_item'] = False
 			workflow = Workflow(
 				TemplateLoader(name=f'workflows/{name}'),
 				targets,

@@ -25,7 +25,7 @@ class Progress(OutputType):
 
 	def __post_init__(self):
 		super().__post_init__()
-		if self.percent not in [0, 100]:
+		if not 0 <= self.percent <= 100:
 			self.percent = 0
 
 	def __str__(self) -> str:

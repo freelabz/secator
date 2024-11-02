@@ -53,24 +53,9 @@ class TestScans(unittest.TestCase, CommandOutputTester):
 
 		for conf in TEST_SCANS:
 			with self.subTest(name=conf.name):
-				console.print(f'Testing scan {conf.name} ...')
 				inputs = INPUTS_SCANS.get(conf.name, [])
 				outputs = OUTPUTS_SCANS.get(conf.name, [])
-				if not inputs:
-					console.print(
-						f'No inputs for scan {conf.name} ! Skipping.', style='dim red'
-					)
-					continue
-				scan = Scan(conf, targets=inputs, run_opts=opts)
-				results = scan.run()
-				if DEBUG > 0:
-					for result in results:
-						print(repr(result))
-				if not outputs:
-					console.print(
-						f'No outputs for scan {conf.name} ! Skipping.', style='dim red'
-					)
-					continue
-				self._test_task_output(
-					results,
+				scan = Scan(conf, inputs=inputs, run_opts=opts)
+				self._test_runner_output(
+					scan,
 					expected_results=outputs)
