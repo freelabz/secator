@@ -406,20 +406,20 @@ class Command(Runner):
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
-			  self.process.stdin.write(f"{sudo_password}\n")
-			  self.process.stdin.flush()
+				self.process.stdin.write(f"{sudo_password}\n")
+				self.process.stdin.flush()
 
 			# Process the output in real-time
 			for line in iter(lambda: self.process.stdout.readline(), b''):
-			  # sleep(0)  # for async to give up control
-			  if not line:
-				break
-			  yield from self.process_line(line)
+				# sleep(0)  # for async to give up control
+				if not line:
+					break
+				yield from self.process_line(line)
 
 			# Run hooks after cmd has completed successfully
 			result = self.run_hooks('on_cmd_done')
 			if result:
-			  yield from result
+				yield from result
 
 		except FileNotFoundError as e:
 			yield from self.handle_file_not_found(e)
