@@ -392,34 +392,34 @@ class Command(Runner):
 			self.return_code = 0
 			self.killed = False
 
-	        # Run the command using subprocess
+			# Run the command using subprocess
 			env = os.environ
-	        self.process = subprocess.Popen(
-	          command,
-	          stdin=subprocess.PIPE if sudo_password else None,
-	          stdout=subprocess.PIPE,
-	          stderr=subprocess.STDOUT,
-	          universal_newlines=True,
-	          shell=self.shell,
-	          env=env,
-	          cwd=self.cwd)
-	
-	        # If sudo password is provided, send it to stdin
-	        if sudo_password:
-	          self.process.stdin.write(f"{sudo_password}\n")
-	          self.process.stdin.flush()
-	
-	        # Process the output in real-time
-	        for line in iter(lambda: self.process.stdout.readline(), b''):
-	          # sleep(0)  # for async to give up control
-	          if not line:
-	            break
-	          yield from self.process_line(line)
-	
-	        # Run hooks after cmd has completed successfully
-	        result = self.run_hooks('on_cmd_done')
-	        if result:
-	          yield from result
+			self.process = subprocess.Popen(
+			  command,
+			  stdin=subprocess.PIPE if sudo_password else None,
+			  stdout=subprocess.PIPE,
+			  stderr=subprocess.STDOUT,
+			  universal_newlines=True,
+			  shell=self.shell,
+			  env=env,
+			  cwd=self.cwd)
+
+			# If sudo password is provided, send it to stdin
+			if sudo_password:
+			  self.process.stdin.write(f"{sudo_password}\n")
+			  self.process.stdin.flush()
+
+			# Process the output in real-time
+			for line in iter(lambda: self.process.stdout.readline(), b''):
+			  # sleep(0)  # for async to give up control
+			  if not line:
+				break
+			  yield from self.process_line(line)
+
+			# Run hooks after cmd has completed successfully
+			result = self.run_hooks('on_cmd_done')
+			if result:
+			  yield from result
 
 		except FileNotFoundError as e:
 			yield from self.handle_file_not_found(e)
