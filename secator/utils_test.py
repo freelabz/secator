@@ -160,12 +160,11 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 		console.print(f'[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
 
 		if not runner.inputs:
-			console.print('[dim gray11] skipped (no inputs defined).[/]')
+			console.print('[dim gold3] skipped (no inputs defined).[/]')
 			return
 
-		if not expected_results:
-			console.print('[dim gray11] skipped (no outputs defined).[/]')
-			return
+		if not expected_results and not expected_output_keys:
+			console.print('[dim gold3] (no outputs defined).[/]', end='')
 
 		try:
 			# Run runner

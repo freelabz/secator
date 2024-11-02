@@ -267,12 +267,14 @@ class Runner:
 			self.stop_live_tasks()
 			yield error
 
-		# Filter results and log info
+		# Mark duplicates and filter results
 		if not self.no_process:
 			self.mark_duplicates()
 			self.results = self.filter_results()
-			self.log_results()
-			self.run_hooks('on_end')
+
+		# Finalize run
+		self.log_results()
+		self.run_hooks('on_end')
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes."""
@@ -525,7 +527,7 @@ class Runner:
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
 		debug('', obj={self.unique_name: self.status, 'count': self.self_findings_count, 'results': self.self_findings}, sub='debug.runner.results')  # noqa: E501
-		if self.exporters:
+		if self.exporters and not self.no_process:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()
@@ -686,7 +688,7 @@ class Runner:
 				self.last_updated_progress = item._timestamp
 
 		# Run on_item hooks
-		if isinstance(item, OutputType):
+		if isinstance(item, tuple(FINDING_TYPES)):
 			item = self.run_hooks('on_item', item)
 
 		return item

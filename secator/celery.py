@@ -43,10 +43,8 @@ trace.LOG_SUCCESS = "Task %(name)s[%(id)s] succeeded in %(runtime)ss"
 
 app = Celery(__name__)
 app.conf.update({
-	# Worker config
-	'worker_send_task_events': True,
-	'worker_prefetch_multiplier': 1,
-	'worker_max_tasks_per_child': 10,
+	# Content types
+	'accept_content': ['application/x-python-serialize', 'application/json'],
 
 	# Broker config
 	'broker_url': CONFIG.celery.broker_url,
@@ -60,30 +58,37 @@ app.conf.update({
 	'broker_pool_limit': CONFIG.celery.broker_pool_limit,
 	'broker_connection_timeout': CONFIG.celery.broker_connection_timeout,
 
-	# Backend config
+	# Result backend config
 	'result_backend': CONFIG.celery.result_backend,
+	'result_expires': CONFIG.celery.result_expires,
 	'result_extended': True,
 	'result_backend_thread_safe': True,
+	'result_serializer': 'pickle',
 	# 'result_backend_transport_options': {'master_name': 'mymaster'}, # for Redis HA backend
 
 	# Task config
+	'task_acks_late': False,
+	'task_compression': 'gzip',
+	'task_create_missing_queues': True,
 	'task_eager_propagates': False,
+	'task_reject_on_worker_lost': False,
 	'task_routes': {
 		'secator.celery.run_workflow': {'queue': 'celery'},
 		'secator.celery.run_scan': {'queue': 'celery'},
 		'secator.celery.run_task': {'queue': 'celery'},
 		'secator.hooks.mongodb.tag_duplicates': {'queue': 'mongodb'}
 	},
-	'task_reject_on_worker_lost': True,
-	'task_acks_late': False,
-	'task_create_missing_queues': True,
-	'task_send_sent_event': True,
-
-	# Serialization / compression
-	'accept_content': ['application/x-python-serialize', 'application/json'],
-	'task_compression': 'gzip',
+	'task_store_eager_result': True,
+	# 'task_send_sent_event': True,  # TODO: consider enabling this for Flower monitoring
 	'task_serializer': 'pickle',
-	'result_serializer': 'pickle'
+
+	# Worker config
+	# 'worker_direct': True,  # TODO: consider enabling this to allow routing to specific workers
+	'worker_max_tasks_per_child': 10,
+	# 'worker_max_memory_per_child': 100000  # TODO: consider enabling this
+	'worker_pool_restarts': True,
+	'worker_prefetch_multiplier': 1,
+	# 'worker_send_task_events': True,  # TODO: consider enabling this for Flower monitoring
 })
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 
@@ -337,7 +342,7 @@ def forward_results(results):
 
 def is_celery_worker_alive():
 	"""Check if a Celery worker is available."""
-	result = app.control.broadcast('ping', reply=True, limit=1, timeout=5)
+	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
 	result = bool(result)
 	if result:
 		console.print(Info(message='Celery worker is alive !'))
