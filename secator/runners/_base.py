@@ -689,7 +689,7 @@ class Runner:
 				self.last_updated_progress = item._timestamp
 
 		# Run on_item hooks
-		if isinstance(item, OutputType):
+		if isinstance(item, tuple(FINDING_TYPES)):
 			item = self.run_hooks('on_item', item)
 
 		return item

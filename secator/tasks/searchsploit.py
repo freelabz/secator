@@ -81,10 +81,15 @@ class searchsploit(Command):
 			group = match.groups()
 			product = '-'.join(group[0].strip().split(' '))
 			if len(group[1]) > 1:
-				versions, title = tuple(group[1].split(' - '))
-				item.name = title
-				product_info = [f'{product.lower()} {v.strip()}' for v in versions.split('/')]
-				item.tags = product_info + item.tags
+				try:
+					versions, title = tuple(group[1].split(' - '))
+					item.name = title
+					product_info = [f'{product.lower()} {v.strip()}' for v in versions.split('/')]
+					item.tags = product_info + item.tags
+				except ValueError:
+					item.name = item.name.split(' - ')[-1]
+					item.tags = [product.lower()]
+					pass
 			# else:
 			# 	self._print(f'[bold red]{item.name} ({item.reference}) did not quite match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
 		input_tag = '-'.join(self.inputs[0].replace('\'', '').split(' '))
