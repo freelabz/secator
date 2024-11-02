@@ -15,11 +15,16 @@ from secator.utils import debug, escape_mongodb_url, should_update
 
 MONGODB_URL = CONFIG.addons.mongodb.url
 MONGODB_UPDATE_FREQUENCY = CONFIG.addons.mongodb.update_frequency
-MAX_POOL_SIZE = 100
+MONGODB_CONNECT_TIMEOUT = CONFIG.addons.mongodb.server_selection_timeout_ms
+MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
 
 logger = logging.getLogger(__name__)
 
-client = pymongo.MongoClient(escape_mongodb_url(MONGODB_URL), maxPoolSize=MAX_POOL_SIZE)
+client = pymongo.MongoClient(
+	escape_mongodb_url(MONGODB_URL),
+	maxPoolSize=MONGODB_MAX_POOL_SIZE,
+	serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT
+)
 
 
 def update_runner(self):
