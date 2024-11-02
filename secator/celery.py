@@ -336,7 +336,7 @@ def forward_results(results):
 
 def is_celery_worker_alive():
 	"""Check if a Celery worker is available."""
-	result = app.control.broadcast('ping', reply=True, limit=1, timeout=5)
+	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
 	result = bool(result)
 	if result:
 		console.print(Info(message='Celery worker is alive !'))

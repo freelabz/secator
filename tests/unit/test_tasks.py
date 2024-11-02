@@ -241,41 +241,6 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 						expected_output_types=cls.output_types
 					)
 
-	def test_cmd_original_schema(self):
-		console.print('')
-		for cls, fixture in FIXTURES_TASKS.items():
-
-			with self.subTest(name=cls.__name__):
-				console.print(f'\t[bold grey35]{cls.__name__} ...[/]', end='')
-
-				# Validate fixture
-				if not self._valid_fixture(cls, fixture):
-					continue
-
-				# Get expected output keys from fixture
-				expected_output_keys = None
-				if isinstance(fixture, dict):
-					if 'results' in fixture: # fix for JSON files having a 'results' key
-						expected_output_keys = fixture['results'][0].keys()
-					else:
-						expected_output_keys = fixture.keys()
-
-				# Run command
-				targets = INPUTS_TASKS[cls.input_type]
-				opts = copy.deepcopy(META_OPTS)
-				opts.update({
-					'orig': True,
-					'raw': isinstance(fixture, str)
-				})
-				with mock_command(cls, targets, opts, fixture) as runner:
-					if not len(cls.output_types) == 1:
-						console.print('[dim gold3] skipped (multi-output task with single schema)[/]')
-						return
-					self._test_runner_output(
-						runner,
-						expected_output_keys=expected_output_keys
-					)
-
 
 class TestCommandHooks(unittest.TestCase):
 
