@@ -395,14 +395,14 @@ class Command(Runner):
 			# Run the command using subprocess
 			env = os.environ
 			self.process = subprocess.Popen(
-			  command,
-			  stdin=subprocess.PIPE if sudo_password else None,
-			  stdout=subprocess.PIPE,
-			  stderr=subprocess.STDOUT,
-			  universal_newlines=True,
-			  shell=self.shell,
-			  env=env,
-			  cwd=self.cwd)
+				command,
+				stdin=subprocess.PIPE if sudo_password else None,
+				stdout=subprocess.PIPE,
+				stderr=subprocess.STDOUT,
+				universal_newlines=True,
+				shell=self.shell,
+				env=env,
+				cwd=self.cwd)
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
