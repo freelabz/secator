@@ -48,6 +48,7 @@ dependencies = [
   'rich < 14',
   'rich-click < 1.7',
   'psutil < 7',
+  'retry < 1',
   'tldextract < 6',
   'typing_extensions < 5',
   'validators < 1',
