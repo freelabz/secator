@@ -1,12 +1,11 @@
 from contextlib import nullcontext
 from time import sleep
 
-from greenlet import GreenletExit
-
 import kombu
 import kombu.exceptions
 
 from celery.result import AsyncResult, GroupResult
+from greenlet import GreenletExit
 from rich.panel import Panel
 from rich.padding import Padding
 

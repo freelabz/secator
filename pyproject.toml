@@ -1,14 +1,14 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ['hatchling']
+build-backend = 'hatchling.build'
 
 [project]
-name = "secator"
-version = "0.6.0"
-authors = [{ name = "FreeLabz", email = "sales@freelabz.com" }]
-readme = "README.md"
+name = 'secator'
+version = '0.6.0'
+authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
+readme = 'README.md'
 description = "The pentester's swiss knife."
-requires-python = ">=3.8"
+requires-python = '>=3.8'
 keywords = [
   'cybersecurity',
   'recon',
@@ -17,40 +17,41 @@ keywords = [
   'automation'
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
-  "Intended Audience :: Developers",
-  "Intended Audience :: Information Technology",
-  "License :: Free for non-commercial use",
-  "Operating System :: Unix",
-  "Programming Language :: Python",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
+  'Development Status :: 3 - Alpha',
+  'Intended Audience :: Developers',
+  'Intended Audience :: Information Technology',
+  'License :: Free for non-commercial use',
+  'Operating System :: Unix',
+  'Programming Language :: Python',
+  'Programming Language :: Python :: 3',
+  'Programming Language :: Python :: 3.8',
+  'Programming Language :: Python :: 3.9',
+  'Programming Language :: Python :: 3.10',
+  'Programming Language :: Python :: 3.11',
 ]
 dependencies = [
-  "beautifulsoup4 <= 5",
+  'beautifulsoup4 <= 5',
   'celery < 6',
-  "cpe < 2",
-  "dotmap < 2",
-  "free-proxy < 2",
-  "furl < 3",
-  "humanize < 5",
-  "ifaddr < 1",
-  "jinja2 < 4",
-  "packaging < 25",
-  "python-dotenv < 2",
-  "pyyaml < 7",
-  "pydantic < 3",
-  "requests < 3",
-  "rich < 14",
-  "rich-click < 1.7",
-  "psutil < 7",
-  "tldextract < 6",
-  "typing_extensions < 5",
-  "validators < 1",
-  "xmltodict < 1"
+  'cpe < 2',
+  'dotmap < 2',
+  'free-proxy < 2',
+  'furl < 3',
+  'greenlet < 4',
+  'humanize < 5',
+  'ifaddr < 1',
+  'jinja2 < 4',
+  'packaging < 25',
+  'python-dotenv < 2',
+  'pyyaml < 7',
+  'pydantic < 3',
+  'requests < 3',
+  'rich < 14',
+  'rich-click < 1.7',
+  'psutil < 7',
+  'tldextract < 6',
+  'typing_extensions < 5',
+  'validators < 1',
+  'xmltodict < 1'
 ]
 
 [project.optional-dependencies]
@@ -70,7 +71,6 @@ trace = [
 ]
 worker = [
   'gevent < 25',
-  'greenlet < 4',
   'eventlet < 1',
   'flower < 3',
 ]
@@ -86,8 +86,8 @@ google = [
 ]
 
 [project.scripts]
-secator = "secator.cli:cli"
+secator = 'secator.cli:cli'
 
 [project.urls]
-Homepage = "https://github.com/freelabz/secator"
-Issues = "https://github.com/freelabz/secator/issues"
+Homepage = 'https://github.com/freelabz/secator'
+Issues = 'https://github.com/freelabz/secator/issues'
