@@ -93,6 +93,7 @@ class Runner:
 		self.celery_result = None
 		self.celery_ids = []
 		self.celery_ids_map = {}
+		self.uuids = []
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -181,6 +182,10 @@ class Runner:
 		return [r for r in self.results if isinstance(r, Error)]
 
 	@property
+	def self_results(self):
+		return [r for r in self.results if r._source.startswith(self.unique_name)]
+
+	@property
 	def findings(self):
 		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES))]
 
@@ -197,10 +202,6 @@ class Runner:
 		return len(self.self_findings)
 
 	@property
-	def uuids(self):
-		return [_._uuid for _ in self.results]
-
-	@property
 	def status(self):
 		if not self.done:
 			return 'RUNNING'
@@ -213,7 +214,7 @@ class Runner:
 			'full_name': self.unique_name,
 			'state': self.status,
 			'progress': self.progress,
-			'results': self.results,
+			'results': self.self_results,
 			'chunk': self.chunk,
 			'chunk_count': self.chunk_count,
 			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
@@ -239,13 +240,9 @@ class Runner:
 
 			# Loop through runner results and process items
 			for item in self.yielder():
-
 				if isinstance(item, (OutputType, DotMap, dict)):
 					item = self._process_item(item)
-					if not item:
-						continue
-
-					if self.enable_duplicate_check and item._uuid in self.uuids:
+					if not item or item._uuid in self.uuids:
 						continue
 
 					# Hack to get new Celery ids dynamically into self.celery_ids
@@ -254,16 +251,17 @@ class Runner:
 						self.celery_ids.append(item.task_id)
 
 					# Append item to results
-					self.results.append(item)
+					self.add_result(item)
 					yield item
 
 				self._print_item(item) if item else ''
 				self.run_hooks('on_iter')
 
 		except BaseException as e:
-			error = Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
-			self.results.append(error)
-			self._print_item(error)
+			error = Error.from_exception(e)
+			error._source = self.unique_name
+			error._uuid = str(uuid.uuid4())
+			self.add_result(error, print=True)
 			self.stop_live_tasks()
 			yield error
 
@@ -275,6 +273,12 @@ class Runner:
 		# Finalize run
 		self.log_results()
 		self.run_hooks('on_end')
+
+	def add_result(self, item, print=False):
+		self.uuids.append(item._uuid)
+		self.results.append(item)
+		if print:
+			self._print_item(item)
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes."""
@@ -422,10 +426,11 @@ class Runner:
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='hooks', level=3)
 			except Exception as e:
 				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failure'}, id=_id, sub='hooks', level=3)
-				error = Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				error = Error.from_exception(e)
 				error.message = f'Hook "{fun}" execution failed.'
-				self.results.append(error)
-				self._print_item(error)
+				error._source = self.unique_name
+				error._uuid = str(uuid.uuid4())
+				self.add_result(error, print=True)
 				if self.raise_on_error:
 					raise e
 		return result
@@ -450,8 +455,7 @@ class Runner:
 						_source=self.unique_name,
 						_uuid=str(uuid.uuid4())
 					)
-					self.results.append(error)
-					self._print_item(error)
+					self.add_result(error, print=True)
 				return False
 			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators', level=3)
 		return True

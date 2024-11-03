@@ -11,6 +11,7 @@ from celery.app import trace
 from rich.logging import RichHandler
 
 from secator.config import CONFIG
+from secator.definitions import ADDONS_ENABLED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
@@ -119,7 +120,7 @@ def update_state(celery_task, task, force=False):
 	task.last_updated_celery = time()
 	debug(
 		'',
-		sub='celery.state',
+		sub='celery.state.update',
 		id=celery_task.request.id,
 		obj={task.unique_name: task.status, 'count': task.self_findings_count},
 		obj_after=False
@@ -176,7 +177,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
 		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
-		task.results.append(info)
+		task.add_result(info)
 		sigs.append(sig)
 
 	# Build Celery workflow
@@ -227,9 +228,10 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
-	from pyinstrument import Profiler
-	profiler = Profiler(interval=0.0001)
-	profiler.start()
+	if ADDONS_ENABLED['trace']:
+		from pyinstrument import Profiler
+		profiler = Profiler(interval=0.0001)
+		profiler.start()
 	chunk = opts.get('chunk')
 	sync = opts.get('sync', True)
 
@@ -305,21 +307,23 @@ def run_command(self, results, name, targets, opts={}):
 			update_state(self, task)
 
 	except BaseException as e:
-		error = Error.from_exception(e, _source=task.unique_name, _uuid=str(uuid.uuid4()))
-		task._print_item(error)
+		error = Error.from_exception(e)
+		error._source = task.unique_name
+		error._uuid = str(uuid.uuid4())
+		task.add_result(error, print=True)
 		task.stop_live_tasks()
-		task.results.append(error)
 
 	finally:
 		update_state(self, task, force=True)
 		gc.collect()
 		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
-		profiler.stop()
-		from pathlib import Path
-		profile_path = Path(task.reports_folder) / 'prof.html'
-		print(f'Writing profile to {profile_path}')
-		with profile_path.open('w', encoding='utf-8') as f_html:
-			f_html.write(profiler.output_html())
+		if ADDONS_ENABLED['trace']:
+			profiler.stop()
+			from pathlib import Path
+			profile_path = Path(task.reports_folder) / 'prof.html'
+			print(f'Writing profile to {profile_path}')
+			with profile_path.open('w', encoding='utf-8') as f_html:
+				f_html.write(profiler.output_html())
 		return task.results
 
 

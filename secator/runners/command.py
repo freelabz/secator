@@ -8,19 +8,18 @@ import subprocess
 import sys
 import uuid
 
-from time import sleep, time
+from time import time
 
 import psutil
 from fp.fp import FreeProxy
-from rich.tree import Tree
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import Info, Error, Target, Stat
+from secator.output_types import Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug, rich_to_ansi
+from secator.utils import debug
 
 
 logger = logging.getLogger(__name__)
@@ -425,8 +424,9 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			for line in self.process.stdout.readlines():
-				yield from self.process_line(line)
+			if self.process:
+				for line in self.process.stdout.readlines():
+					yield from self.process_line(line)
 			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 		finally:
