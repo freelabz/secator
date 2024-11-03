@@ -10,7 +10,6 @@ import humanize
 from dotmap import DotMap
 
 from secator.definitions import DEBUG
-from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
 from secator.report import Report
@@ -376,6 +375,7 @@ class Runner:
 		raise NotImplementedError()
 
 	def yielder_celery(self):
+		from secator.celery_utils import CeleryData
 		yield from CeleryData.iter_results(
 			self.celery_result,
 			ids_map=self.celery_ids_map,

@@ -70,6 +70,7 @@ trace = [
 ]
 worker = [
   'gevent < 25',
+  'greenlet < 4',
   'eventlet < 1',
   'flower < 3',
 ]
