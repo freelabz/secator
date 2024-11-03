@@ -14,7 +14,6 @@ import psutil
 from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
-from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import Error, Target, Stat
 from secator.runners import Runner
@@ -361,10 +360,6 @@ class Command(Runner):
 			dict: Serialized object.
 		"""
 		try:
-			# Yield remote
-			if self.celery_result:
-				yield from self.yield_from_remote()
-				return
 
 			# Abort if it has children tasks
 			if self.has_children:
@@ -424,9 +419,11 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			if self.process:
-				for line in self.process.stdout.readlines():
-					yield from self.process_line(line)
+			debug(
+				f'{self.unique_name}: {type(e).__name__}. Sending SIGINT to process {self.process.pid}.',
+				sub='runner.command'
+			)
+			self.stop_process()
 			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 		finally:
@@ -491,13 +488,6 @@ class Command(Runner):
 		error._source = self.unique_name
 		error._uuid = str(uuid.uuid4())
 		yield error
-
-	def yield_from_remote(self):
-		yield from CeleryData.iter_results(
-			self.celery_result,
-			ids_map=self.celery_ids_map,
-			print_remote_info=False
-		)
 
 	def stop_process(self):
 		"""Sends SIGINT to running process, if any."""
@@ -604,6 +594,8 @@ class Command(Runner):
 		"""Wait for process to finish and process output and return code."""
 		if not self.process:
 			return
+		for line in self.process.stdout.readlines():
+			yield from self.process_line(line)
 		self.process.wait()
 		self.return_code = self.process.returncode
 		self.process.stdout.close()

@@ -10,6 +10,7 @@ import humanize
 from dotmap import DotMap
 
 from secator.definitions import DEBUG
+from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
 from secator.report import Report
@@ -238,31 +239,21 @@ class Runner:
 				self.run_hooks('on_end')
 				return
 
-			# Loop through runner results and process items
-			for item in self.yielder():
-				if isinstance(item, (OutputType, DotMap, dict)):
-					item = self._process_item(item)
-					if not item or item._uuid in self.uuids:
-						continue
+			# Choose yielder
+			yielder = self.yielder_celery if self.celery_result else self.yielder
 
-					# Hack to get new Celery ids dynamically into self.celery_ids
-					# TODO: switch to using context.celery_id for any kind of item
-					if isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
-						self.celery_ids.append(item.task_id)
-
-					# Append item to results
-					self.add_result(item)
-					yield item
-
-				self._print_item(item) if item else ''
+			# Loop and process items
+			for item in yielder():
+				yield from self._process_item(item)
 				self.run_hooks('on_iter')
 
 		except BaseException as e:
+			debug(f'{self.config.name} encountered exception {type(e).__name__}. Stopping remote tasks.')
 			error = Error.from_exception(e)
 			error._source = self.unique_name
 			error._uuid = str(uuid.uuid4())
 			self.add_result(error, print=True)
-			self.stop_live_tasks()
+			self.stop_celery_tasks()
 			yield error
 
 		# Mark duplicates and filter results
@@ -383,6 +374,13 @@ class Runner:
 
 	def yielder(self):
 		raise NotImplementedError()
+
+	def yielder_celery(self):
+		yield from CeleryData.iter_results(
+			self.celery_result,
+			ids_map=self.celery_ids_map,
+			print_remote_info=False
+		)
 
 	def toDict(self):
 		data = {
@@ -537,7 +535,7 @@ class Runner:
 			report.send()
 			self.report = report
 
-	def stop_live_tasks(self):
+	def stop_celery_tasks(self):
 		"""Stop all tasks running in Celery worker."""
 		from secator.celery import revoke_task
 		for task_id in self.celery_ids:
@@ -656,46 +654,67 @@ class Runner:
 				count_map[name] = count
 		return count_map
 
-	def _process_item(self, item: dict):
-		# Abort if no_process is set
+	def _process_item(self, item):
+		# Item is a string, just print it
+		if isinstance(item, str):
+			self._print_item(item) if item else ''
+			return
+
+		# Abort further processing if no_process is set
 		if self.no_process:
-			return None
+			return
 
 		# Run item validators
 		if not self.run_validators('validate_item', item, error=False):
-			return None
+			return
 
 		# Convert output dict to another schema
 		if isinstance(item, dict):
 			item = self.run_hooks('on_item_pre_convert', item)
 			if not item:
-				return None
+				return
 			item = self._convert_item_schema(item)
 
 		# Update item context
 		item._context.update(self.context)
 
+		# Return if already seen
+		if item._uuid in self.uuids:
+			return
+
+		# Add uuid to item
+		if not item._uuid:
+			item._uuid = str(uuid.uuid4())
+
 		# Add context, uuid, progress to item
 		if not item._source:
 			item._source = self.unique_name
 
-		if not item._uuid:
-			item._uuid = str(uuid.uuid4())
-
+		# If progress item, update runner progress
 		if isinstance(item, Progress) and item._source == self.unique_name:
 			self.progress = item.percent
 			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
-				return None
+				return
 			elif int(item.percent) in [0, 100]:
-				return None
+				return
 			else:
 				self.last_updated_progress = item._timestamp
+
+		# If info item and task_id is defined, update runner celery_ids
+		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
+			self.celery_ids.append(item.task_id)
 
 		# Run on_item hooks
 		if isinstance(item, tuple(FINDING_TYPES)):
 			item = self.run_hooks('on_item', item)
+			if not item:
+				return
 
-		return item
+		# Add item to results
+		self.add_result(item, print=True)
+
+		# Yield item
+		yield item
 
 	def get_repr(self, item=None):
 		if not item:

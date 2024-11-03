@@ -1,15 +1,21 @@
+from contextlib import nullcontext
+from time import sleep
+
+from greenlet import GreenletExit
+
+import kombu
+import kombu.exceptions
+
 from celery.result import AsyncResult, GroupResult
 from rich.panel import Panel
 from rich.padding import Padding
+
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
-from contextlib import nullcontext
-from secator.definitions import STATE_COLORS
-from secator.utils import debug, traceback_as_string
-from secator.rich import console
 from secator.config import CONFIG
-import kombu
-import kombu.exceptions
-from time import sleep
+from secator.definitions import STATE_COLORS
+from secator.output_types import Error
+from secator.rich import console
+from secator.utils import debug, traceback_as_string
 
 
 class CeleryData(object):
@@ -119,8 +125,11 @@ class CeleryData(object):
 					debug('RESULT READY', sub='celery.runner', id=result.id)
 					yield from CeleryData.get_all_data(result, ids_map)
 					break
-			except kombu.exceptions.DecodeError:
-				debug('kombu decode error', sub='debug.celery', id=result.id)
+			except (KeyboardInterrupt, GreenletExit):
+				raise
+			except Exception as e:
+				error = Error.from_exception(e)
+				debug(repr(error), sub='celery.poll')
 				pass
 			finally:
 				sleep(refresh_interval)
@@ -133,7 +142,6 @@ class CeleryData(object):
 			dict: Subtasks state and results.
 		"""
 		task_ids = list(ids_map.keys())
-		datas = []
 		for task_id in task_ids:
 			data = CeleryData.get_task_data(task_id, ids_map)
 			if not data:
@@ -146,7 +154,6 @@ class CeleryData(object):
 				level=4
 			)
 			yield data
-			datas.append(data)
 
 		# Calculate and yield parent task progress
 		# if not datas:
@@ -209,7 +216,7 @@ class CeleryData(object):
 			data['results'] = info
 			errors = [e for e in info if e._type == 'error']
 			status = 'FAILURE' if errors else 'SUCCESS'
-			data['count'] = len([c for c in info if c._source == data['name']])
+			data['count'] = len([c for c in info if c._source.startswith(data['name'])])
 			data['state'] = status
 
 		elif isinstance(info, dict):

@@ -9,6 +9,7 @@ from celery import Celery, chain, chord, signals
 from celery.app import trace
 
 from rich.logging import RichHandler
+from retry import retry
 
 from secator.config import CONFIG
 from secator.definitions import ADDONS_ENABLED
@@ -111,6 +112,7 @@ def void(*args, **kwargs):
 	pass
 
 
+@retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
 	if task.sync:
@@ -311,7 +313,7 @@ def run_command(self, results, name, targets, opts={}):
 		error._source = task.unique_name
 		error._uuid = str(uuid.uuid4())
 		task.add_result(error, print=True)
-		task.stop_live_tasks()
+		task.stop_celery_tasks()
 
 	finally:
 		update_state(self, task, force=True)
