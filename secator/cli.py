@@ -27,8 +27,8 @@ from secator.runners import Command, Runner
 from secator.serializers.dataclass import loads_dataclass
 from secator.template import TemplateLoader
 from secator.utils import (
-	debug, detect_host, discover_tasks, flatten, print_version, match_file_by_pattern, get_file_date,
-	sort_files_by_date, get_file_timestamp
+	debug, detect_host, discover_tasks, flatten, print_version, get_file_date,
+	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
 )
 
 click.rich_click.USE_RICH_MARKUP = True
@@ -548,6 +548,32 @@ def config_default(save):
 # 		CONFIG.save()
 # 		console.print(f'\n[bold green]:tada: Saved config to [/]{CONFIG._path}')
 
+#-----------#
+# WORKSPACE #
+#-----------#
+@cli.group(aliases='w')
+def workspace():
+	"""Workspaces."""
+	pass
+
+
+@workspace.command('list')
+def workspace_list():
+	"""List workspaces."""
+	workspaces = {}
+	json_reports = []
+	for root, _, files in os.walk(CONFIG.dirs.reports):
+		for file in files:
+			if file.endswith('report.json'):
+				path = Path(root) / file
+				json_reports.append(path)
+	json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
+	for path in json_reports:
+		ws, runner_type, number = str(path).split('/')[-4:-1]
+		if ws not in workspaces:
+			workspaces[ws] = {'count': 0, 'path': '/'.join(str(path).split('/')[:-3])}
+		workspaces[ws]['count'] += 1
+
 
 #--------#
 # REPORT #
@@ -556,46 +582,53 @@ def config_default(save):
 
 @cli.group(aliases=['r'])
 def report():
-	"""View previous reports."""
+	"""Reports."""
 	pass
 
 
 @report.command('show')
 @click.argument('report_query', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
-@click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
+@click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
+@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('-t', '--type', type=str, default='', help=f'Filter by output type. Choices: {FINDING_TYPES_LOWER}')
 @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
-def report_show(report_query, output, exclude_fields, type, query, workspace, unified):
+def report_show(report_query, output, runner_type, time_delta, type, query, workspace, unified):
 	"""Show report results and filter on them."""
 
-	# Get exporters
-	exporters = Runner.resolve_exporters(output)
+	# Load all report paths
+	all_reports = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 
 	# Get extractors
+	otypes = [o.__name__.lower() for o in FINDING_TYPES]
 	extractors = []
-	type = type.split(',')
-	for typedef in type:
-		if typedef:
-			if '.' in typedef:
-				_type, _field = tuple(typedef.split('.'))
-			else:
-				_type = typedef
-				_field = None
-			extractors.append({
-				'type': _type,
-				'field': _field,
-				'condition': query or 'True'
-			})
-
-	# Load all report paths
-	reports_dir = CONFIG.dirs.reports
-	if workspace:
-		all_reports = list(reports_dir.glob(f"{workspace}/**/report.json"))
-	else:
-		all_reports = list(reports_dir.glob("**/**/report.json"))
+	if type:
+		type = type.split(',')
+		for typedef in type:
+			if typedef:
+				if '.' in typedef:
+					_type, _field = tuple(typedef.split('.'))
+				else:
+					_type = typedef
+					_field = None
+				extractors.append({
+					'type': _type,
+					'field': _field,
+					'condition': query or 'True'
+				})
+	elif query:
+		query = query.split(';')
+		for part in query:
+			_type = part.split('.')[0]
+			if _type in otypes:
+				part = part.replace(_type, 'item')
+				extractor = {
+					'type': _type,
+					'condition': part or 'True'
+				}
+				extractors.append(extractor)
 
 	# Build runner instance
 	current = get_file_timestamp()
@@ -611,17 +644,23 @@ def report_show(report_query, output, exclude_fields, type, query, workspace, un
 
 	# Build report queries from fuzzy input
 	paths = []
-	if report_query:
-		report_queries = report_query.split(',')
+	if not report_query:
+		report_query = all_reports
 	else:
-		report_queries = all_reports
-	for report_query in report_queries:
-		path = Path(report_query)
+		report_query = report_query.split(',')
+	for query in report_query:
+		query = str(query)
+		if not query.endswith('/'):
+			query += '/'
+		path = Path(query)
 		if not path.exists():
-			matches = match_file_by_pattern(all_reports, report_query)
+			matches = []
+			for path in all_reports:
+				if query in str(path):
+					matches.append(path)
 			if not matches:
 				console.print(
-					f'[bold orange3]Query {report_query} did not return any matches. [/][bold green]Ignoring.[/]')
+					f'[bold orange3]Query {query} did not return any matches. [/][bold green]Ignoring.[/]')
 			paths.extend(matches)
 		else:
 			paths.append(path)
@@ -629,77 +668,77 @@ def report_show(report_query, output, exclude_fields, type, query, workspace, un
 
 	# Load reports, extract results
 	all_results = []
-	for path in paths:
+	for ix, path in enumerate(paths):
+		if unified:
+			console.print(f'Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
 		with open(path, 'r') as f:
-			data = loads_dataclass(f.read())
-			ws, runner_type, number = str(path).split('/')[-4:-1]
-			runner_type = runner_type[:-1]
-			runner.results = flatten(list(data['results'].values()))
-			report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
-			report.build(extractors=extractors, dedupe_from=all_results)
-			all_results.extend(flatten(list(report.data['results'].values())))
-
-			# Print report path and info if results
-			if not unified:
+			try:
+				data = loads_dataclass(f.read())
+				info = get_info_from_report_path(path)
+				runner_type = info['type'][:-1]
+				runner.results = flatten(list(data['results'].values()))
+				if unified:
+					all_results.extend(runner.results)
+					continue
+				report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
+				report.build(extractors=extractors if not unified else [])
 				file_date = get_file_date(path)
 				runner_name = data['info']['name']
 				console.print(
 					f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner_type}[/]) ([dim]{file_date}[/]):')
 				if report.is_empty():
-					console.print('[bold orange4]No new results since previous scan.[/]')
+					if len(paths) == 1:
+						console.print('[bold orange4]No results in report.[/]')
+					else:
+						console.print('[bold orange4]No new results since previous scan.[/]')
 					continue
 				report.send()
+			except json.decoder.JSONDecodeError as e:
+				console.print(f'[bold red]Could not load {path}: {str(e)}')
 
 	if unified:
+		console.print(f'\n:wrench: [bold gold3]Building report by crunching {len(all_results)} results ...[/]')
+		console.print(':coffee: [dim]Note that this can take a while when the result count is high...[/]')
 		runner.results = all_results
 		report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
-		report.build(extractors=extractors)
+		report.build(extractors=extractors, dedupe=True)
 		report.send()
 
 
 @report.command('list')
 @click.option('-ws', '-w', '--workspace', type=str)
-def report_list(workspace):
-	reports_dir = Path(CONFIG.dirs.reports)
-	if workspace:
-		json_reports = list(reports_dir.glob(f"{workspace}/**/report.json"))
-	else:
-		json_reports = list(reports_dir.glob("**/**/report.json"))
-	workspace_reports = {}
-	json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
+@click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
+@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+def report_list(workspace, runner_type, time_delta):
+	"""List all secator reports."""
+	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
+	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
-	# Organize reports by workspace
-	for path in json_reports:
-		ws = path.parts[-4]
-		if workspace and ws != workspace:
-			continue
-		if ws not in workspace_reports:
-			workspace_reports[ws] = []
-		workspace_reports[ws].append(path)
-
+	# Build table
 	table = Table()
 	table.add_column("Workspace", style="bold gold3")
-	table.add_column("Path", overflow="fold")
+	table.add_column("Path", overflow='fold')
 	table.add_column("Name")
 	table.add_column("Id")
 	table.add_column("Date")
 	table.add_column("Status", style="green")
 
-	# Process each workspace and sort reports by modification time
-	for path in json_reports:
+	# Load each report
+	for path in paths:
 		try:
+			info = get_info_from_report_path(path)
 			with open(path, 'r') as f:
 				content = json.loads(f.read())
 			data = {
-				'workspace': path.parts[-4],
+				'workspace': info['workspace'],
 				'name': f"[bold blue]{content['info']['name']}[/]",
 				'status': content['info'].get('status', ''),
-				'id': path.parts[-3] + '/' + path.parts[-2],
+				'id': info['type'] + '/' + info['id'],
 				'date': get_file_date(path),  # Assuming get_file_date returns a readable date
 			}
 			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
 
-			# Update table dynamically as each file is processed
+			# Update table
 			table.add_row(
 				data['workspace'],
 				str(path),
@@ -710,7 +749,11 @@ def report_list(workspace):
 			)
 		except json.JSONDecodeError as e:
 			console.print(f'[bold red]Could not load {path}: {str(e)}')
-	console.print(table)
+
+	if len(paths) > 0:
+		console.print(table)
+	else:
+		console.print('[bold red]No results found.')
 
 
 @report.command('export')

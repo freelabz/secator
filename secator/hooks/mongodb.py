@@ -32,7 +32,7 @@ def update_runner(self):
 	type = self.config.type
 	collection = f'{type}s'
 	update = self.toDict()
-	debug_obj = {self.unique_name: self.status, 'count': self.self_findings_count, 'type': type, 'caller': self.config.name}  # noqa: E501
+	debug_obj = {self.unique_name: self.status, 'type': type, 'caller': self.config.name}  # noqa: E501
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
 	debug('maybe_update', sub='debug.hooks.mongodb', id=_id, obj=debug_obj, obj_after=True, obj_breaklines=False)

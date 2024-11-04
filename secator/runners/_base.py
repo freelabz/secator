@@ -4,12 +4,12 @@ import os
 import sys
 import uuid
 from datetime import datetime
+from pathlib import Path
 from time import time
 
 import humanize
-from dotmap import DotMap
 
-from secator.definitions import DEBUG, ADDONS_ENABLED
+from secator.definitions import ADDONS_ENABLED
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
@@ -243,7 +243,7 @@ class Runner:
 			self.log_start()
 			self.run_hooks('on_start')
 
-			# If any errors happened during validation, exit
+			# If any errors happened during valid ation, exit
 			if self.errors:
 				yield from self.errors
 				self.log_results()
@@ -296,10 +296,16 @@ class Runner:
 		}
 
 	def _print_item(self, item, force=False):
+		"""Print an item and add it to the runner's output.
+
+		Args:
+			item (str | OutputType): Secator output type to print.
+			force (bool): Whether to force-print it.
+		"""
 		item_str = str(item)
 
 		# Item is an output type
-		if isinstance(item, (OutputType, DotMap)):
+		if isinstance(item, OutputType):
 			_type = item._type
 			print_this_type = getattr(self, f'print_{_type}', True)
 			if not print_this_type:
@@ -325,7 +331,7 @@ class Runner:
 							item_str = ''
 
 					# raw output is used to pipe, we should only pipe the first output type of a Runner.
-					if isinstance(item, OutputType) and not isinstance(item, self.output_types[0]):
+					if not isinstance(item, self.output_types[0]):
 						item_str = ''
 
 					if item_str:
@@ -333,8 +339,8 @@ class Runner:
 
 				# Repr output
 				if item_out:
-					item_repr = self.get_repr(item)
-					if isinstance(item, OutputType) and self.print_remote_info or DEBUG > 1:
+					item_repr = repr(item)
+					if isinstance(item, OutputType) and self.print_remote_info:
 						item_repr += rich_to_ansi(f' \[[dim]{item._source}[/]]')
 					self._print(item_repr, out=item_out)
 
@@ -343,9 +349,8 @@ class Runner:
 			if self.print_line or force:
 				self._print(item, out=sys.stderr, end='\n')
 
-		self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
-
 	def mark_duplicates(self):
+		"""Mark duplicates."""
 		if not self.enable_duplicate_check:
 			return
 		debug('running duplicate check', id=self.config.name, sub='runner.duplicates')
@@ -362,6 +367,11 @@ class Runner:
 		# debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.duplicates')
 
 	def check_duplicate(self, item):
+		"""Check if an item is a duplicate in the list of results and mark it like so.
+
+		Args:
+			item (OutputType): Secator output type.
+		"""
 		debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
 		others = [f for f in self.results if f == item and f._uuid != item._uuid]
 		if others:
@@ -389,9 +399,11 @@ class Runner:
 					dupe = self.run_hooks('on_duplicate', dupe)
 
 	def yielder(self):
+		"""Yield results. Should be implemented by derived classes."""
 		raise NotImplementedError()
 
 	def yielder_celery(self):
+		"""Yield results from Celery result."""
 		yield from CeleryData.iter_results(
 			self.celery_result,
 			ids_map=self.celery_ids_map,
@@ -399,6 +411,7 @@ class Runner:
 		)
 
 	def toDict(self):
+		"""Dict representation of the runner."""
 		data = {
 			'name': self.name,
 			'status': self.status,
@@ -408,7 +421,6 @@ class Runner:
 			'elapsed': self.elapsed.total_seconds(),
 			'elapsed_human': self.elapsed_human,
 			'run_opts': {k: v for k, v in self.run_opts.items() if k not in self.print_opts},
-			'results_count': self.findings_count,  # name kept for backwards compatibility
 		}
 		data.update({
 			'config': self.config.toDict(),
@@ -421,12 +433,20 @@ class Runner:
 			'output': self.output,
 			'progress': self.progress,
 			'last_updated_db': self.last_updated_db,
-			'context': self.context,
-			'errors': [e.toDict() for e in self.errors],
+			'context': self.context
 		})
 		return data
 
 	def run_hooks(self, hook_type, *args):
+		""""Run hooks of a certain type.
+
+		Args:
+			hook_type (str): Hook type.
+			args (list): List of arguments to pass to the hook.
+
+		Returns:
+			any: Hook return value.
+		"""
 		result = args[0] if len(args) > 0 else None
 		if not self.enable_hooks or self.no_process:
 			return result
@@ -450,6 +470,16 @@ class Runner:
 		return result
 
 	def run_validators(self, validator_type, *args, error=True):
+		"""Run validators of a certain type.
+
+		Args:
+			validator_type (str): Validator type. E.g: on_start.
+			args (list): List of arguments to pass to the validator.
+			error (bool): Whether to add an error to runner results if the validator failed.
+
+		Returns:
+			bool: Validator return value.
+		"""
 		if self.no_process:
 			return True
 		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
@@ -475,6 +505,11 @@ class Runner:
 		return True
 
 	def register_hooks(self, hooks):
+		"""Register hooks.
+
+		Args:
+			hooks (list): List of hooks to register.
+		"""
 		for key in self.hooks:
 			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
@@ -552,7 +587,6 @@ class Runner:
 			self.report = report
 		if self.enable_profiler:
 			self.profiler.stop()
-			from pathlib import Path
 			profile_path = Path(self.reports_folder) / f'{self.unique_name}_profile.html'
 			with profile_path.open('w', encoding='utf-8') as f_html:
 				f_html.write(self.profiler.output_html())
@@ -600,7 +634,7 @@ class Runner:
 			secator.output_types.OutputType: Loaded item.
 		"""
 		# Skip if already converted
-		if isinstance(item, DotMap) or isinstance(item, OutputType):
+		if isinstance(item, OutputType):
 			return item
 
 		# Init the new item and the list of output types to load from
@@ -649,7 +683,7 @@ class Runner:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, rich=False, end='\n'):
+	def _print(self, data, color=None, out=sys.stderr, rich=False, end='\n', add_to_output=True):
 		"""Print function.
 
 		Args:
@@ -657,16 +691,20 @@ class Runner:
 			color (str, Optional): Rich color.
 			out (str, Optional): Output pipe (sys.stderr, sys.stdout, ...)
 			rich (bool, Optional): Force rich output.
+			end (str, Optional): End of line.
+			add_to_output (bool, Optional): Whether to add the item to runner output.
 		"""
 		if rich:
 			_console = console_stdout if out == sys.stdout else console
 			_console.print(data, highlight=False, style=color, soft_wrap=True, end=end)
 		else:
-			if isinstance(data, (OutputType, DotMap, dict)):
+			if isinstance(data, (OutputType, dict)):
 				if getattr(data, 'toDict', None):
 					data = data.toDict()
 				data = json.dumps(data)
 			print(data, file=out)
+		if add_to_output:
+			self.output += data + '\n'
 
 	def _get_findings_count(self):
 		count_map = {}
@@ -738,18 +776,6 @@ class Runner:
 
 		# Yield item
 		yield item
-
-	def get_repr(self, item=None):
-		if not item:
-			return [
-				self.get_repr(item)
-				for item in self.results
-			]
-		if isinstance(item, OutputType):
-			item = repr(item)
-		elif isinstance(item, DotMap):
-			item = json.dumps(item.toDict())
-		return item
 
 	@classmethod
 	def get_func_path(cls, func):

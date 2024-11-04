@@ -12,7 +12,7 @@ import sys
 import validators
 import warnings
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
@@ -31,6 +31,8 @@ from secator.rich import console
 logger = logging.getLogger(__name__)
 
 _tasks = []
+
+TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
 
 
 class TaskError(ValueError):
@@ -577,3 +579,63 @@ def should_update(update_frequency, last_updated=None, timestamp=None):
 	if last_updated and (timestamp - last_updated) < update_frequency:
 		return False
 	return True
+
+
+def list_reports(workspace=None, type=None, timedelta=None):
+	"""List all reports in secator reports dir.
+
+	Args:
+		workspace (str): Filter by workspace name.
+		type (str): Filter by runner type.
+		timedelta (None | datetime.timedelta): Keep results newer than timedelta.
+
+	Returns:
+		list: List all JSON reports.
+	"""
+	if type and not type.endswith('s'):
+		type += 's'
+	json_reports = []
+	for root, _, files in os.walk(CONFIG.dirs.reports):
+		for file in files:
+			path = Path(root) / file
+			if not path.parts[-1] == 'report.json':
+				continue
+			if workspace and path.parts[-4] != workspace:
+				continue
+			if type and path.parts[-3] != type:
+				continue
+			if timedelta and (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)) > timedelta:
+				continue
+			json_reports.append(path)
+	return json_reports
+
+
+def get_info_from_report_path(path):
+	ws, runner_type, number = path.parts[-4], path.parts[-3], path.parts[-2]
+	workspace_path = '/'.join(path.parts[:-3])
+	return {
+		'workspace': ws,
+		'workspace_path': workspace_path,
+		'type': runner_type,
+		'id': number
+	}
+
+
+def human_to_timedelta(time_str):
+	if not time_str:
+		return None
+	parts = TIMEDELTA_REGEX.match(time_str)
+	if not parts:
+		return
+	parts = parts.groupdict()
+	years = int(parts.pop('years') or 0)
+	months = int(parts.pop('months') or 0)
+	days = int(parts.get('days') or 0)
+	days += years * 365
+	days += months * 30
+	parts['days'] = days
+	time_params = {}
+	for name, param in parts.items():
+		if param:
+			time_params[name] = int(param)
+	return timedelta(**time_params)
