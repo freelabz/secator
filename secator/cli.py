@@ -551,7 +551,7 @@ def config_default(save):
 #-----------#
 # WORKSPACE #
 #-----------#
-@cli.group(aliases='w')
+@cli.group(aliases=['ws'])
 def workspace():
 	"""Workspaces."""
 	pass

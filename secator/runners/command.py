@@ -189,8 +189,9 @@ class Command(Runner):
 			self._print(cmd_str, color='bold cyan', rich=True)
 
 		# Debug built input
-		input_str = '\n '.join(self.inputs).strip()
-		debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', sub='runner.init')
+		if len(self.inputs) > 0:
+			input_str = '\n '.join(self.inputs).strip()
+			debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', sub='runner.init')
 
 		# Debug run options
 		run_opts_str = '\n '.join([
@@ -602,6 +603,7 @@ class Command(Runner):
 		self.return_code = 0 if self.ignore_return_code else self.return_code
 		self.output = self.output.strip()
 		self.killed = self.return_code == -2 or self.killed
+		debug(f'Command {self.cmd} finished with return code {self.return_code}', sub='runner.command')
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'

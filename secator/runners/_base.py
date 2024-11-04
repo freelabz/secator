@@ -279,6 +279,7 @@ class Runner:
 	def add_result(self, item, print=False):
 		self.uuids.append(item._uuid)
 		self.results.append(item)
+		self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
 
@@ -306,6 +307,7 @@ class Runner:
 
 		# Item is an output type
 		if isinstance(item, OutputType):
+			self.debug(repr(item), sub='debug.runner.item')
 			_type = item._type
 			print_this_type = getattr(self, f'print_{_type}', True)
 			if not print_this_type:
@@ -346,8 +348,13 @@ class Runner:
 
 		# Item is a line
 		elif isinstance(item, str):
+			self.debug(item, sub='debug.runner.line')
 			if self.print_line or force:
 				self._print(item, out=sys.stderr, end='\n')
+
+	def debug(self, *args, **kwargs):
+		if not self.no_process:
+			debug(*args, **kwargs)
 
 	def mark_duplicates(self):
 		"""Mark duplicates."""
@@ -579,7 +586,10 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-		debug('', obj={self.unique_name: self.status, 'count': self.self_findings_count, 'results': self.self_findings}, sub='debug.runner.results')  # noqa: E501
+		if self.status == 'FAILURE':
+			debug('', obj={self.__class__.__name__: self.status, 'errors': self.errors}, sub='runner.status')
+		else:
+			debug('', obj={self.__class__.__name__: self.status}, sub='runner.status')
 		if self.exporters and not self.no_process:
 			report = Report(self, exporters=self.exporters)
 			report.build()
@@ -683,7 +693,7 @@ class Runner:
 
 		return new_item
 
-	def _print(self, data, color=None, out=sys.stderr, rich=False, end='\n', add_to_output=True):
+	def _print(self, data, color=None, out=sys.stderr, rich=False, end='\n'):
 		"""Print function.
 
 		Args:
@@ -703,8 +713,6 @@ class Runner:
 					data = data.toDict()
 				data = json.dumps(data)
 			print(data, file=out)
-		if add_to_output:
-			self.output += data + '\n'
 
 	def _get_findings_count(self):
 		count_map = {}
@@ -716,8 +724,10 @@ class Runner:
 		return count_map
 
 	def _process_item(self, item):
+
 		# Item is a string, just print it
 		if isinstance(item, str):
+			self.output += item + '\n'
 			self._print_item(item) if item else ''
 			return
 

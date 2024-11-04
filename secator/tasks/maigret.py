@@ -47,28 +47,31 @@ class maigret(ReconUser):
 
 	@staticmethod
 	def on_init(self):
-		output_path = self.get_opt_value(OUTPUT_PATH)
-		self.output_path = output_path
+		self.output_path = self.get_opt_value(OUTPUT_PATH)
 
 	@staticmethod
 	def on_cmd_done(self):
 		# Search output path in cmd output
 		if not self.output_path:
-			match = re.search('JSON ndjson report for .* saved in (.*)', self.output)
-			if match is None:
+			matches = re.findall('JSON ndjson report for .* saved in (.*)', self.output)
+			if not matches:
 				yield Error(message='JSON output file not found in command output.')
 				return
-			self.output_path = match.group(1)
+			self.output_path = matches
 
-		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find JSON results in {self.output_path}')
-			return
+		if not isinstance(self.output_path, list):
+			self.output_path = [self.output_path]
 
-		yield Info(message=f'JSON results saved to {self.output_path}')
-		with open(self.output_path, 'r') as f:
-			data = [json.loads(line) for line in f.read().splitlines()]
-		for item in data:
-			yield item
+		for path in self.output_path:
+			if not os.path.exists(path):
+				yield Error(message=f'Could not find JSON results in {path}')
+				return
+
+			yield Info(message=f'JSON results saved to {path}')
+			with open(path, 'r') as f:
+				data = [json.loads(line) for line in f.read().splitlines()]
+			for item in data:
+				yield item
 
 	@staticmethod
 	def validate_item(self, item):
