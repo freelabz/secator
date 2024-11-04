@@ -50,8 +50,6 @@ class CeleryData(object):
 						border_style='bold gold3',
 						expand=False,
 						highlight=True), pad=(2, 0, 0, 0))
-			from rich.console import Console
-			console = Console()
 			progress = PanelProgress(
 				SpinnerColumn('dots'),
 				TextColumn('{task.fields[descr]}  ') if description else '',

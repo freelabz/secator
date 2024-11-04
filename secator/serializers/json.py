@@ -1,4 +1,4 @@
-import yaml
+import json
 
 
 class JSONSerializer:
@@ -15,6 +15,6 @@ class JSONSerializer:
 			return
 		try:
 			json_obj = line[start_index:end_index+1]
-			yield yaml.safe_load(json_obj)
-		except yaml.YAMLError:
+			yield json.loads(json_obj)
+		except json.decoder.JSONDecodeError:
 			return

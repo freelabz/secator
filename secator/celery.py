@@ -12,7 +12,6 @@ from rich.logging import RichHandler
 from retry import retry
 
 from secator.config import CONFIG
-from secator.definitions import ADDONS_ENABLED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
@@ -230,10 +229,6 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
-	if ADDONS_ENABLED['trace']:
-		from pyinstrument import Profiler
-		profiler = Profiler(interval=0.0001)
-		profiler.start()
 	chunk = opts.get('chunk')
 	sync = opts.get('sync', True)
 
@@ -319,13 +314,6 @@ def run_command(self, results, name, targets, opts={}):
 		update_state(self, task, force=True)
 		gc.collect()
 		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
-		if ADDONS_ENABLED['trace']:
-			profiler.stop()
-			from pathlib import Path
-			profile_path = Path(task.reports_folder) / 'prof.html'
-			print(f'Writing profile to {profile_path}')
-			with profile_path.open('w', encoding='utf-8') as f_html:
-				f_html.write(profiler.output_html())
 		return task.results
 
 

@@ -19,6 +19,7 @@ RUNNER_OPTS = {
 	'print_raw': {'is_flag': True, 'short': 'raw', 'default': False, 'help': 'Print items in raw format'},
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
+	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
 	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
 	'no_process': {'is_flag': True, 'default': False, 'help': 'Disable secator processing'},
 	'enable_profiling': {'is_flag': True, 'default': False, 'help': 'Run Python profiling'},

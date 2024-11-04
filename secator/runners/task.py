@@ -29,6 +29,7 @@ class Task(Runner):
 
 		# Set task output types
 		self.output_types = task_cls.output_types
+		self.enable_duplicate_check = False
 
 		# Get hooks
 		hooks = {task_cls: self.hooks}
@@ -51,7 +52,7 @@ class Task(Runner):
 				self.celery_result,
 				ids_map=self.celery_ids_map,
 				description=True,
-				print_remote_info=self.print_remote_info,
+				print_remote_info=False,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
 
 		# Yield task results

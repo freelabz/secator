@@ -9,7 +9,8 @@ from time import time
 import humanize
 from dotmap import DotMap
 
-from secator.definitions import DEBUG
+from secator.definitions import DEBUG, ADDONS_ENABLED
+from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
 from secator.report import Report
@@ -94,6 +95,7 @@ class Runner:
 		self.celery_ids = []
 		self.celery_ids_map = {}
 		self.uuids = []
+		self.caller = self.run_opts.get('caller', None)
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -108,6 +110,17 @@ class Runner:
 		os.makedirs(self.reports_folder, exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
 		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
+
+		# Profiler
+		self.enable_profiler = self.run_opts.get('enable_profiler', False) and ADDONS_ENABLED['trace']
+		if self.enable_profiler:
+			from pyinstrument import Profiler
+			self.profiler = Profiler(async_mode=False, interval=0.0001)
+			try:
+				self.profiler.start()
+			except RuntimeError:
+				self.enable_profiler = False
+				pass
 
 		# Process opts
 		self.quiet = self.run_opts.get('quiet', False)
@@ -140,7 +153,6 @@ class Runner:
 
 		# Chunks
 		self.has_children = self.run_opts.get('has_children', False)
-		self.caller = self.run_opts.get('caller', None)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
@@ -283,7 +295,7 @@ class Runner:
 			'progress': 0
 		}
 
-	def _print_item(self, item):
+	def _print_item(self, item, force=False):
 		item_str = str(item)
 
 		# Item is an output type
@@ -293,7 +305,7 @@ class Runner:
 			if not print_this_type:
 				return
 
-			if self.print_item:
+			if self.print_item or force:
 				item_out = sys.stdout
 
 				# JSON lines output
@@ -328,7 +340,7 @@ class Runner:
 
 		# Item is a line
 		elif isinstance(item, str):
-			if self.print_line:
+			if self.print_line or force:
 				self._print(item, out=sys.stderr, end='\n')
 
 		self.output += item_str + '\n' if isinstance(item, OutputType) else str(item) + '\n'
@@ -337,45 +349,49 @@ class Runner:
 		if not self.enable_duplicate_check:
 			return
 		debug('running duplicate check', id=self.config.name, sub='runner.duplicates')
-		dupe_count = 0
+		# dupe_count = 0
+		import concurrent.futures
+		executor = concurrent.futures.ThreadPoolExecutor(max_workers=100)
 		for item in self.results.copy():
-			debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
-			others = [f for f in self.results if f == item and f._uuid != item._uuid]
-			if others:
-				main = max(item, *others)
-				dupes = [f for f in others if f._uuid != main._uuid]
-				main._duplicate = False
-				main._related.extend([dupe._uuid for dupe in dupes])
-				main._related = list(dict.fromkeys(main._related))
-				if main._uuid != item._uuid:
-					debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
-					item._duplicate = True
-					item = self.run_hooks('on_item', item)
-					if item._uuid not in main._related:
-						main._related.append(item._uuid)
-					main = self.run_hooks('on_duplicate', main)
-					item = self.run_hooks('on_duplicate', item)
+			executor.submit(self.check_duplicate, item)
+		executor.shutdown(wait=True)
+		# duplicates = [repr(i) for i in self.results if i._duplicate]
+		# if duplicates:
+		# 	duplicates_str = '\n\t'.join(duplicates)
+		# 	debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='debug.runner.duplicates', level=5)
+		# debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.duplicates')
 
-				for dupe in dupes:
-					if not dupe._duplicate:
-						debug(
-							'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-							sub='debug.runner.duplicates', level=5)
-						dupe_count += 1
-						dupe._duplicate = True
-						dupe = self.run_hooks('on_duplicate', dupe)
+	def check_duplicate(self, item):
+		debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
+		others = [f for f in self.results if f == item and f._uuid != item._uuid]
+		if others:
+			main = max(item, *others)
+			dupes = [f for f in others if f._uuid != main._uuid]
+			main._duplicate = False
+			main._related.extend([dupe._uuid for dupe in dupes])
+			main._related = list(dict.fromkeys(main._related))
+			if main._uuid != item._uuid:
+				debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
+				item._duplicate = True
+				item = self.run_hooks('on_item', item)
+				if item._uuid not in main._related:
+					main._related.append(item._uuid)
+				main = self.run_hooks('on_duplicate', main)
+				item = self.run_hooks('on_duplicate', item)
 
-		duplicates = [repr(i) for i in self.results if i._duplicate]
-		if duplicates:
-			duplicates_str = '\n\t'.join(duplicates)
-			debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='debug.runner.duplicates', level=5)
-		debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.duplicates')
+			for dupe in dupes:
+				if not dupe._duplicate:
+					debug(
+						'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
+						sub='debug.runner.duplicates', level=5)
+					# dupe_count += 1
+					dupe._duplicate = True
+					dupe = self.run_hooks('on_duplicate', dupe)
 
 	def yielder(self):
 		raise NotImplementedError()
 
 	def yielder_celery(self):
-		from secator.celery_utils import CeleryData
 		yield from CeleryData.iter_results(
 			self.celery_result,
 			ids_map=self.celery_ids_map,
@@ -534,6 +550,13 @@ class Runner:
 			report.build()
 			report.send()
 			self.report = report
+		if self.enable_profiler:
+			self.profiler.stop()
+			from pathlib import Path
+			profile_path = Path(self.reports_folder) / f'{self.unique_name}_profile.html'
+			with profile_path.open('w', encoding='utf-8') as f_html:
+				f_html.write(self.profiler.output_html())
+			self._print_item(Info(message=f'Wrote profile to {str(profile_path)}', _source=self.unique_name), force=True)
 
 	def stop_celery_tasks(self):
 		"""Stop all tasks running in Celery worker."""
@@ -615,8 +638,8 @@ class Runner:
 				debug(
 					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
 					sub='klass.load')
-				error = Error.from_exception(e)
-				debug(repr(error), sub='debug.klass.load')
+				# error = Error.from_exception(e)
+				# debug(repr(error), sub='debug.klass.load')
 				continue
 
 		if not new_item:

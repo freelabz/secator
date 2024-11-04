@@ -171,7 +171,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
 
-	Command.execute(cmd, name='secator worker')
+	Command.execute(cmd, name='secator_worker')
 
 
 #-------#
@@ -937,7 +937,7 @@ def install_trace():
 	"Install trace addon."
 	run_install(
 		cmd=f'{sys.executable} -m pip install secator[trace]',
-		title='dev addon',
+		title='trace addon',
 		next_steps=[
 		]
 	)
