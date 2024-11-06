@@ -66,7 +66,7 @@ class Workflow(Runner):
 		from celery import chain
 		from secator.celery import forward_results
 		sigs = self.get_tasks(
-			self.config,
+			self.config.tasks.toDict(),
 			self.inputs,
 			self.config.options,
 			run_opts)
@@ -78,7 +78,7 @@ class Workflow(Runner):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
-			config (secator.config.TemplateLoader): Config.
+			config (dict): Tasks config dict.
 			inputs (list): Inputs.
 			workflow_opts (dict): Workflow options.
 			run_opts (dict): Run options.
@@ -90,8 +90,7 @@ class Workflow(Runner):
 		from celery import chain, chord
 		from secator.celery import forward_results
 		sigs = []
-		tasks = config.tasks or {}
-		for task_name, task_opts in tasks.items():
+		for task_name, task_opts in config.items():
 			# Task opts can be None
 			task_opts = task_opts or {}
 
