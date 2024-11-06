@@ -33,7 +33,7 @@ class httpx(Http):
 		'system_chrome': {'is_flag': True, 'default': False, 'help': 'Use local installed Chrome for screenshot'},
 		'headless_options': {'is_flag': False, 'short': 'ho', 'default': None, 'help': 'Headless Chrome additional options'},
 		'follow_host_redirects': {'is_flag': True, 'short': 'fhr', 'default': None, 'help': 'Follow redirects on the same host'},  # noqa: E501
-		'tech_detection': {'is_flag': True, 'short': 'td', 'default': True, 'help': 'Tech detection'},
+		'tech_detect': {'is_flag': True, 'short': 'td', 'default': True, 'help': 'Tech detection'},
 		'tls_grab': {'is_flag': True, 'short': 'tlsg', 'default': False, 'help': 'Grab some informations from the tls certificate'},  # noqa: E501
 		'rstr': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},
 		'rsts': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to save (bytes)'}
