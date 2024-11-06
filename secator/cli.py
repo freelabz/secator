@@ -5,6 +5,7 @@ import shutil
 import sys
 
 from pathlib import Path
+from stat import S_ISFIFO
 
 import rich_click as click
 from dotmap import DotMap
@@ -13,17 +14,18 @@ from jinja2 import Template
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.rule import Rule
+from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
-from secator.template import TemplateLoader
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION
+from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
-from secator.output_types import OUTPUT_TYPES
+from secator.output_types import FINDING_TYPES
+from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.report import Report
 from secator.serializers.dataclass import loads_dataclass
+from secator.template import TemplateLoader
 from secator.utils import (
 	debug, detect_host, discover_tasks, flatten, print_version, match_file_by_pattern, get_file_date,
 	sort_files_by_date, get_file_timestamp
@@ -35,7 +37,7 @@ ALL_TASKS = discover_tasks()
 ALL_CONFIGS = TemplateLoader.load_all()
 ALL_WORKFLOWS = ALL_CONFIGS.workflow
 ALL_SCANS = ALL_CONFIGS.scan
-OUTPUT_TYPES_LOWER = [c.__name__.lower() for c in OUTPUT_TYPES]
+FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 
 
 #-----#
@@ -47,7 +49,12 @@ OUTPUT_TYPES_LOWER = [c.__name__.lower() for c in OUTPUT_TYPES]
 @click.pass_context
 def cli(ctx, version):
 	"""Secator CLI."""
-	console.print(ASCII, highlight=False)
+	ctx.obj = {
+		'piped_input': S_ISFIFO(os.fstat(0).st_mode),
+		'piped_output': not sys.stdout.isatty()
+	}
+	if not ctx.obj['piped_output']:
+		console.print(ASCII, highlight=False)
 	if ctx.invoked_subcommand is None:
 		if version:
 			print_version()
@@ -60,7 +67,8 @@ def cli(ctx, version):
 #------#
 
 @cli.group(aliases=['x', 't'])
-def task():
+@click.pass_context
+def task(ctx):
 	"""Run a task."""
 	pass
 
@@ -75,7 +83,8 @@ for cls in ALL_TASKS:
 
 
 @cli.group(cls=OrderedGroup, aliases=['w'])
-def workflow():
+@click.pass_context
+def workflow(ctx):
 	"""Run a workflow."""
 	pass
 
@@ -89,7 +98,8 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 #------#
 
 @cli.group(cls=OrderedGroup, aliases=['s'])
-def scan():
+@click.pass_context
+def scan(ctx):
 	"""Run a scan."""
 	pass
 
@@ -114,25 +124,35 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	"""Run a worker."""
+
+	# Check Celery addon is installed
 	if not ADDONS_ENABLED['worker']:
 		console.print('[bold red]Missing worker addon: please run [bold green4]secator install addons worker[/][/].')
 		sys.exit(1)
+
+	# Check broken / backend addon is installed
 	broker_protocol = CONFIG.celery.broker_url.split('://')[0]
 	backend_protocol = CONFIG.celery.result_backend.split('://')[0]
 	if CONFIG.celery.broker_url:
 		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 			console.print('[bold red]Missing `redis` addon: please run [bold green4]secator install addons redis[/][/].')
 			sys.exit(1)
+
+	# Debug Celery config
 	from secator.celery import app, is_celery_worker_alive
 	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
 	debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
+
 	if check:
 		is_celery_worker_alive()
 		return
+
 	if not queue:
 		queue = 'io,cpu,' + ','.join([r['queue'] for r in app.conf.task_routes.values()])
+
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'
+
 	if dev:
 		subcmd = 'stop' if stop else 'show' if show else 'start'
 		logfile = '%n.log'
@@ -143,13 +163,14 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 		cmd = f'{celery} -A {app_str} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
 		cmd = f'{celery} -A {app_str} worker -n {hostname} -Q {queue}'
-	if pool:
-		cmd += f' -P {pool}'
-	if concurrency:
-		cmd += f' -c {concurrency}'
+
+	cmd += f' -P {pool}' if pool else ''
+	cmd += f' -c {concurrency}' if concurrency else ''
+
 	if reload:
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
+
 	Command.execute(cmd, name='secator worker')
 
 
@@ -175,7 +196,7 @@ def proxy(timeout, number):
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
 	for _ in range(number):
 		url = proxy.get()
-		print(url)
+		console.print(url)
 
 
 @util.command()
@@ -240,15 +261,14 @@ def revshell(name, host, port, interface, listen, force):
 		console.print('\n'.join(shells_str))
 	else:
 		shell = shell[0]
-		command = shell['command']
+		command = shell['command'].replace('[', '\[')
 		alias = shell['alias']
 		name = shell['name']
 		command_str = Template(command).render(ip=host, port=port, shell='bash')
 		console.print(Rule(f'[bold gold3]{alias}[/] - [bold red]{name} REMOTE SHELL', style='bold red', align='left'))
 		lang = shell.get('lang') or 'sh'
 		if len(command.splitlines()) == 1:
-			console.print()
-			print(f'\033[0;36m{command_str}')
+			console.print(command_str, style='cyan', highlight=False, soft_wrap=True)
 		else:
 			md = Markdown(f'```{lang}\n{command_str}\n```')
 			console.print(md)
@@ -544,7 +564,7 @@ def report():
 @click.argument('report_query', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
 @click.option('-e', '--exclude-fields', type=str, default='', help='List of fields to exclude (comma-separated)')
-@click.option('-t', '--type', type=str, default='', help=f'Filter by output type. Choices: {OUTPUT_TYPES_LOWER}')
+@click.option('-t', '--type', type=str, default='', help=f'Filter by output type. Choices: {FINDING_TYPES_LOWER}')
 @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
@@ -573,9 +593,9 @@ def report_show(report_query, output, exclude_fields, type, query, workspace, un
 	# Load all report paths
 	reports_dir = CONFIG.dirs.reports
 	if workspace:
-		all_reports = reports_dir.glob(f"{workspace}/**/report.json")
+		all_reports = list(reports_dir.glob(f"{workspace}/**/report.json"))
 	else:
-		all_reports = reports_dir.glob("**/**/report.json")
+		all_reports = list(reports_dir.glob("**/**/report.json"))
 
 	# Build runner instance
 	current = get_file_timestamp()
@@ -583,6 +603,7 @@ def report_show(report_query, output, exclude_fields, type, query, workspace, un
 		"config": {
 			"name": f"consolidated_report_{current}"
 		},
+		"name": "runner",
 		"workspace_name": "_consolidated",
 		"reports_folder": Path.cwd(),
 	})
@@ -639,31 +660,57 @@ def report_show(report_query, output, exclude_fields, type, query, workspace, un
 @report.command('list')
 @click.option('-ws', '-w', '--workspace', type=str)
 def report_list(workspace):
-	reports_dir = CONFIG.dirs.reports
-	json_reports = reports_dir.glob("**/**/report.json")
-	ws_reports = {}
-	for path in json_reports:
-		ws, runner, number = str(path).split('/')[-4:-1]
-		if ws not in ws_reports:
-			ws_reports[ws] = []
-		with open(path, 'r') as f:
-			try:
-				content = json.loads(f.read())
-				data = {'path': path, 'name': content['info']['name'], 'runner': runner}
-				ws_reports[ws].append(data)
-			except json.JSONDecodeError as e:
-				console.print(f'[bold red]Could not load {path}: {str(e)}')
+	reports_dir = Path(CONFIG.dirs.reports)
+	if workspace:
+		json_reports = list(reports_dir.glob(f"{workspace}/**/report.json"))
+	else:
+		json_reports = list(reports_dir.glob("**/**/report.json"))
+	workspace_reports = {}
+	json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
 
-	for ws in ws_reports:
-		if workspace and not ws == workspace:
+	# Organize reports by workspace
+	for path in json_reports:
+		ws = path.parts[-4]
+		if workspace and ws != workspace:
 			continue
-		console.print(f'[bold gold3]{ws}:')
-		for data in sorted(ws_reports[ws], key=lambda x: x['path']):
-			runner_name = data["runner"][:-1]
-			name = data["name"]
-			path = data["path"]
-			file_date = get_file_date(path)
-			console.print(f'   • {path} ([bold blue]{name}[/] [dim]{runner_name}[/]) ([dim]{file_date}[/]):')
+		if ws not in workspace_reports:
+			workspace_reports[ws] = []
+		workspace_reports[ws].append(path)
+
+	table = Table()
+	table.add_column("Workspace", style="bold gold3")
+	table.add_column("Path", overflow="fold")
+	table.add_column("Name")
+	table.add_column("Id")
+	table.add_column("Date")
+	table.add_column("Status", style="green")
+
+	# Process each workspace and sort reports by modification time
+	for path in json_reports:
+		try:
+			with open(path, 'r') as f:
+				content = json.loads(f.read())
+			data = {
+				'workspace': path.parts[-4],
+				'name': f"[bold blue]{content['info']['name']}[/]",
+				'status': content['info'].get('status', ''),
+				'id': path.parts[-3] + '/' + path.parts[-2],
+				'date': get_file_date(path),  # Assuming get_file_date returns a readable date
+			}
+			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
+
+			# Update table dynamically as each file is processed
+			table.add_row(
+				data['workspace'],
+				str(path),
+				data['name'],
+				data['id'],
+				data['date'],
+				f"[{status_color}]{data['status']}[/]"
+			)
+		except json.JSONDecodeError as e:
+			console.print(f'[bold red]Could not load {path}: {str(e)}')
+	console.print(table)
 
 
 @report.command('export')
@@ -789,7 +836,7 @@ def run_install(cmd, title, next_steps=None):
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
-		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_cmd=True, print_line=True)
+		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_line=True)
 		if ret.return_code != 0:
 			console.print(f':exclamation_mark: Failed to install {title}.', style='bold red')
 		else:
@@ -1137,23 +1184,22 @@ def lint():
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
-@click.option('--debug', '-d', type=int, default=0, help='Add debug information')
-def unit(tasks, workflows, scans, test, debug=False):
+def unit(tasks, workflows, scans, test):
 	"""Run unit tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
+	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
+	os.environ['SECATOR_OFFLINE_MODE'] = "1"
 	os.environ['SECATOR_HTTP_STORE_RESPONSES'] = '0'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" -m unittest'
+	import shutil
+	shutil.rmtree('/tmp/.secator', ignore_errors=True)
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/unit'
 	if test:
-		if not test.startswith('tests.unit'):
-			test = f'tests.unit.{test}'
-		cmd += f' {test}'
-	else:
-		cmd += ' discover -v tests.unit'
+		test_str = ' or '.join(test.split(','))
+		cmd += f' -k "{test_str}"'
 	run_test(cmd, 'unit')
 
 
@@ -1162,35 +1208,34 @@ def unit(tasks, workflows, scans, test, debug=False):
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
-@click.option('--debug', '-d', type=int, default=0, help='Add debug information')
-def integration(tasks, workflows, scans, test, debug):
+def integration(tasks, workflows, scans, test):
 	"""Run integration tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
-	os.environ['SECATOR_DEBUG_LEVEL'] = str(debug)
+	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
-	os.environ['SECATOR_DIRS_DATA'] = '/tmp/data'
-	os.environ['SECATOR_DIRS_REPORTS'] = '/tmp/data/reports'
-	os.environ['SECATOR_DIRS_CELERY'] = '/tmp/celery'
-	os.environ['SECATOR_DIRS_CELERY_DATA'] = '/tmp/celery/data'
-	os.environ['SECATOR_DIRS_CELERY_RESULTS'] = '/tmp/celery/results'
-	import shutil
-	for path in ['/tmp/data', '/tmp/celery', '/tmp/celery/data', '/tmp/celery/results']:
-		shutil.rmtree(path, ignore_errors=True)
 
-	cmd = f'{sys.executable} -m unittest'
+	import shutil
+	shutil.rmtree('/tmp/.secator', ignore_errors=True)
+
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.integration -m pytest -s -v tests/integration'  # noqa: E501
 	if test:
-		if not test.startswith('tests.integration'):
-			test = f'tests.integration.{test}'
-		cmd += f' {test}'
-	else:
-		cmd += ' discover -v tests.integration'
+		test_str = ' or '.join(test.split(','))
+		cmd += f' -k "{test_str}"'
 	run_test(cmd, 'integration')
 
 
 @test.command()
-def coverage():
-	"""Run coverage report."""
+@click.option('--unit-only', '-u', is_flag=True, default=False, help='Only generate coverage for unit tests')
+@click.option('--integration-only', '-i', is_flag=True, default=False, help='Only generate coverage for integration tests')  # noqa: E501
+def coverage(unit_only, integration_only):
+	"""Run coverage combine + coverage report."""
 	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*,*/templates/*'
+	if unit_only:
+		cmd += ' --data-file=.coverage.unit'
+	elif integration_only:
+		cmd += ' --data-file=.coverage.integration'
+	else:
+		Command.execute(f'{sys.executable} -m coverage combine --keep', name='coverage combine', cwd=ROOT_FOLDER)
 	run_test(cmd, 'coverage')

@@ -46,6 +46,7 @@ dependencies = [
   "requests < 3",
   "rich < 14",
   "rich-click < 1.7",
+  "psutil < 7",
   "tldextract < 6",
   "typing_extensions < 5",
   "validators < 1",
@@ -56,6 +57,7 @@ dependencies = [
 dev = [
   'coverage < 8',
   'flake8 < 8',
+  'pytest < 9',
   'watchdog < 3',
   'asciinema-automation < 1',
 ]
