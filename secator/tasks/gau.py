@@ -16,6 +16,9 @@ class gau(HttpCrawler):
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
+	opts = {
+		'providers': {'type': str, 'default': None, 'help': 'List of providers to use (wayback,commoncrawl,otx,urlscan)'}
+	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: OPT_NOT_SUPPORTED,

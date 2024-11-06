@@ -1196,16 +1196,10 @@ def unit(tasks, workflows, scans, test):
 
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
-
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m unittest'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/unit'
 	if test:
-		tests = test.split(',')
-		for test in tests:
-			if not test.startswith('tests.unit'):
-				test = f'tests.unit.{test}'
-			cmd += f' {test}'
-	else:
-		cmd += ' discover -v tests.unit'
+		test_str = ' or '.join(test.split(','))
+		cmd += f' -k "{test_str}"'
 	run_test(cmd, 'unit')
 
 
@@ -1225,22 +1219,16 @@ def integration(tasks, workflows, scans, test):
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.integration -m unittest'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.integration -m pytest -s -v tests/integration'  # noqa: E501
 	if test:
-		if test:
-			tests = test.split(',')
-			for test in tests:
-				if not test.startswith('tests.integration'):
-					test = f'tests.integration.{test}'
-				cmd += f' {test}'
-	else:
-		cmd += ' discover -v tests.integration'
+		test_str = ' or '.join(test.split(','))
+		cmd += f' -k "{test_str}"'
 	run_test(cmd, 'integration')
 
 
 @test.command()
 @click.option('--unit-only', '-u', is_flag=True, default=False, help='Only generate coverage for unit tests')
-@click.option('--integration-only', '-i', is_flag=True, default=False, help='Only generate coverage for integration tests')  # noqaa: E501
+@click.option('--integration-only', '-i', is_flag=True, default=False, help='Only generate coverage for integration tests')  # noqa: E501
 def coverage(unit_only, integration_only):
 	"""Run coverage combine + coverage report."""
 	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*,*/templates/*'

@@ -10,7 +10,7 @@ INPUTS_TASKS = {
     'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
     'ffuf': 'http://localhost:3000/FUZZ',
     'gf': 'http://localhost:3000?q=test',
-    'gau': 'https://danielmiessler.com/',
+    'gau': 'http://testphp.vulnweb.com',
     'gospider': 'https://danielmiessler.com/',
     'grype': 'redis:7.4.1',
     'nuclei': 'http://localhost:3000/',

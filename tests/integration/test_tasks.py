@@ -39,6 +39,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
+			'gau.providers': 'wayback',
 			'h8mail.local_breach': load_fixture('h8mail_breach', INTEGRATION_DIR, only_path=True),
 			'nmap.port': '3000,8080',
 			'nmap.tcp_connect': True,
@@ -63,34 +64,11 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
 				continue
 			with self.subTest(name=cls.__name__):
-				console.print(f'Testing {cls.__name__} ...')
-
-				# Get task input
-				input = INPUTS_TASKS.get(cls.__name__) or INPUTS_TASKS.get(cls.input_type)
-				if not input:
-					console.print(f'No input for {cls.__name__} ! Skipping')
-					continue
-
-				# Get task output
+				input = INPUTS_TASKS.get(cls.__name__) or INPUTS_TASKS.get(cls.input_type, [])
 				outputs = OUTPUTS_TASKS.get(cls.__name__, [])
-
-				# Init task
 				task = cls(input, **opts)
-
-				# Run task
-				results = task.run()
-
-				# Check return code
-				if not task.ignore_return_code:
-					self.assertEqual(task.return_code, 0)
-
-				if not results:
-					console.print(f'No results from {cls.__name__} ! Skipping item check.')
-					continue
-
-				# Test result types
-				self._test_task_output(
-					results,
+				self._test_runner_output(
+					task,
 					expected_output_types=cls.output_types,
 					expected_results=outputs,
 					empty_results_allowed=True)

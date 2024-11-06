@@ -11,7 +11,7 @@ class TestWorker(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
 		cls.queue = queue.Queue()
-		cls.cmd = Command.execute('secator worker', run=False)
+		cls.cmd = Command.execute('secator worker', quiet=True, run=False)
 		cls.thread = Thread(target=cls.cmd.run)
 		cls.thread.start()
 		sleep(3)
@@ -25,6 +25,7 @@ class TestWorker(unittest.TestCase):
 		cmd = Command.execute(
 			'secator x httpx testphp.vulnweb.com -json',
 			no_process=False,
+			quiet=True,
 			cls_attributes={'output_types': [Target, Url], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
@@ -45,6 +46,7 @@ class TestWorker(unittest.TestCase):
 		cmd = Command.execute(
 			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',
 			no_process=False,
+			quiet=True,
 			cls_attributes={'output_types': [Target, Url, Port, Vulnerability], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto

@@ -62,6 +62,7 @@ class Celery(StrictModel):
 	broker_visibility_timeout: int = 3600
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
+	result_expires: int = 86400  # 1 day
 
 
 class Cli(StrictModel):
@@ -74,6 +75,7 @@ class Runners(StrictModel):
 	input_chunk_size: int = 100
 	progress_update_frequency: int = 20
 	stat_update_frequency: int = 20
+	backend_update_frequency: int = 5
 	poll_frequency: int = 5
 	skip_cve_search: bool = False
 	skip_cve_low_confidence: bool = True
@@ -132,6 +134,8 @@ class MongodbAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'mongodb://localhost'
 	update_frequency: int = 60
+	max_pool_size: int = 10
+	server_selection_timeout_ms: int = 5000
 
 
 class Addons(StrictModel):

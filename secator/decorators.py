@@ -16,18 +16,19 @@ RUNNER_OPTS = {
 	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'print_json': {'is_flag': True, 'short': 'json', 'default': False, 'help': 'Print items as JSON lines'},
-	'print_orig': {'is_flag': True, 'short': 'orig', 'default': False, 'help': 'Print items as JSON lines (original)'},
 	'print_raw': {'is_flag': True, 'short': 'raw', 'default': False, 'help': 'Print items in raw format'},
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
+	'no_process': {'is_flag': True, 'default': False, 'help': 'Disable secator processing'},
+	'enable_profiling': {'is_flag': True, 'default': False, 'help': 'Run Python profiling'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
 
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
-	'remote': {'is_flag': True, 'default': False, 'help': 'Run tasks in worker'},
+	'worker': {'is_flag': True, 'default': False, 'help': 'Run tasks in worker'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
 	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
@@ -273,7 +274,7 @@ def register_runner(cli_endpoint, config):
 	@click.pass_context
 	def func(ctx, **opts):
 		sync = opts['sync']
-		remote = opts.pop('remote')
+		worker = opts.pop('worker')
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
 		show = opts['show']
@@ -289,14 +290,14 @@ def register_runner(cli_endpoint, config):
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 
-		targets = opts.pop(input_type)
-		targets = expand_input(targets, ctx)
+		inputs = opts.pop(input_type)
+		inputs = expand_input(inputs, ctx)
 		if sync or show:
 			sync = True
 		else:
 			from secator.celery import is_celery_worker_alive
 			worker_alive = is_celery_worker_alive()
-			if not worker_alive and not remote:
+			if not worker_alive and not worker:
 				sync = True
 			else:
 				sync = False
@@ -321,14 +322,16 @@ def register_runner(cli_endpoint, config):
 			'print_cmd': True,
 			'print_item': True,
 			'print_line': True,
+			'print_progress': True,
 			'print_remote_info': not sync,
 			'piped_input': ctx.obj['piped_input'],
 			'piped_output': ctx.obj['piped_output'],
+			'caller': 'cli',
 			'sync': sync,
 		})
 
-		# Build exporters
-		runner = runner_cls(config, targets, run_opts=opts, hooks=hooks, context=context)
+		# Start runner
+		runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
 		runner.run()
 
 	generate_cli_subcommand(cli_endpoint, func, **command_opts)
