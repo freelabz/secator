@@ -128,7 +128,6 @@ class Runner:
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
 		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
-		self.parent = self.run_opts.get('parent', False)
 
 		# Print opts
 		self.print_item = self.run_opts.get('print_item', False)
@@ -152,6 +151,7 @@ class Runner:
 		self.register_validators(validators)
 
 		# Chunks
+		self.has_parent = self.run_opts.get('has_parent', False)
 		self.has_children = self.run_opts.get('has_children', False)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
@@ -432,6 +432,7 @@ class Runner:
 		data.update({
 			'config': self.config.toDict(),
 			'opts': self.config.supported_opts,
+			'has_parent': self.has_parent,
 			'has_children': self.has_children,
 			'chunk': self.chunk,
 			'chunk_count': self.chunk_count,
@@ -455,18 +456,19 @@ class Runner:
 			any: Hook return value.
 		"""
 		result = args[0] if len(args) > 0 else None
-		if not self.enable_hooks or self.no_process:
-			return result
 		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 		for hook in self.hooks[hook_type]:
 			name = f'{self.__class__.__name__}.{hook_type}'
 			fun = self.get_func_path(hook)
 			try:
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='hooks', level=3)
+				if not self.enable_hooks or self.no_process:
+					debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks')
+					continue
+				debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim yellow]started[/]'}, id=_id, sub='hooks')
 				result = hook(self, *args)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='hooks', level=3)
+				debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim green]success[/]'}, id=_id, sub='hooks')
 			except Exception as e:
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failure'}, id=_id, sub='hooks', level=3)
+				debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim red]failed[/]'}, id=_id, sub='hooks')
 				error = Error.from_exception(e)
 				error.message = f'Hook "{fun}" execution failed.'
 				error._source = self.unique_name
@@ -493,9 +495,9 @@ class Runner:
 		for validator in self.validators[validator_type]:
 			name = f'{self.__class__.__name__}.{validator_type}'
 			fun = self.get_func_path(validator)
-			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='validators', level=3)
+			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='validators')
 			if not validator(self, *args):
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators', level=3)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators')
 				doc = validator.__doc__
 				if error:
 					message = 'Validator failed'
@@ -508,7 +510,7 @@ class Runner:
 					)
 					self.add_result(error, print=True)
 				return False
-			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators', level=3)
+			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators')
 		return True
 
 	def register_hooks(self, hooks):
@@ -523,7 +525,7 @@ class Runner:
 			if class_hook:
 				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(class_hook)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks', level=3)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks')
 				self.hooks[key].append(class_hook)
 
 			# Register user hooks
@@ -532,7 +534,7 @@ class Runner:
 			for hook in user_hooks:
 				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(hook)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks', level=3)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks')
 			self.hooks[key].extend(user_hooks)
 
 	def register_validators(self, validators):
@@ -543,14 +545,14 @@ class Runner:
 				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(class_validator)
 				self.validators[key].append(class_validator)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='validators', level=3)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='validators')
 
 			# Register user hooks
 			user_validators = validators.get(key, [])
 			for validator in user_validators:
 				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(validator)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators', level=3)
+				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators')
 			self.validators[key].extend(user_validators)
 
 	@staticmethod

@@ -1,3 +1,4 @@
+import copy
 import getpass
 import logging
 import os
@@ -258,12 +259,14 @@ class Command(Runner):
 					d[k] = v.__name__
 			return d
 
-		opts = {k: convert(v) for k, v in cls.opts.items()}
+		cls_opts = copy.deepcopy(cls.opts)
+		opts = {k: convert(v) for k, v in cls_opts.items()}
 		for k, v in opts.items():
 			v['meta'] = cls.__name__
 			v['supported'] = True
 
-		meta_opts = {k: convert(v) for k, v in cls.meta_opts.items() if cls.opt_key_map.get(k) is not OPT_NOT_SUPPORTED}
+		cls_meta_opts = copy.deepcopy(cls.meta_opts)
+		meta_opts = {k: convert(v) for k, v in cls_meta_opts.items() if cls.opt_key_map.get(k) is not OPT_NOT_SUPPORTED}
 		for k, v in meta_opts.items():
 			v['meta'] = 'meta'
 			if cls.opt_key_map.get(k) is OPT_NOT_SUPPORTED:

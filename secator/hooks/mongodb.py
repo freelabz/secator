@@ -27,21 +27,31 @@ client = pymongo.MongoClient(
 )
 
 
+def get_runner_dbg(runner):
+	"""Runner debug object"""
+	return {
+		runner.unique_name: runner.status,
+		'type': runner.config.type,
+		'class': runner.__class__.__name__,
+		'caller': runner.config.name,
+		**runner.context
+	}
+
+
 def update_runner(self):
 	db = client.main
 	type = self.config.type
 	collection = f'{type}s'
 	update = self.toDict()
-	debug_obj = {self.unique_name: self.status, 'type': type, 'caller': self.config.name}  # noqa: E501
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
-	debug('maybe_update', sub='debug.hooks.mongodb', id=_id, obj=debug_obj, obj_after=True, obj_breaklines=False)
+	debug('to_update', sub='debug.hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False)
 	start_time = time.time()
 	if _id:
 		if self.status == 'RUNNING' and not should_update(MONGODB_UPDATE_FREQUENCY, self.last_updated_db):
 			delta = start_time - self.last_updated_db
 			debug(f'skipped ({delta:>.2f}s < {MONGODB_UPDATE_FREQUENCY}s)',
-				  sub='debug.hooks.mongodb', id=_id, obj=debug_obj, obj_after=False)
+				  sub='debug.hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
 			return
 		db = client.main
 		start_time = time.time()
@@ -49,7 +59,7 @@ def update_runner(self):
 		end_time = time.time()
 		elapsed = end_time - start_time
 		debug(
-			f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=False)  # noqa: E501
+			f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)  # noqa: E501
 		self.last_updated_db = start_time
 	else:  # sync update and save result to runner object
 		runner = db[collection].insert_one(update)
@@ -60,7 +70,7 @@ def update_runner(self):
 			self.context[f'{type}_id'] = _id
 		end_time = time.time()
 		elapsed = end_time - start_time
-		debug(f'created in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=debug_obj, obj_after=False)
+		debug(f'created in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
 
 
 def update_finding(self, item):
@@ -80,7 +90,14 @@ def update_finding(self, item):
 		status = 'CREATED'
 	end_time = time.time()
 	elapsed = end_time - start_time
-	debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=str(item._uuid), obj={_type: status, 'type': 'finding', 'caller': self.config.name}, obj_after=False)  # noqa: E501
+	debug_obj = {
+		_type: status,
+		'type': 'finding',
+		'class': self.__class__.__name__,
+		'caller': self.config.name,
+		**self.context
+	}
+	debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=str(item._uuid), obj=debug_obj, obj_after=False)  # noqa: E501
 	return item
 
 
@@ -88,8 +105,12 @@ def find_duplicates(self):
 	ws_id = self.toDict().get('context', {}).get('workspace_id')
 	if not ws_id:
 		return
-	celery_id = tag_duplicates.delay(ws_id)
-	debug(f'running duplicate check on workspace {ws_id}', id=celery_id, sub='hooks.mongodb')
+	if self.sync:
+		tag_duplicates(ws_id)
+		debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
+	else:
+		celery_id = tag_duplicates.delay(ws_id)
+		debug(f'running duplicate check on workspace {ws_id}', id=celery_id, sub='hooks.mongodb')
 
 
 def load_finding(obj):
@@ -196,12 +217,14 @@ def tag_duplicates(ws_id: str = None):
 
 MONGODB_HOOKS = {
 	Scan: {
+		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_iter': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
 	},
 	Workflow: {
+		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_iter': [update_runner],
 		'on_duplicate': [update_finding],

@@ -174,6 +174,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 		task_id = str(uuid.uuid4())
+		opts['has_parent'] = True
 		sig = type(task).s(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
@@ -200,8 +201,6 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
 	debug(f'Received task with args {args} and kwargs {kwargs}', sub="celery", level=2)
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
 	task = Task(*args, **kwargs)
 	task.run()
@@ -210,8 +209,6 @@ def run_task(self, args=[], kwargs={}):
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
 	debug(f'Received workflow with args {args} and kwargs {kwargs}', sub="celery", level=2)
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)
 	workflow.run()

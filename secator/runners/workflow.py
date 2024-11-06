@@ -66,7 +66,7 @@ class Workflow(Runner):
 		from celery import chain
 		from secator.celery import forward_results
 		sigs = self.get_tasks(
-			self.config.tasks.toDict(),
+			self.config,
 			self.inputs,
 			self.config.options,
 			run_opts)
@@ -74,11 +74,11 @@ class Workflow(Runner):
 		workflow = chain(*sigs)
 		return workflow
 
-	def get_tasks(self, obj, inputs, workflow_opts, run_opts):
+	def get_tasks(self, config, inputs, workflow_opts, run_opts):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
-			obj (secator.config.TemplateLoader): Config.
+			config (secator.config.TemplateLoader): Config.
 			inputs (list): Inputs.
 			workflow_opts (dict): Workflow options.
 			run_opts (dict): Run options.
@@ -90,7 +90,8 @@ class Workflow(Runner):
 		from celery import chain, chord
 		from secator.celery import forward_results
 		sigs = []
-		for task_name, task_opts in obj.items():
+		tasks = config.tasks or {}
+		for task_name, task_opts in tasks.items():
 			# Task opts can be None
 			task_opts = task_opts or {}
 
@@ -122,6 +123,7 @@ class Workflow(Runner):
 				opts['hooks'] = {task: self._hooks.get(Task, {})}
 				opts['context'] = self.context.copy()
 				opts['name'] = task_name
+				opts['has_parent'] = True
 
 				# Create task signature
 				task_id = str(uuid.uuid4())
