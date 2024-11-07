@@ -512,7 +512,6 @@ class Runner:
 		for validator in self.validators[validator_type]:
 			name = f'{self.__class__.__name__}.{validator_type}'
 			fun = self.get_func_path(validator)
-			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='validators')
 			if not validator(self, *args):
 				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators')
 				doc = validator.__doc__
