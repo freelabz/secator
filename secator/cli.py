@@ -574,6 +574,15 @@ def workspace_list():
 			workspaces[ws] = {'count': 0, 'path': '/'.join(str(path).split('/')[:-3])}
 		workspaces[ws]['count'] += 1
 
+	# Build table
+	table = Table()
+	table.add_column("Workspace name", style="bold gold3")
+	table.add_column("Run count", overflow='fold')
+	table.add_column("Path")
+	for workspace, config in workspaces.items():
+		table.add_row(workspace, str(config['count']), config['path'])
+	console.print(table)
+
 
 #--------#
 # REPORT #
