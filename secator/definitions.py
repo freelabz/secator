@@ -24,8 +24,6 @@ DEBUG = CONFIG.debug.level
 DEBUG_COMPONENT = CONFIG.debug.component.split(',')
 
 # Default tasks settings
-DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-td')
-DEFAULT_KATANA_FLAGS = os.environ.get('DEFAULT_KATANA_FLAGS', '-jc -js-crawl -known-files all -or -ob')
 DEFAULT_NUCLEI_FLAGS = os.environ.get('DEFAULT_NUCLEI_FLAGS', '-stats -sj -si 20 -hm -or')
 DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-bail --no-state')
 

@@ -29,6 +29,7 @@ class Task(Runner):
 
 		# Set task output types
 		self.output_types = task_cls.output_types
+		self.enable_duplicate_check = False
 
 		# Get hooks
 		hooks = {task_cls: self.hooks}
@@ -51,7 +52,7 @@ class Task(Runner):
 				self.celery_result,
 				ids_map=self.celery_ids_map,
 				description=True,
-				print_remote_info=self.print_remote_info,
+				print_remote_info=False,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
 
 		# Yield task results
@@ -71,21 +72,3 @@ class Task(Runner):
 			if task_cls.__name__ == name:
 				return task_cls
 		raise ValueError(f'Task {name} not found. Aborting.')
-
-	@staticmethod
-	def get_tasks_from_conf(config):
-		"""Get task names from config. Ignore hierarchy and keywords.
-
-		TODO: Add hierarchy tree / add make flow diagrams.
-		"""
-		tasks = []
-		for name, opts in config.items():
-			if name.startswith('_group'):
-				tasks.extend(Task.get_tasks_from_conf(opts))
-			elif name == '_chain':
-				tasks.extend(Task.get_tasks_from_conf(opts))
-			else:
-				if '/' in name:
-					name = name.split('/')[0]
-				tasks.append(name)
-		return tasks

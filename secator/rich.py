@@ -1,7 +1,6 @@
 import operator
 
 import yaml
-from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -67,8 +66,7 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		items = sorted(items, key=operator.attrgetter(*sort_by))
 
 	# Create rich table
-	box_style = box.SIMPLE
-	table = Table(show_lines=True, box=box_style)
+	table = Table(show_lines=True)
 
 	# Get table schema if any, default to first item keys
 	keys = []
@@ -90,23 +88,21 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		for key in keys:
 			key_str = key
 			if not key.startswith('_'):
-				key_str = ' '.join(key.split('_')).upper()
+				key_str = ' '.join(key.split('_')).title()
 			no_wrap = key in ['url', 'reference', 'references', 'matched_at']
 			overflow = None if no_wrap else 'fold'
 			table.add_column(
 				key_str,
 				overflow=overflow,
 				min_width=10,
-				no_wrap=no_wrap,
-				header_style='bold blue')
+				no_wrap=no_wrap)
 
 	if not keys:
 		table.add_column(
 			'Extracted values',
 			overflow=False,
 			min_width=10,
-			no_wrap=False,
-			header_style='bold blue')
+			no_wrap=False)
 
 	# Create table rows
 	for item in items:

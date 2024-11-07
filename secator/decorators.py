@@ -9,8 +9,7 @@ from rich_click.rich_group import RichGroup
 from secator.config import CONFIG
 from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
-from secator.utils import (deduplicate, expand_input, get_command_category,
-						   get_command_cls)
+from secator.utils import (deduplicate, expand_input, get_command_category)
 
 RUNNER_OPTS = {
 	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
@@ -19,9 +18,9 @@ RUNNER_OPTS = {
 	'print_raw': {'is_flag': True, 'short': 'raw', 'default': False, 'help': 'Print items in raw format'},
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
+	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
 	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
 	'no_process': {'is_flag': True, 'default': False, 'help': 'Disable secator processing'},
-	'enable_profiling': {'is_flag': True, 'default': False, 'help': 'Run Python profiling'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
 }
@@ -104,20 +103,34 @@ class OrderedGroup(RichGroup):
 		return self.commands
 
 
-def get_command_options(*tasks):
-	"""Get unified list of command options from a list of secator tasks classes.
+def get_command_options(config):
+	"""Get unified list of command options from a list of secator tasks classes and optionally a Runner config.
 
 	Args:
-		tasks (list): List of secator command classes.
+		config (TemplateLoader): Current runner config.
 
 	Returns:
 		list: List of deduplicated options.
 	"""
+	from secator.utils import debug
 	opt_cache = []
 	all_opts = OrderedDict({})
+	tasks = config.flat_tasks
+	tasks_cls = set([c['class'] for c in tasks.values()])
 
-	for cls in tasks:
+	# Loop through tasks and set options
+	for cls in tasks_cls:
 		opts = OrderedDict(RUNNER_GLOBAL_OPTS, **RUNNER_OPTS, **cls.meta_opts, **cls.opts)
+
+		# Find opts defined in config corresponding to this task class
+		# TODO: rework this as this ignores subsequent tasks of the same task class
+		task_config_opts = {}
+		if config.type != 'task':
+			for k, v in tasks.items():
+				if v['class'] == cls:
+					task_config_opts = v['opts']
+
+		# Loop through options
 		for opt, opt_conf in opts.items():
 
 			# Get opt key map if any
@@ -130,6 +143,7 @@ def get_command_options(*tasks):
 				and opt not in RUNNER_GLOBAL_OPTS:
 				continue
 
+			# Opt is defined as unsupported
 			if opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
 				continue
 
@@ -147,17 +161,40 @@ def get_command_options(*tasks):
 			elif opt in RUNNER_GLOBAL_OPTS:
 				prefix = 'Execution'
 
-			# Check if opt already processed before
-			opt = opt.replace('_', '-')
-			if opt in opt_cache:
-				continue
-
-			# Build help
+			# Get opt conf
 			conf = opt_conf.copy()
 			conf['show_default'] = True
 			conf['prefix'] = prefix
+			opt_default = conf.get('default', None)
+			opt_is_flag = conf.get('is_flag', False)
+			opt_value_in_config = task_config_opts.get(opt)
+
+			# Check if opt already defined in config
+			if opt_value_in_config:
+				if conf.get('required', False):
+					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)  # noqa: E501
+					continue
+				if opt_default is not None and opt_value_in_config != opt_default and opt_is_flag:
+					conf['reverse'] = True
+					conf['default'] = not conf['default']
+
+			# If opt is a flag but the default is True, add opposite flag
+			if opt_is_flag and opt_default is True:
+				conf['reverse'] = True
+
+			# Check if opt already processed before
+			opt = opt.replace('_', '-')
+			if opt in opt_cache:
+				# debug('OPT (skipped: opt is already in opt cache)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)
+				continue
+
+			# Build help
 			all_opts[opt] = conf
 			opt_cache.append(opt)
+
+			# Debug
+			debug_conf = OrderedDict({'opt': opt, 'config_val': opt_value_in_config or 'N/A', **conf.copy()})
+			debug('OPT', obj=debug_conf, sub=f'cli.{config.name}', verbose=True)
 
 	return all_opts
 
@@ -175,12 +212,18 @@ def decorate_command_options(opts):
 		reversed_opts = OrderedDict(list(opts.items())[::-1])
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
-			short = conf.pop('short', None)
-			conf.pop('internal', False)
+			short_opt = conf.pop('short', None)
+			conf.pop('internal', None)
 			conf.pop('prefix', None)
-			conf.pop('shlex', True)
+			conf.pop('shlex', None)
+			conf.pop('meta', None)
+			conf.pop('supported', None)
+			reverse = conf.pop('reverse', False)
 			long = f'--{opt_name}'
-			short = f'-{short}' if short else f'-{opt_name}'
+			short = f'-{short_opt}' if short_opt else f'-{opt_name}'
+			if reverse:
+				long += f'/--no-{opt_name}'
+				short += f'/-n{short_opt}' if short else f'/-n{opt_name}'
 			f = click.option(long, short, **conf)(f)
 		return f
 	return decorator
@@ -210,15 +253,7 @@ def register_runner(cli_endpoint, config):
 	}
 
 	if cli_endpoint.name == 'scan':
-		# TODO: this should be refactored to scan.get_tasks_from_conf() or scan.tasks
-		from secator.cli import ALL_CONFIGS
 		runner_cls = Scan
-		tasks = [
-			get_command_cls(task)
-			for workflow in ALL_CONFIGS.workflow
-			for task in Task.get_tasks_from_conf(workflow.tasks)
-			if workflow.name in list(config.workflows.keys())
-		]
 		short_help = config.description or ''
 		short_help += f' [dim]alias: {config.alias}' if config.alias else ''
 		command_opts.update({
@@ -227,11 +262,7 @@ def register_runner(cli_endpoint, config):
 		})
 
 	elif cli_endpoint.name == 'workflow':
-		# TODO: this should be refactored to workflow.get_tasks_from_conf() or workflow.tasks
 		runner_cls = Workflow
-		tasks = [
-			get_command_cls(task) for task in Task.get_tasks_from_conf(config.tasks)
-		]
 		short_help = config.description or ''
 		short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}' if config.alias else ''
 		command_opts.update({
@@ -242,9 +273,6 @@ def register_runner(cli_endpoint, config):
 	elif cli_endpoint.name == 'task':
 		runner_cls = Task
 		input_required = False  # allow targets from stdin
-		tasks = [
-			get_command_cls(config.name)
-		]
 		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
 		input_type = task_cls.input_type or 'targets'
@@ -257,8 +285,7 @@ def register_runner(cli_endpoint, config):
 
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
-
-	options = get_command_options(*tasks)
+	options = get_command_options(config)
 
 	# TODO: maybe allow this in the future
 	# def get_unknown_opts(ctx):
