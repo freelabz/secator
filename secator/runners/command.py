@@ -19,7 +19,6 @@ from secator.config import CONFIG
 from secator.output_types import Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug
 
 
 logger = logging.getLogger(__name__)

@@ -6,9 +6,9 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, EXECUTION_TYPES
+from secator.output_types import FINDING_TYPES
 from secator.runners import Scan, Task, Workflow
-from secator.utils import debug, escape_mongodb_url, should_update
+from secator.utils import debug, escape_mongodb_url
 
 # import gevent.monkey
 # gevent.monkey.patch_all()
@@ -45,7 +45,7 @@ def update_runner(self):
 	update = self.toDict()
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
-	debug('to_update', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)
+	debug('to_update', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)  # noqa: E501
 	start_time = time.time()
 	if _id:
 		db = client.main

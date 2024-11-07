@@ -263,6 +263,6 @@ class CeleryData(object):
 			if hasattr(result, 'parent') and result.parent:
 				CeleryData.get_task_ids(result.parent, ids=ids)
 
-		except kombu.exceptions.DecodeError as e:
+		except kombu.exceptions.DecodeError:
 			debug('kombu decode error', sub='celery.data.get_task_ids')
 			return

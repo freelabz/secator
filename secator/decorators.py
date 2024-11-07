@@ -172,7 +172,7 @@ def get_command_options(config):
 			# Check if opt already defined in config
 			if opt_value_in_config:
 				if conf.get('required', False):
-					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)
+					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)  # noqa: E501
 					continue
 				if opt_default is not None and opt_value_in_config != opt_default and opt_is_flag:
 					conf['reverse'] = True

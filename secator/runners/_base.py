@@ -307,7 +307,7 @@ class Runner:
 
 		# Item is an output type
 		if isinstance(item, OutputType):
-			self.debug(repr(item), sub=f'item', allow_no_process=False, verbose=True)
+			self.debug(repr(item), sub='item', allow_no_process=False, verbose=True)
 			_type = item._type
 			print_this_type = getattr(self, f'print_{_type}', True)
 			if not print_this_type:
@@ -348,7 +348,7 @@ class Runner:
 
 		# Item is a line
 		elif isinstance(item, str):
-			self.debug(item, sub=f'line', allow_no_process=False, verbose=True)
+			self.debug(item, sub='line', allow_no_process=False, verbose=True)
 			if self.print_line or force:
 				self._print(item, out=sys.stderr, end='\n')
 
@@ -471,16 +471,16 @@ class Runner:
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks.db', verbose=True)
+					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks.db', verbose=True)  # noqa: E501
 					return
 				if not self.enable_hooks or self.no_process:
-					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)
+					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 					continue
-				# self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim yellow]started[/]'}, id=_id, sub='hooks', verbose=True)
+				# self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim yellow]started[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 				result = hook(self, *args)
-				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim green]success[/]'}, id=_id, sub='hooks', verbose=True)
+				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim green]success[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 			except Exception as e:
-				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim red]failed[/]'}, id=_id, sub='hooks', verbose=True)
+				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim red]failed[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 				error = Error.from_exception(e)
 				error.message = f'Hook "{fun}" execution failed.'
 				error._source = self.unique_name

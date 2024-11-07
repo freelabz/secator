@@ -24,7 +24,7 @@ import humanize
 import ifaddr
 import yaml
 
-from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.definitions import (DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
