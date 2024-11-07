@@ -650,16 +650,18 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 
 	# Build report queries from fuzzy input
 	paths = []
-	if not report_query:
-		report_query = all_reports
-	else:
+	if report_query:
 		report_query = report_query.split(',')
+	else:
+		report_query = []
 
 	# Load all report paths
-	load_all_reports = all([Path(p).exists() for p in report_query])
+	load_all_reports = any([not Path(p).exists() for p in report_query])
 	all_reports = []
 	if load_all_reports:
 		all_reports = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
+	if not report_query:
+		report_query = all_reports
 
 	for query in report_query:
 		query = str(query)
