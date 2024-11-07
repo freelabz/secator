@@ -172,7 +172,7 @@ def get_command_options(config):
 			# Check if opt already defined in config
 			if opt_value_in_config:
 				if conf.get('required', False):
-					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'debug.cli.{config.name}')
+					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)
 					continue
 				if opt_default is not None and opt_value_in_config != opt_default and opt_is_flag:
 					conf['reverse'] = True
@@ -185,16 +185,16 @@ def get_command_options(config):
 			# Check if opt already processed before
 			opt = opt.replace('_', '-')
 			if opt in opt_cache:
-				# debug('OPT (skipped: opt is already in opt cache)', obj={'opt': opt}, sub=f'debug.cli.{config.name}')
+				# debug('OPT (skipped: opt is already in opt cache)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)
 				continue
 
 			# Build help
 			all_opts[opt] = conf
 			opt_cache.append(opt)
 
-			if f'debug.cli.{config.name}' in CONFIG.debug.component:
-				debug_conf = OrderedDict({'opt': opt, 'config_val': opt_value_in_config or 'N/A', **conf.copy()})
-				debug('OPT', obj=debug_conf, sub=f'debug.cli.{config.name}')
+			# Debug
+			debug_conf = OrderedDict({'opt': opt, 'config_val': opt_value_in_config or 'N/A', **conf.copy()})
+			debug('OPT', obj=debug_conf, sub=f'cli.{config.name}', verbose=True)
 
 	return all_opts
 

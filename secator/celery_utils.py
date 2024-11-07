@@ -119,10 +119,11 @@ class CeleryData(object):
 			try:
 				yield from CeleryData.get_all_data(result, ids_map)
 				if result.ready():
-					debug('RESULT READY', sub='celery.runner', id=result.id)
+					debug('result is ready', sub='celery.poll', id=result.id)
 					yield from CeleryData.get_all_data(result, ids_map)
 					break
 			except (KeyboardInterrupt, GreenletExit):
+				debug('encounted KeyboardInterrupt or GreenletExit', sub='celery.poll')
 				raise
 			except Exception as e:
 				error = Error.from_exception(e)
@@ -148,7 +149,7 @@ class CeleryData(object):
 				sub='celery.poll',
 				id=data['id'],
 				obj={data['full_name']: data['state'], 'count': data['count']},
-				level=4
+				verbose=True
 			)
 			yield data
 
@@ -187,7 +188,7 @@ class CeleryData(object):
 		# Get remote result
 		res = AsyncResult(task_id)
 		if not res:
-			debug('empty response', sub='debug.celery', id=task_id)
+			debug('empty response', sub='celery.data', id=task_id)
 			return
 
 		# Set up task state
@@ -206,7 +207,7 @@ class CeleryData(object):
 		# - If it's a dict, it's the custom user metadata.
 
 		if isinstance(info, Exception):
-			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='debug.celery', id=task_id)
+			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
 			raise info
 
 		elif isinstance(info, list):
@@ -230,7 +231,7 @@ class CeleryData(object):
 			if progresses:
 				data['progress'] = progresses[-1].percent
 
-		debug('data', obj=data, sub='debug.celery.data', id=task_id)
+		debug('data', obj=data, sub='celery.data', id=task_id, verbose=True)
 		return data
 
 	@staticmethod
@@ -263,5 +264,5 @@ class CeleryData(object):
 				CeleryData.get_task_ids(result.parent, ids=ids)
 
 		except kombu.exceptions.DecodeError as e:
-			console.print(f'[bold red]{str(e)}. Aborting get_task_ids.[/]')
+			debug('kombu decode error', sub='celery.data.get_task_ids')
 			return

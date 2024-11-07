@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES
+from secator.output_types import FINDING_TYPES, EXECUTION_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url, should_update
 
@@ -45,14 +45,9 @@ def update_runner(self):
 	update = self.toDict()
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
-	debug('to_update', sub='debug.hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False)
+	debug('to_update', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)
 	start_time = time.time()
 	if _id:
-		if self.status == 'RUNNING' and not should_update(MONGODB_UPDATE_FREQUENCY, self.last_updated_db):
-			delta = start_time - self.last_updated_db
-			debug(f'skipped ({delta:>.2f}s < {MONGODB_UPDATE_FREQUENCY}s)',
-				  sub='debug.hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
-			return
 		db = client.main
 		start_time = time.time()
 		db[collection].update_one({'_id': ObjectId(_id)}, {'$set': update})
@@ -177,18 +172,19 @@ def tag_duplicates(ws_id: str = None):
 				'seen dupes': len(seen_dupes)
 			},
 			id=ws_id,
-			sub='debug.hooks.mongodb')
+			sub='hooks.mongodb',
+			verbose=True)
 		tmp_duplicates_ids = list(dict.fromkeys([i._uuid for i in tmp_duplicates]))
-		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='debug.hooks.mongodb')
+		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb', verbose=True)
 
 		# Update latest object as non-duplicate
 		if tmp_duplicates:
 			duplicates.extend([f for f in tmp_duplicates])
 			db.findings.update_one({'_id': ObjectId(item._uuid)}, {'$set': {'_related': tmp_duplicates_ids}})
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='debug.hooks.mongodb')
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
 			non_duplicates.append(item)
 		else:
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='debug.hooks.mongodb')
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
 			non_duplicates.append(item)
 
 	# debug(f'found {len(duplicates)} total duplicates')
@@ -219,14 +215,14 @@ MONGODB_HOOKS = {
 	Scan: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
-		'on_iter': [update_runner],
+		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
 	},
 	Workflow: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
-		'on_iter': [update_runner],
+		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
 	},
@@ -235,7 +231,7 @@ MONGODB_HOOKS = {
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
-		'on_iter': [update_runner],
+		'on_interval': [update_runner],
 		'on_end': [update_runner, find_duplicates]
 	}
 }

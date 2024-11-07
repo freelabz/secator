@@ -121,10 +121,11 @@ def update_state(celery_task, task, force=False):
 	task.last_updated_celery = time()
 	debug(
 		'',
-		sub='celery.state.update',
+		sub='celery.state',
 		id=celery_task.request.id,
 		obj={task.unique_name: task.status, 'count': task.self_findings_count},
-		obj_after=False
+		obj_after=False,
+		verbose=True
 	)
 	return celery_task.update_state(
 		state='RUNNING',
@@ -158,7 +159,8 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 		'',
 		obj={task.unique_name: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks), 'target_count': len(targets)},
 		obj_after=False,
-		sub='celery.state'
+		sub='celery.state',
+		verbose=True
 	)
 
 	# Clone opts
@@ -200,7 +202,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
-	debug(f'Received task with args {args} and kwargs {kwargs}', sub="celery", level=2)
+	debug(f'Received task with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	kwargs['context']['celery_id'] = self.request.id
 	task = Task(*args, **kwargs)
 	task.run()
@@ -208,7 +210,7 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
-	debug(f'Received workflow with args {args} and kwargs {kwargs}', sub="celery", level=2)
+	debug(f'Received workflow with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)
 	workflow.run()
@@ -216,7 +218,7 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
-	debug(f'Received scan with args {args} and kwargs {kwargs}', sub="celery", level=2)
+	debug(f'Received scan with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -280,7 +282,8 @@ def run_command(self, results, name, targets, opts={}):
 			},
 			obj_after=False,
 			id=self.request.id,
-			sub='celery.state'
+			sub='celery.state',
+			verbose=True
 		)
 
 		# Chunk task if needed
@@ -310,7 +313,7 @@ def run_command(self, results, name, targets, opts={}):
 	finally:
 		update_state(self, task, force=True)
 		gc.collect()
-		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
+		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='celery.results', verbose=True)
 		return task.results
 
 

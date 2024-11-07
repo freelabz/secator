@@ -28,7 +28,7 @@ HOOKS = [
 	'on_item_pre_convert',
 	'on_item',
 	'on_duplicate',
-	'on_iter',
+	'on_interval',
 ]
 
 VALIDATORS = [
@@ -256,10 +256,10 @@ class Runner:
 			# Loop and process items
 			for item in yielder():
 				yield from self._process_item(item)
-				self.run_hooks('on_iter')
+				self.run_hooks('on_interval')
 
 		except BaseException as e:
-			debug(f'{self.config.name} encountered exception {type(e).__name__}. Stopping remote tasks.')
+			self.debug(f'{self.config.name} encountered exception {type(e).__name__}. Stopping remote tasks.', sub='error')
 			error = Error.from_exception(e)
 			error._source = self.unique_name
 			error._uuid = str(uuid.uuid4())
@@ -307,7 +307,7 @@ class Runner:
 
 		# Item is an output type
 		if isinstance(item, OutputType):
-			self.debug(repr(item), sub='debug.runner.item')
+			self.debug(repr(item), sub=f'item', allow_no_process=False, verbose=True)
 			_type = item._type
 			print_this_type = getattr(self, f'print_{_type}', True)
 			if not print_this_type:
@@ -348,19 +348,27 @@ class Runner:
 
 		# Item is a line
 		elif isinstance(item, str):
-			self.debug(item, sub='debug.runner.line')
+			self.debug(item, sub=f'line', allow_no_process=False, verbose=True)
 			if self.print_line or force:
 				self._print(item, out=sys.stderr, end='\n')
 
 	def debug(self, *args, **kwargs):
-		if not self.no_process:
-			debug(*args, **kwargs)
+		"""Print debug only if self.no_process is True"""
+		allow_no_process = kwargs.pop('allow_no_process', True)
+		if self.no_process and not allow_no_process:
+			return
+		sub = kwargs.get('sub')
+		new_sub = f'runner.{self.__class__.__name__}'
+		if sub:
+			new_sub += f'.{sub}'
+		kwargs['sub'] = new_sub
+		debug(*args, **kwargs)
 
 	def mark_duplicates(self):
 		"""Mark duplicates."""
 		if not self.enable_duplicate_check:
 			return
-		debug('running duplicate check', id=self.config.name, sub='runner.duplicates')
+		self.debug('running duplicate check', id=self.config.name, sub='duplicates')
 		# dupe_count = 0
 		import concurrent.futures
 		executor = concurrent.futures.ThreadPoolExecutor(max_workers=100)
@@ -370,8 +378,8 @@ class Runner:
 		# duplicates = [repr(i) for i in self.results if i._duplicate]
 		# if duplicates:
 		# 	duplicates_str = '\n\t'.join(duplicates)
-		# 	debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='debug.runner.duplicates', level=5)
-		# debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='runner.duplicates')
+		# 	self.debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='duplicates', verbose=True)
+		# self.debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='duplicates')
 
 	def check_duplicate(self, item):
 		"""Check if an item is a duplicate in the list of results and mark it like so.
@@ -379,7 +387,7 @@ class Runner:
 		Args:
 			item (OutputType): Secator output type.
 		"""
-		debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
+		self.debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='duplicates', verbose=True)
 		others = [f for f in self.results if f == item and f._uuid != item._uuid]
 		if others:
 			main = max(item, *others)
@@ -388,7 +396,7 @@ class Runner:
 			main._related.extend([dupe._uuid for dupe in dupes])
 			main._related = list(dict.fromkeys(main._related))
 			if main._uuid != item._uuid:
-				debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='debug.runner.duplicates', level=5)  # noqa: E501
+				self.debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='duplicates', verbose=True)  # noqa: E501
 				item._duplicate = True
 				item = self.run_hooks('on_item', item)
 				if item._uuid not in main._related:
@@ -398,9 +406,9 @@ class Runner:
 
 			for dupe in dupes:
 				if not dupe._duplicate:
-					debug(
+					self.debug(
 						'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-						sub='debug.runner.duplicates', level=5)
+						sub='duplicates', verbose=True)
 					# dupe_count += 1
 					dupe._duplicate = True
 					dupe = self.run_hooks('on_duplicate', dupe)
@@ -423,6 +431,7 @@ class Runner:
 			'name': self.name,
 			'status': self.status,
 			'targets': self.inputs,
+			'errors': self.errors,
 			'start_time': self.start_time,
 			'end_time': self.end_time,
 			'elapsed': self.elapsed.total_seconds(),
@@ -461,14 +470,17 @@ class Runner:
 			name = f'{self.__class__.__name__}.{hook_type}'
 			fun = self.get_func_path(hook)
 			try:
+				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
+					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks.db', verbose=True)
+					return
 				if not self.enable_hooks or self.no_process:
-					debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks')
+					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)
 					continue
-				debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim yellow]started[/]'}, id=_id, sub='hooks')
+				# self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim yellow]started[/]'}, id=_id, sub='hooks', verbose=True)
 				result = hook(self, *args)
-				debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim green]success[/]'}, id=_id, sub='hooks')
+				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim green]success[/]'}, id=_id, sub='hooks', verbose=True)
 			except Exception as e:
-				debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim red]failed[/]'}, id=_id, sub='hooks')
+				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim red]failed[/]'}, id=_id, sub='hooks', verbose=True)
 				error = Error.from_exception(e)
 				error.message = f'Hook "{fun}" execution failed.'
 				error._source = self.unique_name
@@ -495,9 +507,9 @@ class Runner:
 		for validator in self.validators[validator_type]:
 			name = f'{self.__class__.__name__}.{validator_type}'
 			fun = self.get_func_path(validator)
-			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='validators')
+			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'started'}, id=_id, sub='validators')
 			if not validator(self, *args):
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators')
+				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators')
 				doc = validator.__doc__
 				if error:
 					message = 'Validator failed'
@@ -510,7 +522,7 @@ class Runner:
 					)
 					self.add_result(error, print=True)
 				return False
-			debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators')
+			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators')
 		return True
 
 	def register_hooks(self, hooks):
@@ -525,7 +537,7 @@ class Runner:
 			if class_hook:
 				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(class_hook)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks')
+				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks')
 				self.hooks[key].append(class_hook)
 
 			# Register user hooks
@@ -534,7 +546,7 @@ class Runner:
 			for hook in user_hooks:
 				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(hook)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks')
+				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks')
 			self.hooks[key].extend(user_hooks)
 
 	def register_validators(self, validators):
@@ -545,14 +557,14 @@ class Runner:
 				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(class_validator)
 				self.validators[key].append(class_validator)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='validators')
+				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='validators')
 
 			# Register user hooks
 			user_validators = validators.get(key, [])
 			for validator in user_validators:
 				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(validator)
-				debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators')
+				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators')
 			self.validators[key].extend(user_validators)
 
 	@staticmethod
@@ -589,9 +601,9 @@ class Runner:
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
 		if self.status == 'FAILURE':
-			debug('', obj={self.__class__.__name__: self.status, 'errors': self.errors}, sub='runner.status')
+			self.debug('', obj={self.__class__.__name__: self.status, 'errors': self.errors}, sub='status')
 		else:
-			debug('', obj={self.__class__.__name__: self.status}, sub='runner.status')
+			self.debug('', obj={self.__class__.__name__: self.status}, sub='status')
 		if self.exporters and not self.no_process:
 			report = Report(self, exporters=self.exporters)
 			report.build()
@@ -652,14 +664,14 @@ class Runner:
 		# Init the new item and the list of output types to load from
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
-		debug(f'Input item: {item}', sub='klass.load')
+		self.debug(f'Input item: {item}', sub='klass.load', verbose=True)
 
 		# Use a function to pick proper output types
 		output_discriminator = getattr(self, 'output_discriminator', None)
 		if output_discriminator:
 			result = output_discriminator(item)
 			if result:
-				debug(f'Discriminated output type: {result.__name__}', sub='klass.load')
+				self.debug(f'Discriminated output type: {result.__name__}', sub='klass.load', verbose=True)
 				output_types = [result]
 			else:
 				output_types = []
@@ -669,29 +681,29 @@ class Runner:
 			otypes = [o for o in output_types if o.get_name() == item['_type']]
 			if otypes:
 				output_types = [otypes[0]]
-				debug(f'_type key is present in item and matches {otypes[0]}', sub='klass.load')
+				self.debug(f'_type key is present in item and matches {otypes[0]}', sub='klass.load', verbose=True)
 
 		# Load item using picked output types
-		debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load')
+		self.debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load', verbose=True)
 		for klass in output_types:
-			debug(f'Loading item as {klass.__name__}', sub='klass.load')
+			self.debug(f'Loading item as {klass.__name__}', sub='klass.load', verbose=True)
 			output_map = getattr(self, 'output_map', {}).get(klass, {})
 			try:
 				new_item = klass.load(item, output_map)
-				debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', sub='klass.load')
+				self.debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', sub='klass.load', verbose=True)
 				break
 			except (TypeError, KeyError) as e:
-				debug(
+				self.debug(
 					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
-					sub='klass.load')
+					sub='klass.load', verbose=True)
 				# error = Error.from_exception(e)
-				# debug(repr(error), sub='debug.klass.load')
+				# self.debug(repr(error), sub='debug.klass.load')
 				continue
 
 		if not new_item:
 			new_item = Warning(message=f'Failed to load item as output type:\n  {item}')
 
-		debug(f'Output item: {new_item.toDict()}', sub='klass.load')
+		self.debug(f'Output item: {new_item.toDict()}', sub='klass.load', verbose=True)
 
 		return new_item
 
@@ -759,7 +771,7 @@ class Runner:
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
 
-		# Add context, uuid, progress to item
+		# Add source to item
 		if not item._source:
 			item._source = self.unique_name
 

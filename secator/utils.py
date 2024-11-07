@@ -345,13 +345,18 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
-def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
+def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
 	debug_comp_empty = DEBUG_COMPONENT == [""] or not DEBUG_COMPONENT
-	if not debug_comp_empty and not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+	if debug_comp_empty:
 		return
-	elif debug_comp_empty and not DEBUG >= level:
+
+	if sub and verbose and not any(sub == s for s in DEBUG_COMPONENT):
+		sub = f'debug.{sub}'
+
+	if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
 		return
+
 	s = ''
 	if sub:
 		s += f'[dim yellow4]{sub:13s}[/] '

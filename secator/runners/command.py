@@ -189,30 +189,11 @@ class Command(Runner):
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold cyan', rich=True)
 
-		# Debug built input
-		if len(self.inputs) > 0:
-			input_str = '\n '.join(self.inputs).strip()
-			debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', sub='runner.init')
-
-		# Debug run options
-		run_opts_str = '\n '.join([
-			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.run_opts.items() if v is not None]).strip()
-		debug(f'[dim magenta]Run opts:[/]\n {run_opts_str}', sub='debug.runner.init')
-
-		# Debug format options
-		fmt_opts_str = '\n '.join([
-			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.print_opts.items() if v is not None]).strip()
-		debug(f'[dim magenta]Print opts:[/]\n {fmt_opts_str}', sub='debug.runner.init')
-
-		# Debug hooks
-		hooks_str = ''
-		for hook_name, hook_funcs in self.hooks.items():
-			hook_funcs_str = ', '.join([f'[dim green]{h.__module__}.{h.__qualname__}[/]' for h in hook_funcs])
-			if hook_funcs:
-				hooks_str += f'[dim blue]{hook_name}[/] -> {hook_funcs_str}\n '
-		hooks_str = hooks_str.strip()
-		if hooks_str:
-			debug(f'[dim magenta]Hooks:[/]\n {hooks_str}', sub='debug.runner.init')
+		# Debug
+		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
+		self.debug('Inputs', obj=self.inputs, sub='init')
+		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
+		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
 
 	def toDict(self):
 		res = super().toDict()
@@ -423,9 +404,9 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			debug(
+			self.debug(
 				f'{self.unique_name}: {type(e).__name__}. Sending SIGINT to process {self.process.pid}.',
-				sub='runner.command'
+				sub='error'
 			)
 			self.stop_process()
 			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
@@ -606,7 +587,7 @@ class Command(Runner):
 		self.return_code = 0 if self.ignore_return_code else self.return_code
 		self.output = self.output.strip()
 		self.killed = self.return_code == -2 or self.killed
-		debug(f'Command {self.cmd} finished with return code {self.return_code}', sub='runner.command')
+		self.debug(f'Command {self.cmd} finished with return code {self.return_code}', sub='command')
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
@@ -766,9 +747,6 @@ class Command(Runner):
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
 
-		# Debug
-		debug('Built cmd', obj={'cmd': self.cmd}, sub='runner.init')
-
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a
 		string or a list to the cmd.
@@ -810,4 +788,3 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
-		debug('Built input', obj={'inputs': self.inputs, 'inputs_path': self.inputs_path, 'shell': self.shell, 'cmd': self.cmd}, sub='runner.init')  # noqa: E501

@@ -140,8 +140,8 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 
 	# Debug Celery config
 	from secator.celery import app, is_celery_worker_alive
-	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app.conf', level=4)
-	debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.tasks', level=4)
+	debug('conf', obj=dict(app.conf), obj_breaklines=True, sub='celery.app')
+	debug('registered tasks', obj=list(app.tasks.keys()), obj_breaklines=True, sub='celery.app')
 
 	if check:
 		is_celery_worker_alive()
