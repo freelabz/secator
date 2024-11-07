@@ -607,9 +607,6 @@ def report():
 def report_show(report_query, output, runner_type, time_delta, type, query, workspace, unified):
 	"""Show report results and filter on them."""
 
-	# Load all report paths
-	all_reports = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
-
 	# Get extractors
 	otypes = [o.__name__.lower() for o in FINDING_TYPES]
 	extractors = []
@@ -657,6 +654,13 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 		report_query = all_reports
 	else:
 		report_query = report_query.split(',')
+
+	# Load all report paths
+	load_all_reports = all([Path(p).exists() for p in report_query])
+	all_reports = []
+	if load_all_reports:
+		all_reports = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
+
 	for query in report_query:
 		query = str(query)
 		if not query.endswith('/'):
@@ -681,10 +685,10 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 		if unified:
 			console.print(f'Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
 		with open(path, 'r') as f:
+			data = loads_dataclass(f.read())
 			try:
-				data = loads_dataclass(f.read())
 				info = get_info_from_report_path(path)
-				runner_type = info['type'][:-1]
+				runner_type = info.get('type', 'unknowns')[:-1]
 				runner.results = flatten(list(data['results'].values()))
 				if unified:
 					all_results.extend(runner.results)

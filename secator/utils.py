@@ -345,7 +345,7 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
-def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, verbose=False):
+def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
 	debug_comp_empty = DEBUG_COMPONENT == [""] or not DEBUG_COMPONENT
 	if debug_comp_empty:
@@ -356,6 +356,9 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, ve
 
 	if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
 		return
+
+	if lazy:
+		msg = lazy(msg)
 
 	s = ''
 	if sub:
@@ -616,14 +619,17 @@ def list_reports(workspace=None, type=None, timedelta=None):
 
 
 def get_info_from_report_path(path):
-	ws, runner_type, number = path.parts[-4], path.parts[-3], path.parts[-2]
-	workspace_path = '/'.join(path.parts[:-3])
-	return {
-		'workspace': ws,
-		'workspace_path': workspace_path,
-		'type': runner_type,
-		'id': number
-	}
+	try:
+		ws, runner_type, number = path.parts[-4], path.parts[-3], path.parts[-2]
+		workspace_path = '/'.join(path.parts[:-3])
+		return {
+			'workspace': ws,
+			'workspace_path': workspace_path,
+			'type': runner_type,
+			'id': number
+		}
+	except IndexError:
+		return {}
 
 
 def human_to_timedelta(time_str):

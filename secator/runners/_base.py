@@ -307,7 +307,7 @@ class Runner:
 
 		# Item is an output type
 		if isinstance(item, OutputType):
-			self.debug(repr(item), sub='item', allow_no_process=False, verbose=True)
+			self.debug(item, lazy=lambda x: repr(x), sub='item', allow_no_process=False, verbose=True)
 			_type = item._type
 			print_this_type = getattr(self, f'print_{_type}', True)
 			if not print_this_type:
