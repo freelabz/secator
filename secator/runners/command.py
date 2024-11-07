@@ -190,9 +190,6 @@ class Command(Runner):
 
 		# Debug
 		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
-		self.debug('Inputs', obj=self.inputs, sub='init')
-		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
-		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
 
 	def toDict(self):
 		res = super().toDict()

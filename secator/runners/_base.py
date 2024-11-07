@@ -142,6 +142,11 @@ class Runner:
 		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
 		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
+		# Debug
+		self.debug('Inputs', obj=self.inputs, sub='init')
+		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
+		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
+
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.register_hooks(hooks)
