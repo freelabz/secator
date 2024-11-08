@@ -177,7 +177,7 @@ class Config(DotMap):
 	>>> config = Config.parse(path='/path/to/config.yml')  # get custom config (from YAML file).
 	>>> config.print() 									   # print config without defaults.
 	>>> config.print(partial=False)  					   # print full config.
-	>>> config.set('addons.google_drive.enabled', False)         # set value in config.
+	>>> config.set('addons.gdrive.enabled', False)         # set value in config.
 	>>> config.save()									   # save config back to disk.
 	"""
 

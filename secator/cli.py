@@ -938,8 +938,8 @@ def install_gdrive():
 		cmd=f'{sys.executable} -m pip install secator[google]',
 		title='Google Drive addon',
 		next_steps=[
-			'Run [bold green4]secator config set addons.google_drive.credentials_path <VALUE>[/].',
-			'Run [bold green4]secator config set addons.google_drive.drive_parent_folder_id <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gdrive.credentials_path <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gdrive.drive_parent_folder_id <VALUE>[/].',
 			'Run [bold green4]secator x httpx testphp.vulnweb.com -o gdrive[/] to send reports to Google Drive.'
 		]
 	)
@@ -952,7 +952,7 @@ def install_gcs():
 		cmd=f'{sys.executable} -m pip install secator[gcs]',
 		title='Google Cloud Storage addon',
 		next_steps=[
-			'Run [bold green4]secator config set addons.google_drive.credentials_path <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gcs.credentials_path <VALUE>[/].',
 		]
 	)
 
