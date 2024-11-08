@@ -436,7 +436,6 @@ class Runner:
 			'name': self.name,
 			'status': self.status,
 			'targets': self.inputs,
-			'errors': self.errors,
 			'start_time': self.start_time,
 			'end_time': self.end_time,
 			'elapsed': self.elapsed.total_seconds(),
@@ -455,7 +454,8 @@ class Runner:
 			'output': self.output,
 			'progress': self.progress,
 			'last_updated_db': self.last_updated_db,
-			'context': self.context
+			'context': self.context,
+			'errors': [e.toDict() for e in self.errors],
 		})
 		return data
 
