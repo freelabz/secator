@@ -65,7 +65,7 @@ def update_runner(self):
 			self.context[f'{type}_id'] = _id
 		end_time = time.time()
 		elapsed = end_time - start_time
-		debug(f'created in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
+		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
 
 
 def update_finding(self, item):
@@ -211,7 +211,7 @@ def tag_duplicates(ws_id: str = None):
 		sub='hooks.mongodb')
 
 
-MONGODB_HOOKS = {
+HOOKS = {
 	Scan: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],

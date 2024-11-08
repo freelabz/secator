@@ -317,8 +317,37 @@ def register_runner(cli_endpoint, config):
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 
+		# Expand input
 		inputs = opts.pop(input_type)
 		inputs = expand_input(inputs, ctx)
+
+		# Build hooks from driver name
+		hooks = []
+		drivers = driver.split(',') if driver else []
+		console = _get_rich_console()
+		supported_drivers = ['mongodb', 'gcs']
+		for driver in drivers:
+			if driver in supported_drivers:
+				if not ADDONS_ENABLED[driver]:
+					console.print(f'[bold red]Missing "{driver}" addon: please run `secator install addons {driver}`[/].')
+					sys.exit(1)
+				from secator.utils import import_dynamic
+				driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+				if driver_hooks is None:
+					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
+					sys.exit(1)
+				hooks.append(driver_hooks)
+			else:
+				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
+				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
+				console.print(f'Supported drivers: {supported_drivers_str}')
+				sys.exit(1)
+
+		from secator.utils import deep_merge_dicts
+		hooks = deep_merge_dicts(*hooks)
+		print(hooks)
+
+		# Enable sync or not
 		if sync or show:
 			sync = True
 		else:
@@ -334,15 +363,6 @@ def register_runner(cli_endpoint, config):
 					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
 						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 						sys.exit(1)
-
-		# Build hooks from driver name
-		hooks = {}
-		if driver == 'mongodb':
-			if not ADDONS_ENABLED['mongodb']:
-				_get_rich_console().print('[bold red]Missing `mongodb` addon: please run `secator install addons mongodb`[/].')
-				sys.exit(1)
-			from secator.hooks.mongodb import MONGODB_HOOKS
-			hooks = MONGODB_HOOKS
 
 		# Set run options
 		opts.update({

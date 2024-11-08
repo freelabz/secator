@@ -13,6 +13,7 @@ import validators
 import warnings
 
 from datetime import datetime, timedelta
+from functools import reduce
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
@@ -206,25 +207,32 @@ def discover_tasks():
 	return _tasks
 
 
-def import_dynamic(cls_path, cls_root='Command'):
-	"""Import class dynamically from class path.
+def import_dynamic(path, name=None):
+	"""Import class or module dynamically from path.
 
 	Args:
-		cls_path (str): Class path.
+		path (str): Path to class or module.
+		name (str): If specified, does a getattr() on the package to get this attribute.
 		cls_root (str): Root parent class.
+
+	Examples:
+		>>> import_dynamic('secator.exporters', name='CsvExporter')
+		>>> import_dynamic('secator.hooks.mongodb', name='HOOKS')
 
 	Returns:
 		cls: Class object.
 	"""
 	try:
-		package, name = cls_path.rsplit(".", maxsplit=1)
-		cls = getattr(importlib.import_module(package), name)
-		root_cls = inspect.getmro(cls)[-2]
-		if root_cls.__name__ == cls_root:
-			return cls
-		return None
+		res = importlib.import_module(path)
+		if name:
+			res = getattr(res, name)
+			if res is None:
+				raise
+		return res
 	except Exception:
-		warnings.warn(f'"{package}.{name}" not found.')
+		if name:
+			path += f'.{name}'
+		warnings.warn(f'"{path}" not found.', category=UserWarning, stacklevel=2)
 		return None
 
 
@@ -650,3 +658,34 @@ def human_to_timedelta(time_str):
 		if param:
 			time_params[name] = int(param)
 	return timedelta(**time_params)
+
+
+def deep_merge_dicts(*dicts):
+    """
+    Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
+
+    Args:
+        dicts (tuple): A tuple of dictionary objects to merge.
+
+    Returns:
+        dict: A new dictionary containing merged keys and values from all input dictionaries.
+	"""
+    def merge_two_dicts(dict1, dict2):
+        """
+        Helper function that merges two dictionaries.
+        """
+        result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
+        for key, value in dict2.items():
+            if key in result:
+                if isinstance(result[key], dict) and isinstance(value, dict):
+                    result[key] = merge_two_dicts(result[key], value)
+                elif isinstance(result[key], list) and isinstance(value, list):
+                    result[key] += value  # Concatenating lists
+                else:
+                    result[key] = value  # Overwrite if not both lists or both dicts
+            else:
+                result[key] = value
+        return result
+
+    # Use reduce to apply merge_two_dicts to all dictionaries in dicts
+    return reduce(merge_two_dicts, dicts, {})
