@@ -345,7 +345,6 @@ def register_runner(cli_endpoint, config):
 
 		from secator.utils import deep_merge_dicts
 		hooks = deep_merge_dicts(*hooks)
-		print(hooks)
 
 		# Enable sync or not
 		if sync or show:
