@@ -400,10 +400,7 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			self.debug(
-				f'{self.unique_name}: {type(e).__name__}. Sending SIGINT to process {self.process.pid}.',
-				sub='error'
-			)
+			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='error')
 			self.stop_process()
 			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
@@ -474,9 +471,11 @@ class Command(Runner):
 		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
+		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
 		self.process.send_signal(signal.SIGINT)
 
 	def stats(self):
+		"""Gather stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
@@ -499,6 +498,12 @@ class Command(Runner):
 
 	@staticmethod
 	def get_process_info(process, children=False):
+		"""Get process information from psutil.
+
+		Args:
+			process (subprocess.Process): Process.
+			children (bool): Whether to gather stats about children processes too.
+		"""
 		try:
 			data = {
 				k: v._asdict() if hasattr(v, '_asdict') else v
@@ -513,7 +518,11 @@ class Command(Runner):
 				yield from Command.get_process_info(subproc, children=False)
 
 	def run_item_loaders(self, line):
-		"""Run item loaders against an output line."""
+		"""Run item loaders against an output line.
+
+		Args:
+			line (str): Output line.
+		"""
 		if self.no_process:
 			return
 		for item_loader in self.item_loaders:
@@ -618,6 +627,10 @@ class Command(Runner):
 		Args:
 			opts (dict): Command options as input on the CLI.
 			opts_conf (dict): Options config (Click options definition).
+			opt_key_map (dict[str, str | Callable]): A dict to map option key with their actual values.
+			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
+			opt_prefix (str, default: '-'): Option prefix.
+			command_name (str | None, default: None): Command name.
 		"""
 		opts_str = ''
 		for opt_name, opt_conf in opts_conf.items():
@@ -684,7 +697,7 @@ class Command(Runner):
 		"""Input is empty."""
 		if not self.input_required:
 			return True
-		if not self.inputs or len(self.inputs) == 0:
+		if not inputs or len(inputs) == 0:
 			return False
 		return True
 

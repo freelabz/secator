@@ -125,7 +125,8 @@ ADDONS_ENABLED = {}
 
 for addon, module in [
 	('worker', 'eventlet'),
-	('google', 'gspread'),
+	('gdrive', 'gspread'),
+	('gcs', 'google.cloud.storage'),
 	('mongodb', 'pymongo'),
 	('redis', 'redis'),
 	('dev', 'flake8'),

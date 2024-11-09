@@ -121,9 +121,15 @@ class Wordlists(StrictModel):
 	lists: Dict[str, List[str]] = {}
 
 
-class GoogleAddon(StrictModel):
+class GoogleDriveAddon(StrictModel):
 	enabled: bool = False
 	drive_parent_folder_id: str = ''
+	credentials_path: str = ''
+
+
+class GoogleCloudStorageAddon(StrictModel):
+	enabled: bool = False
+	bucket_name: str = ''
 	credentials_path: str = ''
 
 
@@ -140,7 +146,8 @@ class MongodbAddon(StrictModel):
 
 
 class Addons(StrictModel):
-	google: GoogleAddon = GoogleAddon()
+	gdrive: GoogleDriveAddon = GoogleDriveAddon()
+	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 
@@ -170,7 +177,7 @@ class Config(DotMap):
 	>>> config = Config.parse(path='/path/to/config.yml')  # get custom config (from YAML file).
 	>>> config.print() 									   # print config without defaults.
 	>>> config.print(partial=False)  					   # print full config.
-	>>> config.set('addons.google.enabled', False)         # set value in config.
+	>>> config.set('addons.gdrive.enabled', False)         # set value in config.
 	>>> config.save()									   # save config back to disk.
 	"""
 

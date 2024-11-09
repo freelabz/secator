@@ -81,9 +81,12 @@ redis = [
 mongodb = [
   'pymongo < 5',
 ]
-google = [
+gdrive = [
   'google-api-python-client < 3',
   'gspread < 7'
+]
+gcs = [
+	'google-cloud-storage < 3'
 ]
 
 [project.scripts]
