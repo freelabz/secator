@@ -1,8 +1,6 @@
 import os
-import threading
 
 from secator.utils import deduplicate
-from secator.output_types import Error
 
 
 def run_extractors(results, opts, inputs=[]):
@@ -86,4 +84,3 @@ def get_task_folder_id(path):
 	if names:
 		return names[-1] + 1
 	return 0
-

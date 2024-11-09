@@ -863,7 +863,7 @@ class Runner:
 		if isinstance(exporters, str):
 			exporters = exporters.split(',')
 		classes = [
-			import_dynamic(f'secator.exporters', f'{o.capitalize()}Exporter')
+			import_dynamic('secator.exporters', f'{o.capitalize()}Exporter')
 			for o in exporters
 			if o
 		]

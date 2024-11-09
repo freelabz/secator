@@ -1,6 +1,4 @@
-import os
 import threading
-import warnings
 
 from secator.output_types import Error
 
