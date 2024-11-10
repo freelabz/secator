@@ -17,11 +17,8 @@ class Task(Runner):
 	def yielder(self):
 		"""Run task.
 
-		Args:
-			sync (bool): Run in sync mode (main thread). If False, run in Celery worker in distributed mode.
-
-		Returns:
-			list: List of results.
+		Yields:
+			secator.output_types.OutputType: Secator output type.
 		"""
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
@@ -29,10 +26,10 @@ class Task(Runner):
 		# Run opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
-		dry_run = run_opts.get('show', False)
 
 		# Set task output types
 		self.output_types = task_cls.output_types
+		self.enable_duplicate_check = False
 
 		# Get hooks
 		hooks = {task_cls: self.hooks}
@@ -41,12 +38,11 @@ class Task(Runner):
 
 		# Run task
 		if self.sync:
-			run_opts['print_item'] = False
-			results = task_cls(self.targets, **run_opts)
-			if dry_run:  # don't run
-				return
+			self.print_item = False
+			result = task_cls.si(self.inputs, **run_opts)
+			results = result.apply().get()
 		else:
-			self.celery_result = task_cls.delay(self.targets, **run_opts)
+			self.celery_result = task_cls.delay(self.inputs, **run_opts)
 			self.add_subtask(self.celery_result.id, self.config.name, self.config.description or '')
 			yield Info(
 				message=f'Celery task created: {self.celery_result.id}',
@@ -56,7 +52,7 @@ class Task(Runner):
 				self.celery_result,
 				ids_map=self.celery_ids_map,
 				description=True,
-				print_remote_info=self.print_remote_info,
+				print_remote_info=False,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
 
 		# Yield task results
@@ -76,21 +72,3 @@ class Task(Runner):
 			if task_cls.__name__ == name:
 				return task_cls
 		raise ValueError(f'Task {name} not found. Aborting.')
-
-	@staticmethod
-	def get_tasks_from_conf(config):
-		"""Get task names from config. Ignore hierarchy and keywords.
-
-		TODO: Add hierarchy tree / add make flow diagrams.
-		"""
-		tasks = []
-		for name, opts in config.items():
-			if name.startswith('_group'):
-				tasks.extend(Task.get_tasks_from_conf(opts))
-			elif name == '_chain':
-				tasks.extend(Task.get_tasks_from_conf(opts))
-			else:
-				if '/' in name:
-					name = name.split('/')[0]
-				tasks.append(name)
-		return tasks

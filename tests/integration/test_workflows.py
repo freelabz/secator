@@ -81,26 +81,11 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 		for conf in TEST_WORKFLOWS:
 			with self.subTest(name=conf.name):
-				console.print(f'Testing workflow {conf.name} ...')
 				inputs = INPUTS_WORKFLOWS.get(conf.name, [])
 				outputs = OUTPUTS_WORKFLOWS.get(conf.name, [])
-				if not inputs:
-					console.print(
-						f'No inputs for workflow {conf.name} ! Skipping.', style='dim red'
-					)
-					continue
-				workflow = Workflow(conf, targets=inputs, run_opts=opts)
-				results = workflow.run()
-				if DEBUG > 0:
-					for result in results:
-						print(repr(result))
-				if not outputs:
-					console.print(
-						f'No outputs for workflow {conf.name} ! Skipping.', style='dim red'
-					)
-					continue
-				self._test_task_output(
-					results,
+				workflow = Workflow(conf, inputs=inputs, run_opts=opts)
+				self._test_runner_output(
+					workflow,
 					expected_results=outputs)
 
 	def test_inline_workflow(self):
@@ -135,7 +120,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 		config = TemplateLoader(conf)
 		workflow = Workflow(
 			config,
-			targets=['localhost'],
+			inputs=['localhost'],
 			results=[
 				Port(port=9999, host='localhost', ip='127.0.0.1', service_name='fake', _source='unknown', _context=expected_context)
 			],

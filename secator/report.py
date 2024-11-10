@@ -6,6 +6,27 @@ from secator.utils import merge_opts, get_file_timestamp, traceback_as_string
 from secator.rich import console
 from secator.runners._helpers import extract_from_results
 
+import concurrent.futures
+from threading import Lock
+
+
+def remove_duplicates(objects):
+	unique_objects = []
+	lock = Lock()
+
+	def add_if_unique(obj):
+		nonlocal unique_objects
+		with lock:
+			# Perform linear search to check for duplicates
+			if all(obj != existing_obj for existing_obj in unique_objects):
+				unique_objects.append(obj)
+
+	with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
+		# Execute the function concurrently for each object
+		executor.map(add_if_unique, objects)
+
+	return unique_objects
+
 
 # TODO: initialize from data, not from runner
 class Report:
@@ -34,7 +55,7 @@ class Report:
 					f'{str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',
 				)
 
-	def build(self, extractors=[], dedupe_from=[]):
+	def build(self, extractors=[], dedupe=False):
 		# Trim options
 		from secator.decorators import DEFAULT_CLI_OPTIONS
 		opts = merge_opts(self.runner.config.options, self.runner.run_opts)
@@ -75,8 +96,9 @@ class Report:
 			if items:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))
-				if CONFIG.runners.remove_duplicates:
-					items = [item for item in items if not item._duplicate and item not in dedupe_from]
+				if dedupe and CONFIG.runners.remove_duplicates:
+					items = remove_duplicates(items)
+					# items = [item for item in items if not item._duplicate and item not in dedupe_from]
 				for extractor in extractors:
 					items = extract_from_results(items, extractors=[extractor])
 				data['results'][output_name] = items

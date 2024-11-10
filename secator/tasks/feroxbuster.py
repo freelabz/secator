@@ -71,7 +71,7 @@ class feroxbuster(HttpFuzzer):
 
 	@staticmethod
 	def on_start(self):
-		if self.input_path:
+		if self.inputs_path:
 			self.cmd += ' --stdin'
 
 	@staticmethod

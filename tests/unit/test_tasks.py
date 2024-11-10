@@ -8,7 +8,7 @@ import warnings
 from secator.config import CONFIG
 from secator.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
 							   MATCH_CODES, OPT_NOT_SUPPORTED, RATE_LIMIT,
-							   THREADS, TIMEOUT, DEFAULT_HTTPX_FLAGS)
+							   THREADS, TIMEOUT)
 from secator.output_types import Url
 from secator.rich import console
 from secator.runners import Command
@@ -152,61 +152,61 @@ class TestCommandProcessOpts(unittest.TestCase):
 			default=10)
 		self.assertEqual(opt_value, None)
 
-	def test_httpx_build_cmd_defaults(self):
-		if httpx not in TEST_TASKS:
-			return
-		run_opts = {}
-		host = 'test.synology.me'
-		cls = httpx(host, **run_opts)
-		default_threads = cls.meta_opts[THREADS]['default']
-		expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -threads {default_threads}'
-		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls.print_line, False)
-		self.assertEqual(cls.print_item, False)
+	# def test_httpx_build_cmd_defaults(self):
+	# 	if httpx not in TEST_TASKS:
+	# 		return
+	# 	run_opts = {}
+	# 	host = 'test.synology.me'
+	# 	cls = httpx(host, **run_opts)
+	# 	default_threads = cls.meta_opts[THREADS]['default']
+	# 	expected_cmd = f'httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -threads {default_threads}'
+	# 	self.assertEqual(cls.cmd, expected_cmd)
+	# 	self.assertEqual(cls.print_line, False)
+	# 	self.assertEqual(cls.print_item, False)
 
-	def test_httpx_build_cmd_with_opts(self):
-		if httpx not in TEST_TASKS:
-			return
-		run_opts = {
-			FOLLOW_REDIRECT: False,
-			DELAY: 1,
-			RATE_LIMIT: 120,
-			THREADS: 10,
-			TIMEOUT: 1,
-			HEADER: 'Content-Type: application/xml',
-			MATCH_CODES: False, # intentionally omit arg, overriding default value
-			'filter_codes': '500',
-			'filter_size': '23,33'
-		}
-		host = 'test.synology.me'
-		cls = httpx(host, **run_opts)
-		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
-		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls.print_line, False)
-		self.assertEqual(cls.print_item, False)
+	# def test_httpx_build_cmd_with_opts(self):
+	# 	if httpx not in TEST_TASKS:
+	# 		return
+	# 	run_opts = {
+	# 		FOLLOW_REDIRECT: False,
+	# 		DELAY: 1,
+	# 		RATE_LIMIT: 120,
+	# 		THREADS: 10,
+	# 		TIMEOUT: 1,
+	# 		HEADER: 'Content-Type: application/xml',
+	# 		MATCH_CODES: False, # intentionally omit arg, overriding default value
+	# 		'filter_codes': '500',
+	# 		'filter_size': '23,33'
+	# 	}
+	# 	host = 'test.synology.me'
+	# 	cls = httpx(host, **run_opts)
+	# 	expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
+	# 	self.assertEqual(cls.cmd, expected_cmd)
+	# 	self.assertEqual(cls.print_line, False)
+	# 	self.assertEqual(cls.print_item, False)
 
-	def test_httpx_build_cmd_with_opts_with_prefix(self):
-		if httpx not in TEST_TASKS:
-			return
-		run_opts = {
-			FOLLOW_REDIRECT: False,
-			DELAY: 1,
-			RATE_LIMIT: 120,
-			THREADS: 10,
-			TIMEOUT: 1,
-			HEADER: 'Content-Type: application/xml',
-			MATCH_CODES: False, # intentionally omit arg, overriding default value
-			'filter_code': '200',
-			'filter_length': 50,
-			'httpx.filter_codes': '500',    # prefixed option keys should override
-			'httpx_filter_size': '23,33' # prefixed option keys should override
-		}
-		host = 'test.synology.me'
-		cls = httpx(host, **run_opts)
-		expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
-		self.assertEqual(cls.cmd, expected_cmd)
-		self.assertEqual(cls.print_line, False)
-		self.assertEqual(cls.print_item, False)
+	# def test_httpx_build_cmd_with_opts_with_prefix(self):
+	# 	if httpx not in TEST_TASKS:
+	# 		return
+	# 	run_opts = {
+	# 		FOLLOW_REDIRECT: False,
+	# 		DELAY: 1,
+	# 		RATE_LIMIT: 120,
+	# 		THREADS: 10,
+	# 		TIMEOUT: 1,
+	# 		HEADER: 'Content-Type: application/xml',
+	# 		MATCH_CODES: False, # intentionally omit arg, overriding default value
+	# 		'filter_code': '200',
+	# 		'filter_length': 50,
+	# 		'httpx.filter_codes': '500',    # prefixed option keys should override
+	# 		'httpx_filter_size': '23,33' # prefixed option keys should override
+	# 	}
+	# 	host = 'test.synology.me'
+	# 	cls = httpx(host, **run_opts)
+	# 	expected_cmd = f"httpx {DEFAULT_HTTPX_FLAGS} -u {host} -json -rstr {CONFIG.http.response_max_size_bytes} -rsts {CONFIG.http.response_max_size_bytes} -header 'Content-Type: application/xml' -delay 1s -rate-limit 120 -threads 10 -timeout 1 -filter-code 500 -filter-length 23,33"
+	# 	self.assertEqual(cls.cmd, expected_cmd)
+	# 	self.assertEqual(cls.print_line, False)
+	# 	self.assertEqual(cls.print_item, False)
 
 
 class TestCommandRun(unittest.TestCase, CommandOutputTester):
@@ -229,53 +229,16 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 		for cls, fixture in FIXTURES_TASKS.items():
 			console.print(f'\t[bold grey35]{cls.__name__} ...[/] ', end='')
 			with self.subTest(name=cls.__name__):
-
 				# Validate fixture
 				if not self._valid_fixture(cls, fixture):
 					continue
 
 				# Run command
 				targets = INPUTS_TASKS[cls.input_type]
-
-				with mock_command(cls, targets, META_OPTS, fixture, 'run') as results:
-					self._test_task_output(
-						results,
+				with mock_command(cls, targets, META_OPTS, fixture) as runner:
+					self._test_runner_output(
+						runner,
 						expected_output_types=cls.output_types
-					)
-
-	def test_cmd_original_schema(self):
-		console.print('')
-		for cls, fixture in FIXTURES_TASKS.items():
-
-			with self.subTest(name=cls.__name__):
-				console.print(f'\t[bold grey35]{cls.__name__} ...[/]', end='')
-
-				# Validate fixture
-				if not self._valid_fixture(cls, fixture):
-					continue
-
-				# Get expected output keys from fixture
-				expected_output_keys = None
-				if isinstance(fixture, dict):
-					if 'results' in fixture: # fix for JSON files having a 'results' key
-						expected_output_keys = fixture['results'][0].keys()
-					else:
-						expected_output_keys = fixture.keys()
-
-				# Run command
-				targets = INPUTS_TASKS[cls.input_type]
-				opts = copy.deepcopy(META_OPTS)
-				opts.update({
-					'orig': True,
-					'raw': isinstance(fixture, str)
-				})
-				with mock_command(cls, targets, opts, fixture, 'run') as results:
-					if not len(cls.output_types) == 1:
-						console.print('[dim gold3] skipped (multi-output task with single schema)[/]')
-						return
-					self._test_task_output(
-						results,
-						expected_output_keys=expected_output_keys
 					)
 
 

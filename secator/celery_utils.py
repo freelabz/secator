@@ -1,15 +1,20 @@
-from celery.result import AsyncResult, GroupResult
-from rich.panel import Panel
-from rich.padding import Padding
-from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from contextlib import nullcontext
-from secator.definitions import STATE_COLORS
-from secator.utils import debug, traceback_as_string
-from secator.rich import console
-from secator.config import CONFIG
+from time import sleep
+
 import kombu
 import kombu.exceptions
-from time import sleep
+
+from celery.result import AsyncResult, GroupResult
+from greenlet import GreenletExit
+from rich.panel import Panel
+from rich.padding import Padding
+
+from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from secator.config import CONFIG
+from secator.definitions import STATE_COLORS
+from secator.output_types import Error
+from secator.rich import console
+from secator.utils import debug, traceback_as_string
 
 
 class CeleryData(object):
@@ -45,8 +50,6 @@ class CeleryData(object):
 						border_style='bold gold3',
 						expand=False,
 						highlight=True), pad=(2, 0, 0, 0))
-			from rich.console import Console
-			console = Console()
 			progress = PanelProgress(
 				SpinnerColumn('dots'),
 				TextColumn('{task.fields[descr]}  ') if description else '',
@@ -57,7 +60,7 @@ class CeleryData(object):
 				TextColumn('{task.fields[progress]}%'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
 				refresh_per_second=1,
-				transient=True,
+				transient=False,
 				console=console,
 				# redirect_stderr=True,
 				# redirect_stdout=False
@@ -103,10 +106,7 @@ class CeleryData(object):
 		state = data['state']
 		pdata['state'] = f'[{STATE_COLORS[state]}]{state}[/]'
 		pdata = {k: v for k, v in pdata.items() if v}
-		progress_int = pdata.pop('progress', None)
 		progress.update(progress_id, **pdata)
-		if progress_int:
-			progress.update(progress_id, advance=progress_int, **pdata)
 
 	@staticmethod
 	def poll(result, ids_map, refresh_interval):
@@ -119,11 +119,15 @@ class CeleryData(object):
 			try:
 				yield from CeleryData.get_all_data(result, ids_map)
 				if result.ready():
-					debug('RESULT READY', sub='celery.runner', id=result.id)
+					debug('result is ready', sub='celery.poll', id=result.id)
 					yield from CeleryData.get_all_data(result, ids_map)
 					break
-			except kombu.exceptions.DecodeError:
-				debug('kombu decode error', sub='debug.celery', id=result.id)
+			except (KeyboardInterrupt, GreenletExit):
+				debug('encounted KeyboardInterrupt or GreenletExit', sub='celery.poll')
+				raise
+			except Exception as e:
+				error = Error.from_exception(e)
+				debug(repr(error), sub='celery.poll')
 				pass
 			finally:
 				sleep(refresh_interval)
@@ -136,7 +140,6 @@ class CeleryData(object):
 			dict: Subtasks state and results.
 		"""
 		task_ids = list(ids_map.keys())
-		datas = []
 		for task_id in task_ids:
 			data = CeleryData.get_task_data(task_id, ids_map)
 			if not data:
@@ -146,10 +149,9 @@ class CeleryData(object):
 				sub='celery.poll',
 				id=data['id'],
 				obj={data['full_name']: data['state'], 'count': data['count']},
-				level=4
+				verbose=True
 			)
 			yield data
-			datas.append(data)
 
 		# Calculate and yield parent task progress
 		# if not datas:
@@ -186,7 +188,7 @@ class CeleryData(object):
 		# Get remote result
 		res = AsyncResult(task_id)
 		if not res:
-			debug('empty response', sub='debug.celery', id=task_id)
+			debug('empty response', sub='celery.data', id=task_id)
 			return
 
 		# Set up task state
@@ -205,14 +207,14 @@ class CeleryData(object):
 		# - If it's a dict, it's the custom user metadata.
 
 		if isinstance(info, Exception):
-			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='debug.celery', id=task_id)
+			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
 			raise info
 
 		elif isinstance(info, list):
 			data['results'] = info
 			errors = [e for e in info if e._type == 'error']
 			status = 'FAILURE' if errors else 'SUCCESS'
-			data['count'] = len([c for c in info if c._source == data['name']])
+			data['count'] = len([c for c in info if c._source.startswith(data['name'])])
 			data['state'] = status
 
 		elif isinstance(info, dict):
@@ -225,12 +227,11 @@ class CeleryData(object):
 		if data['ready']:
 			data['progress'] = 100
 		elif data['results']:
-			progresses = [e for e in data['results'] if e._type == 'progress']
+			progresses = [e for e in data['results'] if e._type == 'progress' and e._source == data['full_name']]
 			if progresses:
 				data['progress'] = progresses[-1].percent
-				# print(f'found progress for {data["full_name"]}: {data["progress"]}')
 
-		debug('data', obj=data, sub='debug.celery', id=task_id)
+		debug('data', obj=data, sub='celery.data', id=task_id, verbose=True)
 		return data
 
 	@staticmethod
@@ -262,6 +263,6 @@ class CeleryData(object):
 			if hasattr(result, 'parent') and result.parent:
 				CeleryData.get_task_ids(result.parent, ids=ids)
 
-		except kombu.exceptions.DecodeError as e:
-			console.print(f'[bold red]{str(e)}. Aborting get_task_ids.[/]')
+		except kombu.exceptions.DecodeError:
+			debug('kombu decode error', sub='celery.data.get_task_ids')
 			return

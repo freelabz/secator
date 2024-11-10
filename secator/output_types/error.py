@@ -19,8 +19,14 @@ class Error(OutputType):
 	_table_fields = ['message', 'traceback']
 	_sort_by = ('_timestamp',)
 
-	def from_exception(e):
-		return Error(message=f'{type(e).__name__}: {str(e)}', traceback=traceback_as_string(e))
+	def from_exception(e, **kwargs):
+		message = type(e).__name__
+		if str(e):
+			message += f': {str(e)}'
+		return Error(message=message, traceback=traceback_as_string(e), **kwargs)
+
+	def __str__(self):
+		return self.message
 
 	def __repr__(self):
 		s = f'[bold red]❌ {self.message}[/]'
