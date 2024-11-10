@@ -12,7 +12,7 @@ class gf(Tagger):
 	input_flag = OPT_PIPE_INPUT
 	version_flag = OPT_NOT_SUPPORTED
 	opts = {
-		'pattern': {'type': str, 'help': 'Pattern names to match against (comma-delimited)'}
+		'pattern': {'type': str, 'help': 'Pattern names to match against (comma-delimited)', 'required': True}
 	}
 	opt_key_map = {
 		'pattern': ''
@@ -23,7 +23,6 @@ class gf(Tagger):
 		'git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true'
 	)
 	output_types = [Tag]
-	item_loaders = []
 
 	@staticmethod
 	def item_loader(self, line):

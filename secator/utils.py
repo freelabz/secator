@@ -12,24 +12,28 @@ import sys
 import validators
 import warnings
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from functools import reduce
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
+from time import time
+import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
 import ifaddr
 import yaml
-from rich.markdown import Markdown
 
-from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.definitions import (DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
 _tasks = []
+
+TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
 
 
 class TaskError(ValueError):
@@ -55,7 +59,7 @@ def setup_logging(level):
 	return logger
 
 
-def expand_input(input):
+def expand_input(input, ctx):
 	"""Expand user-provided input on the CLI:
 	- If input is a path, read the file and return the lines.
 	- If it's a comma-separated list, return the list.
@@ -63,12 +67,14 @@ def expand_input(input):
 
 	Args:
 		input (str): Input.
+		ctx (click.Context): Click context.
 
 	Returns:
 		str: Input.
 	"""
 	if input is None:  # read from stdin
-		console.print('Waiting for input on stdin ...', style='bold yellow')
+		if not ctx.obj['piped_input']:
+			console.print('Waiting for input on stdin ...', style='bold yellow')
 		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 		if rlist:
 			data = sys.stdin.read().splitlines()
@@ -201,25 +207,32 @@ def discover_tasks():
 	return _tasks
 
 
-def import_dynamic(cls_path, cls_root='Command'):
-	"""Import class dynamically from class path.
+def import_dynamic(path, name=None):
+	"""Import class or module dynamically from path.
 
 	Args:
-		cls_path (str): Class path.
+		path (str): Path to class or module.
+		name (str): If specified, does a getattr() on the package to get this attribute.
 		cls_root (str): Root parent class.
+
+	Examples:
+		>>> import_dynamic('secator.exporters', name='CsvExporter')
+		>>> import_dynamic('secator.hooks.mongodb', name='HOOKS')
 
 	Returns:
 		cls: Class object.
 	"""
 	try:
-		package, name = cls_path.rsplit(".", maxsplit=1)
-		cls = getattr(importlib.import_module(package), name)
-		root_cls = inspect.getmro(cls)[-2]
-		if root_cls.__name__ == cls_root:
-			return cls
-		return None
+		res = importlib.import_module(path)
+		if name:
+			res = getattr(res, name)
+			if res is None:
+				raise
+		return res
 	except Exception:
-		warnings.warn(f'"{package}.{name}" not found.')
+		if name:
+			path += f'.{name}'
+		warnings.warn(f'"{path}" not found.', category=UserWarning, stacklevel=2)
 		return None
 
 
@@ -331,39 +344,6 @@ def detect_host(interface=None):
 	return None
 
 
-def print_results_table(results, title=None, exclude_fields=[], log=False):
-	from secator.output_types import OUTPUT_TYPES
-	from secator.rich import build_table
-	_print = console.log if log else console.print
-	_print()
-	if title:
-		title = ' '.join(title.capitalize().split('_')) + ' results'
-		h1 = Markdown(f'# {title}')
-		_print(h1, style='bold magenta', width=50)
-		_print()
-	tables = []
-	for output_type in OUTPUT_TYPES:
-		if output_type.__name__ == 'Progress':
-			continue
-		items = [
-			item for item in results if item._type == output_type.get_name()
-		]
-		if CONFIG.runners.remove_duplicates:
-			items = [item for item in items if not item._duplicate]
-		if items:
-			_table = build_table(
-				items,
-				output_fields=output_type._table_fields,
-				exclude_fields=exclude_fields,
-				sort_by=output_type._sort_by)
-			tables.append(_table)
-			title = pluralize(items[0]._type).upper()
-			_print(f':wrench: {title}', style='bold gold3', justify='left')
-			_print(_table)
-			_print()
-	return tables
-
-
 def rich_to_ansi(text):
 	"""Convert text formatted with rich markup to standard string."""
 	from rich.console import Console
@@ -373,13 +353,21 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
-def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
+def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
 	debug_comp_empty = DEBUG_COMPONENT == [""] or not DEBUG_COMPONENT
-	if not debug_comp_empty and not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+	if debug_comp_empty:
 		return
-	elif debug_comp_empty and not DEBUG >= level:
+
+	if sub and verbose and not any(sub == s for s in DEBUG_COMPONENT):
+		sub = f'debug.{sub}'
+
+	if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
 		return
+
+	if lazy:
+		msg = lazy(msg)
+
 	s = ''
 	if sub:
 		s += f'[dim yellow4]{sub:13s}[/] '
@@ -392,15 +380,15 @@ def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, le
 		if isinstance(obj, dict):
 			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
 		elif isinstance(obj, list):
-			obj_str += sep.join(obj)
+			obj_str += f'[dim]{sep.join(obj)}[/]'
 	if obj_str and not obj_after:
 		s = f'{s} {obj_str} '
 	s += f'[dim yellow]{msg}[/] '
 	if obj_str and obj_after:
 		s = f'{s}: {obj_str}'
 	if id:
-		s += f' [italic dim white]\[{id}][/] '
-	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
+		s += f' [italic dim gray11]\[{id}][/] '
+	s = rich_to_ansi(f'[dim red]🐛 {s}[/]')
 	print(s)
 
 
@@ -577,3 +565,127 @@ def sort_files_by_date(file_list):
 	"""
 	file_list.sort(key=lambda x: x.stat().st_mtime)
 	return file_list
+
+
+def traceback_as_string(exc):
+	"""Format an exception's traceback as a readable string.
+
+	Args:
+		Exception: an exception.
+
+	Returns:
+		string: readable traceback.
+	"""
+	return ' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
+
+
+def should_update(update_frequency, last_updated=None, timestamp=None):
+	"""Determine if an object should be updated based on the update frequency and the last updated UNIX timestamp.
+
+	Args:
+		update_frequency (int): Update frequency in seconds.
+		last_updated (Union[int, None]): UNIX timestamp or None if unset.
+		timestamp (int): Item timestamp.
+
+	Returns:
+		bool: Whether the object should be updated.
+	"""
+	if not timestamp:
+		timestamp = time()
+	if last_updated and (timestamp - last_updated) < update_frequency:
+		return False
+	return True
+
+
+def list_reports(workspace=None, type=None, timedelta=None):
+	"""List all reports in secator reports dir.
+
+	Args:
+		workspace (str): Filter by workspace name.
+		type (str): Filter by runner type.
+		timedelta (None | datetime.timedelta): Keep results newer than timedelta.
+
+	Returns:
+		list: List all JSON reports.
+	"""
+	if type and not type.endswith('s'):
+		type += 's'
+	json_reports = []
+	for root, _, files in os.walk(CONFIG.dirs.reports):
+		for file in files:
+			path = Path(root) / file
+			if not path.parts[-1] == 'report.json':
+				continue
+			if workspace and path.parts[-4] != workspace:
+				continue
+			if type and path.parts[-3] != type:
+				continue
+			if timedelta and (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)) > timedelta:
+				continue
+			json_reports.append(path)
+	return json_reports
+
+
+def get_info_from_report_path(path):
+	try:
+		ws, runner_type, number = path.parts[-4], path.parts[-3], path.parts[-2]
+		workspace_path = '/'.join(path.parts[:-3])
+		return {
+			'workspace': ws,
+			'workspace_path': workspace_path,
+			'type': runner_type,
+			'id': number
+		}
+	except IndexError:
+		return {}
+
+
+def human_to_timedelta(time_str):
+	if not time_str:
+		return None
+	parts = TIMEDELTA_REGEX.match(time_str)
+	if not parts:
+		return
+	parts = parts.groupdict()
+	years = int(parts.pop('years') or 0)
+	months = int(parts.pop('months') or 0)
+	days = int(parts.get('days') or 0)
+	days += years * 365
+	days += months * 30
+	parts['days'] = days
+	time_params = {}
+	for name, param in parts.items():
+		if param:
+			time_params[name] = int(param)
+	return timedelta(**time_params)
+
+
+def deep_merge_dicts(*dicts):
+    """
+    Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
+
+    Args:
+        dicts (tuple): A tuple of dictionary objects to merge.
+
+    Returns:
+        dict: A new dictionary containing merged keys and values from all input dictionaries.
+	"""
+    def merge_two_dicts(dict1, dict2):
+        """
+        Helper function that merges two dictionaries.
+        """
+        result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
+        for key, value in dict2.items():
+            if key in result:
+                if isinstance(result[key], dict) and isinstance(value, dict):
+                    result[key] = merge_two_dicts(result[key], value)
+                elif isinstance(result[key], list) and isinstance(value, list):
+                    result[key] += value  # Concatenating lists
+                else:
+                    result[key] = value  # Overwrite if not both lists or both dicts
+            else:
+                result[key] = value
+        return result
+
+    # Use reduce to apply merge_two_dicts to all dictionaries in dicts
+    return reduce(merge_two_dicts, dicts, {})

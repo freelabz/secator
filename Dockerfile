@@ -37,7 +37,8 @@ COPY . /code/
 RUN pipx install .
 RUN secator install tools
 RUN secator install addons worker
-RUN secator install addons google
+RUN secator install addons gdrive
+RUN secator install addons gcs
 RUN secator install addons mongodb
 RUN secator install addons redis
 RUN secator install addons dev

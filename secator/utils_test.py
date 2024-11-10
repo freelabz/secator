@@ -6,12 +6,13 @@ import unittest.mock
 
 from fp.fp import FreeProxy
 
-from secator.definitions import (CIDR_RANGE, DEBUG, DELAY, DEPTH, EMAIL,
+from secator.definitions import (CIDR_RANGE, DELAY, DEPTH, EMAIL,
 							   FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
 							   METHOD, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
 from secator.cli import ALL_WORKFLOWS, ALL_TASKS, ALL_SCANS
-from secator.output_types import OutputType
+from secator.output_types import EXECUTION_TYPES, STAT_TYPES
+from secator.runners import Command
 from secator.rich import console
 from secator.utils import load_fixture
 
@@ -108,6 +109,7 @@ def mock_subprocess_popen(output_list):
 	mock_process = unittest.mock.MagicMock()
 	mock_process.wait.return_value = 0
 	mock_process.stdout.readline.side_effect = output_list
+	mock_process.pid = None
 	mock_process.returncode = 0
 
 	def mock_popen(*args, **kwargs):
@@ -117,7 +119,7 @@ def mock_subprocess_popen(output_list):
 
 
 @contextlib.contextmanager
-def mock_command(cls, targets=[], opts={}, fixture=None, method=''):
+def mock_command(cls, inputs=[], opts={}, fixture=None, method=''):
 	mocks = []
 	if isinstance(fixture, dict):
 		fixture = [fixture]
@@ -133,60 +135,79 @@ def mock_command(cls, targets=[], opts={}, fixture=None, method=''):
 		mocks.append(fixture)
 
 	with mock_subprocess_popen(mocks):
-		command = cls(targets, **opts)
+		command = cls(inputs, **opts)
 		if method == 'run':
-			yield cls(targets, **opts).run()
+			yield cls(inputs, **opts).run()
 		elif method == 'si':
-			yield cls.si([], targets, **opts)
+			yield cls.si([], inputs, **opts)
 		elif method in ['s', 'delay']:
-			yield getattr(cls, method)(targets, **opts)
+			yield getattr(cls, method)(inputs, **opts)
 		else:
 			yield command
 
 
 class CommandOutputTester:  # Mixin for unittest.TestCase
 
-	def _test_task_output(
+	def _test_runner_output(
 			self,
-			results,
+			runner,
 			expected_output_keys=[],
 			expected_output_types=[],
 			expected_results=[],
+			expected_status='SUCCESS',
 			empty_results_allowed=False):
 
-		if not isinstance(results, list):
-			results = [results]
+		console.print(f'[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
+
+		if not runner.inputs:
+			console.print('[dim gold3] skipped (no inputs defined).[/]')
+			return
+
+		if not expected_results and not expected_output_keys:
+			console.print('[dim gold3] (no outputs defined).[/]', end='')
 
 		try:
-			if not empty_results_allowed:
-				self.assertGreater(len(results), 0)
+			# Run runner
+			results = runner.run()
 
+			# Add execution types to allowed output types
+			expected_output_types.extend(EXECUTION_TYPES + STAT_TYPES)
+
+			# Check return code
+			if isinstance(runner, Command):
+				if not runner.ignore_return_code:
+					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code')
+
+			# Check results not empty
+			if not empty_results_allowed:
+				self.assertGreater(len(results), 0, f'{runner.name} should return at least 1 result')
+
+			# Check status
+			self.assertEqual(runner.status, expected_status, f'{runner.name} should have the status {expected_status}')
+
+			# Check results
 			for item in results:
 
-				if DEBUG > 2:
-					console.log('\n', log_locals=True)
-
-				if DEBUG > 0 and isinstance(item, OutputType):
-					print(repr(item))
-
 				if expected_output_types:
-					self.assertIn(type(item), expected_output_types)
+					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}"')  # noqa: E501
 
 				if expected_output_keys:
 					keys = [k for k in list(item.keys()) if not k.startswith('_')]
 					self.assertEqual(
 						set(keys).difference(set(expected_output_keys)),
-						set())
+						set(),
+						f'{runner.name}: item is missing expected keys {set(expected_output_keys)}')
 
+			# Check if runner results in expected results
 			if expected_results:
 				for result in expected_results:
-					self.assertIn(result, results)
+					self.assertIn(result, results, f'{runner.name}: {result} should be in runner results')
 
 		except Exception:
-			console.print('[bold red] failed[/]')
+			console.print('[dim red] failed[/]')
 			raise
 
-		console.print('[bold green] ok[/]')
+		console.print('[dim green] ok[/]')
 
 
 def clear_modules():
