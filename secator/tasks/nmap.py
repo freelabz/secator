@@ -30,7 +30,7 @@ class nmap(VulnMulti):
 	opt_prefix = '--'
 	output_types = [Port, Vulnerability, Exploit]
 	opts = {
-		PORTS: {'type': str, 'short': 'p', 'default': 'top-1000', 'help': 'Ports to scan'},
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan'},
 		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [full, 100, 1000]'},
 		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
 		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
