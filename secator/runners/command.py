@@ -1,25 +1,24 @@
+import copy
 import getpass
 import logging
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import uuid
 
-from time import sleep, time
+from time import time
 
 import psutil
 from fp.fp import FreeProxy
-from rich.tree import Tree
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
-from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import Info, Error, Target, Stat
+from secator.output_types import Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug, rich_to_ansi
 
 
 logger = logging.getLogger(__name__)
@@ -189,29 +188,8 @@ class Command(Runner):
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold cyan', rich=True)
 
-		# Debug built input
-		input_str = '\n '.join(self.inputs).strip()
-		debug(f'[dim magenta]File input:[/]\n [italic medium_turquoise]{input_str}[/]', sub='runner.init')
-
-		# Debug run options
-		run_opts_str = '\n '.join([
-			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.run_opts.items() if v is not None]).strip()
-		debug(f'[dim magenta]Run opts:[/]\n {run_opts_str}', sub='debug.runner.init')
-
-		# Debug format options
-		fmt_opts_str = '\n '.join([
-			f'[dim blue]{k}[/] -> [dim green]{v}[/]' for k, v in self.print_opts.items() if v is not None]).strip()
-		debug(f'[dim magenta]Print opts:[/]\n {fmt_opts_str}', sub='debug.runner.init')
-
-		# Debug hooks
-		hooks_str = ''
-		for hook_name, hook_funcs in self.hooks.items():
-			hook_funcs_str = ', '.join([f'[dim green]{h.__module__}.{h.__qualname__}[/]' for h in hook_funcs])
-			if hook_funcs:
-				hooks_str += f'[dim blue]{hook_name}[/] -> {hook_funcs_str}\n '
-		hooks_str = hooks_str.strip()
-		if hooks_str:
-			debug(f'[dim magenta]Hooks:[/]\n {hooks_str}', sub='debug.runner.init')
+		# Debug
+		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
 
 	def toDict(self):
 		res = super().toDict()
@@ -258,12 +236,14 @@ class Command(Runner):
 					d[k] = v.__name__
 			return d
 
-		opts = {k: convert(v) for k, v in cls.opts.items()}
+		cls_opts = copy.deepcopy(cls.opts)
+		opts = {k: convert(v) for k, v in cls_opts.items()}
 		for k, v in opts.items():
 			v['meta'] = cls.__name__
 			v['supported'] = True
 
-		meta_opts = {k: convert(v) for k, v in cls.meta_opts.items() if cls.opt_key_map.get(k) is not OPT_NOT_SUPPORTED}
+		cls_meta_opts = copy.deepcopy(cls.meta_opts)
+		meta_opts = {k: convert(v) for k, v in cls_meta_opts.items() if cls.opt_key_map.get(k) is not OPT_NOT_SUPPORTED}
 		for k, v in meta_opts.items():
 			v['meta'] = 'meta'
 			if cls.opt_key_map.get(k) is OPT_NOT_SUPPORTED:
@@ -361,10 +341,6 @@ class Command(Runner):
 			dict: Serialized object.
 		"""
 		try:
-			# Yield remote
-			if self.celery_result:
-				yield from self.yield_from_remote()
-				return
 
 			# Abort if it has children tasks
 			if self.has_children:
@@ -410,102 +386,96 @@ class Command(Runner):
 
 			# Process the output in real-time
 			for line in iter(lambda: self.process.stdout.readline(), b''):
-				sleep(0)  # for async to give up control
+				# sleep(0)  # for async to give up control
 				if not line:
 					break
+				yield from self.process_line(line)
 
-				# Strip line endings
-				line = line.rstrip()
-
-				# Some commands output ANSI text, so we need to remove those ANSI chars
-				if self.encoding == 'ansi':
-					ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-					line = ansi_escape.sub('', line)
-					line = line.replace('\\x0d\\x0a', '\n')
-
-				# Run on_line hooks
-				line = self.run_hooks('on_line', line)
-				if line is None:
-					continue
-
-				# Run item_loader to try parsing as dict
-				item_count = 0
-				for item in self.run_item_loaders(line):
-					yield item
-					item_count += 1
-
-				# Yield line if no items were yielded
-				if item_count == 0:
-					yield line
-
-				# Skip rest of iteration (no process mode)
-				if self.no_process:
-					continue
-
-				# Yield command stats (CPU, memory, conns ...)
-				# TODO: enable stats support with timer
-				if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
-					continue
-
-				yield from self.stats()
-				self.last_updated_stat = time()
-
+			# Run hooks after cmd has completed successfully
 			result = self.run_hooks('on_cmd_done')
 			if result:
 				yield from result
 
 		except FileNotFoundError as e:
-			if self.config.name in str(e):
-				error = 'Executable not found.'
-				if self.install_cmd:
-					error += f' Install it with `secator install tools {self.config.name}`.'
-			else:
-				error = str(e)
-			celery_id = self.context.get('celery_id', '')
-			if celery_id:
-				error += f' [{celery_id}]'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
-			self.return_code = 1
-			return
+			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			error = Error.from_exception(e)
-			error._source = self.unique_name,
-			error._uuid = str(uuid.uuid4())
-			yield error
-			self.kill()
+			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='error')
+			self.stop_process()
+			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 		finally:
 			yield from self._wait_for_end()
 
-	def yield_from_remote(self):
-		yield from CeleryData.iter_results(
-			self.celery_result,
-			ids_map=self.celery_ids_map,
-			print_remote_info=False
-		)
+	def process_line(self, line):
+		"""Process a single line of output emitted on stdout / stderr and yield results."""
 
-	def kill(self, signum=None, frame=None):
+		# Strip line endings
+		line = line.rstrip()
+
+		# Some commands output ANSI text, so we need to remove those ANSI chars
+		if self.encoding == 'ansi':
+			ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+			line = ansi_escape.sub('', line)
+			line = line.replace('\\x0d\\x0a', '\n')
+
+		# Run on_line hooks
+		line = self.run_hooks('on_line', line)
+		if line is None:
+			return
+
+		# Run item_loader to try parsing as dict
+		item_count = 0
+		for item in self.run_item_loaders(line):
+			yield item
+			item_count += 1
+
+		# Yield line if no items were yielded
+		if item_count == 0:
+			yield line
+
+		# Skip rest of iteration (no process mode)
+		if self.no_process:
+			return
+
+		# Yield command stats (CPU, memory, conns ...)
+		# TODO: enable stats support with timer
+		if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
+			return
+
+		yield from self.stats()
+		self.last_updated_stat = time()
+
+	def handle_file_not_found(self, exc):
+		"""Handle case where binary is not found.
+
+		Args:
+			exc (FileNotFoundError): the exception.
+
+		Yields:
+			secator.output_types.Error: the error.
+		"""
+		self.return_code = 127
+		if self.config.name in str(exc):
+			message = 'Executable not found.'
+			if self.install_cmd:
+				message += f' Install it with `secator install tools {self.config.name}`.'
+			error = Error(message=message)
+		else:
+			error = Error.from_exception(exc)
+		error._source = self.unique_name
+		error._uuid = str(uuid.uuid4())
+		yield error
+
+	def stop_process(self):
+		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
-		pid = self.process.pid
-		if not pid:
-			return
-		proc = psutil.Process(pid)
-		root = Tree(f'   [bold red]{proc.pid} ({proc.name()})[/]')
-		for subproc in proc.children(recursive=True):
-			subproc.kill()
-			root.add(f'    [bold blue]{subproc.pid} ({subproc.name()})[/]')
-		proc.kill()
-		info = Info(message=f'Killed processes:\n{rich_to_ansi(root)}')
-		self._print_item(info)
-		self.killed = True
+		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
+		self.process.send_signal(signal.SIGINT)
 
 	def stats(self):
+		"""Gather stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
@@ -528,6 +498,12 @@ class Command(Runner):
 
 	@staticmethod
 	def get_process_info(process, children=False):
+		"""Get process information from psutil.
+
+		Args:
+			process (subprocess.Process): Process.
+			children (bool): Whether to gather stats about children processes too.
+		"""
 		try:
 			data = {
 				k: v._asdict() if hasattr(v, '_asdict') else v
@@ -542,7 +518,11 @@ class Command(Runner):
 				yield from Command.get_process_info(subproc, children=False)
 
 	def run_item_loaders(self, line):
-		"""Run item loaders against an output line."""
+		"""Run item loaders against an output line.
+
+		Args:
+			line (str): Output line.
+		"""
 		if self.no_process:
 			return
 		for item_loader in self.item_loaders:
@@ -604,12 +584,15 @@ class Command(Runner):
 		"""Wait for process to finish and process output and return code."""
 		if not self.process:
 			return
+		for line in self.process.stdout.readlines():
+			yield from self.process_line(line)
 		self.process.wait()
 		self.return_code = self.process.returncode
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
 		self.output = self.output.strip()
 		self.killed = self.return_code == -2 or self.killed
+		self.debug(f'Command {self.cmd} finished with return code {self.return_code}', sub='command')
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
@@ -644,6 +627,10 @@ class Command(Runner):
 		Args:
 			opts (dict): Command options as input on the CLI.
 			opts_conf (dict): Options config (Click options definition).
+			opt_key_map (dict[str, str | Callable]): A dict to map option key with their actual values.
+			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
+			opt_prefix (str, default: '-'): Option prefix.
+			command_name (str | None, default: None): Command name.
 		"""
 		opts_str = ''
 		for opt_name, opt_conf in opts_conf.items():
@@ -710,7 +697,7 @@ class Command(Runner):
 		"""Input is empty."""
 		if not self.input_required:
 			return True
-		if not self.inputs or len(self.inputs) == 0:
+		if not inputs or len(inputs) == 0:
 			return False
 		return True
 
@@ -769,9 +756,6 @@ class Command(Runner):
 		if meta_opts_str:
 			self.cmd += f' {meta_opts_str}'
 
-		# Debug
-		debug('Built cmd', obj={'cmd': self.cmd}, sub='runner.init')
-
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a
 		string or a list to the cmd.
@@ -813,4 +797,3 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
-		debug('Built input', obj={'inputs': self.inputs, 'inputs_path': self.inputs_path, 'shell': self.shell, 'cmd': self.cmd}, sub='runner.init')  # noqa: E501

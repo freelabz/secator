@@ -35,6 +35,7 @@ class Directories(StrictModel):
 	wordlists: Directory = ''
 	cves: Directory = ''
 	payloads: Directory = ''
+	performance: Directory = ''
 	revshells: Directory = ''
 	celery: Directory = ''
 	celery_data: Directory = ''
@@ -43,7 +44,7 @@ class Directories(StrictModel):
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -120,9 +121,15 @@ class Wordlists(StrictModel):
 	lists: Dict[str, List[str]] = {}
 
 
-class GoogleAddon(StrictModel):
+class GoogleDriveAddon(StrictModel):
 	enabled: bool = False
 	drive_parent_folder_id: str = ''
+	credentials_path: str = ''
+
+
+class GoogleCloudStorageAddon(StrictModel):
+	enabled: bool = False
+	bucket_name: str = ''
 	credentials_path: str = ''
 
 
@@ -139,7 +146,8 @@ class MongodbAddon(StrictModel):
 
 
 class Addons(StrictModel):
-	google: GoogleAddon = GoogleAddon()
+	gdrive: GoogleDriveAddon = GoogleDriveAddon()
+	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 
@@ -169,7 +177,7 @@ class Config(DotMap):
 	>>> config = Config.parse(path='/path/to/config.yml')  # get custom config (from YAML file).
 	>>> config.print() 									   # print config without defaults.
 	>>> config.print(partial=False)  					   # print full config.
-	>>> config.set('addons.google.enabled', False)         # set value in config.
+	>>> config.set('addons.gdrive.enabled', False)         # set value in config.
 	>>> config.save()									   # save config back to disk.
 	"""
 

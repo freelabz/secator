@@ -8,8 +8,8 @@ from time import time
 from celery import Celery, chain, chord, signals
 from celery.app import trace
 
-# from pyinstrument import Profiler  # TODO: make pyinstrument optional
 from rich.logging import RichHandler
+from retry import retry
 
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error
@@ -111,6 +111,7 @@ def void(*args, **kwargs):
 	pass
 
 
+@retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
 	if task.sync:
@@ -123,7 +124,8 @@ def update_state(celery_task, task, force=False):
 		sub='celery.state',
 		id=celery_task.request.id,
 		obj={task.unique_name: task.status, 'count': task.self_findings_count},
-		obj_after=False
+		obj_after=False,
+		verbose=True
 	)
 	return celery_task.update_state(
 		state='RUNNING',
@@ -157,7 +159,8 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 		'',
 		obj={task.unique_name: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks), 'target_count': len(targets)},
 		obj_after=False,
-		sub='celery.state'
+		sub='celery.state',
+		verbose=True
 	)
 
 	# Clone opts
@@ -173,11 +176,13 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
 		task_id = str(uuid.uuid4())
+		opts['has_parent'] = True
+		opts['enable_duplicate_check'] = False
 		sig = type(task).s(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
 		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
-		task.results.append(info)
+		task.add_result(info)
 		sigs.append(sig)
 
 	# Build Celery workflow
@@ -198,9 +203,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
-	debug(f'Received task with args {args} and kwargs {kwargs}', sub="celery", level=2)
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
+	debug(f'Received task with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	kwargs['context']['celery_id'] = self.request.id
 	task = Task(*args, **kwargs)
 	task.run()
@@ -208,9 +211,7 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
-	debug(f'Received workflow with args {args} and kwargs {kwargs}', sub="celery", level=2)
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
+	debug(f'Received workflow with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)
 	workflow.run()
@@ -218,7 +219,7 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
-	debug(f'Received scan with args {args} and kwargs {kwargs}', sub="celery", level=2)
+	debug(f'Received scan with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -282,7 +283,8 @@ def run_command(self, results, name, targets, opts={}):
 			},
 			obj_after=False,
 			id=self.request.id,
-			sub='celery.state'
+			sub='celery.state',
+			verbose=True
 		)
 
 		# Chunk task if needed
@@ -306,14 +308,13 @@ def run_command(self, results, name, targets, opts={}):
 		error = Error.from_exception(e)
 		error._source = task.unique_name
 		error._uuid = str(uuid.uuid4())
-		task._print_item(error)
-		task.stop_live_tasks()
-		task.results.append(error)
+		task.add_result(error, print=True)
+		task.stop_celery_tasks()
 
 	finally:
 		update_state(self, task, force=True)
 		gc.collect()
-		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='debug.celery.results')
+		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='celery.results', verbose=True)
 		return task.results
 
 

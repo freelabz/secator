@@ -12,7 +12,7 @@ class gf(Tagger):
 	input_flag = OPT_PIPE_INPUT
 	version_flag = OPT_NOT_SUPPORTED
 	opts = {
-		'pattern': {'type': str, 'help': 'Pattern names to match against (comma-delimited)'}
+		'pattern': {'type': str, 'help': 'Pattern names to match against (comma-delimited)', 'required': True}
 	}
 	opt_key_map = {
 		'pattern': ''

@@ -72,7 +72,7 @@ class OutputType:
 						mapped_val = mapped_key(item)
 					except Exception as e:
 						mapped_val = None
-						if DEBUG > 0:
+						if DEBUG > 1:
 							console.print_exception(show_locals=True)
 						raise TypeError(
 							f'Fail to transform value for "{key}" using output_map function. Exception: '

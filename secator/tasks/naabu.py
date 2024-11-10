@@ -17,7 +17,7 @@ class naabu(ReconPort):
 	opts = {
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports (default: nmap\'s top 100 ports'},
 		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'},
-		'scan_type': {'type': str, 'help': 'Scan type (SYN (s)/CONNECT(c))'},
+		'scan_type': {'type': str, 'short': 'st', 'help': 'Scan type (SYN (s)/CONNECT(c))'},
 		# 'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
 	}
 	opt_key_map = {
