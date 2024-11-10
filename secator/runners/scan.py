@@ -5,6 +5,7 @@ from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners._helpers import run_extractors
 from secator.runners.workflow import Workflow
+from secator.utils import merge_opts
 
 logger = logging.getLogger(__name__)
 
@@ -22,21 +23,23 @@ class Scan(Runner):
 		"""Run scan.
 
 		Yields:
-			dict: Item yielded from individual workflow tasks.
+			secator.output_types.OutputType: Secator output type.
 		"""
+		scan_opts = self.config.options
+		self.print_item = False
 		for name, workflow_opts in self.config.workflows.items():
 
 			# Extract opts and and expand target from previous workflows results
-			targets, workflow_opts = run_extractors(self.results, workflow_opts or {}, self.targets)
+			targets, workflow_opts = run_extractors(self.results, workflow_opts or {}, self.inputs)
 
 			# Run workflow
 			run_opts = self.run_opts.copy()
-			run_opts['print_item'] = False
+			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			workflow = Workflow(
 				TemplateLoader(name=f'workflows/{name}'),
 				targets,
 				results=[],
-				run_opts=run_opts,
+				run_opts=opts,
 				hooks=self._hooks,
 				context=self.context.copy())
 

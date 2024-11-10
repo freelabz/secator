@@ -58,13 +58,15 @@ class searchsploit(Command):
 
 	@staticmethod
 	def before_init(self):
-		_in = self.input[0]
+		if len(self.inputs) == 0:
+			return
+		_in = self.inputs[0]
 		self.matched_at = None
 		if '~' in _in:
 			split = _in.split('~')
 			self.matched_at = split[0]
-			self.input[0] = split[1]
-		self.input[0] = self.input[0].replace('httpd', '').replace('/', ' ')
+			self.inputs[0] = split[1]
+		self.inputs[0] = self.inputs[0].replace('httpd', '').replace('/', ' ')
 
 	@staticmethod
 	def on_item_pre_convert(self, item):
@@ -81,12 +83,17 @@ class searchsploit(Command):
 			group = match.groups()
 			product = '-'.join(group[0].strip().split(' '))
 			if len(group[1]) > 1:
-				versions, title = tuple(group[1].split(' - '))
-				item.name = title
-				product_info = [f'{product.lower()} {v.strip()}' for v in versions.split('/')]
-				item.tags = product_info + item.tags
+				try:
+					versions, title = tuple(group[1].split(' - '))
+					item.name = title
+					product_info = [f'{product.lower()} {v.strip()}' for v in versions.split('/')]
+					item.tags = product_info + item.tags
+				except ValueError:
+					item.name = item.name.split(' - ')[-1]
+					item.tags = [product.lower()]
+					pass
 			# else:
 			# 	self._print(f'[bold red]{item.name} ({item.reference}) did not quite match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
-		input_tag = '-'.join(self.input[0].replace('\'', '').split(' '))
+		input_tag = '-'.join(self.inputs[0].replace('\'', '').split(' '))
 		item.tags = [input_tag] + item.tags
 		return item

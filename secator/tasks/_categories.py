@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from cpe import CPE
 
 from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
-								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID,
+								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, IP,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
 								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
 								 USERNAME, WORDLIST)
@@ -106,7 +106,7 @@ class ReconIp(Recon):
 
 
 class ReconPort(Recon):
-	input_type = HOST
+	input_type = IP
 	output_types = [Port]
 
 

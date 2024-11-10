@@ -1,5 +1,5 @@
 import unittest
-from secator.output_types import Url, Target, Port, Vulnerability
+from secator.output_types import Url, Target, Port, Vulnerability, Info
 from secator.runners import Command
 from secator.serializers import JSONSerializer
 from time import sleep
@@ -11,21 +11,23 @@ class TestWorker(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
 		cls.queue = queue.Queue()
-		cls.cmd = Command.execute('secator worker', run=False)
+		cls.cmd = Command.execute('secator worker', name='secator_worker', quiet=True, run=False)
 		cls.thread = Thread(target=cls.cmd.run)
 		cls.thread.start()
 		sleep(3)
 
 	@classmethod
 	def tearDownClass(cls) -> None:
-		cls.cmd.kill()
+		cls.cmd.stop_process()
 		cls.thread.join()
 
 	def test_httpx(self):
 		cmd = Command.execute(
 			'secator x httpx testphp.vulnweb.com -json',
+			name='secator_x_httpx',
 			no_process=False,
-			cls_attributes={'output_types': [Target, Url], 'item_loaders': [JSONSerializer()]}
+			quiet=True,
+			cls_attributes={'output_types': [Target, Url, Info], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
 		self.assertEqual(len(cmd.findings), 1)
@@ -44,8 +46,10 @@ class TestWorker(unittest.TestCase):
 	def test_host_recon(self):
 		cmd = Command.execute(
 			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',
+			name='secator_w_host_recon',
 			no_process=False,
-			cls_attributes={'output_types': [Target, Url, Port, Vulnerability], 'item_loaders': [JSONSerializer()]}
+			quiet=True,
+			cls_attributes={'output_types': [Target, Url, Port, Vulnerability, Info], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
 		self.assertGreater(len(cmd.results), 0)
@@ -84,5 +88,5 @@ class TestWorker(unittest.TestCase):
 
 	# def test_pd_pipe(self):
 	# 	cmd = Command.execute(
-	# 		'secator x subfinder vulnweb.com | secator x nmap | secator x httpx | secator x katana | secator x httpx | secator x gf --pattern lfi "{match}" | secator x dalfox'
+	# 		'secator x subfinder vulnweb.com | secator x nmap | secator x httpx | secator x katana | secator x httpx | secator x gf --pattern lfi -fmt "{match}" | secator x dalfox'
 	# 	)

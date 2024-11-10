@@ -172,32 +172,32 @@ class TestCommandRunner(unittest.TestCase):
 		with mock_command(MyCommand, TARGETS, {}, FIXTURE) as command:
 			results = command.run()
 			errors = [e.message for e in results if e._type == 'error']
-			self.assertIn('Loader failed', errors)
+			self.assertIn('Exception: Loader failed', errors)
 			self.assertEqual(len(command.results), 2)
 			self.assertEqual(command.status, 'FAILURE')
 
-	def test_input_validator_failed_no_targets(self):
+	def test_inputs_validator_failed_no_targets(self):
 		cmd = MyCommand([])
 		cmd.run()
 		errors = cmd.errors
 		messages = [e.message for e in errors]
 		self.assertIn("Validator failed: Input is empty.", messages)
 		self.assertEqual(len(cmd.results), 1)
-		self.assertFalse(cmd.input_valid)
+		self.assertFalse(cmd.inputs_valid)
 		self.assertEqual(cmd.status, 'FAILURE')
 
-	def test_input_validator_failed_multiple_targets(self):
+	def test_inputs_validator_failed_multiple_targets(self):
 		targets = ['host1', 'host2']
 		cmd = MyCommand(targets)
 		cmd.run()
 		errors = cmd.errors
 		messages = [e.message for e in errors]
-		self.assertIn("Validator failed: Multiple input passed in non-worker mode.", messages)
+		self.assertIn("Validator failed: Command does not suport multiple inputs in non-worker mode. Consider using .delay() instead.", messages)
 		self.assertEqual(len(cmd.results), 1)
-		self.assertFalse(cmd.input_valid)
+		self.assertFalse(cmd.inputs_valid)
 		self.assertEqual(cmd.status, 'FAILURE')
 
-	# def test_input_validator_failed_wrong_input_type(self):
+	# def test_inputs_validator_failed_wrong_input_type(self):
 	# 	MyCommand.input_types = [Url]
 	# 	targets = ['host1', 'host2'] 
 	# 	cmd = MyCommand(targets)
@@ -205,7 +205,7 @@ class TestCommandRunner(unittest.TestCase):
 	# 	messages = [e.message for e in errors]
 	# 	self.assertIn("Validator failed: Multiple input passed in non-worker mode.", messages)
 	# 	self.assertEqual(len(cmd.results), 0)
-	# 	self.assertFalse(cmd.input_valid)
+	# 	self.assertFalse(cmd.inputs_valid)
 	# 	delattr(MyCommand, 'input_types', None)
 
 	def test_stdout_output(self):
