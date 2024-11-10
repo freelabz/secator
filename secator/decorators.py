@@ -174,23 +174,33 @@ def get_command_options(config):
 				if conf.get('required', False):
 					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)  # noqa: E501
 					continue
-				if opt_default is not None and opt_value_in_config != opt_default and opt_is_flag:
-					conf['reverse'] = True
-					conf['default'] = not conf['default']
+				mapped_value = cls.opt_value_map.get(opt)
+				if callable(mapped_value):
+					opt_value_in_config = mapped_value(opt_value_in_config)
+				elif mapped_value:
+					opt_value_in_config = mapped_value
+				if opt_value_in_config != opt_default:
+					if opt in opt_cache:
+						continue
+					if opt_is_flag:
+						conf['reverse'] = True
+						conf['default'] = not conf['default']
+					# print(f'{opt}: change default to {opt_value_in_config}')
+					conf['default'] = opt_value_in_config
 
 			# If opt is a flag but the default is True, add opposite flag
 			if opt_is_flag and opt_default is True:
 				conf['reverse'] = True
 
 			# Check if opt already processed before
-			opt = opt.replace('_', '-')
 			if opt in opt_cache:
 				# debug('OPT (skipped: opt is already in opt cache)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)
 				continue
 
 			# Build help
-			all_opts[opt] = conf
 			opt_cache.append(opt)
+			opt = opt.replace('_', '-')
+			all_opts[opt] = conf
 
 			# Debug
 			debug_conf = OrderedDict({'opt': opt, 'config_val': opt_value_in_config or 'N/A', **conf.copy()})

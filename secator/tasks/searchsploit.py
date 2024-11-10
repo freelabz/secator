@@ -58,6 +58,8 @@ class searchsploit(Command):
 
 	@staticmethod
 	def before_init(self):
+		if len(self.inputs) == 0:
+			return
 		_in = self.inputs[0]
 		self.matched_at = None
 		if '~' in _in:

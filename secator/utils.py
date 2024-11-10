@@ -380,7 +380,7 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 		if isinstance(obj, dict):
 			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
 		elif isinstance(obj, list):
-			obj_str += f'[dim]{sep.join(obj)}[/]'
+			obj_str += f'[dim green]{sep.join(obj)}[/]'
 	if obj_str and not obj_after:
 		s = f'{s} {obj_str} '
 	s += f'[dim yellow]{msg}[/] '

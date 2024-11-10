@@ -252,8 +252,9 @@ def run_command(self, results, name, targets, opts={}):
 	results = deduplicate(results, attr='_uuid')
 
 	# Get expanded targets
-	if not chunk:
+	if not chunk and results:
 		targets, opts = run_extractors(results, opts, targets)
+		debug('after extractors', obj={'targets': targets, 'opts': opts}, sub='celery.state')
 
 	try:
 		# Get task class
