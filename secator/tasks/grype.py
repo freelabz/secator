@@ -1,6 +1,8 @@
 import os
 import yaml
 
+from pathlib import Path
+
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
@@ -41,9 +43,7 @@ class grype(VulnCode):
 		}
 	}
 	output_types = [Vulnerability]
-	install_cmd = (
-		'$(curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin) || exit 1'
-	)
+	install_cmd = f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {str(Path.home())}/.local/bin'  # noqa: E501
 	install_github_handle = 'anchore/grype'
 
 	@staticmethod
