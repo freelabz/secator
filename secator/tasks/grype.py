@@ -32,16 +32,6 @@ class grype(VulnCode):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
-	output_map = {
-		Vulnerability: {
-			'name': lambda x: x['vulnerability']['id'],
-			'id': lambda x: x['vulnerability']['id'],
-			'severity': lambda x: x['vulnerability']['severity'].lower(),
-			'cvss_score': lambda x: x['vulnerability']['cvss_score'],
-			'references': lambda x: x['vulnerability']['urls'],
-			'description': lambda x: x['vulnerability']['description']
-		}
-	}
 	output_types = [Vulnerability]
 	install_cmd = f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {str(Path.home())}/.local/bin'  # noqa: E501
 	install_github_handle = 'anchore/grype'
