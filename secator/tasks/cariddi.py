@@ -6,6 +6,7 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Tag, Url
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
 
@@ -39,6 +40,7 @@ class cariddi(HttpCrawler):
 		TIMEOUT: 't',
 		USER_AGENT: 'ua'
 	}
+	item_loaders = [JSONSerializer()]
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@latest'
 	install_github_handle = 'edoardottt/cariddi'
 	encoding = 'ansi'
@@ -70,7 +72,6 @@ class cariddi(HttpCrawler):
 
 		for error in errors:
 			match = error['match']
-			match = (match[:1000] + '...TRUNCATED') if len(match) > 1000 else match  # truncate as this can be a very long match
 			error['extra_data'] = {'error': match, 'source': 'body'}
 			error['match'] = url
 			yield Tag(**error)

@@ -1,4 +1,6 @@
 import glob
+
+from collections import OrderedDict
 from pathlib import Path
 
 import yaml
@@ -84,54 +86,68 @@ class TemplateLoader(DotMap):
 			for key in TEMPLATES_DIR_KEYS
 		})
 
-	def get_tasks_class(self):
-		from secator.runners import Task
-		tasks = []
-		for name, conf in self.tasks.items():
-			if name == '_group':
-				group_conf = TemplateLoader(input={'tasks': conf})
-				tasks.extend(group_conf.get_tasks_class())
-			else:
-				tasks.append(Task.get_task_class(name))
-		return tasks
-
-	def get_workflows(self):
-		return [TemplateLoader(name=f'workflows/{name}') for name, _ in self.workflows.items()]
-
-	def get_workflow_supported_opts(self):
-		opts = {}
-		tasks = self.get_tasks_class()
-		for task_cls in tasks:
-			task_opts = task_cls.get_supported_opts()
-			for name, conf in task_opts.items():
-				supported = opts.get(name, {}).get('supported', False)
-				opts[name] = conf
-				opts[name]['supported'] = conf['supported'] or supported
-		return opts
-
-	def get_scan_supported_opts(self):
-		opts = {}
-		workflows = self.get_workflows()
-		for workflow in workflows:
-			workflow_opts = workflow.get_workflow_supported_opts()
-			for name, conf in workflow_opts.items():
-				supported = opts.get(name, {}).get('supported', False)
-				opts[name] = conf
-				opts[name]['supported'] = conf['supported'] or supported
-		return opts
-
 	@property
 	def supported_opts(self):
-		return self.get_supported_opts()
+		"""Property to access supported options easily."""
+		return self._collect_supported_opts()
 
-	def get_supported_opts(self):
+	@property
+	def flat_tasks(self):
+		"""Property to access tasks easily."""
+		return self._extract_tasks()
+
+	def _collect_supported_opts(self):
+		"""Collect supported options from the tasks extracted from the config."""
+		tasks = self._extract_tasks()
 		opts = {}
-		if self.type == 'workflow':
-			opts = self.get_workflow_supported_opts()
-		elif self.type == 'scan':
-			opts = self.get_scan_supported_opts()
+		for _, task_info in tasks.items():
+			task_class = task_info['class']
+			if task_class:
+				task_opts = task_class.get_supported_opts()
+				for name, conf in task_opts.items():
+					if name not in opts or not opts[name].get('supported', False):
+						opts[name] = conf
+		return opts
+
+	def _extract_tasks(self):
+		"""Extract tasks from any workflow or scan config.
+
+		Returns:
+			dict: A dict of task full name to task configuration containing the keyts keys ['name', 'class', 'opts']).
+		"""
+		from secator.runners import Task
+		tasks = OrderedDict()
+
+		def parse_config(config, prefix=''):
+			for key, value in config.items():
+				if key == '_group':
+					parse_config(value, prefix)
+				elif value:
+					task_name = f'{prefix}/{key}' if prefix else key
+					name = key.split('/')[0]
+					if task_name not in tasks:
+						tasks[task_name] = {'name': name, 'class': Task.get_task_class(name), 'opts': {}}
+					tasks[task_name]['opts'] = value.toDict()
+
+		if not self.type:
+			return tasks
+
 		elif self.type == 'task':
-			tasks = self.get_tasks_class()
-			if tasks:
-				opts = tasks[0].get_supported_opts()
-		return dict(sorted(opts.items()))
+			tasks[self.name] = {'name': self.name, 'class': Task.get_task_class(self.name)}
+
+		elif self.type == 'scan':
+			# For each workflow in the scan, load it and incorporate it with a unique prefix
+			for wf_name, _ in self.workflows.items():
+				name = wf_name.split('/')[0]
+				config = TemplateLoader(name=f'workflows/{name}')
+				wf_tasks = config.flat_tasks
+				# Prefix tasks from this workflow with its name to prevent collision
+				for task_key, task_val in wf_tasks.items():
+					unique_task_key = f"{wf_name}/{task_key}"  # Append workflow name to task key
+					tasks[unique_task_key] = task_val
+
+		elif self.type == 'workflow':
+			# Normal parsing of a workflow
+			parse_config(self.tasks)
+
+		return dict(tasks)

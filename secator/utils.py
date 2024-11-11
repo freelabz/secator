@@ -1,3 +1,4 @@
+import fnmatch
 import inspect
 import importlib
 import itertools
@@ -11,24 +12,28 @@ import sys
 import validators
 import warnings
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from functools import reduce
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
+from time import time
+import traceback
 from urllib.parse import urlparse, quote
 
-
+import humanize
 import ifaddr
 import yaml
-from rich.markdown import Markdown
 
-from secator.definitions import (DEBUG, DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.definitions import (DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
 _tasks = []
+
+TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
 
 
 class TaskError(ValueError):
@@ -54,7 +59,7 @@ def setup_logging(level):
 	return logger
 
 
-def expand_input(input):
+def expand_input(input, ctx):
 	"""Expand user-provided input on the CLI:
 	- If input is a path, read the file and return the lines.
 	- If it's a comma-separated list, return the list.
@@ -62,12 +67,14 @@ def expand_input(input):
 
 	Args:
 		input (str): Input.
+		ctx (click.Context): Click context.
 
 	Returns:
 		str: Input.
 	"""
 	if input is None:  # read from stdin
-		console.print('Waiting for input on stdin ...', style='bold yellow')
+		if not ctx.obj['piped_input']:
+			console.print('Waiting for input on stdin ...', style='bold yellow')
 		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 		if rlist:
 			data = sys.stdin.read().splitlines()
@@ -200,25 +207,32 @@ def discover_tasks():
 	return _tasks
 
 
-def import_dynamic(cls_path, cls_root='Command'):
-	"""Import class dynamically from class path.
+def import_dynamic(path, name=None):
+	"""Import class or module dynamically from path.
 
 	Args:
-		cls_path (str): Class path.
+		path (str): Path to class or module.
+		name (str): If specified, does a getattr() on the package to get this attribute.
 		cls_root (str): Root parent class.
+
+	Examples:
+		>>> import_dynamic('secator.exporters', name='CsvExporter')
+		>>> import_dynamic('secator.hooks.mongodb', name='HOOKS')
 
 	Returns:
 		cls: Class object.
 	"""
 	try:
-		package, name = cls_path.rsplit(".", maxsplit=1)
-		cls = getattr(importlib.import_module(package), name)
-		root_cls = inspect.getmro(cls)[-2]
-		if root_cls.__name__ == cls_root:
-			return cls
-		return None
+		res = importlib.import_module(path)
+		if name:
+			res = getattr(res, name)
+			if res is None:
+				raise
+		return res
 	except Exception:
-		warnings.warn(f'"{package}.{name}" not found.')
+		if name:
+			path += f'.{name}'
+		warnings.warn(f'"{path}" not found.', category=UserWarning, stacklevel=2)
 		return None
 
 
@@ -330,39 +344,6 @@ def detect_host(interface=None):
 	return None
 
 
-def print_results_table(results, title=None, exclude_fields=[], log=False):
-	from secator.output_types import OUTPUT_TYPES
-	from secator.rich import build_table
-	_print = console.log if log else console.print
-	_print()
-	if title:
-		title = ' '.join(title.capitalize().split('_')) + ' results'
-		h1 = Markdown(f'# {title}')
-		_print(h1, style='bold magenta', width=50)
-		_print()
-	tables = []
-	for output_type in OUTPUT_TYPES:
-		if output_type.__name__ == 'Progress':
-			continue
-		items = [
-			item for item in results if item._type == output_type.get_name()
-		]
-		if CONFIG.runners.remove_duplicates:
-			items = [item for item in items if not item._duplicate]
-		if items:
-			_table = build_table(
-				items,
-				output_fields=output_type._table_fields,
-				exclude_fields=exclude_fields,
-				sort_by=output_type._sort_by)
-			tables.append(_table)
-			title = pluralize(items[0]._type).upper()
-			_print(f':wrench: {title}', style='bold gold3', justify='left')
-			_print(_table)
-			_print()
-	return tables
-
-
 def rich_to_ansi(text):
 	"""Convert text formatted with rich markup to standard string."""
 	from rich.console import Console
@@ -372,35 +353,43 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
-def debug(msg, sub='', id='', obj=None, obj_after=True, obj_breaklines=False, level=1):
-	"""Print debug log if DEBUG >= level."""
-	debug_comp_empty = DEBUG_COMPONENT == [""] or not DEBUG_COMPONENT
-	if not debug_comp_empty and not any(sub.startswith(s) for s in DEBUG_COMPONENT):
-		return
-	elif debug_comp_empty and not DEBUG >= level:
-		return
-	s = ''
-	if sub:
-		s += f'[dim yellow4]{sub:13s}[/] '
-	obj_str = ''
-	if obj:
-		sep = ', '
-		if obj_breaklines:
-			obj_str += '\n '
-			sep = '\n '
-		if isinstance(obj, dict):
-			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
-		elif isinstance(obj, list):
-			obj_str += sep.join(obj)
-	if obj_str and not obj_after:
-		s = f'{s} {obj_str} '
-	s += f'[dim yellow]{msg}[/] '
-	if obj_str and obj_after:
-		s = f'{s}: {obj_str}'
-	if id:
-		s += f' [italic dim white]\[{id}][/] '
-	s = rich_to_ansi(f'[dim red]\[debug] {s}[/]')
-	print(s)
+def format_object(obj, obj_breaklines=False):
+    """Format the debug object for printing."""
+    sep = '\n ' if obj_breaklines else ', '
+    if isinstance(obj, dict):
+        return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
+    elif isinstance(obj, list):
+        return f'[dim green]{sep.join(obj)}[/]'
+    return ''
+
+
+def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
+    """Print debug log if DEBUG >= level."""
+    if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
+        return
+
+    if sub:
+        if verbose and sub not in DEBUG_COMPONENT:
+            sub = f'debug.{sub}'
+        if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+            return
+
+    if lazy:
+        msg = lazy(msg)
+
+    formatted_msg = f'[dim yellow4]{sub:13s}[/] ' if sub else ''
+    obj_str = format_object(obj, obj_breaklines) if obj else ''
+
+    # Constructing the message string based on object position
+    if obj_str and not obj_after:
+        formatted_msg += f'{obj_str} '
+    formatted_msg += f'[dim yellow]{msg}[/]'
+    if obj_str and obj_after:
+        formatted_msg += f': {obj_str}'
+    if id:
+        formatted_msg += f' [italic dim gray11]\[{id}][/]'
+
+    console.print(f'[dim red]🐛 {formatted_msg}[/]', style='red')
 
 
 def escape_mongodb_url(url):
@@ -468,31 +457,239 @@ def extract_domain_info(input, domain_only=False):
 
 
 def extract_subdomains_from_fqdn(fqdn, domain, suffix):
+	"""Generates a list of subdomains up to the root domain from a fully qualified domain name (FQDN).
+
+	Args:
+		fqdn (str): The full domain name, e.g., 'console.cloud.google.com'.
+		domain (str): The main domain, e.g., 'google'.
+		suffix (str): The top-level domain (TLD), e.g., 'com'.
+
+	Returns:
+		List[str]: A list containing the FQDN and all its subdomains down to the root domain.
+	"""
+	# Start with the full domain and prepare to break it down
+	parts = fqdn.split('.')
+
+	# Initialize the list of subdomains with the full domain
+	subdomains = [fqdn]
+
+	# Continue stripping subdomains until reaching the base domain (domain + suffix)
+	base_domain = f"{domain}.{suffix}"
+	current = fqdn
+
+	while current != base_domain:
+		# Remove the leftmost part of the domain
+		parts = parts[1:]
+		current = '.'.join(parts)
+		subdomains.append(current)
+
+	return subdomains
+
+
+def match_file_by_pattern(paths, pattern, type='both'):
+	"""Match pattern on a set of paths.
+
+	Args:
+		paths (iterable): An iterable of Path objects to be searched.
+		pattern (str): The pattern to search for in file names or directory names, supports Unix shell-style wildcards.
+		type (str): Specifies the type to search for; 'file', 'directory', or 'both'.
+
+	Returns:
+		list of Path: A list of Path objects that match the given pattern.
+	"""
+	matches = []
+	for path in paths:
+		full_path = str(path.resolve())
+		if path.is_dir() and type in ['directory', 'both'] and fnmatch.fnmatch(full_path, f'*{pattern}*'):
+			matches.append(path)
+		elif path.is_file() and type in ['file', 'both'] and fnmatch.fnmatch(full_path, f'*{pattern}*'):
+			matches.append(path)
+
+	return matches
+
+
+def get_file_date(file_path):
+	"""Retrieves the last modification date of the file and returns it in a human-readable format.
+
+	Args:
+		file_path (Path): Path object pointing to the file.
+
+	Returns:
+		str: Human-readable time format.
+	"""
+	# Get the last modified time of the file
+	mod_timestamp = file_path.stat().st_mtime
+	mod_date = datetime.fromtimestamp(mod_timestamp)
+
+	# Determine how to display the date based on how long ago it was modified
+	now = datetime.now()
+	if (now - mod_date).days < 7:
+		# If the modification was less than a week ago, use natural time
+		return humanize.naturaltime(now - mod_date) + mod_date.strftime(" @ %H:%m")
+	else:
+		# Otherwise, return the date in "on %B %d" format
+		return f"{mod_date.strftime('%B %d @ %H:%m')}"
+
+
+def trim_string(s, max_length=30):
+	"""
+	Trims a long string to include the beginning and the end, with an ellipsis in the middle.
+	The output string will not exceed the specified maximum length.
+
+	Args:
+		s (str): The string to be trimmed.
+		max_length (int): The maximum allowed length of the trimmed string.
+
+	Returns:
+	str: The trimmed string.
+	"""
+	if len(s) <= max_length:
+		return s  # Return the original string if it's short enough
+
+	# Calculate the lengths of the start and end parts
+	end_length = 30  # Default end length
+	if max_length - end_length - 5 < 0:  # 5 accounts for the length of '[...] '
+		end_length = max_length - 5  # Adjust end length if total max_length is too small
+	start_length = max_length - end_length - 5  # Subtract the space for '[...] '
+
+	# Build the trimmed string
+	start_part = s[:start_length]
+	end_part = s[-end_length:]
+	return f"{start_part} [...] {end_part}"
+
+
+def sort_files_by_date(file_list):
+	"""Sorts a list of file paths by their modification date.
+
+	Args:
+		file_list (list): A list of file paths (strings or Path objects).
+
+	Returns:
+		list: The list of file paths sorted by modification date.
+	"""
+	file_list.sort(key=lambda x: x.stat().st_mtime)
+	return file_list
+
+
+def traceback_as_string(exc):
+	"""Format an exception's traceback as a readable string.
+
+	Args:
+		Exception: an exception.
+
+	Returns:
+		string: readable traceback.
+	"""
+	return ' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
+
+
+def should_update(update_frequency, last_updated=None, timestamp=None):
+	"""Determine if an object should be updated based on the update frequency and the last updated UNIX timestamp.
+
+	Args:
+		update_frequency (int): Update frequency in seconds.
+		last_updated (Union[int, None]): UNIX timestamp or None if unset.
+		timestamp (int): Item timestamp.
+
+	Returns:
+		bool: Whether the object should be updated.
+	"""
+	if not timestamp:
+		timestamp = time()
+	if last_updated and (timestamp - last_updated) < update_frequency:
+		return False
+	return True
+
+
+def list_reports(workspace=None, type=None, timedelta=None):
+	"""List all reports in secator reports dir.
+
+	Args:
+		workspace (str): Filter by workspace name.
+		type (str): Filter by runner type.
+		timedelta (None | datetime.timedelta): Keep results newer than timedelta.
+
+	Returns:
+		list: List all JSON reports.
+	"""
+	if type and not type.endswith('s'):
+		type += 's'
+	json_reports = []
+	for root, _, files in os.walk(CONFIG.dirs.reports):
+		for file in files:
+			path = Path(root) / file
+			if not path.parts[-1] == 'report.json':
+				continue
+			if workspace and path.parts[-4] != workspace:
+				continue
+			if type and path.parts[-3] != type:
+				continue
+			if timedelta and (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)) > timedelta:
+				continue
+			json_reports.append(path)
+	return json_reports
+
+
+def get_info_from_report_path(path):
+	try:
+		ws, runner_type, number = path.parts[-4], path.parts[-3], path.parts[-2]
+		workspace_path = '/'.join(path.parts[:-3])
+		return {
+			'workspace': ws,
+			'workspace_path': workspace_path,
+			'type': runner_type,
+			'id': number
+		}
+	except IndexError:
+		return {}
+
+
+def human_to_timedelta(time_str):
+	if not time_str:
+		return None
+	parts = TIMEDELTA_REGEX.match(time_str)
+	if not parts:
+		return
+	parts = parts.groupdict()
+	years = int(parts.pop('years') or 0)
+	months = int(parts.pop('months') or 0)
+	days = int(parts.get('days') or 0)
+	days += years * 365
+	days += months * 30
+	parts['days'] = days
+	time_params = {}
+	for name, param in parts.items():
+		if param:
+			time_params[name] = int(param)
+	return timedelta(**time_params)
+
+
+def deep_merge_dicts(*dicts):
     """
-    Generates a list of subdomains up to the root domain from a fully qualified domain name (FQDN).
+    Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
 
     Args:
-        fqdn (str): The full domain name, e.g., 'console.cloud.google.com'.
-        domain (str): The main domain, e.g., 'google'.
-        suffix (str): The top-level domain (TLD), e.g., 'com'.
+        dicts (tuple): A tuple of dictionary objects to merge.
 
     Returns:
-        List[str]: A list containing the FQDN and all its subdomains down to the root domain.
-    """
-    # Start with the full domain and prepare to break it down
-    parts = fqdn.split('.')
+        dict: A new dictionary containing merged keys and values from all input dictionaries.
+	"""
+    def merge_two_dicts(dict1, dict2):
+        """
+        Helper function that merges two dictionaries.
+        """
+        result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
+        for key, value in dict2.items():
+            if key in result:
+                if isinstance(result[key], dict) and isinstance(value, dict):
+                    result[key] = merge_two_dicts(result[key], value)
+                elif isinstance(result[key], list) and isinstance(value, list):
+                    result[key] += value  # Concatenating lists
+                else:
+                    result[key] = value  # Overwrite if not both lists or both dicts
+            else:
+                result[key] = value
+        return result
 
-    # Initialize the list of subdomains with the full domain
-    subdomains = [fqdn]
-
-    # Continue stripping subdomains until reaching the base domain (domain + suffix)
-    base_domain = f"{domain}.{suffix}"
-    current = fqdn
-
-    while current != base_domain:
-        # Remove the leftmost part of the domain
-        parts = parts[1:]
-        current = '.'.join(parts)
-        subdomains.append(current)
-
-    return subdomains
+    # Use reduce to apply merge_two_dicts to all dictionaries in dicts
+    return reduce(merge_two_dicts, dicts, {})

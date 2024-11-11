@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, trim_string
 
 
 @dataclass
@@ -37,9 +37,11 @@ class Tag(OutputType):
 				sep = ' '
 				if not v:
 					continue
-				if isinstance(v, str) and len(v) >= 80:
-					v = v.replace('\n', '\n' + '  ').replace('...TRUNCATED', '\n[italic bold red]...truncated to 1000 chars[/]')
-					sep = '\n    '
+				if isinstance(v, str):
+					v = trim_string(v, max_length=1000)
+					if len(v) > 1000:
+						v = v.replace('\n', '\n' + sep)
+						sep = '\n    '
 				ed += f'\n    [dim red]{k}[/]:{sep}[dim yellow]{v}[/]'
 		if ed:
 			s += ed

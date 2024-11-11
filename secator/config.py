@@ -20,6 +20,7 @@ StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.
 ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
+DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
 
 
 class StrictModel(BaseModel, extra='forbid'):
@@ -28,12 +29,13 @@ class StrictModel(BaseModel, extra='forbid'):
 
 class Directories(StrictModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
-	data: Directory = Path.home() / '.secator'
+	data: Directory = Path(DATA_FOLDER)
 	templates: Directory = ''
 	reports: Directory = ''
 	wordlists: Directory = ''
 	cves: Directory = ''
 	payloads: Directory = ''
+	performance: Directory = ''
 	revshells: Directory = ''
 	celery: Directory = ''
 	celery_data: Directory = ''
@@ -42,7 +44,7 @@ class Directories(StrictModel):
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -61,6 +63,7 @@ class Celery(StrictModel):
 	broker_visibility_timeout: int = 3600
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
+	result_expires: int = 86400  # 1 day
 
 
 class Cli(StrictModel):
@@ -70,8 +73,11 @@ class Cli(StrictModel):
 
 
 class Runners(StrictModel):
-	input_chunk_size: int = 1000
-	progress_update_frequency: int = 60
+	input_chunk_size: int = 100
+	progress_update_frequency: int = 20
+	stat_update_frequency: int = 20
+	backend_update_frequency: int = 5
+	poll_frequency: int = 5
 	skip_cve_search: bool = False
 	skip_cve_low_confidence: bool = True
 	remove_duplicates: bool = False
@@ -81,20 +87,21 @@ class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
 	store_responses: bool = False
+	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
 
 
 class Tasks(StrictModel):
-	exporters: List[str] = ['json', 'csv']
+	exporters: List[str] = ['json', 'csv', 'txt']
 
 
 class Workflows(StrictModel):
-	exporters: List[str] = ['json', 'csv']
+	exporters: List[str] = ['json', 'csv', 'txt']
 
 
 class Scans(StrictModel):
-	exporters: List[str] = ['json', 'csv']
+	exporters: List[str] = ['json', 'csv', 'txt']
 
 
 class Payloads(StrictModel):
@@ -114,9 +121,15 @@ class Wordlists(StrictModel):
 	lists: Dict[str, List[str]] = {}
 
 
-class GoogleAddon(StrictModel):
+class GoogleDriveAddon(StrictModel):
 	enabled: bool = False
 	drive_parent_folder_id: str = ''
+	credentials_path: str = ''
+
+
+class GoogleCloudStorageAddon(StrictModel):
+	enabled: bool = False
+	bucket_name: str = ''
 	credentials_path: str = ''
 
 
@@ -128,10 +141,13 @@ class MongodbAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'mongodb://localhost'
 	update_frequency: int = 60
+	max_pool_size: int = 10
+	server_selection_timeout_ms: int = 5000
 
 
 class Addons(StrictModel):
-	google: GoogleAddon = GoogleAddon()
+	gdrive: GoogleDriveAddon = GoogleDriveAddon()
+	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 
@@ -161,7 +177,7 @@ class Config(DotMap):
 	>>> config = Config.parse(path='/path/to/config.yml')  # get custom config (from YAML file).
 	>>> config.print() 									   # print config without defaults.
 	>>> config.print(partial=False)  					   # print full config.
-	>>> config.set('addons.google.enabled', False)         # set value in config.
+	>>> config.set('addons.gdrive.enabled', False)         # set value in config.
 	>>> config.save()									   # save config back to disk.
 	"""
 
@@ -512,7 +528,7 @@ def download_files(data: dict, target_folder: Path, offline_mode: bool, type: st
 		else:
 			# Download file from URL
 			ext = url_or_path.split('.')[-1]
-			filename = f'{name}.{ext}'
+			filename = f'{name}.{ext}' if not name.endswith(ext) else name
 			target_path = target_folder / filename
 			if not target_path.exists():
 				try:
