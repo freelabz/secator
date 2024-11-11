@@ -53,5 +53,18 @@ class trivy(Command):
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read())['Results']
 		for item in results:
-			yield from item.get('Vulnerabilities', [])
-			yield from item.get('Secrets', [])
+			for vuln in item.get('Vulnerabilities', []):
+				vuln_id = vuln['VulnerabilityID']
+				yield Vulnerability(
+					name=vuln_id,
+					id=vuln_id,
+					description=vuln['Description'],
+					severity=vuln['Severity'].lower(),
+					references=vuln['References']
+				)
+			for secret in item.get('Secrets', []):
+				yield Tag(
+					name=vuln['RuleID'],
+					match=vuln['Match'],
+					extra_data={k: v for k, v in secret.items() if k not in ['RuleID', 'Match']}
+				)
