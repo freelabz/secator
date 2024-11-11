@@ -203,7 +203,6 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
-	debug(f'Received task with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	kwargs['context']['celery_id'] = self.request.id
 	task = Task(*args, **kwargs)
 	task.run()
@@ -211,7 +210,6 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
-	debug(f'Received workflow with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)
 	workflow.run()
@@ -219,7 +217,6 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
-	debug(f'Received scan with args {args} and kwargs {kwargs}', sub="celery.run", verbose=True)
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -252,8 +249,9 @@ def run_command(self, results, name, targets, opts={}):
 	results = deduplicate(results, attr='_uuid')
 
 	# Get expanded targets
-	if not chunk:
+	if not chunk and results:
 		targets, opts = run_extractors(results, opts, targets)
+		debug('after extractors', obj={'targets': targets, 'opts': opts}, sub='celery.state')
 
 	try:
 		# Get task class
