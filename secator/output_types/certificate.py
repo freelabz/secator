@@ -53,14 +53,14 @@ class Certificate(OutputType):
     def __repr__(self) -> str:
         s = f'📜 [bold white]{self.host}[/]'
         if self.subject_cn:
-            s += f' [white]Subject cn : {self.subject_cn}'
+            s += f' [white]\[cn={self.subject_cn}][/]'
         if self.subject_an:
-            s += f' [white]Subject an : {', '.join(self.subject_an)}'
+            s += f' [white]\[an={", ".join(self.subject_an)}][/]'
         if self.is_expired():
-            s += f' [red] expired since {self.not_after.strftime('%m %d %Y')}'
+            s += f' [red] expired since {self.not_after.strftime("%m %d %Y")}[/]'
         else:
-            s += f' [green] not expired until {self.not_after.strftime('%m %d %Y')}'
+            s += f' [green] not expired until {self.not_after.strftime("%m %d %Y")}[/]'
         if self.issuer:
-            s += f'[white] issuer : {self.issuer}'
-        s += f'[white] {self.status}'
+            s += f'[white] issuer : {self.issuer}[/]'
+        s += f'[white] {self.status}[/]'
         return rich_to_ansi(s)
