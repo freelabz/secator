@@ -353,43 +353,43 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
+def format_object(obj, obj_breaklines=False):
+    """Format the debug object for printing."""
+    sep = '\n ' if obj_breaklines else ', '
+    if isinstance(obj, dict):
+        return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
+    elif isinstance(obj, list):
+        return f'[dim green]{sep.join(obj)}[/]'
+    return ''
+
+
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
-	"""Print debug log if DEBUG >= level."""
-	debug_comp_empty = DEBUG_COMPONENT == [""] or not DEBUG_COMPONENT
-	if debug_comp_empty:
-		return
+    """Print debug log if DEBUG >= level."""
+    if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
+        return
 
-	if sub and verbose and not any(sub == s for s in DEBUG_COMPONENT):
-		sub = f'debug.{sub}'
+    if sub:
+        if verbose and sub not in DEBUG_COMPONENT:
+            sub = f'debug.{sub}'
+        if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+            return
 
-	if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
-		return
+    if lazy:
+        msg = lazy(msg)
 
-	if lazy:
-		msg = lazy(msg)
+    formatted_msg = f'[dim yellow4]{sub:13s}[/] ' if sub else ''
+    obj_str = format_object(obj, obj_breaklines) if obj else ''
 
-	s = ''
-	if sub:
-		s += f'[dim yellow4]{sub:13s}[/] '
-	obj_str = ''
-	if obj:
-		sep = ', '
-		if obj_breaklines:
-			obj_str += '\n '
-			sep = '\n '
-		if isinstance(obj, dict):
-			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
-		elif isinstance(obj, list):
-			obj_str += f'[dim green]{sep.join(obj)}[/]'
-	if obj_str and not obj_after:
-		s = f'{s} {obj_str} '
-	s += f'[dim yellow]{msg}[/] '
-	if obj_str and obj_after:
-		s = f'{s}: {obj_str}'
-	if id:
-		s += f' [italic dim gray11]\[{id}][/] '
-	s = rich_to_ansi(f'[dim red]🐛 {s}[/]')
-	print(s)
+    # Constructing the message string based on object position
+    if obj_str and not obj_after:
+        formatted_msg += f'{obj_str} '
+    formatted_msg += f'[dim yellow]{msg}[/]'
+    if obj_str and obj_after:
+        formatted_msg += f': {obj_str}'
+    if id:
+        formatted_msg += f' [italic dim gray11]\[{id}][/]'
+    
+    console.print(f'[dim red]🐛 {formatted_msg}[/]', style='red')
 
 
 def escape_mongodb_url(url):

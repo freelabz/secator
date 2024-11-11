@@ -19,6 +19,7 @@ from secator.config import CONFIG
 from secator.output_types import Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
+from secator.utils import debug
 
 
 logger = logging.getLogger(__name__)
@@ -621,8 +622,7 @@ class Command(Runner):
 			opt_value_map={},
 			opt_prefix='-',
 			command_name=None):
-		"""Process a dict of options using a config, option key map / value map
-		and option character like '-' or '--'.
+		"""Process a dict of options using a config, option key map / value map and option character like '-' or '--'.
 
 		Args:
 			opts (dict): Command options as input on the CLI.
@@ -634,6 +634,7 @@ class Command(Runner):
 		"""
 		opts_str = ''
 		for opt_name, opt_conf in opts_conf.items():
+			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)
 
 			# Get opt value
 			default_val = opt_conf.get('default')
@@ -644,25 +645,30 @@ class Command(Runner):
 				opt_prefix=command_name,
 				default=default_val)
 
+			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)
+
 			# Skip option if value is falsy
 			if opt_val in [None, False, []]:
-				# logger.debug(f'Option {opt_name} was passed but is falsy. Skipping.')
+				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)
 				continue
 
 			# Convert opt value to expected command opt value
 			mapped_opt_val = opt_value_map.get(opt_name)
-			if callable(mapped_opt_val):
-				opt_val = mapped_opt_val(opt_val)
-			elif mapped_opt_val:
-				opt_val = mapped_opt_val
+			if mapped_opt_val:
+				if callable(mapped_opt_val):
+					opt_val = mapped_opt_val(opt_val)
+				else:
+					opt_val = mapped_opt_val
 
 			# Convert opt name to expected command opt name
 			mapped_opt_name = opt_key_map.get(opt_name)
-			if mapped_opt_name == OPT_NOT_SUPPORTED:
-				# logger.debug(f'Option {opt_name} was passed but is unsupported. Skipping.')
-				continue
-			elif mapped_opt_name is not None:
-				opt_name = mapped_opt_name
+			if mapped_opt_name:
+				if mapped_opt_name == OPT_NOT_SUPPORTED:
+					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='command.options', verbose=True)
+					continue
+				else:
+					opt_name = mapped_opt_name
+			debug('mapped key / value', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)
 
 			# Avoid shell injections and detect opt prefix
 			opt_name = str(opt_name).split(' ')[0]  # avoid cmd injection
@@ -682,6 +688,7 @@ class Command(Runner):
 				if shlex_quote:
 					opt_val = shlex.quote(str(opt_val))
 				opts_str += f' {opt_val}'
+			debug('final', obj={'name': opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)
 
 		return opts_str.strip()
 
@@ -715,17 +722,21 @@ class Command(Runner):
 	@staticmethod
 	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
 		default = default or Command._get_opt_default(opt_name, opts_conf)
-		aliases = [
-			opts.get(f'{opt_prefix}_{opt_name}'),
-			opts.get(f'{opt_prefix}.{opt_name}'),
-			opts.get(opt_name),
+		opt_names = [
+			f'{opt_prefix}.{opt_name}',
+			f'{opt_prefix}_{opt_name}',
+			opt_name,
 		]
-		alias = [conf.get('short') for _, conf in opts_conf.items() if conf.get('short') in opts]
+		opt_values = [opts.get(o) for o in opt_names]
+		alias = [conf.get('short') for _, conf in opts_conf.items() if conf.get('short') in opts and _ == opt_name]
 		if alias:
-			aliases.append(opts.get(alias[0]))
-		if OPT_NOT_SUPPORTED in aliases:
+			opt_values.append(opts.get(alias[0]))
+		if OPT_NOT_SUPPORTED in opt_values:
+			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='command.options', verbose=True)
 			return None
-		return next((v for v in aliases if v is not None), default)
+		value = next((v for v in opt_values if v is not None), default)
+		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)
+		return value
 
 	def _build_cmd(self):
 		"""Build command string."""

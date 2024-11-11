@@ -373,6 +373,9 @@ def register_runner(cli_endpoint, config):
 						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 						sys.exit(1)
 
+		from secator.utils import debug
+		debug('Run options', obj=opts, sub='cli')
+
 		# Set run options
 		opts.update({
 			'print_cmd': True,
