@@ -4,7 +4,7 @@ services:
 
   secator:
     image: freelabz/secator:latest
-    container_name: secator-manager
+    container_name: secator-client
     restart: unless-stopped
     entrypoint: ""
     command: ['tail', '-F', '/dev/null']
