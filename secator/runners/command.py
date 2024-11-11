@@ -634,7 +634,7 @@ class Command(Runner):
 		"""
 		opts_str = ''
 		for opt_name, opt_conf in opts_conf.items():
-			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)
+			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 
 			# Get opt value
 			default_val = opt_conf.get('default')
@@ -645,11 +645,11 @@ class Command(Runner):
 				opt_prefix=command_name,
 				default=default_val)
 
-			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)
+			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 
 			# Skip option if value is falsy
 			if opt_val in [None, False, []]:
-				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)
+				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 				continue
 
 			# Convert opt value to expected command opt value
@@ -664,11 +664,11 @@ class Command(Runner):
 			mapped_opt_name = opt_key_map.get(opt_name)
 			if mapped_opt_name:
 				if mapped_opt_name == OPT_NOT_SUPPORTED:
-					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='command.options', verbose=True)
+					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='command.options', verbose=True)  # noqa: E501
 					continue
 				else:
 					opt_name = mapped_opt_name
-			debug('mapped key / value', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)
+			debug('mapped key / value', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 
 			# Avoid shell injections and detect opt prefix
 			opt_name = str(opt_name).split(' ')[0]  # avoid cmd injection
@@ -735,7 +735,7 @@ class Command(Runner):
 			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='command.options', verbose=True)
 			return None
 		value = next((v for v in opt_values if v is not None), default)
-		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)
+		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 		return value
 
 	def _build_cmd(self):

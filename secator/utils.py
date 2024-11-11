@@ -357,7 +357,7 @@ def format_object(obj, obj_breaklines=False):
     """Format the debug object for printing."""
     sep = '\n ' if obj_breaklines else ', '
     if isinstance(obj, dict):
-        return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
+        return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
     elif isinstance(obj, list):
         return f'[dim green]{sep.join(obj)}[/]'
     return ''
@@ -388,7 +388,7 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
         formatted_msg += f': {obj_str}'
     if id:
         formatted_msg += f' [italic dim gray11]\[{id}][/]'
-    
+
     console.print(f'[dim red]🐛 {formatted_msg}[/]', style='red')
 
 
