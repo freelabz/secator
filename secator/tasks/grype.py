@@ -63,6 +63,8 @@ class grype(VulnCode):
 		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read())
+			if not results:
+				return
 			for item in results['matches']:
 				vulns = [item['vulnerability']] + item['relatedVulnerabilities']
 				details = item['matchDetails'][0]
