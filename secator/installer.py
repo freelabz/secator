@@ -88,8 +88,6 @@ class GithubInstaller:
 
 		# Find the right asset to download
 		os_identifiers, arch_identifiers = cls._get_platform_identifier()
-		print(os_identifiers)
-		print(arch_identifiers)
 		download_url = cls._find_matching_asset(latest_release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
 			console.print('[dim red]Could not find a GitHub release matching distribution.[/]')
