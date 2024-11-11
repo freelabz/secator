@@ -59,8 +59,8 @@ class Certificate(OutputType):
         if self.is_expired():
             s += f' [red] expired since {self.not_after.strftime('%m %d %Y')}'
         else:
-            s+= f' [green] not expired until {self.not_after.strftime('%m %d %Y')}'
+            s += f' [green] not expired until {self.not_after.strftime('%m %d %Y')}'
         if self.issuer:
-            s+= f'[white] issuer : {self.issuer}'
-        s+= f'[white] {self.status}'
+            s += f'[white] issuer : {self.issuer}'
+        s += f'[white] {self.status}'
         return rich_to_ansi(s)
