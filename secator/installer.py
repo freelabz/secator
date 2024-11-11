@@ -88,6 +88,8 @@ class GithubInstaller:
 
 		# Find the right asset to download
 		os_identifiers, arch_identifiers = cls._get_platform_identifier()
+		print(os_identifiers)
+		print(arch_identifiers)
 		download_url = cls._find_matching_asset(latest_release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
 			console.print('[dim red]Could not find a GitHub release matching distribution.[/]')
@@ -146,8 +148,8 @@ class GithubInstaller:
 
 		# Enhanced architecture mapping to avoid conflicts
 		arch_mapping = {
-			'x86_64': ['amd64', 'x86_64'],
-			'amd64': ['amd64', 'x86_64'],
+			'x86_64': ['amd64', 'x86_64', '64bit'],
+			'amd64': ['amd64', 'x86_64', '64bit'],
 			'aarch64': ['arm64', 'aarch64'],
 			'armv7l': ['armv7', 'arm'],
 			'386': ['386', 'x86', 'i386'],
@@ -164,6 +166,7 @@ class GithubInstaller:
 
 		for asset in assets:
 			asset_name = asset['name'].lower()
+			print(asset_name)
 			if any(os_id in asset_name for os_id in os_identifiers) and \
 			   any(arch_id in asset_name for arch_id in arch_identifiers):
 				potential_matches.append(asset['browser_download_url'])
