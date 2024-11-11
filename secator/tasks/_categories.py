@@ -203,6 +203,9 @@ class Vuln(Command):
 				resp = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5)
 				resp.raise_for_status()
 				cve_info = resp.json()
+				if not cve_info:
+					debug(f'Empty response from https://cve.circl.lu/api/cve/{cve_id}.', sub='cve')
+					return None
 			except requests.RequestException as e:
 				debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
 				return None
