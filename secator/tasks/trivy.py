@@ -20,19 +20,6 @@ class trivy(VulnCode):
 	opt_key_map = {
 		THREADS: OPT_NOT_SUPPORTED
 	}
-	output_map = {
-		Vulnerability: {
-			'name': 'VulnerabilityID',
-			'description': 'Description',
-			'severity': lambda x: x['Severity'].lower(),
-			'references': 'References'
-		},
-		Tag: {
-			'name': 'RuleID',
-			'match': 'Match',
-			'extra_data': lambda x: {k: v for k, v in x.items() if k not in ['RuleID', 'Match']}
-		}
-	}
 	output_types = [Tag, Vulnerability]
 	install_cmd = "sudo apt install trivy"
 	install_github_handle = 'aquasecurity/trivy'
