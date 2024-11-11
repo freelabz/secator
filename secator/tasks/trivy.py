@@ -2,7 +2,7 @@ import click
 import os
 import yaml
 
-from secator.decorators import task 
+from secator.decorators import task
 from secator.runners import Command
 from secator.output_types import Vulnerability, Tag, Info, Error
 from secator.definitions import (OUTPUT_PATH)
@@ -10,11 +10,11 @@ from secator.definitions import (OUTPUT_PATH)
 
 @task()
 class trivy(Command):
-	cmd = 'trivy'  
+	cmd = 'trivy'
 	input_flag = None
 	json_flag = '-f json'
 	opts = {
-		"mode": {"type": click.Choice(['image','fs','repo']), "default": "image", "help": "Trivy mode (`image`, `fs` or `repo`)"}
+		"mode": {"type": click.Choice(['image', 'fs', 'repo']), "default": "image", "help": "Trivy mode (`image`, `fs` or `repo`)"}  # noqa: E501
 	}
 	output_map = {
 		Vulnerability: {
