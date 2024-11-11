@@ -9,7 +9,6 @@ input_types:
 tasks:
   naabu:
     description: Find open ports
-    ports: "-"  # scan all ports
   nmap:
     description: Search for vulnerabilities on open ports
     skip_host_discovery: True
