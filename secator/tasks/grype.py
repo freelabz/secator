@@ -35,25 +35,25 @@ class grype(VulnCode):
 	@staticmethod
 	def item_loader(self, line):
 		"""Load vulnerabilty dicts from grype line output."""
-		split = [i for i in line.split(' ') if i]
-		if not len(split) in [5, 6] or split[0] == 'NAME':
-			return None
-		version_fixed = None
+		split = [i for i in line.split('  ') if i]
+		if len(split) not in [5, 6] or split[0] == 'NAME':
+			return
+		versions_fixed = None
 		if len(split) == 5:  # no version fixed
 			product, version, product_type, vuln_id, severity = tuple(split)
 		elif len(split) == 6:
-			product, version, version_fixed, product_type, vuln_id, severity = tuple(split)
+			product, version, versions_fixed, product_type, vuln_id, severity = tuple(split)
 		extra_data = {
 			'lang': product_type,
 			'product': product,
 			'version': version,
 		}
-		if version_fixed:
-			extra_data['version_fixed'] = version_fixed
+		if versions_fixed:
+			extra_data['versions_fixed'] = [c.strip() for c in versions_fixed.split(', ')]
 		data = {
 			'id': vuln_id,
 			'name': vuln_id,
-			'matched_at': self.input,
+			'matched_at': self.inputs[0],
 			'confidence': 'medium',
 			'severity': severity.lower(),
 			'provider': 'grype',
@@ -76,4 +76,4 @@ class grype(VulnCode):
 				data.update(vuln)
 				data['severity'] = data['severity'] or severity.lower()
 		data['extra_data'] = extra_data
-		return data
+		yield data

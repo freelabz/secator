@@ -14,7 +14,9 @@ class Port(OutputType):
 	service_name: str = field(default='', compare=False)
 	cpes: list = field(default_factory=list, compare=False)
 	host: str = field(default='', repr=True, compare=False)
+	protocol: str = field(default='tcp', repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
+	confidence: str = field(default='low', repr=False, compare=False)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='port', repr=True)
@@ -38,8 +40,13 @@ class Port(OutputType):
 
 	def __repr__(self) -> str:
 		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
+		if self.protocol != 'TCP':
+			s += f' \[[yellow3]{self.protocol}[/]]'
 		if self.service_name:
-			s += f' \[[bold purple]{self.service_name}[/]]'
+			conf = ''
+			if self.confidence == 'low':
+				conf = '?'
+			s += f' \[[bold purple]{self.service_name}{conf}[/]]'
 		if self.host:
 			s += f' \[[cyan]{self.host}[/]]'
 		return rich_to_ansi(s)

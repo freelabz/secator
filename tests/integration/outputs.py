@@ -3,6 +3,22 @@ from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability, Record)
 
 OUTPUTS_TASKS = {
+	'bup': [
+        Url(
+            url='http://localhost:3000/ftp/coupons_2013.md.bak',
+            status_code=403,
+            content_length=164,
+            content_type='text/html',
+            method='GET',
+            _source='bup'
+        ),
+        Url(
+            url='http://localhost:3000/ftp/coupons_2013.md.bak',
+            status_code=405,
+            method='SEARCH',
+            _source='bup'
+        )
+	],
     'cariddi': [
         Url(
             url='http://localhost:3000/robots.txt',
@@ -59,7 +75,7 @@ OUTPUTS_TASKS = {
             _source='dnsx'
 		),
         Record(
-            name='v=spf1 include:wikimedia.org ~all',
+            name='v=spf1 include:_cidrs.wikimedia.org ~all',
             type='TXT',
             host='wikipedia.org',
             _source='dnsx'
@@ -128,7 +144,7 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'gau': [
-        Url(url='http://www.danielmiessler.com/wp-content/uploads/2010/03/self_discipline.jpeg', _source='gau')
+        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
     ],
     'gf': [
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
@@ -138,21 +154,17 @@ OUTPUTS_TASKS = {
     ],
     'grype': [
 		Vulnerability(
-            matched_at=ROOT_FOLDER,
-            name='Owner Footprinting',
-            provider='cve.circl.lu',
-            severity='medium',
-            tags=['ghsa'],
-			id='CVE-2023-43804',
-            extra_data={
-                'product': 'urllib3',
-				'product_type': 'python',
-                'version': '2.0.5',
-				'version_fixed': '2.0.6',
-                'ghsa_id': 'GHSA-v845-jxx5-vc9f'
-            },
-            _source='grype',
-        )
+			name='CVE-2024-24790',
+			provider='grype',
+			id='CVE-2024-24790',
+			matched_at='redis:7.4.1',
+			ip='',
+			confidence='medium',
+			severity='critical',
+			cvss_score=-1,
+			tags=[],
+			_source='grype',
+		)
     ],
     'h8mail': [
         UserAccount(
@@ -184,7 +196,12 @@ OUTPUTS_TASKS = {
         )
     ],
     'maigret': [
-        UserAccount(site_name='GitHub', username='ocervell', url='https://github.com/ocervell', _source='maigret')
+        UserAccount(
+			site_name='GitHubGist',
+			username='ocervell',
+			url='https://gist.github.com/ocervell',
+			_source='maigret'
+		)
     ],
     'mapcidr': [
         Ip(ip='192.168.1.0', alive=False, _source='mapcidr'),
@@ -192,12 +209,12 @@ OUTPUTS_TASKS = {
     ],
     'msfconsole': [],
     'naabu': [
-        Port(port=3000, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
+        Port(port=3000, ip='127.0.0.1', state='open', _source='naabu'),
+        Port(port=8080, ip='127.0.0.1', state='open', _source='naabu'),
     ],
     'nmap': [
-        Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
-        Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca',  _source='nmap'),
+        Port(port=3000, ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
+        Port(port=8080, ip='127.0.0.1', state='open', service_name='nagios nsca', _source='nmap'),
     ],
     'nuclei': [
         Vulnerability(
@@ -217,7 +234,7 @@ OUTPUTS_TASKS = {
     ],
     'wpscan': [
         Tag(
-            name='Wordpress theme - twentytwentyfour 1.1',
+            name='Wordpress theme - twentytwentyfour 1.2',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(

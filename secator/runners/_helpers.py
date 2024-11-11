@@ -3,26 +3,26 @@ import os
 from secator.utils import deduplicate
 
 
-def run_extractors(results, opts, targets=[]):
+def run_extractors(results, opts, inputs=[]):
 	"""Run extractors and merge extracted values with option dict.
 
 	Args:
 		results (list): List of results.
 		opts (dict): Options.
-		targets (list): Original targets.
+		inputs (list): Original inputs.
 
 	Returns:
-		tuple: targets, options.
+		tuple: inputs, options.
 	"""
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
 	for key, val in extractors.items():
 		key = key.rstrip('_')
 		values = extract_from_results(results, val)
 		if key == 'targets':
-			targets = deduplicate(values)
+			inputs = deduplicate(values)
 		else:
 			opts[key] = deduplicate(values)
-	return targets, opts
+	return inputs, opts
 
 
 def extract_from_results(results, extractors):
@@ -67,74 +67,6 @@ def process_extractor(results, extractor, ctx={}):
 		_field = '{' + _field + '}' if not '{' in _field else _field
 		items = [_field.format(**item.toDict()) for item in items]
 	return items
-
-
-def get_task_ids(result, ids=[]):
-	"""Get all Celery task ids recursively.
-
-	Args:
-		result (Union[AsyncResult, GroupResult]): Celery result object.
-		ids (list): List of ids.
-	"""
-	from celery.result import AsyncResult, GroupResult
-	if result is None:
-		return
-
-	if isinstance(result, GroupResult):
-		get_task_ids(result.parent, ids=ids)
-
-	elif isinstance(result, AsyncResult):
-		if result.id not in ids:
-			ids.append(result.id)
-
-	if hasattr(result, 'children') and result.children:
-		for child in result.children:
-			get_task_ids(child, ids=ids)
-
-	# Browse parent
-	if hasattr(result, 'parent') and result.parent:
-		get_task_ids(result.parent, ids=ids)
-
-
-def get_task_data(task_id):
-	"""Get task info.
-
-	Args:
-		task_id (str): Celery task id.
-
-	Returns:
-		dict: Task info (id, name, state, results, chunk_info, count, error, ready).
-	"""
-	from celery.result import AsyncResult
-	res = AsyncResult(task_id)
-	if not (res and res.args and len(res.args) > 1):
-		return
-	data = {}
-	task_name = res.args[1]
-	data['id'] = task_id
-	data['name'] = task_name
-	data['state'] = res.state
-	data['chunk_info'] = ''
-	data['count'] = 0
-	data['error'] = None
-	data['ready'] = False
-	data['descr'] = ''
-	data['progress'] = 0
-	data['results'] = []
-	if res.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
-		data['ready'] = True
-	if res.info and not isinstance(res.info, list):
-		chunk = res.info.get('chunk', '')
-		chunk_count = res.info.get('chunk_count', '')
-		data['chunk'] = chunk
-		data['chunk_count'] = chunk_count
-		if chunk:
-			data['chunk_info'] = f'{chunk}/{chunk_count}'
-		data.update(res.info)
-		data['descr'] = data.pop('description', '')
-		# del data['results']
-		# del data['task_results']
-	return data
 
 
 def get_task_folder_id(path):

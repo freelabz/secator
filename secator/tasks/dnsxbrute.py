@@ -1,6 +1,8 @@
 from secator.decorators import task
-from secator.definitions import (DEFAULT_DNS_WORDLIST, DOMAIN, HOST, RATE_LIMIT, RETRIES, THREADS, WORDLIST, EXTRA_DATA)
+from secator.definitions import (DOMAIN, HOST, RATE_LIMIT, RETRIES, THREADS, WORDLIST, EXTRA_DATA)
+from secator.config import CONFIG
 from secator.output_types import Subdomain
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import ReconDns
 
 
@@ -17,10 +19,11 @@ class dnsxbrute(ReconDns):
         THREADS: 'threads',
     }
     opts = {
-        WORDLIST: {'type': str, 'short': 'w', 'default': DEFAULT_DNS_WORDLIST, 'help': 'Wordlist'},
+        WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.dns, 'help': 'Wordlist'},
         'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
         'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Use wildcard domain to exclude false positives'}
     }
+    item_loaders = [JSONSerializer()]
     output_map = {
         Subdomain: {
             HOST: 'host',

@@ -4,15 +4,16 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 								 MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT,
 								 PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
 								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
-								 USER_AGENT, DEFAULT_NUCLEI_FLAGS)
+								 USER_AGENT)
 from secator.output_types import Progress, Vulnerability
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
 
 
 @task()
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
-	cmd = f'nuclei {DEFAULT_NUCLEI_FLAGS}'
+	cmd = 'nuclei'
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-jsonl'
@@ -23,6 +24,11 @@ class nuclei(VulnMulti):
 		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
 		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
 		'debug': {'type': str, 'help': 'Debug mode'},
+		'stats': {'is_flag': True, 'short': 'stats', 'default': True, 'help': 'Display statistics about the running scan'},
+		'stats_json': {'is_flag': True, 'short': 'sj', 'default': True, 'help': 'Display statistics in JSONL(ines) format'},
+		'stats_interval': {'type': str, 'short': 'si', 'default': 20, 'help': 'Number of seconds to wait between showing a statistics update'},  # noqa: E501
+		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
+		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'}  # noqa: E501
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -45,6 +51,7 @@ class nuclei(VulnMulti):
 		'templates': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
+	item_loaders = [JSONSerializer()]
 	output_types = [Vulnerability, Progress]
 	output_map = {
 		Vulnerability: {
@@ -85,8 +92,12 @@ class nuclei(VulnMulti):
 	def extra_data_extractor(item):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
+		data['type'] = item.get('type', '')
 		data['template_id'] = item['template-id']
 		data['template_url'] = item.get('template-url', '')
+		for k, v in item.get('meta', {}).items():
+			data['data'].append(f'{k}: {v}')
+		data['metadata'] = item.get('metadata', {})
 		return data
 
 	@staticmethod

@@ -5,9 +5,8 @@ import logging
 from rich.panel import Panel
 
 from secator.decorators import task
-from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST,
-							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   DATA_FOLDER, THREADS, TIMEOUT, USER_AGENT)
+from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+								 THREADS, TIMEOUT, USER_AGENT)
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
 
@@ -22,7 +21,6 @@ class msfconsole(VulnMulti):
 	input_type = HOST
 	input_chunk_size = 1
 	output_types = []
-	output_return_type = str
 	opt_prefix = '--'
 	opts = {
 		'resource': {'type': str, 'help': 'Metasploit resource script.', 'short': 'r'},
@@ -41,18 +39,10 @@ class msfconsole(VulnMulti):
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
-		THREADS: OPT_NOT_SUPPORTED,
 	}
 	encoding = 'ansi'
 	ignore_return_code = True
 	# install_cmd = 'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/msfinstall.sh | sh'
-
-	@staticmethod
-	def validate_input(self, input):
-		"""No list input supported for this command. Pass a single input instead."""
-		if isinstance(input, list):
-			return False
-		return True
 
 	@staticmethod
 	def on_init(self):
@@ -62,14 +52,14 @@ class msfconsole(VulnMulti):
 		env_vars = {}
 		if environment:
 			env_vars = dict(map(lambda x: x.split('='), environment.strip().split(',')))
-		env_vars['RHOST'] = self.input
-		env_vars['RHOSTS'] = self.input
+		env_vars['RHOST'] = self.inputs[0]
+		env_vars['RHOSTS'] = self.inputs[0]
 
 		# Passing msfconsole command directly, simply add RHOST / RHOSTS from host input and run then exit
 		if command:
 			self.run_opts['msfconsole.execute_command'] = (
-				f'setg RHOST {self.input}; '
-				f'setg RHOSTS {self.input}; '
+				f'setg RHOST {self.inputs[0]}; '
+				f'setg RHOSTS {self.inputs[0]}; '
 				f'{command.format(**env_vars)}; '
 				f'exit;'
 			)
@@ -84,7 +74,7 @@ class msfconsole(VulnMulti):
 
 			# Make a copy and replace vars inside by env vars passed on the CLI
 			timestr = get_file_timestamp()
-			out_path = f'{DATA_FOLDER}/msfconsole_{timestr}.rc'
+			out_path = f'{self.reports_folder}/.inputs/msfconsole_{timestr}.rc'
 			logger.debug(
 				f'Writing formatted resource script to new temp file {out_path}'
 			)
@@ -101,9 +91,6 @@ class msfconsole(VulnMulti):
 		# Nothing passed, error out
 		else:
 			raise ValueError('At least one of "inline_script" or "resource_script" must be passed.')
-
-		# Clear host input
-		self.input = ''
 
 
 # TODO: This is better as it goes through an RPC API to communicate with

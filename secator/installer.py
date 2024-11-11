@@ -11,7 +11,7 @@ from rich.table import Table
 
 from secator.rich import console
 from secator.runners import Command
-from secator.definitions import BIN_FOLDER, GITHUB_TOKEN
+from secator.config import CONFIG
 
 
 class ToolInstaller:
@@ -95,7 +95,7 @@ class GithubInstaller:
 
 		# Download and unpack asset
 		console.print(f'Found release URL: {download_url}')
-		cls._download_and_unpack(download_url, BIN_FOLDER, repo)
+		cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
 		return True
 
 	@classmethod
@@ -113,8 +113,8 @@ class GithubInstaller:
 		owner, repo = tuple(github_handle.split('/'))
 		url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 		headers = {}
-		if GITHUB_TOKEN:
-			headers['Authorization'] = f'Bearer {GITHUB_TOKEN}'
+		if CONFIG.cli.github_token:
+			headers['Authorization'] = f'Bearer {CONFIG.cli.github_token}'
 		try:
 			response = requests.get(url, headers=headers, timeout=5)
 			response.raise_for_status()
@@ -259,7 +259,7 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 	Return:
 		dict: Version info.
 	"""
-	from pkg_resources import parse_version
+	from packaging import version as _version
 	from secator.installer import GithubInstaller
 	info = {
 		'name': name,
@@ -281,13 +281,15 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 		info['version'] = version
 
 	# Get latest version
-	latest_version = GithubInstaller.get_latest_version(github_handle)
-	info['latest_version'] = latest_version
+	latest_version = None
+	if not CONFIG.offline_mode:
+		latest_version = GithubInstaller.get_latest_version(github_handle)
+		info['latest_version'] = latest_version
 
 	if location:
 		info['installed'] = True
 		if version and latest_version:
-			if parse_version(version) < parse_version(latest_version):
+			if _version.parse(version) < _version.parse(latest_version):
 				info['status'] = 'outdated'
 			else:
 				info['status'] = 'latest'
@@ -295,6 +297,8 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 			info['status'] = 'current unknown'
 		elif not latest_version:
 			info['status'] = 'latest unknown'
+			if CONFIG.offline_mode:
+				info['status'] += ' [dim orange1]\[offline][/]'
 	else:
 		info['status'] = 'missing'
 

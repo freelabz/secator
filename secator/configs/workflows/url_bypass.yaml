@@ -1,0 +1,10 @@
+type: workflow
+name: url_bypass
+alias: urlbypass
+description: Try bypass techniques for 4xx URLs
+tags: [http, crawl]
+input_types:
+  - url
+tasks:
+  bup:
+    description: Bypass 4xx

@@ -1,7 +1,6 @@
 import operator
 
 import yaml
-from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -67,51 +66,57 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		items = sorted(items, key=operator.attrgetter(*sort_by))
 
 	# Create rich table
-	box_style = box.ROUNDED
-	table = Table(show_lines=True, box=box_style)
+	table = Table(show_lines=True)
 
 	# Get table schema if any, default to first item keys
-	keys = output_fields
+	keys = []
+	if output_fields:
+		keys = [k for k in output_fields if k not in exclude_fields]
+		# Remove meta fields not needed in output
+		if '_cls' in keys:
+			keys.remove('_cls')
+		if '_type' in keys:
+			keys.remove('_type')
+		if '_uuid' in keys:
+			keys.remove('_uuid')
 
-	# List of fields to exclude
-	keys = [k for k in keys if k not in exclude_fields]
+		# Add _source field
+		if '_source' not in keys:
+			keys.append('_source')
 
-	# Remove meta fields not needed in output
-	if '_cls' in keys:
-		keys.remove('_cls')
-	if '_type' in keys:
-		keys.remove('_type')
-	if '_uuid' in keys:
-		keys.remove('_uuid')
+		# Create table columns
+		for key in keys:
+			key_str = key
+			if not key.startswith('_'):
+				key_str = ' '.join(key.split('_')).title()
+			no_wrap = key in ['url', 'reference', 'references', 'matched_at']
+			overflow = None if no_wrap else 'fold'
+			table.add_column(
+				key_str,
+				overflow=overflow,
+				min_width=10,
+				no_wrap=no_wrap)
 
-	# Add _source field
-	if '_source' not in keys:
-		keys.append('_source')
-
-	# Create table columns
-	for key in keys:
-		key_str = key
-		if not key.startswith('_'):
-			key_str = ' '.join(key.split('_')).upper()
-		no_wrap = key in ['url', 'reference', 'references', 'matched_at']
-		overflow = None if no_wrap else 'fold'
+	if not keys:
 		table.add_column(
-			key_str,
-			overflow=overflow,
+			'Extracted values',
+			overflow=False,
 			min_width=10,
-			no_wrap=no_wrap,
-			header_style='bold blue')
+			no_wrap=False)
 
 	# Create table rows
 	for item in items:
 		values = []
-		for key in keys:
-			value = getattr(item, key)
-			value = FORMATTERS.get(key, lambda x: x)(value)
-			if isinstance(value, dict) or isinstance(value, list):
-				value = yaml.dump(value)
-			elif isinstance(value, int) or isinstance(value, float):
-				value = str(value)
-			values.append(value)
+		if keys:
+			for key in keys:
+				value = getattr(item, key) if keys else item
+				value = FORMATTERS.get(key, lambda x: x)(value) if keys else item
+				if isinstance(value, dict) or isinstance(value, list):
+					value = yaml.dump(value)
+				elif isinstance(value, int) or isinstance(value, float):
+					value = str(value)
+				values.append(value)
+		else:
+			values = [item]
 		table.add_row(*values)
 	return table

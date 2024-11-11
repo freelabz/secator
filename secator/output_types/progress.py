@@ -8,7 +8,7 @@ from secator.utils import rich_to_ansi
 @dataclass
 class Progress(OutputType):
 	duration: str
-	percent: int
+	percent: int = 0
 	errors: list = field(default_factory=list)
 	extra_data: dict = field(default_factory=dict)
 	_source: str = field(default='', repr=True)
@@ -22,6 +22,11 @@ class Progress(OutputType):
 
 	_table_fields = ['percent', 'duration']
 	_sort_by = ('percent',)
+
+	def __post_init__(self):
+		super().__post_init__()
+		if not 0 <= self.percent <= 100:
+			self.percent = 0
 
 	def __str__(self) -> str:
 		return f'{self.percent}%'

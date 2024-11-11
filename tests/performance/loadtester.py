@@ -1,10 +1,10 @@
 import eventlet
 eventlet.monkey_patch()
-from secator.runners import Workflow
-from secator.config import ConfigLoader
+from secator.runners import Workflow, Task, Scan
+from secator.template import TemplateLoader
 from secator.rich import console
 from secator.celery import *
-import os
+import click
 import sys
 import json
 from time import sleep, time
@@ -13,43 +13,65 @@ pool = eventlet.GreenPool(100)
 
 from kombu.serialization import register
 
-nworkflows = int(os.environ.get('SECATOR_WORKFLOWS_COUNT', '1'))
-targets = [c.strip() for c in os.environ.get('SECATOR_TARGETS', '').split(',') if c]
-
-if not targets:
-	console.log('Please specify test targets with SECATOR_TARGETS keys (hosts are comma-separated)', style='bold red')
-	sys.exit(1)
-
-if not is_celery_worker_alive():
-	console.log('A Celery worker must be running. Start one using "secator worker"', style='bold red')
-	sys.exit(1)
-
-console.log(f'Load tester initialized with {len(targets)} targets.')
-console.log(f'Targets: {targets}')
-
-def create_runner(index):
+def create_runner(runner_type, targets, index, total):
 	register('json', json.dumps, json.loads, content_type='application/json', content_encoding='utf-8')
-	config = ConfigLoader(name='workflows/subdomain_recon')
 	run_opts = {
-		'sync': False,
-		# 'print_start': True,
 		'print_item': True,
-		# 'print_remote_status': True,
-		# 'print_run_summary': True,
-		'json': False
+		'print_line': True,
+		'print_cmd': True
 	}
-	result = Workflow.delay(config, targets, run_opts=run_opts)
+	runner = None
+	if runner_type == 'workflow':
+		runner = Workflow
+		config = TemplateLoader(name='workflows/subdomain_recon')
+	elif runner_type == 'task':
+		runner = Task
+		config = TemplateLoader(input={'name': 'httpx', 'type': 'task'})
+	elif runner_type == 'scan':
+		runner = Scan
+	result = runner.delay(config, targets, run_opts=run_opts)
 	while not result.ready():
-		print(f'Running workflow {index + 1}/{nworkflows} ..')
-		sleep(2)
+		# print(f'Running {runner_type} {index}/{total} ..')
+		sleep(1)
+	print(f'Task {index} / {total} finished running.')
 	result.get()
 
+def start_worker():
+	from secator.runners import Command
+	from threading import Thread
+	cmd = f'pyinstrument -r html -o /tmp/test.html --from-path secator worker'
+	process = Command.execute(cmd, run=False)
+	thread = Thread(target=process.run)
+	return thread, process
+
+@click.command()
+@click.option('--count', type=int, default=1)
+@click.option('--runner', type=str, default='task')
+@click.option('--targets', type=str, default='http://testphp.vulnweb.com')
+def cli(count, runner, targets):
+	"""Secator CLI."""
+	try:
+		targets = [c.strip() for c in targets.split(',')]
+		print(f'Load tester initialized with {len(targets)} targets.')
+		print(f'Targets: {targets}')
+		thread, process = start_worker()
+		print('Starting worker ...')
+		thread.start()
+		sleep(3)
+		print(f'Starting {count} {runner}s ...')
+		start_time = time()
+		for i in range(count):
+			print(f'Starting {runner} {i + 1}/{count} ..')
+			pool.spawn(create_runner, runner, targets, i + 1, count)
+		pool.waitall()
+		elapsed_time = time() - start_time
+		print(f'All {runner}s completed in {elapsed_time:.2f}s.')
+	except BaseException:
+		pass
+	finally:
+		import signal
+		process.send_signal(signal.SIGINT)
+		thread.join()
 
 if __name__ == '__main__':
-	print(f'Starting {nworkflows} workflows ...')
-	start_time = time()
-	for i in range(nworkflows):
-		pool.spawn(create_runner, i)
-	pool.waitall()
-	elapsed_time = time() - start_time
-	print(f'All workflows completed in {elapsed_time:.2f}s.')
+    cli()

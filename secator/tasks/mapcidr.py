@@ -23,11 +23,10 @@ class mapcidr(ReconIp):
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
-		THREADS: OPT_NOT_SUPPORTED,
 	}
 
 	@staticmethod
 	def item_loader(self, line):
 		if validators.ipv4(line) or validators.ipv6(line):
-			return {'ip': line, 'alive': False}
-		return None
+			yield {'ip': line, 'alive': False}
+		return

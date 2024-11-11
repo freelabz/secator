@@ -8,6 +8,7 @@ from secator.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FILTER_CODES,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   STATUS_CODE, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Url
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
 
@@ -44,6 +45,7 @@ class gospider(HttpCrawler):
 		FOLLOW_REDIRECT: lambda x: not x,
 		DELAY: lambda x: round(x) if isinstance(x, float) else x
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Url: {
 			URL: 'output',
@@ -62,6 +64,8 @@ class gospider(HttpCrawler):
 	@staticmethod
 	def validate_item(self, item):
 		"""Keep only items that match the same host."""
+		if not isinstance(item, dict):
+			return False
 		try:
 			netloc_in = furl(item['input']).netloc
 			netloc_out = furl(item['output']).netloc

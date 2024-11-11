@@ -1,4 +1,6 @@
+from datetime import date, datetime
 import json
+from pathlib import PosixPath
 from secator.output_types import OUTPUT_TYPES
 
 
@@ -6,6 +8,10 @@ class DataclassEncoder(json.JSONEncoder):
     def default(self, obj):
         if hasattr(obj, 'toDict'):
             return obj.toDict()
+        elif isinstance(obj, PosixPath):
+            return str(obj)
+        elif isinstance(obj, (datetime, date)):
+            return obj.isoformat()
         else:
             return json.JSONEncoder.default(self, obj)
 
