@@ -3,19 +3,22 @@ import os
 import yaml
 
 from secator.decorators import task
-from secator.runners import Command
+from secator.definitions import THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED
+from secator.tasks._categories import VulnCode
 from secator.output_types import Vulnerability, Tag, Info, Error
-from secator.definitions import (OUTPUT_PATH)
 
 
 @task()
-class trivy(Command):
+class trivy(VulnCode):
 	"""Comprehensive and versatile security scanner."""
 	cmd = 'trivy'
 	input_flag = None
 	json_flag = '-f json'
 	opts = {
-		"mode": {"type": click.Choice(['image', 'fs', 'repo']), "default": "image", "help": "Trivy mode (`image`, `fs` or `repo`)"}  # noqa: E501
+		"mode": {"type": click.Choice(['image', 'fs', 'repo']), 'default': 'image', 'help': 'Trivy mode', 'required': True}  # noqa: E501
+	}
+	opt_key_map = {
+		THREADS: OPT_NOT_SUPPORTED
 	}
 	output_map = {
 		Vulnerability: {
@@ -56,16 +59,32 @@ class trivy(Command):
 		for item in results:
 			for vuln in item.get('Vulnerabilities', []):
 				vuln_id = vuln['VulnerabilityID']
-				yield Vulnerability(
-					name=vuln_id,
-					id=vuln_id,
-					description=vuln['Description'],
-					severity=vuln['Severity'].lower(),
-					references=vuln['References']
-				)
+				extra_data = {}
+				if 'PkgName' in vuln:
+					extra_data['product'] = vuln['PkgName']
+				if 'InstalledVersion' in vuln:
+					extra_data['version'] = vuln['InstalledVersion']
+				cvss = vuln.get('CVSS', {})
+				cvss_score = cvss.get('V3Score', -1) or cvss.get('V2Score', -1)
+				data = {
+					'name': vuln_id,
+					'id': vuln_id,
+					'description': vuln.get('Description'),
+					'matched_at': self.inputs[0],
+					'confidence': 'high',
+					'severity': vuln['Severity'].lower(),
+					'cvss_score': cvss_score,
+					'references': vuln.get('References', []),
+					'extra_data': extra_data
+				}
+				if vuln_id.startswith('CVE'):
+					remote_data = VulnCode.lookup_cve(vuln_id)
+					if remote_data:
+						data.update(remote_data)
+				yield Vulnerability(**data)
 			for secret in item.get('Secrets', []):
 				yield Tag(
-					name=vuln['RuleID'],
-					match=vuln['Match'],
+					name=secret['RuleID'],
+					match=secret['Match'],
 					extra_data={k: v for k, v in secret.items() if k not in ['RuleID', 'Match']}
 				)
