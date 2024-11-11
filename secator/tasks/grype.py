@@ -16,7 +16,7 @@ from secator.utils import debug
 @task()
 class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
-	cmd = 'grype --quiet'
+	cmd = 'grype'
 	input_flag = ''
 	file_flag = OPT_NOT_SUPPORTED
 	json_flag = '-o json'
