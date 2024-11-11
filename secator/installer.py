@@ -150,7 +150,7 @@ class GithubInstaller:
 			'amd64': ['amd64', 'x86_64', '64bit'],
 			'aarch64': ['arm64', 'aarch64'],
 			'armv7l': ['armv7', 'arm'],
-			'386': ['386', 'x86', 'i386'],
+			'386': ['386', 'x86', 'i386', '32bit],
 		}
 
 		os_identifiers = os_mapping.get(system, [])
