@@ -24,14 +24,19 @@ DEBUG = CONFIG.debug.level
 DEBUG_COMPONENT = CONFIG.debug.component.split(',')
 
 # Default tasks settings
-DEFAULT_HTTPX_FLAGS = os.environ.get('DEFAULT_HTTPX_FLAGS', '-td')
-DEFAULT_KATANA_FLAGS = os.environ.get('DEFAULT_KATANA_FLAGS', '-jc -js-crawl -known-files all -or -ob')
 DEFAULT_NUCLEI_FLAGS = os.environ.get('DEFAULT_NUCLEI_FLAGS', '-stats -sj -si 20 -hm -or')
 DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-bail --no-state')
 
 # Constants
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
+STATE_COLORS = {
+	'PENDING': 'dim yellow3',
+	'RUNNING': 'bold yellow3',
+	'SUCCESS': 'bold green',
+	'FAILURE': 'bold red',
+	'REVOKED': 'bold magenta'
+}
 
 # Vocab
 ALIVE = 'alive'
@@ -120,7 +125,8 @@ ADDONS_ENABLED = {}
 
 for addon, module in [
 	('worker', 'eventlet'),
-	('google', 'gspread'),
+	('gdrive', 'gspread'),
+	('gcs', 'google.cloud.storage'),
 	('mongodb', 'pymongo'),
 	('redis', 'redis'),
 	('dev', 'flake8'),

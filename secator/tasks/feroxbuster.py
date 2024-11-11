@@ -1,15 +1,13 @@
-import shlex
-from pathlib import Path
-
 from secator.decorators import task
 from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, LINES, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
-							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OUTPUT_PATH, PROXY,
+							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, DEFAULT_FEROXBUSTER_FLAGS)
 from secator.output_types import Url
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpFuzzer
 
 
@@ -20,7 +18,7 @@ class feroxbuster(HttpFuzzer):
 	input_flag = '--url'
 	input_chunk_size = 1
 	file_flag = OPT_PIPE_INPUT
-	json_flag = '--json'
+	json_flag = '--silent --json'
 	opt_prefix = '--'
 	opts = {
 		# 'auto_tune': {'is_flag': True, 'default': False, 'help': 'Automatically lower scan rate when too many errors'},
@@ -51,6 +49,7 @@ class feroxbuster(HttpFuzzer):
 		USER_AGENT: 'user-agent',
 		WORDLIST: 'wordlist'
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Url: {
 			STATUS_CODE: 'status',
@@ -71,20 +70,12 @@ class feroxbuster(HttpFuzzer):
 	profile = 'cpu'
 
 	@staticmethod
-	def on_init(self):
-		self.output_path = self.get_opt_value(OUTPUT_PATH)
-		if not self.output_path:
-			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		Path(self.output_path).touch()
-		self.cmd += f' --output {self.output_path}'
-
-	@staticmethod
 	def on_start(self):
-		if self.input_path:
+		if self.inputs_path:
 			self.cmd += ' --stdin'
-		self.cmd += f' & tail --pid=$! -f {shlex.quote(self.output_path)}'
-		self.shell = True
 
 	@staticmethod
 	def validate_item(self, item):
-		return item['type'] == 'response'
+		if isinstance(item, dict):
+			return item['type'] == 'response'
+		return True

@@ -2,26 +2,21 @@ import os
 from urllib.parse import urlparse
 
 from secator.decorators import task
-from secator.definitions import (CONTENT_TYPE, DEFAULT_KATANA_FLAGS,
-								 DELAY, DEPTH,
-								 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
-								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
-								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
-								 RATE_LIMIT, RETRIES, STATUS_CODE,
-								 STORED_RESPONSE_PATH, TECH,
-								 THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER, CONTENT_LENGTH)
+from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+								 FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
+								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, STATUS_CODE,
+								 STORED_RESPONSE_PATH, TECH, THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER,
+								 CONTENT_LENGTH)
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
 
 @task()
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
-	# TODO: add -fx for form detection and extract 'forms' from the output with custom item_loader
-	# TODO: add -jsluice for JS parsing
-	cmd = f'katana {DEFAULT_KATANA_FLAGS}'
+	cmd = 'katana'
 	file_flag = '-list'
 	input_flag = '-u'
 	json_flag = '-jsonl'
@@ -30,7 +25,12 @@ class katana(HttpCrawler):
 		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'},
 		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'},
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'},  # noqa: E501
-		'form_fill': {'type': bool, 'short': 'ff', 'help': 'Enable form filling'}
+		'form_fill': {'is_flag': True, 'short': 'ff', 'help': 'Enable form filling'},
+		'js_crawl': {'is_flag': True, 'short': 'jc', 'default': True, 'help': 'Enable endpoint parsing / crawling in javascript file'},  # noqa: E501
+		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': True, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
+		'known_files': {'type': str, 'short': 'kf', 'default': 'all', 'help': 'Enable crawling of known files (all, robotstxt, sitemapxml)'},  # noqa: E501
+		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
+		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'}
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -58,6 +58,7 @@ class katana(HttpCrawler):
 	opt_value_map = {
 		DELAY: lambda x: int(x) if isinstance(x, float) else x
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Url: {
 			URL: lambda x: x['request']['endpoint'],

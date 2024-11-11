@@ -3,6 +3,7 @@ from secator.definitions import (DELAY, HOST, OPT_NOT_SUPPORTED, PORT, PORTS,
 								 PROXY, RATE_LIMIT, RETRIES, STATE, THREADS,
 								 TIMEOUT, TOP_PORTS)
 from secator.output_types import Port
+from secator.serializers import JSONSerializer
 from secator.tasks._categories import ReconPort
 
 
@@ -14,9 +15,9 @@ class naabu(ReconPort):
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports (default: nmap\'s top 100 ports'},
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports'},
 		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'},
-		'scan_type': {'type': str, 'help': 'Scan type (SYN (s)/CONNECT(c))'},
+		'scan_type': {'type': str, 'short': 'st', 'help': 'Scan type (SYN (s)/CONNECT(c))'},
 		# 'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
 	}
 	opt_key_map = {
@@ -37,6 +38,7 @@ class naabu(ReconPort):
 		RETRIES: lambda x: 1 if x == 0 else x,
 		PROXY: lambda x: x.replace('socks5://', '')
 	}
+	item_loaders = [JSONSerializer()]
 	output_map = {
 		Port: {
 			PORT: lambda x: x['port'],

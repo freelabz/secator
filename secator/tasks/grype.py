@@ -30,7 +30,6 @@ class grype(VulnCode):
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Vulnerability]
-	item_loaders = []
 	install_cmd = (
 		'$(curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin) || exit 1'
 	)
@@ -46,7 +45,7 @@ class grype(VulnCode):
         }
     }
 
-	@staticmethod
+	@staticmetho
 	def on_cmd(self):
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
@@ -64,22 +63,9 @@ class grype(VulnCode):
 		self.results = []
 		if not self.output_json:
 			return
-		note = f'Trivy JSON result saved to {self.output_path}'
-		if self.print_line:
-			self._print(note)
-		if os.path.exists(self.output_path):
-			with open(self.output_path, 'r') as f:
-				results = yaml.safe_load(f.read())
-			for item in results['matches']:
-				for i in item['relatedVulnerabilities'][0]['cvss']:
-					item['vulnerability']['cvss_score'] = str(i['metrics']['baseScore'])
-				# severity Negligible to unknow
-				if item['vulnerability']['severity'] == 'Negligible':
-					item['vulnerability']['severity'] = 'unknown'
-
+		note = f'Trivy JSON result saved to {self.output_path}
 				item = self._process_item(item)
 				if not item:
 					continue
 				yield item
 		self.print_item_count = prev
-
