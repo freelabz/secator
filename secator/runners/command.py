@@ -662,7 +662,7 @@ class Command(Runner):
 
 			# Convert opt name to expected command opt name
 			mapped_opt_name = opt_key_map.get(opt_name)
-			if mapped_opt_name:
+			if mapped_opt_name is not None:
 				if mapped_opt_name == OPT_NOT_SUPPORTED:
 					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='command.options', verbose=True)  # noqa: E501
 					continue
