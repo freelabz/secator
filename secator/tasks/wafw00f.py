@@ -1,10 +1,11 @@
 import os
 import yaml
 
-from secator.decorators import task 
+from secator.decorators import task
 from secator.runners import Command
 from secator.definitions import (OUTPUT_PATH, HEADER, PROXY, URL)
 from secator.output_types import Tag, Info, Error
+
 
 @task()
 class wafw00f(Command):
@@ -18,7 +19,7 @@ class wafw00f(Command):
     opts = {
         'l': {'is_flag': True, 'default': False, 'help': 'List all WAFs that WAFW00F is able to detect'},
         't': {'type': str, 'help': 'Test for one specific WAF'},
-        'a': {'is_flag': True, 'default': False, 'help': 'Find all WAFs which match the signatures, do not stop testing on the first one'},
+        'a': {'is_flag': True, 'default': False, 'help': 'Find all WAFs which match the signatures, do not stop testing on the first one'},  # noqa: E501
         'r': {'is_flag': True, 'default': False, 'help': 'Do not follow redirections given by 3xx responses'}
     }
 
@@ -56,6 +57,5 @@ class wafw00f(Command):
                 yield Tag(
                     name=results[0]['firewall'],
                     match=results[0]['manufacturer'],
-                    extra_data= {'trigger_url': results[0]['trigger_url']}
+                    extra_data={'trigger_url': results[0]['trigger_url']}
                 )
-                pass
