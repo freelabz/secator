@@ -164,7 +164,6 @@ class GithubInstaller:
 
 		for asset in assets:
 			asset_name = asset['name'].lower()
-			print(asset_name)
 			if any(os_id in asset_name for os_id in os_identifiers) and \
 			   any(arch_id in asset_name for arch_id in arch_identifiers):
 				potential_matches.append(asset['browser_download_url'])
