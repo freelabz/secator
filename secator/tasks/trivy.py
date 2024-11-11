@@ -10,6 +10,7 @@ from secator.definitions import (OUTPUT_PATH)
 
 @task()
 class trivy(Command):
+	"""Comprehensive and versatile security scanner."""
 	cmd = 'trivy'
 	input_flag = None
 	json_flag = '-f json'
