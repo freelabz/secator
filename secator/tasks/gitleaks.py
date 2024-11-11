@@ -2,11 +2,13 @@ import click
 import os
 import yaml
 
+from pathlib import Path
+
 from secator.decorators import task
 from secator.runners import Command
 from secator.definitions import (OUTPUT_PATH)
 from secator.utils import caml_to_snake
-from secator.output_types import Tag
+from secator.output_types import Tag, Info, Error
 
 
 @task()
@@ -15,9 +17,9 @@ class gitleaks(Command):
 	input_flag = None
 	json_flag = '-f json'
 	opts = {
-		"ignore_path": {"type": str},
-		"mode": {"type": click.Choice(['git', 'dir']), "default": "dir", "help": "Gitleaks mode (`git` or `dir`)"},
-		"c": {"type": str, 'short': 'config',"help": "Gitleaks config file path"}
+		'ignore_path': {'type': str},
+		'mode': {'type': click.Choice(['git', 'dir']), 'default': 'dir', 'help': 'Gitleaks mode'},
+		'c': {'type': str, 'short': 'config', 'help': 'Gitleaks config file path'}
 	}
 	opt_key_map = {
 		"ignore_path": "i"
@@ -34,8 +36,8 @@ class gitleaks(Command):
 
 	install_cmd = (
 		'export GITLEAKS_VERSION="8.19.3" && '
-		'wget https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz -O gitleaks_latest.tar.gz &&'
-		'tar -zxvf gitleaks_latest.tar.gz gitleaks && mv gitleaks /usr/local/bin/gitleaks &&'
+		'wget https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz -O gitleaks_latest.tar.gz &&'  # noqa: E501
+		f'tar -zxvf gitleaks_latest.tar.gz gitleaks && mv gitleaks {Path.home()}/.local/bin/ &&'
 		'rm gitleaks_latest.tar.gz'
 	)
 
@@ -56,24 +58,21 @@ class gitleaks(Command):
 		self.output_path = output_path
 		self.cmd += f' -r {self.output_path}'
 
-	def yielder(self):
-		prev = self.print_item_count
-		self.print_item_count = False
-		list(super().yielder())
-		if self.return_code != 0:
+	@staticmethod
+	def on_cmd_done(self):
+		if not os.path.exists(self.output_path):
+			yield Error(message=f'Could not find JSON results in {self.output_path}')
 			return
-		self.results = []
-		if not self.output_json:
-			return
-		note = f'gitleaks JSON results saved to {self.output_path}'
-		if self.print_line:
-			self._print(note)
-		if os.path.exists(self.output_path):
-			with open(self.output_path, 'r') as f:
-				results = yaml.safe_load(f.read())
-			for item in results:
-				item = self._process_item(item)
-				if not item:
-					continue
-				yield item
-		self.print_item_count = prev
+
+		yield Info(message=f'JSON results saved to {self.output_path}')
+		with open(self.output_path, 'r') as f:
+			results = yaml.safe_load(f.read())
+		for result in results:
+			yield Tag(
+				name=result['RuleID'],
+				match='{File}:{StartLine}:{StartColumn}'.format(**result),
+				extra_data={
+					caml_to_snake(k): v for k, v in result.items()
+					if k not in ['RuleID', 'File']
+				}
+			)
