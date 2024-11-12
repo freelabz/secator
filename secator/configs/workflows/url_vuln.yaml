@@ -34,7 +34,7 @@ tasks:
     targets_:
       - type: tag
         field: match
-        condition: item._source == "gf"
+        condition: item._source.startswith("gf")
 
   # TODO: Add support for SQLMap
   # sqlmap:
