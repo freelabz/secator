@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error, Target, Stat
+from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug
@@ -334,7 +334,13 @@ class Command(Runner):
 			if self.has_children:
 				return
 
+			# Print task description
 			self.print_description()
+
+			# Abort if no inputs
+			if len(self.inputs) == 0 and self.skip_if_no_inputs:
+				yield Info(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				return
 
 			# Yield targets
 			for input in self.inputs:
