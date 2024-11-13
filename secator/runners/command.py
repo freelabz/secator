@@ -124,9 +124,12 @@ class Command(Runner):
 		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
+		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
 
 		# Prepare validators
-		input_validators = [self._validate_input_nonempty]
+		input_validators = []
+		if not self.skip_if_no_inputs:
+			input_validators.append(self._validate_input_nonempty)
 		if not caller:
 			input_validators.append(self._validate_chunked_input)
 		validators = {'validate_input': input_validators}
