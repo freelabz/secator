@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error, Target, Stat
+from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug
@@ -176,22 +176,6 @@ class Command(Runner):
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
 
-		# Print built cmd
-		if not self.has_children:
-			if self.sync:
-				if self.caller and self.description:
-					self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-				elif self.print_cmd:
-					self._print('')
-		if self.print_cmd:
-			cmd_str = self.cmd.replace('[', '\\[')
-			if self.sync and self.chunk and self.chunk_count:
-				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
-			self._print(cmd_str, color='bold cyan', rich=True)
-
-		# Debug
-		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
-
 	def toDict(self):
 		res = super().toDict()
 		res.update({
@@ -347,6 +331,8 @@ class Command(Runner):
 			if self.has_children:
 				return
 
+			self.print_description()
+
 			# Yield targets
 			for input in self.inputs:
 				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
@@ -366,7 +352,6 @@ class Command(Runner):
 
 			# Output and results
 			self.return_code = 0
-			self.killed = False
 
 			# Run the command using subprocess
 			env = os.environ
@@ -379,6 +364,7 @@ class Command(Runner):
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
+			self.print_command()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
@@ -401,9 +387,9 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='error')
-			self.stop_process()
+			self.debug(f'{type(e).__name__}', sub='error')
 			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			self.stop_process()
 
 		finally:
 			yield from self._wait_for_end()
@@ -446,6 +432,23 @@ class Command(Runner):
 
 		yield from self.stats()
 		self.last_updated_stat = time()
+
+	def print_description(self):
+		"""Print description"""
+		if self.sync and not self.has_children:
+			if self.caller and self.description:
+				self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
+			elif self.print_cmd:
+				self._print('')
+
+	def print_command(self):
+		"""Print command."""
+		if self.print_cmd:
+			cmd_str = self.cmd.replace('[', '\\[')
+			if self.sync and self.chunk and self.chunk_count:
+				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
+			self._print(cmd_str, color='bold cyan', rich=True)
+		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
@@ -585,6 +588,7 @@ class Command(Runner):
 		"""Wait for process to finish and process output and return code."""
 		if not self.process:
 			return
+		self.debug(f'Waiting for command to finish ...', sub='command')
 		for line in self.process.stdout.readlines():
 			yield from self.process_line(line)
 		self.process.wait()
@@ -592,19 +596,9 @@ class Command(Runner):
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
 		self.output = self.output.strip()
-		self.killed = self.return_code == -2 or self.killed
-		self.debug(f'Command {self.cmd} finished with return code {self.return_code}', sub='command')
-
-		if self.killed:
-			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
-
-		elif self.return_code != 0:
-			error = f'Command failed with return code {self.return_code}.'
+		self.debug(f'finished with return code {self.return_code}', sub='command')
+		if self.return_code != 0 and self.return_code != 130:
+			error = f'failed with return code {self.return_code}.'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
 			yield Error(

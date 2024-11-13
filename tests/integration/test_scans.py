@@ -1,14 +1,10 @@
 import logging
 import os
-import unittest
-import warnings
-from time import sleep
 
 from secator.definitions import DEBUG
-from secator.rich import console
-from secator.runners import Command, Scan
-from secator.utils import setup_logging, merge_opts
-from secator.utils_test import TEST_SCANS, CommandOutputTester, load_fixture
+from secator.runners import Scan
+from secator.utils import setup_logging
+from secator.utils_test import TEST_SCANS, CommandOutputTester, load_fixture, SecatorTestCase
 from tests.integration.inputs import INPUTS_SCANS
 from tests.integration.outputs import OUTPUTS_SCANS
 
@@ -17,24 +13,9 @@ level = logging.DEBUG if DEBUG > 0 else logging.INFO
 setup_logging(level)
 
 
-class TestScans(unittest.TestCase, CommandOutputTester):
+class TestScans(SecatorTestCase, CommandOutputTester):
 
-	def setUp(self):
-		warnings.simplefilter('ignore', category=ResourceWarning)
-		warnings.simplefilter('ignore', category=DeprecationWarning)
-		Command.execute(
-			f'sh {INTEGRATION_DIR}/setup.sh',
-			quiet=True,
-			cwd=INTEGRATION_DIR
-		)
-		sleep(15)
-
-	def tearDown(self):
-		Command.execute(
-			f'sh {INTEGRATION_DIR}/teardown.sh',
-			quiet=True,
-			cwd=INTEGRATION_DIR
-		)
+	celery_worker = True
 
 	def test_scans(self):
 		opts = {

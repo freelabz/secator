@@ -1,17 +1,10 @@
-import queue
 import os
-import unittest
-import warnings
-
-from time import sleep
-from threading import Thread
 
 from celery import chain, chord
 
 from secator.celery import app, forward_results
 from secator.config import CONFIG
-from secator.utils_test import TEST_TASKS, load_fixture
-from secator.runners import Command
+from secator.utils_test import SecatorTestCase, TEST_TASKS, load_fixture
 from secator.output_types import Url
 from tests.integration.inputs import INPUTS_SCANS
 
@@ -28,32 +21,9 @@ URL_TARGETS_RESULTS_COUNT = [12, 1]
 HOST_TARGETS = INPUTS_SCANS['host']
 
 
-class TestCelery(unittest.TestCase):
+class TestCelery(SecatorTestCase):
 
-	@classmethod
-	def setUpClass(cls):
-		warnings.simplefilter('ignore', category=ResourceWarning)
-		warnings.simplefilter('ignore', category=DeprecationWarning)
-		Command.execute(
-			f'sh {INTEGRATION_DIR}/setup.sh',
-			quiet=True,
-			cwd=INTEGRATION_DIR
-		)
-		cls.queue = queue.Queue()
-		cls.cmd = Command.execute('secator worker', quiet=True, run=False)
-		cls.thread = Thread(target=cls.cmd.run)
-		cls.thread.start()
-		sleep(5)
-
-	@classmethod
-	def tearDownClass(cls) -> None:
-		cls.cmd.stop_process()
-		cls.thread.join()
-		Command.execute(
-			f'sh {INTEGRATION_DIR}/teardown.sh',
-			quiet=True,
-			cwd=INTEGRATION_DIR
-		)
+	celery_worker = True
 
 	def test_httpx_chain(self):
 		from secator.tasks import httpx
