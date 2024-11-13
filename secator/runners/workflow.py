@@ -123,6 +123,7 @@ class Workflow(Runner):
 				opts['context'] = self.context.copy()
 				opts['name'] = task_name
 				opts['has_parent'] = True
+				opts['skip_if_no_inputs'] = True
 
 				# Create task signature
 				task_id = str(uuid.uuid4())

@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.7.0](https://github.com/freelabz/secator/compare/v0.6.0...v0.7.0) (2024-11-13)
+
+
+### Features
+
+* **`bup`:** add proxy option and progress indicator ([#444](https://github.com/freelabz/secator/issues/444)) ([d5c63c8](https://github.com/freelabz/secator/commit/d5c63c81c6465a142ce70e4800effc02d526a243))
+* **`dnsx`:** add IP output type on dnsx A record  ([#426](https://github.com/freelabz/secator/issues/426)) ([629439e](https://github.com/freelabz/secator/commit/629439e459a6eefd5cbe68e9fc3a317371ba7987))
+* **`naabu`/`nmap`:** help for defaults and change workflow opts ([#438](https://github.com/freelabz/secator/issues/438)) ([4dd0055](https://github.com/freelabz/secator/commit/4dd00556648e691a093887d294325b00409ac04a))
+* **`nmap`:** add udp scan (`-sU`) and change default scan opts ([#418](https://github.com/freelabz/secator/issues/418)) ([36c6ff3](https://github.com/freelabz/secator/commit/36c6ff3766f88ac311c1bfea86a1b5e8686dd94e))
+* add url_bypass workflow based on bup ([e96b1bc](https://github.com/freelabz/secator/commit/e96b1bc9906cd2f9aa3eb5b3770594811f242abd))
+* chunk dalfox input by 1 ([#443](https://github.com/freelabz/secator/issues/443)) ([26c38d7](https://github.com/freelabz/secator/commit/26c38d79e89be3d35f464e89c6973b7beadb6ac4))
+* **cli:** misc bug fixes and features ([#445](https://github.com/freelabz/secator/issues/445)) ([fccfdb8](https://github.com/freelabz/secator/commit/fccfdb8ca38dcd3a2c559429a7d58d46ecac49a6))
+* **hooks:** explicit output type yield in static hooks ([#439](https://github.com/freelabz/secator/issues/439)) ([2d1f8e6](https://github.com/freelabz/secator/commit/2d1f8e6b7b77210028efe2c2c56866efbd6b0152))
+* **katana:** add form_fill option ([#419](https://github.com/freelabz/secator/issues/419)) ([bebddb1](https://github.com/freelabz/secator/commit/bebddb1e2fae460403adda2d84b9ae515ca977aa))
+* **refactor:** improve performance, add on_interval hook, rework CLI opts ([#473](https://github.com/freelabz/secator/issues/473)) ([4a22a70](https://github.com/freelabz/secator/commit/4a22a7082fe1edf50644034cfc54b11653b47aa4))
+* **runner:** add GCS driver and secator threads ([#476](https://github.com/freelabz/secator/issues/476)) ([cae475a](https://github.com/freelabz/secator/commit/cae475a2fe15742ccd80d40c28ad41aa1ffc5348))
+* **runner:** add skip_if_no_inputs to workflows ([#482](https://github.com/freelabz/secator/issues/482)) ([5546b82](https://github.com/freelabz/secator/commit/5546b82756d6aad0d227072d5a3b1149c44306e8))
+* **runner:** on serialized hooks ([#424](https://github.com/freelabz/secator/issues/424)) ([fde6cd7](https://github.com/freelabz/secator/commit/fde6cd7f6cba015b08b370bfd14b0aca3f4a4018))
+* **runner:** rework Celery core and mix fixes ([#450](https://github.com/freelabz/secator/issues/450)) ([b72f152](https://github.com/freelabz/secator/commit/b72f15286bb29ae60568309907d4dad41d4fbacb))
+* sudo prompt check test ([#432](https://github.com/freelabz/secator/issues/432)) ([f45b123](https://github.com/freelabz/secator/commit/f45b1230fd6313342ebdda5a359c1285f2d80aa8))
+* sudo prompts in non-tty mode ([#431](https://github.com/freelabz/secator/issues/431)) ([0e26b55](https://github.com/freelabz/secator/commit/0e26b55c168bfd69c212bc7667ef1b97e89e6bd5))
+* **tasks:** bbot integration ([#375](https://github.com/freelabz/secator/issues/375)) ([2f0dea4](https://github.com/freelabz/secator/commit/2f0dea4f4cac3370129d0adf0000c8d0efa54361))
+* **tasks:** bup integration ([#398](https://github.com/freelabz/secator/issues/398)) ([ed636aa](https://github.com/freelabz/secator/commit/ed636aad7d90baa7b3b73baebc8f5be002dd796a))
+
+
+### Bug Fixes
+
+* **cli:** proper opts override for workflows ([#436](https://github.com/freelabz/secator/issues/436)) ([1d1eaa3](https://github.com/freelabz/secator/commit/1d1eaa3283b3d5e9650b452e3865476e6a60a086))
+* **dalfox:** restore input_chunk_size to default ([8f0a3b4](https://github.com/freelabz/secator/commit/8f0a3b4976e20afc2fb708483c7f8885b2b9f3d9))
+* dnsx parsing output loading error ([#422](https://github.com/freelabz/secator/issues/422)) ([b9e98da](https://github.com/freelabz/secator/commit/b9e98da2b5378957076e1d8f0afd3948d5bcb5f6))
+* empty CVE should pass ([#478](https://github.com/freelabz/secator/issues/478)) ([0644d68](https://github.com/freelabz/secator/commit/0644d68ccb92a4c38e8210e39f14f0850d84348d))
+* gcs bug with empty paths ([549ac4c](https://github.com/freelabz/secator/commit/549ac4c8e7391a829cf1a6c5a43ad291bec1b34a))
+* gcs bug with empty paths ([2d57e1a](https://github.com/freelabz/secator/commit/2d57e1ad4669587cf0abb0a59b0918cf72107d72))
+* get_opt_value default value and reorg hooks ([#429](https://github.com/freelabz/secator/issues/429)) ([a44a36d](https://github.com/freelabz/secator/commit/a44a36d37f888787927ec6dfc891e86dab071aa4))
+* mix bugfixes for stable release ([b743925](https://github.com/freelabz/secator/commit/b7439258c9cdadc7bd14a0a0b49e2db2d0f5b537))
+* nmap defaults ([396f68a](https://github.com/freelabz/secator/commit/396f68a325a5a8f1a9379d314979dbf85a9c95c7))
+* **nmap:** undefined service name ([#437](https://github.com/freelabz/secator/issues/437)) ([596f1af](https://github.com/freelabz/secator/commit/596f1aff53e9add73e1587497aee82465d212300))
+* runner opts processing ([#477](https://github.com/freelabz/secator/issues/477)) ([d788e9d](https://github.com/freelabz/secator/commit/d788e9d3e508a849119d418bcc5ce371c6c53c6c))
+* runner toDict() errors ([#475](https://github.com/freelabz/secator/issues/475)) ([b43c866](https://github.com/freelabz/secator/commit/b43c8669808651368536fa121be2ce79de7556aa))
+* **runner:** bug with no inputs ([#483](https://github.com/freelabz/secator/issues/483)) ([4db7b46](https://github.com/freelabz/secator/commit/4db7b460a949e6b74b5837f0f1e3b5ca51b39094))
+* **url_vuln:** repair bad condition ([214c8ab](https://github.com/freelabz/secator/commit/214c8abf7cad4916c8301ff056d894cc0bc26b28))
+
+
+### Documentation
+
+* add package json ([#415](https://github.com/freelabz/secator/issues/415)) ([f9a7c2f](https://github.com/freelabz/secator/commit/f9a7c2fc5df11506cce0d81babf1f7790b80465a))
+
 ## [0.6.0](https://github.com/freelabz/secator/compare/v0.5.2...v0.6.0) (2024-07-25)
 
 
