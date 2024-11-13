@@ -1,17 +1,16 @@
 import logging
 import os
-import unittest
 import warnings
 from time import sleep
 
 from secator.template import TemplateLoader
 from secator.runners import Task
-from secator.output_types import Target, Port, Url
+from secator.output_types import Port, Url
 from secator.definitions import DEBUG
 from secator.rich import console
 from secator.runners import Command, Workflow
 from secator.utils import setup_logging, merge_opts
-from secator.utils_test import TEST_WORKFLOWS, ALL_WORKFLOWS, CommandOutputTester, load_fixture
+from secator.utils_test import TEST_WORKFLOWS, ALL_WORKFLOWS, SecatorTestCase, CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_WORKFLOWS
 from tests.integration.outputs import OUTPUTS_WORKFLOWS
 
@@ -33,26 +32,7 @@ def hook_item(self, item):
 	return item
 
 
-class TestWorkflows(unittest.TestCase, CommandOutputTester):
-
-	@classmethod
-	def setUpClass(cls):
-		warnings.simplefilter('ignore', category=ResourceWarning)
-		warnings.simplefilter('ignore', category=DeprecationWarning)
-		Command.execute(
-			f'sh {INTEGRATION_DIR}/setup.sh',
-			quiet=True,
-			cwd=INTEGRATION_DIR
-		)
-		sleep(15)
-
-	@classmethod
-	def tearDownClass(self):
-		Command.execute(
-			f'sh {INTEGRATION_DIR}/teardown.sh',
-			quiet=True,
-			cwd=INTEGRATION_DIR
-		)
+class TestWorkflows(SecatorTestCase, CommandOutputTester):
 
 	def test_default_workflows(self):
 		fmt_opts = {
