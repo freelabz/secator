@@ -233,7 +233,7 @@ class SecatorTestCase(unittest.TestCase):
 		}
 		for addon, cmd in commands.items():
 			if getattr(cls, addon, False) is True:
-				command = Command.execute(cmd, name=addon, cwd=INTEGRATION_DIR, quiet=True, run=False)
+				command = Command.execute(cmd, name=addon, cwd=INTEGRATION_DIR, quiet=False, run=False)
 				cls.commands.append(command)
 				cls.threads.append(Thread(target=command.run))
 
