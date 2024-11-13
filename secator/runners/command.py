@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Info, Error, Target, Stat
+from secator.output_types import Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug
@@ -591,7 +591,7 @@ class Command(Runner):
 		"""Wait for process to finish and process output and return code."""
 		if not self.process:
 			return
-		self.debug(f'Waiting for command to finish ...', sub='command')
+		self.debug('Waiting for command to finish ...', sub='command')
 		for line in self.process.stdout.readlines():
 			yield from self.process_line(line)
 		self.process.wait()

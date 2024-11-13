@@ -226,8 +226,8 @@ class SecatorTestCase(unittest.TestCase):
 		cls.threads = []
 		cls.commands = []
 		commands = {
-			'integration_lab': f'docker-compose up',
-			'celery_worker': f'secator worker',
+			'integration_lab': 'docker-compose up',
+			'celery_worker': 'secator worker',
 			'mongodb': 'docker run --name integration-mongo -p 27018:27017 mongo:latest',
 			'redis': 'docker run --name integration-redis -p 6380:6379 redis'
 		}
