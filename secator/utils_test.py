@@ -241,7 +241,7 @@ class SecatorTestCase(unittest.TestCase):
 		[thread.start() for thread in cls.threads]
 
 		# Wait a bit and check for errors
-		sleep(5)
+		sleep(20)
 		for command in cls.commands:
 			if command.status == 'FAILURE':
 				cls.tearDownClass()
