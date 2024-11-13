@@ -23,8 +23,12 @@ def process_item(self, item):
 		return item
 	to_send = ITEMS_TO_SEND[item._type]
 	for k, v in item.toDict().items():
-		if k in to_send and v and Path(v).exists():
-			blob_name = f'{item._uuid}_{k}'
+		if k in to_send and v:
+			path = Path(v)
+			if not path.exists():
+				continue
+			ext = path.suffix
+			blob_name = f'{item._uuid}_{k}{ext}'
 			t = Thread(target=upload_blob, args=(GCS_BUCKET_NAME, v, blob_name))
 			t.start()
 			self.threads.append(t)
