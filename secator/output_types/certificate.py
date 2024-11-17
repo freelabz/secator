@@ -1,15 +1,9 @@
 import time
 from datetime import datetime
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi
-
-
-class Certificate_status(Enum):
-    REVOKED = auto()  # noqa: F821
-    TRUSTED = auto()  # noqa: F821
-    UNKOWN = auto()  # noqa: F821
+from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
 
 
 @dataclass
@@ -26,7 +20,7 @@ class Certificate(OutputType):
     issuer: str = ''
     self_signed: bool = True
     trusted: bool = False
-    status: Certificate_status = Certificate_status.UNKOWN
+    status: str = CERTIFICATE_STATUS_UNKNOWN
     keysize: int = None
     serial_number: str = ''
     ciphers: list[str] = field(default_factory=list)
@@ -47,7 +41,7 @@ class Certificate(OutputType):
 
     def is_expired(self) -> bool:
         if self.not_after:
-            return self.not_after > datetime.now()
+            return self.not_after < datetime.now()
         return True
 
     def __repr__(self) -> str:
@@ -59,7 +53,7 @@ class Certificate(OutputType):
         if self.is_expired():
             s += f' [red] expired since {self.not_after.strftime("%m %d %Y")}[/]'
         else:
-            s += f' [green] not expired until {self.not_after.strftime("%m %d %Y")}[/]'
+            s += f' [green] not expired, valid until {self.not_after.strftime("%m %d %Y")}[/]'
         if self.issuer:
             s += f'[white] issuer : {self.issuer}[/]'
         s += f'[white] {self.status}[/]'
