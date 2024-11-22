@@ -15,23 +15,37 @@ tasks:
     version_detection: True
     targets_: port.host
     ports_: port.port
-  httpx:
-    description: Probe HTTP services on open ports
-    targets_:
-      - type: port
-        field: '{host}:{port}'
-        condition: item._source.startswith('nmap')
-  _group:
+  _group/ports:
+    httpx:
+      description: Probe HTTP services on open ports
+      targets_:
+        - type: port
+          field: '{host}:{port}'
+          condition: item._source.startswith('nmap')
+    # msfconsole:
+    #   description: Check any FTP server for anonymous access
+    #   execute_command: "use auxiliary/scanner/ftp/anonymous; exploit"
+    #   targets_:
+    #     - type: port
+    #       field: host
+    #       condition: item.port == 21
+  _group/nuclei:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
-    nuclei/url:
-      description: Search for vulnerabilities on alive HTTP services
-      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
-      targets_:
-        - type: url
-          field: url
-          condition: item.status_code != 0
+  #   nuclei/url:
+  #     description: Search for vulnerabilities on alive HTTP services
+  #     exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
+  #     targets_:
+  #       - type: url
+  #         field: url
+  #         condition: item.status_code != 0
+  msfconsole/cve_search:
+    description: Search for CVEs in Metasploit
+    execute_command_:
+      - type: vulnerability
+        field: 'search cve:{id}'
+        condition: item.id.startswith("CVE")
 results:
   - type: port
     condition: item._source.startswith('nmap')
