@@ -16,6 +16,7 @@ class cariddi(HttpCrawler):
 	cmd = 'cariddi -info -s -err -e -ext 1'
 	input_type = URL
 	input_flag = OPT_PIPE_INPUT
+	input_chunk_size = 10
 	output_types = [Url, Tag]
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '-json'
