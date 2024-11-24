@@ -15,7 +15,7 @@ from secator.tasks._categories import VulnMulti
 class testsslsh(VulnMulti):
     output_types = [Certificate, Vulnerability]
     install_cmd = (
-        'sudo git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl.sh && ',
+        'sudo git clone --depth 1 https://github.com/drwetter/testssl.sh.git /opt/testssl.sh && '
         'sudo ln -s /opt/testssl.sh/testssl.sh /usr/bin'
     )
     cmd = 'testssl.sh'
