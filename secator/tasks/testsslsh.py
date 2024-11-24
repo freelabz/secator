@@ -19,7 +19,7 @@ class testsslsh(VulnMulti):
         'sudo ln -s /opt/testssl.sh/testssl.sh /usr/bin'
     )
     cmd = 'testssl.sh'
-    # TODO
+    # TODO add more of the default options
     opt_key_map = {
         PROXY: 'proxy',
         USER_AGENT: 'user-agent',
