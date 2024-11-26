@@ -4,6 +4,9 @@ import os
 import sys
 import unittest.mock
 
+from threading import Thread
+from time import sleep
+
 from fp.fp import FreeProxy
 
 from secator.definitions import (CIDR_RANGE, DELAY, DEPTH, EMAIL,
@@ -22,6 +25,7 @@ from secator.utils import load_fixture
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/tests/'
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
+INTEGRATION_DIR = f'{TEST_DIR}/integration'
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 
 #------------#
@@ -208,6 +212,48 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			raise
 
 		console.print('[dim green] ok[/]')
+
+
+class SecatorTestCase(unittest.TestCase):
+
+	integration_lab = True
+	celery_worker = False
+	mongodb = False
+	redis = False
+
+	@classmethod
+	def setUpClass(cls):
+		cls.threads = []
+		cls.commands = []
+		commands = {
+			'integration_lab': 'docker-compose up',
+			'celery_worker': 'secator worker',
+			'mongodb': 'docker run --name integration-mongo -p 27018:27017 mongo:latest',
+			'redis': 'docker run --name integration-redis -p 6380:6379 redis'
+		}
+		for addon, cmd in commands.items():
+			if getattr(cls, addon, False) is True:
+				command = Command.execute(cmd, name=addon, cwd=INTEGRATION_DIR, quiet=False, run=False)
+				cls.commands.append(command)
+				cls.threads.append(Thread(target=command.run))
+
+		# Start all threads
+		[thread.start() for thread in cls.threads]
+
+		# Wait a bit and check for errors
+		sleep(20)
+		for command in cls.commands:
+			if command.status == 'FAILURE':
+				cls.tearDownClass()
+				assert False, f'{command.name} failed to start properly'
+
+	@classmethod
+	def tearDownClass(cls):
+		# Stop all command
+		[command.stop_process() for command in cls.commands]
+
+		# Stop all threads
+		[thread.join() for thread in cls.threads]
 
 
 def clear_modules():

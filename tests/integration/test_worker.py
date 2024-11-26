@@ -1,25 +1,16 @@
-import unittest
+from time import sleep
+from threading import Thread
+
 from secator.output_types import Url, Target, Port, Vulnerability, Info
 from secator.runners import Command
 from secator.serializers import JSONSerializer
-from time import sleep
-from threading import Thread
-import queue
+from secator.utils_test import SecatorTestCase
 
-class TestWorker(unittest.TestCase):
 
-	@classmethod
-	def setUpClass(cls):
-		cls.queue = queue.Queue()
-		cls.cmd = Command.execute('secator worker', name='secator_worker', quiet=True, run=False)
-		cls.thread = Thread(target=cls.cmd.run)
-		cls.thread.start()
-		sleep(3)
+class TestWorker(SecatorTestCase):
 
-	@classmethod
-	def tearDownClass(cls) -> None:
-		cls.cmd.stop_process()
-		cls.thread.join()
+	celery_worker = True
+	lab = False
 
 	def test_httpx(self):
 		cmd = Command.execute(

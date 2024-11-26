@@ -361,7 +361,6 @@ class Command(Runner):
 
 			# Output and results
 			self.return_code = 0
-			self.killed = False
 
 			# Run the command using subprocess
 			env = os.environ
@@ -397,9 +396,9 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='error')
-			self.stop_process()
+			self.debug(f'{type(e).__name__}', sub='error')
 			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			self.stop_process()
 
 		finally:
 			yield from self._wait_for_end()
@@ -598,6 +597,7 @@ class Command(Runner):
 		"""Wait for process to finish and process output and return code."""
 		if not self.process:
 			return
+		self.debug('Waiting for command to finish ...', sub='command')
 		for line in self.process.stdout.readlines():
 			yield from self.process_line(line)
 		self.process.wait()
@@ -605,19 +605,9 @@ class Command(Runner):
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
 		self.output = self.output.strip()
-		self.killed = self.return_code == -2 or self.killed
-		self.debug(f'Command {self.cmd} finished with return code {self.return_code}', sub='command')
-
-		if self.killed:
-			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
-
-		elif self.return_code != 0:
-			error = f'Command failed with return code {self.return_code}.'
+		self.debug(f'finished with return code {self.return_code}', sub='command')
+		if self.return_code != 0 and self.return_code != 130:
+			error = f'failed with return code {self.return_code}.'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
 			yield Error(

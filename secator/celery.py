@@ -251,7 +251,7 @@ def run_command(self, results, name, targets, opts={}):
 	# Get expanded targets
 	if not chunk and results:
 		targets, opts = run_extractors(results, opts, targets)
-		debug('after extractors', obj={'targets': targets, 'opts': opts}, sub='celery.state')
+		debug('after extractors', obj={'targets': targets}, sub='celery.inputs', verbose=True)
 
 	try:
 		# Get task class

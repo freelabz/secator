@@ -23,7 +23,8 @@ class Error(OutputType):
 		message = type(e).__name__
 		if str(e):
 			message += f': {str(e)}'
-		return Error(message=message, traceback=traceback_as_string(e), **kwargs)
+		tb = not isinstance(e, KeyboardInterrupt)
+		return Error(message=message, traceback=traceback_as_string(e) if tb else '', **kwargs)
 
 	def __str__(self):
 		return self.message
