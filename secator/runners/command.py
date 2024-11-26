@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error, Target, Stat
+from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug
@@ -124,9 +124,12 @@ class Command(Runner):
 		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
+		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
 
 		# Prepare validators
-		input_validators = [self._validate_input_nonempty]
+		input_validators = []
+		if not self.skip_if_no_inputs:
+			input_validators.append(self._validate_input_nonempty)
 		if not caller:
 			input_validators.append(self._validate_chunked_input)
 		validators = {'validate_input': input_validators}
@@ -175,22 +178,6 @@ class Command(Runner):
 		if instance_func:
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
-
-		# Print built cmd
-		if not self.has_children:
-			if self.sync:
-				if self.caller and self.description:
-					self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-				elif self.print_cmd:
-					self._print('')
-		if self.print_cmd:
-			cmd_str = self.cmd.replace('[', '\\[')
-			if self.sync and self.chunk and self.chunk_count:
-				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
-			self._print(cmd_str, color='bold cyan', rich=True)
-
-		# Debug
-		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
 
 	def toDict(self):
 		res = super().toDict()
@@ -347,6 +334,14 @@ class Command(Runner):
 			if self.has_children:
 				return
 
+			# Print task description
+			self.print_description()
+
+			# Abort if no inputs
+			if len(self.inputs) == 0 and self.skip_if_no_inputs:
+				yield Info(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				return
+
 			# Yield targets
 			for input in self.inputs:
 				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
@@ -379,6 +374,7 @@ class Command(Runner):
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
+			self.print_command()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
@@ -446,6 +442,23 @@ class Command(Runner):
 
 		yield from self.stats()
 		self.last_updated_stat = time()
+
+	def print_description(self):
+		"""Print description"""
+		if self.sync and not self.has_children:
+			if self.caller and self.description:
+				self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
+			elif self.print_cmd:
+				self._print('')
+
+	def print_command(self):
+		"""Print command."""
+		if self.print_cmd:
+			cmd_str = self.cmd.replace('[', '\\[')
+			if self.sync and self.chunk and self.chunk_count:
+				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
+			self._print(cmd_str, color='bold cyan', rich=True)
+		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.

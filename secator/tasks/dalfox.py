@@ -24,7 +24,7 @@ class dalfox(VulnHttp):
 	input_type = URL
 	input_flag = 'url'
 	file_flag = 'file'
-	input_chunk_size = 1
+	# input_chunk_size = 1
 	json_flag = '--format json'
 	version_flag = 'version'
 	opt_prefix = '--'
