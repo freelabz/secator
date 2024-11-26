@@ -2,6 +2,7 @@ import fnmatch
 import inspect
 import importlib
 import itertools
+import json
 import logging
 import operator
 import os
@@ -70,8 +71,9 @@ def expand_input(input, ctx):
 		ctx (click.Context): Click context.
 
 	Returns:
-		str: Input.
+		tuple[list,list]: Tuple of inputs, results.
 	"""
+	path = Path(input)
 	if input is None:  # read from stdin
 		if not ctx.obj['piped_input']:
 			console.print('Waiting for input on stdin ...', style='bold yellow')
@@ -79,26 +81,28 @@ def expand_input(input, ctx):
 		if rlist:
 			data = sys.stdin.read().splitlines()
 		else:
-			console.print(
-				'No input passed on stdin. Showing help page.',
-				style='bold red')
-			return None
-		return data
-	elif os.path.exists(input):
-		if os.path.isfile(input):
+			console.print('No input passed on stdin. Showing help page.', style='bold red')
+			return None, None
+		return data, []
+	else:
+		path = Path(input)
+		if path.exists and path.is_file():
 			with open(input, 'r') as f:
-				data = f.read().splitlines()
-			return data
-		return input
-	elif isinstance(input, str):
-		input = input.split(',')
-
-	# If the list is only one item, return it instead of the list
-	# Usefull for commands that can take only one input at a time.
-	if isinstance(input, list) and len(input) == 1:
-		return input[0]
-
-	return input
+				data = f.read()
+			if path.suffix == '.json':  # json report input
+				data = json.loads(data)
+				results = data.get('results', [])
+				return [], results
+			else:  # raw file input
+				data = data.splitlines()
+			return data, []
+		elif isinstance(input, str):  # csv input
+			input = input.split(',')
+			if len(input) == 1:
+				return input[0], []
+			return input, []
+		else:
+			console.print(f'[bold red]Invalid input {input}[/]')
 
 
 def sanitize_url(http_url):
