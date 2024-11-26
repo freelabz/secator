@@ -101,8 +101,8 @@ def find_duplicates(self):
 	if not ws_id:
 		return
 	if self.sync:
-		tag_duplicates(ws_id)
 		debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
+		tag_duplicates(ws_id)
 	else:
 		celery_id = tag_duplicates.delay(ws_id)
 		debug(f'running duplicate check on workspace {ws_id}', id=celery_id, sub='hooks.mongodb')
@@ -172,19 +172,19 @@ def tag_duplicates(ws_id: str = None):
 				'seen dupes': len(seen_dupes)
 			},
 			id=ws_id,
-			sub='hooks.mongodb',
+			sub='hooks.mongodb.duplicates',
 			verbose=True)
 		tmp_duplicates_ids = list(dict.fromkeys([i._uuid for i in tmp_duplicates]))
-		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb', verbose=True)
+		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
 
 		# Update latest object as non-duplicate
 		if tmp_duplicates:
 			duplicates.extend([f for f in tmp_duplicates])
 			db.findings.update_one({'_id': ObjectId(item._uuid)}, {'$set': {'_related': tmp_duplicates_ids}})
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
 			non_duplicates.append(item)
 		else:
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
 			non_duplicates.append(item)
 
 	# debug(f'found {len(duplicates)} total duplicates')
@@ -208,7 +208,7 @@ def tag_duplicates(ws_id: str = None):
 			'duplicates': len(duplicates_ids),
 			'non-duplicates': len(non_duplicates_ids)
 		},
-		sub='hooks.mongodb')
+		sub='hooks.mongodb.duplicates')
 
 
 HOOKS = {
