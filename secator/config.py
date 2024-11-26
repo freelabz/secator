@@ -116,7 +116,11 @@ class Wordlists(StrictModel):
 	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains'}
 	templates: Dict[str, str] = {
 		'bo0m_fuzz': 'https://raw.githubusercontent.com/Bo0oM/fuzz.txt/master/fuzz.txt',
-		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt'  # noqa: E501
+		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt',  # noqa: E501
+		'lfi': 'https://raw.githubusercontent.com/freelabz/loxs/refs/heads/main/payloads/lfi.txt', #wordlist for lfi
+		'or': 'https://raw.githubusercontent.com/freelabz/loxs/refs/heads/main/payloads/or.txt',
+		'xss': 'https://raw.githubusercontent.com/freelabz/loxs/refs/heads/main/payloads/xss.txt',
+		'xsspollygots': 'https://raw.githubusercontent.com/freelabz/loxs/refs/heads/main/payloads/xsspollygots.txt'
 	}
 	lists: Dict[str, List[str]] = {}
 
