@@ -121,7 +121,7 @@ class TemplateLoader(DotMap):
 		def parse_config(config, prefix=''):
 			for key, value in config.items():
 				if key.startswith('_group'):
-					parse_config(value, key)
+					parse_config(value, prefix)
 				elif value:
 					task_name = f'{prefix}/{key}' if prefix else key
 					name = key.split('/')[0]
