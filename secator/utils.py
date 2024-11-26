@@ -13,6 +13,7 @@ import validators
 import warnings
 
 from datetime import datetime, timedelta
+from functools import reduce
 from inspect import isclass
 from pathlib import Path
 from pkgutil import iter_modules
@@ -206,25 +207,32 @@ def discover_tasks():
 	return _tasks
 
 
-def import_dynamic(cls_path, cls_root='Command'):
-	"""Import class dynamically from class path.
+def import_dynamic(path, name=None):
+	"""Import class or module dynamically from path.
 
 	Args:
-		cls_path (str): Class path.
+		path (str): Path to class or module.
+		name (str): If specified, does a getattr() on the package to get this attribute.
 		cls_root (str): Root parent class.
+
+	Examples:
+		>>> import_dynamic('secator.exporters', name='CsvExporter')
+		>>> import_dynamic('secator.hooks.mongodb', name='HOOKS')
 
 	Returns:
 		cls: Class object.
 	"""
 	try:
-		package, name = cls_path.rsplit(".", maxsplit=1)
-		cls = getattr(importlib.import_module(package), name)
-		root_cls = inspect.getmro(cls)[-2]
-		if root_cls.__name__ == cls_root:
-			return cls
-		return None
+		res = importlib.import_module(path)
+		if name:
+			res = getattr(res, name)
+			if res is None:
+				raise
+		return res
 	except Exception:
-		warnings.warn(f'"{package}.{name}" not found.')
+		if name:
+			path += f'.{name}'
+		warnings.warn(f'"{path}" not found.', category=UserWarning, stacklevel=2)
 		return None
 
 
@@ -345,43 +353,43 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
+def format_object(obj, obj_breaklines=False):
+    """Format the debug object for printing."""
+    sep = '\n ' if obj_breaklines else ', '
+    if isinstance(obj, dict):
+        return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
+    elif isinstance(obj, list):
+        return f'[dim green]{sep.join(obj)}[/]'
+    return ''
+
+
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
-	"""Print debug log if DEBUG >= level."""
-	debug_comp_empty = DEBUG_COMPONENT == [""] or not DEBUG_COMPONENT
-	if debug_comp_empty:
-		return
+    """Print debug log if DEBUG >= level."""
+    if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
+        return
 
-	if sub and verbose and not any(sub == s for s in DEBUG_COMPONENT):
-		sub = f'debug.{sub}'
+    if sub:
+        if verbose and sub not in DEBUG_COMPONENT:
+            sub = f'debug.{sub}'
+        if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+            return
 
-	if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
-		return
+    if lazy:
+        msg = lazy(msg)
 
-	if lazy:
-		msg = lazy(msg)
+    formatted_msg = f'[dim yellow4]{sub:13s}[/] ' if sub else ''
+    obj_str = format_object(obj, obj_breaklines) if obj else ''
 
-	s = ''
-	if sub:
-		s += f'[dim yellow4]{sub:13s}[/] '
-	obj_str = ''
-	if obj:
-		sep = ', '
-		if obj_breaklines:
-			obj_str += '\n '
-			sep = '\n '
-		if isinstance(obj, dict):
-			obj_str += sep.join(f'[dim blue]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)
-		elif isinstance(obj, list):
-			obj_str += f'[dim]{sep.join(obj)}[/]'
-	if obj_str and not obj_after:
-		s = f'{s} {obj_str} '
-	s += f'[dim yellow]{msg}[/] '
-	if obj_str and obj_after:
-		s = f'{s}: {obj_str}'
-	if id:
-		s += f' [italic dim gray11]\[{id}][/] '
-	s = rich_to_ansi(f'[dim red]🐛 {s}[/]')
-	print(s)
+    # Constructing the message string based on object position
+    if obj_str and not obj_after:
+        formatted_msg += f'{obj_str} '
+    formatted_msg += f'[dim yellow]{msg}[/]'
+    if obj_str and obj_after:
+        formatted_msg += f': {obj_str}'
+    if id:
+        formatted_msg += f' [italic dim gray11]\[{id}][/]'
+
+    console.print(f'[dim red]🐛 {formatted_msg}[/]', style='red')
 
 
 def escape_mongodb_url(url):
@@ -650,3 +658,34 @@ def human_to_timedelta(time_str):
 		if param:
 			time_params[name] = int(param)
 	return timedelta(**time_params)
+
+
+def deep_merge_dicts(*dicts):
+    """
+    Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
+
+    Args:
+        dicts (tuple): A tuple of dictionary objects to merge.
+
+    Returns:
+        dict: A new dictionary containing merged keys and values from all input dictionaries.
+	"""
+    def merge_two_dicts(dict1, dict2):
+        """
+        Helper function that merges two dictionaries.
+        """
+        result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
+        for key, value in dict2.items():
+            if key in result:
+                if isinstance(result[key], dict) and isinstance(value, dict):
+                    result[key] = merge_two_dicts(result[key], value)
+                elif isinstance(result[key], list) and isinstance(value, list):
+                    result[key] += value  # Concatenating lists
+                else:
+                    result[key] = value  # Overwrite if not both lists or both dicts
+            else:
+                result[key] = value
+        return result
+
+    # Use reduce to apply merge_two_dicts to all dictionaries in dicts
+    return reduce(merge_two_dicts, dicts, {})

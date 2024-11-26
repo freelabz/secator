@@ -16,9 +16,10 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Error, Target, Stat
+from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
+from secator.utils import debug
 
 
 logger = logging.getLogger(__name__)
@@ -123,9 +124,12 @@ class Command(Runner):
 		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
+		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
 
 		# Prepare validators
-		input_validators = [self._validate_input_nonempty]
+		input_validators = []
+		if not self.skip_if_no_inputs:
+			input_validators.append(self._validate_input_nonempty)
 		if not caller:
 			input_validators.append(self._validate_chunked_input)
 		validators = {'validate_input': input_validators}
@@ -174,22 +178,6 @@ class Command(Runner):
 		if instance_func:
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
-
-		# Print built cmd
-		if not self.has_children:
-			if self.sync:
-				if self.caller and self.description:
-					self._print(f'\n:wrench: {self.description} ...', color='bold gold3', rich=True)
-				elif self.print_cmd:
-					self._print('')
-		if self.print_cmd:
-			cmd_str = self.cmd.replace('[', '\\[')
-			if self.sync and self.chunk and self.chunk_count:
-				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
-			self._print(cmd_str, color='bold cyan', rich=True)
-
-		# Debug
-		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
 
 	def toDict(self):
 		res = super().toDict()
@@ -346,6 +334,14 @@ class Command(Runner):
 			if self.has_children:
 				return
 
+			# Print task description
+			self.print_description()
+
+			# Abort if no inputs
+			if len(self.inputs) == 0 and self.skip_if_no_inputs:
+				yield Info(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				return
+
 			# Yield targets
 			for input in self.inputs:
 				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
@@ -378,6 +374,7 @@ class Command(Runner):
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
+			self.print_command()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
@@ -400,10 +397,7 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			self.debug(
-				f'{self.unique_name}: {type(e).__name__}. Sending SIGINT to process {self.process.pid}.',
-				sub='error'
-			)
+			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='error')
 			self.stop_process()
 			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
@@ -449,6 +443,23 @@ class Command(Runner):
 		yield from self.stats()
 		self.last_updated_stat = time()
 
+	def print_description(self):
+		"""Print description"""
+		if self.sync and not self.has_children:
+			if self.caller and self.description:
+				self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
+			elif self.print_cmd:
+				self._print('')
+
+	def print_command(self):
+		"""Print command."""
+		if self.print_cmd:
+			cmd_str = self.cmd.replace('[', '\\[')
+			if self.sync and self.chunk and self.chunk_count:
+				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
+			self._print(cmd_str, color='bold cyan', rich=True)
+		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
+
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
 
@@ -474,9 +485,11 @@ class Command(Runner):
 		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
+		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
 		self.process.send_signal(signal.SIGINT)
 
 	def stats(self):
+		"""Gather stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
@@ -499,6 +512,12 @@ class Command(Runner):
 
 	@staticmethod
 	def get_process_info(process, children=False):
+		"""Get process information from psutil.
+
+		Args:
+			process (subprocess.Process): Process.
+			children (bool): Whether to gather stats about children processes too.
+		"""
 		try:
 			data = {
 				k: v._asdict() if hasattr(v, '_asdict') else v
@@ -513,7 +532,11 @@ class Command(Runner):
 				yield from Command.get_process_info(subproc, children=False)
 
 	def run_item_loaders(self, line):
-		"""Run item loaders against an output line."""
+		"""Run item loaders against an output line.
+
+		Args:
+			line (str): Output line.
+		"""
 		if self.no_process:
 			return
 		for item_loader in self.item_loaders:
@@ -612,15 +635,19 @@ class Command(Runner):
 			opt_value_map={},
 			opt_prefix='-',
 			command_name=None):
-		"""Process a dict of options using a config, option key map / value map
-		and option character like '-' or '--'.
+		"""Process a dict of options using a config, option key map / value map and option character like '-' or '--'.
 
 		Args:
 			opts (dict): Command options as input on the CLI.
 			opts_conf (dict): Options config (Click options definition).
+			opt_key_map (dict[str, str | Callable]): A dict to map option key with their actual values.
+			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
+			opt_prefix (str, default: '-'): Option prefix.
+			command_name (str | None, default: None): Command name.
 		"""
 		opts_str = ''
 		for opt_name, opt_conf in opts_conf.items():
+			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 
 			# Get opt value
 			default_val = opt_conf.get('default')
@@ -631,25 +658,30 @@ class Command(Runner):
 				opt_prefix=command_name,
 				default=default_val)
 
+			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+
 			# Skip option if value is falsy
 			if opt_val in [None, False, []]:
-				# logger.debug(f'Option {opt_name} was passed but is falsy. Skipping.')
+				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 				continue
 
 			# Convert opt value to expected command opt value
 			mapped_opt_val = opt_value_map.get(opt_name)
-			if callable(mapped_opt_val):
-				opt_val = mapped_opt_val(opt_val)
-			elif mapped_opt_val:
-				opt_val = mapped_opt_val
+			if mapped_opt_val:
+				if callable(mapped_opt_val):
+					opt_val = mapped_opt_val(opt_val)
+				else:
+					opt_val = mapped_opt_val
 
 			# Convert opt name to expected command opt name
 			mapped_opt_name = opt_key_map.get(opt_name)
-			if mapped_opt_name == OPT_NOT_SUPPORTED:
-				# logger.debug(f'Option {opt_name} was passed but is unsupported. Skipping.')
-				continue
-			elif mapped_opt_name is not None:
-				opt_name = mapped_opt_name
+			if mapped_opt_name is not None:
+				if mapped_opt_name == OPT_NOT_SUPPORTED:
+					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='command.options', verbose=True)  # noqa: E501
+					continue
+				else:
+					opt_name = mapped_opt_name
+			debug('mapped key / value', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 
 			# Avoid shell injections and detect opt prefix
 			opt_name = str(opt_name).split(' ')[0]  # avoid cmd injection
@@ -669,6 +701,7 @@ class Command(Runner):
 				if shlex_quote:
 					opt_val = shlex.quote(str(opt_val))
 				opts_str += f' {opt_val}'
+			debug('final', obj={'name': opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)
 
 		return opts_str.strip()
 
@@ -684,7 +717,7 @@ class Command(Runner):
 		"""Input is empty."""
 		if not self.input_required:
 			return True
-		if not self.inputs or len(self.inputs) == 0:
+		if not inputs or len(inputs) == 0:
 			return False
 		return True
 
@@ -702,17 +735,21 @@ class Command(Runner):
 	@staticmethod
 	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
 		default = default or Command._get_opt_default(opt_name, opts_conf)
-		aliases = [
-			opts.get(f'{opt_prefix}_{opt_name}'),
-			opts.get(f'{opt_prefix}.{opt_name}'),
-			opts.get(opt_name),
+		opt_names = [
+			f'{opt_prefix}.{opt_name}',
+			f'{opt_prefix}_{opt_name}',
+			opt_name,
 		]
-		alias = [conf.get('short') for _, conf in opts_conf.items() if conf.get('short') in opts]
+		opt_values = [opts.get(o) for o in opt_names]
+		alias = [conf.get('short') for _, conf in opts_conf.items() if conf.get('short') in opts and _ == opt_name]
 		if alias:
-			aliases.append(opts.get(alias[0]))
-		if OPT_NOT_SUPPORTED in aliases:
+			opt_values.append(opts.get(alias[0]))
+		if OPT_NOT_SUPPORTED in opt_values:
+			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='command.options', verbose=True)
 			return None
-		return next((v for v in aliases if v is not None), default)
+		value = next((v for v in opt_values if v is not None), default)
+		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+		return value
 
 	def _build_cmd(self):
 		"""Build command string."""

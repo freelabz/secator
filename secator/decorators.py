@@ -174,23 +174,33 @@ def get_command_options(config):
 				if conf.get('required', False):
 					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)  # noqa: E501
 					continue
-				if opt_default is not None and opt_value_in_config != opt_default and opt_is_flag:
-					conf['reverse'] = True
-					conf['default'] = not conf['default']
+				mapped_value = cls.opt_value_map.get(opt)
+				if callable(mapped_value):
+					opt_value_in_config = mapped_value(opt_value_in_config)
+				elif mapped_value:
+					opt_value_in_config = mapped_value
+				if opt_value_in_config != opt_default:
+					if opt in opt_cache:
+						continue
+					if opt_is_flag:
+						conf['reverse'] = True
+						conf['default'] = not conf['default']
+					# print(f'{opt}: change default to {opt_value_in_config}')
+					conf['default'] = opt_value_in_config
 
 			# If opt is a flag but the default is True, add opposite flag
 			if opt_is_flag and opt_default is True:
 				conf['reverse'] = True
 
 			# Check if opt already processed before
-			opt = opt.replace('_', '-')
 			if opt in opt_cache:
 				# debug('OPT (skipped: opt is already in opt cache)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)
 				continue
 
 			# Build help
-			all_opts[opt] = conf
 			opt_cache.append(opt)
+			opt = opt.replace('_', '-')
+			all_opts[opt] = conf
 
 			# Debug
 			debug_conf = OrderedDict({'opt': opt, 'config_val': opt_value_in_config or 'N/A', **conf.copy()})
@@ -317,8 +327,36 @@ def register_runner(cli_endpoint, config):
 		# unknown_opts = get_unknown_opts(ctx)
 		# opts.update(unknown_opts)
 
+		# Expand input
 		inputs = opts.pop(input_type)
 		inputs = expand_input(inputs, ctx)
+
+		# Build hooks from driver name
+		hooks = []
+		drivers = driver.split(',') if driver else []
+		console = _get_rich_console()
+		supported_drivers = ['mongodb', 'gcs']
+		for driver in drivers:
+			if driver in supported_drivers:
+				if not ADDONS_ENABLED[driver]:
+					console.print(f'[bold red]Missing "{driver}" addon: please run `secator install addons {driver}`[/].')
+					sys.exit(1)
+				from secator.utils import import_dynamic
+				driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+				if driver_hooks is None:
+					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
+					sys.exit(1)
+				hooks.append(driver_hooks)
+			else:
+				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
+				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
+				console.print(f'Supported drivers: {supported_drivers_str}')
+				sys.exit(1)
+
+		from secator.utils import deep_merge_dicts
+		hooks = deep_merge_dicts(*hooks)
+
+		# Enable sync or not
 		if sync or show:
 			sync = True
 		else:
@@ -335,14 +373,8 @@ def register_runner(cli_endpoint, config):
 						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 						sys.exit(1)
 
-		# Build hooks from driver name
-		hooks = {}
-		if driver == 'mongodb':
-			if not ADDONS_ENABLED['mongodb']:
-				_get_rich_console().print('[bold red]Missing `mongodb` addon: please run `secator install addons mongodb`[/].')
-				sys.exit(1)
-			from secator.hooks.mongodb import MONGODB_HOOKS
-			hooks = MONGODB_HOOKS
+		from secator.utils import debug
+		debug('Run options', obj=opts, sub='cli')
 
 		# Set run options
 		opts.update({

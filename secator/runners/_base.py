@@ -41,17 +41,16 @@ class Runner:
 	"""Runner class.
 
 	Args:
-		config (secator.config.TemplateLoader): Loaded config.
-		targets (list): List of targets to run task on.
-		results (list): List of existing results to re-use.
-		workspace_name (str): Workspace name.
-		run_opts (dict): Run options.
+		config (secator.config.TemplateLoader): Runner config.
+		inputs (List[str]): List of inputs to run task on.
+		results (List[OutputType]): List of results to re-use.
+		run_opts (dict[str]): Run options.
+		hooks (dict[str, List[Callable]]): User hooks to register.
+		validators (dict): User validators to register.
+		context (dict): Runner context.
 
 	Yields:
-		dict: Result (when running in sync mode with `run`).
-
-	Returns:
-		list: List of results (when running in async mode with `run_async`).
+		OutputType: Output types.
 	"""
 
 	# Input field (mostly for tests and CLI)
@@ -96,10 +95,11 @@ class Runner:
 		self.celery_ids_map = {}
 		self.uuids = []
 		self.caller = self.run_opts.get('caller', None)
+		self.threads = []
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
-		self.exporters = Runner.resolve_exporters(exporters_str)
+		self.exporters = self.resolve_exporters(exporters_str)
 
 		# Determine report folder
 		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
@@ -241,9 +241,19 @@ class Runner:
 		}
 
 	def run(self):
+		"""Run method.
+
+		Returns:
+			List[OutputType]: List of runner results.
+		"""
 		return list(self.__iter__())
 
 	def __iter__(self):
+		"""Process results from derived runner class in real-time and yield results.
+
+		Yields:
+			OutputType: runner result.
+		"""
 		try:
 			self.log_start()
 			self.run_hooks('on_start')
@@ -263,13 +273,17 @@ class Runner:
 				yield from self._process_item(item)
 				self.run_hooks('on_interval')
 
+			# Wait for threads to finish
+			yield from self.join_threads()
+
 		except BaseException as e:
-			self.debug(f'{self.config.name} encountered exception {type(e).__name__}. Stopping remote tasks.', sub='error')
+			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='error')
 			error = Error.from_exception(e)
 			error._source = self.unique_name
 			error._uuid = str(uuid.uuid4())
 			self.add_result(error, print=True)
 			self.stop_celery_tasks()
+			yield from self.join_threads()
 			yield error
 
 		# Mark duplicates and filter results
@@ -281,7 +295,26 @@ class Runner:
 		self.log_results()
 		self.run_hooks('on_end')
 
+	def join_threads(self):
+		"""Wait for all running threads to complete."""
+		if not self.threads:
+			return
+		self.debug(f'waiting for {len(self.threads)} threads to complete')
+		for thread in self.threads:
+			error = thread.join()
+			if error:
+				error._source = self.unique_name
+				error._uuid = str(uuid.uuid4())
+				self.add_result(error, print=True)
+				yield error
+
 	def add_result(self, item, print=False):
+		"""Add item to runner results.
+
+		Args:
+			item (OutputType): Item.
+			print (bool): Whether to print it or not.
+		"""
 		self.uuids.append(item._uuid)
 		self.results.append(item)
 		self.output += repr(item) + '\n'
@@ -289,7 +322,13 @@ class Runner:
 			self._print_item(item)
 
 	def add_subtask(self, task_id, task_name, task_description):
-		"""Add a Celery subtask to the current runner for tracking purposes."""
+		"""Add a Celery subtask to the current runner for tracking purposes.
+
+		Args:
+			task_id (str): Celery task id.
+			task_name (str): Task name.
+			task_description (str): Task description.
+		"""
 		self.celery_ids.append(task_id)
 		self.celery_ids_map[task_id] = {
 			'id': task_id,
@@ -358,7 +397,12 @@ class Runner:
 				self._print(item, out=sys.stderr, end='\n')
 
 	def debug(self, *args, **kwargs):
-		"""Print debug only if self.no_process is True"""
+		"""Print debug with runner class name, only if self.no_process is True.
+
+		Args:
+			args (list): List of debug args.
+			kwargs (dict): Dict of debug kwargs.
+		"""
 		allow_no_process = kwargs.pop('allow_no_process', True)
 		if self.no_process and not allow_no_process:
 			return
@@ -370,7 +414,7 @@ class Runner:
 		debug(*args, **kwargs)
 
 	def mark_duplicates(self):
-		"""Mark duplicates."""
+		"""Check for duplicates and mark items as duplicates."""
 		if not self.enable_duplicate_check:
 			return
 		self.debug('running duplicate check', id=self.config.name, sub='duplicates')
@@ -533,7 +577,7 @@ class Runner:
 		"""Register hooks.
 
 		Args:
-			hooks (list): List of hooks to register.
+			hooks (dict[str, List[Callable]]): List of hooks to register.
 		"""
 		for key in self.hooks:
 			# Register class + derived class hooks
@@ -554,6 +598,11 @@ class Runner:
 			self.hooks[key].extend(user_hooks)
 
 	def register_validators(self, validators):
+		"""Register validators.
+
+		Args:
+			validators (dict[str, List[Callable]]): Validators to register.
+		"""
 		# Register class + derived class hooks
 		for key in self.validators:
 			class_validator = getattr(self, key, None)
@@ -571,20 +620,6 @@ class Runner:
 				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators')
 			self.validators[key].extend(user_validators)
 
-	@staticmethod
-	def resolve_exporters(exporters):
-		"""Resolve exporters from output options."""
-		if not exporters or exporters in ['false', 'False']:
-			return []
-		if isinstance(exporters, str):
-			exporters = exporters.split(',')
-		classes = [
-			import_dynamic(f'secator.exporters.{o.capitalize()}Exporter', 'Exporter')
-			for o in exporters
-			if o
-		]
-		return [cls for cls in classes if cls]
-
 	def log_start(self):
 		"""Log runner start."""
 		if not self.print_remote_info:
@@ -595,17 +630,12 @@ class Runner:
 		self._print_item(info)
 
 	def log_results(self):
-		"""Log results.
-
-		Args:
-			results (list): List of results.
-			output_types (list): List of result types to add to report.
-		"""
+		"""Log runner results."""
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
 		if self.status == 'FAILURE':
-			self.debug('', obj={self.__class__.__name__: self.status, 'errors': self.errors}, sub='status')
+			self.debug('', obj={self.__class__.__name__: self.status, 'errors': [str(_.message) for _ in self.errors]}, sub='status')  # noqa: E501
 		else:
 			self.debug('', obj={self.__class__.__name__: self.status}, sub='status')
 		if self.exporters and not self.no_process:
@@ -653,13 +683,13 @@ class Runner:
 		return results
 
 	def _convert_item_schema(self, item):
-		"""Convert dict item to a new structure using the class output schema.
+		"""Convert dict item to a secator output type.
 
 		Args:
-			item (dict): Item.
+			item (dict): Dict item.
 
 		Returns:
-			secator.output_types.OutputType: Loaded item.
+			OutputType: Loaded item.
 		"""
 		# Skip if already converted
 		if isinstance(item, OutputType):
@@ -733,6 +763,11 @@ class Runner:
 			print(data, file=out)
 
 	def _get_findings_count(self):
+		"""Get finding count.
+
+		Returns:
+			dict[str,int]: Dict of finding type to count.
+		"""
 		count_map = {}
 		for output_type in FINDING_TYPES:
 			name = output_type.get_name()
@@ -742,6 +777,14 @@ class Runner:
 		return count_map
 
 	def _process_item(self, item):
+		"""Process an item yielded by the derived runner.
+
+		Args:
+			item (dict | str): Input item.
+
+		Yields:
+			OutputType: Output type.
+		"""
 
 		# Item is a string, just print it
 		if isinstance(item, str):
@@ -805,11 +848,31 @@ class Runner:
 		# Yield item
 		yield item
 
+	@staticmethod
+	def resolve_exporters(exporters):
+		"""Resolve exporters from output options.
+
+		Args:
+			exporters (list[str]): List of exporters to resolve.
+
+		Returns:
+			list: List of exporter classes.
+		"""
+		if not exporters or exporters in ['false', 'False']:
+			return []
+		if isinstance(exporters, str):
+			exporters = exporters.split(',')
+		classes = [
+			import_dynamic('secator.exporters', f'{o.capitalize()}Exporter')
+			for o in exporters
+			if o
+		]
+		return [cls for cls in classes if cls]
+
 	@classmethod
 	def get_func_path(cls, func):
-		"""
-		Get the full symbolic path of a function or method, including staticmethods,
-		using function and method attributes.
+		"""Get the full symbolic path of a function or method, including staticmethods, using function and method
+		attributes.
 
 		Args:
 			func (function, method, or staticmethod): A function or method object.

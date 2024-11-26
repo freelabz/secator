@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'secator'
-version = '0.6.0'
+version = "0.7.0"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -81,9 +81,12 @@ redis = [
 mongodb = [
   'pymongo < 5',
 ]
-google = [
+gdrive = [
   'google-api-python-client < 3',
   'gspread < 7'
+]
+gcs = [
+	'google-cloud-storage < 3'
 ]
 
 [project.scripts]

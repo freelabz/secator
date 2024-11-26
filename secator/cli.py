@@ -841,14 +841,13 @@ def health(json, debug):
 	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
 	table = get_health_table()
 	with Live(table, console=console):
-		for addon in ['worker', 'google', 'mongodb', 'redis', 'dev', 'trace', 'build']:
-			addon_var = ADDONS_ENABLED[addon]
+		for addon, installed in ADDONS_ENABLED.items():
 			info = {
 				'name': addon,
 				'version': None,
-				'status': 'ok' if addon_var else 'missing',
+				'status': 'ok' if installed else 'missing',
 				'latest_version': None,
-				'installed': addon_var,
+				'installed': installed,
 				'location': None
 			}
 			row = fmt_health_table_row(info, 'addons')
@@ -898,7 +897,7 @@ def run_install(cmd, title, next_steps=None):
 		if ret.return_code != 0:
 			console.print(f':exclamation_mark: Failed to install {title}.', style='bold red')
 		else:
-			console.print(f':tada: {title.capitalize()} installed successfully !', style='bold green')
+			console.print(f':tada: {title} installed successfully !', style='bold green')
 			if next_steps:
 				console.print('[bold gold3]:wrench: Next steps:[/]')
 				for ix, step in enumerate(next_steps):
@@ -920,10 +919,10 @@ def addons():
 
 @addons.command('worker')
 def install_worker():
-	"Install worker addon."
+	"Install Celery worker addon."
 	run_install(
 		cmd=f'{sys.executable} -m pip install secator[worker]',
-		title='worker addon',
+		title='Celery worker addon',
 		next_steps=[
 			'Run [bold green4]secator worker[/] to run a Celery worker using the file system as a backend and broker.',
 			'Run [bold green4]secator x httpx testphp.vulnweb.com[/] to admire your task running in a worker.',
@@ -932,26 +931,38 @@ def install_worker():
 	)
 
 
-@addons.command('google')
-def install_google():
-	"Install google addon."
+@addons.command('gdrive')
+def install_gdrive():
+	"Install Google Drive addon."
 	run_install(
 		cmd=f'{sys.executable} -m pip install secator[google]',
-		title='google addon',
+		title='Google Drive addon',
 		next_steps=[
-			'Run [bold green4]secator config set addons.google.credentials_path <VALUE>[/].',
-			'Run [bold green4]secator config set addons.google.drive_parent_folder_id <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gdrive.credentials_path <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gdrive.drive_parent_folder_id <VALUE>[/].',
 			'Run [bold green4]secator x httpx testphp.vulnweb.com -o gdrive[/] to send reports to Google Drive.'
+		]
+	)
+
+
+@addons.command('gcs')
+def install_gcs():
+	"Install Google Cloud Storage addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[gcs]',
+		title='Google Cloud Storage addon',
+		next_steps=[
+			'Run [bold green4]secator config set addons.gcs.credentials_path <VALUE>[/].',
 		]
 	)
 
 
 @addons.command('mongodb')
 def install_mongodb():
-	"Install mongodb addon."
+	"Install MongoDB addon."
 	run_install(
 		cmd=f'{sys.executable} -m pip install secator[mongodb]',
-		title='mongodb addon',
+		title='MongoDB addon',
 		next_steps=[
 			'[dim]\[optional][/] Run [bold green4]docker run --name mongo -p 27017:27017 -d mongo:latest[/] to run a local MongoDB instance.',  # noqa: E501
 			'Run [bold green4]secator config set addons.mongodb.url mongodb://<URL>[/].',
@@ -962,10 +973,10 @@ def install_mongodb():
 
 @addons.command('redis')
 def install_redis():
-	"Install redis addon."
+	"Install Redis addon."
 	run_install(
 		cmd=f'{sys.executable} -m pip install secator[redis]',
-		title='redis addon',
+		title='Redis addon',
 		next_steps=[
 			'[dim]\[optional][/] Run [bold green4]docker run --name redis -p 6379:6379 -d redis[/] to run a local Redis instance.',  # noqa: E501
 			'Run [bold green4]secator config set celery.broker_url redis://<URL>[/]',

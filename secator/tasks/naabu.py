@@ -15,7 +15,7 @@ class naabu(ReconPort):
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports (default: nmap\'s top 100 ports'},
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports'},
 		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'},
 		'scan_type': {'type': str, 'short': 'st', 'help': 'Scan type (SYN (s)/CONNECT(c))'},
 		# 'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
