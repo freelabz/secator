@@ -1,7 +1,8 @@
 from secator.decorators import task
 from secator.runners import Command
-from secator.definitions import OPT_PIPE_INPUT, OPT_NOT_SUPPORTED, URL
+from secator.definitions import OPT_PIPE_INPUT, URL
 from secator.output_types import Url
+
 
 @task()
 class qsreplace(Command):
