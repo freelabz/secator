@@ -570,7 +570,7 @@ class Runner:
 					)
 					self.add_result(error, print=True)
 				return False
-			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: '[dim green]success[/]'}, id=_id, verbose=True, sub='validators')
+			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: '[dim green]success[/]'}, id=_id, verbose=True, sub='validators')  # noqa: E501
 		return True
 
 	def register_hooks(self, hooks):
