@@ -79,7 +79,8 @@ class Runners(StrictModel):
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5
 	skip_cve_search: bool = False
-	skip_cve_low_confidence: bool = True
+	skip_exploit_search: bool = False
+	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
 
 

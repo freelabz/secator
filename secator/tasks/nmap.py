@@ -116,6 +116,7 @@ class nmap(VulnMulti):
 class nmapData(dict):
 
 	def __iter__(self):
+		datas = []
 		for host in self._get_hosts():
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
@@ -177,16 +178,19 @@ class nmapData(dict):
 					if not func:
 						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve')
 						continue
-					for vuln in func(output, cpes=cpes):
-						vuln.update(metadata)
+					for data in func(output, cpes=cpes):
+						data.update(metadata)
 						confidence = 'low'
-						if 'cpe-match' in vuln[TAGS]:
+						if 'cpe-match' in data[TAGS]:
 							confidence = 'high' if version_exact else 'medium'
-						vuln[CONFIDENCE] = confidence
-						if (CONFIG.runners.skip_cve_low_confidence and vuln[CONFIDENCE] == 'low'):
-							debug(f'{vuln[ID]}: ignored (low confidence).', sub='cve')
+						data[CONFIDENCE] = confidence
+						if (CONFIG.runners.skip_cve_low_confidence and data[CONFIDENCE] == 'low'):
+							debug(f'{data[ID]}: ignored (low confidence).', sub='cve')
 							continue
-						yield vuln
+						if data in datas:
+							continue
+						yield data
+						datas.append(data)
 
 	#---------------------#
 	# XML FILE EXTRACTORS #
@@ -339,7 +343,7 @@ class nmapData(dict):
 				TAGS: [vuln_id, provider_name]
 			}
 			if provider_name == 'MITRE CVE':
-				data = VulnMulti.lookup_cve(vuln['id'], cpes=cpes)
+				data = VulnMulti.lookup_cve(vuln['id'], *cpes)
 				if data:
 					vuln.update(data)
 				yield vuln
@@ -358,30 +362,35 @@ class nmapData(dict):
 				cpes.append(line.rstrip(':'))
 				continue
 			elems = tuple(line.split('\t'))
-			vuln = {}
 
 			if len(elems) == 4:  # exploit
 				# TODO: Implement exploit processing
 				exploit_id, cvss_score, reference_url, _ = elems
 				name = exploit_id
 				# edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
-				vuln = {
+				exploit = {
 					ID: exploit_id,
 					NAME: name,
 					PROVIDER: provider_name,
 					REFERENCE: reference_url,
+					TAGS: [exploit_id, provider_name],
+					CVSS_SCORE: cvss_score,
+					CONFIDENCE: 'low',
 					'_type': 'exploit',
-					TAGS: [exploit_id, provider_name]
-					# CVSS_SCORE: cvss_score,
-					# CONFIDENCE: 'low'
 				}
 				# TODO: lookup exploit in ExploitDB to find related CVEs
 				# if edb_id:
 				# 	print(edb_id)
-				# 	vuln_data = VulnMulti.lookup_exploitdb(edb_id)
-				yield vuln
+				# 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
+				vuln = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
+				if vuln:
+					yield vuln
+					exploit[TAGS].extend(vuln[TAGS])
+					exploit[CONFIDENCE] = vuln[CONFIDENCE]
+				yield exploit
 
 			elif len(elems) == 3:  # vuln
+				vuln = {}
 				vuln_id, vuln_cvss, reference_url = tuple(line.split('\t'))
 				vuln_cvss = float(vuln_cvss)
 				vuln_id = vuln_id.split(':')[-1]
@@ -398,7 +407,7 @@ class nmapData(dict):
 				}
 				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
 					vuln[TAGS].append('cve')
-					data = VulnMulti.lookup_cve(vuln_id, cpes=cpes)
+					data = VulnMulti.lookup_cve(vuln_id, *cpes)
 					if data:
 						vuln.update(data)
 					yield vuln
