@@ -578,9 +578,10 @@ class Command(Runner):
 			return -1, error
 
 		# If not, prompt the user for a password
-		self._print('[bold red]Please enter sudo password to continue.[/]')
+		self._print('[bold red]Please enter sudo password to continue.[/]', rich=True)
 		for _ in range(3):
-			self._print('\[sudo] password: ')
+			user = getpass.getuser()
+			self._print(f'\[sudo] password for {user}: ▌', rich=True)
 			sudo_password = getpass.getpass()
 			result = subprocess.run(
 				['sudo', '-S', '-p', '', 'true'],
