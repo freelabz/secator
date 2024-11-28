@@ -875,6 +875,7 @@ def health(json, debug, strict):
 			row = fmt_health_table_row(info, 'tools')
 			table.add_row(*row)
 			status['tools'][tool.__name__] = info
+	console.print('')
 
 	# Print JSON health
 	if json:

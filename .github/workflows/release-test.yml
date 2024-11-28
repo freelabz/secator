@@ -35,4 +35,4 @@ jobs:
       run: secator u build docker
 
     - name: Run secator health check (strict)
-      run: docker run -it --privileged freelabz/secator:dev health --strict
+      run: docker run --privileged freelabz/secator:dev health --strict
