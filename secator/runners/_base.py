@@ -557,7 +557,7 @@ class Runner:
 			name = f'{self.__class__.__name__}.{validator_type}'
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
-				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators')
+				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, verbose=True, sub='validators')
 				doc = validator.__doc__
 				if error:
 					message = 'Validator failed'
@@ -570,7 +570,7 @@ class Runner:
 					)
 					self.add_result(error, print=True)
 				return False
-			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators')
+			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, verbose=True, sub='validators')
 		return True
 
 	def register_hooks(self, hooks):
