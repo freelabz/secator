@@ -67,7 +67,7 @@ class Celery(StrictModel):
 
 
 class Cli(StrictModel):
-	github_token: str = ''
+	github_token: str = os.environ.get('GITHUB_TOKEN', '')
 	record: bool = False
 	stdin_timeout: int = 1000
 
