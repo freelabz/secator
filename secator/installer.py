@@ -1,20 +1,41 @@
-
-import requests
 import os
 import platform
+import re
 import shutil
 import tarfile
 import zipfile
 import io
 
+from enum import Enum
+
+import json
+import requests
+
 from rich.table import Table
 
+from secator.definitions import OPT_NOT_SUPPORTED
 from secator.rich import console
 from secator.runners import Command
 from secator.config import CONFIG
 
 
+class InstallerStatus(Enum):
+	SUCCESS = 'SUCCESS'
+	INSTALL_NOT_SUPPORTED = 'INSTALL_NOT_SUPPORTED'
+	GITHUB_LATEST_RELEASE_NOT_FOUND = 'GITHUB_LATEST_RELEASE_NOT_FOUND'
+	GITHUB_RELEASE_NOT_FOUND = 'RELEASE_NOT_FOUND'
+	GITHUB_RELEASE_FAILED_DOWNLOAD = 'GITHUB_RELEASE_FAILED_DOWNLOAD'
+	GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE = 'GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE'
+	SOURCE_INSTALL_FAILED = 'SOURCE_INSTALL_FAILED'
+	UNKNOWN = 'UNKNOWN'
+
+	def is_ok(self):
+		return self.value in ['SUCCESS', 'INSTALL_NOT_SUPPORTED']
+
+
 class ToolInstaller:
+
+	status = InstallerStatus
 
 	@classmethod
 	def install(cls, tool_cls):
@@ -25,29 +46,29 @@ class ToolInstaller:
 			tool_cls: Tool class (derived from secator.runners.Command).
 
 		Returns:
-			bool: True if install is successful, False otherwise.
+			InstallerStatus: Install status.
 		"""
 		console.print(f'[bold gold3]:wrench: Installing {tool_cls.__name__}')
-		success = False
+		status = InstallerStatus.UNKNOWN
 
 		if not tool_cls.install_github_handle and not tool_cls.install_cmd:
 			console.print(
 				f'[bold red]{tool_cls.__name__} install is not supported yet. Please install it manually.[/]')
-			return False
+			status = InstallerStatus.INSTALL_NOT_SUPPORTED
 
 		if tool_cls.install_github_handle:
-			success = GithubInstaller.install(tool_cls.install_github_handle)
+			status = GithubInstaller.install(tool_cls.install_github_handle)
 
-		if tool_cls.install_cmd and not success:
-			success = SourceInstaller.install(tool_cls.install_cmd)
+		if tool_cls.install_cmd and not status.is_ok():
+			status = SourceInstaller.install(tool_cls.install_cmd)
 
-		if success:
+		if status == InstallerStatus.SUCCESS:
 			console.print(
 				f'[bold green]:tada: {tool_cls.__name__} installed successfully[/] !')
 		else:
 			console.print(
-				f'[bold red]:exclamation_mark: Failed to install {tool_cls.__name__}.[/]')
-		return success
+				f'[bold red]:exclamation_mark: Failed to install {tool_cls.__name__}: {status}.[/]')
+		return status
 
 
 class SourceInstaller:
@@ -62,10 +83,10 @@ class SourceInstaller:
 			install_cmd (str): Install command.
 
 		Returns:
-			bool: True if install is successful, False otherwise.
+			Status: install status.
 		"""
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True})
-		return ret.return_code == 0
+		return InstallerStatus.SUCCESS if ret.return_code == 0 else InstallerStatus.SOURCE_INSTALL_FAILED
 
 
 class GithubInstaller:
@@ -79,24 +100,23 @@ class GithubInstaller:
 			github_handle (str): A GitHub handle {user}/{repo}
 
 		Returns:
-			bool: True if install is successful, False otherwise.
+			InstallerStatus: status.
 		"""
 		_, repo = tuple(github_handle.split('/'))
 		latest_release = cls.get_latest_release(github_handle)
 		if not latest_release:
-			return False
+			return InstallerStatus.GITHUB_LATEST_RELEASE_NOT_FOUND
 
 		# Find the right asset to download
 		os_identifiers, arch_identifiers = cls._get_platform_identifier()
 		download_url = cls._find_matching_asset(latest_release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
 			console.print('[dim red]Could not find a GitHub release matching distribution.[/]')
-			return False
+			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
 
 		# Download and unpack asset
 		console.print(f'Found release URL: {download_url}')
-		cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
-		return True
+		return cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
 
 	@classmethod
 	def get_latest_release(cls, github_handle):
@@ -181,10 +201,21 @@ class GithubInstaller:
 
 	@classmethod
 	def _download_and_unpack(cls, url, destination, repo_name):
-		"""Download and unpack a release asset."""
+		"""Download and unpack a release asset.
+
+		Args:
+			cls (Runner): Task class.
+			url (str): GitHub release URL.
+			destination (str): Local destination.
+			repo_name (str): GitHub repository name.
+
+		Returns:
+			InstallerStatus: install status.
+		"""
 		console.print(f'Downloading and unpacking to {destination}...')
 		response = requests.get(url, timeout=5)
-		response.raise_for_status()
+		if not response.status_code == 200:
+			return InstallerStatus.GITHUB_RELEASE_FAILED_DOWNLOAD
 
 		# Create a temporary directory to extract the archive
 		temp_dir = os.path.join("/tmp", repo_name)
@@ -202,8 +233,10 @@ class GithubInstaller:
 		if binary_path:
 			os.chmod(binary_path, 0o755)  # Make it executable
 			shutil.move(binary_path, os.path.join(destination, repo_name))  # Move the binary
+			return InstallerStatus.SUCCESS
 		else:
 			console.print('[bold red]Binary matching the repository name was not found in the archive.[/]')
+			return InstallerStatus.GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE
 
 	@classmethod
 	def _find_binary_in_directory(cls, directory, binary_name):
@@ -235,31 +268,47 @@ def get_version(version_cmd):
 		version_cmd (str): Command to get the version.
 
 	Returns:
-		str: Version string.
+		tuple[str]: Version string, return code.
 	"""
 	from secator.runners import Command
 	import re
 	regex = r'[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
+	return_code = ret.return_code
+	if not return_code == 0:
+		return '', ret.return_code
 	match = re.findall(regex, ret.output)
 	if not match:
-		return ''
-	return match[0]
+		return '', return_code
+	return match[0], return_code
 
 
-def get_version_info(name, version_flag=None, github_handle=None, version=None):
+def parse_version(ver):
+	from packaging import version as _version
+	try:
+		return _version.parse(ver)
+	except _version.InvalidVersion:
+		version_regex = re.compile(r'(\d+\.\d+(?:\.\d+)?)')
+		match = version_regex.search(ver)
+		if match:
+			return _version.parse(match.group(1))
+		return None
+
+
+def get_version_info(name, version_flag, install_github_handle=None, install_cmd=None, version=None, opt_prefix='--'):
 	"""Get version info for a command.
 
 	Args:
 		name (str): Command name.
 		version_flag (str): Version flag.
-		github_handle (str): Github handle.
+		install_github_handle (str): Github handle.
+		install_cmd (str): Install command.
 		version (str): Existing version.
+		opt_prefix (str, default: '--'): Option prefix.
 
 	Return:
 		dict: Version info.
 	"""
-	from packaging import version as _version
 	from secator.installer import GithubInstaller
 	info = {
 		'name': name,
@@ -274,22 +323,50 @@ def get_version_info(name, version_flag=None, github_handle=None, version=None):
 	location = which(name).output
 	info['location'] = location
 
-	# Get current version
-	if version_flag:
-		version_cmd = f'{name} {version_flag}'
-		version = get_version(version_cmd)
-		info['version'] = version
-
 	# Get latest version
 	latest_version = None
 	if not CONFIG.offline_mode:
-		latest_version = GithubInstaller.get_latest_version(github_handle)
-		info['latest_version'] = latest_version
+		if install_github_handle:
+			latest_version = GithubInstaller.get_latest_version(install_github_handle)
+			info['latest_version'] = latest_version
+		elif install_cmd and install_cmd.startswith('pip'):
+			req = requests.get(f'https://pypi.python.org/pypi/{name}/json')
+			version = parse_version('0')
+			if req.status_code == requests.codes.ok:
+				j = json.loads(req.text.encode(req.encoding))
+				releases = j.get('releases', [])
+				for release in releases:
+					ver = parse_version(release)
+					if ver and not ver.is_prerelease:
+						version = max(version, ver)
+						latest_version = str(version)
+						info['latest_version'] = latest_version
+		elif install_cmd and install_cmd.startswith('sudo apt install'):
+			ret = Command.execute(f'apt-cache madison {name}', quiet=True)
+			if ret.return_code == 0:
+				output = ret.output.split(' | ')
+				if len(output) > 1:
+					ver = parse_version(output[1].strip())
+					if ver:
+						latest_version = str(ver)
+						info['latest_version'] = latest_version
+
+	# Get current version
+	version_ret = 1
+	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag or f'{opt_prefix}version'
+	if version_flag:
+		version_cmd = f'{name} {version_flag}'
+		version, version_ret = get_version(version_cmd)
+		info['version'] = version
+		if version_ret != 0:  # version command error
+			info['installed'] = False
+			info['status'] = 'missing'
+			return info
 
 	if location:
 		info['installed'] = True
 		if version and latest_version:
-			if _version.parse(version) < _version.parse(latest_version):
+			if parse_version(version) < parse_version(latest_version):
 				info['status'] = 'outdated'
 			else:
 				info['status'] = 'latest'
@@ -310,6 +387,7 @@ def fmt_health_table_row(version_info, category=None):
 	version = version_info['version']
 	status = version_info['status']
 	installed = version_info['installed']
+	latest_version = version_info['latest_version']
 	name_str = f'[magenta]{name:<13}[/]'
 
 	# Format version row
@@ -319,6 +397,8 @@ def fmt_health_table_row(version_info, category=None):
 		_version += ' [bold green](latest)[/]'
 	elif status == 'outdated':
 		_version += ' [bold red](outdated)[/]'
+		if latest_version:
+			_version += f' [dim](<{latest_version})'
 	elif status == 'missing':
 		_version = '[bold red]missing[/]'
 	elif status == 'ok':

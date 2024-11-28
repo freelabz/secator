@@ -1,5 +1,8 @@
 import json
 import os
+import re
+
+from functools import cache
 
 import requests
 from bs4 import BeautifulSoup
@@ -178,13 +181,57 @@ class Vuln(Command):
 		tup2 = split_fs2[3], split_fs2[4], split_fs2[5]
 		return tup1 == tup2
 
+	@cache
 	@staticmethod
-	def lookup_cve(cve_id, cpes=[]):
+	def lookup_cve_from_vulners_exploit(exploit_id, *cpes):
+		"""Search for a CVE corresponding to an exploit by extracting the CVE id from the exploit HTML page.
+
+		Args:
+			exploit_id (str): Exploit ID.
+			cpes (tuple[str], Optional): CPEs to match for.
+
+		Returns:
+			dict: vulnerability data.
+		"""
+		if CONFIG.runners.skip_exploit_search:
+			debug(f'Skip remote query for {exploit_id} since config.runners.skip_exploit_search is set.', sub='cve')
+			return None
+		if CONFIG.offline_mode:
+			debug(f'Skip remote query for {exploit_id} since config.offline_mode is set.', sub='cve')
+			return None
+		try:
+			resp = requests.get(f'https://vulners.com/githubexploit/{exploit_id}', timeout=5)
+			resp.raise_for_status()
+			soup = BeautifulSoup(resp.text, 'lxml')
+			title = soup.title.get_text(strip=True)
+			h1 = [h1.get_text(strip=True) for h1 in soup.find_all('h1')]
+			if '404' in h1:
+				raise requests.RequestException("404 [not found or rate limited]")
+			code = [code.get_text(strip=True) for code in soup.find_all('code')]
+			elems = [title] + h1 + code
+			content = '\n'.join(elems)
+			cve_regex = re.compile(r'(CVE(?:-|_)\d{4}(?:-|_)\d{4,7})', re.IGNORECASE)
+			matches = cve_regex.findall(str(content))
+			if not matches:
+				debug(f'{exploit_id}: No CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve')
+				return None
+			cve_id = matches[0].replace('_', '-').upper()
+			cve_data = Vuln.lookup_cve(cve_id, *cpes)
+			if cve_data:
+				return cve_data
+
+		except requests.RequestException as e:
+			debug(f'Failed remote query for {exploit_id} ({str(e)}).', sub='cve')
+			return None
+
+	@cache
+	@staticmethod
+	def lookup_cve(cve_id, *cpes):
 		"""Search for a CVE in local db or using cve.circl.lu and return vulnerability data.
 
 		Args:
 			cve_id (str): CVE ID in the form CVE-*
-			cpes (str, Optional): CPEs to match for.
+			cpes (tuple[str], Optional): CPEs to match for.
 
 		Returns:
 			dict: vulnerability data.
@@ -216,15 +263,20 @@ class Vuln(Command):
 		# The check is not executed if no CPE was passed (sometimes nmap cannot properly detect a CPE) or if the CPE
 		# version cannot be determined.
 		cpe_match = False
-		tags = []
+		tags = [cve_id]
 		if cpes:
 			for cpe in cpes:
-				cpe_obj = CPE(cpe)
-				cpe_fs = cpe_obj.as_fs()
+				try:
+					cpe_obj = CPE(cpe)
+					cpe_fs = cpe_obj.as_fs()
+				except NotImplementedError:
+					debug(f'{cve_id}: Failed to parse CPE {cpe} with CPE parser.', sub='cve')
+					cpe_fs = cpe
+					tags.append('cpe-invalid')
 				# cpe_version = cpe_obj.get_version()[0]
 				vulnerable_fs = cve_info['vulnerable_product']
 				for fs in vulnerable_fs:
-					# debug(f'{cve_id}: Testing {cpe_fs} against {fs}', sub='cve')  # for hardcore debugging
+					debug(f'{cve_id}: Testing {cpe_fs} against {fs}', sub='cve.match', verbose=True)
 					if Vuln.match_cpes(cpe_fs, fs):
 						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
 						cpe_match = True
@@ -289,6 +341,7 @@ class Vuln(Command):
 
 		return vuln
 
+	@cache
 	@staticmethod
 	def lookup_ghsa(ghsa_id):
 		"""Search for a GHSA on Github and and return associated CVE vulnerability data.

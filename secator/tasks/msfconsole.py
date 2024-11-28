@@ -90,7 +90,7 @@ class msfconsole(VulnMulti):
 
 		# Nothing passed, error out
 		else:
-			raise ValueError('At least one of "inline_script" or "resource_script" must be passed.')
+			raise ValueError('At least one of "execute_command" or "resource" must be passed.')
 
 
 # TODO: This is better as it goes through an RPC API to communicate with

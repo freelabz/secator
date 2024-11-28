@@ -67,7 +67,7 @@ class Celery(StrictModel):
 
 
 class Cli(StrictModel):
-	github_token: str = ''
+	github_token: str = os.environ.get('GITHUB_TOKEN', '')
 	record: bool = False
 	stdin_timeout: int = 1000
 
@@ -79,7 +79,8 @@ class Runners(StrictModel):
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5
 	skip_cve_search: bool = False
-	skip_cve_low_confidence: bool = True
+	skip_exploit_search: bool = False
+	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
 
 
