@@ -823,7 +823,8 @@ def report_export(json_path, output_folder, output):
 @cli.command(name='health')
 @click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
-def health(json, debug):
+@click.option('--strict', '-strict', is_flag=True, default=False, help='Fail if missing tools')
+def health(json, debug, strict):
 	"""[dim]Get health status.[/]"""
 	tools = ALL_TASKS
 	status = {'secator': {}, 'languages': {}, 'tools': {}, 'addons': {}}
@@ -870,18 +871,28 @@ def health(json, debug):
 	table = get_health_table()
 	with Live(table, console=console):
 		for tool in tools:
-			cmd = tool.cmd.split(' ')[0]
-			version_flag = tool.version_flag or f'{tool.opt_prefix}version'
-			version_flag = None if tool.version_flag == OPT_NOT_SUPPORTED else version_flag
-			info = get_version_info(cmd, version_flag, tool.install_github_handle)
+			info = get_version_info(tool.cmd.split(' ')[0], tool.version_flag, tool.install_github_handle, tool.install_cmd)
 			row = fmt_health_table_row(info, 'tools')
 			table.add_row(*row)
 			status['tools'][tool.__name__] = info
+	console.print('')
 
 	# Print JSON health
 	if json:
 		import json as _json
 		print(_json.dumps(status))
+
+	# Strict mode
+	if strict:
+		error = False
+		for tool, info in status['tools'].items():
+			if not info['installed']:
+				console.print(f'[bold red]{tool} not installed and strict mode is enabled.[/]')
+				error = True
+		if error:
+			sys.exit(1)
+		console.print('[bold green]Strict healthcheck passed ![/]')
+
 
 #---------#
 # INSTALL #
@@ -1066,11 +1077,15 @@ def install_tools(cmds):
 		tools = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
 	else:
 		tools = ALL_TASKS
-
+	return_code = 0
 	for ix, cls in enumerate(tools):
 		with console.status(f'[bold yellow][{ix}/{len(tools)}] Installing {cls.__name__} ...'):
-			ToolInstaller.install(cls)
+			status = ToolInstaller.install(cls)
+			if not status.is_ok():
+				console.print(f'[bold red]Failed installing {cls.__name__}[/]')
+				return_code = 1
 		console.print()
+	sys.exit(return_code)
 
 
 @install.command('cves')
@@ -1103,22 +1118,52 @@ def install_cves(force):
 #--------#
 
 @cli.command('update')
-def update():
+@click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (addons, tools, ...)')
+def update(all):
 	"""[dim]Update to latest version.[/]"""
 	if CONFIG.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
-		return
+		sys.exit(1)
+
+	# Check current and latest version
 	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
+	do_update = True
+
+	# Skip update if latest
 	if info['status'] == 'latest':
 		console.print(f'[bold green]secator is already at the newest version {latest_version}[/] !')
-		sys.exit(0)
-	console.print(f'[bold gold3]:wrench: Updating secator from {VERSION} to {latest_version} ...[/]')
-	if 'pipx' in sys.executable:
-		Command.execute(f'pipx install secator=={latest_version} --force')
-	else:
-		Command.execute(f'pip install secator=={latest_version}')
+		do_update = False
 
+	# Fail if unknown latest
+	if not latest_version:
+		console.print('[bold red]Could not fetch latest secator version.[/]')
+		sys.exit(1)
+
+	# Update secator
+	if do_update:
+		console.print(f'[bold gold3]:wrench: Updating secator from {VERSION} to {latest_version} ...[/]')
+		if 'pipx' in sys.executable:
+			ret = Command.execute(f'pipx install secator=={latest_version} --force')
+		else:
+			ret = Command.execute(f'pip install secator=={latest_version}')
+		if not ret.return_code == 0:
+			sys.exit(1)
+
+	# Update tools
+	if all:
+		return_code = 0
+		for cls in ALL_TASKS:
+			cmd = cls.cmd.split(' ')[0]
+			version_flag = cls.version_flag or f'{cls.opt_prefix}version'
+			version_flag = None if cls.version_flag == OPT_NOT_SUPPORTED else version_flag
+			info = get_version_info(cmd, version_flag, cls.install_github_handle)
+			if not info['installed'] or info['status'] == 'outdated' or not info['latest_version']:
+				with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
+					status = ToolInstaller.install(cls)
+					if not status.is_ok():
+						return_code = 1
+		sys.exit(return_code)
 
 #-------#
 # ALIAS #

@@ -155,6 +155,7 @@ class bbot(Command):
 	json_flag = '--json'
 	input_flag = '-t'
 	file_flag = None
+	version_flag = '--help'
 	opts = {
 		'modules': {'type': str, 'short': 'm', 'default': '', 'help': ','.join(BBOT_MODULES)},
 		'presets': {'type': str, 'short': 'ps', 'default': 'kitchen-sink', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
