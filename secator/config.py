@@ -84,6 +84,10 @@ class Runners(StrictModel):
 	remove_duplicates: bool = False
 
 
+class Security(StrictModel):
+	allow_local_file_access: bool = True
+
+
 class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
@@ -167,6 +171,7 @@ class SecatorConfig(StrictModel):
 	payloads: Payloads = Payloads()
 	wordlists: Wordlists = Wordlists()
 	addons: Addons = Addons()
+	security: Security = Security()
 	offline_mode: bool = False
 
 
@@ -539,6 +544,9 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 		target_path = target_folder / local_path.name
 		if not name:
 			name = url_or_path.split('/')[-1]
+		if not CONFIG.security.allow_local_file_access:
+			console.print(f'[bold red]Cannot reference local file {url_or_path}(disabled for security reasons)[/]')
+			return
 		if not target_path.exists():
 			console.print(f'[bold turquoise4]Symlinking {type} [bold magenta]{name}[/] ...[/] ', end='')
 			try:
