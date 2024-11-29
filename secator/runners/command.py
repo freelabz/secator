@@ -666,6 +666,11 @@ class Command(Runner):
 				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 				continue
 
+			# Apply process function on opt value
+			if 'process' in opt_conf:
+				func = opt_conf['process']
+				opt_val = func(opt_val)
+
 			# Convert opt value to expected command opt value
 			mapped_opt_val = opt_value_map.get(opt_name)
 			if mapped_opt_val:

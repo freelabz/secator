@@ -26,7 +26,7 @@ import ifaddr
 import yaml
 
 from secator.definitions import (DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
-from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
+from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -689,3 +689,25 @@ def deep_merge_dicts(*dicts):
 
     # Use reduce to apply merge_two_dicts to all dictionaries in dicts
     return reduce(merge_two_dicts, dicts, {})
+
+
+def process_wordlist(val):
+	"""Pre-process wordlist option value to allow referencing wordlists from remote URLs or from config keys.
+
+	Args:
+		val (str): Can be a config value in CONFIG.wordlists.defaults or CONFIG.wordlists.templates, or a local path,
+		or a URL.
+	"""
+	default_wordlist = getattr(CONFIG.wordlists.defaults, val)
+	if default_wordlist:
+		val = default_wordlist
+	template_wordlist = getattr(CONFIG.wordlists.templates, val)
+	if template_wordlist:
+		return template_wordlist
+	else:
+		return download_file(
+			val,
+			target_folder=CONFIG.dirs.wordlists,
+			offline_mode=CONFIG.offline_mode,
+			type='wordlist'
+		)
