@@ -16,7 +16,7 @@ from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTI
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
 from secator.runners import Command
-from secator.utils import debug
+from secator.utils import debug, process_wordlist
 
 
 OPTS = {
@@ -39,7 +39,7 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.http, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use'}
 }
 
 OPTS_HTTP = [

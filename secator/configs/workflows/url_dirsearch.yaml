@@ -8,7 +8,7 @@ input_types:
 tasks:
   ffuf:
     description: Search for HTTP directories
-    wordlist: /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt
+    wordlist: directory_list_small
     targets_:
       - type: target
         field: '{name}/FUZZ'
