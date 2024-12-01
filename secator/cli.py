@@ -871,7 +871,7 @@ def health(json, debug, strict):
 	table = get_health_table()
 	with Live(table, console=console):
 		for tool in tools:
-			info = get_version_info(tool.cmd.split(' ')[0], tool.version_flag, tool.install_github_handle, tool.install_cmd)
+			info = get_version_info(tool.cmd.split(' ')[0], tool.version_flag or f'{tool.opt_prefix}version', tool.install_github_handle, tool.install_cmd)
 			row = fmt_health_table_row(info, 'tools')
 			table.add_row(*row)
 			status['tools'][tool.__name__] = info

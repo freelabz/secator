@@ -295,7 +295,7 @@ def parse_version(ver):
 		return None
 
 
-def get_version_info(name, version_flag, install_github_handle=None, install_cmd=None, version=None, opt_prefix='--'):
+def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, version=None, opt_prefix='--'):
 	"""Get version info for a command.
 
 	Args:
@@ -353,7 +353,7 @@ def get_version_info(name, version_flag, install_github_handle=None, install_cmd
 
 	# Get current version
 	version_ret = 1
-	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag or f'{opt_prefix}version'
+	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag
 	if version_flag:
 		version_cmd = f'{name} {version_flag}'
 		version, version_ret = get_version(version_cmd)
