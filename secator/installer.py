@@ -295,7 +295,7 @@ def parse_version(ver):
 		return None
 
 
-def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, version=None, opt_prefix='--'):
+def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, version=None):
 	"""Get version info for a command.
 
 	Args:
@@ -304,7 +304,6 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		install_github_handle (str): Github handle.
 		install_cmd (str): Install command.
 		version (str): Existing version.
-		opt_prefix (str, default: '--'): Option prefix.
 
 	Return:
 		dict: Version info.
