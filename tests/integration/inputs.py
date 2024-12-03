@@ -4,7 +4,7 @@ INPUTS_TASKS = {
     URL: 'http://localhost:3000/',
     HOST: 'localhost',
     USERNAME: 'ocervell',
-    IP: '127.0.0.1',
+    IP: 'localhost',
     CIDR_RANGE: '192.168.1.0/24',
 	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
     'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
@@ -37,7 +37,7 @@ INPUTS_WORKFLOWS = {
 
 INPUTS_SCANS = {
     'domain': 'testphp.vulnweb.com',
-    'host': ['localhost', '127.0.0.1'],
+    'host': ['localhost'],
     'network': '127.0.0.1/24',
     'url': ['http://localhost:3000', 'http://localhost:8080']
 }
