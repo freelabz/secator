@@ -53,3 +53,9 @@ class naabu(ReconPort):
 	proxy_socks5 = True
 	proxy_http = False
 	profile = 'io'
+
+	@staticmethod
+	def before_init(self):
+		for ix, input in enumerate(self.inputs):
+			if input == 'localhost':
+				self.inputs[ix] = '127.0.0.1'
