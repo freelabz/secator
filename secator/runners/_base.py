@@ -75,7 +75,9 @@ class Runner:
 		if not isinstance(inputs, list):
 			inputs = [inputs]
 		self.inputs = inputs
-		self.results = results
+		self.uuids = []
+		self.output = ''
+		self.results = []
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
@@ -86,14 +88,12 @@ class Runner:
 		self.last_updated_progress = None
 		self.end_time = None
 		self._hooks = hooks
-		self.output = ''
 		self.progress = 0
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.celery_result = None
 		self.celery_ids = []
 		self.celery_ids_map = {}
-		self.uuids = []
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
 
@@ -162,6 +162,10 @@ class Runner:
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
+
+		# Process prior results
+		for result in results:
+			list(self._process_item(result))
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -836,8 +840,8 @@ class Runner:
 		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
 			self.celery_ids.append(item.task_id)
 
-		# Run on_item hooks
-		if isinstance(item, tuple(FINDING_TYPES)):
+		# If finding, run on_item hooks
+		elif isinstance(item, tuple(FINDING_TYPES)):
 			item = self.run_hooks('on_item', item)
 			if not item:
 				return
