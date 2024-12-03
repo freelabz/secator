@@ -59,3 +59,9 @@ class naabu(ReconPort):
 		for ix, input in enumerate(self.inputs):
 			if input == 'localhost':
 				self.inputs[ix] = '127.0.0.1'
+
+	@staticmethod
+	def on_item(self, item):
+		if item.host == '127.0.0.1':
+			item.host = 'localhost'
+		return item
