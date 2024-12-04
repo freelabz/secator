@@ -1,0 +1,32 @@
+type: workflow
+name: url_lfi
+alias: url_lfi
+description: URL LFI scan with fuzzing on parameters
+tags: [http, lfi, fuzz, vulnerability]
+input_types:
+  - url
+tasks:
+  katana:
+    description: Crawl the target URL to find potential endpoints
+
+  gf/lfi:
+    description: Fuzz LFI parameters using a wordlist
+    pattern: lfi
+    targets_:
+      type: url
+      field: url
+
+  qsreplace:
+    description:
+    targets_:
+      type: tag
+      field: match
+      condition: item._source.startswith('gf')
+
+  ffuf:
+    description: Fuzz URLs with lfi wordlist
+    wordlist: /home/nabot/.secator/wordlists/lfi.txt
+    targets_:
+      type: url
+      field: '{url}FUZZ'
+      condition: item._source.startswith('qsreplace')
