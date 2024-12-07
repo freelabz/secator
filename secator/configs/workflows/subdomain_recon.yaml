@@ -8,6 +8,11 @@ input_types:
 tasks:
   subfinder:
     description: List subdomains (passive)
+  # dnsxbrute:
+  #   description: Bruteforce subdomain (active)
+  #   targets_:
+  #     - type: target
+  #       field: 'FUZZ.{name}'
   # TODO: add subdomain bruteforcers
   # gobuster:
   #   input: vhost
@@ -28,6 +33,11 @@ tasks:
       tags: [takeover, dns]
     httpx:
       description: Run HTTP probes on subdomains
+      targets_:
+      - target.name
+      - subdomain.host
+    dnsx:
+      description: Get DNS records for subdomains
       targets_:
       - target.name
       - subdomain.host
