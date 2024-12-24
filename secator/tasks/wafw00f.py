@@ -16,7 +16,8 @@ class wafw00f(Command):
 	encoding = 'ansi'
 	opt_prefix = '-'
 	meta_opts = {
-		PROXY: OPTS[PROXY]
+		PROXY: OPTS[PROXY],
+		HEADER = OPTS[HEADER]
 	}
 	opts = {
 		'l': {'is_flag': True, 'default': False, 'help': 'List all WAFs that WAFW00F is able to detect'},
