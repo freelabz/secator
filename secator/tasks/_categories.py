@@ -226,8 +226,45 @@ class Vuln(Command):
 
 	@cache
 	@staticmethod
+	def lookup_cve_from_cve_circle(cve_id):
+		try:
+			resp = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5)
+			resp.raise_for_status()
+			cve_info = resp.json()
+			if not cve_info:
+				debug(f'Empty response from https://cve.circl.lu/api/cve/{cve_id}.', sub='cve')
+				return None
+		except requests.RequestException as e:
+			debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
+			return None
+		# print(json.dumps(cve_info, indent=True))
+		cve_id = cve_info['cveMetadata']['cveId']
+		cna = cve_info['containers']['cna']
+		metrics = cna.get('metrics', [])
+		cvss_score = 0
+		for metric in metrics:
+			for name, value in metric.items():
+				if 'cvss' in name:
+					cvss_score = metric[name]['baseScore']
+		description = cna.get('descriptions', [{}])[0].get('value')
+		cwe_id = cna.get('problemTypes', [{}])[0].get('descriptions', [{}])[0].get('cweId')
+		cpes = []
+		for product in cna['affected']:
+			cpes.extend(product.get('cpes', []))
+		references = [u['url'] for u in cna['references']]
+		return {
+			'id': cve_id,
+			'cwe_id': cwe_id,
+			'cvss_score': cvss_score,
+			'description': description,
+			'cpes': cpes,
+			'references': references
+		}
+
+	@cache
+	@staticmethod
 	def lookup_cve(cve_id, *cpes):
-		"""Search for a CVE in local db or using cve.circl.lu and return vulnerability data.
+		"""Search for a CVE info and return vulnerability data.
 
 		Args:
 			cve_id (str): CVE ID in the form CVE-*
@@ -246,16 +283,7 @@ class Vuln(Command):
 			if CONFIG.offline_mode:
 				debug(f'Skip remote query for {cve_id} since config.offline_mode is set.', sub='cve')
 				return None
-			try:
-				resp = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5)
-				resp.raise_for_status()
-				cve_info = resp.json()
-				if not cve_info:
-					debug(f'Empty response from https://cve.circl.lu/api/cve/{cve_id}.', sub='cve')
-					return None
-			except requests.RequestException as e:
-				debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
-				return None
+			cve_info = Vuln.lookup_cve_from_cve_circle(cve_id)
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.
 		# This allow to limit the number of False positives (high) that we get from nmap NSE vuln scripts like vulscan
@@ -274,25 +302,28 @@ class Vuln(Command):
 					cpe_fs = cpe
 					tags.append('cpe-invalid')
 				# cpe_version = cpe_obj.get_version()[0]
-				vulnerable_fs = cve_info['vulnerable_product']
+				vulnerable_fs = cve_info['cpes']
 				for fs in vulnerable_fs:
 					debug(f'{cve_id}: Testing {cpe_fs} against {fs}', sub='cve.match', verbose=True)
-					if Vuln.match_cpes(cpe_fs, fs):
+					try:
+						cpe_match = Vuln.match_cpes(cpe_fs, fs)
 						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
-						cpe_match = True
-						tags.append('cpe-match')
+						if cpe_match:
+							tags.append('cpe-match')
 						break
+					except IndexError:
+						debug(f'{cve_id}: Invalid fs {fs}. Skipping', sub='cve.match', verbose=True)
+						continue
 				if not cpe_match:
 					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve')
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
-		cvss = cve_info.get('cvss') or 0
 		# exploit_ids = cve_info.get('refmap', {}).get('exploit-db', [])
 		# osvdb_ids = cve_info.get('refmap', {}).get('osvdb', [])
 
 		# Get description
-		description = cve_info.get('summary')
+		description = cve_info['description']
 		if description is not None:
 			description = description.replace(id, '').strip()
 
@@ -302,25 +333,13 @@ class Vuln(Command):
 		references.append(cve_ref_url)
 
 		# Get CWE ID
-		vuln_cwe_id = cve_info.get('cwe')
-		if vuln_cwe_id is None:
-			tags.append(vuln_cwe_id)
-
-		# Parse capecs for a better vuln name / type
-		capecs = cve_info.get('capec', [])
-		if capecs and len(capecs) > 0:
-			name = capecs[0]['name']
-
-		# Parse ovals for a better vuln name / type
-		ovals = cve_info.get('oval', [])
-		if ovals:
-			if description == 'none':
-				description = ovals[0]['title']
-			family = ovals[0]['family']
-			tags.append(family)
+		cwe_id = cve_info['cwe_id']
+		if cwe_id is not None:
+			tags.append(cwe_id)
 
 		# Set vulnerability severity based on CVSS score
 		severity = None
+		cvss = cve_info['cvss_score']
 		if cvss:
 			severity = Vuln.cvss_to_severity(cvss)
 
