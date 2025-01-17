@@ -234,32 +234,13 @@ class Vuln(Command):
 			if not cve_info:
 				debug(f'Empty response from https://cve.circl.lu/api/cve/{cve_id}.', sub='cve')
 				return None
+			cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
+			with open(cve_path, 'w') as f:
+				f.write(json.dumps(cve_info, indent=2))
+			return cve_info
 		except requests.RequestException as e:
 			debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
 			return None
-		# print(json.dumps(cve_info, indent=True))
-		cve_id = cve_info['cveMetadata']['cveId']
-		cna = cve_info['containers']['cna']
-		metrics = cna.get('metrics', [])
-		cvss_score = 0
-		for metric in metrics:
-			for name, value in metric.items():
-				if 'cvss' in name:
-					cvss_score = metric[name]['baseScore']
-		description = cna.get('descriptions', [{}])[0].get('value')
-		cwe_id = cna.get('problemTypes', [{}])[0].get('descriptions', [{}])[0].get('cweId')
-		cpes = []
-		for product in cna['affected']:
-			cpes.extend(product.get('cpes', []))
-		references = [u['url'] for u in cna['references']]
-		return {
-			'id': cve_id,
-			'cwe_id': cwe_id,
-			'cvss_score': cvss_score,
-			'description': description,
-			'cpes': cpes,
-			'references': references
-		}
 
 	@cache
 	@staticmethod
@@ -284,6 +265,30 @@ class Vuln(Command):
 				debug(f'Skip remote query for {cve_id} since config.offline_mode is set.', sub='cve')
 				return None
 			cve_info = Vuln.lookup_cve_from_cve_circle(cve_id)
+
+		# Convert cve info to easy format
+		cve_id = cve_info['cveMetadata']['cveId']
+		cna = cve_info['containers']['cna']
+		metrics = cna.get('metrics', [])
+		cvss_score = 0
+		for metric in metrics:
+			for name, value in metric.items():
+				if 'cvss' in name:
+					cvss_score = metric[name]['baseScore']
+		description = cna.get('descriptions', [{}])[0].get('value')
+		cwe_id = cna.get('problemTypes', [{}])[0].get('descriptions', [{}])[0].get('cweId')
+		cpes = []
+		for product in cna['affected']:
+			cpes.extend(product.get('cpes', []))
+		references = [u['url'] for u in cna['references']]
+		cve_info = {
+			'id': cve_id,
+			'cwe_id': cwe_id,
+			'cvss_score': cvss_score,
+			'description': description,
+			'cpes': cpes,
+			'references': references
+		}
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.
 		# This allow to limit the number of False positives (high) that we get from nmap NSE vuln scripts like vulscan
