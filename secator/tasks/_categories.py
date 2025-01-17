@@ -181,6 +181,21 @@ class Vuln(Command):
 		tup2 = split_fs2[3], split_fs2[4], split_fs2[5]
 		return tup1 == tup2
 
+	@staticmethod
+	def get_cpe_fs(cpe):
+		""""Return formatted string for given CPE.
+
+		Args:
+			cpe (string): Input CPE
+
+		Returns:
+			string: CPE formatted string.
+		"""
+		try:
+			return CPE(cpe).as_fs()
+		except NotImplementedError:
+			return None
+
 	@cache
 	@staticmethod
 	def lookup_cve_from_vulners_exploit(exploit_id, *cpes):
@@ -227,6 +242,14 @@ class Vuln(Command):
 	@cache
 	@staticmethod
 	def lookup_cve_from_cve_circle(cve_id):
+		"""Get CVE data from cve.circl.lu.
+
+		Args:
+			cve_id (str): CVE id.
+
+		Returns:
+			dict: CVE data.
+		"""
 		try:
 			resp = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5)
 			resp.raise_for_status()
@@ -277,16 +300,16 @@ class Vuln(Command):
 					cvss_score = metric[name]['baseScore']
 		description = cna.get('descriptions', [{}])[0].get('value')
 		cwe_id = cna.get('problemTypes', [{}])[0].get('descriptions', [{}])[0].get('cweId')
-		cpes = []
+		cpes_affected = []
 		for product in cna['affected']:
-			cpes.extend(product.get('cpes', []))
+			cpes_affected.extend(product.get('cpes', []))
 		references = [u['url'] for u in cna['references']]
 		cve_info = {
 			'id': cve_id,
 			'cwe_id': cwe_id,
 			'cvss_score': cvss_score,
 			'description': description,
-			'cpes': cpes,
+			'cpes': cpes_affected,
 			'references': references
 		}
 
@@ -299,26 +322,24 @@ class Vuln(Command):
 		tags = [cve_id]
 		if cpes:
 			for cpe in cpes:
-				try:
-					cpe_obj = CPE(cpe)
-					cpe_fs = cpe_obj.as_fs()
-				except NotImplementedError:
-					debug(f'{cve_id}: Failed to parse CPE {cpe} with CPE parser.', sub='cve')
-					cpe_fs = cpe
+				cpe_fs = Vuln.get_cpe_fs(cpe)
+				if not cpe_fs:
+					debug(f'{cve_id}: Failed to parse CPE {cpe} with CPE parser', sub='cve.match', verbose=True)
 					tags.append('cpe-invalid')
+					continue
 				# cpe_version = cpe_obj.get_version()[0]
-				vulnerable_fs = cve_info['cpes']
-				for fs in vulnerable_fs:
-					debug(f'{cve_id}: Testing {cpe_fs} against {fs}', sub='cve.match', verbose=True)
-					try:
-						cpe_match = Vuln.match_cpes(cpe_fs, fs)
-						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
-						if cpe_match:
-							tags.append('cpe-match')
-						break
-					except IndexError:
-						debug(f'{cve_id}: Invalid fs {fs}. Skipping', sub='cve.match', verbose=True)
+				for cpe_affected in cpes_affected:
+					cpe_affected_fs = Vuln.get_cpe_fs(cpe_affected)
+					if not cpe_affected_fs:
+						debug(f'{cve_id}: Failed to parse CPE {cpe} (from online data) with CPE parser', sub='cve.match', verbose=True)
 						continue
+					debug(f'{cve_id}: Testing {cpe_fs} against {cpe_affected_fs}', sub='cve.match', verbose=True)
+					cpe_match = Vuln.match_cpes(cpe_fs, cpe_affected_fs)
+					if cpe_match:
+						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
+						tags.append('cpe-match')
+						break
+
 				if not cpe_match:
 					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve')
 
