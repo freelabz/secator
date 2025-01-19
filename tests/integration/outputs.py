@@ -150,7 +150,7 @@ OUTPUTS_TASKS = {
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
     'gospider': [
-        Url(url='https://danielmiessler.com/t/Newsletter', status_code=200, content_length=92, _source='gospider')
+        Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider')
     ],
     'grype': [
 		Vulnerability(
