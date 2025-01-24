@@ -261,7 +261,7 @@ def revshell(name, host, port, interface, listen, force):
 		console.print('\n'.join(shells_str))
 	else:
 		shell = shell[0]
-		command = shell['command'].replace('[', '\[')
+		command = shell['command'].replace('[', r'\[')
 		alias = shell['alias']
 		name = shell['name']
 		command_str = Template(command).render(ip=host, port=port, shell='bash')
@@ -685,7 +685,7 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 	all_results = []
 	for ix, path in enumerate(paths):
 		if unified:
-			console.print(f'Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
+			console.print(rf'Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
 		with open(path, 'r') as f:
 			data = loads_dataclass(f.read())
 			try:
@@ -942,7 +942,7 @@ def install_worker():
 		next_steps=[
 			'Run [bold green4]secator worker[/] to run a Celery worker using the file system as a backend and broker.',
 			'Run [bold green4]secator x httpx testphp.vulnweb.com[/] to admire your task running in a worker.',
-			'[dim]\[optional][/dim] Run [bold green4]secator install addons redis[/] to setup Redis backend / broker.'
+			r'[dim]\[optional][/dim] Run [bold green4]secator install addons redis[/] to setup Redis backend / broker.'
 		]
 	)
 
@@ -980,7 +980,7 @@ def install_mongodb():
 		cmd=f'{sys.executable} -m pip install secator[mongodb]',
 		title='MongoDB addon',
 		next_steps=[
-			'[dim]\[optional][/] Run [bold green4]docker run --name mongo -p 27017:27017 -d mongo:latest[/] to run a local MongoDB instance.',  # noqa: E501
+			r'[dim]\[optional][/] Run [bold green4]docker run --name mongo -p 27017:27017 -d mongo:latest[/] to run a local MongoDB instance.',  # noqa: E501
 			'Run [bold green4]secator config set addons.mongodb.url mongodb://<URL>[/].',
 			'Run [bold green4]secator x httpx testphp.vulnweb.com -driver mongodb[/] to save results to MongoDB.'
 		]
@@ -994,7 +994,7 @@ def install_redis():
 		cmd=f'{sys.executable} -m pip install secator[redis]',
 		title='Redis addon',
 		next_steps=[
-			'[dim]\[optional][/] Run [bold green4]docker run --name redis -p 6379:6379 -d redis[/] to run a local Redis instance.',  # noqa: E501
+			r'[dim]\[optional][/] Run [bold green4]docker run --name redis -p 6379:6379 -d redis[/] to run a local Redis instance.',  # noqa: E501
 			'Run [bold green4]secator config set celery.broker_url redis://<URL>[/]',
 			'Run [bold green4]secator config set celery.result_backend redis://<URL>[/]',
 			'Run [bold green4]secator worker[/] to run a worker.',
