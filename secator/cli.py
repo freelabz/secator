@@ -658,7 +658,7 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 	# Load all report paths
 	load_all_reports = any([not Path(p).exists() for p in report_query])
 	all_reports = []
-	if load_all_reports:
+	if load_all_reports or workspace:
 		all_reports = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	if not report_query:
 		report_query = all_reports
