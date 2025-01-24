@@ -58,25 +58,25 @@ class Url(OutputType):
 	def __repr__(self):
 		s = f'🔗 [white]{self.url}'
 		if self.method and self.method != 'GET':
-			s += f' \[[turquoise4]{self.method}[/]]'
+			s += rf' \[[turquoise4]{self.method}[/]]'
 		if self.status_code and self.status_code != 0:
 			if self.status_code < 400:
-				s += f' \[[green]{self.status_code}[/]]'
+				s += rf' \[[green]{self.status_code}[/]]'
 			else:
-				s += f' \[[red]{self.status_code}[/]]'
+				s += rf' \[[red]{self.status_code}[/]]'
 		if self.title:
-			s += f' \[[green]{trim_string(self.title)}[/]]'
+			s += rf' \[[green]{trim_string(self.title)}[/]]'
 		if self.webserver:
-			s += f' \[[magenta]{self.webserver}[/]]'
+			s += rf' \[[magenta]{self.webserver}[/]]'
 		if self.tech:
 			techs_str = ', '.join([f'[magenta]{tech}[/]' for tech in self.tech])
 			s += f' [{techs_str}]'
 		if self.content_type:
-			s += f' \[[magenta]{self.content_type}[/]]'
+			s += rf' \[[magenta]{self.content_type}[/]]'
 		if self.content_length:
 			cl = str(self.content_length)
 			cl += '[bold red]+[/]' if self.content_length == CONFIG.http.response_max_size_bytes else ''
-			s += f' \[[magenta]{cl}[/]]'
+			s += rf' \[[magenta]{cl}[/]]'
 		if self.screenshot_path:
-			s += f' \[[magenta]{self.screenshot_path}[/]]'
+			s += rf' \[[magenta]{self.screenshot_path}[/]]'
 		return rich_to_ansi(s)

@@ -374,7 +374,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		elif not latest_version:
 			info['status'] = 'latest unknown'
 			if CONFIG.offline_mode:
-				info['status'] += ' [dim orange1]\[offline][/]'
+				info['status'] += r' [dim orange1]\[offline][/]'
 	else:
 		info['status'] = 'missing'
 

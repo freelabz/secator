@@ -31,11 +31,11 @@ class UserAccount(OutputType):
 	def __repr__(self) -> str:
 		s = f'👤 [green]{self.username}[/]'
 		if self.email:
-			s += f' \[[bold yellow]{self.email}[/]]'
+			s += rf' \[[bold yellow]{self.email}[/]]'
 		if self.site_name:
-			s += f' \[[bold blue]{self.site_name}[/]]'
+			s += rf' \[[bold blue]{self.site_name}[/]]'
 		if self.url:
-			s += f' \[[white]{self.url}[/]]'
+			s += rf' \[[white]{self.url}[/]]'
 		if self.extra_data:
-			s += ' \[[bold yellow]' + ', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + '[/]]'
+			s += r' \[[bold yellow]' + ', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + '[/]]'
 		return rich_to_ansi(s)
