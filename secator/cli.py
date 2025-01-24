@@ -1093,31 +1093,6 @@ def install_tools(cmds):
 	sys.exit(return_code)
 
 
-@install.command('cves')
-@click.option('--force', is_flag=True)
-def install_cves(force):
-	"""Install CVEs (enables passive vulnerability search)."""
-	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
-		return
-	cve_json_path = f'{CONFIG.dirs.cves}/circl-cve-search-expanded.json'
-	if not os.path.exists(cve_json_path) or force:
-		with console.status('[bold yellow]Downloading zipped CVEs from cve.circl.lu ...[/]'):
-			Command.execute('wget https://cve.circl.lu/static/circl-cve-search-expanded.json.gz', cwd=CONFIG.dirs.cves)
-		with console.status('[bold yellow]Unzipping CVEs ...[/]'):
-			Command.execute(f'gunzip {CONFIG.dirs.cves}/circl-cve-search-expanded.json.gz', cwd=CONFIG.dirs.cves)
-	with console.status(f'[bold yellow]Installing CVEs to {CONFIG.dirs.cves} ...[/]'):
-		with open(cve_json_path, 'r') as f:
-			for line in f:
-				data = json.loads(line)
-				cve_id = data['id']
-				cve_path = f'{CONFIG.dirs.cves}/{cve_id}.json'
-				with open(cve_path, 'w') as f:
-					f.write(line)
-				console.print(f'CVE saved to {cve_path}')
-	console.print(':tada: CVEs installed successfully !', style='bold green')
-
-
 #--------#
 # UPDATE #
 #--------#
