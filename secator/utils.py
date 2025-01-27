@@ -387,7 +387,7 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
     if obj_str and obj_after:
         formatted_msg += f': {obj_str}'
     if id:
-        formatted_msg += f' [italic dim gray11]\[{id}][/]'
+        formatted_msg += rf' [italic dim gray11]\[{id}][/]'
 
     console.print(f'[dim red]🐛 {formatted_msg}[/]', style='red')
 

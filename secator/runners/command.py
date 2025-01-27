@@ -454,7 +454,7 @@ class Command(Runner):
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = self.cmd.replace('[', '\\[')
+			cmd_str = self.cmd.replace('[', r'\\[')
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold cyan', rich=True)
@@ -581,7 +581,7 @@ class Command(Runner):
 		self._print('[bold red]Please enter sudo password to continue.[/]', rich=True)
 		for _ in range(3):
 			user = getpass.getuser()
-			self._print(f'\[sudo] password for {user}: ▌', rich=True)
+			self._print(rf'\[sudo] password for {user}: ▌', rich=True)
 			sudo_password = getpass.getpass()
 			result = subprocess.run(
 				['sudo', '-S', '-p', '', 'true'],
