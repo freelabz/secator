@@ -46,7 +46,7 @@ dependencies = [
   'pydantic < 3',
   'requests < 3',
   'rich < 14',
-  'rich-click < 1.7',
+  'rich-click >= 1.8',
   'psutil < 7',
   'retry < 1',
   'tldextract < 6',
