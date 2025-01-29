@@ -165,7 +165,7 @@ class Runner:
 
 		# Process prior results
 		for result in results:
-			list(self._process_item(result))
+			list(self._process_item(result, print=False))
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -391,7 +391,7 @@ class Runner:
 				if item_out:
 					item_repr = repr(item)
 					if isinstance(item, OutputType) and self.print_remote_info:
-						item_repr += rich_to_ansi(f' \[[dim]{item._source}[/]]')
+						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
 					self._print(item_repr, out=item_out)
 
 		# Item is a line
@@ -780,11 +780,12 @@ class Runner:
 				count_map[name] = count
 		return count_map
 
-	def _process_item(self, item):
+	def _process_item(self, item, print=True):
 		"""Process an item yielded by the derived runner.
 
 		Args:
 			item (dict | str): Input item.
+			print (bool): Print item in console.
 
 		Yields:
 			OutputType: Output type.
@@ -793,7 +794,7 @@ class Runner:
 		# Item is a string, just print it
 		if isinstance(item, str):
 			self.output += item + '\n'
-			self._print_item(item) if item else ''
+			self._print_item(item) if item and print else ''
 			return
 
 		# Abort further processing if no_process is set
@@ -847,7 +848,7 @@ class Runner:
 				return
 
 		# Add item to results
-		self.add_result(item, print=True)
+		self.add_result(item, print=print)
 
 		# Yield item
 		yield item
