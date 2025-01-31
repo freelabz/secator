@@ -6,6 +6,7 @@ import tarfile
 import zipfile
 import io
 
+from datetime import datetime
 from enum import Enum
 
 import json
@@ -13,10 +14,11 @@ import requests
 
 from rich.table import Table
 
+from secator.config import CONFIG
 from secator.definitions import OPT_NOT_SUPPORTED
+from secator.output_types import Info, Error
 from secator.rich import console
 from secator.runners import Command
-from secator.config import CONFIG
 
 
 class InstallerStatus(Enum):
@@ -53,7 +55,7 @@ class ToolInstaller:
 
 		if not tool_cls.install_github_handle and not tool_cls.install_cmd:
 			console.print(
-				f'[bold red]{tool_cls.__name__} install is not supported yet. Please install it manually.[/]')
+				Error(message=f'{tool_cls.__name__} install is not supported yet. Please install it manually.[/]'))
 			status = InstallerStatus.INSTALL_NOT_SUPPORTED
 
 		if tool_cls.install_github_handle:
@@ -64,10 +66,10 @@ class ToolInstaller:
 
 		if status == InstallerStatus.SUCCESS:
 			console.print(
-				f'[bold green]:tada: {tool_cls.__name__} installed successfully[/] !')
+				Info(message=f'{tool_cls.__name__} installed successfully[/] !'))
 		else:
 			console.print(
-				f'[bold red]:exclamation_mark: Failed to install {tool_cls.__name__}: {status}.[/]')
+				Error(message=f'Failed to install {tool_cls.__name__}: {status}.[/]'))
 		return status
 
 
@@ -111,11 +113,11 @@ class GithubInstaller:
 		os_identifiers, arch_identifiers = cls._get_platform_identifier()
 		download_url = cls._find_matching_asset(latest_release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
-			console.print('[dim red]Could not find a GitHub release matching distribution.[/]')
+			console.print(Error(message='Could not find a GitHub release matching distribution.[/]'))
 			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
 
 		# Download and unpack asset
-		console.print(f'Found release URL: {download_url}')
+		console.print(Info(message=f'Found release URL: {download_url}'))
 		return cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
 
 	@classmethod
@@ -141,7 +143,7 @@ class GithubInstaller:
 			latest_release = response.json()
 			return latest_release
 		except requests.RequestException as e:
-			console.print(f'Failed to fetch latest release for {github_handle}: {str(e)}')
+			console.print(Error(message=f'Failed to fetch latest release for {github_handle}: {str(e)}'))
 			return None
 
 	@classmethod
@@ -218,7 +220,8 @@ class GithubInstaller:
 			return InstallerStatus.GITHUB_RELEASE_FAILED_DOWNLOAD
 
 		# Create a temporary directory to extract the archive
-		temp_dir = os.path.join("/tmp", repo_name)
+		date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+		temp_dir = os.path.join("/tmp", f'{repo_name}_{date_str}')
 		os.makedirs(temp_dir, exist_ok=True)
 
 		if url.endswith('.zip'):
@@ -235,7 +238,7 @@ class GithubInstaller:
 			shutil.move(binary_path, os.path.join(destination, repo_name))  # Move the binary
 			return InstallerStatus.SUCCESS
 		else:
-			console.print('[bold red]Binary matching the repository name was not found in the archive.[/]')
+			console.print(Error(message='Binary matching the repository name was not found in the archive.[/]'))
 			return InstallerStatus.GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE
 
 	@classmethod

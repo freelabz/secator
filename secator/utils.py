@@ -377,19 +377,19 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
     if lazy:
         msg = lazy(msg)
 
-    formatted_msg = f'[dim yellow4]{sub:13s}[/] ' if sub else ''
+    formatted_msg = f'[yellow4]{sub:13s}[/] ' if sub else ''
     obj_str = format_object(obj, obj_breaklines) if obj else ''
 
     # Constructing the message string based on object position
     if obj_str and not obj_after:
         formatted_msg += f'{obj_str} '
-    formatted_msg += f'[dim yellow]{msg}[/]'
+    formatted_msg += f'[yellow]{msg}[/]'
     if obj_str and obj_after:
         formatted_msg += f': {obj_str}'
     if id:
-        formatted_msg += rf' [italic dim gray11]\[{id}][/]'
+        formatted_msg += rf' [italic gray11]\[{id}][/]'
 
-    console.print(f'[dim red]🐛 {formatted_msg}[/]', style='red')
+    console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
 
 
 def escape_mongodb_url(url):

@@ -29,7 +29,7 @@ class Error(OutputType):
 		return self.message
 
 	def __repr__(self):
-		s = f'[bold red]❌ {self.message}[/]'
+		s = rf"\[[bold red]ERR[/]] {self.message}"
 		if self.traceback:
 			traceback_pretty = '   ' + self.traceback.replace('\n', '\n   ')
 			s += f'\n[dim]{traceback_pretty}[/]'

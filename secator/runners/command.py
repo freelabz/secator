@@ -359,6 +359,23 @@ class Command(Runner):
 			# Prepare cmds
 			command = self.cmd if self.shell else shlex.split(self.cmd)
 
+			# Check command is installed and auto-install
+			if not self.is_installed():
+				if CONFIG.security.auto_install_commands:
+					from secator.installer import ToolInstaller
+					yield Info(
+						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noq: E501
+						_source=self.unique_name,
+						_uuid=str(uuid.uuid4())
+					)
+					status = ToolInstaller.install(self.__class__)
+					if not status.is_ok():
+						yield Error(
+							message=f'Failed installing {self.name}',
+							_source=self.unique_name,
+							_uuid=str(uuid.uuid4())
+						)
+
 			# Output and results
 			self.return_code = 0
 			self.killed = False
@@ -403,6 +420,23 @@ class Command(Runner):
 
 		finally:
 			yield from self._wait_for_end()
+
+	def is_installed(self):
+		"""Check if a command is installed by using `which`.
+
+		Args:
+			command (str): The command to check.
+
+		Returns:
+			bool: True if the command is installed, False otherwise.
+		"""
+		result = subprocess.run(
+			["which", self.cmd.split(' ')[0]],
+			stdout=subprocess.PIPE,
+			stderr=subprocess.PIPE,
+			text=True
+		)
+		return result.returncode == 0
 
 	def process_line(self, line):
 		"""Process a single line of output emitted on stdout / stderr and yield results."""
@@ -473,7 +507,7 @@ class Command(Runner):
 		if self.config.name in str(exc):
 			message = 'Executable not found.'
 			if self.install_cmd:
-				message += f' Install it with `secator install tools {self.config.name}`.'
+				message += f' Install it with [bold green4]secator install tools {self.config.name}[/].'
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)

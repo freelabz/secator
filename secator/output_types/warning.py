@@ -20,5 +20,5 @@ class Warning(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
-		s = f"[orange4]⚠ {self.message}[/]"
+		s = rf"\[[yellow]WRN[/]] {self.message}"
 		return rich_to_ansi(s)
