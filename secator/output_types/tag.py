@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, trim_string
+from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 
 
 @dataclass
@@ -30,7 +30,7 @@ class Tag(OutputType):
 
 	def __repr__(self) -> str:
 		s = f'🏷️  [bold magenta]{self.name}[/]'
-		s += f' found @ [bold]{self.match}[/]'
+		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.extra_data:
 			for k, v in self.extra_data.items():
@@ -42,7 +42,7 @@ class Tag(OutputType):
 					if len(v) > 1000:
 						v = v.replace('\n', '\n' + sep)
 						sep = '\n    '
-				ed += f'\n    [dim red]{k}[/]:{sep}[dim yellow]{v}[/]'
+				ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
 		return rich_to_ansi(s)

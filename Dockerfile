@@ -35,7 +35,8 @@ COPY . /code/
 
 # Install secator
 RUN pipx install .
-RUN secator install tools
+# RUN secator install tools wpscan
+# RUN secator install tools
 RUN secator install addons worker
 RUN secator install addons gdrive
 RUN secator install addons gcs

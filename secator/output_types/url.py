@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TIME, TITLE, URL, WEBSERVER)
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, trim_string
+from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 from secator.config import CONFIG
 
 
@@ -56,7 +56,7 @@ class Url(OutputType):
 		return self.url
 
 	def __repr__(self):
-		s = f'🔗 [white]{self.url}'
+		s = f'🔗 [white]{_s(self.url)}'
 		if self.method and self.method != 'GET':
 			s += rf' \[[turquoise4]{self.method}[/]]'
 		if self.status_code and self.status_code != 0:
@@ -67,16 +67,16 @@ class Url(OutputType):
 		if self.title:
 			s += rf' \[[green]{trim_string(self.title)}[/]]'
 		if self.webserver:
-			s += rf' \[[magenta]{self.webserver}[/]]'
+			s += rf' \[[magenta]{_s(self.webserver)}[/]]'
 		if self.tech:
-			techs_str = ', '.join([f'[magenta]{tech}[/]' for tech in self.tech])
+			techs_str = ', '.join([f'[magenta]{_s(tech)}[/]' for tech in self.tech])
 			s += f' [{techs_str}]'
 		if self.content_type:
-			s += rf' \[[magenta]{self.content_type}[/]]'
+			s += rf' \[[magenta]{_s(self.content_type)}[/]]'
 		if self.content_length:
 			cl = str(self.content_length)
 			cl += '[bold red]+[/]' if self.content_length == CONFIG.http.response_max_size_bytes else ''
 			s += rf' \[[magenta]{cl}[/]]'
 		if self.screenshot_path:
-			s += rf' \[[magenta]{self.screenshot_path}[/]]'
+			s += rf' \[[magenta]{_s(self.screenshot_path)}[/]]'
 		return rich_to_ansi(s)
