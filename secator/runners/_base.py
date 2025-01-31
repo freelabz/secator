@@ -9,8 +9,6 @@ from time import time
 
 import humanize
 
-from rich.markup import escape as _escape
-
 from secator.definitions import ADDONS_ENABLED
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG

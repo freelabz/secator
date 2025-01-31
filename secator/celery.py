@@ -12,7 +12,7 @@ from rich.logging import RichHandler
 from retry import retry
 
 from secator.config import CONFIG
-from secator.output_types import Info, Warning, Error
+from secator.output_types import Info, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors

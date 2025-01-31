@@ -364,7 +364,7 @@ class Command(Runner):
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
 					yield Info(
-						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noq: E501
+						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noqa: E501
 						_source=self.unique_name,
 						_uuid=str(uuid.uuid4())
 					)

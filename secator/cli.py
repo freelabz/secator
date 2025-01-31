@@ -20,7 +20,7 @@ from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_p
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
-from secator.output_types import FINDING_TYPES, Info, Warning, Error
+from secator.output_types import FINDING_TYPES, Info, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
@@ -293,7 +293,7 @@ def serve(directory, host, port, interface):
 		if not host:
 			host = detect_host(interface)
 			if not host:
-				console.print(Error(message=f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.'))  # noqa: E502
+				console.print(Error(message=f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.'))  # noqa: E501
 				return
 		console.print(f'{fname} [dim][/]', style='bold magenta')
 		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
