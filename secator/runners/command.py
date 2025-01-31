@@ -19,7 +19,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug
+from secator.utils import debug, rich_escape as _s
 
 
 logger = logging.getLogger(__name__)
@@ -488,7 +488,7 @@ class Command(Runner):
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = self.cmd.replace('[', r'\\[')
+			cmd_str = _s(self.cmd)
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold cyan', rich=True)

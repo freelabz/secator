@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import time
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, rich_escape as _s
 
 
 @dataclass
@@ -20,5 +20,5 @@ class Warning(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
-		s = rf"\[[yellow]WRN[/]] {self.message}"
+		s = rf"\[[yellow]WRN[/]] {_s(self.message)}"
 		return rich_to_ansi(s)

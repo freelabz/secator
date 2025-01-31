@@ -353,43 +353,47 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
+def rich_escape(text):
+	return text.replace('[', '\[').replace(']', '\]')
+
+
 def format_object(obj, obj_breaklines=False):
-    """Format the debug object for printing."""
-    sep = '\n ' if obj_breaklines else ', '
-    if isinstance(obj, dict):
-        return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
-    elif isinstance(obj, list):
-        return f'[dim green]{sep.join(obj)}[/]'
-    return ''
+	"""Format the debug object for printing."""
+	sep = '\n ' if obj_breaklines else ', '
+	if isinstance(obj, dict):
+		return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
+	elif isinstance(obj, list):
+		return f'[dim green]{sep.join(obj)}[/]'
+	return ''
 
 
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
-    """Print debug log if DEBUG >= level."""
-    if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
-        return
+	"""Print debug log if DEBUG >= level."""
+	if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
+		return
 
-    if sub:
-        if verbose and sub not in DEBUG_COMPONENT:
-            sub = f'debug.{sub}'
-        if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
-            return
+	if sub:
+		if verbose and sub not in DEBUG_COMPONENT:
+			sub = f'debug.{sub}'
+		if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+			return
 
-    if lazy:
-        msg = lazy(msg)
+	if lazy:
+		msg = lazy(msg)
 
-    formatted_msg = f'[yellow4]{sub:13s}[/] ' if sub else ''
-    obj_str = format_object(obj, obj_breaklines) if obj else ''
+	formatted_msg = f'[yellow4]{sub:13s}[/] ' if sub else ''
+	obj_str = format_object(obj, obj_breaklines) if obj else ''
 
-    # Constructing the message string based on object position
-    if obj_str and not obj_after:
-        formatted_msg += f'{obj_str} '
-    formatted_msg += f'[yellow]{msg}[/]'
-    if obj_str and obj_after:
-        formatted_msg += f': {obj_str}'
-    if id:
-        formatted_msg += rf' [italic gray11]\[{id}][/]'
+	# Constructing the message string based on object position
+	if obj_str and not obj_after:
+		formatted_msg += f'{obj_str} '
+	formatted_msg += f'[yellow]{msg}[/]'
+	if obj_str and obj_after:
+		formatted_msg += f': {obj_str}'
+	if id:
+		formatted_msg += rf' [italic gray11]\[{id}][/]'
 
-    console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+	console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
 
 
 def escape_mongodb_url(url):
@@ -661,34 +665,34 @@ def human_to_timedelta(time_str):
 
 
 def deep_merge_dicts(*dicts):
-    """
-    Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
-
-    Args:
-        dicts (tuple): A tuple of dictionary objects to merge.
-
-    Returns:
-        dict: A new dictionary containing merged keys and values from all input dictionaries.
 	"""
-    def merge_two_dicts(dict1, dict2):
-        """
-        Helper function that merges two dictionaries.
-        """
-        result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
-        for key, value in dict2.items():
-            if key in result:
-                if isinstance(result[key], dict) and isinstance(value, dict):
-                    result[key] = merge_two_dicts(result[key], value)
-                elif isinstance(result[key], list) and isinstance(value, list):
-                    result[key] += value  # Concatenating lists
-                else:
-                    result[key] = value  # Overwrite if not both lists or both dicts
-            else:
-                result[key] = value
-        return result
+	Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
 
-    # Use reduce to apply merge_two_dicts to all dictionaries in dicts
-    return reduce(merge_two_dicts, dicts, {})
+	Args:
+		dicts (tuple): A tuple of dictionary objects to merge.
+
+	Returns:
+		dict: A new dictionary containing merged keys and values from all input dictionaries.
+	"""
+	def merge_two_dicts(dict1, dict2):
+		"""
+		Helper function that merges two dictionaries.
+		"""
+		result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
+		for key, value in dict2.items():
+			if key in result:
+				if isinstance(result[key], dict) and isinstance(value, dict):
+					result[key] = merge_two_dicts(result[key], value)
+				elif isinstance(result[key], list) and isinstance(value, list):
+					result[key] += value  # Concatenating lists
+				else:
+					result[key] = value  # Overwrite if not both lists or both dicts
+			else:
+				result[key] = value
+		return result
+
+	# Use reduce to apply merge_two_dicts to all dictionaries in dicts
+	return reduce(merge_two_dicts, dicts, {})
 
 
 def process_wordlist(val):
