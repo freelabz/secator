@@ -81,6 +81,7 @@ class Command(Runner):
 	# Install
 	install_cmd = None
 	install_github_handle = None
+	install_check = True
 
 	# Serializer
 	item_loader = None
@@ -375,6 +376,7 @@ class Command(Runner):
 							_source=self.unique_name,
 							_uuid=str(uuid.uuid4())
 						)
+						return
 
 			# Output and results
 			self.return_code = 0
@@ -430,12 +432,8 @@ class Command(Runner):
 		Returns:
 			bool: True if the command is installed, False otherwise.
 		"""
-		result = subprocess.run(
-			["which", self.cmd.split(' ')[0]],
-			stdout=subprocess.PIPE,
-			stderr=subprocess.PIPE,
-			text=True
-		)
+		result = subprocess.Popen(["which", self.cmd.split(' ')[0]], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		result.communicate()
 		return result.returncode == 0
 
 	def process_line(self, line):
@@ -482,8 +480,6 @@ class Command(Runner):
 		if self.sync and not self.has_children:
 			if self.caller and self.description:
 				self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
-			elif self.print_cmd:
-				self._print('')
 
 	def print_command(self):
 		"""Print command."""

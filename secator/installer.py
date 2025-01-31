@@ -50,12 +50,12 @@ class ToolInstaller:
 		Returns:
 			InstallerStatus: Install status.
 		"""
-		console.print(f'[bold gold3]:wrench: Installing {tool_cls.__name__}')
+		console.print(Info(message=f'Installing {tool_cls.__name__}'))
 		status = InstallerStatus.UNKNOWN
 
 		if not tool_cls.install_github_handle and not tool_cls.install_cmd:
 			console.print(
-				Error(message=f'{tool_cls.__name__} install is not supported yet. Please install it manually.[/]'))
+				Error(message=f'{tool_cls.__name__} install is not supported yet. Please install it manually'))
 			status = InstallerStatus.INSTALL_NOT_SUPPORTED
 
 		if tool_cls.install_github_handle:
@@ -66,10 +66,10 @@ class ToolInstaller:
 
 		if status == InstallerStatus.SUCCESS:
 			console.print(
-				Info(message=f'{tool_cls.__name__} installed successfully[/] !'))
+				Info(message=f'{tool_cls.__name__} installed successfully'))
 		else:
 			console.print(
-				Error(message=f'Failed to install {tool_cls.__name__}: {status}.[/]'))
+				Error(message=f'Failed to install {tool_cls.__name__}: {status}'))
 		return status
 
 
@@ -113,7 +113,7 @@ class GithubInstaller:
 		os_identifiers, arch_identifiers = cls._get_platform_identifier()
 		download_url = cls._find_matching_asset(latest_release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
-			console.print(Error(message='Could not find a GitHub release matching distribution.[/]'))
+			console.print(Error(message='Could not find a GitHub release matching distribution.'))
 			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
 
 		# Download and unpack asset
@@ -214,7 +214,7 @@ class GithubInstaller:
 		Returns:
 			InstallerStatus: install status.
 		"""
-		console.print(f'Downloading and unpacking to {destination}...')
+		console.print(Info(message=f'Downloading and unpacking to {destination}...'))
 		response = requests.get(url, timeout=5)
 		if not response.status_code == 200:
 			return InstallerStatus.GITHUB_RELEASE_FAILED_DOWNLOAD
@@ -238,7 +238,7 @@ class GithubInstaller:
 			shutil.move(binary_path, os.path.join(destination, repo_name))  # Move the binary
 			return InstallerStatus.SUCCESS
 		else:
-			console.print(Error(message='Binary matching the repository name was not found in the archive.[/]'))
+			console.print(Error(message='Binary matching the repository name was not found in the archive.'))
 			return InstallerStatus.GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE
 
 	@classmethod
