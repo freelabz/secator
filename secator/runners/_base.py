@@ -398,7 +398,7 @@ class Runner:
 		elif isinstance(item, str):
 			self.debug(item, sub='line', allow_no_process=False, verbose=True)
 			if self.print_line or force:
-				self._print(item, out=sys.stderr, end='\n')
+				self._print(item, out=sys.stderr, end='\n', rich=False)
 
 	def debug(self, *args, **kwargs):
 		"""Print debug with runner class name, only if self.no_process is True.
@@ -790,7 +790,6 @@ class Runner:
 		Yields:
 			OutputType: Output type.
 		"""
-
 		# Item is a string, just print it
 		if isinstance(item, str):
 			self.output += item + '\n'

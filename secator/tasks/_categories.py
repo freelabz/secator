@@ -242,7 +242,7 @@ class Vuln(Command):
 	@cache
 	@staticmethod
 	def lookup_cve_from_cve_circle(cve_id):
-		"""Get CVE data from cve.circl.lu.
+		"""Get CVE data from vulnerability.circl.lu.
 
 		Args:
 			cve_id (str): CVE id.
@@ -251,11 +251,11 @@ class Vuln(Command):
 			dict: CVE data.
 		"""
 		try:
-			resp = requests.get(f'https://cve.circl.lu/api/cve/{cve_id}', timeout=5)
+			resp = requests.get(f'https://vulnerability.circl.lu/api/cve/{cve_id}', timeout=5)
 			resp.raise_for_status()
 			cve_info = resp.json()
 			if not cve_info:
-				debug(f'Empty response from https://cve.circl.lu/api/cve/{cve_id}.', sub='cve')
+				debug(f'Empty response from https://vulnerability.circl.lu/api/cve/{cve_id}.', sub='cve')
 				return None
 			cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
 			with open(cve_path, 'w') as f:
