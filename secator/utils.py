@@ -308,11 +308,21 @@ def pluralize(word):
 	"""
 	if word.endswith('y'):
 		return word.rstrip('y') + 'ies'
-	else:
-		return f'{word}s'
+	return f'{word}s'
 
 
 def load_fixture(name, fixtures_dir, ext=None, only_path=False):
+	"""Load fixture a fixture dir. Optionally load it's content if it's JSON / YAML.
+
+	Args:
+		name (str): Fixture name.
+		fixtures_dir (str): Fixture parent directory.
+		ext (str, Optional): Extension to load.
+		only_path (bool, Optional): Return fixture path instead of fixture content.
+
+	Returns:
+		str: Fixture path or content.
+	"""
 	fixture_path = f'{fixtures_dir}/{name}'
 	exts = ['.json', '.txt', '.xml', '.rc']
 	if ext:
@@ -331,10 +341,19 @@ def load_fixture(name, fixtures_dir, ext=None, only_path=False):
 
 
 def get_file_timestamp():
+	"""Get current timestamp into a formatted string."""
 	return datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%f_%p")
 
 
 def detect_host(interface=None):
+	"""Detect hostname from ethernet adapters.
+
+	Args:
+		interface (str): Interface name to get hostname from.
+
+	Returns:
+		str | None: hostname or ip address, or None if not found.
+	"""
 	adapters = ifaddr.get_adapters()
 	for adapter in adapters:
 		iface = adapter.name
@@ -345,7 +364,14 @@ def detect_host(interface=None):
 
 
 def rich_to_ansi(text):
-	"""Convert text formatted with rich markup to standard string."""
+	"""Convert text formatted with rich markup to standard string.
+
+	Args:
+		text (str): Text.
+
+	Returns:
+		str: Converted text (ANSI).
+	"""
 	from rich.console import Console
 	tmp_console = Console(file=None, highlight=False, color_system='truecolor')
 	with tmp_console.capture() as capture:
@@ -353,12 +379,30 @@ def rich_to_ansi(text):
 	return capture.get()
 
 
-def rich_escape(text):
-	return text.replace('[', '\[').replace(']', '\]')
+def rich_escape(obj):
+	"""Escape object for rich printing.
+
+	Args:
+		obj (any): Input object.
+
+	Returns:
+		any: Initial object, or escaped Rich string.
+	"""
+	if isinstance(obj, str):
+		return obj.replace('[', '\[').replace(']', '\]')
+	return obj
 
 
 def format_object(obj, obj_breaklines=False):
-	"""Format the debug object for printing."""
+	"""Format the debug object for printing.
+
+	Args:
+		obj (dict | list): Input object.
+		obj_breaklines (bool): Split output with newlines for each item in input object.
+
+	Returns:
+		str: Rich-formatted string.
+	"""
 	sep = '\n ' if obj_breaklines else ', '
 	if isinstance(obj, dict):
 		return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
@@ -532,16 +576,15 @@ def get_file_date(file_path):
 
 
 def trim_string(s, max_length=30):
-	"""
-	Trims a long string to include the beginning and the end, with an ellipsis in the middle.
-	The output string will not exceed the specified maximum length.
+	"""Trims a long string to include the beginning and the end, with an ellipsis in the middle. The output string will
+	not exceed the specified maximum length.
 
 	Args:
 		s (str): The string to be trimmed.
 		max_length (int): The maximum allowed length of the trimmed string.
 
 	Returns:
-	str: The trimmed string.
+		str: The trimmed string.
 	"""
 	if len(s) <= max_length:
 		return s  # Return the original string if it's short enough
@@ -631,6 +674,14 @@ def list_reports(workspace=None, type=None, timedelta=None):
 
 
 def get_info_from_report_path(path):
+	"""Get some info from the report path, like workspace, run type and id.
+
+	Args:
+		path (pathlib.Path): Report path.
+
+	Returns:
+		dict: Info dict.
+	"""
 	try:
 		ws, runner_type, number = path.parts[-4], path.parts[-3], path.parts[-2]
 		workspace_path = '/'.join(path.parts[:-3])
@@ -645,6 +696,14 @@ def get_info_from_report_path(path):
 
 
 def human_to_timedelta(time_str):
+	"""Convert human time to a timedelta object.
+
+	Args:
+		str: Time string in human format (like 2 years)
+
+	Returns:
+		datetime.TimeDelta: TimeDelta object.
+	"""
 	if not time_str:
 		return None
 	parts = TIMEDELTA_REGEX.match(time_str)
@@ -665,8 +724,7 @@ def human_to_timedelta(time_str):
 
 
 def deep_merge_dicts(*dicts):
-	"""
-	Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
+	"""Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
 
 	Args:
 		dicts (tuple): A tuple of dictionary objects to merge.
@@ -675,8 +733,13 @@ def deep_merge_dicts(*dicts):
 		dict: A new dictionary containing merged keys and values from all input dictionaries.
 	"""
 	def merge_two_dicts(dict1, dict2):
-		"""
-		Helper function that merges two dictionaries.
+		"""Helper function that merges two dictionaries.
+
+		Args:
+			dict1 (dict): First dict.
+			dict2 (dict): Second dict.
+		Returns:
+			dict: Merged dict.
 		"""
 		result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
 		for key, value in dict2.items():
