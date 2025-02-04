@@ -892,7 +892,7 @@ def health(json, debug, strict):
 				error = True
 		if error:
 			sys.exit(1)
-		console.print(Info(message='Strict healthcheck passed ![/]'))
+		console.print(Info(message='Strict healthcheck passed !'))
 
 
 #---------#
@@ -1071,7 +1071,7 @@ def install_ruby():
 def install_tools(cmds):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
 	if cmds is not None:
 		cmds = cmds.split(',')
@@ -1084,7 +1084,7 @@ def install_tools(cmds):
 		with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 			status = ToolInstaller.install(cls)
 			if not status.is_ok():
-				console.print(f'[bold red]Failed installing {cls.__name__}[/]')
+				console.print(Error(f'Failed to install {cls.__name__}'))
 				return_code = 1
 		console.print()
 	sys.exit(return_code)
@@ -1099,7 +1099,7 @@ def install_tools(cmds):
 def update(all):
 	"""[dim]Update to latest version.[/]"""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 
 	# Check current and latest version
@@ -1109,12 +1109,12 @@ def update(all):
 
 	# Skip update if latest
 	if info['status'] == 'latest':
-		console.print(f'[bold green]secator is already at the newest version {latest_version}[/] !')
+		console.print(Info(message=f'secator is already at the newest version {latest_version} !'))
 		do_update = False
 
 	# Fail if unknown latest
 	if not latest_version:
-		console.print('[bold red]Could not fetch latest secator version.[/]')
+		console.print(Error(message='Could not fetch latest secator version.'))
 		sys.exit(1)
 
 	# Update secator
@@ -1242,10 +1242,10 @@ def list_aliases(silent):
 def test():
 	"""[dim]Run tests."""
 	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to run tests.[/]')
+		console.print(Error(message='You MUST use a development version of secator to run tests.'))
 		sys.exit(1)
 	if not ADDONS_ENABLED['dev']:
-		console.print('[bold red]Missing dev addon: please run [bold green4]secator install addons dev[/][/]')
+		console.print(Error(message='Missing dev addon: please run [bold green4]secator install addons dev[/]'))
 		sys.exit(1)
 	pass
 

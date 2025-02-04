@@ -63,8 +63,14 @@ class nmap(VulnMulti):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
+	install_packages = {
+		'apt': ['nmap'],
+		'apk': ['nmap', 'nmap-scripts'],
+		'pacman': ['nmap'],
+		'brew': ['nmap']
+	}
 	install_cmd = (
-		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
+		'git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
 	proxychains = True

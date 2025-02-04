@@ -1,3 +1,5 @@
+import distro
+import getpass
 import os
 import platform
 import re
@@ -16,7 +18,7 @@ from rich.table import Table
 
 from secator.config import CONFIG
 from secator.definitions import OPT_NOT_SUPPORTED
-from secator.output_types import Info, Error
+from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
 
@@ -29,6 +31,7 @@ class InstallerStatus(Enum):
 	GITHUB_RELEASE_FAILED_DOWNLOAD = 'GITHUB_RELEASE_FAILED_DOWNLOAD'
 	GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE = 'GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE'
 	SOURCE_INSTALL_FAILED = 'SOURCE_INSTALL_FAILED'
+	UNKNOWN_DISTRIBUTION = 'UNKNOWN_DISTRIBUTION'
 	UNKNOWN = 'UNKNOWN'
 
 	def is_ok(self):
@@ -51,27 +54,63 @@ class ToolInstaller:
 			InstallerStatus: Install status.
 		"""
 		console.print(Info(message=f'Installing {tool_cls.__name__}'))
-		status = InstallerStatus.UNKNOWN
+		status = InstallerStatus.INSTALL_NOT_SUPPORTED
+		cmd, manager, distro = get_pkg_manager()
+		console.print(Info(message=f'Detected distribution "{distro}", will use package manager "{manager}"'))
 
-		if not tool_cls.install_github_handle and not tool_cls.install_cmd:
-			console.print(
-				Error(message=f'{tool_cls.__name__} install is not supported yet. Please install it manually'))
-			status = InstallerStatus.INSTALL_NOT_SUPPORTED
+		if tool_cls.install_packages:
+			status = PackageInstaller.install(tool_cls.install_packages, cmd, manager, distro)
 
-		if tool_cls.install_github_handle:
+		if tool_cls.install_extras and distro in tool_cls.install_extras:
+			status = SourceInstaller.install(tool_cls.install_extras[distro])
+
+		bin_install_ok = False
+		if tool_cls.install_github_handle and not CONFIG.security.force_source_install:
 			status = GithubInstaller.install(tool_cls.install_github_handle)
+			bin_install_ok = status.is_ok()
 
-		if tool_cls.install_cmd and not status.is_ok():
+		if tool_cls.install_cmd and not bin_install_ok:
 			status = SourceInstaller.install(tool_cls.install_cmd)
 
-		if status == InstallerStatus.SUCCESS:
+		if status == InstallerStatus.INSTALL_NOT_SUPPORTED:
 			console.print(
-				Info(message=f'{tool_cls.__name__} installed successfully'))
-		else:
-			console.print(
-				Error(message=f'Failed to install {tool_cls.__name__}: {status}'))
+				Error(message=f'{tool_cls.__name__} install is not supported yet. Please install it manually'))
+			return status
+
+		ToolInstaller.print_status(status, tool_cls.__name__)
 		return status
 
+	def print_status(status, name):
+		if status == InstallerStatus.SUCCESS:
+			console.print(
+				Info(message=f'{name} installed successfully !'))
+		else:
+			console.print(
+				Error(message=f'Failed to install {name}: {status}'))
+
+
+class PackageInstaller:
+	"""Install system packages."""
+
+	@classmethod
+	def install(cls, config, cmd, manager, system):
+		status = InstallerStatus.UNKNOWN
+		if cmd == 'unknown':
+			status = InstallerStatus.UNKNOWN_DISTRIBUTION
+		else:
+			packages = config.get(manager)
+			if getpass.getuser() != 'root':
+				cmd = f'sudo {cmd}'
+			if packages:
+				for package in packages:
+					console.print(Info(message=f'Installing package {package}'))
+					status = SourceInstaller.install(f'{cmd} {package}')
+					ToolInstaller.print_status(status, package)
+					if not status.is_ok():
+						break
+			else:
+				status = InstallerStatus.SUCCESS
+		return status
 
 class SourceInstaller:
 	"""Install a tool from source."""
@@ -143,7 +182,7 @@ class GithubInstaller:
 			latest_release = response.json()
 			return latest_release
 		except requests.RequestException as e:
-			console.print(Error(message=f'Failed to fetch latest release for {github_handle}: {str(e)}'))
+			console.print(Warning(message=f'Failed to fetch latest release for {github_handle}: {str(e)}'))
 			return None
 
 	@classmethod
@@ -382,6 +421,48 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		info['status'] = 'missing'
 
 	return info
+
+
+def get_pkg_manager():
+	"""Detects the system's package manager based on the OS distribution and return the default installation command."""
+
+	# If explicitely set by the user, use that one
+	package_manager_variable = os.environ.get('SECATOR_PACKAGE_MANAGER')
+	if package_manager_variable:
+		return package_manager_variable
+	cmd = "unknown"
+	system = platform.system()
+	distro_id = system
+
+	if system == "Linux":
+		distro_id = distro.id()
+
+		if distro_id in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
+			cmd = "apt install -y"
+		elif distro_id in ["arch", "manjaro", "endeavouros"]:
+			cmd = "pacman -S --noconfirm"
+		elif distro_id in ["alpine"]:
+			cmd = "apk add"
+		elif distro_id in ["fedora"]:
+			cmd = "dnf install -y"
+		elif distro_id in ["centos", "rhel", "rocky", "alma"]:
+			cmd = "yum -y"
+		elif distro_id in ["opensuse", "sles"]:
+			cmd = "zypper -n"
+
+	elif system == "Darwin":  # macOS
+		cmd = "brew install"
+
+	elif system == "Windows":
+		if shutil.which("winget"):
+			cmd = "winget install --disable-interactivity"
+		elif shutil.which("choco"):
+			cmd = "choco install"
+		else:
+			cmd = "scoop"  # Alternative package manager for Windows
+
+	manager = cmd.split(' ')[0]
+	return cmd, manager, distro_id
 
 
 def fmt_health_table_row(version_info, category=None):

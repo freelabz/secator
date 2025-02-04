@@ -37,7 +37,13 @@ class searchsploit(Command):
 			}
 		}
 	}
-	install_cmd = 'sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb || true && sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit'  # noqa: E501
+	install_packages = {
+		'apk': ['bash']
+	}
+	install_cmd = (
+		'git clone https://gitlab.com/exploit-database/exploitdb.git /usr/local/share/exploitdb || true && '
+		'ln -sf /usr/local/share/exploitdb/searchsploit $HOME/.local/bin/searchsploit'
+	)
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False

@@ -29,7 +29,12 @@ class fping(ReconIp):
 	}
 	input_type = IP
 	output_types = [Ip]
-	install_cmd = 'sudo apt install -y fping'
+	install_packages = {
+		'apt': ['fping'],
+		'apk': ['fping'],
+		'pacman': ['fping'],
+		'brew': ['fping']
+	}
 
 	@staticmethod
 	def item_loader(self, line):

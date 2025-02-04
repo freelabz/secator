@@ -28,7 +28,7 @@ class grype(VulnCode):
 	}
 	output_types = [Vulnerability]
 	install_cmd = (
-		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
+		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b $HOME/.local/bin'
 	)
 	install_github_handle = 'anchore/grype'
 

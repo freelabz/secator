@@ -66,7 +66,15 @@ class wpscan(VulnHttp):
 		},
 	}
 	output_types = [Vulnerability, Tag]
-	install_cmd = 'sudo apt install -y build-essential ruby-dev rubygems && sudo apt install -y libcurl4t64 || true && sudo gem install wpscan && sudo gem uninstall nokogiri --force && sudo gem install nokogiri --platform=ruby'  # noqa: E501
+	install_packages = {
+		'apt': ['libcurl4t64'],
+		'pacman': ['wpscan'],
+		'brew': ['wpscanteam/tap/wpscan']
+	}
+	install_extras = {
+		'kali': 'gem install -n $HOME/.local/bin wpscan && gem uninstall nokogiri --force --executables && gem install nokogiri --platform=ruby',
+		'debian': 'gem install -n $HOME/.local/bin wpscan && gem uninstall nokogiri --force --executables && gem install nokogiri --platform=ruby',
+	}
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False

@@ -87,6 +87,7 @@ class Runners(StrictModel):
 class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
+	force_source_install: bool = False
 
 
 class HTTP(StrictModel):
