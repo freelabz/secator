@@ -1,4 +1,5 @@
 #!/bin/sh
+# https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb
 
 print_pgp_key() {
   cat <<-EOF
@@ -110,6 +111,43 @@ install_suse() {
   zypper install -y metasploit-framework
 }
 
+install_apk() {
+  apk add -U --no-cache \
+    build-base \
+    ruby \
+    ruby-bigdecimal \
+    ruby-bundler \
+    ruby-io-console \
+    ruby-webrick \
+    ruby-dev \
+    libffi-dev\
+    openssl-dev \
+    readline-dev \
+    sqlite-dev \
+    postgresql-dev \
+    libpcap-dev \
+    libxml2-dev \
+    libxslt-dev \
+    yaml-dev \
+    zlib-dev \
+    ncurses-dev \
+    autoconf \
+    bison \
+    subversion \
+    git \
+    sqlite \
+    nmap \
+    libxslt \
+    postgresql \
+    ncurses
+  cd /usr/share && \
+	git clone https://github.com/rapid7/metasploit-framework.git
+	cd /usr/share/metasploit-framework
+	/usr/bin/bundle update --bundler
+	/usr/bin/bundle install
+  ln -sf /usr/share/metasploit-framework/msfconsole $HOME/.local/bin/msfconsole
+}
+
 install_pkg()
 {
   (
@@ -144,6 +182,8 @@ else
     PKGTYPE=pkg
   elif [ -f /usr/bin/zypper ] ; then
     PKGTYPE=sus
+  elif [ -f /sbin/apk ] ; then
+	  PKGTYPE=apk
   else
     PKGTYPE=deb
   fi
@@ -170,6 +210,9 @@ case $PKGTYPE in
   rpm)
     install_rpm
     ;;
+  apk)
+	  install_apk
+	;;
   *)
     install_pkg
 esac
