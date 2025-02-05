@@ -1,4 +1,5 @@
 #!/bin/sh
+# https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb
 
 print_pgp_key() {
   cat <<-EOF
