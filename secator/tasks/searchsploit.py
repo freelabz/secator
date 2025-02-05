@@ -37,9 +37,6 @@ class searchsploit(Command):
 			}
 		}
 	}
-	install_packages = {
-		'apk': ['bash']
-	}
 	install_cmd = (
 		'git clone https://gitlab.com/exploit-database/exploitdb.git /usr/local/share/exploitdb || true && '
 		'ln -sf /usr/local/share/exploitdb/searchsploit $HOME/.local/bin/searchsploit'

@@ -63,11 +63,9 @@ class nmap(VulnMulti):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
-	install_packages = {
-		'apt': ['nmap'],
+	install_pre = {
+		'apt|pacman|brew': ['nmap'],
 		'apk': ['nmap', 'nmap-scripts'],
-		'pacman': ['nmap'],
-		'brew': ['nmap']
 	}
 	install_cmd = (
 		'git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '

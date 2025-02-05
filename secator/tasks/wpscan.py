@@ -66,12 +66,12 @@ class wpscan(VulnHttp):
 		},
 	}
 	output_types = [Vulnerability, Tag]
-	install_packages = {
+	install_pre = {
 		'apt': ['libcurl4t64', 'libffi-dev'],
 		'pacman': ['ruby-erb'],
 	}
 	install_cmd = 'gem install -n $HOME/.local/bin wpscan'
-	install_extras = {
+	install_post = {
 		'kali': 'gem uninstall nokogiri --force --executables && gem install nokogiri --platform=ruby',
 	}
 	proxychains = False
