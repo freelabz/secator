@@ -79,11 +79,10 @@ class Command(Runner):
 	version_flag = None
 
 	# Install
-	install_packages = None
-	install_extras = None
+	install_pre = None
+	install_post = None
 	install_cmd = None
 	install_github_handle = None
-	install_check = True
 
 	# Serializer
 	item_loader = None

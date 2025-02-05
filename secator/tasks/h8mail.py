@@ -21,7 +21,7 @@ class h8mail(OSInt):
 		'config': {'type': str, 'help': 'Configuration file for API keys'},
 		'local_breach': {'type': str, 'short': 'lb', 'help': 'Local breach file'}
 	}
-	install_cmd = 'pipx install h8mail'
+	install_cmd = 'pipx install h8mail && pipx upgrade h8mail'
 
 	@staticmethod
 	def on_start(self):

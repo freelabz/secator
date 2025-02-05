@@ -1,25 +1,27 @@
-FROM archlinux:latest
+FROM ubuntu:latest
 
 ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
-RUN pacman -Syu --noconfirm && \
-    pacman -S --noconfirm \
-	base-devel \
+RUN apt update -y && \
+    apt install -y \
 	bash \
+	build-essential \
 	chromium \
 	curl \
 	gcc \
 	git \
-	go \
+	golang-go \
     jq \
     make \
     openssl \
+	pipx \
+	python3 \
+	python3-pip \
+	python3-venv \
+	ruby-full \
+	rubygems \
 	proxychains \
 	proxychains-ng \
-	python \
-	python-pip \
-	python-pipx \
-	ruby \
-	rubygems \
+	sudo \
 	unzip \
 	vim \
     wget

@@ -42,7 +42,7 @@ class msfconsole(VulnMulti):
 	}
 	encoding = 'ansi'
 	ignore_return_code = True
-	# install_cmd = 'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/msfinstall.sh | sh'
+	install_cmd = 'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/msfinstall.sh | sh'
 
 	@staticmethod
 	def on_init(self):

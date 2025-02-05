@@ -26,6 +26,7 @@ from secator.runners import Command
 class InstallerStatus(Enum):
 	SUCCESS = 'SUCCESS'
 	INSTALL_NOT_SUPPORTED = 'INSTALL_NOT_SUPPORTED'
+	INSTALL_SKIPPED = 'INSTALL_SKIPPED'
 	GITHUB_LATEST_RELEASE_NOT_FOUND = 'GITHUB_LATEST_RELEASE_NOT_FOUND'
 	GITHUB_RELEASE_NOT_FOUND = 'RELEASE_NOT_FOUND'
 	GITHUB_RELEASE_FAILED_DOWNLOAD = 'GITHUB_RELEASE_FAILED_DOWNLOAD'
@@ -39,54 +40,73 @@ class InstallerStatus(Enum):
 
 
 class ToolInstaller:
-
 	status = InstallerStatus
 
 	@classmethod
 	def install(cls, tool_cls):
-		"""Install a tool.
-
-		Args:
-			cls: ToolInstaller class.
-			tool_cls: Tool class (derived from secator.runners.Command).
-
-		Returns:
-			InstallerStatus: Install status.
-		"""
 		console.print(Info(message=f'Installing {tool_cls.__name__}'))
-		status = InstallerStatus.INSTALL_NOT_SUPPORTED
 		cmd, manager, distro = get_pkg_manager()
-		console.print(Info(message=f'Detected distribution "{distro}", will use package manager "{manager}"'))
+		console.print(Info(message=f'Detected distribution "{distro}", using package manager "{manager}"'))
 
-		if tool_cls.install_packages:
-			status = PackageInstaller.install(tool_cls.install_packages, cmd, manager, distro)
-
-		if tool_cls.install_extras and distro in tool_cls.install_extras:
-			status = SourceInstaller.install(tool_cls.install_extras[distro])
-
-		bin_install_ok = False
-		if tool_cls.install_github_handle and not CONFIG.security.force_source_install:
-			status = GithubInstaller.install(tool_cls.install_github_handle)
-			bin_install_ok = status.is_ok()
-
-		if tool_cls.install_cmd and not bin_install_ok:
-			status = SourceInstaller.install(tool_cls.install_cmd)
-
-		if status == InstallerStatus.INSTALL_NOT_SUPPORTED:
-			console.print(
-				Error(message=f'{tool_cls.__name__} install is not supported yet. Please install it manually'))
+		status = cls._install_pre(tool_cls.install_pre, cmd, manager, distro)
+		if not status.is_ok():
 			return status
 
-		ToolInstaller.print_status(status, tool_cls.__name__)
+		status = cls._install_github(tool_cls.install_github_handle)
+		if not status.is_ok():
+			status = cls._install_cmd(tool_cls.install_cmd)
+	
+		status = cls._install_post(tool_cls.install_post, distro)
+		if not status.is_ok():
+			return status
+
+		# if status == InstallerStatus.INSTALL_NOT_SUPPORTED:
+		#     console.print(Error(message=f'{tool_cls.__name__} install is not supported yet. Please install manually'))
+		# else:
+		#     cls.print_status(status, tool_cls.__name__)
 		return status
 
-	def print_status(status, name):
+	@classmethod
+	def _install_pre(cls, package_config, cmd, manager, distro):
+		"""Install pre install packages for specific package managers."""
+		if not package_config:
+			return InstallerStatus.INSTALL_NOT_SUPPORTED
+		for managers, packages in package_config.items():
+			if manager in managers.split("|"):
+				return PackageInstaller.install({manager: packages}, cmd, manager, distro)
+		return InstallerStatus.SUCCESS
+
+	@classmethod
+	def _install_post(cls, cmd_config, distro):
+		"""Run post install commands for specific distributions."""
+		if not cmd_config:
+			return InstallerStatus.INSTALL_NOT_SUPPORTED
+		for distros, command in cmd_config.items():
+			if distro in distros.split("|"):
+				return SourceInstaller.install(command)
+		return InstallerStatus.SUCCESS
+
+	@classmethod
+	def _install_github(cls, github_handle):
+		"""Attempt to install the binary release from GitHub."""
+		if not github_handle or CONFIG.security.force_source_install:
+			return InstallerStatus.INSTALL_SKIPPED
+		status = GithubInstaller.install(github_handle)
+		return status
+
+	@classmethod
+	def _install_cmd(cls, cmd):
+		"""Attempt to build from source if binary install fails."""
+		if not cmd:
+			return InstallerStatus.INSTALL_NOT_SUPPORTED
+		return SourceInstaller.install(cmd)
+
+	@classmethod
+	def print_status(cls, status, name):
 		if status == InstallerStatus.SUCCESS:
-			console.print(
-				Info(message=f'{name} installed successfully !'))
+			console.print(Info(message=f'{name} installed successfully!'))
 		else:
-			console.print(
-				Error(message=f'Failed to install {name}: {status}'))
+			console.print(Error(message=f'Failed to install {name}: {status}'))
 
 
 class PackageInstaller:
