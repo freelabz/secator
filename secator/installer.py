@@ -55,7 +55,7 @@ class ToolInstaller:
 		status = cls._install_github(tool_cls.install_github_handle)
 		if not status.is_ok():
 			status = cls._install_cmd(tool_cls.install_cmd)
-	
+
 		status = cls._install_post(tool_cls.install_post, distro)
 		if not status.is_ok():
 			return status
@@ -135,6 +135,7 @@ class PackageInstaller:
 			else:
 				status = InstallerStatus.SUCCESS
 		return status
+
 
 class SourceInstaller:
 	"""Install a tool from source."""
