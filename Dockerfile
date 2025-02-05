@@ -1,49 +1,34 @@
-FROM kalilinux/kali-rolling
+FROM alpine:latest
 
 ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
-
-RUN apt update -y && \
-    apt install -y \
+RUN apk add --no-cache \
+	bash \
+	build-base \
+	chromium \
 	curl \
 	gcc \
 	git \
-	golang-go \
-    make \
-	pipx \
-	python3 \
-	python3-pip \
-	python3-venv \
-	ruby-full \
-	rubygems \
-	sudo \
-	vim \
-    wget \
-	chromium \
-    jq \
+	go \
+	linux-headers \
     openssl \
-	proxychains \
-	proxychains-ng
-
-# Install Metasploit framework
-RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
-RUN chmod 755 msfinstall
-RUN ./msfinstall
-
-# Copy code
+	pipx \
+	proxychains-ng \
+	python3 \
+	python3-dev \
+	py3-pip \
+	ruby \
+	ruby-dev \
+	sudo \
+	unzip
+COPY . /code
 WORKDIR /code
-COPY . /code/
-
-# Install secator
-RUN pipx install .
-RUN secator install addons worker
-RUN secator install addons gdrive
-RUN secator install addons gcs
-RUN secator install addons mongodb
-RUN secator install addons redis
-RUN secator install addons dev
-
-# Cleanup
-RUN rm -rf /var/lib/apt/lists/*
-
-# Set entrypoint
+RUN pipx install . && \
+	secator install addons worker && \
+	secator install addons gdrive && \
+	secator install addons gcs && \
+	secator install addons mongodb && \
+	secator install addons redis && \
+	secator install addons dev
+RUN secator config set security.force_source_install true
+RUN secator install tools
 ENTRYPOINT ["secator"]
