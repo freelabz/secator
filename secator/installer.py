@@ -113,7 +113,7 @@ class PackageInstaller:
 	"""Install system packages."""
 
 	@classmethod
-	def install(cls, config, cmd, manager, system):
+	def install(cls, config, cmd, manager, distro):
 		status = InstallerStatus.UNKNOWN
 		if cmd == 'unknown':
 			status = InstallerStatus.UNKNOWN_DISTRIBUTION
@@ -123,6 +123,10 @@ class PackageInstaller:
 				cmd = f'sudo {cmd}'
 			if packages:
 				for package in packages:
+					if ':' in package:
+						pdistro, package = package.split(':')
+						if pdistro != distro:
+							continue
 					console.print(Info(message=f'Installing package {package}'))
 					status = SourceInstaller.install(f'{cmd} {package}')
 					ToolInstaller.print_status(status, package)
