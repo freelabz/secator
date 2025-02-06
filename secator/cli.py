@@ -911,9 +911,9 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 		elif packages:
 			from secator.installer import PackageInstaller
 			status = PackageInstaller.install(packages)
-		return_code = 0
+		return_code = 1
 		if status.is_ok():
-			return_code = 1
+			return_code = 0
 			if next_steps:
 				console.print('[bold gold3]:wrench: Next steps:[/]')
 				for ix, step in enumerate(next_steps):
