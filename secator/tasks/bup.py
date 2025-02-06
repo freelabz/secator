@@ -14,6 +14,7 @@ from secator.tasks._categories import Http
 
 @task()
 class bup(Http):
+	"""40X bypasser."""
 	cmd = 'bup'
 	input_flag = '-u'
 	input_type = URL

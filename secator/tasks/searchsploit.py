@@ -14,7 +14,7 @@ SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*
 
 @task()
 class searchsploit(Command):
-	"""Exploit-DB command line search tool."""
+	"""Exploit searcher based on ExploitDB."""
 	cmd = 'searchsploit'
 	input_flag = None
 	json_flag = '--json'
