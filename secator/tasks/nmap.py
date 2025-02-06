@@ -269,7 +269,7 @@ class nmapData(dict):
 			extra_data['version_exact'] = version_exact
 
 		# Grap service name
-		product = extra_data.get('name', None) or extra_data.get('product', None)
+		product = extra_data.get('product', None) or extra_data.get('name', None)
 		if product:
 			service_name = product
 			if version:
@@ -410,7 +410,6 @@ class nmapData(dict):
 					CONFIDENCE: 'low'
 				}
 				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
-					vuln[TAGS].append('cve')
 					data = VulnMulti.lookup_cve(vuln_id, *cpes)
 					if data:
 						vuln.update(data)
