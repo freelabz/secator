@@ -4,6 +4,7 @@ import logging
 
 from rich.panel import Panel
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 								 THREADS, TIMEOUT, USER_AGENT)
@@ -42,7 +43,19 @@ class msfconsole(VulnMulti):
 	}
 	encoding = 'ansi'
 	ignore_return_code = True
-	install_cmd = 'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/msfinstall.sh | sh'
+	install_pre = {
+		'apt': ['libpq-dev'],
+		'pacman': ['ruby-erb', 'postgresl-libs'],
+		'yum|zypper': ['postgresql-devel']
+	}
+	install_cmd = (
+		f'git clone https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework &&'
+		f'cd {CONFIG.dirs.bin}/metasploit-framework &&'
+		f'gem install bundler --user-install -n {CONFIG.dirs.bin} &&'
+		'bundle update --bundler &&'
+		'bundle install &&'
+		f'ln -sf $HOME/.local/share/metasploit-framework/msfconsole {CONFIG.dirs.bin}/msfconsole'
+	)
 
 	@staticmethod
 	def on_init(self):
