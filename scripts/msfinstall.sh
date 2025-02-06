@@ -111,41 +111,56 @@ install_suse() {
   zypper install -y metasploit-framework
 }
 
-install_apk() {
-  apk add -U --no-cache \
-    build-base \
-    ruby \
-    ruby-bigdecimal \
-    ruby-bundler \
-    ruby-io-console \
-    ruby-webrick \
-    ruby-dev \
-    libffi-dev\
-    openssl-dev \
-    readline-dev \
-    sqlite-dev \
-    postgresql-dev \
-    libpcap-dev \
-    libxml2-dev \
-    libxslt-dev \
-    yaml-dev \
-    zlib-dev \
-    ncurses-dev \
-    autoconf \
-    bison \
-    subversion \
-    git \
-    sqlite \
-    nmap \
-    libxslt \
-    postgresql \
-    ncurses
-  cd /usr/share && \
-	git clone https://github.com/rapid7/metasploit-framework.git
-	cd /usr/share/metasploit-framework
-	/usr/bin/bundle update --bundler
-	/usr/bin/bundle install
-  ln -sf /usr/share/metasploit-framework/msfconsole $HOME/.local/bin/msfconsole
+install_apk()
+{
+  (
+    apk add -U --no-cache \
+      build-base \
+      ruby \
+      ruby-bigdecimal \
+      ruby-bundler \
+      ruby-io-console \
+      ruby-webrick \
+      ruby-dev \
+      libffi-dev\
+      openssl-dev \
+      readline-dev \
+      sqlite-dev \
+      postgresql-dev \
+      libpcap-dev \
+      libxml2-dev \
+      libxslt-dev \
+      yaml-dev \
+      zlib-dev \
+      ncurses-dev \
+      autoconf \
+      bison \
+      subversion \
+      git \
+      sqlite \
+      nmap \
+      libxslt \
+      postgresql \
+      ncurses
+    cd /usr/share && \
+    git clone https://github.com/rapid7/metasploit-framework.git
+    cd /usr/share/metasploit-framework
+    /usr/bin/bundle update --bundler
+    /usr/bin/bundle install
+    ln -sf /usr/share/metasploit-framework/msfconsole $HOME/.local/bin/msfconsole
+  )
+}
+
+install_pacman()
+{
+  (
+    cd /usr/share && \
+    git clone https://github.com/rapid7/metasploit-framework.git
+    cd /usr/share/metasploit-framework
+    /usr/bin/bundle update --bundler
+    /usr/bin/bundle install
+    ln -sf /usr/share/metasploit-framework/msfconsole $HOME/.local/bin/msfconsole
+  )
 }
 
 install_pkg()

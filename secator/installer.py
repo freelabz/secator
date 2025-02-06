@@ -1,3 +1,5 @@
+import distro
+import getpass
 import os
 import platform
 import re
@@ -6,6 +8,7 @@ import tarfile
 import zipfile
 import io
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -16,79 +19,164 @@ from rich.table import Table
 
 from secator.config import CONFIG
 from secator.definitions import OPT_NOT_SUPPORTED
-from secator.output_types import Info, Error
+from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
 
 
 class InstallerStatus(Enum):
 	SUCCESS = 'SUCCESS'
+	INSTALL_FAILED = 'INSTALL_FAILED'
 	INSTALL_NOT_SUPPORTED = 'INSTALL_NOT_SUPPORTED'
+	INSTALL_SKIPPED_OK = 'INSTALL_SKIPPED_OK'
 	GITHUB_LATEST_RELEASE_NOT_FOUND = 'GITHUB_LATEST_RELEASE_NOT_FOUND'
 	GITHUB_RELEASE_NOT_FOUND = 'RELEASE_NOT_FOUND'
 	GITHUB_RELEASE_FAILED_DOWNLOAD = 'GITHUB_RELEASE_FAILED_DOWNLOAD'
 	GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE = 'GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE'
-	SOURCE_INSTALL_FAILED = 'SOURCE_INSTALL_FAILED'
+	UNKNOWN_DISTRIBUTION = 'UNKNOWN_DISTRIBUTION'
 	UNKNOWN = 'UNKNOWN'
 
 	def is_ok(self):
-		return self.value in ['SUCCESS', 'INSTALL_NOT_SUPPORTED']
+		return self.value in ['SUCCESS', 'INSTALL_SKIPPED_OK']
+
+
+@dataclass
+class Distribution:
+	pm_install_command: str
+	pm_name: str
+	name: str
 
 
 class ToolInstaller:
-
 	status = InstallerStatus
 
 	@classmethod
 	def install(cls, tool_cls):
-		"""Install a tool.
-
-		Args:
-			cls: ToolInstaller class.
-			tool_cls: Tool class (derived from secator.runners.Command).
-
-		Returns:
-			InstallerStatus: Install status.
-		"""
-		console.print(Info(message=f'Installing {tool_cls.__name__}'))
+		name = tool_cls.__name__
+		console.print(Info(message=f'Installing {name}'))
 		status = InstallerStatus.UNKNOWN
 
-		if not tool_cls.install_github_handle and not tool_cls.install_cmd:
-			console.print(
-				Error(message=f'{tool_cls.__name__} install is not supported yet. Please install it manually'))
-			status = InstallerStatus.INSTALL_NOT_SUPPORTED
+		# Fail if not supported
+		if not any(_ for _ in [
+			tool_cls.install_pre,
+			tool_cls.install_github_handle,
+			tool_cls.install_cmd,
+			tool_cls.install_post]):
+			return InstallerStatus.INSTALL_NOT_SUPPORTED
 
-		if tool_cls.install_github_handle:
-			status = GithubInstaller.install(tool_cls.install_github_handle)
+		# Install pre-required packages
+		if tool_cls.install_pre:
+			status = PackageInstaller.install(tool_cls.install_pre)
+			if not status.is_ok():
+				cls.print_status(status, name)
+				return status
 
-		if tool_cls.install_cmd and not status.is_ok():
+		# Install binaries from GH
+		gh_status = InstallerStatus.UNKNOWN
+		if tool_cls.install_github_handle and not CONFIG.security.force_source_install:
+			gh_status = GithubInstaller.install(tool_cls.install_github_handle)
+			status = gh_status
+
+		# Install from source
+		if tool_cls.install_cmd and not gh_status.is_ok():
 			status = SourceInstaller.install(tool_cls.install_cmd)
+			if not status.is_ok():
+				cls.print_status(status, name)
+				return status
 
-		if status == InstallerStatus.SUCCESS:
-			console.print(
-				Info(message=f'{tool_cls.__name__} installed successfully'))
-		else:
-			console.print(
-				Error(message=f'Failed to install {tool_cls.__name__}: {status}'))
+		# Install post commands
+		if tool_cls.install_post:
+			post_status = SourceInstaller.install(tool_cls.install_post)
+			if not post_status.is_ok():
+				cls.print_status(post_status, name)
+				return post_status
+
+		cls.print_status(status, name)
 		return status
+
+	@classmethod
+	def print_status(cls, status, name):
+		if status.is_ok():
+			console.print(Info(message=f'{name} installed successfully!'))
+		elif status == InstallerStatus.INSTALL_NOT_SUPPORTED:
+			console.print(Error(message=f'{name} install is not supported yet. Please install manually'))
+		else:
+			console.print(Error(message=f'Failed to install {name}: {status}'))
+
+
+class PackageInstaller:
+	"""Install system packages."""
+
+	@classmethod
+	def install(cls, config):
+		"""Install packages using the correct package manager based on the distribution.
+
+		Args:
+			config (dict): A dict of package managers as keys and a list of package names as values.
+
+		Returns:
+			InstallerStatus: installer status.
+		"""
+		# Init status
+		distribution = get_distro_config()
+		if distribution.pm_install_command == 'unknown':
+			return InstallerStatus.UNKNOWN_DISTRIBUTION
+
+		console.print(
+			Info(message=f'Detected distribution "{distribution.name}", using package manager "{distribution.pm_name}"'))
+
+		# Construct package list
+		pkg_list = []
+		for managers, packages in config.items():
+			if distribution.pm_name in managers.split("|") or managers == '*':
+				pkg_list.extend(packages)
+				break
+
+		# Installer cmd
+		cmd = distribution.pm_install_command
+		if getpass.getuser() != 'root':
+			cmd = f'sudo {cmd}'
+
+		if pkg_list:
+			for pkg in pkg_list:
+				if ':' in pkg:
+					pdistro, pkg = pkg.split(':')
+					if pdistro != distribution.name:
+						continue
+				console.print(Info(message=f'Installing package {pkg}'))
+				status = SourceInstaller.install(f'{cmd} {pkg}')
+				if not status.is_ok():
+					return status
+		return InstallerStatus.SUCCESS
 
 
 class SourceInstaller:
 	"""Install a tool from source."""
 
 	@classmethod
-	def install(cls, install_cmd):
+	def install(cls, config):
 		"""Install from source.
 
 		Args:
 			cls: ToolInstaller class.
-			install_cmd (str): Install command.
+			config (dict): A dict of distros as keys and a command as value.
 
 		Returns:
 			Status: install status.
 		"""
-		ret = Command.execute(install_cmd, cls_attributes={'shell': True})
-		return InstallerStatus.SUCCESS if ret.return_code == 0 else InstallerStatus.SOURCE_INSTALL_FAILED
+		install_cmd = None
+		if isinstance(config, str):
+			install_cmd = config
+		else:
+			distribution = get_distro_config()
+			for distros, command in config.items():
+				if distribution.name in distros.split("|") or distros == '*':
+					install_cmd = command
+					break
+		if not install_cmd:
+			return InstallerStatus.INSTALL_SKIPPED_OK
+		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
+		return InstallerStatus.SUCCESS if ret.return_code == 0 else InstallerStatus.INSTALL_FAILED
 
 
 class GithubInstaller:
@@ -143,7 +231,7 @@ class GithubInstaller:
 			latest_release = response.json()
 			return latest_release
 		except requests.RequestException as e:
-			console.print(Error(message=f'Failed to fetch latest release for {github_handle}: {str(e)}'))
+			console.print(Warning(message=f'Failed to fetch latest release for {github_handle}: {str(e)}'))
 			return None
 
 	@classmethod
@@ -382,6 +470,53 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		info['status'] = 'missing'
 
 	return info
+
+
+def get_distro_config():
+	"""Detects the system's package manager based on the OS distribution and return the default installation command."""
+
+	# If explicitely set by the user, use that one
+	package_manager_variable = os.environ.get('SECATOR_PACKAGE_MANAGER')
+	if package_manager_variable:
+		return package_manager_variable
+	cmd = "unknown"
+	system = platform.system()
+	distrib = system
+
+	if system == "Linux":
+		distrib = distro.id()
+
+		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
+			cmd = "apt install -y"
+		elif distrib in ["arch", "manjaro", "endeavouros"]:
+			cmd = "pacman -S --noconfirm"
+		elif distrib in ["alpine"]:
+			cmd = "apk add"
+		elif distrib in ["fedora"]:
+			cmd = "dnf install -y"
+		elif distrib in ["centos", "rhel", "rocky", "alma"]:
+			cmd = "yum -y"
+		elif distrib in ["opensuse", "sles"]:
+			cmd = "zypper -n"
+
+	elif system == "Darwin":  # macOS
+		cmd = "brew install"
+
+	elif system == "Windows":
+		if shutil.which("winget"):
+			cmd = "winget install --disable-interactivity"
+		elif shutil.which("choco"):
+			cmd = "choco install"
+		else:
+			cmd = "scoop"  # Alternative package manager for Windows
+
+	manager = cmd.split(' ')[0]
+	config = Distribution(
+		pm_install_command=cmd,
+		pm_name=manager,
+		name=distrib
+	)
+	return config
 
 
 def fmt_health_table_row(version_info, category=None):

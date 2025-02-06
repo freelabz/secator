@@ -389,7 +389,7 @@ def rich_escape(obj):
 		any: Initial object, or escaped Rich string.
 	"""
 	if isinstance(obj, str):
-		return obj.replace('[', '\[').replace(']', '\]')
+		return obj.replace('[', r'\[').replace(']', r'\]')
 	return obj
 
 

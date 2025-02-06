@@ -892,7 +892,7 @@ def health(json, debug, strict):
 				error = True
 		if error:
 			sys.exit(1)
-		console.print(Info(message='Strict healthcheck passed ![/]'))
+		console.print(Info(message='Strict healthcheck passed !'))
 
 
 #---------#
@@ -900,21 +900,25 @@ def health(json, debug, strict):
 #---------#
 
 
-def run_install(cmd, title, next_steps=None):
+def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
-		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_line=True)
-		if ret.return_code != 0:
-			console.print(Error(message=f'Failed to install {title}.'))
-		else:
-			console.print(Info(message=f'{title} installed successfully !'))
+		if cmd:
+			from secator.installer import SourceInstaller
+			status = SourceInstaller.install(cmd)
+		elif packages:
+			from secator.installer import PackageInstaller
+			status = PackageInstaller.install(packages)
+		return_code = 1
+		if status.is_ok():
+			return_code = 0
 			if next_steps:
 				console.print('[bold gold3]:wrench: Next steps:[/]')
 				for ix, step in enumerate(next_steps):
 					console.print(f'   :keycap_{ix}: {step}')
-		sys.exit(ret.return_code)
+		sys.exit(return_code)
 
 
 @cli.group()
@@ -1061,7 +1065,12 @@ def install_go():
 def install_ruby():
 	"""Install Ruby."""
 	run_install(
-		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
+		packages={
+			'apt': ['ruby-full', 'rubygems'],
+			'apk': ['ruby', 'ruby-dev'],
+			'pacman': ['ruby', 'ruby-dev'],
+			'brew': ['ruby']
+		},
 		title='Ruby'
 	)
 
@@ -1071,7 +1080,7 @@ def install_ruby():
 def install_tools(cmds):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
 	if cmds is not None:
 		cmds = cmds.split(',')
@@ -1084,7 +1093,6 @@ def install_tools(cmds):
 		with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 			status = ToolInstaller.install(cls)
 			if not status.is_ok():
-				console.print(f'[bold red]Failed installing {cls.__name__}[/]')
 				return_code = 1
 		console.print()
 	sys.exit(return_code)
@@ -1099,7 +1107,7 @@ def install_tools(cmds):
 def update(all):
 	"""[dim]Update to latest version.[/]"""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 
 	# Check current and latest version
@@ -1109,12 +1117,12 @@ def update(all):
 
 	# Skip update if latest
 	if info['status'] == 'latest':
-		console.print(f'[bold green]secator is already at the newest version {latest_version}[/] !')
+		console.print(Info(message=f'secator is already at the newest version {latest_version} !'))
 		do_update = False
 
 	# Fail if unknown latest
 	if not latest_version:
-		console.print('[bold red]Could not fetch latest secator version.[/]')
+		console.print(Error(message='Could not fetch latest secator version.'))
 		sys.exit(1)
 
 	# Update secator
@@ -1242,10 +1250,10 @@ def list_aliases(silent):
 def test():
 	"""[dim]Run tests."""
 	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to run tests.[/]')
+		console.print(Error(message='You MUST use a development version of secator to run tests.'))
 		sys.exit(1)
 	if not ADDONS_ENABLED['dev']:
-		console.print('[bold red]Missing dev addon: please run [bold green4]secator install addons dev[/][/]')
+		console.print(Error(message='Missing dev addon: please run [bold green4]secator install addons dev[/]'))
 		sys.exit(1)
 	pass
 

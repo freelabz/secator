@@ -63,8 +63,12 @@ class nmap(VulnMulti):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
+	install_pre = {
+		'apt|pacman|brew': ['nmap'],
+		'apk': ['nmap', 'nmap-scripts'],
+	}
 	install_cmd = (
-		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
+		'sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
 	proxychains = True
@@ -348,7 +352,7 @@ class nmapData(dict):
 					vuln.update(data)
 				yield vuln
 			else:
-				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve')
+				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve.provider', verbose=True)
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
