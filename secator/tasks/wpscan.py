@@ -75,7 +75,7 @@ class wpscan(VulnHttp):
 	install_post = {
 		'kali': (
 			f'gem uninstall nokogiri --user-install -n {CONFIG.dirs.bin} --force --executables && '
-			f'gem install nokogiri --user-install -n {CONFIG.dirs.bin} --platform=ruby',
+			f'gem install nokogiri --user-install -n {CONFIG.dirs.bin} --platform=ruby'
 		)
 	}
 	proxychains = False
