@@ -98,7 +98,7 @@ class msfconsole(VulnMulti):
 				f.write(content)
 
 			script_name = script_path.split('/')[-1]
-			self._print(Panel(content, title=f'[bold magenta]{script_name}', expand=False))
+			self._print(Panel(content, title=f'[bold magenta]{script_name}', expand=False), rich=True)
 
 			# Override original command with new resource script
 			self.run_opts['msfconsole.resource'] = out_path

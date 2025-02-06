@@ -38,6 +38,9 @@ class searchsploit(Command):
 			}
 		}
 	}
+	install_pre = {
+		'apk': ['ncurses']
+	}
 	install_cmd = (
 		f'git clone https://gitlab.com/exploit-database/exploitdb.git {CONFIG.dirs.share}/exploitdb || true && '
 		f'ln -sf $HOME/.local/share/exploitdb/searchsploit {CONFIG.dirs.bin}/searchsploit'

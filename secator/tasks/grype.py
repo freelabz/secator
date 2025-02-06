@@ -63,7 +63,6 @@ class grype(VulnCode):
 		if vuln_id.startswith('GHSA'):
 			data['provider'] = 'github.com'
 			data['references'] = [f'https://github.com/advisories/{vuln_id}']
-			data['tags'].extend(['cve', 'ghsa'])
 			vuln = VulnCode.lookup_ghsa(vuln_id)
 			if vuln:
 				data.update(vuln)
@@ -72,7 +71,6 @@ class grype(VulnCode):
 		elif vuln_id.startswith('CVE'):
 			vuln = VulnCode.lookup_cve(vuln_id)
 			if vuln:
-				vuln['tags'].append('cve')
 				data.update(vuln)
 				data['severity'] = data['severity'] or severity.lower()
 		data['extra_data'] = extra_data
