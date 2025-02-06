@@ -57,7 +57,11 @@ class ToolInstaller:
 		status = InstallerStatus.UNKNOWN
 
 		# Fail if not supported
-		if not any(_ for _ in [tool_cls.install_pre, tool_cls.install_github_handle, tool_cls.install_cmd, tool_cls.install_post]):
+		if not any(_ for _ in [
+			tool_cls.install_pre,
+			tool_cls.install_github_handle,
+			tool_cls.install_cmd,
+			tool_cls.install_post]):
 			return InstallerStatus.INSTALL_NOT_SUPPORTED
 
 		# Install pre-required packages
@@ -118,7 +122,8 @@ class PackageInstaller:
 		if distribution.pm_install_command == 'unknown':
 			return InstallerStatus.UNKNOWN_DISTRIBUTION
 
-		console.print(Info(message=f'Detected distribution "{distribution.name}", using package manager "{distribution.pm_name}"'))
+		console.print(
+			Info(message=f'Detected distribution "{distribution.name}", using package manager "{distribution.pm_name}"'))
 
 		# Construct package list
 		pkg_list = []

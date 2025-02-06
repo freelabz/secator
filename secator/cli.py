@@ -920,6 +920,7 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 					console.print(f'   :keycap_{ix}: {step}')
 		sys.exit(return_code)
 
+
 @cli.group()
 def install():
 	"""[dim]Install langs, tools and addons.[/]"""
