@@ -37,5 +37,5 @@ RUN pipx install . && \
 	secator install addons dev
 RUN secator install langs go
 RUN secator config set security.force_source_install true
-RUN secator install tools
+# RUN secator install tools
 ENTRYPOINT ["secator"]

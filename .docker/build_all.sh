@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define an array of distributions
-DISTROS=("alpine" "arch" "debian" "kali" "osx", "ubuntu")
+DISTROS=("alpine" "arch" "debian" "kali" "osx" "ubuntu")
 
 # Function to build an image
 build_image() {

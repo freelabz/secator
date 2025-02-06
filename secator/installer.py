@@ -130,6 +130,7 @@ class PackageInstaller:
 		for managers, packages in config.items():
 			if distribution.pm_name in managers.split("|") or managers == '*':
 				pkg_list.extend(packages)
+				break
 
 		# Installer cmd
 		cmd = distribution.pm_install_command
@@ -171,6 +172,7 @@ class SourceInstaller:
 			for distros, command in config.items():
 				if distribution.name in distros.split("|") or distros == '*':
 					install_cmd = command
+					break
 		if not install_cmd:
 			return InstallerStatus.INSTALL_SKIPPED_OK
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)

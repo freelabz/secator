@@ -44,16 +44,18 @@ class msfconsole(VulnMulti):
 	encoding = 'ansi'
 	ignore_return_code = True
 	install_pre = {
-		'apt': ['libpq-dev'],
-		'pacman': ['ruby-erb', 'postgresl-libs'],
-		'yum|zypper': ['postgresql-devel']
+		'apt|apk': ['libpq-dev', 'libpcap-dev', 'libffi-dev'],
+		'pacman': ['ruby-erb', 'postgresql-libs'],
+		'yum|zypper': ['postgresql-devel'],
 	}
 	install_cmd = (
-		f'git clone https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework &&'
-		f'cd {CONFIG.dirs.bin}/metasploit-framework &&'
-		f'gem install bundler --user-install -n {CONFIG.dirs.bin} &&'
-		'bundle update --bundler &&'
-		'bundle install &&'
+		f'git clone https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework || true && '
+		f'cd {CONFIG.dirs.share}/metasploit-framework && '
+		f'gem install bundler --user-install -n {CONFIG.dirs.bin} && '
+		f'gem install xmlrpc --user-install -n {CONFIG.dirs.bin} && '
+		f'bundle config set --local path "{CONFIG.dirs.share}" && '
+		'bundle update --bundler && '
+		'bundle install && '
 		f'ln -sf $HOME/.local/share/metasploit-framework/msfconsole {CONFIG.dirs.bin}/msfconsole'
 	)
 

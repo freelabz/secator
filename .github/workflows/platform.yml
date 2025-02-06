@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distribution: ["alpine", "arch", "debian", "kali", "osx"]
+        distribution: ["alpine", "arch", "debian", "kali", "osx", "ubuntu"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
