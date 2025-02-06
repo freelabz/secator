@@ -1,6 +1,7 @@
 FROM debian:latest
 
-ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
+ENV PATH="${PATH}:/root/.local/bin"
+ENV GOBIN="/root/.local/bin"
 RUN apt update -y && \
     apt install -y \
 	bash \

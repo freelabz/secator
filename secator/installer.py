@@ -74,6 +74,9 @@ class ToolInstaller:
 		for managers, packages in package_config.items():
 			if manager in managers.split("|"):
 				return PackageInstaller.install({manager: packages}, cmd, manager, distro)
+		for managers, packages in package_config.items():
+			if managers == '*':
+				return PackageInstaller.install({manager: packages}, cmd, manager, distro)
 		return InstallerStatus.SUCCESS
 
 	@classmethod
@@ -83,6 +86,9 @@ class ToolInstaller:
 			return InstallerStatus.INSTALL_NOT_SUPPORTED
 		for distros, command in cmd_config.items():
 			if distro in distros.split("|"):
+				return SourceInstaller.install(command)
+		for distros, command in cmd_config.items():
+			if distros == '*':
 				return SourceInstaller.install(command)
 		return InstallerStatus.SUCCESS
 

@@ -1,4 +1,4 @@
-
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
@@ -28,7 +28,7 @@ class grype(VulnCode):
 	}
 	output_types = [Vulnerability]
 	install_cmd = (
-		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b $HOME/.local/bin'
+		f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'
 	)
 	install_github_handle = 'anchore/grype'
 

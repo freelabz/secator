@@ -1,5 +1,6 @@
 import re
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
 								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
@@ -38,8 +39,8 @@ class searchsploit(Command):
 		}
 	}
 	install_cmd = (
-		'git clone https://gitlab.com/exploit-database/exploitdb.git /usr/local/share/exploitdb || true && '
-		'ln -sf /usr/local/share/exploitdb/searchsploit $HOME/.local/bin/searchsploit'
+		f'git clone https://gitlab.com/exploit-database/exploitdb.git {CONFIG.dirs.share}/exploitdb || true && '
+		f'ln -sf $HOME/.local/share/exploitdb/searchsploit {CONFIG.dirs.bin}/searchsploit'
 	)
 	proxychains = False
 	proxy_socks5 = False

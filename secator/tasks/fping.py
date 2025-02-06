@@ -29,7 +29,7 @@ class fping(ReconIp):
 	}
 	input_type = IP
 	output_types = [Ip]
-	install_pre = {'apt|apk|pacman|brew': ['fping']}
+	install_pre = {'*': ['fping']}
 
 	@staticmethod
 	def item_loader(self, line):

@@ -127,6 +127,7 @@ class Vuln(Command):
 		if os.path.exists(cve_path):
 			with open(cve_path, 'r') as f:
 				return json.load(f)
+		debug(f'CVE {cve_id} not found in cache', sub='cve')
 		return None
 
 	# @staticmethod
@@ -248,18 +249,19 @@ class Vuln(Command):
 			cve_id (str): CVE id.
 
 		Returns:
-			dict: CVE data.
+			dict | None: CVE data, None if no response or empty response.
 		"""
 		try:
 			resp = requests.get(f'https://vulnerability.circl.lu/api/cve/{cve_id}', timeout=5)
 			resp.raise_for_status()
 			cve_info = resp.json()
 			if not cve_info:
-				debug(f'Empty response from https://vulnerability.circl.lu/api/cve/{cve_id}.', sub='cve')
+				debug(f'Empty response from https://vulnerability.circl.lu/api/cve/{cve_id}', sub='cve')
 				return None
 			cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
 			with open(cve_path, 'w') as f:
 				f.write(json.dumps(cve_info, indent=2))
+			debug(f'Downloaded {cve_id} to {cve_path}', sub='cve')
 			return cve_info
 		except requests.RequestException as e:
 			debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
@@ -288,6 +290,8 @@ class Vuln(Command):
 				debug(f'Skip remote query for {cve_id} since config.offline_mode is set.', sub='cve')
 				return None
 			cve_info = Vuln.lookup_cve_from_cve_circle(cve_id)
+			if not cve_info:
+				return None
 
 		# Convert cve info to easy format
 		cve_id = cve_info['cveMetadata']['cveId']
@@ -355,7 +359,7 @@ class Vuln(Command):
 
 		# Get references
 		references = cve_info.get(REFERENCES, [])
-		cve_ref_url = f'https://cve.circl.lu/cve/{id}'
+		cve_ref_url = f'https://vulnerability.circl.lu/cve/{id}'
 		references.append(cve_ref_url)
 
 		# Get CWE ID
@@ -373,11 +377,11 @@ class Vuln(Command):
 		vuln = {
 			ID: id,
 			NAME: name,
-			PROVIDER: 'cve.circl.lu',
+			PROVIDER: 'vulnerability.circl.lu',
 			SEVERITY: severity,
 			CVSS_SCORE: cvss,
 			TAGS: tags,
-			REFERENCES: [f'https://cve.circl.lu/cve/{id}'] + references,
+			REFERENCES: [f'https://vulnerability.circl.lu/cve/{id}'] + references,
 			DESCRIPTION: description,
 		}
 		return vuln

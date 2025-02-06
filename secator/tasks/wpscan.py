@@ -1,6 +1,7 @@
 import json
 import os
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
@@ -70,9 +71,12 @@ class wpscan(VulnHttp):
 		'apt': ['kali:libcurl4t64', 'libffi-dev'],
 		'pacman': ['ruby-erb'],
 	}
-	install_cmd = 'gem install -n $HOME/.local/bin wpscan'
+	install_cmd = f'gem install wpscan --user-install -n {CONFIG.dirs.bin}'
 	install_post = {
-		'kali': 'gem uninstall nokogiri --force --executables && gem install nokogiri --platform=ruby',
+		'kali': (
+			f'gem uninstall nokogiri --user-install -n {CONFIG.dirs.bin} --force --executables && '
+			f'gem install nokogiri --user-install -n {CONFIG.dirs.bin} --platform=ruby',
+		)
 	}
 	proxychains = False
 	proxy_http = True

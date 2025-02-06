@@ -29,6 +29,7 @@ class StrictModel(BaseModel, extra='forbid'):
 
 class Directories(StrictModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
+	share: Directory = Path.home() / '.local' / 'share'
 	data: Directory = Path(DATA_FOLDER)
 	templates: Directory = ''
 	reports: Directory = ''
