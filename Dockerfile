@@ -1,1 +1,1 @@
-./tests/platform/Dockerfile.alpine
+.docker/Dockerfile.alpine
