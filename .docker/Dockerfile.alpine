@@ -2,6 +2,7 @@ FROM alpine:latest
 
 ENV PATH="${PATH}:/root/.local/bin"
 ENV GOBIN="/root/.local/bin"
+ENV TERM="dumb"
 RUN apk add --no-cache \
 	bash \
 	build-base \
