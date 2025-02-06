@@ -362,7 +362,7 @@ class Command(Runner):
 			command = self.cmd if self.shell else shlex.split(self.cmd)
 
 			# Check command is installed and auto-install
-			if not self.is_installed():
+			if not self.no_process and not self.is_installed():
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
 					yield Info(

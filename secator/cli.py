@@ -900,22 +900,25 @@ def health(json, debug, strict):
 #---------#
 
 
-def run_install(cmd, title, next_steps=None):
+def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
-		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_line=True)
-		if ret.return_code != 0:
-			console.print(Error(message=f'Failed to install {title}.'))
-		else:
-			console.print(Info(message=f'{title} installed successfully !'))
+		if cmd:
+			from secator.installer import SourceInstaller
+			status = SourceInstaller.install(cmd)
+		elif packages:
+			from secator.installer import PackageInstaller
+			status = PackageInstaller.install(packages)
+		return_code = 0
+		if status.is_ok():
+			return_code = 1
 			if next_steps:
 				console.print('[bold gold3]:wrench: Next steps:[/]')
 				for ix, step in enumerate(next_steps):
 					console.print(f'   :keycap_{ix}: {step}')
-		sys.exit(ret.return_code)
-
+		sys.exit(return_code)
 
 @cli.group()
 def install():
@@ -1061,7 +1064,12 @@ def install_go():
 def install_ruby():
 	"""Install Ruby."""
 	run_install(
-		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
+		packages={
+			'apt': ['ruby-full', 'rubygems'],
+			'apk': ['ruby', 'ruby-dev'],
+			'pacman': ['ruby', 'ruby-dev'],
+			'brew': ['ruby']
+		},
 		title='Ruby'
 	)
 
@@ -1084,7 +1092,6 @@ def install_tools(cmds):
 		with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 			status = ToolInstaller.install(cls)
 			if not status.is_ok():
-				console.print(Error(f'Failed to install {cls.__name__}'))
 				return_code = 1
 		console.print()
 	sys.exit(return_code)
