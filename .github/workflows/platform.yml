@@ -32,3 +32,6 @@ jobs:
 
     - name: Run secator health check (strict)
       run: docker run --privileged freelabz/secator:${{ matrix.distribution }} health --strict
+
+    - name: Run Docker image ls to view size
+      run: docker image ls

@@ -68,7 +68,7 @@ class nmap(VulnMulti):
 		'apk': ['nmap', 'nmap-scripts'],
 	}
 	install_cmd = (
-		'sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
+		'sudo git clone --depth 1 --single-branch https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
 	proxychains = True

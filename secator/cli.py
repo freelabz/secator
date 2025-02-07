@@ -19,7 +19,7 @@ from rich.table import Table
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
-from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
+from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Error
 from secator.report import Report
 from secator.rich import console
@@ -1095,6 +1095,18 @@ def install_tools(cmds):
 			if not status.is_ok():
 				return_code = 1
 		console.print()
+	distro = get_distro_config()
+	cleanup_cmds = [
+		'go clean -cache',
+		'go clean -modcache',
+		'pip cache purge',
+		'gem cleanup --user-install',
+		'gem clean --user-install',
+	]
+	if distro.pm_finalizer:
+		cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
+	cmd = ' && '.join(cleanup_cmds)
+	Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
 	sys.exit(return_code)
 
 

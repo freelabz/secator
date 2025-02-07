@@ -6,13 +6,10 @@ RUN apt update -y && \
     apt install -y \
 	bash \
 	build-essential \
-	chromium \
 	curl \
-	gcc \
 	git \
 	golang-go \
     jq \
-    make \
     openssl \
 	pipx \
 	python3 \
