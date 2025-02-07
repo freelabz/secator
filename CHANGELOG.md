@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/freelabz/secator/compare/v0.8.0...v0.8.1) (2025-02-07)
+
+
+### Bug Fixes
+
+* reduce docker image size ([#516](https://github.com/freelabz/secator/issues/516)) ([28d8fa3](https://github.com/freelabz/secator/commit/28d8fa379a88a1af73df7edfda28c0270f521bb4))
+
 ## [0.8.0](https://github.com/freelabz/secator/compare/v0.7.0...v0.8.0) (2025-02-06)
 
 
