@@ -52,9 +52,8 @@ class msfconsole(VulnMulti):
 		f'git clone --depth 1 --single-branch https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework || true && '  # noqa: E501
 		f'cd {CONFIG.dirs.share}/metasploit-framework && '
 		f'gem install bundler --user-install -n {CONFIG.dirs.bin} && '
-		f'gem install xmlrpc --user-install -n {CONFIG.dirs.bin} && '
 		f'bundle config set --local path "{CONFIG.dirs.share}" && '
-		'bundle update --bundler && '
+		'bundle lock --normalize-platforms &&'
 		'bundle install && '
 		f'ln -sf $HOME/.local/share/metasploit-framework/msfconsole {CONFIG.dirs.bin}/msfconsole'
 	)
