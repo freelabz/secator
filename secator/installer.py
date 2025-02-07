@@ -42,9 +42,10 @@ class InstallerStatus(Enum):
 
 @dataclass
 class Distribution:
-	pm_install_command: str
-	pm_name: str
 	name: str
+	pm_name: str
+	pm_installer: str
+	pm_finalizer: str
 
 
 class ToolInstaller:
@@ -119,7 +120,7 @@ class PackageInstaller:
 		"""
 		# Init status
 		distribution = get_distro_config()
-		if distribution.pm_install_command == 'unknown':
+		if not distribution.pm_installer:
 			return InstallerStatus.UNKNOWN_DISTRIBUTION
 
 		console.print(
@@ -133,7 +134,7 @@ class PackageInstaller:
 				break
 
 		# Installer cmd
-		cmd = distribution.pm_install_command
+		cmd = distribution.pm_installer
 		if getpass.getuser() != 'root':
 			cmd = f'sudo {cmd}'
 
@@ -479,7 +480,8 @@ def get_distro_config():
 	package_manager_variable = os.environ.get('SECATOR_PACKAGE_MANAGER')
 	if package_manager_variable:
 		return package_manager_variable
-	cmd = "unknown"
+	installer = None
+	finalizer = None
 	system = platform.system()
 	distrib = system
 
@@ -487,32 +489,37 @@ def get_distro_config():
 		distrib = distro.id()
 
 		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
-			cmd = "apt install -y"
+			installer = "apt install -y --no-install-recommends"
+			finalizer = "rm -rf /var/lib/apt/lists/*"
 		elif distrib in ["arch", "manjaro", "endeavouros"]:
-			cmd = "pacman -S --noconfirm"
+			installer = "pacman -S --noconfirm --needed"
 		elif distrib in ["alpine"]:
-			cmd = "apk add"
+			installer = "apk add --no-cache"
 		elif distrib in ["fedora"]:
-			cmd = "dnf install -y"
+			installer = "dnf install -y"
+			finalizer = "dnf clean all"
 		elif distrib in ["centos", "rhel", "rocky", "alma"]:
-			cmd = "yum -y"
+			installer = "yum -y"
+			finalizer = "yum clean all"
 		elif distrib in ["opensuse", "sles"]:
-			cmd = "zypper -n"
+			installer = "zypper -n"
+			finalizer = "zypper clean --all"
 
 	elif system == "Darwin":  # macOS
-		cmd = "brew install"
+		installer = "brew install"
 
 	elif system == "Windows":
 		if shutil.which("winget"):
-			cmd = "winget install --disable-interactivity"
+			installer = "winget install --disable-interactivity"
 		elif shutil.which("choco"):
-			cmd = "choco install"
+			installer = "choco install -y --no-progress"
 		else:
-			cmd = "scoop"  # Alternative package manager for Windows
+			installer = "scoop"  # Alternative package manager for Windows
 
-	manager = cmd.split(' ')[0]
+	manager = installer.split(' ')[0]
 	config = Distribution(
-		pm_install_command=cmd,
+		pm_installer=installer,
+		pm_finalizer=finalizer,
 		pm_name=manager,
 		name=distrib
 	)
