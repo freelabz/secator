@@ -151,6 +151,7 @@ def output_discriminator(self, item):
 
 @task()
 class bbot(Command):
+	"""Multipurpose scanner."""
 	cmd = 'bbot -y --allow-deadly --force'
 	json_flag = '--json'
 	input_flag = '-t'

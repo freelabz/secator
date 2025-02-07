@@ -4,6 +4,7 @@ import logging
 
 from rich.panel import Panel
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 								 THREADS, TIMEOUT, USER_AGENT)
@@ -42,7 +43,21 @@ class msfconsole(VulnMulti):
 	}
 	encoding = 'ansi'
 	ignore_return_code = True
-	# install_cmd = 'wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/msfinstall.sh | sh'
+	install_pre = {
+		'apt|apk': ['libpq-dev', 'libpcap-dev', 'libffi-dev'],
+		'pacman': ['ruby-erb', 'postgresql-libs'],
+		'yum|zypper': ['postgresql-devel'],
+	}
+	install_cmd = (
+		f'git clone https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework || true && '
+		f'cd {CONFIG.dirs.share}/metasploit-framework && '
+		f'gem install bundler --user-install -n {CONFIG.dirs.bin} && '
+		f'gem install xmlrpc --user-install -n {CONFIG.dirs.bin} && '
+		f'bundle config set --local path "{CONFIG.dirs.share}" && '
+		'bundle update --bundler && '
+		'bundle install && '
+		f'ln -sf $HOME/.local/share/metasploit-framework/msfconsole {CONFIG.dirs.bin}/msfconsole'
+	)
 
 	@staticmethod
 	def on_init(self):
@@ -83,7 +98,7 @@ class msfconsole(VulnMulti):
 				f.write(content)
 
 			script_name = script_path.split('/')[-1]
-			self._print(Panel(content, title=f'[bold magenta]{script_name}', expand=False))
+			self._print(Panel(content, title=f'[bold magenta]{script_name}', expand=False), rich=True)
 
 			# Override original command with new resource script
 			self.run_opts['msfconsole.resource'] = out_path

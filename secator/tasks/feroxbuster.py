@@ -1,3 +1,4 @@
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
@@ -59,9 +60,7 @@ class feroxbuster(HttpFuzzer):
 		}
 	}
 	install_cmd = (
-		'sudo apt install -y unzip curl && '
-		'curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | '
-		'bash && sudo mv feroxbuster /usr/local/bin'
+		f'cd /tmp && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash -s {CONFIG.dirs.bin}'  # noqa: E501
 	)
 	install_github_handle = 'epi052/feroxbuster'
 	proxychains = False

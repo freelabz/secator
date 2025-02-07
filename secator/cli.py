@@ -20,7 +20,7 @@ from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_p
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
-from secator.output_types import FINDING_TYPES
+from secator.output_types import FINDING_TYPES, Info, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
@@ -191,7 +191,7 @@ def util():
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
 	for _ in range(number):
@@ -211,18 +211,16 @@ def revshell(name, host, port, interface, listen, force):
 	if host is None:  # detect host automatically
 		host = detect_host(interface)
 		if not host:
-			console.print(
-				f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces.',
-				style='bold red')
+			console.print(Error(message=f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces'))  # noqa: E501
 			return
 		else:
-			console.print(f'[bold green]Detected host IP: [bold orange1]{host}[/].[/]')
+			console.print(Info(message=f'Detected host IP: [bold orange1]{host}[/]'))
 
 	# Download reverse shells JSON from repo
 	revshells_json = f'{CONFIG.dirs.revshells}/revshells.json'
 	if not os.path.exists(revshells_json) or force:
 		if CONFIG.offline_mode:
-			console.print('[bold red]Cannot run this command in offline mode.[/]')
+			console.print(Error(message='Cannot run this command in offline mode'))
 			return
 		ret = Command.execute(
 			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {CONFIG.dirs.revshells}',  # noqa: E501
@@ -277,7 +275,7 @@ def revshell(name, host, port, interface, listen, force):
 		console.print(Rule(style='bold red'))
 
 	if listen:
-		console.print(f'Starting netcat listener on port {port} ...', style='bold gold3')
+		console.print(Info(message=f'Starting netcat listener on port {port} ...'))
 		cmd = f'nc -lvnp {port}'
 		Command.execute(cmd)
 
@@ -295,9 +293,7 @@ def serve(directory, host, port, interface):
 		if not host:
 			host = detect_host(interface)
 			if not host:
-				console.print(
-					f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.',
-					style='bold red')
+				console.print(Error(message=f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of interfaces.'))  # noqa: E501
 				return
 		console.print(f'{fname} [dim][/]', style='bold magenta')
 		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
@@ -337,9 +333,9 @@ def record(record_name, script, interactive, width, height, output_dir):
 		# If existing cast file, remove it
 		if os.path.exists(output_cast_path):
 			os.unlink(output_cast_path)
-			console.print(f'Removed existing {output_cast_path}', style='bold green')
+			console.print(Info(message=f'Removed existing {output_cast_path}'))
 
-		with console.status('[bold gold3]Recording with asciinema ...[/]'):
+		with console.status(Info(message='Recording with asciinema ...')):
 			Command.execute(
 				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
 				cls_attributes=attrs,
@@ -390,14 +386,14 @@ def record(record_name, script, interactive, width, height, output_dir):
 			f'agg {output_cast_path} {output_gif_path}',
 			cls_attributes=attrs,
 		)
-		console.print(f'Generated {output_gif_path}', style='bold green')
+		console.print(Info(message=f'Generated {output_gif_path}'))
 
 
 @util.group('build')
 def build():
 	"""Build secator."""
 	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to make builds.[/]')
+		console.print(Error(message='You MUST use a development version of secator to make builds'))
 		sys.exit(1)
 	pass
 
@@ -406,7 +402,7 @@ def build():
 def build_pypi():
 	"""Build secator PyPI package."""
 	if not ADDONS_ENABLED['build']:
-		console.print('[bold red]Missing build addon: please run [bold green4]secator install addons build[/][/]')
+		console.print(Error(message='Missing build addon: please run [bold green4]secator install addons build[/]'))
 		sys.exit(1)
 	with console.status('[bold gold3]Building PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
@@ -892,11 +888,11 @@ def health(json, debug, strict):
 		error = False
 		for tool, info in status['tools'].items():
 			if not info['installed']:
-				console.print(f'[bold red]{tool} not installed and strict mode is enabled.[/]')
+				console.print(Error(message=f'{tool} not installed and strict mode is enabled.[/]'))
 				error = True
 		if error:
 			sys.exit(1)
-		console.print('[bold green]Strict healthcheck passed ![/]')
+		console.print(Info(message='Strict healthcheck passed !'))
 
 
 #---------#
@@ -904,21 +900,25 @@ def health(json, debug, strict):
 #---------#
 
 
-def run_install(cmd, title, next_steps=None):
+def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
 		console.print('[bold red]Cannot run this command in offline mode.[/]')
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
-		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_line=True)
-		if ret.return_code != 0:
-			console.print(f':exclamation_mark: Failed to install {title}.', style='bold red')
-		else:
-			console.print(f':tada: {title} installed successfully !', style='bold green')
+		if cmd:
+			from secator.installer import SourceInstaller
+			status = SourceInstaller.install(cmd)
+		elif packages:
+			from secator.installer import PackageInstaller
+			status = PackageInstaller.install(packages)
+		return_code = 1
+		if status.is_ok():
+			return_code = 0
 			if next_steps:
 				console.print('[bold gold3]:wrench: Next steps:[/]')
 				for ix, step in enumerate(next_steps):
 					console.print(f'   :keycap_{ix}: {step}')
-		sys.exit(ret.return_code)
+		sys.exit(return_code)
 
 
 @cli.group()
@@ -1065,7 +1065,12 @@ def install_go():
 def install_ruby():
 	"""Install Ruby."""
 	run_install(
-		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
+		packages={
+			'apt': ['ruby-full', 'rubygems'],
+			'apk': ['ruby', 'ruby-dev'],
+			'pacman': ['ruby', 'ruby-dev'],
+			'brew': ['ruby']
+		},
 		title='Ruby'
 	)
 
@@ -1075,19 +1080,19 @@ def install_ruby():
 def install_tools(cmds):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
 	if cmds is not None:
 		cmds = cmds.split(',')
 		tools = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
 	else:
 		tools = ALL_TASKS
+	tools.sort(key=lambda x: x.__name__)
 	return_code = 0
 	for ix, cls in enumerate(tools):
-		with console.status(f'[bold yellow][{ix}/{len(tools)}] Installing {cls.__name__} ...'):
+		with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 			status = ToolInstaller.install(cls)
 			if not status.is_ok():
-				console.print(f'[bold red]Failed installing {cls.__name__}[/]')
 				return_code = 1
 		console.print()
 	sys.exit(return_code)
@@ -1102,7 +1107,7 @@ def install_tools(cmds):
 def update(all):
 	"""[dim]Update to latest version.[/]"""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 
 	# Check current and latest version
@@ -1112,12 +1117,12 @@ def update(all):
 
 	# Skip update if latest
 	if info['status'] == 'latest':
-		console.print(f'[bold green]secator is already at the newest version {latest_version}[/] !')
+		console.print(Info(message=f'secator is already at the newest version {latest_version} !'))
 		do_update = False
 
 	# Fail if unknown latest
 	if not latest_version:
-		console.print('[bold red]Could not fetch latest secator version.[/]')
+		console.print(Error(message='Could not fetch latest secator version.'))
 		sys.exit(1)
 
 	# Update secator
@@ -1245,10 +1250,10 @@ def list_aliases(silent):
 def test():
 	"""[dim]Run tests."""
 	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to run tests.[/]')
+		console.print(Error(message='You MUST use a development version of secator to run tests.'))
 		sys.exit(1)
 	if not ADDONS_ENABLED['dev']:
-		console.print('[bold red]Missing dev addon: please run [bold green4]secator install addons dev[/][/]')
+		console.print(Error(message='Missing dev addon: please run [bold green4]secator install addons dev[/]'))
 		sys.exit(1)
 	pass
 
