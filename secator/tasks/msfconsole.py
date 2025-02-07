@@ -49,7 +49,7 @@ class msfconsole(VulnMulti):
 		'yum|zypper': ['postgresql-devel'],
 	}
 	install_cmd = (
-		f'git clone https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework || true && '
+		f'git clone --depth 1 --single-branch https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework || true && '  # noqa: E501
 		f'cd {CONFIG.dirs.share}/metasploit-framework && '
 		f'gem install bundler --user-install -n {CONFIG.dirs.bin} && '
 		f'gem install xmlrpc --user-install -n {CONFIG.dirs.bin} && '

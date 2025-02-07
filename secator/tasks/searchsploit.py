@@ -42,7 +42,7 @@ class searchsploit(Command):
 		'apk': ['ncurses']
 	}
 	install_cmd = (
-		f'git clone https://gitlab.com/exploit-database/exploitdb.git {CONFIG.dirs.share}/exploitdb || true && '
+		f'git clone  --depth 1 --single-branch https://gitlab.com/exploit-database/exploitdb.git {CONFIG.dirs.share}/exploitdb || true && '  # noqa: E501
 		f'ln -sf $HOME/.local/share/exploitdb/searchsploit {CONFIG.dirs.bin}/searchsploit'
 	)
 	proxychains = False
