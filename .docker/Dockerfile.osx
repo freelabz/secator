@@ -9,13 +9,10 @@ RUN sudo pacman -Syu --noconfirm && \
     sudo pacman -S --noconfirm -y \
 	base-devel \
 	bash \
-	chromium \
 	curl \
-	gcc \
 	git \
 	go \
     jq \
-    make \
     openssl \
 	proxychains \
 	proxychains-ng \
@@ -24,6 +21,7 @@ RUN sudo pacman -Syu --noconfirm && \
 	python-pipx \
 	ruby \
 	rubygems \
+	sudo \
 	unzip \
 	vim \
     wget
