@@ -10,6 +10,7 @@ RUN apk add --no-cache \
 	git \
 	go \
 	jq \
+	lib6c-compat \
 	linux-headers \
     openssl \
 	pipx \
