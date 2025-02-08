@@ -146,6 +146,9 @@ class Command(Runner):
 			validators=validators,
 			context=context)
 
+		# Cmd name
+		self.cmd_name = self.__class__.cmd.split(' ')[0]
+
 		# Inputs path
 		self.inputs_path = None
 
@@ -308,7 +311,7 @@ class Command(Runner):
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
 			self._print(
-				f'[bold red]Ignoring proxy "{self.proxy}" for {self.__class__.__name__} (not supported).[/]', rich=True)
+				f'[bold red]Ignoring proxy "{self.proxy}" for {self.cmd_name} (not supported).[/]', rich=True)
 
 	#----------#
 	# Internal #
@@ -373,7 +376,7 @@ class Command(Runner):
 					status = ToolInstaller.install(self.__class__)
 					if not status.is_ok():
 						yield Error(
-							message=f'Failed installing {self.name}',
+							message=f'Failed installing {self.cmd_name}',
 							_source=self.unique_name,
 							_uuid=str(uuid.uuid4())
 						)
@@ -433,7 +436,7 @@ class Command(Runner):
 		Returns:
 			bool: True if the command is installed, False otherwise.
 		"""
-		result = subprocess.Popen(["which", self.cmd.split(' ')[0]], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		result = subprocess.Popen(["which", self.cmd_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		result.communicate()
 		return result.returncode == 0
 
