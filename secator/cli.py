@@ -1089,6 +1089,10 @@ def install_tools(cmds):
 		tools = ALL_TASKS
 	tools.sort(key=lambda x: x.__name__)
 	return_code = 0
+	if not tools:
+		cmd_str = ' '.join(cmds)
+		console.print(Error(message=f'No tools found for {cmd_str}.'))
+		return
 	for ix, cls in enumerate(tools):
 		with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 			status = ToolInstaller.install(cls)
