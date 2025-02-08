@@ -59,8 +59,11 @@ class feroxbuster(HttpFuzzer):
 			WORDS: 'word_count'
 		}
 	}
+	install_pre = {
+		'*': ['curl']
+	}
 	install_cmd = (
-		f'cd /tmp && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash -s {CONFIG.dirs.bin}'  # noqa: E501
+		f'cd /tmp && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | sh -s {CONFIG.dirs.bin}'  # noqa: E501
 	)
 	install_github_handle = 'epi052/feroxbuster'
 	proxychains = False

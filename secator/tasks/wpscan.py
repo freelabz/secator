@@ -68,8 +68,9 @@ class wpscan(VulnHttp):
 	}
 	output_types = [Vulnerability, Tag]
 	install_pre = {
-		'apt': ['kali:libcurl4t64', 'libffi-dev'],
-		'pacman': ['ruby-erb'],
+		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
+		'pacman': ['make', 'ruby-erb'],
+		'*': ['make']
 	}
 	install_cmd = f'gem install wpscan --user-install -n {CONFIG.dirs.bin}'
 	install_post = {
