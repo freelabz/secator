@@ -630,7 +630,7 @@ class Runner:
 			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
 		runner_name = self.__class__.__name__
-		info = Info(message=f'{runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', _source=self.unique_name)
+		info = Info(message=f'{runner_name} {self.config.name} {remote_str}...', _source=self.unique_name)
 		self._print_item(info)
 
 	def log_results(self):
