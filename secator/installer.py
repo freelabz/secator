@@ -18,6 +18,7 @@ import requests
 from rich.table import Table
 
 from secator.config import CONFIG
+from secator.celery import IN_CELERY_WORKER_PROCESS
 from secator.definitions import OPT_NOT_SUPPORTED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
@@ -135,19 +136,23 @@ class PackageInstaller:
 
 		# Installer cmd
 		cmd = distribution.pm_installer
+		if CONFIG.security.autoinstall_commands and IN_CELERY_WORKER_PROCESS:
+			cmd = f'flock /tmp/install.lock {cmd}'
 		if getpass.getuser() != 'root':
 			cmd = f'sudo {cmd}'
 
 		if pkg_list:
+			pkg_str = ''
 			for pkg in pkg_list:
 				if ':' in pkg:
 					pdistro, pkg = pkg.split(':')
 					if pdistro != distribution.name:
 						continue
-				console.print(Info(message=f'Installing package {pkg}'))
-				status = SourceInstaller.install(f'{cmd} {pkg}')
-				if not status.is_ok():
-					return status
+				pkg_str += f'{pkg} '
+			console.print(Info(message=f'Installing packages {pkg_str}'))
+			status = SourceInstaller.install(f'{cmd} {pkg_str}', install_prereqs=False)
+			if not status.is_ok():
+				return status
 		return InstallerStatus.SUCCESS
 
 
@@ -155,7 +160,7 @@ class SourceInstaller:
 	"""Install a tool from source."""
 
 	@classmethod
-	def install(cls, config):
+	def install(cls, config, install_prereqs=True):
 		"""Install from source.
 
 		Args:
@@ -176,6 +181,23 @@ class SourceInstaller:
 					break
 		if not install_cmd:
 			return InstallerStatus.INSTALL_SKIPPED_OK
+
+		# Install build dependencies if needed
+		if install_prereqs:
+			if 'go ' in install_cmd:
+				status = PackageInstaller.install({'apt': ['golang-go'], '*': ['go']})
+				if not status.is_ok():
+					return status
+			if 'gem ' in install_cmd:
+				status = PackageInstaller.install({'apk': ['ruby', 'ruby-dev'], 'pacman': ['ruby', 'rubygems'], 'apt': ['ruby-full', 'rubygems']})  # noqa: E501
+				if not status.is_ok():
+					return status
+			if 'git ' in install_cmd or 'git+' in install_cmd:
+				status = PackageInstaller.install({'*': ['git']})
+				if not status.is_ok():
+					return status
+
+		# Run command
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
 		return InstallerStatus.SUCCESS if ret.return_code == 0 else InstallerStatus.INSTALL_FAILED
 
@@ -313,6 +335,7 @@ class GithubInstaller:
 		temp_dir = os.path.join("/tmp", f'{repo_name}_{date_str}')
 		os.makedirs(temp_dir, exist_ok=True)
 
+		console.print(Info(message=f'Extracting binary to {temp_dir}...'))
 		if url.endswith('.zip'):
 			with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
 				zip_ref.extractall(temp_dir)
@@ -324,7 +347,9 @@ class GithubInstaller:
 		binary_path = cls._find_binary_in_directory(temp_dir, repo_name)
 		if binary_path:
 			os.chmod(binary_path, 0o755)  # Make it executable
-			shutil.move(binary_path, os.path.join(destination, repo_name))  # Move the binary
+			destination = os.path.join(destination, repo_name)
+			console.print(Info(message=f'Moving binary to {destination}...'))
+			shutil.move(binary_path, destination)  # Move the binary
 			return InstallerStatus.SUCCESS
 		else:
 			console.print(Error(message='Binary matching the repository name was not found in the archive.'))
