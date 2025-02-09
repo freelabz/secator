@@ -127,7 +127,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 
 	# Check Celery addon is installed
 	if not ADDONS_ENABLED['worker']:
-		console.print('[bold red]Missing worker addon: please run [bold green4]secator install addons worker[/][/].')
+		console.print(Error(message='Missing worker addon: please run "secator install addons worker".'))
 		sys.exit(1)
 
 	# Check broken / backend addon is installed
@@ -135,7 +135,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	backend_protocol = CONFIG.celery.result_backend.split('://')[0]
 	if CONFIG.celery.broker_url:
 		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
-			console.print('[bold red]Missing `redis` addon: please run [bold green4]secator install addons redis[/][/].')
+			console.print(Error(message='Missing redis addon: please run "secator install addons redis".'))
 			sys.exit(1)
 
 	# Debug Celery config
@@ -214,7 +214,7 @@ def revshell(name, host, port, interface, listen, force):
 			console.print(Error(message=f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces'))  # noqa: E501
 			return
 		else:
-			console.print(Info(message=f'Detected host IP: [bold orange1]{host}[/]'))
+			console.print(Info(message=f'Detected host IP: {host}'))
 
 	# Download reverse shells JSON from repo
 	revshells_json = f'{CONFIG.dirs.revshells}/revshells.json'
@@ -402,7 +402,7 @@ def build():
 def build_pypi():
 	"""Build secator PyPI package."""
 	if not ADDONS_ENABLED['build']:
-		console.print(Error(message='Missing build addon: please run [bold green4]secator install addons build[/]'))
+		console.print(Error(message='Missing build addon: please run "secator install addons build"'))
 		sys.exit(1)
 	with console.status('[bold gold3]Building PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
@@ -429,7 +429,7 @@ def build_docker(tag, latest):
 def publish():
 	"""Publish secator."""
 	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to publish builds.[/]')
+		console.print(Error(message='You MUST use a development version of secator to publish builds.'))
 		sys.exit(1)
 	pass
 
@@ -438,12 +438,12 @@ def publish():
 def publish_pypi():
 	"""Publish secator PyPI package."""
 	if not ADDONS_ENABLED['build']:
-		console.print('[bold red]Missing build addon: please run [bold green4]secator install addons build[/][/]')
+		console.print(Error(message='Missing build addon: please run "secator install addons build"'))
 		sys.exit(1)
 	os.environ['HATCH_INDEX_USER'] = '__token__'
 	hatch_token = os.environ.get('HATCH_INDEX_AUTH')
 	if not hatch_token:
-		console.print('[bold red]Missing PyPI auth token (HATCH_INDEX_AUTH env variable).')
+		console.print(Error(message='Missing PyPI auth token (HATCH_INDEX_AUTH env variable).'))
 		sys.exit(1)
 	with console.status('[bold gold3]Publishing PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch publish', name='hatch publish', cwd=ROOT_FOLDER)
@@ -503,7 +503,7 @@ def config_set(key, value):
 			return
 		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
 	else:
-		console.print('[bold red]:x: Invalid config, not saving it.')
+		console.print(Error(message='Invalid config, not saving it.'))
 
 
 @config.command('edit')
@@ -699,13 +699,13 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 					f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner_type}[/]) ([dim]{file_date}[/]):')
 				if report.is_empty():
 					if len(paths) == 1:
-						console.print('[bold orange4]No results in report.[/]')
+						console.print(Warning(message='No results in report.'))
 					else:
-						console.print('[bold orange4]No new results since previous scan.[/]')
+						console.print(Warning(message='No new results since previous scan.'))
 					continue
 				report.send()
 			except json.decoder.JSONDecodeError as e:
-				console.print(f'[bold red]Could not load {path}: {str(e)}')
+				console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if unified:
 		console.print(f'\n:wrench: [bold gold3]Building report by crunching {len(all_results)} results ...[/]')
@@ -759,12 +759,12 @@ def report_list(workspace, runner_type, time_delta):
 				f"[{status_color}]{data['status']}[/]"
 			)
 		except json.JSONDecodeError as e:
-			console.print(f'[bold red]Could not load {path}: {str(e)}')
+			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if len(paths) > 0:
 		console.print(table)
 	else:
-		console.print('[bold red]No results found.')
+		console.print(Error(message='No results found.'))
 
 
 @report.command('export')
@@ -888,7 +888,7 @@ def health(json, debug, strict):
 		error = False
 		for tool, info in status['tools'].items():
 			if not info['installed']:
-				console.print(Error(message=f'{tool} not installed and strict mode is enabled.[/]'))
+				console.print(Error(message=f'{tool} not installed and strict mode is enabled.'))
 				error = True
 		if error:
 			sys.exit(1)
@@ -902,7 +902,7 @@ def health(json, debug, strict):
 
 def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
 		if cmd:
@@ -1269,7 +1269,7 @@ def test():
 		console.print(Error(message='You MUST use a development version of secator to run tests.'))
 		sys.exit(1)
 	if not ADDONS_ENABLED['dev']:
-		console.print(Error(message='Missing dev addon: please run [bold green4]secator install addons dev[/]'))
+		console.print(Error(message='Missing dev addon: please run "secator install addons dev"'))
 		sys.exit(1)
 	pass
 
