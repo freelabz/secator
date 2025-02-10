@@ -1,23 +1,28 @@
-name: platform
+name: docker
 
 on:
   push:
-    branches: [ main ]
+    branches:
+    - release-please*
+    paths:
+    - '.docker/**'
   pull_request:
-    branches: [ main ]
+    types: [labeled, synchronize]
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  docker:
+  platform:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-docker')) }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         distribution: ["alpine", "arch", "debian", "kali", "osx", "ubuntu"]
     steps:
+
     - name: Checkout repository
       uses: actions/checkout@v3
 

@@ -74,6 +74,9 @@ class katana(HttpCrawler):
 			# TAGS: lambda x: x['response'].get('server')
 		}
 	}
+	install_pre = {
+		'apk': ['libc6-compat']
+	}
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
 	install_github_handle = 'projectdiscovery/katana'
 	proxychains = False

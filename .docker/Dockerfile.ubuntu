@@ -15,10 +15,10 @@ RUN apt update -y && \
 	python3 \
 	python3-pip \
 	python3-venv \
-	ruby-full \
-	rubygems \
 	proxychains \
 	proxychains-ng \
+	ruby-full \
+	rubygems \
 	sudo \
 	unzip \
 	vim \

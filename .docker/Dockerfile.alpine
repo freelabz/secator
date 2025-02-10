@@ -1,27 +1,18 @@
 FROM alpine:latest
 
+ARG flavor=full
 ENV PATH="${PATH}:/root/.local/bin"
 ENV GOBIN="/root/.local/bin"
 ENV TERM="xterm-256color"
 RUN apk add --no-cache \
-	bash \
-	build-base \
-	curl \
-	git \
-	go \
-	jq \
-	libc6-compat \
+	flock \
+	gcc \
+	musl-dev \
 	linux-headers \
-    openssl \
 	pipx \
-	proxychains-ng \
-	python3 \
 	python3-dev \
 	py3-pip \
-	ruby \
-	ruby-dev \
-	sudo \
-	unzip
+	sudo
 COPY . /code
 WORKDIR /code
 RUN pipx install . && \
@@ -31,6 +22,5 @@ RUN pipx install . && \
 	secator install addons mongodb && \
 	secator install addons redis && \
 	secator install addons dev
-# RUN secator config set security.force_source_install true
-RUN secator install tools
+RUN if [ "$flavor" != "lite" ]; then secator install tools; fi
 ENTRYPOINT ["secator"]
