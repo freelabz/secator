@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-docker')) }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         distribution: ["alpine", "arch", "debian", "kali", "osx", "ubuntu"]
     steps:

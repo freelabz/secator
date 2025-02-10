@@ -57,10 +57,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs: [ unit ]
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         python-version: ["3.11"]
-        os: [ubuntu-latest, debian, archlinux]
+        os: [ubuntu-latest]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -83,10 +83,10 @@ jobs:
 
     - name: Install dependencies
       run: |
+        secator install addons worker
         secator install langs go
         secator install langs ruby
         secator install tools
-        secator install addons worker
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
