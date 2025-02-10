@@ -389,54 +389,41 @@ def record(record_name, script, interactive, width, height, output_dir):
 		console.print(Info(message=f'Generated {output_gif_path}'))
 
 
-@util.group('build')
-def build():
-	"""Build secator."""
+@util.command('build')
+@click.option('--version', type=str, help='Override version specified in pyproject.toml')
+def build(version):
+	"""Build secator PyPI package."""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to make builds'))
 		sys.exit(1)
-	pass
-
-
-@build.command('pypi')
-def build_pypi():
-	"""Build secator PyPI package."""
 	if not ADDONS_ENABLED['build']:
 		console.print(Error(message='Missing build addon: please run "secator install addons build"'))
 		sys.exit(1)
+
+	# Update version in pyproject.toml if --version is explicitely passed
+	if version:
+		pyproject_toml_path = Path.cwd() / 'pyproject.toml'
+		if not pyproject_toml_path.exists():
+			console.print(Error(message='You must be in the secator root directory to make builds with --version'))
+			sys.exit(1)
+		console.print(Info(message=f'Updating version in pyproject.toml to {version}'))
+		with open(pyproject_toml_path, "r") as file:
+			content = file.read()
+		updated_content = re.sub(r'^\s*version\s*=\s*".*?"', f'version = "{version}"', content, flags=re.MULTILINE)
+		with open(pyproject_toml_path, "w") as file:
+			file.write(updated_content)
+
 	with console.status('[bold gold3]Building PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
 		sys.exit(ret.return_code)
 
 
-@build.command('docker')
-@click.option('--tag', '-t', type=str, default=None, help='Specific tag')
-@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
-def build_docker(tag, latest):
-	"""Build secator Docker image."""
-	if not tag:
-		tag = VERSION if latest else 'dev'
-	cmd = f'docker build -t freelabz/secator:{tag}'
-	if latest:
-		cmd += ' -t freelabz/secator:latest'
-	cmd += ' .'
-	with console.status('[bold gold3]Building Docker image...[/]'):
-		ret = Command.execute(cmd, name='docker build', cwd=ROOT_FOLDER)
-		sys.exit(ret.return_code)
-
-
-@util.group('publish')
+@util.command('publish')
 def publish():
-	"""Publish secator."""
+	"""Publish secator PyPI package."""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to publish builds.'))
 		sys.exit(1)
-	pass
-
-
-@publish.command('pypi')
-def publish_pypi():
-	"""Publish secator PyPI package."""
 	if not ADDONS_ENABLED['build']:
 		console.print(Error(message='Missing build addon: please run "secator install addons build"'))
 		sys.exit(1)
@@ -447,23 +434,6 @@ def publish_pypi():
 		sys.exit(1)
 	with console.status('[bold gold3]Publishing PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch publish', name='hatch publish', cwd=ROOT_FOLDER)
-		sys.exit(ret.return_code)
-
-
-@publish.command('docker')
-@click.option('--tag', '-t', default=None, help='Specific tag')
-@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
-def publish_docker(tag, latest):
-	"""Publish secator Docker image."""
-	if not tag:
-		tag = VERSION if latest else 'dev'
-	cmd = f'docker push freelabz/secator:{tag}'
-	cmd2 = 'docker push freelabz/secator:latest'
-	with console.status(f'[bold gold3]Publishing Docker image {tag}...[/]'):
-		ret = Command.execute(cmd, name=f'docker push ({tag})', cwd=ROOT_FOLDER)
-		if latest:
-			ret2 = Command.execute(cmd2, name='docker push (latest)')
-			sys.exit(max(ret.return_code, ret2.return_code))
 		sys.exit(ret.return_code)
 
 

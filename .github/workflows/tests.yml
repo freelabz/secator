@@ -54,11 +54,13 @@ jobs:
         path: .coverage.unit
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    needs: [ unit ]
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11"]
+        os: [ubuntu-latest, debian, archlinux]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -75,7 +77,7 @@ jobs:
 
     - name: Add GOBIN to PATH
       run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
-  
+
     - name: Add GOPATH to PATH
       run: echo "${HOME}/go/bin" >> $GITHUB_PATH
 

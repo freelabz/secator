@@ -24,11 +24,14 @@ jobs:
     - name: Install secator build addon
       run: secator install addons build
 
+    - name: Extract version from tag
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
     - name: Build PyPI package
-      run: secator u build pypi
+      run: secator u build --version ${VERSION}
 
     - name: Publish PyPI package
-      run: secator u publish pypi
+      run: secator u publish
       env:
         HATCH_INDEX_AUTH: ${{ secrets.PYPI_TOKEN }}
 
@@ -59,10 +62,25 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build Docker image
-      run: secator u build docker --latest
+    - name: Extract version from tag
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
 
-    - name: Publish Docker image
-      run: secator u publish docker --latest
+    - name: Build Docker image (full)
+      run: docker build -t freelabz/secator:${VERSION} .
 
+    - name: Build Docker image (lite)
+      run: docker build -t freelabz/secator:${VERSION}-lite --build-arg flavor=lite .
+
+    - name: Tag image with 'latest'
+      run: docker tag freelabz/secator:${VERSION} freelabz/secator:latest
+      if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') }}
+
+    - name: Push Docker images
+      run: |
+        docker push freelabz/secator:${VERSION}-lite
+        docker push freelabz/secator:${VERSION}
+
+    - name: Push Docker image 'latest'
+      run: docker push freelabz/secator:latest
+      if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') }}
 
