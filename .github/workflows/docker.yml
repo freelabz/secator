@@ -16,7 +16,7 @@ permissions:
 jobs:
   platform:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.label_name == 'ci-docker') }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-docker')) }}
     strategy:
       fail-fast: false
       matrix:
