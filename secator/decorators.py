@@ -228,6 +228,7 @@ def decorate_command_options(opts):
 			conf.pop('shlex', None)
 			conf.pop('meta', None)
 			conf.pop('supported', None)
+			conf.pop('process', None)
 			reverse = conf.pop('reverse', False)
 			long = f'--{opt_name}'
 			short = f'-{short_opt}' if short_opt else f'-{opt_name}'

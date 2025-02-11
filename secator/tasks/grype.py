@@ -33,7 +33,12 @@ class grype(VulnCode):
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Vulnerability]
-	install_cmd = f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {str(Path.home())}/.local/bin'  # noqa: E501
+	install_pre = {
+		'*': ['curl']
+	}
+	install_cmd = (
+		f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'
+	)
 	install_github_handle = 'anchore/grype'
 
 	@staticmethod

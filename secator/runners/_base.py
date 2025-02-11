@@ -75,7 +75,9 @@ class Runner:
 		if not isinstance(inputs, list):
 			inputs = [inputs]
 		self.inputs = inputs
-		self.results = results
+		self.uuids = []
+		self.output = ''
+		self.results = []
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
@@ -86,14 +88,12 @@ class Runner:
 		self.last_updated_progress = None
 		self.end_time = None
 		self._hooks = hooks
-		self.output = ''
 		self.progress = 0
 		self.context = context
 		self.delay = run_opts.get('delay', False)
 		self.celery_result = None
 		self.celery_ids = []
 		self.celery_ids_map = {}
-		self.uuids = []
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
 
@@ -162,6 +162,10 @@ class Runner:
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
+
+		# Process prior results
+		for result in results:
+			list(self._process_item(result, print=False))
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -387,14 +391,14 @@ class Runner:
 				if item_out:
 					item_repr = repr(item)
 					if isinstance(item, OutputType) and self.print_remote_info:
-						item_repr += rich_to_ansi(f' \[[dim]{item._source}[/]]')
+						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
 					self._print(item_repr, out=item_out)
 
 		# Item is a line
 		elif isinstance(item, str):
 			self.debug(item, sub='line', allow_no_process=False, verbose=True)
 			if self.print_line or force:
-				self._print(item, out=sys.stderr, end='\n')
+				self._print(item, out=sys.stderr, end='\n', rich=False)
 
 	def debug(self, *args, **kwargs):
 		"""Print debug with runner class name, only if self.no_process is True.
@@ -557,7 +561,7 @@ class Runner:
 			name = f'{self.__class__.__name__}.{validator_type}'
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
-				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'failed'}, id=_id, sub='validators')
+				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: '[dim red]failed[/]'}, id=_id, verbose=True, sub='validators')  # noqa: E501
 				doc = validator.__doc__
 				if error:
 					message = 'Validator failed'
@@ -570,7 +574,7 @@ class Runner:
 					)
 					self.add_result(error, print=True)
 				return False
-			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'success'}, id=_id, sub='validators')
+			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: '[dim green]success[/]'}, id=_id, verbose=True, sub='validators')  # noqa: E501
 		return True
 
 	def register_hooks(self, hooks):
@@ -626,7 +630,7 @@ class Runner:
 			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
 		runner_name = self.__class__.__name__
-		info = Info(message=f'{runner_name} [bold magenta]{self.config.name}[/] {remote_str}...', _source=self.unique_name)
+		info = Info(message=f'{runner_name} {self.config.name} {remote_str}...', _source=self.unique_name)
 		self._print_item(info)
 
 	def log_results(self):
@@ -776,20 +780,20 @@ class Runner:
 				count_map[name] = count
 		return count_map
 
-	def _process_item(self, item):
+	def _process_item(self, item, print=True):
 		"""Process an item yielded by the derived runner.
 
 		Args:
 			item (dict | str): Input item.
+			print (bool): Print item in console.
 
 		Yields:
 			OutputType: Output type.
 		"""
-
 		# Item is a string, just print it
 		if isinstance(item, str):
 			self.output += item + '\n'
-			self._print_item(item) if item else ''
+			self._print_item(item) if item and print else ''
 			return
 
 		# Abort further processing if no_process is set
@@ -836,14 +840,14 @@ class Runner:
 		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
 			self.celery_ids.append(item.task_id)
 
-		# Run on_item hooks
-		if isinstance(item, tuple(FINDING_TYPES)):
+		# If finding, run on_item hooks
+		elif isinstance(item, tuple(FINDING_TYPES)):
 			item = self.run_hooks('on_item', item)
 			if not item:
 				return
 
 		# Add item to results
-		self.add_result(item, print=True)
+		self.add_result(item, print=print)
 
 		# Yield item
 		yield item
