@@ -66,6 +66,12 @@ class ToolInstaller:
 			tool_cls.install_post]):
 			return InstallerStatus.INSTALL_NOT_SUPPORTED
 
+		# Check PATH
+		path_var = os.environ.get('PATH', '')
+		if not str(CONFIG.dirs.bin) in path_var:
+			console.print(Warning(message=f'Bin directory {CONFIG.dirs.bin} not found in PATH ! Binaries installed by secator will not work'))  # noqa: E501
+			console.print(Warning(message=f'Run "export PATH=$PATH:{CONFIG.dirs.bin}" to add the binaries to your PATH'))
+
 		# Install pre-required packages
 		if tool_cls.install_pre:
 			status = PackageInstaller.install(tool_cls.install_pre)
