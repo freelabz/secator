@@ -159,10 +159,10 @@ OUTPUTS_TASKS = {
 			id='CVE-2024-24790',
 			matched_at='redis:7.4.1',
 			ip='',
-			confidence='medium',
+			confidence='high',
 			severity='critical',
-			cvss_score=-1,
-			tags=[],
+			cvss_score=9.8,
+			tags=['cpe-match', 'cve'],
 			_source='grype',
 		)
     ],
