@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 env:
-  FORCE_COLOR: 1
+  TERM: xterm
 
 jobs:
   lint:

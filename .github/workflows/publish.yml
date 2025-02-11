@@ -6,7 +6,7 @@ on:
       - v*.*.*
 
 env:
-  FORCE_COLOR: 1
+  TERM: xterm
 
 jobs:
   publish-pypi:
