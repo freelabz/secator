@@ -84,6 +84,7 @@ class Report:
 		if 'results' in data['info']:
 			del data['info']['results']
 		data['info']['title'] = self.title
+		data['info']['errors'] = self.runner.errors
 
 		# Fill report
 		for output_type in FINDING_TYPES:

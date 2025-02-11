@@ -104,7 +104,7 @@ class TestConfigEnv(unittest.TestCase):
 		self.assertEqual(CONFIG.dirs.data, Path('/tmp/.secator/new'))
 
 		# Check other dirs configured OK
-		ignore_dirs = ['bin', 'data']
+		ignore_dirs = ['bin', 'share', 'data']
 		for k, dir in CONFIG.dirs.items():
 			if k in ignore_dirs:
 				continue
@@ -123,7 +123,7 @@ class TestConfigEnv(unittest.TestCase):
 		self.assertEqual(CONFIG.dirs.payloads, Path('/tmp/.secator/payloads2'))
 
 		# Check other dirs configured OK
-		ignore_dirs = ['bin', 'data', 'payloads']
+		ignore_dirs = ['bin', 'share', 'data', 'payloads']
 		for k, dir in CONFIG.dirs.items():
 			if k in ignore_dirs:
 				continue
@@ -143,7 +143,7 @@ class TestConfigEnv(unittest.TestCase):
 		self.assertEqual(CONFIG.dirs.templates, Path('/tmp/.secator/templates2'))
 
 		# Check other dirs configured OK
-		ignore_dirs = ['bin', 'data', 'payloads', 'templates']
+		ignore_dirs = ['bin', 'share', 'data', 'payloads', 'templates']
 		for k, dir in CONFIG.dirs.items():
 			if k in ignore_dirs:
 				continue
