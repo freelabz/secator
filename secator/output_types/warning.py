@@ -19,6 +19,6 @@ class Warning(OutputType):
 	_table_fields = ['task_name', 'message']
 	_sort_by = ('_timestamp',)
 
-	def __repr__(self):
+	def __rich__(self):
 		s = rf"\[[yellow]WRN[/]] {_s(self.message)}"
-		return rich_to_ansi(s)
+		return s

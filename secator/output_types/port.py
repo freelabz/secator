@@ -38,7 +38,7 @@ class Port(OutputType):
 	def __str__(self) -> str:
 		return f'{self.host}:{self.port}'
 
-	def __repr__(self) -> str:
+	def __rich__(self):
 		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
 		if self.protocol != 'TCP':
 			s += rf' \[[yellow3]{self.protocol}[/]]'
@@ -49,4 +49,4 @@ class Port(OutputType):
 			s += rf' \[[bold purple]{self.service_name}{conf}[/]]'
 		if self.host:
 			s += rf' \[[cyan]{self.host}[/]]'
-		return rich_to_ansi(s)
+		return s
