@@ -14,7 +14,6 @@ permissions:
   pull-requests: write
 
 env:
-  TERM: xterm
   FORCE_COLOR: 1
 
 jobs:

@@ -6,7 +6,6 @@ on:
       - v*.*.*
 
 env:
-  TERM: xterm
   FORCE_COLOR: 1
 
 jobs:
