@@ -1,5 +1,5 @@
 <h1 align="center">
-	<img src="https://github.com/freelabz/secator/assets/9629314/ee203af4-e853-439a-af01-edeabfc4bf07/" width="400">
+    <img src="https://github.com/freelabz/secator/assets/9629314/ee203af4-e853-439a-af01-edeabfc4bf07/" width="400">
 </h1>
 
 <h4 align="center">The pentester's swiss knife.</h4>
@@ -50,32 +50,35 @@ and it is designed to improve productivity for pentesters and security researche
 
 `secator` integrates the following tools:
 
-| Name                                                          | Description                                                                    | Category       |
-|---------------------------------------------------------------|--------------------------------------------------------------------------------|----------------|
-| [httpx](https://github.com/projectdiscovery/httpx)            | Fast HTTP prober.                                                              | `http`         |
-| [cariddi](https://github.com/edoardottt/cariddi)              | Fast crawler and endpoint secrets / api keys / tokens matcher.                 | `http/crawler` |
-| [gau](https://github.com/lc/gau)                              | Offline URL crawler (Alien Vault, The Wayback Machine, Common Crawl, URLScan). | `http/crawler` |
-| [gospider](https://github.com/jaeles-project/gospider)        | Fast web spider written in Go.                                                 | `http/crawler` |
-| [katana](https://github.com/projectdiscovery/katana)          | Next-generation crawling and spidering framework.                              | `http/crawler` |
-| [dirsearch](https://github.com/maurosoria/dirsearch)          | Web path discovery.                                                            | `http/fuzzer`  |
-| [feroxbuster](https://github.com/epi052/feroxbuster)          | Simple, fast, recursive content discovery tool written in Rust.                | `http/fuzzer`  |
-| [ffuf](https://github.com/ffuf/ffuf)                          | Fast web fuzzer written in Go.                                                 | `http/fuzzer`  |
-| [h8mail](https://github.com/khast3x/h8mail)                   | Email OSINT and breach hunting tool.                                           | `osint`        |
-| [dnsx](https://github.com/projectdiscovery/dnsx)              | Fast and multi-purpose DNS toolkit designed for running DNS queries.           | `recon/dns`    |
-| [dnsxbrute](https://github.com/projectdiscovery/dnsx)              | Fast and multi-purpose DNS toolkit designed for running DNS queries (bruteforce mode).           | `recon/dns`    |
-| [subfinder](https://github.com/projectdiscovery/subfinder)    | Fast subdomain finder.                                                         | `recon/dns`    |
-| [fping](https://fping.org/)                                   | Find alive hosts on local networks.                                            | `recon/ip`     |
-| [mapcidr](https://github.com/projectdiscovery/mapcidr)        | Expand CIDR ranges into IPs.                                                   | `recon/ip`     |
-| [naabu](https://github.com/projectdiscovery/naabu)            | Fast port discovery tool.                                                      | `recon/port`   |
-| [maigret](https://github.com/soxoj/maigret)                   | Hunt for user accounts across many websites.                                   | `recon/user`   |
-| [gf](https://github.com/tomnomnom/gf)                         | A wrapper around grep to avoid typing common patterns.                         | `tagger`       |
-| [grype](https://github.com/anchore/grype)                     | A vulnerability scanner for container images and filesystems.                  | `vuln/code`    |
-| [dalfox](https://github.com/hahwul/dalfox)                    | Powerful XSS scanning tool and parameter analyzer.                             | `vuln/http`    |
-| [msfconsole](https://docs.rapid7.com/metasploit/msf-overview) | CLI to access and work with the Metasploit Framework.                          | `vuln/http`    |
-| [wpscan](https://github.com/wpscanteam/wpscan)                | WordPress Security Scanner                                                     | `vuln/multi`   |
-| [nmap](https://github.com/nmap/nmap)                          | Vulnerability scanner using NSE scripts.                                       | `vuln/multi`   |
-| [nuclei](https://github.com/projectdiscovery/nuclei)          | Fast and customisable vulnerability scanner based on simple YAML based DSL.    | `vuln/multi`   |
-| [searchsploit](https://gitlab.com/exploit-database/exploitdb) | Exploit searcher. | `exploit/search`    |
+| Name                                                          | Description                                                                    | Category        |
+|---------------------------------------------------------------|--------------------------------------------------------------------------------|-----------------|
+| [httpx](https://github.com/projectdiscovery/httpx)            | Fast HTTP prober.                                                              | `http`          |
+| [cariddi](https://github.com/edoardottt/cariddi)              | Fast crawler and endpoint secrets / api keys / tokens matcher.                 | `http/crawler`  |
+| [gau](https://github.com/lc/gau)                              | Offline URL crawler (Alien Vault, The Wayback Machine, Common Crawl, URLScan). | `http/crawler`  |
+| [gospider](https://github.com/jaeles-project/gospider)        | Fast web spider written in Go.                                                 | `http/crawler`  |
+| [katana](https://github.com/projectdiscovery/katana)          | Next-generation crawling and spidering framework.                              | `http/crawler`  |
+| [dirsearch](https://github.com/maurosoria/dirsearch)          | Web path discovery.                                                            | `http/fuzzer`   |
+| [feroxbuster](https://github.com/epi052/feroxbuster)          | Simple, fast, recursive content discovery tool written in Rust.                | `http/fuzzer`   |
+| [ffuf](https://github.com/ffuf/ffuf)                          | Fast web fuzzer written in Go.                                                 | `http/fuzzer`   |
+| [h8mail](https://github.com/khast3x/h8mail)                   | Email OSINT and breach hunting tool.                                           | `osint`         |
+| [dnsx](https://github.com/projectdiscovery/dnsx)              | Fast and multi-purpose DNS toolkit.                                            | `recon/dns`     |
+| [dnsxbrute](https://github.com/projectdiscovery/dnsx)         | Fast and multi-purpose DNS toolkit (bruteforce mode).                          | `recon/dns`     |
+| [subfinder](https://github.com/projectdiscovery/subfinder)    | Fast subdomain finder.                                                         | `recon/dns`     |
+| [fping](https://fping.org/)                                   | Find alive hosts on local networks.                                            | `recon/ip`      |
+| [mapcidr](https://github.com/projectdiscovery/mapcidr)        | Expand CIDR ranges into IPs.                                                   | `recon/ip`      |
+| [naabu](https://github.com/projectdiscovery/naabu)            | Fast port discovery tool.                                                      | `recon/port`    |
+| [maigret](https://github.com/soxoj/maigret)                   | Hunt for user accounts across many websites.                                   | `recon/user`    |
+| [gf](https://github.com/tomnomnom/gf)                         | A wrapper around grep to avoid typing common patterns.                         | `tagger`        |
+| [grype](https://github.com/anchore/grype)                     | A vulnerability scanner for container images and filesystems.                  | `vuln/code`     |
+| [dalfox](https://github.com/hahwul/dalfox)                    | Powerful XSS scanning tool and parameter analyzer.                             | `vuln/http`     |
+| [msfconsole](https://docs.rapid7.com/metasploit/msf-overview) | CLI to access and work with the Metasploit Framework.                          | `vuln/http`     |
+| [wpscan](https://github.com/wpscanteam/wpscan)                | WordPress Security Scanner                                                     | `vuln/multi`    |
+| [nmap](https://github.com/nmap/nmap)                          | Vulnerability scanner using NSE scripts.                                       | `vuln/multi`    |
+| [nuclei](https://github.com/projectdiscovery/nuclei)          | Fast and customisable vulnerability scanner based on simple YAML based DSL.    | `vuln/multi`    |
+| [bbot](https://github.com/blacklanternsecurity/bbot)          | Multipurpose scanner.                                                          | `multi`         |
+| [searchsploit](https://gitlab.com/exploit-database/exploitdb) | Exploit searcher based on ExploitDB.                                           | `exploit/search`|
+| [bup](https://github.com/laluka/bypass-url-parser)            | 40X bypasser.                                                                  | `http`          |
+
 
 Feel free to request new tools to be added by opening an issue, but please 
 check that the tool complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).
@@ -86,7 +89,7 @@ check that the tool complies with our selection criterias before doing so. If it
 ### Installing secator
 
 <details>
-	<summary>Pipx</summary>
+    <summary>Pipx</summary>
 
 ```sh
 pipx install secator
@@ -95,7 +98,7 @@ pipx install secator
 </details>
 
 <details>
-	<summary>Pip</summary>
+    <summary>Pip</summary>
 
 ```sh
 pip install secator
@@ -113,7 +116,7 @@ wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/instal
 </details>
 
 <details>
-	<summary>Docker</summary>
+    <summary>Docker</summary>
 
 ```sh
 docker run -it --rm --net=host -v ~/.secator:/root/.secator freelabz/secator --help
@@ -134,13 +137,13 @@ secator --help
 </details>
 
 <details>
-	<summary>Docker Compose</summary>
+    <summary>Docker Compose</summary>
 
 ```sh
 git clone https://github.com/freelabz/secator
 cd secator
 docker-compose up -d
-docker-compose exec secator secator --help
+docker-compose exec secator-client secator --help
 ```
 
 </details>
@@ -154,7 +157,7 @@ docker-compose exec secator secator --help
 We provide utilities to install required languages if you don't manage them externally:
 
 <details>
-	<summary>Go</summary>
+    <summary>Go</summary>
 
 ```sh
 secator install langs go
@@ -163,7 +166,7 @@ secator install langs go
 </details>
 
 <details>
-	<summary>Ruby</summary>
+    <summary>Ruby</summary>
 
 ```sh
 secator install langs ruby
@@ -178,7 +181,7 @@ secator install langs ruby
 We provide utilities to install or update each supported tool which should work on all systems supporting `apt`:
 
 <details>
-	<summary>All tools</summary>
+    <summary>All tools</summary>
 
 ```sh
 secator install tools
@@ -187,7 +190,7 @@ secator install tools
 </details>
 
 <details>
-	<summary>Specific tools</summary>
+    <summary>Specific tools</summary>
 
 ```sh
 secator install tools <TOOL_NAME>
@@ -210,7 +213,7 @@ Please make sure you are using the latest available versions for each tool befor
 There are several addons available for `secator`:
 
 <details>
-	<summary>worker</summary>
+    <summary>worker</summary>
 
 Add support for Celery workers (see [Distributed runs with Celery](https://docs.freelabz.com/in-depth/distributed-runs-with-celery)).
 ```sh
@@ -221,7 +224,7 @@ secator install addons worker
 
 
 <details>
-	<summary>google</summary>
+    <summary>google</summary>
 
 Add support for Google Drive exporter (`-o gdrive`).
 
@@ -232,7 +235,7 @@ secator install addons google
 </details>
 
 <details>
-	<summary>mongodb</summary>
+    <summary>mongodb</summary>
 
 Add support for MongoDB driver (`-driver mongodb`).
 ```sh
@@ -242,7 +245,7 @@ secator install addons mongodb
 </details>
 
 <details>
-	<summary>redis</summary>
+    <summary>redis</summary>
 
 Add support for Redis backend (Celery).
 
@@ -253,7 +256,7 @@ secator install addons redis
 </details>
 
 <details>
-	<summary>dev</summary>
+    <summary>dev</summary>
 
 Add development tools like `coverage` and `flake8` required for running tests.
 
@@ -264,7 +267,7 @@ secator install addons dev
 </details>
 
 <details>
-	<summary>trace</summary>
+    <summary>trace</summary>
 
 Add tracing tools like `memray` and `pyinstrument` required for tracing functions.
 
@@ -275,7 +278,7 @@ secator install addons trace
 </details>
 
 <details>
-	<summary>build</summary>
+    <summary>build</summary>
 
 Add `hatch` for building and publishing the PyPI package.
 

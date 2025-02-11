@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, rich_escape as _s
 
 
 @dataclass
@@ -26,5 +26,5 @@ class Target(OutputType):
 		return self.name
 
 	def __repr__(self):
-		s = f'🎯 {self.name}'
+		s = f'🎯 {_s(self.name)}'
 		return rich_to_ansi(s)
