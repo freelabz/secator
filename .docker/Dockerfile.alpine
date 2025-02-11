@@ -22,5 +22,5 @@ RUN pipx install . && \
 	secator install addons mongodb && \
 	secator install addons redis && \
 	secator install addons dev
-RUN if [ "$flavor" != "lite" ]; then secator install tools; fi
+RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup; fi
 ENTRYPOINT ["secator"]
