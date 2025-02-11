@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.7", "3.11"]
+        python-version: ["3.8", "3.11"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -54,11 +54,13 @@ jobs:
         path: .coverage.unit
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    needs: [ unit ]
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         python-version: ["3.11"]
+        os: [ubuntu-latest]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -75,16 +77,16 @@ jobs:
 
     - name: Add GOBIN to PATH
       run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
-  
+
     - name: Add GOPATH to PATH
       run: echo "${HOME}/go/bin" >> $GITHUB_PATH
 
     - name: Install dependencies
       run: |
+        secator install addons worker
         secator install langs go
         secator install langs ruby
         secator install tools
-        secator install addons worker
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
