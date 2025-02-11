@@ -26,6 +26,7 @@ class Task(Runner):
 		# Run opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
+		run_opts['output'] = ['log']
 
 		# Set task output types
 		self.output_types = task_cls.output_types
