@@ -4,7 +4,6 @@ from typing import List
 
 from secator.definitions import DOMAIN, HOST, SOURCES
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
 
 
 @dataclass

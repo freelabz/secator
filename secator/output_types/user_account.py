@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import SITE_NAME, URL, USERNAME
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s
+from secator.utils import rich_escape as _s
 
 
 @dataclass

@@ -4,7 +4,6 @@ from enum import Enum
 
 from secator.definitions import ALIVE, IP
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
 
 
 class IpProtocol(str, Enum):
