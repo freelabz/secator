@@ -58,9 +58,8 @@ jobs:
 
   integration:
     runs-on: ${{ matrix.os }}
-    needs: [ unit ]
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         python-version: ["3.11"]
         os: [ubuntu-latest]
