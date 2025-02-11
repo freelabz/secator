@@ -13,6 +13,7 @@ from secator.utils import (deduplicate, expand_input, get_command_category)
 
 RUNNER_OPTS = {
 	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
+	'profiles': {'type': str, 'default': 'default', 'help': 'Profiles', 'short': 'p'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
 	'print_json': {'is_flag': True, 'short': 'json', 'default': False, 'help': 'Print items as JSON lines'},
 	'print_raw': {'is_flag': True, 'short': 'raw', 'default': False, 'help': 'Print items in raw format'},

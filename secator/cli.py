@@ -37,6 +37,7 @@ ALL_TASKS = discover_tasks()
 ALL_CONFIGS = TemplateLoader.load_all()
 ALL_WORKFLOWS = ALL_CONFIGS.workflow
 ALL_SCANS = ALL_CONFIGS.scan
+ALL_PROFILES = ALL_CONFIGS.profile
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 
 
@@ -65,6 +66,18 @@ def cli(ctx, version):
 #------#
 # TASK #
 #------#
+
+@profile.command('list')
+def profile_list():
+	table = Table()
+	table.add_column("Profile name", style="bold gold3")
+	table.add_column("Description", overflow='fold')
+	table.add_column("Options", overflow='fold')
+	for profile in ALL_PROFILES:
+		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
+		table.add_row(profile.name, profile.description, opts_str)
+	console.print(table)
+
 
 @cli.group(aliases=['x', 't'])
 @click.pass_context
@@ -106,6 +119,13 @@ def scan(ctx):
 
 for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
+
+
+@cli.group(aliases=['p'])
+@click.pass_context
+def profile(ctx):
+	"""Show profiles"""
+	pass
 
 
 #--------#

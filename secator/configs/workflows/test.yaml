@@ -1,0 +1,32 @@
+type: workflow
+name: test
+alias: test
+description: Test workflow
+tasks:
+  _group:
+    bbot:
+    searchsploit:
+    bup:
+    httpx:
+    cariddi:
+    gau:
+    gospider:
+    katana:
+    dirsearch:
+    feroxbuster:
+    ffuf:
+    h8mail:
+    dnsx:
+    dnsxbrute:
+    subfinder:
+    fping:
+    mapcidr:
+    naabu:
+    maigret:
+    gf:
+    grype:
+    dalfox:
+    wpscan:
+    msfconsole:
+    nmap:
+    nuclei:
