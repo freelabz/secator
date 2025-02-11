@@ -437,7 +437,7 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 	if id:
 		formatted_msg += rf' [italic gray11]\[{id}][/]'
 
-	console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+	console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]', highlight=False)
 
 
 def escape_mongodb_url(url):
