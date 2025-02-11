@@ -15,6 +15,7 @@ permissions:
 
 env:
   TERM: xterm
+  FORCE_COLOR: 1
 
 jobs:
   platform:
