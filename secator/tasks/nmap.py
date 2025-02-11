@@ -63,8 +63,12 @@ class nmap(VulnMulti):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
+	install_pre = {
+		'apt|pacman|brew': ['nmap'],
+		'apk': ['nmap', 'nmap-scripts'],
+	}
 	install_cmd = (
-		'sudo apt install -y nmap && sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
+		'sudo git clone --depth 1 --single-branch https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
 		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
 	)
 	proxychains = True
@@ -265,7 +269,7 @@ class nmapData(dict):
 			extra_data['version_exact'] = version_exact
 
 		# Grap service name
-		product = extra_data.get('name', None) or extra_data.get('product', None)
+		product = extra_data.get('product', None) or extra_data.get('name', None)
 		if product:
 			service_name = product
 			if version:
@@ -348,7 +352,7 @@ class nmapData(dict):
 					vuln.update(data)
 				yield vuln
 			else:
-				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve')
+				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve.provider', verbose=True)
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
@@ -406,7 +410,6 @@ class nmapData(dict):
 					CONFIDENCE: 'low'
 				}
 				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
-					vuln[TAGS].append('cve')
 					data = VulnMulti.lookup_cve(vuln_id, *cpes)
 					if data:
 						vuln.update(data)

@@ -29,6 +29,7 @@ class StrictModel(BaseModel, extra='forbid'):
 
 class Directories(StrictModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
+	share: Directory = Path.home() / '.local' / 'share'
 	data: Directory = Path(DATA_FOLDER)
 	templates: Directory = ''
 	reports: Directory = ''
@@ -86,6 +87,8 @@ class Runners(StrictModel):
 
 class Security(StrictModel):
 	allow_local_file_access: bool = True
+	auto_install_commands: bool = True
+	force_source_install: bool = False
 
 
 class HTTP(StrictModel):

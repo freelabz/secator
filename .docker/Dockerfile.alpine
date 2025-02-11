@@ -1,0 +1,26 @@
+FROM alpine:latest
+
+ARG flavor=full
+ENV PATH="${PATH}:/root/.local/bin"
+ENV GOBIN="/root/.local/bin"
+ENV TERM="xterm-256color"
+RUN apk add --no-cache \
+	flock \
+	gcc \
+	musl-dev \
+	linux-headers \
+	pipx \
+	python3-dev \
+	py3-pip \
+	sudo
+COPY . /code
+WORKDIR /code
+RUN pipx install . && \
+	secator install addons worker && \
+	secator install addons gdrive && \
+	secator install addons gcs && \
+	secator install addons mongodb && \
+	secator install addons redis && \
+	secator install addons dev
+RUN if [ "$flavor" != "lite" ]; then secator install tools; fi
+ENTRYPOINT ["secator"]

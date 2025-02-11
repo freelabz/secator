@@ -36,5 +36,5 @@ class Ip(OutputType):
 	def __repr__(self) -> str:
 		s = f'💻 [bold white]{self.ip}[/]'
 		if self.host:
-			s += f' \[[bold magenta]{self.host}[/]]'
+			s += rf' \[[bold magenta]{self.host}[/]]'
 		return rich_to_ansi(s)

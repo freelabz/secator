@@ -19,7 +19,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug
+from secator.utils import debug, rich_escape as _s
 
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,8 @@ class Command(Runner):
 	version_flag = None
 
 	# Install
+	install_pre = None
+	install_post = None
 	install_cmd = None
 	install_github_handle = None
 
@@ -143,6 +145,9 @@ class Command(Runner):
 			hooks=hooks,
 			validators=validators,
 			context=context)
+
+		# Cmd name
+		self.cmd_name = self.__class__.cmd.split(' ')[0]
 
 		# Inputs path
 		self.inputs_path = None
@@ -296,7 +301,7 @@ class Command(Runner):
 				proxy = CONFIG.http.socks5_proxy
 			elif self.proxy in ['auto', 'http'] and self.proxy_http and CONFIG.http.http_proxy:
 				proxy = CONFIG.http.http_proxy
-			elif self.proxy == 'random':
+			elif self.proxy == 'random' and self.proxy_http:
 				proxy = FreeProxy(timeout=CONFIG.http.freeproxy_timeout, rand=True, anonym=True).get()
 			elif self.proxy.startswith(('http://', 'socks5://')):
 				proxy = self.proxy
@@ -306,7 +311,7 @@ class Command(Runner):
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
 			self._print(
-				f'[bold red]Ignoring proxy "{self.proxy}" for {self.__class__.__name__} (not supported).[/]', rich=True)
+				f'[bold red]Ignoring proxy "{self.proxy}" for {self.cmd_name} (not supported).[/]', rich=True)
 
 	#----------#
 	# Internal #
@@ -359,6 +364,24 @@ class Command(Runner):
 			# Prepare cmds
 			command = self.cmd if self.shell else shlex.split(self.cmd)
 
+			# Check command is installed and auto-install
+			if not self.no_process and not self.is_installed():
+				if CONFIG.security.auto_install_commands:
+					from secator.installer import ToolInstaller
+					yield Info(
+						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noqa: E501
+						_source=self.unique_name,
+						_uuid=str(uuid.uuid4())
+					)
+					status = ToolInstaller.install(self.__class__)
+					if not status.is_ok():
+						yield Error(
+							message=f'Failed installing {self.cmd_name}',
+							_source=self.unique_name,
+							_uuid=str(uuid.uuid4())
+						)
+						return
+
 			# Output and results
 			self.return_code = 0
 			self.killed = False
@@ -404,6 +427,19 @@ class Command(Runner):
 		finally:
 			yield from self._wait_for_end()
 
+	def is_installed(self):
+		"""Check if a command is installed by using `which`.
+
+		Args:
+			command (str): The command to check.
+
+		Returns:
+			bool: True if the command is installed, False otherwise.
+		"""
+		result = subprocess.Popen(["which", self.cmd_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		result.communicate()
+		return result.returncode == 0
+
 	def process_line(self, line):
 		"""Process a single line of output emitted on stdout / stderr and yield results."""
 
@@ -448,13 +484,11 @@ class Command(Runner):
 		if self.sync and not self.has_children:
 			if self.caller and self.description:
 				self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
-			elif self.print_cmd:
-				self._print('')
 
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = self.cmd.replace('[', '\\[')
+			cmd_str = _s(self.cmd)
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold cyan', rich=True)
@@ -473,7 +507,7 @@ class Command(Runner):
 		if self.config.name in str(exc):
 			message = 'Executable not found.'
 			if self.install_cmd:
-				message += f' Install it with `secator install tools {self.config.name}`.'
+				message += f' Install it with [bold green4]secator install tools {self.config.name}[/].'
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)
@@ -581,7 +615,7 @@ class Command(Runner):
 		self._print('[bold red]Please enter sudo password to continue.[/]', rich=True)
 		for _ in range(3):
 			user = getpass.getuser()
-			self._print(f'\[sudo] password for {user}: ▌', rich=True)
+			self._print(rf'\[sudo] password for {user}: ▌', rich=True)
 			sudo_password = getpass.getpass()
 			result = subprocess.run(
 				['sudo', '-S', '-p', '', 'true'],
