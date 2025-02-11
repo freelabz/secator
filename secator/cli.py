@@ -1068,7 +1068,8 @@ def install_ruby():
 
 @install.command('tools')
 @click.argument('cmds', required=False)
-def install_tools(cmds):
+@click.option('--cleanup', is_flag=True, default=False)
+def install_tools(cmds, cleanup):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
@@ -1090,18 +1091,19 @@ def install_tools(cmds):
 			if not status.is_ok():
 				return_code = 1
 		console.print()
-	distro = get_distro_config()
-	cleanup_cmds = [
-		'go clean -cache',
-		'go clean -modcache',
-		'pip cache purge',
-		'gem cleanup --user-install',
-		'gem clean --user-install',
-	]
-	if distro.pm_finalizer:
-		cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
-	cmd = ' && '.join(cleanup_cmds)
-	Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
+	if cleanup:
+		distro = get_distro_config()
+		cleanup_cmds = [
+			'go clean -cache',
+			'go clean -modcache',
+			'pip cache purge',
+			'gem cleanup --user-install',
+			'gem clean --user-install',
+		]
+		if distro.pm_finalizer:
+			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
+		cmd = ' && '.join(cleanup_cmds)
+		Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
 	sys.exit(return_code)
 
 
