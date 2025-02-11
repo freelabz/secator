@@ -67,17 +67,6 @@ def cli(ctx, version):
 # TASK #
 #------#
 
-@profile.command('list')
-def profile_list():
-	table = Table()
-	table.add_column("Profile name", style="bold gold3")
-	table.add_column("Description", overflow='fold')
-	table.add_column("Options", overflow='fold')
-	for profile in ALL_PROFILES:
-		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
-		table.add_row(profile.name, profile.description, opts_str)
-	console.print(table)
-
 
 @cli.group(aliases=['x', 't'])
 @click.pass_context
@@ -126,6 +115,18 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 def profile(ctx):
 	"""Show profiles"""
 	pass
+
+
+@profile.command('list')
+def profile_list():
+	table = Table()
+	table.add_column("Profile name", style="bold gold3")
+	table.add_column("Description", overflow='fold')
+	table.add_column("Options", overflow='fold')
+	for profile in ALL_PROFILES:
+		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
+		table.add_row(profile.name, profile.description, opts_str)
+	console.print(table)
 
 
 #--------#
