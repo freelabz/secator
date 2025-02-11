@@ -655,7 +655,7 @@ class Command(Runner):
 			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
-			last_lines = [l for l in last_lines if l != '']
+			last_lines = [line for line in last_lines if line != '']
 			yield Error(
 				message=error,
 				traceback='\n'.join(last_lines),
