@@ -4,7 +4,7 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-console = Console(stderr=True, color_system='truecolor')
+console = Console(stderr=True)
 console_stdout = Console(record=True)
 # handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
 
