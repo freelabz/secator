@@ -1,5 +1,5 @@
 type: profile
-name: insane
+name: default
 description: "General scanning"
 opts:
     rate_limit: 1000

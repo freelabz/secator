@@ -4,5 +4,5 @@ description: "Internal networks or time-sensitive scans"
 opts:
     rate_limit: 10000
     delay: 0
-    timeout: 0.3
+    timeout: 1
     retries: 1
