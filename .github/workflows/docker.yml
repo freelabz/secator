@@ -13,6 +13,9 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  FORCE_COLOR: 1
+
 jobs:
   platform:
     runs-on: ubuntu-latest

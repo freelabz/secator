@@ -5,6 +5,9 @@ on:
     tags:
       - v*.*.*
 
+env:
+  FORCE_COLOR: 1
+
 jobs:
   publish-pypi:
     runs-on: ubuntu-latest
