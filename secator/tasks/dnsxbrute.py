@@ -4,6 +4,7 @@ from secator.config import CONFIG
 from secator.output_types import Subdomain
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import ReconDns
+from secator.utils import process_wordlist
 
 
 @task()
@@ -19,7 +20,7 @@ class dnsxbrute(ReconDns):
         THREADS: 'threads',
     }
     opts = {
-        WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.dns, 'help': 'Wordlist'},
+        WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.dns, 'process': process_wordlist, 'help': 'Wordlist to use'},  # noqa: E501
         'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
     }
     item_loaders = [JSONSerializer()]

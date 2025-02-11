@@ -1,5 +1,6 @@
 import shutil
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.runners import Command
 from secator.serializers import RegexSerializer
@@ -151,10 +152,12 @@ def output_discriminator(self, item):
 
 @task()
 class bbot(Command):
+	"""Multipurpose scanner."""
 	cmd = 'bbot -y --allow-deadly --force'
 	json_flag = '--json'
 	input_flag = '-t'
 	file_flag = None
+	version_flag = '--help'
 	opts = {
 		'modules': {'type': str, 'short': 'm', 'default': '', 'help': ','.join(BBOT_MODULES)},
 		'presets': {'type': str, 'short': 'ps', 'default': 'kitchen-sink', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
@@ -215,7 +218,13 @@ class bbot(Command):
 			'message': 'message'
 		}
 	}
+	install_pre = {
+		'*': ['git', 'openssl', 'unzip', 'tar', 'chromium']
+	}
 	install_cmd = 'pipx install bbot && pipx upgrade bbot'
+	install_post = {
+		'*': f'rm -fr {CONFIG.dirs.share}/pipx/venvs/bbot/lib/python3.12/site-packages/ansible_collections/*'
+	}
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -226,7 +235,7 @@ class bbot(Command):
 			return
 
 		if _type not in BBOT_MAP_TYPES:
-			self._print(f'[bold orange3]Found unsupported bbot type: {_type}.[/] [bold green]Skipping.[/]')
+			self._print(f'[bold orange3]Found unsupported bbot type: {_type}.[/] [bold green]Skipping.[/]', rich=True)
 			return
 
 		if isinstance(item['data'], str):
