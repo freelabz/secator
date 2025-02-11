@@ -96,8 +96,6 @@ jobs:
     - name: Run integration tests
       run: |
         secator test integration --test test_celery,test_worker,test_tasks
-      env:
-        SECATOR_DEBUG_COMPONENT: celery,runner
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
