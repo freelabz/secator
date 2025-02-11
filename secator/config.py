@@ -29,6 +29,7 @@ class StrictModel(BaseModel, extra='forbid'):
 
 class Directories(StrictModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
+	share: Directory = Path.home() / '.local' / 'share'
 	data: Directory = Path(DATA_FOLDER)
 	templates: Directory = ''
 	reports: Directory = ''
@@ -67,7 +68,7 @@ class Celery(StrictModel):
 
 
 class Cli(StrictModel):
-	github_token: str = ''
+	github_token: str = os.environ.get('GITHUB_TOKEN', '')
 	record: bool = False
 	stdin_timeout: int = 1000
 
@@ -79,8 +80,15 @@ class Runners(StrictModel):
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5
 	skip_cve_search: bool = False
-	skip_cve_low_confidence: bool = True
+	skip_exploit_search: bool = False
+	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+
+
+class Security(StrictModel):
+	allow_local_file_access: bool = True
+	auto_install_commands: bool = True
+	force_source_install: bool = False
 
 
 class HTTP(StrictModel):
@@ -116,7 +124,8 @@ class Wordlists(StrictModel):
 	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains'}
 	templates: Dict[str, str] = {
 		'bo0m_fuzz': 'https://raw.githubusercontent.com/Bo0oM/fuzz.txt/master/fuzz.txt',
-		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt'  # noqa: E501
+		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt',  # noqa: E501
+		'directory_list_small': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/directory-list-2.3-small.txt',  # noqa: E501
 	}
 	lists: Dict[str, List[str]] = {}
 
@@ -165,6 +174,7 @@ class SecatorConfig(StrictModel):
 	payloads: Payloads = Payloads()
 	wordlists: Wordlists = Wordlists()
 	addons: Addons = Addons()
+	security: Security = Security()
 	offline_mode: bool = False
 
 
@@ -495,56 +505,81 @@ def download_files(data: dict, target_folder: Path, offline_mode: bool, type: st
 		offline_mode (bool): Offline mode.
 	"""
 	for name, url_or_path in data.items():
-		if url_or_path.startswith('git+'):
-			# Clone Git repository
-			git_url = url_or_path[4:]  # remove 'git+' prefix
-			repo_name = git_url.split('/')[-1]
-			if repo_name.endswith('.git'):
-				repo_name = repo_name[:-4]
-			target_path = target_folder / repo_name
-			if not target_path.exists():
-				console.print(f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ', end='')
+		target_path = download_file(url_or_path, target_folder, offline_mode, type, name=name)
+		if target_path:
+			data[name] = target_path
+
+
+def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: str, name: str = None):
+	"""Download remote file to target folder, clone git repos, or symlink local files.
+
+	Args:
+		data (dict): Dict of name to url or local path prefixed with 'git+' for Git repos.
+		target_folder (Path): Target folder for storing files or repos.
+		offline_mode (bool): Offline mode.
+		type (str): Type of files to handle.
+		name (str, Optional): Name of object.
+
+	Returns:
+		path (Path): Path to downloaded file / folder.
+	"""
+	if url_or_path.startswith('git+'):
+		# Clone Git repository
+		git_url = url_or_path[4:]  # remove 'git+' prefix
+		repo_name = git_url.split('/')[-1]
+		if repo_name.endswith('.git'):
+			repo_name = repo_name[:-4]
+		target_path = target_folder / repo_name
+		if not target_path.exists():
+			console.print(f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ', end='')
+			if offline_mode:
+				console.print('[bold orange1]skipped [dim][offline[/].[/]')
+				return
+			try:
+				call(['git', 'clone', git_url, str(target_path)], stderr=DEVNULL, stdout=DEVNULL)
+				console.print('[bold green]ok.[/]')
+			except Exception as e:
+				console.print(f'[bold red]failed ({str(e)}).[/]')
+		return target_path.resolve()
+	elif Path(url_or_path).exists():
+		# Create a symbolic link for a local file
+		local_path = Path(url_or_path)
+		target_path = target_folder / local_path.name
+		if not name:
+			name = url_or_path.split('/')[-1]
+		if not CONFIG.security.allow_local_file_access:
+			console.print(f'[bold red]Cannot reference local file {url_or_path}(disabled for security reasons)[/]')
+			return
+		if not target_path.exists():
+			console.print(f'[bold turquoise4]Symlinking {type} [bold magenta]{name}[/] ...[/] ', end='')
+			try:
+				target_path.symlink_to(local_path)
+				console.print('[bold green]ok.[/]')
+			except Exception as e:
+				console.print(f'[bold red]failed ({str(e)}).[/]')
+		return target_path.resolve()
+	else:
+		# Download file from URL
+		ext = url_or_path.split('.')[-1]
+		if not name:
+			name = url_or_path.split('/')[-1]
+		filename = f'{name}.{ext}' if not name.endswith(ext) else name
+		target_path = target_folder / filename
+		if not target_path.exists():
+			try:
+				console.print(f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ', end='')
 				if offline_mode:
-					console.print('[bold orange1]skipped [dim][offline[/].[/]')
-					continue
-				try:
-					call(['git', 'clone', git_url, str(target_path)], stderr=DEVNULL, stdout=DEVNULL)
-					console.print('[bold green]ok.[/]')
-				except Exception as e:
-					console.print(f'[bold red]failed ({str(e)}).[/]')
-			data[name] = target_path.resolve()
-		elif Path(url_or_path).exists():
-			# Create a symbolic link for a local file
-			local_path = Path(url_or_path)
-			target_path = target_folder / local_path.name
-			if not target_path.exists():
-				console.print(f'[bold turquoise4]Symlinking {type} [bold magenta]{name}[/] ...[/] ', end='')
-				try:
-					target_path.symlink_to(local_path)
-					console.print('[bold green]ok.[/]')
-				except Exception as e:
-					console.print(f'[bold red]failed ({str(e)}).[/]')
-			data[name] = target_path.resolve()
-		else:
-			# Download file from URL
-			ext = url_or_path.split('.')[-1]
-			filename = f'{name}.{ext}' if not name.endswith(ext) else name
-			target_path = target_folder / filename
-			if not target_path.exists():
-				try:
-					console.print(f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ', end='')
-					if offline_mode:
-						console.print('[bold orange1]skipped [dim](offline)[/].[/]')
-						continue
-					resp = requests.get(url_or_path, timeout=3)
-					resp.raise_for_status()
-					with open(target_path, 'wb') as f:
-						f.write(resp.content)
-					console.print('[bold green]ok.[/]')
-				except requests.RequestException as e:
-					console.print(f'[bold red]failed ({str(e)}).[/]')
-					continue
-			data[name] = target_path.resolve()
+					console.print('[bold orange1]skipped [dim](offline)[/].[/]')
+					return
+				resp = requests.get(url_or_path, timeout=3)
+				resp.raise_for_status()
+				with open(target_path, 'wb') as f:
+					f.write(resp.content)
+				console.print('[bold green]ok.[/]')
+			except requests.RequestException as e:
+				console.print(f'[bold red]failed ({str(e)}).[/]')
+				return
+		return target_path.resolve()
 
 
 # Load default_config
@@ -576,13 +611,8 @@ for name, dir in CONFIG.dirs.items():
 		dir.mkdir(parents=False)
 		console.print('[bold green]ok.[/]')
 
-# Download wordlists and set defaults
+# Download wordlists and payloads
 download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
-for category, name in CONFIG.wordlists.defaults.items():
-	if name in CONFIG.wordlists.templates.keys():
-		CONFIG.wordlists.defaults[category] = str(CONFIG.wordlists.templates[name])
-
-# Download payloads
 download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
 
 # Print config

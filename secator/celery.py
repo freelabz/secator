@@ -12,7 +12,7 @@ from rich.logging import RichHandler
 from retry import retry
 
 from secator.config import CONFIG
-from secator.output_types import Info, Warning, Error
+from secator.output_types import Info, Error
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
@@ -338,7 +338,7 @@ def is_celery_worker_alive():
 	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
 	result = bool(result)
 	if result:
-		console.print(Info(message='Celery worker is alive !'))
+		console.print(Info(message='Celery worker is available, running remotely'))
 	else:
-		console.print(Warning(message='No Celery worker alive.'))
+		console.print(Info(message='No Celery worker available, running locally'))
 	return result

@@ -9,7 +9,7 @@ from secator.config import CONFIG, ROOT_FOLDER
 
 # Globals
 VERSION = version('secator')
-ASCII = f"""
+ASCII = rf"""
 			 __            
    ________  _________ _/ /_____  _____
   / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/

@@ -1,5 +1,6 @@
 import re
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
 								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
@@ -13,7 +14,7 @@ SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*
 
 @task()
 class searchsploit(Command):
-	"""Exploit-DB command line search tool."""
+	"""Exploit searcher based on ExploitDB."""
 	cmd = 'searchsploit'
 	input_flag = None
 	json_flag = '--json'
@@ -37,7 +38,13 @@ class searchsploit(Command):
 			}
 		}
 	}
-	install_cmd = 'sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb || true && sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit'  # noqa: E501
+	install_pre = {
+		'apk': ['ncurses']
+	}
+	install_cmd = (
+		f'git clone  --depth 1 --single-branch https://gitlab.com/exploit-database/exploitdb.git {CONFIG.dirs.share}/exploitdb || true && '  # noqa: E501
+		f'ln -sf $HOME/.local/share/exploitdb/searchsploit {CONFIG.dirs.bin}/searchsploit'
+	)
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
