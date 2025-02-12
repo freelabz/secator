@@ -72,7 +72,6 @@ trace = [
   'pyinstrument < 5',
 ]
 worker = [
-  'gevent < 25',
   'eventlet < 1',
   'flower < 3',
 ]
