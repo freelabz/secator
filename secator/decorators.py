@@ -3,8 +3,9 @@ import sys
 from collections import OrderedDict
 
 import rich_click as click
-from rich_click.rich_click import _get_rich_console
 from rich_click.rich_group import RichGroup
+from rich_click.rich_help_configuration import RichHelpConfiguration
+from rich_click.rich_help_formatter import RichHelpFormatter
 
 from secator.config import CONFIG
 from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
@@ -47,7 +48,7 @@ class OrderedGroup(RichGroup):
 		def decorator(f):
 			aliases = kwargs.pop("aliases", None)
 			if aliases:
-				max_width = _get_rich_console().width
+				max_width = RichHelpFormatter(RichHelpConfiguration.load_from_globals).width
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
 
@@ -78,7 +79,7 @@ class OrderedGroup(RichGroup):
 			aliases = kwargs.pop('aliases', [])
 			aliased_group = []
 			if aliases:
-				max_width = _get_rich_console().width
+				max_width = RichHelpFormatter(RichHelpConfiguration.load_from_globals).width
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
 				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
@@ -335,7 +336,7 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = []
 		drivers = driver.split(',') if driver else []
-		console = _get_rich_console()
+		console = RichHelpFormatter(RichHelpConfiguration.load_from_globals)
 		supported_drivers = ['mongodb', 'gcs']
 		for driver in drivers:
 			if driver in supported_drivers:
@@ -371,7 +372,9 @@ def register_runner(cli_endpoint, config):
 				backend_protocol = CONFIG.celery.result_backend.split('://')[0]
 				if CONFIG.celery.broker_url:
 					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
-						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
+						RichHelpFormatter(
+                                RichHelpConfiguration.load_from_globals).print(
+                                        '[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 						sys.exit(1)
 
 		from secator.utils import debug
