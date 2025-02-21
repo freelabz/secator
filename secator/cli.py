@@ -1099,7 +1099,7 @@ def update(all):
 		sys.exit(1)
 
 	# Check current and latest version
-	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
+	info = get_version_info('secator', '-version', 'freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
 	do_update = True
 
