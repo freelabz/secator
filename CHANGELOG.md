@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.9.0](https://github.com/freelabz/secator/compare/v0.8.2...v0.9.0) (2025-02-21)
+
+
+### Features
+
+* add cleanup option to secator install tools ([#530](https://github.com/freelabz/secator/issues/530)) ([bcc11c2](https://github.com/freelabz/secator/commit/bcc11c24e628b527111b1890b3810bf60be14448))
+* add warning if bin dir is not in path ([#528](https://github.com/freelabz/secator/issues/528)) ([59ca31e](https://github.com/freelabz/secator/commit/59ca31e3e4bb07680762213d6f5722afb9586519))
+* improve dockerfile size with multi-stage build ([#534](https://github.com/freelabz/secator/issues/534)) ([ceb3652](https://github.com/freelabz/secator/commit/ceb3652371669bfce525a5e26c38e88e9e03356f))
+
+
+### Bug Fixes
+
+* bbot screenshots copy ([#540](https://github.com/freelabz/secator/issues/540)) ([2cea982](https://github.com/freelabz/secator/commit/2cea9825cf73fb97546c38793c7f280db7c99822))
+* install chromium in httpx ([#541](https://github.com/freelabz/secator/issues/541)) ([1965619](https://github.com/freelabz/secator/commit/19656198351fc0b40f71aeb7fb20035db6b89a37))
+* miscellaneous bugfixes ([#533](https://github.com/freelabz/secator/issues/533)) ([b8c0edf](https://github.com/freelabz/secator/commit/b8c0edf30882bb030dbb6b376e264850d3905307))
+* restore colors to rich defaults to honor TERM and NO_COLOR ([#524](https://github.com/freelabz/secator/issues/524)) ([982fc55](https://github.com/freelabz/secator/commit/982fc55a60c03d03bf871727fafdf6840dab0908))
+* secator update command ([#538](https://github.com/freelabz/secator/issues/538)) ([cf73def](https://github.com/freelabz/secator/commit/cf73def36de7e9e8522d795922daae02252792fd))
+
 ## [0.8.2](https://github.com/freelabz/secator/compare/v0.8.1...v0.8.2) (2025-02-10)
 
 
