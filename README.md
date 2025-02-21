@@ -107,7 +107,7 @@ pip install secator
 </details>
 
 <details>
-  <summary>Bash</summary>
+  <summary>Bash (uses `apt` package manager)</summary>
 
 ```sh
 wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
