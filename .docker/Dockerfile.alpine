@@ -1,4 +1,4 @@
-FROM alpine:latest as builder
+FROM alpine:latest AS builder
 
 ENV PATH="${PATH}:/root/.local/bin"
 RUN apk add --no-cache \
