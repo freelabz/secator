@@ -1,0 +1,8 @@
+type: profile
+name: paranoid
+description: "Maximum stealth"
+opts:
+    rate_limit: 5
+    delay: 5
+    timeout: 15
+    retries: 5

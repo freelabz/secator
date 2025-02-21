@@ -26,6 +26,7 @@ class Workflow(Runner):
 		# Task opts
 		run_opts = self.run_opts.copy()
 		run_opts['hooks'] = self._hooks.get(Task, {})
+		run_opts.pop('profiles', None)
 
 		# Build Celery workflow
 		workflow = self.build_celery_workflow(
