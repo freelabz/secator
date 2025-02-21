@@ -2,7 +2,6 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -25,9 +24,9 @@ class Stat(OutputType):
 	_table_fields = ['name', 'pid', 'cpu', 'memory']
 	_sort_by = ('name', 'pid')
 
-	def __repr__(self) -> str:
+	def __rich__(self):
 		s = rf'[dim yellow3]📊 {self.name} \[pid={self.pid}] \[cpu={self.cpu:.2f}%] \[memory={self.memory:.2f}%]'
 		if self.net_conns:
 			s += rf' \[connections={self.net_conns}]'
 		s += ' [/]'
-		return rich_to_ansi(s)
+		return s

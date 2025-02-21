@@ -451,6 +451,7 @@ class Command(Runner):
 			ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 			line = ansi_escape.sub('', line)
 			line = line.replace('\\x0d\\x0a', '\n')
+		self.debug(line, sub='line', allow_no_process=False, verbose=True)
 
 		# Run on_line hooks
 		line = self.run_hooks('on_line', line)

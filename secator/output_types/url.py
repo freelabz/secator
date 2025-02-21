@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TIME, TITLE, URL, WEBSERVER)
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
+from secator.utils import trim_string, rich_escape as _s
 from secator.config import CONFIG
 
 
@@ -55,7 +55,7 @@ class Url(OutputType):
 	def __str__(self):
 		return self.url
 
-	def __repr__(self):
+	def __rich__(self):
 		s = f'🔗 [white]{_s(self.url)}'
 		if self.method and self.method != 'GET':
 			s += rf' \[[turquoise4]{self.method}[/]]'
@@ -79,4 +79,4 @@ class Url(OutputType):
 			s += rf' \[[magenta]{cl}[/]]'
 		if self.screenshot_path:
 			s += rf' \[[magenta]{_s(self.screenshot_path)}[/]]'
-		return rich_to_ansi(s)
+		return s

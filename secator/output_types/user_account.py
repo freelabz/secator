@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import SITE_NAME, URL, USERNAME
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s
+from secator.utils import rich_escape as _s
 
 
 @dataclass
@@ -28,7 +28,7 @@ class UserAccount(OutputType):
 	def __str__(self) -> str:
 		return self.url
 
-	def __repr__(self) -> str:
+	def __rich__(self):
 		s = f'👤 [green]{_s(self.username)}[/]'
 		if self.email:
 			s += rf' \[[bold yellow]{_s(self.email)}[/]]'
@@ -38,4 +38,4 @@ class UserAccount(OutputType):
 			s += rf' \[[white]{_s(self.url)}[/]]'
 		if self.extra_data:
 			s += r' \[[bold yellow]' + _s(', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + '[/]]')
-		return rich_to_ansi(s)
+		return s

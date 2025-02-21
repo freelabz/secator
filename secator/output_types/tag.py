@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
+from secator.utils import trim_string, rich_escape as _s
 
 
 @dataclass
@@ -28,7 +28,7 @@ class Tag(OutputType):
 	def __str__(self) -> str:
 		return self.match
 
-	def __repr__(self) -> str:
+	def __rich__(self):
 		s = f'🏷️  [bold magenta]{self.name}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
@@ -45,4 +45,4 @@ class Tag(OutputType):
 				ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
-		return rich_to_ansi(s)
+		return s

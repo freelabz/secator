@@ -389,14 +389,13 @@ class Runner:
 
 				# Repr output
 				if item_out:
-					item_repr = repr(item)
+					item_repr = item.__rich__()
 					if isinstance(item, OutputType) and self.print_remote_info:
-						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
-					self._print(item_repr, out=item_out)
+						item_repr += f' \[[dim]{item._source}[/]]'
+					self._print(item_repr, out=item_out, rich=True)
 
 		# Item is a line
 		elif isinstance(item, str):
-			self.debug(item, sub='line', allow_no_process=False, verbose=True)
 			if self.print_line or force:
 				self._print(item, out=sys.stderr, end='\n', rich=False)
 
