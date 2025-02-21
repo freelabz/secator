@@ -344,7 +344,7 @@ class Command(Runner):
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Info(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
 				return
 
 			# Yield targets
@@ -652,12 +652,14 @@ class Command(Runner):
 			)
 
 		elif self.return_code != 0:
-			error = f'Command failed with return code {self.return_code}.'
+			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
+			last_lines = [line for line in last_lines if line != '']
 			yield Error(
 				message=error,
 				traceback='\n'.join(last_lines),
+				traceback_title='Last stdout lines',
 				_source=self.unique_name,
 				_uuid=str(uuid.uuid4())
 			)

@@ -8,6 +8,7 @@ from secator.utils import rich_to_ansi, traceback_as_string, rich_escape as _s
 class Error(OutputType):
 	message: str
 	traceback: str = field(default='', compare=False)
+	traceback_title: str = field(default='', compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='error', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -31,6 +32,9 @@ class Error(OutputType):
 	def __repr__(self):
 		s = rf"\[[bold red]ERR[/]] {_s(self.message)}"
 		if self.traceback:
-			traceback_pretty = '   ' + self.traceback.replace('\n', '\n   ')
+			s += ':'
+			traceback_pretty = '   ' + _s(self.traceback).replace('\n', '\n   ')
+			if self.traceback_title:
+				traceback_pretty = f'   {self.traceback_title}:\n{traceback_pretty}'
 			s += f'\n[dim]{_s(traceback_pretty)}[/]'
 		return rich_to_ansi(s)
