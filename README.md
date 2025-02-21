@@ -94,6 +94,7 @@ check that the tool complies with our selection criterias before doing so. If it
 ```sh
 pipx install secator
 ```
+***Note:** Make sure to have [pipx](https://pipx.pypa.io/stable/installation/) installed.*
 
 </details>
 
@@ -107,7 +108,7 @@ pip install secator
 </details>
 
 <details>
-  <summary>Bash (uses `apt` package manager)</summary>
+  <summary>Bash (uses apt)</summary>
 
 ```sh
 wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
