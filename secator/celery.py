@@ -1,4 +1,5 @@
 import gc
+import json
 import logging
 import sys
 import uuid
@@ -62,17 +63,17 @@ app.conf.update({
 	# Result backend config
 	'result_backend': CONFIG.celery.result_backend,
 	'result_expires': CONFIG.celery.result_expires,
+	'result_backend_transport_options': json.loads(CONFIG.celery.result_backend_transport_options),
 	'result_extended': True,
 	'result_backend_thread_safe': True,
 	'result_serializer': 'pickle',
-	# 'result_backend_transport_options': {'master_name': 'mymaster'}, # for Redis HA backend
 
 	# Task config
-	'task_acks_late': False,
+	'task_acks_late': CONFIG.celery.task_acks_late,
 	'task_compression': 'gzip',
 	'task_create_missing_queues': True,
 	'task_eager_propagates': False,
-	'task_reject_on_worker_lost': False,
+	'task_reject_on_worker_lost': CONFIG.celery.task_reject_on_worker_lost,
 	'task_routes': {
 		'secator.celery.run_workflow': {'queue': 'celery'},
 		'secator.celery.run_scan': {'queue': 'celery'},
@@ -85,10 +86,10 @@ app.conf.update({
 
 	# Worker config
 	# 'worker_direct': True,  # TODO: consider enabling this to allow routing to specific workers
-	'worker_max_tasks_per_child': 10,
+	'worker_max_tasks_per_child': CONFIG.celery.worker_max_tasks_per_child,
 	# 'worker_max_memory_per_child': 100000  # TODO: consider enabling this
 	'worker_pool_restarts': True,
-	'worker_prefetch_multiplier': 1,
+	'worker_prefetch_multiplier': CONFIG.celery.worker_prefetch_multiplier,
 	# 'worker_send_task_events': True,  # TODO: consider enabling this for Flower monitoring
 })
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)

@@ -64,7 +64,12 @@ class Celery(StrictModel):
 	broker_visibility_timeout: int = 3600
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
+	result_backend_transport_options: str = "{}"
 	result_expires: int = 86400  # 1 day
+	task_acks_late: bool = False
+	task_reject_on_worker_lost: bool = False
+	worker_max_tasks_per_child: int = 20
+	worker_prefetch_multiplier: int = 1
 
 
 class Cli(StrictModel):
