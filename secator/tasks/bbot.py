@@ -219,7 +219,8 @@ class bbot(Command):
 		}
 	}
 	install_pre = {
-		'*': ['git', 'openssl', 'unzip', 'tar', 'chromium']
+		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
+		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
 	}
 	install_cmd = 'pipx install bbot && pipx upgrade bbot'
 	install_post = {
