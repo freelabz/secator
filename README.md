@@ -225,12 +225,23 @@ secator install addons worker
 
 
 <details>
-    <summary>google</summary>
+    <summary>gdrive</summary>
 
 Add support for Google Drive exporter (`-o gdrive`).
 
 ```sh
-secator install addons google
+secator install addons gdrive
+```
+
+</details>
+
+<details>
+    <summary>gcs</summary>
+
+Add support for Google Cloud Storage driver (`-driver gcs`).
+
+```sh
+secator install addons gcs
 ```
 
 </details>
