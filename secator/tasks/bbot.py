@@ -4,7 +4,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.runners import Command
 from secator.serializers import RegexSerializer
-from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Error
+from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error
 from secator.serializers import JSONSerializer
 
 
@@ -234,6 +234,11 @@ class bbot(Command):
 			yield item
 			return
 
+		# Set scan name and base path for output
+		if _type == 'SCAN':
+			self.scan_config = item['data']
+			return
+
 		if _type not in BBOT_MAP_TYPES:
 			self._print(f'[bold orange3]Found unsupported bbot type: {_type}.[/] [bold green]Skipping.[/]', rich=True)
 			return
@@ -278,9 +283,11 @@ class bbot(Command):
 
 		# If a screenshot was saved, move it to secator output folder
 		if item['type'] == 'WEBSCREENSHOT':
-			path = item['data']['path']
-			name = path.split('/')[-1]
+			from pathlib import Path
+			path = Path.home() / '.bbot' / 'scans' / self.scan_config['name'] / item['data']['path']
+			name = path.as_posix().split('/')[-1]
 			secator_path = f'{self.reports_folder}/.outputs/{name}'
+			yield Info(f'Copying screenshot {path} to {secator_path}')
 			shutil.copy(path, secator_path)
 			item['data']['path'] = secator_path
 
