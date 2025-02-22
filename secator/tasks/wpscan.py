@@ -142,6 +142,7 @@ class wpscan(VulnHttp):
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress theme - {slug} {number} outdated',
+						confidence='high',
 						severity='info'
 					)
 
@@ -171,5 +172,6 @@ class wpscan(VulnHttp):
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress plugin - {slug} {number} outdated',
+						confidence='high',
 						severity='info'
 					)
