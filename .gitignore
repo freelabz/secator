@@ -137,5 +137,4 @@ dmypy.json
 
 # Project
 .git/
-.docker/
 images/
