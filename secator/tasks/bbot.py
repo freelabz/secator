@@ -194,7 +194,7 @@ class bbot(Command):
 			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Port: {
-			'port': lambda x: int(x['data']['port']) if 'port' in x['data'] else x['data'].split(':')[-1],
+			'port': lambda x: int(x['data']['port']) if 'port' in x['data'] else int(x['data'].split(':')[-1]),
 			'ip': lambda x: [_ for _ in x['resolved_hosts'] if not _.startswith('::')][0],
 			'state': lambda x: 'OPEN',
 			'service_name': lambda x: x['data']['protocol'] if 'protocol' in x['data'] else '',
