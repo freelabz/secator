@@ -50,7 +50,7 @@ app.conf.update({
 
 	# Broker config
 	'broker_url': CONFIG.celery.broker_url,
-	'broker_transport_options': {
+	'broker_transport_options': json.loads(CONFIG.celery.broker_transport_options) if CONFIG.celery.broker_transport_options else {
 		'data_folder_in': CONFIG.dirs.celery_data,
 		'data_folder_out': CONFIG.dirs.celery_data,
 		'control_folder': CONFIG.dirs.celery_data,
@@ -63,7 +63,7 @@ app.conf.update({
 	# Result backend config
 	'result_backend': CONFIG.celery.result_backend,
 	'result_expires': CONFIG.celery.result_expires,
-	'result_backend_transport_options': json.loads(CONFIG.celery.result_backend_transport_options),
+	'result_backend_transport_options': json.loads(CONFIG.celery.result_backend_transport_options) if CONFIG.celery.result_backend_transport_options else {},
 	'result_extended': True,
 	'result_backend_thread_safe': True,
 	'result_serializer': 'pickle',
@@ -92,6 +92,8 @@ app.conf.update({
 	'worker_prefetch_multiplier': CONFIG.celery.worker_prefetch_multiplier,
 	# 'worker_send_task_events': True,  # TODO: consider enabling this for Flower monitoring
 })
+print(app.conf.broker_transport_options)
+print(app.conf.result_backend_transport_options)
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 
 

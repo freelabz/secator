@@ -62,9 +62,10 @@ class Celery(StrictModel):
 	broker_pool_limit: int = 10
 	broker_connection_timeout: float = 4.0
 	broker_visibility_timeout: int = 3600
+	broker_transport_options: str = ""
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
-	result_backend_transport_options: str = "{}"
+	result_backend_transport_options: str = ""
 	result_expires: int = 86400  # 1 day
 	task_acks_late: bool = False
 	task_reject_on_worker_lost: bool = False
