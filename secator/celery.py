@@ -81,7 +81,7 @@ app.conf.update({
 		'secator.hooks.mongodb.tag_duplicates': {'queue': 'mongodb'}
 	},
 	'task_store_eager_result': True,
-	# 'task_send_sent_event': True,  # TODO: consider enabling this for Flower monitoring
+	'task_send_sent_event': CONFIG.celery.task_send_sent_event,
 	'task_serializer': 'pickle',
 
 	# Worker config
@@ -90,7 +90,7 @@ app.conf.update({
 	# 'worker_max_memory_per_child': 100000  # TODO: consider enabling this
 	'worker_pool_restarts': True,
 	'worker_prefetch_multiplier': CONFIG.celery.worker_prefetch_multiplier,
-	# 'worker_send_task_events': True,  # TODO: consider enabling this for Flower monitoring
+	'worker_send_task_events': CONFIG.celery.worker_send_task_events
 })
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 

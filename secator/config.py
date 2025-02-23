@@ -68,10 +68,11 @@ class Celery(StrictModel):
 	result_backend_transport_options: str = ""
 	result_expires: int = 86400  # 1 day
 	task_acks_late: bool = False
+	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
 	worker_max_tasks_per_child: int = 20
 	worker_prefetch_multiplier: int = 1
-
+	worker_send_task_events: bool = False
 
 class Cli(StrictModel):
 	github_token: str = os.environ.get('GITHUB_TOKEN', '')
