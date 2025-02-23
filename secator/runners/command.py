@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Info, Error, Target, Stat
+from secator.output_types import Info, Warning, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s
