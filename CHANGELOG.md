@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/freelabz/secator/compare/v0.9.1...v0.9.2) (2025-02-23)
+
+
+### Bug Fixes
+
+* warning bug ([#550](https://github.com/freelabz/secator/issues/550)) ([3853d47](https://github.com/freelabz/secator/commit/3853d4781f4b135ddbf5eab8ccaf5bbf02feb2e0))
+
 ## [0.9.1](https://github.com/freelabz/secator/compare/v0.9.0...v0.9.1) (2025-02-22)
 
 
