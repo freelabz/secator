@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.1](https://github.com/freelabz/secator/compare/v0.9.0...v0.9.1) (2025-02-22)
+
+
+### Bug Fixes
+
+* add celery broker transport options ([#547](https://github.com/freelabz/secator/issues/547)) ([3703d1e](https://github.com/freelabz/secator/commit/3703d1e10dd605b9c631ff6084713beb36bda469))
+* add celery opts required for remote ([#544](https://github.com/freelabz/secator/issues/544)) ([36d1f2d](https://github.com/freelabz/secator/commit/36d1f2dadbd601ad8866e0b4ada485e3d26ec1b6))
+* bbot port not cast as int ([#542](https://github.com/freelabz/secator/issues/542)) ([744553c](https://github.com/freelabz/secator/commit/744553c597869e0c4811214a00ead740b4dcd2e9))
+* change main dockerfile path ([#546](https://github.com/freelabz/secator/issues/546)) ([6a2faf6](https://github.com/freelabz/secator/commit/6a2faf6966db2bf340311815a46ff4c347c8c136))
+* cli bug warning ([#543](https://github.com/freelabz/secator/issues/543)) ([ca44b12](https://github.com/freelabz/secator/commit/ca44b12dcc5e4869753dc1d186adabd77825ee7e))
+* update Dockerfile symlink ([#549](https://github.com/freelabz/secator/issues/549)) ([1b2bdcf](https://github.com/freelabz/secator/commit/1b2bdcf37eabad7150420a8893bb064a9f9c41cb))
+* **wpscan:** set vuln confidence ([#548](https://github.com/freelabz/secator/issues/548)) ([0d8f13d](https://github.com/freelabz/secator/commit/0d8f13d7830906654778910c3e0e259962e31276))
+
 ## [0.9.0](https://github.com/freelabz/secator/compare/v0.8.2...v0.9.0) (2025-02-21)
 
 
