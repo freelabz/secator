@@ -74,6 +74,7 @@ class Celery(StrictModel):
 	worker_prefetch_multiplier: int = 1
 	worker_send_task_events: bool = False
 
+
 class Cli(StrictModel):
 	github_token: str = os.environ.get('GITHUB_TOKEN', '')
 	record: bool = False
