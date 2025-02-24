@@ -73,7 +73,7 @@ class httpx(Http):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'cpu'
+	profile = 'io'
 
 	@staticmethod
 	def on_init(self):
