@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.3](https://github.com/freelabz/secator/compare/v0.9.2...v0.9.3) (2025-02-24)
+
+
+### Bug Fixes
+
+* add celery monitoring opts ([#552](https://github.com/freelabz/secator/issues/552)) ([51681d3](https://github.com/freelabz/secator/commit/51681d3dad12570a6483c30dda82a40e81675c2e))
+* update tasks profiles ([#553](https://github.com/freelabz/secator/issues/553)) ([cebc50a](https://github.com/freelabz/secator/commit/cebc50a9139f31f5315e5e290e90807744df9db3))
+
 ## [0.9.2](https://github.com/freelabz/secator/compare/v0.9.1...v0.9.2) (2025-02-23)
 
 
