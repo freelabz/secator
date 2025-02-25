@@ -7,6 +7,13 @@
 
 * **nuclei:** set input_chunk_size to 1 ([cf6bda1](https://github.com/freelabz/secator/commit/cf6bda19e97754a3560e2ed17bfb83c87d889f1e))
 
+## [0.9.4](https://github.com/freelabz/secator/compare/v0.9.3...v0.9.4) (2025-02-25)
+
+
+### Bug Fixes
+
+* **nuclei:** set input_chunk_size to 1 ([cf6bda1](https://github.com/freelabz/secator/commit/cf6bda19e97754a3560e2ed17bfb83c87d889f1e))
+
 ## [0.9.3](https://github.com/freelabz/secator/compare/v0.9.2...v0.9.3) (2025-02-24)
 
 
