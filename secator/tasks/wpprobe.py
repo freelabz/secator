@@ -10,10 +10,12 @@ from secator.output_types import Vulnerability, Info
 class wpprobe(Command):
     cmd = 'wpprobe'
 
+    file_flag = '-f'
+    input_flag = '-u'
     opt_prefix = '-'
 
     opts = {
-        # 'mode': {'type': click.Choice(['scan','update','update-db']), 'default':'scan', 'help': 'WPProbe mode'},
+        'mode': {'type': click.Choice(['scan','update','update-db']), 'default':'scan', 'help': 'WPProbe mode'},
         'f': {'type': str, 'help': 'Targets list path'},
         't': {'type': int, 'default': 20, 'help':'Numbers of threads (default 20)'},
         'u': {'type': str, 'help':'Target url'}
