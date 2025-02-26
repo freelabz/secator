@@ -94,6 +94,7 @@ check that the tool complies with our selection criterias before doing so. If it
 ```sh
 pipx install secator
 ```
+***Note:** Make sure to have [pipx](https://pipx.pypa.io/stable/installation/) installed.*
 
 </details>
 
@@ -107,7 +108,7 @@ pip install secator
 </details>
 
 <details>
-  <summary>Bash</summary>
+  <summary>Bash (uses apt)</summary>
 
 ```sh
 wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
@@ -224,12 +225,23 @@ secator install addons worker
 
 
 <details>
-    <summary>google</summary>
+    <summary>gdrive</summary>
 
 Add support for Google Drive exporter (`-o gdrive`).
 
 ```sh
-secator install addons google
+secator install addons gdrive
+```
+
+</details>
+
+<details>
+    <summary>gcs</summary>
+
+Add support for Google Cloud Storage driver (`-driver gcs`).
+
+```sh
+secator install addons gcs
 ```
 
 </details>
@@ -288,14 +300,6 @@ secator install addons build
 
 </details>
 
-
-### Install CVEs
-
-`secator` makes remote API calls to https://cve.circl.lu/ to get in-depth information about the CVEs it encounters.
-We provide a subcommand to download all known CVEs locally so that future lookups are made from disk instead:
-```sh
-secator install cves
-```
 
 ### Checking installation health
 

@@ -20,7 +20,7 @@ from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_p
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
-from secator.output_types import FINDING_TYPES, Info, Error
+from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
@@ -1120,7 +1120,7 @@ def update(all):
 		sys.exit(1)
 
 	# Check current and latest version
-	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
+	info = get_version_info('secator', '-version', 'freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
 	do_update = True
 

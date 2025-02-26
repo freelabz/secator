@@ -34,7 +34,7 @@ class naabu(ReconPort):
 		# 'health_check': 'hc'
 	}
 	opt_value_map = {
-		TIMEOUT: lambda x: x*1000 if x and x > 0 else None,  # convert to milliseconds
+		TIMEOUT: lambda x: int(x*1000) if x and x > 0 else None,  # convert to milliseconds
 		RETRIES: lambda x: 1 if x == 0 else x,
 		PROXY: lambda x: x.replace('socks5://', '')
 	}
