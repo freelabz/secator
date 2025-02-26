@@ -97,6 +97,10 @@ class Runner:
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
 
+		# Load profiles
+		profiles_str = run_opts.get('profiles', [])
+		self.load_profiles(profiles_str)
+
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
 		self.exporters = self.resolve_exporters(exporters_str)
@@ -872,6 +876,32 @@ class Runner:
 			if o
 		]
 		return [cls for cls in classes if cls]
+
+	def load_profiles(self, profiles):
+		"""Load profiles and update run options.
+
+		Args:
+			profiles (list[str]): List of profile names to resolve.
+
+		Returns:
+			list: List of profiles.
+		"""
+		from secator.cli import ALL_PROFILES
+		if isinstance(profiles, str):
+			profiles = profiles.split(',')
+		templates = []
+		for pname in profiles:
+			matches = [p for p in ALL_PROFILES if p.name == pname]
+			if not matches:
+				self._print(Warning(message=f'Profile "{pname}" was not found'), rich=True)
+			else:
+				templates.append(matches[0])
+		opts = {}
+		for profile in templates:
+			self._print(Info(message=f'Loaded profile {profile.name} ({profile.description})'), rich=True)
+			opts.update(profile.opts)
+		opts = {k: v for k, v in opts.items() if k not in self.run_opts}
+		self.run_opts.update(opts)
 
 	@classmethod
 	def get_func_path(cls, func):

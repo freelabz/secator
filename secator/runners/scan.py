@@ -34,6 +34,7 @@ class Scan(Runner):
 
 			# Run workflow
 			run_opts = self.run_opts.copy()
+			run_opts.pop('profiles', None)
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			workflow = Workflow(
 				TemplateLoader(name=f'workflows/{name}'),
