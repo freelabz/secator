@@ -26,6 +26,7 @@ class Workflow(Runner):
 		# Task opts
 		run_opts = self.run_opts.copy()
 		run_opts['hooks'] = self._hooks.get(Task, {})
+		run_opts.pop('no_poll', False)
 
 		# Build Celery workflow
 		workflow = self.build_celery_workflow(
@@ -46,6 +47,8 @@ class Workflow(Runner):
 				message=f'Celery task created: {self.celery_result.id}',
 				task_id=self.celery_result.id
 			)
+			if self.no_poll:
+				return
 			results = CeleryData.iter_results(
 				self.celery_result,
 				ids_map=self.celery_ids_map,

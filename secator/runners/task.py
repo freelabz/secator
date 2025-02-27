@@ -26,6 +26,7 @@ class Task(Runner):
 		# Run opts
 		run_opts = self.run_opts.copy()
 		run_opts.pop('output', None)
+		run_opts.pop('no_poll', False)
 
 		# Set task output types
 		self.output_types = task_cls.output_types
@@ -48,6 +49,8 @@ class Task(Runner):
 				message=f'Celery task created: {self.celery_result.id}',
 				task_id=self.celery_result.id
 			)
+			if self.no_poll:
+				return
 			results = CeleryData.iter_results(
 				self.celery_result,
 				ids_map=self.celery_ids_map,

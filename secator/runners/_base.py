@@ -96,6 +96,7 @@ class Runner:
 		self.celery_ids_map = {}
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
+		self.no_poll = self.run_opts.get('no_poll', False)
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -635,6 +636,8 @@ class Runner:
 
 	def log_results(self):
 		"""Log runner results."""
+		if self.no_poll:
+			return
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
