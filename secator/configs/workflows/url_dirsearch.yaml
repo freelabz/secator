@@ -14,6 +14,11 @@ tasks:
         field: '{name}/FUZZ'
   cariddi:
     description: Crawl HTTP directories for content
+    info: True
+    secrets: True
+    errors: True
+    juicy_extensions: 1
+    juicy_endpoints: True
     targets_:
       - target.name
       - url.url
