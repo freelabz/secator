@@ -23,10 +23,6 @@ ASCII = rf"""
 DEBUG = CONFIG.debug.level
 DEBUG_COMPONENT = CONFIG.debug.component.split(',')
 
-# Default tasks settings
-DEFAULT_NUCLEI_FLAGS = os.environ.get('DEFAULT_NUCLEI_FLAGS', '-stats -sj -si 20 -hm -or')
-DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-bail --no-state')
-
 # Constants
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1

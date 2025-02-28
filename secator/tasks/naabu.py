@@ -10,7 +10,7 @@ from secator.tasks._categories import ReconPort
 @task()
 class naabu(ReconPort):
 	"""Port scanning tool written in Go."""
-	cmd = 'naabu -Pn -silent'
+	cmd = 'naabu -silent'
 	input_flag = '-host'
 	file_flag = '-list'
 	json_flag = '-json'
@@ -18,6 +18,7 @@ class naabu(ReconPort):
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports'},
 		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'},
 		'scan_type': {'type': str, 'short': 'st', 'help': 'Scan type (SYN (s)/CONNECT(c))'},
+		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery'},
 		# 'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
 	}
 	opt_key_map = {

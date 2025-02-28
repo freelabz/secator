@@ -26,8 +26,8 @@ class katana(HttpCrawler):
 		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'},
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'},  # noqa: E501
 		'form_fill': {'is_flag': True, 'short': 'ff', 'help': 'Enable form filling'},
-		'js_crawl': {'is_flag': True, 'short': 'jc', 'default': True, 'help': 'Enable endpoint parsing / crawling in javascript file'},  # noqa: E501
-		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': True, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
+		'js_crawl': {'is_flag': True, 'short': 'jc', 'default': False, 'help': 'Enable endpoint parsing / crawling in javascript file'},  # noqa: E501
+		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': False, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
 		'known_files': {'type': str, 'short': 'kf', 'default': 'all', 'help': 'Enable crawling of known files (all, robotstxt, sitemapxml)'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
 		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'}

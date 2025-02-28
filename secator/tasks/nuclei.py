@@ -16,20 +16,24 @@ class nuclei(VulnMulti):
 	cmd = 'nuclei'
 	file_flag = '-l'
 	input_flag = '-u'
-	input_chunk_size = 1
 	json_flag = '-jsonl'
 	opts = {
-		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
-		'tags': {'type': str, 'help': 'Tags'},
-		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
-		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
-		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
+		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
 		'debug': {'type': str, 'help': 'Debug mode'},
+		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
+		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
+		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
+		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
+		'headless_bulk_size': {'type': int, 'short': 'hbs', 'help': 'Maximum number of headless hosts to be analzyed in parallel per template'},  # noqa: E501
+		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},
+		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
+		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
 		'stats': {'is_flag': True, 'short': 'stats', 'default': True, 'help': 'Display statistics about the running scan'},
 		'stats_json': {'is_flag': True, 'short': 'sj', 'default': True, 'help': 'Display statistics in JSONL(ines) format'},
-		'stats_interval': {'type': str, 'short': 'si', 'default': 20, 'help': 'Number of seconds to wait between showing a statistics update'},  # noqa: E501
-		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
-		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'}  # noqa: E501
+		'stats_interval': {'type': str, 'short': 'si', 'help': 'Number of seconds to wait between showing a statistics update'},  # noqa: E501
+		'tags': {'type': str, 'help': 'Tags'},
+		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
+		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -78,7 +82,7 @@ class nuclei(VulnMulti):
 	install_pre = {
 		'*': ['git']
 	}
-	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest'
+	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest'
 	install_github_handle = 'projectdiscovery/nuclei'
 	install_post = {
 		'*': 'nuclei -ut'
