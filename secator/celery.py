@@ -6,12 +6,13 @@ import uuid
 
 from time import time
 
-from celery import Celery, chain, chord, signals
+from celery import Celery, chain, chord
 from celery.app import trace
 
 from rich.logging import RichHandler
 from retry import retry
 
+from secator.celery_signals import setup_handlers
 from secator.config import CONFIG
 from secator.output_types import Info, Error
 from secator.rich import console
@@ -93,23 +94,8 @@ app.conf.update({
 	'worker_send_task_events': CONFIG.celery.worker_send_task_events
 })
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
-
-
-def maybe_override_logging():
-	def decorator(func):
-		if CONFIG.celery.override_default_logging:
-			return signals.setup_logging.connect(func)
-		else:
-			return func
-	return decorator
-
-
-@maybe_override_logging()
-def void(*args, **kwargs):
-	"""Override celery's logging setup to prevent it from altering our settings.
-	github.com/celery/celery/issues/1867
-	"""
-	pass
+if IN_CELERY_WORKER_PROCESS:
+	setup_handlers()
 
 
 @retry(Exception, tries=3, delay=2)

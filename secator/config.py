@@ -73,6 +73,8 @@ class Celery(StrictModel):
 	worker_max_tasks_per_child: int = 20
 	worker_prefetch_multiplier: int = 1
 	worker_send_task_events: bool = False
+	worker_kill_after_task: bool = False
+	worker_kill_after_idle_seconds: int = -1
 
 
 class Cli(StrictModel):
