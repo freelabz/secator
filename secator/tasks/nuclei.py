@@ -16,7 +16,6 @@ class nuclei(VulnMulti):
 	cmd = 'nuclei'
 	file_flag = '-l'
 	input_flag = '-u'
-	input_chunk_size = 1
 	json_flag = '-jsonl'
 	opts = {
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
