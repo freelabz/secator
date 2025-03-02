@@ -148,7 +148,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 		return
 
 	if not queue:
-		queue = 'io,cpu,' + ','.join([r['queue'] for r in app.conf.task_routes.values()])
+		queue = 'io,cpu,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
 
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'

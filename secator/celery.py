@@ -1,6 +1,7 @@
 import gc
 import json
 import logging
+import os
 import sys
 import uuid
 
@@ -79,7 +80,8 @@ app.conf.update({
 		'secator.celery.run_workflow': {'queue': 'celery'},
 		'secator.celery.run_scan': {'queue': 'celery'},
 		'secator.celery.run_task': {'queue': 'celery'},
-		'secator.hooks.mongodb.tag_duplicates': {'queue': 'mongodb'}
+		'secator.celery.forward_results': {'queue': 'results'},
+		'secator.hooks.mongodb.*': {'queue': 'mongodb'}
 	},
 	'task_store_eager_result': True,
 	'task_send_sent_event': CONFIG.celery.task_send_sent_event,
@@ -174,10 +176,10 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 
 	# Build Celery workflow
 	workflow = chain(
-		forward_results.s(results).set(queue='io'),
+		forward_results.s(results).set(queue='results'),
 		chord(
 			tuple(sigs),
-			forward_results.s().set(queue='io'),
+			forward_results.s().set(queue='results'),
 		)
 	)
 	if task.sync:
@@ -190,6 +192,7 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 
 @app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
+	console.print(Info(message=f'Running task {self.request.id}'))
 	kwargs['context']['celery_id'] = self.request.id
 	task = Task(*args, **kwargs)
 	task.run()
@@ -197,6 +200,7 @@ def run_task(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
+	console.print(Info(message=f'Running workflow {self.request.id}'))
 	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)
 	workflow.run()
@@ -204,6 +208,7 @@ def run_workflow(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_scan(self, args=[], kwargs={}):
+	console.print(Info(message=f'Running scan {self.request.id}'))
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
@@ -219,6 +224,7 @@ def run_command(self, results, name, targets, opts={}):
 	# Set Celery request id in context
 	context = opts.get('context', {})
 	context['celery_id'] = self.request.id
+	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
 	opts['context'] = context
 	opts['print_remote_info'] = False
 	opts['results'] = results
@@ -230,6 +236,8 @@ def run_command(self, results, name, targets, opts={}):
 			'print_line': True,
 			'print_cmd': True
 		})
+		routing_key = self.request.delivery_info['routing_key']
+		console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
 
 	# Flatten + dedupe results
 	results = flatten(results)
@@ -240,7 +248,10 @@ def run_command(self, results, name, targets, opts={}):
 		targets, opts = run_extractors(results, opts, targets)
 		debug('after extractors', obj={'targets': targets, 'opts': opts}, sub='celery.state')
 
+	task = None
+
 	try:
+
 		# Get task class
 		task_cls = Task.get_task_class(name)
 
@@ -254,8 +265,14 @@ def run_command(self, results, name, targets, opts={}):
 			'print_remote_info': False,
 			'has_children': chunk_it,
 		})
+
+		if IN_CELERY_WORKER_PROCESS and chunk_it and routing_key != 'poll':
+			console.print(Info(message=f'Task {name} is chunkable but not running on "poll" queue, re-routing to "poll" queue'))
+			raise self.replace(run_command.si(results, name, targets, opts=opts).set(queue='poll', task_id=self.request.id))
+
 		if chunk_it:
 			task_opts['print_cmd'] = False
+
 		task = task_cls(targets, **task_opts)
 		debug(
 			'',
@@ -281,6 +298,7 @@ def run_command(self, results, name, targets, opts={}):
 				targets,
 				results=results,
 				chunk_size=chunk_size)
+			console.print(Info(message=f'Task "{name}" starts polling for chunked results'))
 
 		# Update state before starting
 		update_state(self, task)
@@ -290,6 +308,8 @@ def run_command(self, results, name, targets, opts={}):
 			update_state(self, task)
 
 	except BaseException as e:
+		if not task:
+			raise e
 		error = Error.from_exception(e)
 		error._source = task.unique_name
 		error._uuid = str(uuid.uuid4())
@@ -297,6 +317,8 @@ def run_command(self, results, name, targets, opts={}):
 		task.stop_celery_tasks()
 
 	finally:
+		if not task:
+			raise
 		update_state(self, task, force=True)
 		gc.collect()
 		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='celery.results', verbose=True)
