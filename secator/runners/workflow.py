@@ -73,7 +73,7 @@ class Workflow(Runner):
 			self.inputs,
 			self.config.options,
 			run_opts)
-		sigs = [forward_results.si(results).set(queue='io')] + sigs + [forward_results.s().set(queue='io')]
+		sigs = [forward_results.si(results).set(queue='results')] + sigs + [forward_results.s().set(queue='results')]
 		workflow = chain(*sigs)
 		return workflow
 
@@ -105,7 +105,7 @@ class Workflow(Runner):
 					workflow_opts,
 					run_opts
 				)
-				sig = chord((tasks), forward_results.s().set(queue='io'))
+				sig = chord((tasks), forward_results.s().set(queue='results'))
 			elif task_name == '_chain':
 				tasks = self.get_tasks(
 					task_opts,
