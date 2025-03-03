@@ -607,7 +607,7 @@ if not config_path.exists():
 		f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
 	config_path.touch()
 	console.print('[bold green]ok.[/]')
-CONFIG = Config.parse(path=config_path, print_errors=False)
+CONFIG = Config.parse(path=config_path)
 
 # Fallback to default if invalid user config
 if not CONFIG:
