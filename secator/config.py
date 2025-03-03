@@ -593,7 +593,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 
 
 # Load default_config
-default_config = Config.parse()
+default_config = Config.parse(print_errors=False)
 
 # Load user config
 data_root = default_config.dirs.data
