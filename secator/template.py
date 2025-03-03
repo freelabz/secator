@@ -6,8 +6,10 @@ from pathlib import Path
 import yaml
 from dotmap import DotMap
 
-from secator.rich import console
 from secator.config import CONFIG, CONFIGS_FOLDER
+from secator.rich import console
+from secator.utils import convert_functions_to_strings
+
 
 TEMPLATES_DIR_KEYS = ['workflow', 'scan', 'profile']
 
@@ -106,7 +108,7 @@ class TemplateLoader(DotMap):
 				task_opts = task_class.get_supported_opts()
 				for name, conf in task_opts.items():
 					if name not in opts or not opts[name].get('supported', False):
-						opts[name] = conf
+						opts[name] = convert_functions_to_strings(conf)
 		return opts
 
 	def _extract_tasks(self):
