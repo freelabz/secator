@@ -501,8 +501,8 @@ class Config(DotMap):
 					self.set(path, value, set_partial=False)
 					if not self.validate(print_errors=False) and print_errors:
 						console.print(f'[bold red]{var} (override failed)[/]')
-				elif print_errors:
-					console.print(f'[bold red]{var} (override failed: key not found)[/]')
+				# elif print_errors:
+				# 	console.print(f'[bold red]{var} (override failed: key not found)[/]')
 
 
 def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):
@@ -593,7 +593,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 
 
 # Load default_config
-default_config = Config.parse(print_errors=False)
+default_config = Config.parse()
 
 # Load user config
 data_root = default_config.dirs.data
