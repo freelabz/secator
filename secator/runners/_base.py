@@ -140,7 +140,7 @@ class Runner:
 		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
 		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
 		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
-		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
+		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Debug
