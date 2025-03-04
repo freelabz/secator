@@ -9,10 +9,12 @@ input_types:
 tasks:
   naabu:
     description: Find open ports
+    skip_host_discovery: True
   nmap:
     description: Search for vulnerabilities on open ports
     skip_host_discovery: True
     version_detection: True
+    script: vulners
     targets_: port.host
     ports_: port.port
   httpx:

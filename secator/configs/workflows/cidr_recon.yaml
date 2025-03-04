@@ -13,6 +13,7 @@ tasks:
     targets_: ip.ip
   naabu:
     description: Scan alive IPs' ports
+    skip_host_discovery: True
     targets_:
     - type: ip
       field: ip
