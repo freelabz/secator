@@ -20,8 +20,8 @@ MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
 
 logger = logging.getLogger(__name__)
 
-# Replace direct client initialization with None
 _mongodb_client = None
+
 
 def get_mongodb_client():
 	"""Get or create MongoDB client"""
