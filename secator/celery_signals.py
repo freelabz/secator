@@ -17,7 +17,7 @@ def kill_worker():
 	""""Kill current worker using it's pid by sending a SIGTERM to Celery master process."""
 	worker_name = os.environ['WORKER_NAME']
 	if not TASK_IN_PROGRESS:
-		pid = os.getpid()
+		pid = os.getppid()
 		console.print(Info(message=f'Sending SIGTERM to worker {worker_name} with pid {pid}'))
 		os.kill(pid, signal.SIGTERM)
 	else:
