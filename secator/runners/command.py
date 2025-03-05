@@ -110,7 +110,7 @@ class Command(Runner):
 	proxy_http = False
 
 	# Profile
-	profile = 'cpu'
+	profile = 'io'
 
 	def __init__(self, inputs=[], **run_opts):
 

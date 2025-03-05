@@ -73,6 +73,8 @@ class Celery(StrictModel):
 	worker_max_tasks_per_child: int = 20
 	worker_prefetch_multiplier: int = 1
 	worker_send_task_events: bool = False
+	worker_kill_after_task: bool = False
+	worker_kill_after_idle_seconds: int = -1
 
 
 class Cli(StrictModel):
@@ -499,8 +501,8 @@ class Config(DotMap):
 					self.set(path, value, set_partial=False)
 					if not self.validate(print_errors=False) and print_errors:
 						console.print(f'[bold red]{var} (override failed)[/]')
-				elif print_errors:
-					console.print(f'[bold red]{var} (override failed: key not found)[/]')
+				# elif print_errors:
+				# 	console.print(f'[bold red]{var} (override failed: key not found)[/]')
 
 
 def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):

@@ -28,6 +28,7 @@ RUNNER_OPTS = {
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
 	'worker': {'is_flag': True, 'default': False, 'help': 'Run tasks in worker'},
+	'no_poll': {'is_flag': True, 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
 	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},

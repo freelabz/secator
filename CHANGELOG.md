@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.0](https://github.com/freelabz/secator/compare/v0.9.4...v0.10.0) (2025-03-04)
+
+
+### Features
+
+* **celery:** add single pool job processing options ([#558](https://github.com/freelabz/secator/issues/558)) ([cca9797](https://github.com/freelabz/secator/commit/cca9797339ed95c15ef42604ba9bf897a76da766))
+
+
+### Bug Fixes
+
+* add poll queue and re-route tasks to it when chunked ([#562](https://github.com/freelabz/secator/issues/562)) ([b9e7576](https://github.com/freelabz/secator/commit/b9e7576dcd46db0e95df09dc8beafb762314cc39))
+* **config:** disable key not found error message (too verbose) ([#563](https://github.com/freelabz/secator/issues/563)) ([3b044da](https://github.com/freelabz/secator/commit/3b044da14f3e399e03e10c97566a25e858e7e7d6))
+* **katana:** add -no-sandbox option ([#566](https://github.com/freelabz/secator/issues/566)) ([50cf2fe](https://github.com/freelabz/secator/commit/50cf2fef5eaa1b7cf67c691360e3349b7bf7bfbe))
+* mongodb document bug ([#564](https://github.com/freelabz/secator/issues/564)) ([29c6af4](https://github.com/freelabz/secator/commit/29c6af4f3a2a49ac973f7193ca334f56e7b178d5))
+* reset nuclei input chunk size ([#561](https://github.com/freelabz/secator/issues/561)) ([683b9ef](https://github.com/freelabz/secator/commit/683b9efb28d2425961e2e64c31b9af5cb07c0923))
+
 ## [0.9.4](https://github.com/freelabz/secator/compare/v0.9.3...v0.9.4) (2025-02-25)
 
 
