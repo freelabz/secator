@@ -38,7 +38,7 @@ class IdleTimer:
 
 	def cancel(self):
 		self.thread.cancel()
-		self.s_started = False
+		self.is_started = False
 
 
 IDLE_TIMER = IdleTimer(IDLE_TIMEOUT)
