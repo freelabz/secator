@@ -34,6 +34,17 @@ def clear_task_running():
         lock_file.unlink()
 
 
+def kill_worker():
+	""""Kill current worker using it's pid by sending a SIGTERM to Celery master process."""
+	worker_name = os.environ['WORKER_NAME']
+	if not TASK_IN_PROGRESS:
+		pid = os.getppid()
+		console.print(Info(message=f'Sending SIGTERM to worker {worker_name} with pid {pid}'))
+		os.kill(pid, signal.SIGTERM)
+	else:
+		console.print(Info(message=f'Cancelling worker shutdown of {worker_name} since a task is currently in progress'))
+
+
 def is_task_running():
     """Check if a task is currently running"""
     return get_lock_file_path().exists()
