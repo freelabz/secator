@@ -772,6 +772,8 @@ def process_wordlist(val):
 	template_wordlist = getattr(CONFIG.wordlists.templates, val)
 	if template_wordlist:
 		return template_wordlist
+	elif Path(val).exists():
+		return val
 	else:
 		return download_file(
 			val,

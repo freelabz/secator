@@ -20,11 +20,19 @@ MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
 
 logger = logging.getLogger(__name__)
 
-client = pymongo.MongoClient(
-	escape_mongodb_url(MONGODB_URL),
-	maxPoolSize=MONGODB_MAX_POOL_SIZE,
-	serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT
-)
+_mongodb_client = None
+
+
+def get_mongodb_client():
+	"""Get or create MongoDB client"""
+	global _mongodb_client
+	if _mongodb_client is None:
+		_mongodb_client = pymongo.MongoClient(
+			escape_mongodb_url(MONGODB_URL),
+			maxPoolSize=MONGODB_MAX_POOL_SIZE,
+			serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT
+		)
+	return _mongodb_client
 
 
 def get_runner_dbg(runner):
@@ -39,6 +47,7 @@ def get_runner_dbg(runner):
 
 
 def update_runner(self):
+	client = get_mongodb_client()
 	db = client.main
 	type = self.config.type
 	collection = f'{type}s'
@@ -72,6 +81,7 @@ def update_finding(self, item):
 	if type(item) not in FINDING_TYPES:
 		return item
 	start_time = time.time()
+	client = get_mongodb_client()
 	db = client.main
 	update = item.toDict()
 	_type = item._type
@@ -132,6 +142,7 @@ def tag_duplicates(ws_id: str = None):
 	Args:
 		ws_id (str): Workspace id.
 	"""
+	client = get_mongodb_client()
 	db = client.main
 	workspace_query = list(
 		db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': True}).sort('_timestamp', -1))
