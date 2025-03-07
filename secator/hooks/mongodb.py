@@ -242,6 +242,6 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, find_duplicates]
+		'on_end': [update_runner]
 	}
 }
