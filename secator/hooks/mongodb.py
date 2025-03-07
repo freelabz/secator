@@ -111,11 +111,9 @@ def find_duplicates(self):
 	if not ws_id:
 		return
 	if self.sync:
-		debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
 		tag_duplicates(ws_id)
 	else:
-		celery_id = tag_duplicates.delay(ws_id)
-		debug(f'running duplicate check on workspace {ws_id}', id=celery_id, sub='hooks.mongodb')
+		tag_duplicates.delay(ws_id)
 
 
 def load_finding(obj):
@@ -142,6 +140,7 @@ def tag_duplicates(ws_id: str = None):
 	Args:
 		ws_id (str): Workspace id.
 	"""
+	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
 	client = get_mongodb_client()
 	db = client.main
 	workspace_query = list(
