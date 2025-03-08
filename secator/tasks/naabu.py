@@ -48,7 +48,7 @@ class naabu(ReconPort):
 	}
 	output_types = [Port]
 	install_cmd = 'go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@v2.3.3'
-	install_github_handle = 'projectdiscovery/naabu'
+	# install_github_handle = 'projectdiscovery/naabu'
 	install_pre = {'apt': ['libpcap-dev'], 'apk': ['libpcap-dev', 'libc6-compat'], 'pacman|brew': ['libpcap']}
 	install_post = {'arch|alpine': 'sudo ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8'}
 	proxychains = False

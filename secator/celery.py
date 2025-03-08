@@ -7,7 +7,7 @@ import uuid
 
 from time import time
 
-from celery import Celery, chain, chord
+from celery import Celery, chord
 from celery.app import trace
 
 from rich.logging import RichHandler
@@ -15,10 +15,9 @@ from retry import retry
 
 from secator.celery_signals import setup_handlers
 from secator.config import CONFIG
-from secator.output_types import Info, Error
+from secator.output_types import Info
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import run_extractors
 from secator.utils import (debug, deduplicate, flatten, should_update)
 
 IN_CELERY_WORKER_PROCESS = sys.argv and ('secator.celery.app' in sys.argv or 'worker' in sys.argv)
