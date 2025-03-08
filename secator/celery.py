@@ -103,7 +103,7 @@ if IN_CELERY_WORKER_PROCESS:
 @retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
-	if task.sync:
+	if not IN_CELERY_WORKER_PROCESS:
 		return
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
@@ -116,6 +116,7 @@ def update_state(celery_task, task, force=False):
 		obj_after=False,
 		verbose=True
 	)
+	print(task.celery_state)
 	return celery_task.update_state(
 		state='RUNNING',
 		meta=task.celery_state
@@ -137,6 +138,16 @@ def revoke_task(task_id, task_name=None):
 
 def chunker(seq, size):
 	return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
+
+@app.task(bind=True)
+def handle_runner_error(self, results, runner):
+	"""Handle errors in Celery workflows (chunked tasks or runners)."""
+	results = forward_results(results)
+	runner.results = results
+	runner.log_results()
+	runner.run_hooks('on_end')
+	return runner.results
 
 
 def break_task(task, task_opts, targets, results=[], chunk_size=1):
@@ -167,7 +178,8 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 		task_id = str(uuid.uuid4())
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
-		sig = type(task).s(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
+		opts['results'] = results
+		sig = type(task).si(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
 		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
@@ -175,20 +187,11 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 		sigs.append(sig)
 
 	# Build Celery workflow
-	workflow = chain(
-		forward_results.s(results).set(queue='results'),
-		chord(
-			tuple(sigs),
-			forward_results.s().set(queue='results'),
-		)
+	workflow = chord(
+		tuple(sigs),
+		handle_runner_error.s(runner=task).set(queue='results')
 	)
 	return workflow
-	# if task.sync:
-	# 	task.print_item = False
-	# 	task.results = workflow.apply().get()
-	# else:
-	# 	result = workflow.apply_async()
-	# 	task.celery_result = result
 
 
 @app.task(bind=True)
@@ -220,122 +223,41 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
-	task_cls = Task.get_task_class(name)
+	if IN_CELERY_WORKER_PROCESS:
+		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True})
+		routing_key = self.request.delivery_info['routing_key']
+		console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
+
+	# Flatten + dedupe + filter results
+	results = forward_results(results)
+
+	# Set Celery request id in context
+	context = opts.get('context', {})
+	context['celery_id'] = self.request.id
+	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
+	opts['context'] = context
+	opts['results'] = results
+	opts['sync'] = True
+
+	# Initialize task
 	sync = not IN_CELERY_WORKER_PROCESS
+	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
+	update_state(self, task, force=True)
+
+	# Chunk task if needed
 	if task_cls.needs_chunking(targets, sync):
 		console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
 		return self.replace(break_task(task, opts, targets, results=results))
-	return task.run()
 
+	# Update state live
+	[update_state(self, task) for _ in task]
+	update_state(self, task, force=True)
 
-# @app.task(bind=True)
-# def run_command(self, results, name, targets, opts={}):
-# 	chunk = opts.get('chunk')
-# 	sync = opts.get('sync', True)
+	# Garbage collection to save RAM
+	gc.collect()
 
-# 	# Set Celery request id in context
-# 	context = opts.get('context', {})
-# 	context['celery_id'] = self.request.id
-# 	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
-# 	opts['context'] = context
-# 	opts['print_remote_info'] = False
-# 	opts['results'] = results
-
-# 	# If we are in a Celery worker, print everything, always
-# 	if IN_CELERY_WORKER_PROCESS:
-# 		opts.update({
-# 			'print_item': True,
-# 			'print_line': True,
-# 			'print_cmd': True
-# 		})
-# 		routing_key = self.request.delivery_info['routing_key']
-# 		console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
-
-# 	# Flatten + dedupe results
-# 	results = flatten(results)
-# 	results = deduplicate(results, attr='_uuid')
-
-# 	# Get expanded targets
-# 	if not chunk and results:
-# 		targets, opts = run_extractors(results, opts, targets)
-# 		debug('after extractors', obj={'targets': targets, 'opts': opts}, sub='celery.state')
-
-# 	task = None
-
-# 	try:
-
-# 		# Get task class
-# 		task_cls = Task.get_task_class(name)
-
-# 		# Check if chunkable
-# 		many_targets = len(targets) > 1
-# 		targets_over_chunk_size = task_cls.input_chunk_size and len(targets) > task_cls.input_chunk_size
-# 		has_file_flag = task_cls.file_flag is not None
-# 		chunk_it = (sync and many_targets and not has_file_flag) or (not sync and many_targets and targets_over_chunk_size)
-# 		task_opts = opts.copy()
-# 		task_opts.update({
-# 			'print_remote_info': False,
-# 			'has_children': chunk_it,
-# 		})
-
-# 		if IN_CELERY_WORKER_PROCESS and chunk_it and routing_key != 'poll':
-# 			console.print(Info(message=f'Task {name} is chunkable but not running on "poll" queue, re-routing to "poll" queue'))
-# 			raise self.replace(run_command.si(results, name, targets, opts=opts).set(queue='poll', task_id=self.request.id))
-
-# 		if chunk_it:
-# 			task_opts['print_cmd'] = False
-
-# 		task = task_cls(targets, **task_opts)
-# 		debug(
-# 			'',
-# 			obj={
-# 				f'{task.unique_name}': 'CHUNK STATUS',
-# 				'chunk_it': chunk_it,
-# 				'sync': task.sync,
-# 				'many_targets': many_targets,
-# 				'targets_over_chunk_size': targets_over_chunk_size,
-# 			},
-# 			obj_after=False,
-# 			id=self.request.id,
-# 			sub='celery.state',
-# 			verbose=True
-# 		)
-
-# 		# Chunk task if needed
-# 		if chunk_it:
-# 			chunk_size = task_cls.input_chunk_size if has_file_flag else 1
-# 			break_task(
-# 				task,
-# 				opts,
-# 				targets,
-# 				results=results,
-# 				chunk_size=chunk_size)
-# 			console.print(Info(message=f'Task "{name}" starts polling for chunked results'))
-
-# 		# Update state before starting
-# 		update_state(self, task)
-
-# 		# Update state for each item found
-# 		for _ in task:
-# 			update_state(self, task)
-
-# 	except BaseException as e:
-# 		if not task:
-# 			raise e
-# 		error = Error.from_exception(e)
-# 		error._source = task.unique_name
-# 		error._uuid = str(uuid.uuid4())
-# 		task.add_result(error, print=True)
-# 		task.stop_celery_tasks()
-
-# 	finally:
-# 		if not task:
-# 			raise
-# 		update_state(self, task, force=True)
-# 		gc.collect()
-# 		debug('', obj={task.unique_name: task.status, 'results': task.results}, sub='celery.results', verbose=True)
-# 		return task.results
+	return task.results
 
 
 @app.task
@@ -348,6 +270,7 @@ def forward_results(results):
 		results = results['results']
 	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
+	console.print(Info(message=f'Forwarding {len(results)} results ...'))
 	return results
 
 #--------------#

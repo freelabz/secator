@@ -25,7 +25,7 @@ class Error(OutputType):
 		message = errtype
 		if str(e):
 			message += f': {str(e)}'
-		traceback = traceback_as_string(e) if errtype != 'KeyboardInterrupt' else ''
+		traceback = traceback_as_string(e) if errtype not in ['KeyboardInterrupt', 'GreenletExit'] else ''
 		error = Error(message=message, traceback=traceback, **kwargs)
 		return error
 

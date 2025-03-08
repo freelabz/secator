@@ -15,7 +15,7 @@ from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_folder_id, process_extractor)
+from secator.runners._helpers import (get_task_folder_id, process_extractor, run_extractors)
 from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi, should_update)
 
 logger = logging.getLogger(__name__)
@@ -69,15 +69,14 @@ class Runner:
 	reports_folder = None
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
+		self.uuids = []
+		self.results = []
+		self.output = ''
+
+		# Runner config
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
-		if not isinstance(inputs, list):
-			inputs = [inputs]
-		self.inputs = inputs
-		self.uuids = []
-		self.output = ''
-		self.results = []
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
@@ -97,6 +96,39 @@ class Runner:
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
 		self.no_poll = self.run_opts.get('no_poll', False)
+		self.quiet = self.run_opts.get('quiet', False)
+
+		# Runner process options
+		self.no_process = self.run_opts.get('no_process', False)
+		self.piped_input = self.run_opts.get('piped_input', False)
+		self.piped_output = self.run_opts.get('piped_output', False)
+		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
+
+		# Runner print opts
+		self.print_item = self.run_opts.get('print_item', False)
+		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
+		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
+		self.print_json = self.run_opts.get('print_json', False)
+		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
+		self.print_fmt = self.run_opts.get('fmt', '')
+		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
+		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
+		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
+		self.raise_on_error = self.run_opts.get('raise_on_error', False)
+		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
+
+		# Determine inputs
+		inputs = [inputs] if not isinstance(inputs, list) else inputs
+		if results:
+			inputs, run_opts, errors = run_extractors(results, run_opts, inputs)
+			for error in errors:
+				self.add_result(error, print=True)
+		self.inputs = inputs
+
+		# Debug
+		self.debug('Inputs', obj=self.inputs, sub='init')
+		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
+		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -122,31 +154,6 @@ class Runner:
 			except RuntimeError:
 				self.enable_profiler = False
 				pass
-
-		# Process opts
-		self.quiet = self.run_opts.get('quiet', False)
-		self.no_process = self.run_opts.get('no_process', False)
-		self.piped_input = self.run_opts.get('piped_input', False)
-		self.piped_output = self.run_opts.get('piped_output', False)
-		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
-
-		# Print opts
-		self.print_item = self.run_opts.get('print_item', False)
-		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
-		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
-		self.print_json = self.run_opts.get('print_json', False)
-		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
-		self.print_fmt = self.run_opts.get('fmt', '')
-		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
-		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
-		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
-		self.raise_on_error = self.run_opts.get('raise_on_error', False)
-		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
-
-		# Debug
-		self.debug('Inputs', obj=self.inputs, sub='init')
-		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
-		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
 
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
@@ -220,6 +227,12 @@ class Runner:
 		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES)) if r._source.startswith(self.unique_name)]
 
 	@property
+	def self_errors(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
+		return [r for r in self.results if isinstance(r, Error)]
+
+	@property
 	def self_findings_count(self):
 		return len(self.self_findings)
 
@@ -227,7 +240,7 @@ class Runner:
 	def status(self):
 		if not self.done:
 			return 'RUNNING'
-		return 'FAILURE' if len(self.errors) > 0 else 'SUCCESS'
+		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
 
 	@property
 	def celery_state(self):
