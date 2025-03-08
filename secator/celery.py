@@ -115,7 +115,6 @@ def update_state(celery_task, task, force=False):
 		obj_after=False,
 		verbose=True
 	)
-	print(task.celery_state)
 	return celery_task.update_state(
 		state='RUNNING',
 		meta=task.celery_state
