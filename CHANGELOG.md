@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.1](https://github.com/freelabz/secator/compare/v0.10.0...v0.10.1) (2025-03-08)
+
+
+### Bug Fixes
+
+* **celery:** kill worker in solo mode ([#568](https://github.com/freelabz/secator/issues/568)) ([c2fd107](https://github.com/freelabz/secator/commit/c2fd107ea1c4248c3eba518dfdc6d777eff8ef15))
+* thread is_started ([9b6c6bb](https://github.com/freelabz/secator/commit/9b6c6bb244a3434db3d398160918bc807288a9ad))
+* wordlist not loaded when local path is provided ([#572](https://github.com/freelabz/secator/issues/572)) ([ef071a9](https://github.com/freelabz/secator/commit/ef071a9aa430220b5cfe0dcb5db271512339a140))
+
 ## [0.10.0](https://github.com/freelabz/secator/compare/v0.9.4...v0.10.0) (2025-03-04)
 
 
