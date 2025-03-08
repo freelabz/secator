@@ -171,7 +171,8 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
 
-	Command.execute(cmd, name='secator_worker')
+	ret = Command.execute(cmd, name='secator_worker')
+	sys.exit(ret.return_code)
 
 
 #-------#
