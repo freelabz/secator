@@ -525,7 +525,7 @@ class Runner:
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks.db', verbose=True)  # noqa: E501
+					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 					return
 				if not self.enable_hooks or self.no_process:
 					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501

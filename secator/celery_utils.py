@@ -264,5 +264,5 @@ class CeleryData(object):
 				CeleryData.get_task_ids(result.parent, ids=ids)
 
 		except kombu.exceptions.DecodeError:
-			debug('kombu decode error', sub='celery.data.get_task_ids')
+			debug('kombu decode error', sub='celery.data')
 			return
