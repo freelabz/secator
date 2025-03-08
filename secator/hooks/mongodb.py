@@ -107,10 +107,11 @@ def update_finding(self, item):
 
 
 def find_duplicates(self):
+	from secator.celery import IN_CELERY_WORKER_PROCESS
 	ws_id = self.toDict().get('context', {}).get('workspace_id')
 	if not ws_id:
 		return
-	if self.sync:
+	if not IN_CELERY_WORKER_PROCESS:
 		tag_duplicates(ws_id)
 	else:
 		tag_duplicates.delay(ws_id)
@@ -182,19 +183,19 @@ def tag_duplicates(ws_id: str = None):
 				'seen dupes': len(seen_dupes)
 			},
 			id=ws_id,
-			sub='hooks.mongodb.duplicates',
+			sub='hooks.mongodb',
 			verbose=True)
 		tmp_duplicates_ids = list(dict.fromkeys([i._uuid for i in tmp_duplicates]))
-		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
+		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb', verbose=True)
 
 		# Update latest object as non-duplicate
 		if tmp_duplicates:
 			duplicates.extend([f for f in tmp_duplicates])
 			db.findings.update_one({'_id': ObjectId(item._uuid)}, {'$set': {'_related': tmp_duplicates_ids}})
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
 			non_duplicates.append(item)
 		else:
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
 			non_duplicates.append(item)
 
 	# debug(f'found {len(duplicates)} total duplicates')
@@ -218,7 +219,7 @@ def tag_duplicates(ws_id: str = None):
 			'duplicates': len(duplicates_ids),
 			'non-duplicates': len(non_duplicates_ids)
 		},
-		sub='hooks.mongodb.duplicates')
+		sub='hooks.mongodb')
 
 
 HOOKS = {
