@@ -33,7 +33,7 @@ class Scan(Runner):
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			workflow = Workflow(
 				TemplateLoader(name=f'workflows/{name}'),
-				targets,
+				self.inputs,
 				results=[],
 				run_opts=opts,
 				hooks=self._hooks,
