@@ -21,10 +21,13 @@ class Error(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def from_exception(e, **kwargs):
-		message = type(e).__name__
+		errtype = type(e).__name__
+		message = errtype
 		if str(e):
 			message += f': {str(e)}'
-		return Error(message=message, traceback=traceback_as_string(e), **kwargs)
+		traceback = traceback_as_string(e) if errtype not in ['KeyboardInterrupt', 'GreenletExit'] else ''
+		error = Error(message=message, traceback=traceback, **kwargs)
+		return error
 
 	def __str__(self):
 		return self.message
