@@ -33,7 +33,7 @@ class Scan(Runner):
 			workflow = Workflow(
 				TemplateLoader(name=f'workflows/{name}'),
 				self.inputs,
-				results=[],
+				results=self.results,
 				run_opts=opts,
 				hooks=self._hooks,
 				context=self.context.copy())
