@@ -2,6 +2,7 @@ import fnmatch
 import inspect
 import importlib
 import itertools
+import json
 import logging
 import operator
 import os
@@ -771,6 +772,8 @@ def process_wordlist(val):
 	template_wordlist = getattr(CONFIG.wordlists.templates, val)
 	if template_wordlist:
 		return template_wordlist
+	elif Path(val).exists():
+		return val
 	else:
 		return download_file(
 			val,
@@ -778,3 +781,22 @@ def process_wordlist(val):
 			offline_mode=CONFIG.offline_mode,
 			type='wordlist'
 		)
+
+
+def convert_functions_to_strings(data):
+	"""Recursively convert functions to strings in a dict.
+
+	Args:
+		data (dict): Dictionary to convert.
+
+	Returns:
+		dict: Converted dictionary.
+	"""
+	if isinstance(data, dict):
+		return {k: convert_functions_to_strings(v) for k, v in data.items()}
+	elif isinstance(data, list):
+		return [convert_functions_to_strings(v) for v in data]
+	elif callable(data):
+		return json.dumps(data.__name__)  # or use inspect.getsource(data) if you want the actual function code
+	else:
+		return data

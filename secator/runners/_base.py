@@ -140,7 +140,7 @@ class Runner:
 		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
 		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
 		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
-		self.raise_on_error = self.run_opts.get('raise_on_error', not self.sync)
+		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
 		# Debug
@@ -166,7 +166,7 @@ class Runner:
 
 		# Process prior results
 		for result in results:
-			list(self._process_item(result, print=False))
+			list(self._process_item(result, print=False, output=False))
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -783,19 +783,20 @@ class Runner:
 				count_map[name] = count
 		return count_map
 
-	def _process_item(self, item, print=True):
+	def _process_item(self, item, print=True, output=True):
 		"""Process an item yielded by the derived runner.
 
 		Args:
 			item (dict | str): Input item.
 			print (bool): Print item in console.
+			output (bool): Add to runner output.
 
 		Yields:
 			OutputType: Output type.
 		"""
 		# Item is a string, just print it
 		if isinstance(item, str):
-			self.output += item + '\n'
+			self.output += item + '\n' if output else ''
 			self._print_item(item) if item and print else ''
 			return
 

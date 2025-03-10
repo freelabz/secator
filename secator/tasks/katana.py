@@ -30,7 +30,8 @@ class katana(HttpCrawler):
 		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': False, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
 		'known_files': {'type': str, 'short': 'kf', 'default': 'all', 'help': 'Enable crawling of known files (all, robotstxt, sitemapxml)'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
-		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'}
+		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'},
+		'no_sandbox': {'is_flag': True, 'short': 'ns', 'default': False, 'help': 'Disable sandboxing'},
 	}
 	opt_key_map = {
 		HEADER: 'headers',

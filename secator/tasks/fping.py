@@ -13,7 +13,6 @@ class fping(ReconIp):
 	cmd = 'fping -a'
 	file_flag = '-f'
 	input_flag = None
-	ignore_return_code = True
 	opt_prefix = '--'
 	opt_key_map = {
 		DELAY: 'period',

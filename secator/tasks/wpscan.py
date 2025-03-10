@@ -83,7 +83,6 @@ class wpscan(VulnHttp):
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	ignore_return_code = True
 	profile = 'io'
 
 	@staticmethod
