@@ -117,9 +117,17 @@ class Runner:
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
+		# Chunks
+		self.has_parent = self.run_opts.get('has_parent', False)
+		self.has_children = self.run_opts.get('has_children', False)
+		self.chunk = self.run_opts.get('chunk', None)
+		self.chunk_count = self.run_opts.get('chunk_count', None)
+		self.unique_name = self.name.replace('/', '_')
+		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
+
 		# Determine inputs
 		inputs = [inputs] if not isinstance(inputs, list) else inputs
-		if results:
+		if not self.chunk and results:
 			inputs, run_opts, errors = run_extractors(results, run_opts, inputs)
 			for error in errors:
 				self.add_result(error, print=True)
@@ -162,14 +170,6 @@ class Runner:
 		# Validators
 		self.validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
 		self.register_validators(validators)
-
-		# Chunks
-		self.has_parent = self.run_opts.get('has_parent', False)
-		self.has_children = self.run_opts.get('has_children', False)
-		self.chunk = self.run_opts.get('chunk', None)
-		self.chunk_count = self.run_opts.get('chunk_count', None)
-		self.unique_name = self.name.replace('/', '_')
-		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
 
 		# Process prior results
 		for result in results:

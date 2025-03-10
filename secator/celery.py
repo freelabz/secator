@@ -2,7 +2,6 @@ import gc
 import json
 import logging
 import os
-import sys
 import uuid
 
 from time import time
@@ -13,14 +12,13 @@ from celery.app import trace
 from rich.logging import RichHandler
 from retry import retry
 
-from secator.celery_signals import setup_handlers
+from secator.celery_signals import IN_CELERY_WORKER_PROCESS, setup_handlers
 from secator.config import CONFIG
 from secator.output_types import Info
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (debug, deduplicate, flatten, should_update)
 
-IN_CELERY_WORKER_PROCESS = sys.argv and ('secator.celery.app' in sys.argv or 'worker' in sys.argv)
 
 #---------#
 # Logging #
@@ -148,14 +146,14 @@ def handle_runner_error(self, results, runner):
 	return runner.results
 
 
-def break_task(task, task_opts, targets, results=[], chunk_size=1):
+def break_task(task, task_opts, results=[]):
 	"""Break a task into multiple of the same type."""
-	chunks = targets
-	if chunk_size > 1:
-		chunks = list(chunker(targets, chunk_size))
+	chunks = task.inputs
+	if task.input_chunk_size > 1:
+		chunks = list(chunker(task.inputs, task.input_chunk_size))
 	debug(
 		'',
-		obj={task.unique_name: 'CHUNKED', 'chunk_size': chunk_size, 'chunks': len(chunks), 'target_count': len(targets)},
+		obj={task.unique_name: 'CHUNKED', 'chunk_size': task.input_chunk_size, 'chunks': len(chunks), 'target_count': len(task.inputs)},  # noqa: E501
 		obj_after=False,
 		sub='celery.state',
 		verbose=True
@@ -196,6 +194,8 @@ def break_task(task, task_opts, targets, results=[], chunk_size=1):
 def run_task(self, args=[], kwargs={}):
 	print('run task')
 	console.print(Info(message=f'Running task {self.request.id}'))
+	if 'context' not in kwargs:
+		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
 	task = Task(*args, **kwargs)
 	task.run()
@@ -204,6 +204,8 @@ def run_task(self, args=[], kwargs={}):
 @app.task(bind=True)
 def run_workflow(self, args=[], kwargs={}):
 	console.print(Info(message=f'Running workflow {self.request.id}'))
+	if 'context' not in kwargs:
+		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)
 	workflow.run()
@@ -244,9 +246,11 @@ def run_command(self, results, name, targets, opts={}):
 	update_state(self, task, force=True)
 
 	# Chunk task if needed
-	if task_cls.needs_chunking(targets, sync):
+	if task.needs_chunking(sync):
 		console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
-		return self.replace(break_task(task, opts, targets, results=results))
+		tasks = break_task(task, opts, results=results)
+		update_state(self, task, force=True)
+		return self.replace(tasks)
 
 	# Update state live
 	[update_state(self, task) for _ in task]
@@ -268,7 +272,8 @@ def forward_results(results):
 		results = results['results']
 	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
-	console.print(Info(message=f'Forwarding {len(results)} results ...'))
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Forwarding {len(results)} results ...'))
 	return results
 
 #--------------#
