@@ -16,7 +16,7 @@ from secator.tasks._categories import VulnHttp
 @task()
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
-	cmd = 'wpscan --random-user-agent --force --verbose'
+	cmd = 'wpscan --force --verbose'
 	file_flag = None
 	input_flag = '--url'
 	input_type = URL
@@ -30,7 +30,8 @@ class wpscan(VulnHttp):
 		'passwords': {'type': str, 'help': 'List of passwords to use during the password attack.'},
 		'usernames': {'type': str, 'help': 'List of usernames to use during the password attack.'},
 		'login_uri': {'type': str, 'short': 'lu', 'help': 'URI of the login page if different from /wp-login.php'},
-		'detection_mode': {'type': str, 'short': 'dm', 'help': 'Detection mode between mixed, passive, and aggressive'}
+		'detection_mode': {'type': str, 'short': 'dm', 'help': 'Detection mode between mixed, passive, and aggressive'},
+		'random_user_agent': {'is_flag': True, 'short': 'rua', 'help': 'Random user agent'}
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
