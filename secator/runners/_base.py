@@ -836,13 +836,13 @@ class Runner:
 		# Update item context
 		item._context.update(self.context)
 
-		# Return if already seen
-		if item._uuid in self.uuids:
-			return
-
 		# Add uuid to item
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
+
+		# Return if already seen
+		if item._uuid in self.uuids:
+			return
 
 		# Add source to item
 		if not item._source:
