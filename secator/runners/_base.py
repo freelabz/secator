@@ -125,10 +125,13 @@ class Runner:
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
 
+		# Add prior results to runner results
+		[self.add_result(result, print=False, output=False) for result in results]
+
 		# Determine inputs
 		inputs = [inputs] if not isinstance(inputs, list) else inputs
-		if not self.chunk and results:
-			inputs, run_opts, errors = run_extractors(results, run_opts, inputs)
+		if not self.chunk and self.results:
+			inputs, run_opts, errors = run_extractors(self.results, run_opts, inputs)
 			for error in errors:
 				self.add_result(error, print=True)
 		self.inputs = inputs
@@ -170,10 +173,6 @@ class Runner:
 		# Validators
 		self.validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
 		self.register_validators(validators)
-
-		# Process prior results
-		for result in results:
-			list(self._process_item(result, print=False, output=False))
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -326,16 +325,18 @@ class Runner:
 				self.add_result(error, print=True)
 				yield error
 
-	def add_result(self, item, print=False):
+	def add_result(self, item, print=False, output=True):
 		"""Add item to runner results.
 
 		Args:
 			item (OutputType): Item.
 			print (bool): Whether to print it or not.
+			output (bool): Whether to add it to the output or not.
 		"""
 		self.uuids.append(item._uuid)
 		self.results.append(item)
-		self.output += repr(item) + '\n'
+		if output:
+			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
 
