@@ -97,6 +97,7 @@ class Runner:
 		self.threads = []
 		self.no_poll = self.run_opts.get('no_poll', False)
 		self.quiet = self.run_opts.get('quiet', False)
+		self.started = False
 
 		# Runner process options
 		self.no_process = self.run_opts.get('no_process', False)
@@ -237,6 +238,8 @@ class Runner:
 
 	@property
 	def status(self):
+		if not self.started:
+			return 'PENDING'
 		if not self.done:
 			return 'RUNNING'
 		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
@@ -641,6 +644,7 @@ class Runner:
 
 	def log_start(self):
 		"""Log runner start."""
+		self.started = True
 		if not self.print_remote_info:
 			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
