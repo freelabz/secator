@@ -15,7 +15,7 @@ from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_folder_id, process_extractor)
+from secator.runners._helpers import (get_task_folder_id, process_extractor, run_extractors)
 from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi, should_update)
 
 logger = logging.getLogger(__name__)
@@ -69,15 +69,14 @@ class Runner:
 	reports_folder = None
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
+		self.uuids = []
+		self.results = []
+		self.output = ''
+
+		# Runner config
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
-		if not isinstance(inputs, list):
-			inputs = [inputs]
-		self.inputs = inputs
-		self.uuids = []
-		self.output = ''
-		self.results = []
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
@@ -97,6 +96,51 @@ class Runner:
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
 		self.no_poll = self.run_opts.get('no_poll', False)
+		self.quiet = self.run_opts.get('quiet', False)
+		self.started = False
+
+		# Runner process options
+		self.no_process = self.run_opts.get('no_process', False)
+		self.piped_input = self.run_opts.get('piped_input', False)
+		self.piped_output = self.run_opts.get('piped_output', False)
+		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
+
+		# Runner print opts
+		self.print_item = self.run_opts.get('print_item', False)
+		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
+		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
+		self.print_json = self.run_opts.get('print_json', False)
+		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
+		self.print_fmt = self.run_opts.get('fmt', '')
+		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
+		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
+		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
+		self.raise_on_error = self.run_opts.get('raise_on_error', False)
+		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
+
+		# Chunks
+		self.has_parent = self.run_opts.get('has_parent', False)
+		self.has_children = self.run_opts.get('has_children', False)
+		self.chunk = self.run_opts.get('chunk', None)
+		self.chunk_count = self.run_opts.get('chunk_count', None)
+		self.unique_name = self.name.replace('/', '_')
+		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
+
+		# Add prior results to runner results
+		[self.add_result(result, print=False, output=False) for result in results]
+
+		# Determine inputs
+		inputs = [inputs] if not isinstance(inputs, list) else inputs
+		if not self.chunk and self.results:
+			inputs, run_opts, errors = run_extractors(self.results, run_opts, inputs)
+			for error in errors:
+				self.add_result(error, print=True)
+		self.inputs = inputs
+
+		# Debug
+		self.debug('Inputs', obj=self.inputs, sub='init')
+		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
+		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -123,31 +167,6 @@ class Runner:
 				self.enable_profiler = False
 				pass
 
-		# Process opts
-		self.quiet = self.run_opts.get('quiet', False)
-		self.no_process = self.run_opts.get('no_process', False)
-		self.piped_input = self.run_opts.get('piped_input', False)
-		self.piped_output = self.run_opts.get('piped_output', False)
-		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
-
-		# Print opts
-		self.print_item = self.run_opts.get('print_item', False)
-		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
-		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
-		self.print_json = self.run_opts.get('print_json', False)
-		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
-		self.print_fmt = self.run_opts.get('fmt', '')
-		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
-		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
-		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
-		self.raise_on_error = self.run_opts.get('raise_on_error', False)
-		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
-
-		# Debug
-		self.debug('Inputs', obj=self.inputs, sub='init')
-		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
-		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
-
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.register_hooks(hooks)
@@ -155,18 +174,6 @@ class Runner:
 		# Validators
 		self.validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
 		self.register_validators(validators)
-
-		# Chunks
-		self.has_parent = self.run_opts.get('has_parent', False)
-		self.has_children = self.run_opts.get('has_children', False)
-		self.chunk = self.run_opts.get('chunk', None)
-		self.chunk_count = self.run_opts.get('chunk_count', None)
-		self.unique_name = self.name.replace('/', '_')
-		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
-
-		# Process prior results
-		for result in results:
-			list(self._process_item(result, print=False))
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -220,14 +227,22 @@ class Runner:
 		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES)) if r._source.startswith(self.unique_name)]
 
 	@property
+	def self_errors(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
+		return [r for r in self.results if isinstance(r, Error)]
+
+	@property
 	def self_findings_count(self):
 		return len(self.self_findings)
 
 	@property
 	def status(self):
+		if not self.started:
+			return 'PENDING'
 		if not self.done:
 			return 'RUNNING'
-		return 'FAILURE' if len(self.errors) > 0 else 'SUCCESS'
+		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
 
 	@property
 	def celery_state(self):
@@ -313,16 +328,18 @@ class Runner:
 				self.add_result(error, print=True)
 				yield error
 
-	def add_result(self, item, print=False):
+	def add_result(self, item, print=False, output=True):
 		"""Add item to runner results.
 
 		Args:
 			item (OutputType): Item.
 			print (bool): Whether to print it or not.
+			output (bool): Whether to add it to the output or not.
 		"""
 		self.uuids.append(item._uuid)
 		self.results.append(item)
-		self.output += repr(item) + '\n'
+		if output:
+			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
 
@@ -525,7 +542,7 @@ class Runner:
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks.db', verbose=True)  # noqa: E501
+					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 					return
 				if not self.enable_hooks or self.no_process:
 					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
@@ -627,6 +644,7 @@ class Runner:
 
 	def log_start(self):
 		"""Log runner start."""
+		self.started = True
 		if not self.print_remote_info:
 			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
@@ -783,19 +801,20 @@ class Runner:
 				count_map[name] = count
 		return count_map
 
-	def _process_item(self, item, print=True):
+	def _process_item(self, item, print=True, output=True):
 		"""Process an item yielded by the derived runner.
 
 		Args:
 			item (dict | str): Input item.
 			print (bool): Print item in console.
+			output (bool): Add to runner output.
 
 		Yields:
 			OutputType: Output type.
 		"""
 		# Item is a string, just print it
 		if isinstance(item, str):
-			self.output += item + '\n'
+			self.output += item + '\n' if output else ''
 			self._print_item(item) if item and print else ''
 			return
 
@@ -817,13 +836,13 @@ class Runner:
 		# Update item context
 		item._context.update(self.context)
 
-		# Return if already seen
-		if item._uuid in self.uuids:
-			return
-
 		# Add uuid to item
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
+
+		# Return if already seen
+		if item._uuid in self.uuids:
+			return
 
 		# Add source to item
 		if not item._source:

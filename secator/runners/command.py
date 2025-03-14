@@ -193,6 +193,13 @@ class Command(Runner):
 		})
 		return res
 
+	def needs_chunking(self, sync):
+		many_targets = len(self.inputs) > 1
+		targets_over_chunk_size = self.input_chunk_size and len(self.inputs) > self.input_chunk_size
+		has_file_flag = self.file_flag is not None
+		chunk_it = (sync and many_targets and not has_file_flag) or (not sync and many_targets and targets_over_chunk_size)
+		return chunk_it
+
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
@@ -858,6 +865,8 @@ class Command(Runner):
 				cmd = f'cat {fpath} | {cmd}'
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
+			else:
+				cmd += f' {fpath}'
 
 			self.inputs_path = fpath
 
