@@ -60,7 +60,8 @@ INPUTS_TASKS = {
 	USERNAME: 'test',
 	IP: '192.168.1.23',
 	CIDR_RANGE: '192.168.1.0/24',
-	EMAIL: 'fake@fake.com'
+	EMAIL: 'fake@fake.com',
+	'folder': '.'
 }
 
 #---------------------#
@@ -97,6 +98,7 @@ META_OPTS = {
 	'nmap.skip_host_discovery': True,
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
 	'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
+	'gitleaks_output_path': load_fixture('gitleaks_output', FIXTURES_DIR, only_path=True),
 	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True),
 	'nuclei.template_id': 'prometheus-metrics',
 	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
