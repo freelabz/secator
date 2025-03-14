@@ -1,5 +1,6 @@
 import os
 import signal
+import sys
 import threading
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from secator.output_types import Info
 from secator.rich import console
 
 IDLE_TIMEOUT = CONFIG.celery.worker_kill_after_idle_seconds
+IN_CELERY_WORKER_PROCESS = sys.argv and ('secator.celery.app' in sys.argv or 'worker' in sys.argv)
 
 # File-based state management system
 STATE_DIR = Path("/tmp/celery_state")
