@@ -22,6 +22,7 @@ class dnsxbrute(ReconDns):
     opts = {
         WORDLIST: {'type': str, 'short': 'w', 'default': CONFIG.wordlists.defaults.dns, 'process': process_wordlist, 'help': 'Wordlist to use'},  # noqa: E501
         'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},
+        'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Use wildcard domain to exclude false positives'}
     }
     item_loaders = [JSONSerializer()]
     output_map = {

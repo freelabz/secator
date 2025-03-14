@@ -1,0 +1,26 @@
+type: workflow
+name: js_deobfuscate
+alias: jsdeobf
+description: Deobfuscate Javascript
+tags: [http, crawl]
+input_types:
+  - url
+tasks:
+  httpx:
+  # deobfuscate:
+  #   description: Deminify + deobfuscate javascript containing .min.js
+  #   targets_:
+  #     type: url
+  #     field: url
+  #     condition: item.url.contains('.min.js')
+  # _group:
+  #   gf/email:
+  #     targets_:
+  #       type: local_file
+  #       field: content
+  #     pattern: email
+  #   gf/link:
+  #     targets_:
+  #       type: local_file
+  #       field: content
+  #     pattern: link
