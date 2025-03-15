@@ -4,8 +4,6 @@ from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
-from secator.celery_utils import CeleryData
-from secator.output_types import Info
 
 
 class Workflow(Runner):
@@ -17,65 +15,38 @@ class Workflow(Runner):
 		from secator.celery import run_workflow
 		return run_workflow.delay(args=args, kwargs=kwargs)
 
-	def yielder(self):
-		"""Run workflow.
+	@classmethod
+	def s(cls, *args, **kwargs):
+		from secator.celery import run_workflow
+		return run_workflow.s(args=args, kwargs=kwargs)
 
-		Yields:
-			secator.output_types.OutputType: Secator output type.
-		"""
-		# Task opts
-		run_opts = self.run_opts.copy()
-		run_opts['hooks'] = self._hooks.get(Task, {})
-		run_opts.pop('no_poll', False)
-
-		# Build Celery workflow
-		workflow = self.build_celery_workflow(
-			run_opts=run_opts,
-			results=self.results
-		)
-		self.celery_ids = list(self.celery_ids_map.keys())
-
-		# Run Celery workflow and get results
-		if self.sync:
-			self.print_item = False
-			results = workflow.apply().get()
-		else:
-			result = workflow()
-			self.celery_ids.append(str(result.id))
-			self.celery_result = result
-			yield Info(
-				message=f'Celery task created: {self.celery_result.id}',
-				task_id=self.celery_result.id
-			)
-			if self.no_poll:
-				return
-			results = CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
-			)
-
-		# Get workflow results
-		yield from results
-
-	def build_celery_workflow(self, run_opts={}, results=[]):
-		""""Build Celery workflow.
+	def build_celery_workflow(self):
+		"""Build Celery workflow for workflow execution.
 
 		Returns:
-			tuple(celery.chain, List[str]): Celery task chain, Celery task ids.
+			celery.Signature: Celery task signature.
 		"""
 		from celery import chain
-		from secator.celery import forward_results
+		from secator.celery import mark_runner_started, mark_runner_complete
+
+		# Prepare run options
+		opts = self.run_opts.copy()
+		opts['hooks'] = self._hooks.get(Task, {})
+		opts.pop('no_poll', False)
+
+		# Build task signatures
 		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
 			self.inputs,
 			self.config.options,
-			run_opts)
-		sigs = [forward_results.si(results).set(queue='results')] + sigs + [forward_results.s().set(queue='results')]
-		workflow = chain(*sigs)
-		return workflow
+			opts)
+
+		# Build workflow chain with lifecycle management
+		return chain(
+			mark_runner_started.si(self).set(queue='results'),
+			*sigs,
+			mark_runner_complete.s(self).set(queue='results'),
+		)
 
 	def get_tasks(self, config, inputs, workflow_opts, run_opts):
 		"""Get tasks recursively as Celery chains / chords.
