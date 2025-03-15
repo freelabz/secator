@@ -137,66 +137,12 @@ def chunker(seq, size):
 
 
 @app.task(bind=True)
-def handle_runner_error(self, results, runner):
-	"""Handle errors in Celery workflows (chunked tasks or runners)."""
-	results = forward_results(results)
-	runner.results = results
-	runner.log_results()
-	runner.run_hooks('on_end')
-	return runner.results
-
-
-def break_task(task, task_opts, results=[]):
-	"""Break a task into multiple of the same type."""
-	chunks = task.inputs
-	if task.input_chunk_size > 1:
-		chunks = list(chunker(task.inputs, task.input_chunk_size))
-	debug(
-		'',
-		obj={task.unique_name: 'CHUNKED', 'chunk_size': task.input_chunk_size, 'chunks': len(chunks), 'target_count': len(task.inputs)},  # noqa: E501
-		obj_after=False,
-		sub='celery.state',
-		verbose=True
-	)
-
-	# Clone opts
-	opts = task_opts.copy()
-
-	# Build signatures
-	sigs = []
-	task.ids_map = {}
-	for ix, chunk in enumerate(chunks):
-		if not isinstance(chunk, list):
-			chunk = [chunk]
-		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
-			opts['chunk'] = ix + 1
-			opts['chunk_count'] = len(chunks)
-		task_id = str(uuid.uuid4())
-		opts['has_parent'] = True
-		opts['enable_duplicate_check'] = False
-		opts['results'] = results
-		sig = type(task).si(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
-		full_name = f'{task.name}_{ix + 1}'
-		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
-		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
-		task.add_result(info)
-		sigs.append(sig)
-
-	# Build Celery workflow
-	workflow = chord(
-		tuple(sigs),
-		handle_runner_error.s(runner=task).set(queue='results')
-	)
-	return workflow
-
-
-@app.task(bind=True)
 def run_task(self, args=[], kwargs={}):
-	print('run task')
 	console.print(Info(message=f'Running task {self.request.id}'))
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
+	print("Task hooks: ", kwargs['hooks'])
 	task = Task(*args, **kwargs)
 	task.run()
 
@@ -243,11 +189,14 @@ def run_command(self, results, name, targets, opts={}):
 	sync = not IN_CELERY_WORKER_PROCESS
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
+	task.started = True
+	task.run_hooks('on_start')
 	update_state(self, task, force=True)
 
 	# Chunk task if needed
 	if task.needs_chunking(sync):
-		console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
+		if IN_CELERY_WORKER_PROCESS:
+			console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
 		tasks = break_task(task, opts, results=results)
 		update_state(self, task, force=True)
 		return self.replace(tasks)
@@ -276,6 +225,52 @@ def forward_results(results):
 		console.print(Info(message=f'Forwarding {len(results)} results ...'))
 	return results
 
+
+@app.task
+def mark_runner_started(runner):
+	"""Mark a runner as started and run on_start hooks.
+
+	Args:
+		runner (Runner): Secator runner instance
+
+	Returns:
+		list: Runner results
+	"""
+	runner.started = True
+	# runner.start_time = time()
+	runner.run_hooks('on_start')
+	return runner.results
+
+
+@app.task
+def mark_runner_complete(results, runner):
+	"""Mark a runner as completed and run on_end hooks.
+
+	Args:
+		results (list): Task results
+		runner (Runner): Secator runner instance
+
+	Returns:
+		list: Final results
+	"""
+	results = forward_results(results)
+
+	# If sync mode, don't update the runner as it's already done
+	if runner.sync:
+		return results
+
+	# Run final processing
+	runner.results = results
+	runner.done = True
+	runner.progress = 100
+	if not runner.no_process:
+		runner.mark_duplicates()
+		runner.results = runner.filter_results()
+	runner.log_results()
+	runner.run_hooks('on_end')
+	return runner.results
+
+
 #--------------#
 # Celery utils #
 #--------------#
@@ -290,3 +285,47 @@ def is_celery_worker_alive():
 	else:
 		console.print(Info(message='No Celery worker available, running locally'))
 	return result
+
+
+def break_task(task, task_opts, results=[]):
+	"""Break a task into multiple of the same type."""
+	chunks = task.inputs
+	if task.input_chunk_size > 1:
+		chunks = list(chunker(task.inputs, task.input_chunk_size))
+	debug(
+		'',
+		obj={task.unique_name: 'CHUNKED', 'chunk_size': task.input_chunk_size, 'chunks': len(chunks), 'target_count': len(task.inputs)},  # noqa: E501
+		obj_after=False,
+		sub='celery.state',
+		verbose=True
+	)
+
+	# Clone opts
+	opts = task_opts.copy()
+
+	# Build signatures
+	sigs = []
+	task.ids_map = {}
+	for ix, chunk in enumerate(chunks):
+		if not isinstance(chunk, list):
+			chunk = [chunk]
+		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
+			opts['chunk'] = ix + 1
+			opts['chunk_count'] = len(chunks)
+		task_id = str(uuid.uuid4())
+		opts['has_parent'] = True
+		opts['enable_duplicate_check'] = False
+		opts['results'] = results
+		sig = type(task).si(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
+		full_name = f'{task.name}_{ix + 1}'
+		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
+		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
+		task.add_result(info)
+		sigs.append(sig)
+
+	# Build Celery workflow
+	workflow = chord(
+		tuple(sigs),
+		mark_runner_complete.s(runner=task).set(queue='results')
+	)
+	return workflow

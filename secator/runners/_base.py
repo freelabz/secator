@@ -12,7 +12,7 @@ import humanize
 from secator.definitions import ADDONS_ENABLED
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
+from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, process_extractor, run_extractors)
@@ -285,11 +285,8 @@ class Runner:
 				self.run_hooks('on_end')
 				return
 
-			# Choose yielder
-			yielder = self.yielder_celery if self.celery_result else self.yielder
-
 			# Loop and process items
-			for item in yielder():
+			for item in self.yielder():
 				yield from self._process_item(item)
 				self.run_hooks('on_interval')
 
@@ -485,16 +482,52 @@ class Runner:
 					dupe = self.run_hooks('on_duplicate', dupe)
 
 	def yielder(self):
-		"""Yield results. Should be implemented by derived classes."""
-		raise NotImplementedError()
+		"""Base yielder implementation.
 
-	def yielder_celery(self):
-		"""Yield results from Celery result."""
-		yield from CeleryData.iter_results(
-			self.celery_result,
-			ids_map=self.celery_ids_map,
-			print_remote_info=False
-		)
+		This should be overridden by derived classes if they need custom behavior.
+		Otherwise, they can implement build_celery_workflow() and get standard behavior.
+
+		Yields:
+			secator.output_types.OutputType: Secator output type.
+		"""
+		# Build Celery workflow
+		workflow = self.build_celery_workflow()
+
+		# Run workflow and get results
+		if self.sync:
+			self.print_item = False
+			self.started = True
+			results = workflow.apply().get()
+			yield from results
+		else:
+			self.celery_result = workflow()
+			self.celery_ids.append(str(self.celery_result.id))
+			yield Info(
+				message=f'Celery task created: {self.celery_result.id}',
+				task_id=self.celery_result.id
+			)
+			if self.no_poll:
+				return
+			results = CeleryData.iter_results(
+				self.celery_result,
+				ids_map=self.celery_ids_map,
+				description=True,
+				print_remote_info=self.print_remote_info,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
+			)
+
+		# Yield results
+		yield from results
+
+	def build_celery_workflow(self):
+		"""Build Celery workflow.
+
+		This should be implemented by derived classes.
+
+		Returns:
+			celery.Signature: Celery task signature.
+		"""
+		raise NotImplementedError("Derived classes must implement build_celery_workflow()")
 
 	def toDict(self):
 		"""Dict representation of the runner."""
@@ -644,7 +677,6 @@ class Runner:
 
 	def log_start(self):
 		"""Log runner start."""
-		self.started = True
 		if not self.print_remote_info:
 			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
@@ -656,6 +688,7 @@ class Runner:
 		"""Log runner results."""
 		if self.no_poll:
 			return
+		self.started = True
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
@@ -848,8 +881,20 @@ class Runner:
 		if not item._source:
 			item._source = self.unique_name
 
+		# Check for state updates
+		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
+			self.debug(f'Updating runner state from Celery: {item.state}', sub='state')
+			if item.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
+				self.started = True
+				self.done = True
+			elif item.state in ['RUNNING']:
+				self.started = True
+			self.debug(f'Runner {self.unique_name} is {self.status} (started: {self.started}, done: {self.done})', sub='state')
+			self.last_updated_celery = item._timestamp
+			return
+
 		# If progress item, update runner progress
-		if isinstance(item, Progress) and item._source == self.unique_name:
+		elif isinstance(item, Progress) and item._source == self.unique_name:
 			self.progress = item.percent
 			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
 				return

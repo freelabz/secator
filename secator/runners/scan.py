@@ -1,10 +1,8 @@
 import logging
 
-from secator.template import TemplateLoader
 from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.workflow import Workflow
-from secator.output_types import Error
 from secator.utils import merge_opts
 
 logger = logging.getLogger(__name__)
@@ -19,25 +17,39 @@ class Scan(Runner):
 		from secator.celery import run_scan
 		return run_scan.delay(args=args, kwargs=kwargs)
 
-	def yielder(self):
-		"""Run scan.
+	def build_celery_workflow(self):
+		"""Build Celery workflow for scan execution.
 
-		Yields:
-			secator.output_types.OutputType: Secator output type.
+		Returns:
+			celery.Signature: Celery task signature.
 		"""
+		from celery import chain
+		from secator.celery import mark_runner_started, mark_runner_complete
+		from secator.template import TemplateLoader
+
 		scan_opts = self.config.options
-		self.print_item = False
+
+		# Build chain of workflows
+		sigs = []
 		for name, workflow_opts in self.config.workflows.items():
 			run_opts = self.run_opts.copy()
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
+			config = TemplateLoader(name=f'workflows/{name}')
 			workflow = Workflow(
-				TemplateLoader(name=f'workflows/{name}'),
+				config,
 				self.inputs,
 				results=self.results,
 				run_opts=opts,
 				hooks=self._hooks,
-				context=self.context.copy())
-			yield from workflow
-			if len(self.errors) > 0:
-				self.add_result(Error(message=f'Stopping scan since workflow {name} has errors'))
-				return
+				context=self.context.copy()
+			)
+			celery_workflow = workflow.build_celery_workflow()
+			for task_id, task_info in workflow.celery_ids_map.items():
+				self.add_subtask(task_id, task_info['name'], task_info['descr'])
+			sigs.append(celery_workflow)
+
+		return chain(
+			mark_runner_started.si(self).set(queue='results'),
+			*sigs,
+			mark_runner_complete.s(self).set(queue='results'),
+		)
