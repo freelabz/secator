@@ -142,7 +142,6 @@ def run_task(self, args=[], kwargs={}):
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
 	kwargs['context']['celery_id'] = self.request.id
-	print("Task hooks: ", kwargs['hooks'])
 	task = Task(*args, **kwargs)
 	task.run()
 
