@@ -322,6 +322,9 @@ def break_task(task, task_opts, results=[]):
 		task.add_result(info)
 		sigs.append(sig)
 
+	# Mark main task as async since it's being chunked
+	task.sync = False
+
 	# Build Celery workflow
 	workflow = chord(
 		tuple(sigs),
