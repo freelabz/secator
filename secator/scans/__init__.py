@@ -1,7 +1,6 @@
 from secator.cli import ALL_SCANS
+from secator.runners import Scan
 
-
-from secator.runners import  Scan
 
 class DynamicScan(Scan):
 	def __init__(self, config):
@@ -20,7 +19,7 @@ class DynamicScan(Scan):
 			run_opts=kwargs)
 		return self
 
-# Then, instead of creating a dynamic class, create an instance of DynamicWorkflow
+
 DYNAMIC_SCANS = {}
 for scan in ALL_SCANS:
 	instance = DynamicScan(scan)

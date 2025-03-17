@@ -1,7 +1,6 @@
 from secator.cli import ALL_WORKFLOWS
-
-
 from secator.runners import Workflow
+
 
 class DynamicWorkflow(Workflow):
 	def __init__(self, config):
@@ -20,7 +19,7 @@ class DynamicWorkflow(Workflow):
 			run_opts=kwargs)
 		return self
 
-# Then, instead of creating a dynamic class, create an instance of DynamicWorkflow
+
 DYNAMIC_WORKFLOWS = {}
 for workflow in ALL_WORKFLOWS:
 	instance = DynamicWorkflow(workflow)
