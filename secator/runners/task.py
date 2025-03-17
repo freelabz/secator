@@ -6,8 +6,8 @@ from celery import chain
 
 
 class Task(Runner):
+
 	default_exporters = CONFIG.tasks.exporters
-	enable_hooks = False
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
@@ -37,6 +37,7 @@ class Task(Runner):
 		# Set task output types
 		self.output_types = task_cls.output_types
 		self.enable_duplicate_check = False
+		self.enable_hooks = False
 
 		# Get hooks
 		hooks = self._hooks.get(Task, {})

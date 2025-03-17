@@ -15,8 +15,8 @@ from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_folder_id, process_extractor, run_extractors)
-from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi, should_update)
+from secator.runners._helpers import (get_task_folder_id, run_extractors)
+from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update)
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +281,8 @@ class Runner:
 			# If any errors happened during valid ation, exit
 			if self.errors:
 				yield from self.errors
+				if self.no_process:
+					return
 				self.log_results()
 				self.run_hooks('on_end')
 				return
@@ -303,14 +305,12 @@ class Runner:
 			yield from self.join_threads()
 			yield error
 
-		# Mark duplicates and filter results
-		if not self.no_process:
+		finally:
+			if self.no_process:
+				return
 			self.mark_duplicates()
-			self.results = self.filter_results()
-
-		# Finalize run
-		self.log_results()
-		self.run_hooks('on_end')
+			self.log_results()
+			self.run_hooks('on_end')
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""
@@ -507,6 +507,8 @@ class Runner:
 				task_id=self.celery_result.id
 			)
 			if self.no_poll:
+				self.enable_hooks = False
+				self.no_process = True
 				return
 			results = CeleryData.iter_results(
 				self.celery_result,
@@ -712,31 +714,6 @@ class Runner:
 		for task_id in self.celery_ids:
 			name = self.celery_ids_map.get(task_id, {}).get('full_name')
 			revoke_task(task_id, name)
-
-	def filter_results(self):
-		"""Filter runner results using extractors defined in config."""
-		extractors = self.config.results
-		results = []
-		if extractors:
-			# Keep results based on extractors
-			opts = merge_opts(self.config.options, self.run_opts)
-			for extractor in extractors:
-				tmp = process_extractor(self.results, extractor, ctx=opts)
-				results.extend(tmp)
-
-			# Keep the field types in results not specified in the extractors.
-			extract_fields = [e['type'] for e in extractors]
-			keep_fields = [
-				_type for _type in FINDING_TYPES
-				if _type not in extract_fields
-			]
-			results.extend([
-				item for item in self.results
-				if item._type in keep_fields
-			])
-		else:
-			results = self.results
-		return results
 
 	def _convert_item_schema(self, item):
 		"""Convert dict item to a secator output type.
