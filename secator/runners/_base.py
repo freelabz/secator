@@ -686,8 +686,6 @@ class Runner:
 
 	def log_results(self):
 		"""Log runner results."""
-		if self.no_poll:
-			return
 		self.started = True
 		self.done = True
 		self.progress = 100

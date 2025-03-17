@@ -260,8 +260,6 @@ def mark_runner_complete(results, runner):
 
 	# Run final processing
 	runner.results = results
-	runner.done = True
-	runner.progress = 100
 	if not runner.no_process:
 		runner.mark_duplicates()
 		runner.results = runner.filter_results()
