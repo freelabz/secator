@@ -30,14 +30,55 @@ class nmap(VulnMulti):
 	opt_prefix = '--'
 	output_types = [Port, Vulnerability, Exploit]
 	opts = {
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan'},
-		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [full, 100, 1000]'},
-		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
+		# Port specification and scan order
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (- to scan all)'},
+		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [100, 1000, full]'},
+
+		# Script scanning
+		SCRIPT: {'type': str, 'default': None, 'help': 'NSE scripts'},
+		'script_args': {'type': str, 'default': None, 'help': 'NSE script arguments (n1=v1,n2=v2,...)'},
+
+		# Host discovery
 		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
-		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Version detection'},
+
+		# Service and version detection
+		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Enable version detection (slow)'},
+		'detect_all': {'is_flag': True, 'short': 'A', 'default': False, 'help': 'Enable OS detection, version detection, script scanning, and traceroute on open ports'},
+		'detect_os': {'is_flag': True, 'short': 'O', 'default': False, 'help': 'Enable OS detection'},
+
+		# Scan techniques
 		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
 		'tcp_connect': {'is_flag': True, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
 		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan'},
+		'tcp_null_scan': {'is_flag': True, 'short': 'sN', 'default': False, 'help': 'TCP Null scan'},
+		'tcp_fin_scan': {'is_flag': True, 'short': 'sF', 'default': False, 'help': 'TCP FIN scan'},
+		'tcp_xmas_scan': {'is_flag': True, 'short': 'sX', 'default': False, 'help': 'TCP Xmas scan'},
+		'tcp_ack_scan': {'is_flag': True, 'short': 'sA', 'default': False, 'help': 'TCP ACK scan'},
+		'tcp_window_scan': {'is_flag': True, 'short': 'sW', 'default': False, 'help': 'TCP Window scan'},
+		'tcp_maimon_scan': {'is_flag': True, 'short': 'sM', 'default': False, 'help': 'TCP Maimon scan'},
+		'sctp_init_scan': {'is_flag': True, 'short': 'sY', 'default': False, 'help': 'SCTP Init scan'},
+		'sctp_cookie_echo_scan': {'is_flag': True, 'short': 'sZ', 'default': False, 'help': 'SCTP Cookie Echo scan'},
+		'ping_scan': {'is_flag': True, 'short': 'sn', 'default': False, 'help': 'Ping scan (disable port scan)'},
+		'ip_protocol_scan': {'type': str, 'short': 'sO', 'default': None, 'help': 'IP protocol scan'},
+		'script_scan': {'is_flag': True, 'short': 'sC', 'default': False, 'help': 'Enable default scanning'},
+		'zombie_host': {'type': str, 'short': 'sI', 'default': None, 'help': 'Use a zombie host for idle scan'},
+		'ftp_relay_host': {'type': str, 'short': 'sB', 'default': None, 'help': 'FTP bounce scan relay host'},
+
+		# Firewall / IDS evasion and spoofing
+		'spoof_source_port': {'type': int, 'short': 'g', 'default': None, 'help': 'Send packets from a specific port'},
+		'spoof_source_ip': {'type': str, 'short': 'S', 'default': None, 'help': 'Spoof source IP address'},
+		'spoof_source_mac': {'type': str, 'short': 'spoofmac', 'default': None, 'help': 'Spoof MAC address'},
+		'fragment': {'is_flag': True, 'short': 'fragment', 'default': False, 'help': 'Fragment packets'},
+		'mtu': {'type': int, 'short': 'mtu', 'default': None, 'help': 'Fragment packets with given MTU'},
+		'ttl': {'type': int, 'short': 'ttl', 'default': None, 'help': 'Set TTL'},
+		'badsum': {'is_flag': True, 'short': 'badsum', 'default': False, 'help': 'Create a bad checksum in the TCP header'},
+		'ipv6': {'is_flag': True, 'short': 'ipv6', 'default': False, 'help': 'Enable IPv6 scanning'},
+
+		# Host discovery
+		'traceroute': {'is_flag': True, 'short': 'traceroute', 'default': False, 'help': 'Traceroute'},
+		'disable_arp_ping': {'is_flag': True, 'short': 'disable-arp-ping', 'default': False, 'help': 'Disable ARP ping'},
+
+		# Misc
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
 	}
 	opt_key_map = {
@@ -55,9 +96,34 @@ class nmap(VulnMulti):
 		PORTS: '-p',
 		'skip_host_discovery': '-Pn',
 		'version_detection': '-sV',
-		'tcp_connect': '-sT',
+		'detect_all': '-A',
+		'detect_os': '-O',
 		'tcp_syn_stealth': '-sS',
+		'tcp_connect': '-sT',
+		'tcp_window_scan': '-sW',
+		'tcp_maimon_scan': '-sM',
 		'udp_scan': '-sU',
+		'tcp_null_scan': '-sN',
+		'tcp_fin_scan': '-sF',
+		'tcp_xmas_scan': '-sX',
+		'tcp_ack_scan': '-sA',
+		'sctp_init_scan': '-sY',
+		'sctp_cookie_echo_scan': '-sZ',
+		'ping_scan': '-sn',
+		'ip_protocol_scan': '-sO',
+		'script_scan': '-sC',
+		'zombie_host': '-sI',
+		'ftp_relay_host': '-b',
+		'spoof_source_port': '-g',
+		'spoof_source_ip': '-S',
+		'spoof_source_mac': '--spoof-mac',
+		'fragmentation': '-f',
+		'mtu': '--mtu',
+		'ttl': '--ttl',
+		'badsum': '--badsum',
+		'ipv6': '-6',
+		'traceroute': '--traceroute',
+		'disable_arp_ping': '--disable-arp-ping',
 		'output_path': '-oX',
 	}
 	opt_value_map = {
