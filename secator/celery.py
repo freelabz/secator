@@ -238,7 +238,6 @@ def mark_runner_started(runner):
 	if IN_CELERY_WORKER_PROCESS:
 		console.print(Info(message=f'Marking runner {runner.unique_name} as started'))
 	runner.started = True
-	# runner.start_time = time()
 	runner.run_hooks('on_start')
 	return runner.results
 
@@ -266,8 +265,6 @@ def mark_runner_complete(results, runner):
 
 	# Run final processing
 	runner.results = results
-	# if not runner.no_process:
-		# runner.mark_duplicates()
 	runner.log_results()
 	runner.run_hooks('on_end')
 	return runner.results
