@@ -220,8 +220,6 @@ def forward_results(results):
 		results = results['results']
 	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
-	if IN_CELERY_WORKER_PROCESS:
-		console.print(Info(message=f'Forwarding {len(results)} results ...'))
 	return results
 
 
