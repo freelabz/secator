@@ -150,12 +150,15 @@ class TestCelery(unittest.TestCase):
 			return
 
 		size = CONFIG.runners.input_chunk_size + 1
-		targets = [URL_TARGETS[0]] * size
+		import uuid
+		targets = []
+		for _ in range(size):
+			targets.append(URL_TARGETS[0] + '?id=' + str(uuid.uuid4()))
 		result = httpx.delay(targets)
 		results = result.get()
 		urls = [r.url for r in results if r._type == 'url']
 		infos = [r.message for r in results if r._type == 'info']
-		self.assertEqual(len(urls), 2)  # same URL, but twice because 2 chunks and same input
+		self.assertEqual(len(urls), size)  # same URL, but twice because 2 chunks and same input
 		# self.assertEqual(len(infos), 2) # one chunk message for each chunk
 		# for message in infos:
 			# self.assertIn('Celery chunked task created', message)
