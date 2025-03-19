@@ -76,7 +76,7 @@ jobs:
 
     - name: Tag image with 'latest'
       run: docker tag freelabz/secator:${VERSION} freelabz/secator:latest
-      if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') }}
+      if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'a') && !contains(github.ref, 'b') }}
 
     - name: Push Docker images
       run: |
@@ -85,5 +85,5 @@ jobs:
 
     - name: Push Docker image 'latest'
       run: docker push freelabz/secator:latest
-      if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') }}
+      if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'a') && !contains(github.ref, 'b') }}
 
