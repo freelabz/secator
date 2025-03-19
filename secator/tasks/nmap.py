@@ -43,7 +43,7 @@ class nmap(VulnMulti):
 
 		# Service and version detection
 		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Enable version detection (slow)'},
-		'detect_all': {'is_flag': True, 'short': 'A', 'default': False, 'help': 'Enable OS detection, version detection, script scanning, and traceroute on open ports'},
+		'detect_all': {'is_flag': True, 'short': 'A', 'default': False, 'help': 'Enable OS detection, version detection, script scanning, and traceroute on open ports'},  # noqa: E501
 		'detect_os': {'is_flag': True, 'short': 'O', 'default': False, 'help': 'Enable OS detection'},
 
 		# Scan techniques
