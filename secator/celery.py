@@ -266,8 +266,8 @@ def mark_runner_complete(results, runner):
 
 	# Run final processing
 	runner.results = results
-	if not runner.no_process:
-		runner.mark_duplicates()
+	# if not runner.no_process:
+		# runner.mark_duplicates()
 	runner.log_results()
 	runner.run_hooks('on_end')
 	return runner.results
