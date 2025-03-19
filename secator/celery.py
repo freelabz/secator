@@ -235,6 +235,8 @@ def mark_runner_started(runner):
 	Returns:
 		list: Runner results
 	"""
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Marking runner {runner.unique_name} as started'))
 	runner.started = True
 	# runner.start_time = time()
 	runner.run_hooks('on_start')
@@ -252,10 +254,14 @@ def mark_runner_complete(results, runner):
 	Returns:
 		list: Final results
 	"""
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Marking runner {runner.unique_name} as completed'))
 	results = forward_results(results)
 
 	# If sync mode, don't update the runner as it's already done
 	if runner.sync:
+		if IN_CELERY_WORKER_PROCESS:
+			console.print(Info(message=f'Runner {runner.unique_name} is in sync mode, skipping final processing'))
 		return results
 
 	# Run final processing
