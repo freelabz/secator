@@ -135,7 +135,7 @@ class Runner:
 			inputs, run_opts, errors = run_extractors(self.results, run_opts, inputs)
 			for error in errors:
 				self.add_result(error, print=True)
-		self.inputs = inputs
+		self.inputs = list(set(inputs))
 
 		# Debug
 		self.debug('Inputs', obj=self.inputs, sub='init')
@@ -864,7 +864,7 @@ class Runner:
 				self.done = True
 			elif item.state in ['RUNNING']:
 				self.started = True
-			self.debug(f'Runner {self.unique_name} is {self.status} (started: {self.started}, done: {self.done})', sub='state')
+			# self.debug(f'Runner {self.unique_name} is {self.status} (started: {self.started}, done: {self.done})', sub='state')
 			self.last_updated_celery = item._timestamp
 			return
 
