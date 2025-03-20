@@ -50,9 +50,7 @@ class Task(Runner):
 		task_id = str(uuid.uuid4())
 		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=task_cls.profile, task_id=task_id)
 		self.add_subtask(task_id, self.config.name, self.config.description or '')
-
-		# Build signature chain with lifecycle management
-		return sig
+		return chain(sig)
 
 	@staticmethod
 	def get_task_class(name):

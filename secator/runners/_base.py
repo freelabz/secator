@@ -287,6 +287,7 @@ class Runner:
 			# If any errors happened during validation, exit
 			if self.errors:
 				yield from self.errors
+				self.mark_completed(enable_hooks=not self.sync, enable_reports=self.sync)
 				return
 
 			# Loop and process items
@@ -558,7 +559,7 @@ class Runner:
 		})
 		return data
 
-	def run_hooks(self, hook_type, *args):
+	def run_hooks(self, hook_type, *args, enabled=True):
 		""""Run hooks of a certain type.
 
 		Args:
@@ -677,25 +678,25 @@ class Runner:
 
 	def mark_started(self, enable_hooks=None):
 		"""Mark runner as started."""
-		self.enable_hooks = enable_hooks if enable_hooks is not None else self.enable_hooks
+		enable_hooks = enable_hooks if enable_hooks is not None else self.enable_hooks
 		self.started = True
 		self.start_time = datetime.fromtimestamp(time())
-		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks})')
+		self.debug(f'started (sync: {self.sync}, hooks: {enable_hooks})')
 		self.log_start()
-		self.run_hooks('on_start')
+		self.run_hooks('on_start', enabled=enable_hooks)
 
 	def mark_completed(self, enable_hooks=None, enable_reports=None):
 		"""Mark runner as completed."""
-		self.enable_hooks = enable_hooks if enable_hooks is not None else self.enable_hooks
-		self.enable_reports = enable_reports if enable_reports is not None else self.enable_reports
+		enable_hooks = enable_hooks if enable_hooks is not None else self.enable_hooks
+		enable_reports = enable_reports if enable_reports is not None else self.enable_reports
 		self.started = True
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-		self.debug(f'completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')
+		self.debug(f'completed (sync: {self.sync}, reports: {enable_reports}, hooks: {enable_hooks})')
 		self.mark_duplicates()
-		self.run_hooks('on_end')
-		self.export_reports()
+		self.run_hooks('on_end', enabled=enable_hooks)
+		self.export_reports(enabled=enable_reports)
 		self.export_profiler()
 		self.log_results()
 
@@ -704,19 +705,18 @@ class Runner:
 		if not self.print_remote_info:
 			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
-		runner_name = self.__class__.__name__
-		info = Info(message=f'{runner_name} {self.config.name} {remote_str}...', _source=self.unique_name)
+		info = Info(message=f'{self.config.type.capitalize()} {self.unique_name} {remote_str}...', _source=self.unique_name)
 		self._print_item(info)
 
 	def log_results(self):
 		"""Log runner results."""
-		runner_name = self.__class__.__name__
-		info = Info(message=f'{runner_name} {self.config.name} finished with status {self.status} and found {len(self.results)} results')
+		info = Info(message=f'{self.config.type.capitalize()} {self.unique_name} finished with status {self.status} and found {len(self.self_findings)} findings', _source=self.unique_name)
 		self._print_item(info)
 
-	def export_reports(self):
+	def export_reports(self, enabled=None):
 		"""Export reports."""
-		if self.enable_reports and self.exporters and not self.no_process:
+		enabled = enabled if enabled is not None else self.enable_reports
+		if enabled and self.exporters and not self.no_process:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()
@@ -883,9 +883,14 @@ class Runner:
 		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
 			self.debug(f'Sync runner state from remote: {item.state}')
 			if item.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
-				self.mark_completed(enable_hooks=False, enable_reports=True)
+				self.started = True
+				self.done = True
+				self.progress = 100
+				self.end_time = datetime.fromtimestamp(time())
 			elif item.state in ['RUNNING']:
-				self.mark_started(enable_hooks=False)
+				self.started = True
+				self.start_time = datetime.fromtimestamp(time())
+				self.end_time = None
 			self.last_updated_celery = item._timestamp
 			return
 

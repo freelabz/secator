@@ -170,8 +170,8 @@ def run_scan(self, args=[], kwargs={}):
 def run_command(self, results, name, targets, opts={}):
 	if IN_CELERY_WORKER_PROCESS:
 		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True})
-		routing_key = self.request.delivery_info['routing_key']
-		console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
+		# routing_key = self.request.delivery_info['routing_key']
+		# console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
 
 	# Flatten + dedupe + filter results
 	results = forward_results(results)
@@ -234,7 +234,7 @@ def mark_runner_started(runner, enable_hooks=True):
 	"""
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
 	runner.mark_started(enable_hooks)
-	return runner.results
+	return forward_results(runner.results)
 
 
 @app.task
@@ -252,7 +252,7 @@ def mark_runner_completed(results, runner, enable_hooks=True, enable_reports=Tru
 	"""
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
-	runner.results = results
+	[runner.add_result(item) for item in results]
 	runner.mark_completed(enable_hooks, enable_reports)
 	return runner.results
 

@@ -144,7 +144,7 @@ class CeleryData(object):
 					_source='celery'
 				)
 				debug(f"Main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
-				yield {'id': result.id, 'results': [main_task]}
+				yield {'id': result.id, 'state': result.state, 'results': [main_task]}
 				yield from CeleryData.get_all_data(result, ids_map)
 
 				if result.ready():
@@ -155,7 +155,7 @@ class CeleryData(object):
 						_source='celery'
 					)
 					debug(f"Final main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
-					yield {'id': result.id, 'results': [main_task]}
+					yield {'id': result.id, 'state': result.state, 'results': [main_task]}
 					yield from CeleryData.get_all_data(result, ids_map)
 					break
 			except (KeyboardInterrupt, GreenletExit):

@@ -184,6 +184,9 @@ class Command(Runner):
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
 
+		# Mark started
+		self.mark_started(enable_hooks=True)
+
 	def toDict(self):
 		res = super().toDict()
 		res.update({
@@ -341,7 +344,6 @@ class Command(Runner):
 			dict: Serialized object.
 		"""
 		try:
-			self.mark_started(enable_hooks=True)
 
 			# Abort if it has children tasks
 			if self.has_children:

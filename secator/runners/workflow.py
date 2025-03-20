@@ -43,9 +43,9 @@ class Workflow(Runner):
 
 		# Build workflow chain with lifecycle management
 		return chain(
-			mark_runner_started.si(self).set(queue='results'),
+			mark_runner_started.si(self, enable_hooks=True).set(queue='results'),
 			*sigs,
-			mark_runner_completed.s(self, enable_reports=False).set(queue='results'),
+			mark_runner_completed.s(self, enable_hooks=True, enable_reports=False).set(queue='results'),
 		)
 
 	def get_tasks(self, config, inputs, workflow_opts, run_opts):
