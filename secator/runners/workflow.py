@@ -27,7 +27,7 @@ class Workflow(Runner):
 			celery.Signature: Celery task signature.
 		"""
 		from celery import chain
-		from secator.celery import mark_runner_started, mark_runner_complete
+		from secator.celery import mark_runner_started, mark_runner_completed
 
 		# Prepare run options
 		opts = self.run_opts.copy()
@@ -45,7 +45,7 @@ class Workflow(Runner):
 		return chain(
 			mark_runner_started.si(self).set(queue='results'),
 			*sigs,
-			mark_runner_complete.s(self).set(queue='results'),
+			mark_runner_completed.s(self, enable_reports=False).set(queue='results'),
 		)
 
 	def get_tasks(self, config, inputs, workflow_opts, run_opts):

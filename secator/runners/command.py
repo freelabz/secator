@@ -341,6 +341,7 @@ class Command(Runner):
 			dict: Serialized object.
 		"""
 		try:
+			self.mark_started(enable_hooks=True)
 
 			# Abort if it has children tasks
 			if self.has_children:

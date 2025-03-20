@@ -7,8 +7,6 @@ input_types:
   - host
   - cidr_range
 tasks:
-  naabu:
-    description: Find open ports
   nmap:
     description: Search for vulnerabilities on open ports
     skip_host_discovery: True

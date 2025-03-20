@@ -24,7 +24,7 @@ class Scan(Runner):
 			celery.Signature: Celery task signature.
 		"""
 		from celery import chain
-		from secator.celery import mark_runner_started, mark_runner_complete
+		from secator.celery import mark_runner_started, mark_runner_completed
 		from secator.template import TemplateLoader
 
 		scan_opts = self.config.options
@@ -52,5 +52,5 @@ class Scan(Runner):
 		return chain(
 			mark_runner_started.si(self).set(queue='results'),
 			*sigs,
-			mark_runner_complete.s(self).set(queue='results'),
+			mark_runner_completed.s(self).set(queue='results'),
 		)

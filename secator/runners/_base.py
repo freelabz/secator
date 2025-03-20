@@ -98,6 +98,8 @@ class Runner:
 		self.no_poll = self.run_opts.get('no_poll', False)
 		self.quiet = self.run_opts.get('quiet', False)
 		self.started = False
+		self.enable_reports = self.run_opts.get('enable_reports', not self.sync)
+		self._reports_folder = self.run_opts.get('reports_folder', None)
 
 		# Runner process options
 		self.no_process = self.run_opts.get('no_process', False)
@@ -145,16 +147,6 @@ class Runner:
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
 		self.exporters = self.resolve_exporters(exporters_str)
-
-		# Determine report folder
-		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
-		_id = get_task_folder_id(default_reports_folder_base)
-		self.reports_folder = f'{default_reports_folder_base}/{_id}'
-
-		# Make reports folders
-		os.makedirs(self.reports_folder, exist_ok=True)
-		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
-		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
 
 		# Profiler
 		self.enable_profiler = self.run_opts.get('enable_profiler', False) and ADDONS_ENABLED['trace']
@@ -260,6 +252,23 @@ class Runner:
 			'descr': self.config.description or '',
 		}
 
+	@property
+	def reports_folder(self):
+		if self._reports_folder and Path(self._reports_folder).exists():
+			return self._reports_folder
+		_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
+		_id = get_task_folder_id(_base)
+		path = Path(f'{_base}/{_id}')
+		path_inputs = path / '.inputs'
+		path_outputs = path / '.outputs'
+		if not path.exists():
+			self.debug(f'Creating reports folder {path}')
+			path.mkdir(parents=True, exist_ok=True)
+			path_inputs.mkdir(exist_ok=True)
+			path_outputs.mkdir(exist_ok=True)
+		self._reports_folder = path.resolve()
+		return self._reports_folder
+
 	def run(self):
 		"""Run method.
 
@@ -275,16 +284,9 @@ class Runner:
 			OutputType: runner result.
 		"""
 		try:
-			self.log_start()
-			self.run_hooks('on_start')
-
-			# If any errors happened during valid ation, exit
+			# If any errors happened during validation, exit
 			if self.errors:
 				yield from self.errors
-				if self.no_process:
-					return
-				self.log_results()
-				self.run_hooks('on_end')
 				return
 
 			# Loop and process items
@@ -306,11 +308,7 @@ class Runner:
 			yield error
 
 		finally:
-			if self.no_process:
-				return
-			self.mark_duplicates()
-			self.log_results()
-			self.run_hooks('on_end')
+			self.mark_completed(enable_hooks=not self.sync, enable_reports=self.sync)
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""
@@ -496,7 +494,6 @@ class Runner:
 		# Run workflow and get results
 		if self.sync:
 			self.print_item = False
-			self.started = True
 			results = workflow.apply().get()
 			yield from results
 		else:
@@ -508,6 +505,7 @@ class Runner:
 			)
 			if self.no_poll:
 				self.enable_hooks = False
+				self.enable_reports = False
 				self.no_process = True
 				return
 			results = CeleryData.iter_results(
@@ -677,6 +675,30 @@ class Runner:
 				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators')
 			self.validators[key].extend(user_validators)
 
+	def mark_started(self, enable_hooks=None):
+		"""Mark runner as started."""
+		self.enable_hooks = enable_hooks if enable_hooks is not None else self.enable_hooks
+		self.started = True
+		self.start_time = datetime.fromtimestamp(time())
+		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks})')
+		self.log_start()
+		self.run_hooks('on_start')
+
+	def mark_completed(self, enable_hooks=None, enable_reports=None):
+		"""Mark runner as completed."""
+		self.enable_hooks = enable_hooks if enable_hooks is not None else self.enable_hooks
+		self.enable_reports = enable_reports if enable_reports is not None else self.enable_reports
+		self.started = True
+		self.done = True
+		self.progress = 100
+		self.end_time = datetime.fromtimestamp(time())
+		self.debug(f'completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')
+		self.mark_duplicates()
+		self.run_hooks('on_end')
+		self.export_reports()
+		self.export_profiler()
+		self.log_results()
+
 	def log_start(self):
 		"""Log runner start."""
 		if not self.print_remote_info:
@@ -688,19 +710,20 @@ class Runner:
 
 	def log_results(self):
 		"""Log runner results."""
-		self.started = True
-		self.done = True
-		self.progress = 100
-		self.end_time = datetime.fromtimestamp(time())
-		if self.status == 'FAILURE':
-			self.debug('', obj={self.__class__.__name__: self.status, 'errors': [str(_.message) for _ in self.errors]}, sub='status')  # noqa: E501
-		else:
-			self.debug('', obj={self.__class__.__name__: self.status}, sub='status')
-		if self.exporters and not self.no_process:
+		runner_name = self.__class__.__name__
+		info = Info(message=f'{runner_name} {self.config.name} finished with status {self.status} and found {len(self.results)} results')
+		self._print_item(info)
+
+	def export_reports(self):
+		"""Export reports."""
+		if self.enable_reports and self.exporters and not self.no_process:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()
 			self.report = report
+
+	def export_profiler(self):
+		"""Export profiler."""
 		if self.enable_profiler:
 			self.profiler.stop()
 			profile_path = Path(self.reports_folder) / f'{self.unique_name}_profile.html'
@@ -858,13 +881,11 @@ class Runner:
 
 		# Check for state updates
 		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
-			self.debug(f'Updating runner state from Celery: {item.state}', sub='state')
+			self.debug(f'Sync runner state from remote: {item.state}')
 			if item.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
-				self.started = True
-				self.done = True
+				self.mark_completed(enable_hooks=False, enable_reports=True)
 			elif item.state in ['RUNNING']:
-				self.started = True
-			# self.debug(f'Runner {self.unique_name} is {self.status} (started: {self.started}, done: {self.done})', sub='state')
+				self.mark_started(enable_hooks=False)
 			self.last_updated_celery = item._timestamp
 			return
 

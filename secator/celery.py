@@ -188,8 +188,6 @@ def run_command(self, results, name, targets, opts={}):
 	sync = not IN_CELERY_WORKER_PROCESS
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
-	task.started = True
-	task.run_hooks('on_start')
 	update_state(self, task, force=True)
 
 	# Chunk task if needed
@@ -224,47 +222,38 @@ def forward_results(results):
 
 
 @app.task
-def mark_runner_started(runner):
+def mark_runner_started(runner, enable_hooks=True):
 	"""Mark a runner as started and run on_start hooks.
 
 	Args:
-		runner (Runner): Secator runner instance
+		runner (Runner): Secator runner instance.
+		enable_hooks (bool): Enable hooks.
 
 	Returns:
 		list: Runner results
 	"""
-	if IN_CELERY_WORKER_PROCESS:
-		console.print(Info(message=f'Marking runner {runner.unique_name} as started'))
-	runner.started = True
-	runner.run_hooks('on_start')
+	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
+	runner.mark_started(enable_hooks)
 	return runner.results
 
 
 @app.task
-def mark_runner_complete(results, runner):
+def mark_runner_completed(results, runner, enable_hooks=True, enable_reports=True):
 	"""Mark a runner as completed and run on_end hooks.
 
 	Args:
 		results (list): Task results
 		runner (Runner): Secator runner instance
+		enable_hooks (bool): Enable hooks.
+		enable_reports (bool): Enable reports.
 
 	Returns:
 		list: Final results
 	"""
-	if IN_CELERY_WORKER_PROCESS:
-		console.print(Info(message=f'Marking runner {runner.unique_name} as completed'))
+	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
-
-	# If sync mode, don't update the runner as it's already done
-	if runner.sync:
-		if IN_CELERY_WORKER_PROCESS:
-			console.print(Info(message=f'Runner {runner.unique_name} is in sync mode, skipping final processing'))
-		return results
-
-	# Run final processing
 	runner.results = results
-	runner.log_results()
-	runner.run_hooks('on_end')
+	runner.mark_completed(enable_hooks, enable_reports)
 	return runner.results
 
 
@@ -326,6 +315,6 @@ def break_task(task, task_opts, results=[]):
 	# Build Celery workflow
 	workflow = chord(
 		tuple(sigs),
-		mark_runner_complete.s(runner=task).set(queue='results')
+		mark_runner_completed.s(runner=task).set(queue='results')
 	)
 	return workflow
