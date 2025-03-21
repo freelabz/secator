@@ -4,7 +4,6 @@ from typing import List
 
 from secator.definitions import DOMAIN, HOST, SOURCES
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -32,11 +31,11 @@ class Subdomain(OutputType):
 	def __str__(self):
 		return self.host
 
-	def __repr__(self):
+	def __rich__(self):
 		sources_str = ', '.join([f'[magenta]{source}[/]' for source in self.sources])
 		s = f'🏰 [white]{self.host}[/]'
 		if sources_str:
 			s += f' [{sources_str}]'
 		if self.extra_data:
 			s += r' \[[bold yellow]' + ', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + '[/]]'
-		return rich_to_ansi(s)
+		return s

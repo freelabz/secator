@@ -148,7 +148,7 @@ class CeleryData(object):
 				raise
 			except Exception as e:
 				error = Error.from_exception(e)
-				debug(repr(error), sub='celery.poll')
+				debug(error.__rich__(), sub='celery.poll')
 				pass
 			finally:
 				sleep(refresh_interval)

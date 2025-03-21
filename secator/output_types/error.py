@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import time
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, traceback_as_string, rich_escape as _s
+from secator.utils import traceback_as_string, rich_escape as _s
 
 
 @dataclass
@@ -32,7 +32,7 @@ class Error(OutputType):
 	def __str__(self):
 		return self.message
 
-	def __repr__(self):
+	def __rich__(self):
 		s = rf"\[[bold red]ERR[/]] {_s(self.message)}"
 		if self.traceback:
 			s += ':'
@@ -40,4 +40,4 @@ class Error(OutputType):
 			if self.traceback_title:
 				traceback_pretty = f'   {self.traceback_title}:\n{traceback_pretty}'
 			s += f'\n[dim]{_s(traceback_pretty)}[/]'
-		return rich_to_ansi(s)
+		return s
