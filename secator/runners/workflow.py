@@ -103,6 +103,7 @@ class Workflow(Runner):
 
 				# Merge task options (order of priority with overrides)
 				opts = merge_opts(workflow_opts, task_opts, run_opts)
+				opts['name'] = task_name
 
 				# Create task signature
 				task_id = str(uuid.uuid4())
