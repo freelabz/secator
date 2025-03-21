@@ -37,12 +37,14 @@ class Workflow(Runner):
 		# Set hooks and reports
 		self.enable_reports = True  # Workflow will handle reports
 		self.enable_hooks = False   # Celery will handle hooks
+
 		# Get hooks
 		hooks = self._hooks.get(Task, {})
 		opts['hooks'] = hooks
 		opts['context'] = self.context.copy()
 		opts['reports_folder'] = str(self.reports_folder)
 		opts['enable_reports'] = False  # Workflow will handle reports
+		opts['enable_duplicate_check'] = False  # Workflow will handle duplicate check
 		opts['has_parent'] = True
 		opts['skip_if_no_inputs'] = True
 
@@ -73,8 +75,7 @@ class Workflow(Runner):
 		Returns:
 			tuple (List[celery.Signature], List[str]): Celery signatures, Celery task ids.
 		"""
-		from celery import chain, chord
-		from secator.celery import forward_results
+		from celery import chain, group
 		sigs = []
 		for task_name, task_opts in config.items():
 			# Task opts can be None
@@ -88,7 +89,7 @@ class Workflow(Runner):
 					workflow_opts,
 					run_opts
 				)
-				sig = chord((tasks), forward_results.s().set(queue='results'))
+				sig = group(*tasks)
 			elif task_name == '_chain':
 				tasks = self.get_tasks(
 					task_opts,
@@ -107,6 +108,7 @@ class Workflow(Runner):
 
 				# Create task signature
 				task_id = str(uuid.uuid4())
+				opts['context'] = self.context.copy()
 				sig = task.s(inputs, **opts).set(queue=task.profile, task_id=task_id)
 				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
