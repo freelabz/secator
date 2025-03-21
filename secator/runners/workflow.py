@@ -31,8 +31,20 @@ class Workflow(Runner):
 
 		# Prepare run options
 		opts = self.run_opts.copy()
-		opts['hooks'] = self._hooks.get(Task, {})
+		opts.pop('output', None)
 		opts.pop('no_poll', False)
+
+		# Set hooks and reports
+		self.enable_reports = True  # Workflow will handle reports
+		self.enable_hooks = False   # Celery will handle hooks
+		# Get hooks
+		hooks = self._hooks.get(Task, {})
+		opts['hooks'] = hooks
+		opts['context'] = self.context.copy()
+		opts['reports_folder'] = str(self.reports_folder)
+		opts['enable_reports'] = False  # Workflow will handle reports
+		opts['has_parent'] = True
+		opts['skip_if_no_inputs'] = True
 
 		# Build task signatures
 		sigs = self.get_tasks(
@@ -45,7 +57,7 @@ class Workflow(Runner):
 		return chain(
 			mark_runner_started.si(self, enable_hooks=True).set(queue='results'),
 			*sigs,
-			mark_runner_completed.s(self, enable_hooks=True, enable_reports=False).set(queue='results'),
+			mark_runner_completed.s(self, enable_hooks=True).set(queue='results'),
 		)
 
 	def get_tasks(self, config, inputs, workflow_opts, run_opts):
@@ -91,13 +103,6 @@ class Workflow(Runner):
 
 				# Merge task options (order of priority with overrides)
 				opts = merge_opts(workflow_opts, task_opts, run_opts)
-
-				# Add task context and hooks to options
-				opts['hooks'] = {task: self._hooks.get(Task, {})}
-				opts['context'] = self.context.copy()
-				opts['name'] = task_name
-				opts['has_parent'] = True
-				opts['skip_if_no_inputs'] = True
 
 				# Create task signature
 				task_id = str(uuid.uuid4())

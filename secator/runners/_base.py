@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import sys
 import uuid
 from datetime import datetime
@@ -64,9 +63,6 @@ class Runner:
 
 	# Run hooks
 	enable_hooks = True
-
-	# Reports folder
-	reports_folder = None
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		self.uuids = []
@@ -284,10 +280,14 @@ class Runner:
 			OutputType: runner result.
 		"""
 		try:
+			# If sync mode, set started
+			if self.sync:
+				self.mark_started()
+
 			# If any errors happened during validation, exit
 			if self.errors:
 				yield from self.errors
-				self.mark_completed(enable_hooks=not self.sync, enable_reports=self.sync)
+				self.mark_completed()
 				return
 
 			# Loop and process items
@@ -309,7 +309,10 @@ class Runner:
 			yield error
 
 		finally:
-			self.mark_completed(enable_hooks=not self.sync, enable_reports=self.sync)
+			if self.sync:
+				self.mark_completed()
+			if self.enable_reports:
+				self.export_reports()
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""
@@ -559,7 +562,7 @@ class Runner:
 		})
 		return data
 
-	def run_hooks(self, hook_type, *args, enabled=True):
+	def run_hooks(self, hook_type, *args):
 		""""Run hooks of a certain type.
 
 		Args:
@@ -676,27 +679,27 @@ class Runner:
 				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators')
 			self.validators[key].extend(user_validators)
 
-	def mark_started(self, enable_hooks=None):
+	def mark_started(self):
 		"""Mark runner as started."""
-		enable_hooks = enable_hooks if enable_hooks is not None else self.enable_hooks
+		if self.started:
+			return
 		self.started = True
 		self.start_time = datetime.fromtimestamp(time())
-		self.debug(f'started (sync: {self.sync}, hooks: {enable_hooks})')
+		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks})')
 		self.log_start()
-		self.run_hooks('on_start', enabled=enable_hooks)
+		self.run_hooks('on_start')
 
-	def mark_completed(self, enable_hooks=None, enable_reports=None):
+	def mark_completed(self):
 		"""Mark runner as completed."""
-		enable_hooks = enable_hooks if enable_hooks is not None else self.enable_hooks
-		enable_reports = enable_reports if enable_reports is not None else self.enable_reports
+		if self.done:
+			return
 		self.started = True
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-		self.debug(f'completed (sync: {self.sync}, reports: {enable_reports}, hooks: {enable_hooks})')
+		self.debug(f'completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')
 		self.mark_duplicates()
-		self.run_hooks('on_end', enabled=enable_hooks)
-		self.export_reports(enabled=enable_reports)
+		self.run_hooks('on_end')
 		self.export_profiler()
 		self.log_results()
 
@@ -710,13 +713,12 @@ class Runner:
 
 	def log_results(self):
 		"""Log runner results."""
-		info = Info(message=f'{self.config.type.capitalize()} {self.unique_name} finished with status {self.status} and found {len(self.self_findings)} findings', _source=self.unique_name)
+		info = Info(message=f'{self.config.type.capitalize()} {self.unique_name} finished with status {self.status} and found {len(self.self_findings)} findings', _source=self.unique_name)  # noqa: E501
 		self._print_item(info)
 
-	def export_reports(self, enabled=None):
+	def export_reports(self):
 		"""Export reports."""
-		enabled = enabled if enabled is not None else self.enable_reports
-		if enabled and self.exporters and not self.no_process:
+		if self.enable_reports and self.exporters and not self.no_process:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()

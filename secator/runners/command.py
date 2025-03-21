@@ -184,9 +184,6 @@ class Command(Runner):
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
 
-		# Mark started
-		self.mark_started(enable_hooks=True)
-
 	def toDict(self):
 		res = super().toDict()
 		res.update({

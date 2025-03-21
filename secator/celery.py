@@ -188,6 +188,7 @@ def run_command(self, results, name, targets, opts={}):
 	sync = not IN_CELERY_WORKER_PROCESS
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
+	task.mark_started()
 	update_state(self, task, force=True)
 
 	# Chunk task if needed
@@ -233,27 +234,28 @@ def mark_runner_started(runner, enable_hooks=True):
 		list: Runner results
 	"""
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
-	runner.mark_started(enable_hooks)
+	runner.enable_hooks = enable_hooks
+	runner.mark_started()
 	return forward_results(runner.results)
 
 
 @app.task
-def mark_runner_completed(results, runner, enable_hooks=True, enable_reports=True):
+def mark_runner_completed(results, runner, enable_hooks=True):
 	"""Mark a runner as completed and run on_end hooks.
 
 	Args:
 		results (list): Task results
 		runner (Runner): Secator runner instance
 		enable_hooks (bool): Enable hooks.
-		enable_reports (bool): Enable reports.
 
 	Returns:
 		list: Final results
 	"""
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
+	runner.enable_hooks = enable_hooks
 	[runner.add_result(item) for item in results]
-	runner.mark_completed(enable_hooks, enable_reports)
+	runner.mark_completed()
 	return runner.results
 
 

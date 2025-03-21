@@ -34,15 +34,17 @@ class Task(Runner):
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
 
-		# Set task output types
+		# Set output types
 		self.output_types = task_cls.output_types
-		self.enable_hooks = False  # command will handle hooks
-		self.enable_reports = True # Task will handle reports
+
+		# Set hooks and reports
+		self.enable_hooks = False   # Celery will handle hooks
+		self.enable_reports = True  # Task will handle reports
 
 		# Get hooks
 		hooks = self._hooks.get(Task, {})
 		opts['hooks'] = hooks
-		opts['context'] = self.context
+		opts['context'] = self.context.copy()
 		opts['reports_folder'] = str(self.reports_folder)
 		opts['enable_reports'] = False  # Task will handle reports
 
