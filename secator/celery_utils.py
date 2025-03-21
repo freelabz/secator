@@ -12,7 +12,7 @@ from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from secator.config import CONFIG
 from secator.definitions import STATE_COLORS
-from secator.output_types import Error, Info
+from secator.output_types import Error, Info, State
 from secator.rich import console
 from secator.utils import debug, traceback_as_string
 
@@ -138,9 +138,24 @@ class CeleryData(object):
 		"""
 		while True:
 			try:
+				main_task = State(
+					task_id=result.id,
+					state=result.state,
+					_source='celery'
+				)
+				debug(f"Main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
+				yield {'id': result.id, 'state': result.state, 'results': [main_task]}
 				yield from CeleryData.get_all_data(result, ids_map)
+
 				if result.ready():
 					debug('result is ready', sub='celery.poll', id=result.id)
+					main_task = State(
+						task_id=result.id,
+						state=result.state,
+						_source='celery'
+					)
+					debug(f"Final main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
+					yield {'id': result.id, 'state': result.state, 'results': [main_task]}
 					yield from CeleryData.get_all_data(result, ids_map)
 					break
 			except (KeyboardInterrupt, GreenletExit):

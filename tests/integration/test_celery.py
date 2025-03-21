@@ -10,7 +10,7 @@ from celery import chain, chord
 
 from secator.celery import app, forward_results
 from secator.config import CONFIG
-from secator.utils_test import TEST_TASKS, load_fixture
+from secator.utils_test import TEST_TASKS, TEST_WORKFLOWS,load_fixture
 from secator.runners import Command
 from secator.output_types import Url
 from tests.integration.inputs import INPUTS_SCANS
@@ -24,7 +24,8 @@ OPTS = {
 	'ffuf.wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 }
 URL_TARGETS = INPUTS_SCANS['url']
-URL_TARGETS_RESULTS_COUNT = [12, 1]
+URL_RESULTS_COUNT = [14, 1]
+TAG_RESULTS_COUNT = []
 HOST_TARGETS = INPUTS_SCANS['host']
 
 
@@ -149,12 +150,15 @@ class TestCelery(unittest.TestCase):
 			return
 
 		size = CONFIG.runners.input_chunk_size + 1
-		targets = [URL_TARGETS[0]] * size
+		import uuid
+		targets = []
+		for _ in range(size):
+			targets.append(URL_TARGETS[0] + '?id=' + str(uuid.uuid4()))
 		result = httpx.delay(targets)
 		results = result.get()
 		urls = [r.url for r in results if r._type == 'url']
 		infos = [r.message for r in results if r._type == 'info']
-		self.assertEqual(len(urls), 2)  # same URL, but twice because 2 chunks and same input
+		self.assertEqual(len(urls), size)  # same URL, but twice because 2 chunks and same input
 		# self.assertEqual(len(infos), 2) # one chunk message for each chunk
 		# for message in infos:
 			# self.assertIn('Celery chunked task created', message)
@@ -192,4 +196,15 @@ class TestCelery(unittest.TestCase):
 		targets = [r.name for r in results if r._type == 'target']
 		urls = [r.url for r in results if r._type == 'url']
 		self.assertEqual(len(targets), len(URL_TARGETS))
-		self.assertEqual(len(urls), sum(URL_TARGETS_RESULTS_COUNT))
+		self.assertEqual(len(urls), sum(URL_RESULTS_COUNT))
+
+	def test_url_vuln_workflow(self):
+		from secator.workflows import url_vuln
+		workflow = url_vuln([t + '?id=1' for t in URL_TARGETS])
+		workflow = workflow.build_celery_workflow()
+		result = workflow.apply()
+		results = result.get()
+		targets = [r.name for r in results if r._type == 'target']
+		tags = [r.name for r in results if r._type == 'tag']
+		self.assertEqual(len(targets), 16)
+		self.assertEqual(len(tags), 6)

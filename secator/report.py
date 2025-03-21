@@ -38,7 +38,7 @@ class Report:
 		exporters (list): List of exporter classes.
 	"""
 	def __init__(self, runner, title=None, exporters=[]):
-		self.title = title or f'{runner.__class__.__name__.lower()}_{runner.config.name}'
+		self.title = title or f'{runner.config.type}_{runner.config.name}'
 		self.runner = runner
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
