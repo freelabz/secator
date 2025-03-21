@@ -307,6 +307,7 @@ class Runner:
 			self.stop_celery_tasks()
 			yield from self.join_threads()
 			yield error
+			self.mark_completed()
 
 		finally:
 			if self.sync:
