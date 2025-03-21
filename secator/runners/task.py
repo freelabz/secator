@@ -47,7 +47,7 @@ class Task(Runner):
 		opts['context'] = self.context.copy()
 		opts['reports_folder'] = str(self.reports_folder)
 		opts['enable_reports'] = False  # Task will handle reports
-		opts['enable_duplicate_check'] = False # Task will handle duplicate check
+		opts['enable_duplicate_check'] = False  # Task will handle duplicate check
 		opts['has_parent'] = False
 		opts['skip_if_no_inputs'] = False
 
