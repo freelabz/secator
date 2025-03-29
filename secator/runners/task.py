@@ -50,6 +50,7 @@ class Task(Runner):
 		opts['enable_duplicate_check'] = False  # Task will handle duplicate check
 		opts['has_parent'] = False
 		opts['skip_if_no_inputs'] = False
+		opts['caller'] = 'Task'
 
 		# Create task signature
 		task_id = str(uuid.uuid4())

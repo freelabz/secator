@@ -488,9 +488,8 @@ class Command(Runner):
 
 	def print_description(self):
 		"""Print description"""
-		if self.sync and not self.has_children:
-			if self.caller and self.description:
-				self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
+		if self.sync and not self.has_children and self.caller and self.description:
+			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
 
 	def print_command(self):
 		"""Print command."""
@@ -756,7 +755,7 @@ class Command(Runner):
 
 	@staticmethod
 	def _validate_chunked_input(self, inputs):
-		"""Command does not suport multiple inputs in non-worker mode. Consider using .delay() instead."""
+		"""Command does not suport multiple inputs in non-worker mode. Consider running with a remote worker instead."""
 		if len(inputs) > 1 and self.sync and self.file_flag is None:
 			return False
 		return True

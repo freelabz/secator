@@ -47,6 +47,7 @@ class Workflow(Runner):
 		opts['enable_duplicate_check'] = False  # Workflow will handle duplicate check
 		opts['has_parent'] = True
 		opts['skip_if_no_inputs'] = True
+		opts['caller'] = 'Workflow'
 
 		# Build task signatures
 		sigs = self.get_tasks(
