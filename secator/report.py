@@ -15,7 +15,7 @@ def remove_duplicates(objects):
 	lock = Lock()
 
 	def add_if_unique(obj):
-		nonlocal unique_objects
+		nonlocal unique_objects  # noqa: F824
 		with lock:
 			# Perform linear search to check for duplicates
 			if all(obj != existing_obj for existing_obj in unique_objects):
