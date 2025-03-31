@@ -119,11 +119,12 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
 @click.option('--quiet', is_flag=True, help='Quiet mode.')
+@click.option('--loglevel', type=str, default='INFO', help='Log level.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
-def worker(hostname, concurrency, reload, queue, pool, quiet, check, dev, stop, show):
+def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show):
 	"""Run a worker."""
 
 	# Check Celery addon is installed
@@ -169,6 +170,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, check, dev, stop, 
 
 	cmd += f' -P {pool}' if pool else ''
 	cmd += f' -c {concurrency}' if concurrency else ''
+	cmd += f' -l {loglevel}' if loglevel else ''
 
 	if reload:
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
