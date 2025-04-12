@@ -880,21 +880,21 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
-	with console.status(f'[bold yellow] Installing {title}...'):
-		if cmd:
-			from secator.installer import SourceInstaller
-			status = SourceInstaller.install(cmd)
-		elif packages:
-			from secator.installer import PackageInstaller
-			status = PackageInstaller.install(packages)
-		return_code = 1
-		if status.is_ok():
-			return_code = 0
-			if next_steps:
-				console.print('[bold gold3]:wrench: Next steps:[/]')
-				for ix, step in enumerate(next_steps):
-					console.print(f'   :keycap_{ix}: {step}')
-		sys.exit(return_code)
+	# with console.status(f'[bold yellow] Installing {title}...'):
+	if cmd:
+		from secator.installer import SourceInstaller
+		status = SourceInstaller.install(cmd)
+	elif packages:
+		from secator.installer import PackageInstaller
+		status = PackageInstaller.install(packages)
+	return_code = 1
+	if status.is_ok():
+		return_code = 0
+		if next_steps:
+			console.print('[bold gold3]:wrench: Next steps:[/]')
+			for ix, step in enumerate(next_steps):
+				console.print(f'   :keycap_{ix}: {step}')
+	sys.exit(return_code)
 
 
 @cli.group()
@@ -1138,10 +1138,10 @@ def update(all):
 			version_flag = None if cls.version_flag == OPT_NOT_SUPPORTED else version_flag
 			info = get_version_info(cmd, version_flag, cls.install_github_handle)
 			if not info['installed'] or info['status'] == 'outdated' or not info['latest_version']:
-				with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
-					status = ToolInstaller.install(cls)
-					if not status.is_ok():
-						return_code = 1
+				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
+				status = ToolInstaller.install(cls)
+				if not status.is_ok():
+					return_code = 1
 		sys.exit(return_code)
 
 #-------#
