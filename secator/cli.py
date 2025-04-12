@@ -1071,10 +1071,10 @@ def install_tools(cmds, cleanup):
 		console.print(Error(message=f'No tools found for {cmd_str}.'))
 		return
 	for ix, cls in enumerate(tools):
-		with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
-			status = ToolInstaller.install(cls)
-			if not status.is_ok():
-				return_code = 1
+		# with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
+		status = ToolInstaller.install(cls)
+		if not status.is_ok():
+			return_code = 1
 		console.print()
 	if cleanup:
 		distro = get_distro_config()
