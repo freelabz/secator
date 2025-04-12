@@ -164,6 +164,9 @@ class Command(Runner):
 		# Process
 		self.process = None
 
+		# Sudo
+		self.requires_sudo = False
+
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
@@ -176,6 +179,10 @@ class Command(Runner):
 
 		# Run on_cmd hook
 		self.run_hooks('on_cmd')
+
+		# Add sudo to command if it is required
+		if self.requires_sudo:
+			self.cmd = f'sudo {self.cmd}'
 
 		# Build item loaders
 		instance_func = getattr(self, 'item_loader', None)
@@ -464,15 +471,12 @@ class Command(Runner):
 		if line is None:
 			return
 
+		# Yield line if no items were yielded
+		yield line
+
 		# Run item_loader to try parsing as dict
-		item_count = 0
 		for item in self.run_item_loaders(line):
 			yield item
-			item_count += 1
-
-		# Yield line if no items were yielded
-		if item_count == 0:
-			yield line
 
 		# Skip rest of iteration (no process mode)
 		if self.no_process:
@@ -499,6 +503,7 @@ class Command(Runner):
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold cyan', rich=True)
 		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
+		self.debug('Options', obj={'opts': self.cmd_options}, sub='init')
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
@@ -687,10 +692,16 @@ class Command(Runner):
 			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
 			opt_prefix (str, default: '-'): Option prefix.
 			command_name (str | None, default: None): Command name.
+
+		Returns:
+			dict: Processed options dict.
 		"""
-		opts_str = ''
+		opts_dict = {}
 		for opt_name, opt_conf in opts_conf.items():
 			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+
+			# Save original opt name
+			original_opt_name = opt_name
 
 			# Get opt value
 			default_val = opt_conf.get('default')
@@ -743,15 +754,10 @@ class Command(Runner):
 
 			# Append opt name + opt value to option string.
 			# Note: does not append opt value if value is True (flag)
-			opts_str += f' {opt_name}'
-			shlex_quote = opt_conf.get('shlex', True)
-			if opt_val is not True:
-				if shlex_quote:
-					opt_val = shlex.quote(str(opt_val))
-				opts_str += f' {opt_val}'
-			debug('final', obj={'name': opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)
+			opts_dict[original_opt_name] = {'name': opt_name, 'value': opt_val, 'conf': opt_conf}
+			debug('final', obj={'name': original_opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)  # noqa: E501
 
-		return opts_str.strip()
+		return opts_dict
 
 	@staticmethod
 	def _validate_chunked_input(self, inputs):
@@ -806,27 +812,54 @@ class Command(Runner):
 		if self.json_flag:
 			self.cmd += f' {self.json_flag}'
 
+		# Opts str
+		opts_str = ''
+		opts = {}
+
 		# Add options to cmd
-		opts_str = Command._process_opts(
+		opts_dict = Command._process_opts(
 			self.run_opts,
 			self.opts,
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
 			command_name=self.config.name)
-		if opts_str:
-			self.cmd += f' {opts_str}'
 
 		# Add meta options to cmd
-		meta_opts_str = Command._process_opts(
+		meta_opts_dict = Command._process_opts(
 			self.run_opts,
 			self.meta_opts,
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
 			command_name=self.config.name)
-		if meta_opts_str:
-			self.cmd += f' {meta_opts_str}'
+
+		if opts_dict:
+			opts.update(opts_dict)
+		if meta_opts_dict:
+			opts.update(meta_opts_dict)
+
+		if opts:
+			for opt_conf in opts.values():
+				conf = opt_conf['conf']
+				if conf.get('requires_sudo', False):
+					self.requires_sudo = True
+				opts_str += ' ' + Command._build_opt_str(opt_conf)
+		self.cmd_options = opts
+		self.cmd += opts_str
+
+	@staticmethod
+	def _build_opt_str(opt):
+		"""Build option string."""
+		conf = opt['conf']
+		opts_str = f'{opt["name"]}'
+		shlex_quote = conf.get('shlex', True)
+		value = opt['value']
+		if value is not True:
+			if shlex_quote:
+				value = shlex.quote(str(value))
+			opts_str += f' {value}'
+		return opts_str
 
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a

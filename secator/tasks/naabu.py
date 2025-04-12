@@ -10,7 +10,7 @@ from secator.tasks._categories import ReconPort
 @task()
 class naabu(ReconPort):
 	"""Port scanning tool written in Go."""
-	cmd = 'naabu -Pn -silent'
+	cmd = 'naabu -Pn'
 	input_flag = '-host'
 	file_flag = '-list'
 	json_flag = '-json'
@@ -61,6 +61,12 @@ class naabu(ReconPort):
 		for ix, input in enumerate(self.inputs):
 			if input == 'localhost':
 				self.inputs[ix] = '127.0.0.1'
+
+	@staticmethod
+	def on_cmd(self):
+		scan_type = self.get_opt_value('scan_type')
+		if scan_type == 's':
+			self.requires_sudo = True
 
 	@staticmethod
 	def on_item(self, item):
