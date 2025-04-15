@@ -20,8 +20,11 @@ class Workflow(Runner):
 		from secator.celery import run_workflow
 		return run_workflow.s(args=args, kwargs=kwargs)
 
-	def build_celery_workflow(self):
+	def build_celery_workflow(self, chain_previous_results=False):
 		"""Build Celery workflow for workflow execution.
+
+		Args:
+			chain_previous_results (bool): Chain previous results.
 
 		Returns:
 			celery.Signature: Celery task signature.
@@ -49,21 +52,31 @@ class Workflow(Runner):
 		opts['skip_if_no_inputs'] = True
 		opts['caller'] = 'Workflow'
 
+		forwarded_opts = {}
+		if chain_previous_results:
+			forwarded_opts = {k: v for k, v in self.run_opts.items() if k.endswith('_')}
+
 		# Build task signatures
 		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
 			self.inputs,
 			self.config.options,
-			opts)
+			opts,
+			forwarded_opts=forwarded_opts
+		)
+
+		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue='results')
+		if chain_previous_results:
+			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue='results')
 
 		# Build workflow chain with lifecycle management
 		return chain(
-			mark_runner_started.si(self, enable_hooks=True).set(queue='results'),
+			start_sig,
 			*sigs,
 			mark_runner_completed.s(self, enable_hooks=True).set(queue='results'),
 		)
 
-	def get_tasks(self, config, inputs, workflow_opts, run_opts):
+	def get_tasks(self, config, inputs, workflow_opts, run_opts, forwarded_opts={}):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
@@ -71,6 +84,7 @@ class Workflow(Runner):
 			inputs (list): Inputs.
 			workflow_opts (dict): Workflow options.
 			run_opts (dict): Run options.
+			forwarded_opts (dict): Opts forwarded from parent runner (e.g: scan).
 			sync (bool): Synchronous mode (chain of tasks, no chords).
 
 		Returns:
@@ -78,6 +92,7 @@ class Workflow(Runner):
 		"""
 		from celery import chain, group
 		sigs = []
+		ix = 0
 		for task_name, task_opts in config.items():
 			# Task opts can be None
 			task_opts = task_opts or {}
@@ -105,6 +120,8 @@ class Workflow(Runner):
 
 				# Merge task options (order of priority with overrides)
 				opts = merge_opts(workflow_opts, task_opts, run_opts)
+				if ix == 0 and forwarded_opts:
+					opts.update(forwarded_opts)
 				opts['name'] = task_name
 
 				# Create task signature
@@ -113,5 +130,6 @@ class Workflow(Runner):
 				sig = task.s(inputs, **opts).set(queue=task.profile, task_id=task_id)
 				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
+				ix += 1
 			sigs.append(sig)
 		return sigs

@@ -223,10 +223,11 @@ def forward_results(results):
 
 
 @app.task
-def mark_runner_started(runner, enable_hooks=True):
+def mark_runner_started(results, runner, enable_hooks=True):
 	"""Mark a runner as started and run on_start hooks.
 
 	Args:
+		results (List): Previous results.
 		runner (Runner): Secator runner instance.
 		enable_hooks (bool): Enable hooks.
 
@@ -234,9 +235,11 @@ def mark_runner_started(runner, enable_hooks=True):
 		list: Runner results
 	"""
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
+	if results:
+		runner.results = forward_results(results)
 	runner.enable_hooks = enable_hooks
 	runner.mark_started()
-	return forward_results(runner.results)
+	return runner.results
 
 
 @app.task

@@ -111,10 +111,10 @@ class TestTemplateLoader(unittest.TestCase):
 		self.assertEqual(tasks['nuclei/host']['opts'], {'opt_4': 'test4'})
 		self.assertEqual(tasks['nuclei/network']['opts'], {'opt_4': 'test4_new', 'opt_5': 'test5'})
 
-	@patch('secator.template.TemplateLoader._load_from_name')
-	def test_extract_tasks_and_supported_opts_scan(self, mock_load_from_name):
+	@patch('secator.template.TemplateLoader._load')
+	def test_extract_tasks_and_supported_opts_scan(self, mock_load):
 		from secator.template import TemplateLoader
-		mock_load_from_name.return_value = self.workflow_config
+		mock_load.return_value = self.workflow_config
 		loader_wf = TemplateLoader(input=self.workflow_config)
 		wf_tasks = loader_wf._extract_tasks()
 		loader = TemplateLoader(input=self.scan_config)

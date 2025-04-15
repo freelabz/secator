@@ -128,12 +128,8 @@ class Runner:
 		[self.add_result(result, print=False, output=False) for result in results]
 
 		# Determine inputs
-		inputs = [inputs] if not isinstance(inputs, list) else inputs
-		if not self.chunk and self.results:
-			inputs, run_opts, errors = run_extractors(self.results, run_opts, inputs)
-			for error in errors:
-				self.add_result(error, print=True)
-		self.inputs = list(set(inputs))
+		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
+		self.filter_results(results)
 
 		# Debug
 		self.debug('Inputs', obj=self.inputs, sub='init')
@@ -327,6 +323,15 @@ class Runner:
 				error._uuid = str(uuid.uuid4())
 				self.add_result(error, print=True)
 				yield error
+
+	def filter_results(self, results):
+		"""Filter results based on the runner's config."""
+		if not self.chunk and results:
+			inputs, run_opts, errors = run_extractors(results, self.run_opts, self.inputs)
+			for error in errors:
+				self.add_result(error, print=True)
+			self.inputs = list(set(inputs))
+			self.run_opts = run_opts
 
 	def add_result(self, item, print=False, output=True):
 		"""Add item to runner results.

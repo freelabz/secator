@@ -34,8 +34,10 @@ class Scan(Runner):
 		for name, workflow_opts in self.config.workflows.items():
 			run_opts = self.run_opts.copy()
 			run_opts['no_poll'] = True
+			run_opts['caller'] = 'Scan'
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
-			config = TemplateLoader(name=f'workflows/{name}')
+			name = name.split('/')[0]
+			config = TemplateLoader(name=f'workflow/{name}')
 			workflow = Workflow(
 				config,
 				self.inputs,
@@ -44,13 +46,13 @@ class Scan(Runner):
 				hooks=self._hooks,
 				context=self.context.copy()
 			)
-			celery_workflow = workflow.build_celery_workflow()
+			celery_workflow = workflow.build_celery_workflow(chain_previous_results=True)
 			for task_id, task_info in workflow.celery_ids_map.items():
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
 
 		return chain(
-			mark_runner_started.si(self).set(queue='results'),
+			mark_runner_started.si([], self).set(queue='results'),
 			*sigs,
 			mark_runner_completed.s(self).set(queue='results'),
 		)

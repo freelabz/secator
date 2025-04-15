@@ -25,7 +25,7 @@ from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
 from secator.serializers.dataclass import loads_dataclass
-from secator.template import TemplateLoader
+from secator.template import TEMPLATES, TemplateLoader
 from secator.utils import (
 	debug, detect_host, discover_tasks, flatten, print_version, get_file_date,
 	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
@@ -34,9 +34,8 @@ from secator.utils import (
 click.rich_click.USE_RICH_MARKUP = True
 
 ALL_TASKS = discover_tasks()
-ALL_CONFIGS = TemplateLoader.load_all()
-ALL_WORKFLOWS = ALL_CONFIGS.workflow
-ALL_SCANS = ALL_CONFIGS.scan
+ALL_WORKFLOWS = [t for t in TEMPLATES if t.type == 'workflow']
+ALL_SCANS = [t for t in TEMPLATES if t.type == 'scan']
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 
 
