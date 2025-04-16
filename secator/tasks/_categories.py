@@ -8,14 +8,12 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
-								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, IP,
-								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
-								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
-								 USERNAME, WORDLIST)
-from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
+from secator.definitions import (CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, ID,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PROVIDER, PROXY,
+								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, USER_AGENT,
+								 WORDLIST)
 from secator.config import CONFIG
-from secator.runners import Command
 from secator.utils import debug, process_wordlist
 
 
@@ -62,64 +60,20 @@ OPTS_VULN = [
 ]
 
 
-#---------------#
-# HTTP category #
-#---------------#
+class HttpMixin:
+	meta_opts = {k: OPTS[k] for k in OPTS_HTTP}
 
-class Http(Command):
+class HttpCrawlerMixin:
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
-	input_type = URL
-	output_types = [Url]
 
-
-class HttpCrawler(Command):
-	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
-	input_type = URL
-	output_types = [Url]
-
-
-class HttpFuzzer(Command):
+class HttpFuzzerMixin:
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
-	input_type = URL
-	output_types = [Url]
 
-
-#----------------#
-# Recon category #
-#----------------#
-
-class Recon(Command):
+class ReconMixin:
 	meta_opts = {k: OPTS[k] for k in OPTS_RECON}
-	output_types = [Subdomain, UserAccount, Ip, Port]
 
-
-class ReconDns(Recon):
-	input_type = HOST
-	output_types = [Subdomain]
-
-
-class ReconUser(Recon):
-	input_type = USERNAME
-	output_types = [UserAccount]
-
-
-class ReconIp(Recon):
-	input_type = CIDR_RANGE
-	output_types = [Ip]
-
-
-class ReconPort(Recon):
-	input_type = IP
-	output_types = [Port]
-
-
-#---------------#
-# Vuln category #
-#---------------#
-
-class Vuln(Command):
+class VulnMixin:
 	meta_opts = {k: OPTS[k] for k in OPTS_VULN}
-	output_types = [Vulnerability]
 
 	@staticmethod
 	def lookup_local_cve(cve_id):
@@ -129,19 +83,6 @@ class Vuln(Command):
 				return json.load(f)
 		debug(f'CVE {cve_id} not found in cache', sub='cve')
 		return None
-
-	# @staticmethod
-	# def lookup_exploitdb(exploit_id):
-	# 	print('looking up exploit')
-	# 	try:
-	# 		resp = requests.get(f'https://exploit-db.com/exploits/{exploit_id}', timeout=5)
-	#		resp.raise_for_status()
-	#		content = resp.content
-	# 	except requests.RequestException as e:
-	#		debug(f'Failed remote query for {exploit_id} ({str(e)}).', sub='cve')
-	# 		logger.error(f'Could not fetch exploit info for exploit {exploit_id}. Skipping.')
-	# 		return None
-	# 	return cve_info
 
 	@staticmethod
 	def create_cpe_string(product_name, version):
@@ -232,7 +173,7 @@ class Vuln(Command):
 				debug(f'{exploit_id}: No CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve')
 				return None
 			cve_id = matches[0].replace('_', '-').upper()
-			cve_data = Vuln.lookup_cve(cve_id, *cpes)
+			cve_data = VulnMixin.lookup_cve(cve_id, *cpes)
 			if cve_data:
 				return cve_data
 
@@ -279,7 +220,7 @@ class Vuln(Command):
 		Returns:
 			dict: vulnerability data.
 		"""
-		cve_info = Vuln.lookup_local_cve(cve_id)
+		cve_info = VulnMixin.lookup_local_cve(cve_id)
 
 		# Online CVE lookup
 		if not cve_info:
@@ -289,7 +230,7 @@ class Vuln(Command):
 			if CONFIG.offline_mode:
 				debug(f'Skip remote query for {cve_id} since config.offline_mode is set.', sub='cve')
 				return None
-			cve_info = Vuln.lookup_cve_from_cve_circle(cve_id)
+			cve_info = VulnMixin.lookup_cve_from_cve_circle(cve_id)
 			if not cve_info:
 				return None
 
@@ -326,19 +267,19 @@ class Vuln(Command):
 		tags = [cve_id]
 		if cpes:
 			for cpe in cpes:
-				cpe_fs = Vuln.get_cpe_fs(cpe)
+				cpe_fs = VulnMixin.get_cpe_fs(cpe)
 				if not cpe_fs:
 					debug(f'{cve_id}: Failed to parse CPE {cpe} with CPE parser', sub='cve.match', verbose=True)
 					tags.append('cpe-invalid')
 					continue
 				# cpe_version = cpe_obj.get_version()[0]
 				for cpe_affected in cpes_affected:
-					cpe_affected_fs = Vuln.get_cpe_fs(cpe_affected)
+					cpe_affected_fs = VulnMixin.get_cpe_fs(cpe_affected)
 					if not cpe_affected_fs:
 						debug(f'{cve_id}: Failed to parse CPE {cpe} (from online data) with CPE parser', sub='cve.match', verbose=True)
 						continue
 					debug(f'{cve_id}: Testing {cpe_fs} against {cpe_affected_fs}', sub='cve.match', verbose=True)
-					cpe_match = Vuln.match_cpes(cpe_fs, cpe_affected_fs)
+					cpe_match = VulnMixin.match_cpes(cpe_fs, cpe_affected_fs)
 					if cpe_match:
 						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
 						tags.append('cpe-match')
@@ -371,7 +312,7 @@ class Vuln(Command):
 		severity = None
 		cvss = cve_info['cvss_score']
 		if cvss:
-			severity = Vuln.cvss_to_severity(cvss)
+			severity = VulnMixin.cvss_to_severity(cvss)
 
 		# Set confidence
 		vuln = {
@@ -406,7 +347,7 @@ class Vuln(Command):
 		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
 		cve_id = sidebar_items[2].find('div').text.strip()
-		vuln = Vuln.lookup_cve(cve_id)
+		vuln = VulnMixin.lookup_cve(cve_id)
 		if vuln:
 			vuln[TAGS].append('ghsa')
 			return vuln
@@ -423,33 +364,3 @@ class Vuln(Command):
 		else:
 			severity = 'critical'
 		return severity
-
-
-class VulnHttp(Vuln):
-	input_type = HOST
-
-
-class VulnCode(Vuln):
-	input_type = PATH
-
-
-class VulnMulti(Vuln):
-	input_type = HOST
-	output_types = [Vulnerability]
-
-
-#--------------#
-# Tag category #
-#--------------#
-
-class Tagger(Command):
-	input_type = URL
-	output_types = [Tag]
-
-#----------------#
-# osint category #
-#----------------#
-
-
-class OSInt(Command):
-	output_types = [UserAccount]

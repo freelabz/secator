@@ -7,12 +7,13 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTE
 from secator.config import CONFIG
 from secator.output_types import Url, Subdomain
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import Http
+from secator.tasks._categories import HttpMixin
 from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
+from secator.runners import Command
 
 
 @task()
-class httpx(Http):
+class httpx(Command, HttpMixin):
 	"""Fast and multi-purpose HTTP toolkit."""
 	cmd = 'httpx'
 	file_flag = '-l'

@@ -10,16 +10,19 @@ from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES, FILTE
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpCrawler
+from secator.tasks._categories import HttpCrawlerMixin
+from secator.runners import Command
 
 
 @task()
-class katana(HttpCrawler):
+class katana(Command, HttpCrawlerMixin):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana'
 	file_flag = '-list'
 	input_flag = '-u'
+	input_type = URL
 	json_flag = '-jsonl'
+	output_types = [Url, Tag]
 	opts = {
 		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
 		'system_chrome': {'is_flag': True, 'short': 'sc', 'help': 'Use local installed chrome browser'},

@@ -3,17 +3,20 @@ from secator.definitions import (DOMAIN, HOST, RATE_LIMIT, RETRIES, THREADS, WOR
 from secator.config import CONFIG
 from secator.output_types import Subdomain
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import ReconDns
+from secator.tasks._categories import ReconMixin
 from secator.utils import process_wordlist
+from secator.runners import Command
 
 
 @task()
-class dnsxbrute(ReconDns):
+class dnsxbrute(Command, ReconMixin):
     """dnsx is a fast and multi-purpose DNS toolkit designed for running various library."""
     cmd = 'dnsx'
     json_flag = '-json'
     input_flag = '-domain'
+    input_type = HOST
     file_flag = '-domain'
+    output_types = [Subdomain]
     opt_key_map = {
         RATE_LIMIT: 'rate-limit',
         RETRIES: 'retry',

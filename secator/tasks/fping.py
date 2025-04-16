@@ -4,11 +4,10 @@ from secator.decorators import task
 from secator.definitions import (DELAY, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
 							   RETRIES, THREADS, TIMEOUT)
 from secator.output_types import Ip
-from secator.tasks._categories import ReconIp
-
+from secator.runners import Command
 
 @task()
-class fping(ReconIp):
+class fping(Command):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
 	cmd = 'fping -a'
 	file_flag = '-f'

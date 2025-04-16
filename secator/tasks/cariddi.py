@@ -7,11 +7,12 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Tag, Url
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpCrawler
+from secator.tasks._categories import HttpCrawlerMixin
+from secator.runners import Command
 
 
 @task()
-class cariddi(HttpCrawler):
+class cariddi(Command, HttpCrawlerMixin):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
 	cmd = 'cariddi -info -s -err -e -ext 1'
 	input_type = URL

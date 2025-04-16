@@ -14,17 +14,19 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability, Info, Error
-from secator.tasks._categories import VulnMulti
+from secator.tasks._categories import VulnMixin
 from secator.utils import debug, traceback_as_string
+from secator.runners import Command
 
 logger = logging.getLogger(__name__)
 
 
 @task()
-class nmap(VulnMulti):
+class nmap(Command, VulnMixin):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap'
 	input_flag = None
+	input_type = HOST
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
@@ -363,7 +365,7 @@ class nmapData(dict):
 		if product and version:
 			vsplit = version.split('-')
 			version_cpe = vsplit[0] if not version_exact else version
-			cpe = VulnMulti.create_cpe_string(product, version_cpe)
+			cpe = VulnMixin.create_cpe_string(product, version_cpe)
 			if cpe not in cpes:
 				cpes.append(cpe)
 				debug(f'Added new CPE from identified product and version: {cpe}', sub='cve')
@@ -410,10 +412,11 @@ class nmapData(dict):
 				NAME: vuln_id,
 				DESCRIPTION: vuln_title,
 				PROVIDER: provider_name,
-				TAGS: [vuln_id, provider_name]
+				TAGS: [vuln_id, provider_name],
+				'references': {},
 			}
 			if provider_name == 'MITRE CVE':
-				data = VulnMulti.lookup_cve(vuln['id'], *cpes)
+				data = VulnMixin.lookup_cve(vuln['id'], *cpes)
 				if data:
 					vuln.update(data)
 				yield vuln
@@ -451,8 +454,8 @@ class nmapData(dict):
 				# TODO: lookup exploit in ExploitDB to find related CVEs
 				# if edb_id:
 				# 	print(edb_id)
-				# 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
-				vuln = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
+				# 	exploit_data = VulnMixin.lookup_exploitdb(edb_id)
+				vuln = VulnMixin.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
 				if vuln:
 					yield vuln
 					exploit[TAGS].extend(vuln[TAGS])
@@ -470,13 +473,13 @@ class nmapData(dict):
 					NAME: vuln_id,
 					PROVIDER: provider_name,
 					CVSS_SCORE: vuln_cvss,
-					SEVERITY: VulnMulti.cvss_to_severity(vuln_cvss),
+					SEVERITY: VulnMixin.cvss_to_severity(vuln_cvss),
 					REFERENCES: [reference_url],
 					TAGS: [vuln_id, provider_name],
 					CONFIDENCE: 'low'
 				}
 				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
-					data = VulnMulti.lookup_cve(vuln_id, *cpes)
+					data = VulnMixin.lookup_cve(vuln_id, *cpes)
 					if data:
 						vuln.update(data)
 					yield vuln

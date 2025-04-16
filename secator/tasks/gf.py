@@ -1,11 +1,11 @@
 from secator.decorators import task
 from secator.definitions import OPT_PIPE_INPUT, OPT_NOT_SUPPORTED, URL
 from secator.output_types import Tag
-from secator.tasks._categories import Tagger
+from secator.runners import Command
 
 
 @task()
-class gf(Tagger):
+class gf(Command):
 	"""Wrapper around grep, to help you grep for things."""
 	cmd = 'gf'
 	file_flag = OPT_PIPE_INPUT

@@ -254,7 +254,7 @@ def get_command_cls(cls_name):
 
 
 def get_command_category(command):
-	"""Get the category of a command.
+	"""Get the category of a command based on its Mixin base class.
 
 	Args:
 		command (class): Command class.
@@ -262,8 +262,16 @@ def get_command_category(command):
 	Returns:
 		str: Command category.
 	"""
-	base_cls = command.__bases__[0].__name__.replace('Command', '').replace('Runner', 'misc')
-	category = re.sub(r'(?<!^)(?=[A-Z])', '/', base_cls).lower()
+	from secator.runners import Command  # Ensure Command is imported
+	category_name = 'misc'  # Default category
+	for base in command.__bases__:
+		base_name = base.__name__
+		if base_name != 'Command' and base_name != 'object' and base_name.endswith('Mixin'):
+			category_name = base_name[:-5]  # Remove 'Mixin'
+			break  # Found the mixin, no need to check further
+
+	# Convert CamelCase to snake_case/path_case and lowercase
+	category = re.sub(r'(?<!^)(?=[A-Z])', '/', category_name).lower()
 	return category
 
 
@@ -768,6 +776,7 @@ def process_wordlist(val):
 		val (str): Can be a config value in CONFIG.wordlists.defaults or CONFIG.wordlists.templates, or a local path,
 		or a URL.
 	"""
+	print(val)
 	default_wordlist = getattr(CONFIG.wordlists.defaults, val)
 	if default_wordlist:
 		val = default_wordlist

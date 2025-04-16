@@ -3,12 +3,12 @@ import json
 
 from secator.decorators import task
 from secator.definitions import EMAIL, OUTPUT_PATH
-from secator.tasks._categories import OSInt
 from secator.output_types import UserAccount, Info, Error
+from secator.runners import Command
 
 
 @task()
-class h8mail(OSInt):
+class h8mail(Command):
 	"""Email information and password lookup tool."""
 	cmd = 'h8mail'
 	json_flag = '--json '
