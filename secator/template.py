@@ -8,7 +8,7 @@ from dotmap import DotMap
 
 from secator.config import CONFIG, CONFIGS_FOLDER
 from secator.rich import console
-from secator.utils import convert_functions_to_strings
+from secator.utils import convert_functions_to_strings, debug
 from secator.output_types import Error
 
 TEMPLATES = []
@@ -33,6 +33,9 @@ class TemplateLoader(DotMap):
 		elif isinstance(input, str):
 			config = self._load(input)
 		super().__init__(config, **kwargs)
+
+	def add_to_templates(self):
+		TEMPLATES.append(self)
 
 	def _load_from_path(self, path):
 		if not path.exists():
@@ -122,9 +125,11 @@ def find_templates():
 			Path(path)
 			for path in glob.glob(str(dir).rstrip('/') + '/**/*.y*ml', recursive=True)
 		]
+		debug(f'Found {len(config_paths)} templates in {dir}', sub='template')
 		paths.extend(config_paths)
 	for path in paths:
 		config = TemplateLoader(input=path)
+		debug(f'Loaded template from {path}', sub='template')
 		results.append(config)
 	return results
 
