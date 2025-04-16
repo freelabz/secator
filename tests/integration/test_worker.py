@@ -41,7 +41,7 @@ class TestWorker(unittest.TestCase):
 			content_length=4958,
 			_source='httpx'
 		)
-		self.assertIn(url, cmd.results)
+		self.assertIn(url, cmd.findings)
 
 	def test_host_recon(self):
 		cmd = Command.execute(
@@ -82,9 +82,9 @@ class TestWorker(unittest.TestCase):
 			tags=['tech', 'nginx'],
 			_source='nuclei_url'
 		)
-		self.assertIn(port, cmd.results)
-		self.assertIn(url, cmd.results)
-		self.assertIn(vuln, cmd.results)
+		self.assertIn(port, cmd.findings)
+		self.assertIn(url, cmd.findings)
+		self.assertIn(vuln, cmd.findings)
 
 	# def test_pd_pipe(self):
 	# 	cmd = Command.execute(
