@@ -102,6 +102,7 @@ class Runner:
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
 		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
+		self.dry_run = self.run_opts.get('dry_run', False)
 
 		# Runner print opts
 		self.print_item = self.run_opts.get('print_item', False)
@@ -306,6 +307,8 @@ class Runner:
 			self.mark_completed()
 
 		finally:
+			if self.dry_run:
+				return
 			if self.sync:
 				self.mark_completed()
 			if self.enable_reports:
@@ -326,8 +329,8 @@ class Runner:
 
 	def filter_results(self, results):
 		"""Filter results based on the runner's config."""
-		if not self.chunk and results:
-			inputs, run_opts, errors = run_extractors(results, self.run_opts, self.inputs)
+		if not self.chunk:
+			inputs, run_opts, errors = run_extractors(results, self.run_opts, self.inputs, self.dry_run)
 			for error in errors:
 				self.add_result(error, print=True)
 			self.inputs = list(set(inputs))

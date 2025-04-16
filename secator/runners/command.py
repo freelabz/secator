@@ -353,6 +353,11 @@ class Command(Runner):
 			if self.has_children:
 				return
 
+			# Abort if dry run
+			if self.dry_run:
+				self.print_command()
+				return
+
 			# Print task description
 			self.print_description()
 

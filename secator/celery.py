@@ -238,7 +238,8 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if results:
 		runner.results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	runner.mark_started()
+	if not runner.dry_run:
+		runner.mark_started()
 	return runner.results
 
 
@@ -257,8 +258,9 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	[runner.add_result(item) for item in results]
-	runner.mark_completed()
+	if not runner.dry_run:
+		[runner.add_result(item) for item in results]
+		runner.mark_completed()
 	return runner.results
 
 

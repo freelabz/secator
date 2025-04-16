@@ -23,6 +23,7 @@ RUNNER_OPTS = {
 	'no_process': {'is_flag': True, 'short': 'nps', 'default': False, 'help': 'Disable secator processing'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'short': 'q', 'default': False, 'help': 'Enable quiet mode'},
+	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
 }
 
 RUNNER_GLOBAL_OPTS = {
