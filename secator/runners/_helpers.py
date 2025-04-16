@@ -4,13 +4,14 @@ from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
 
-def run_extractors(results, opts, inputs=[]):
+def run_extractors(results, opts, inputs=[], dry_run=False):
 	"""Run extractors and merge extracted values with option dict.
 
 	Args:
 		results (list): List of results.
 		opts (dict): Options.
 		inputs (list): Original inputs.
+		dry_run (bool): Dry run.
 
 	Returns:
 		tuple: inputs, options, errors.
@@ -22,9 +23,9 @@ def run_extractors(results, opts, inputs=[]):
 		values, err = extract_from_results(results, val)
 		errors.extend(err)
 		if key == 'targets':
-			inputs = deduplicate(values)
+			inputs = ['<COMPUTED>'] if dry_run else deduplicate(values)
 		else:
-			opts[key] = deduplicate(values)
+			opts[key] = ['<COMPUTED>'] if dry_run else deduplicate(values)
 	return inputs, opts, errors
 
 

@@ -10,7 +10,7 @@ from secator.tasks._categories import ReconIp
 @task()
 class mapcidr(ReconIp):
 	"""Utility program to perform multiple operations for a given subnet/cidr ranges."""
-	cmd = 'mapcidr -silent'
+	cmd = 'mapcidr'
 	input_flag = '-cidr'
 	file_flag = '-cl'
 	install_pre = {

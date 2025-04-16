@@ -137,13 +137,147 @@ def chunker(seq, size):
 
 
 @app.task(bind=True)
-def handle_runner_error(self, results, runner):
-	"""Handle errors in Celery workflows (chunked tasks or runners)."""
+def run_task(self, args=[], kwargs={}):
+	console.print(Info(message=f'Running task {self.request.id}'))
+	if 'context' not in kwargs:
+		kwargs['context'] = {}
+	kwargs['context']['celery_id'] = self.request.id
+	task = Task(*args, **kwargs)
+	task.run()
+
+
+@app.task(bind=True)
+def run_workflow(self, args=[], kwargs={}):
+	console.print(Info(message=f'Running workflow {self.request.id}'))
+	if 'context' not in kwargs:
+		kwargs['context'] = {}
+	kwargs['context']['celery_id'] = self.request.id
+	workflow = Workflow(*args, **kwargs)
+	workflow.run()
+
+
+@app.task(bind=True)
+def run_scan(self, args=[], kwargs={}):
+	console.print(Info(message=f'Running scan {self.request.id}'))
+	if 'context' not in kwargs:
+		kwargs['context'] = {}
+	kwargs['context']['celery_id'] = self.request.id
+	scan = Scan(*args, **kwargs)
+	scan.run()
+
+
+@app.task(bind=True)
+def run_command(self, results, name, targets, opts={}):
+	if IN_CELERY_WORKER_PROCESS:
+		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True})
+		# routing_key = self.request.delivery_info['routing_key']
+		# console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
+
+	# Flatten + dedupe + filter results
 	results = forward_results(results)
-	runner.results = results
-	runner.log_results()
-	runner.run_hooks('on_end')
+
+	# Set Celery request id in context
+	context = opts.get('context', {})
+	context['celery_id'] = self.request.id
+	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
+	opts['context'] = context
+	opts['results'] = results
+	opts['sync'] = True
+
+	# Initialize task
+	sync = not IN_CELERY_WORKER_PROCESS
+	task_cls = Task.get_task_class(name)
+	task = task_cls(targets, **opts)
+	task.mark_started()
+	update_state(self, task, force=True)
+
+	# Chunk task if needed
+	if task.needs_chunking(sync):
+		if IN_CELERY_WORKER_PROCESS:
+			console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
+		tasks = break_task(task, opts, results=results)
+		update_state(self, task, force=True)
+		return self.replace(tasks)
+
+	# Update state live
+	[update_state(self, task) for _ in task]
+	update_state(self, task, force=True)
+
+	# Garbage collection to save RAM
+	gc.collect()
+
+	return task.results
+
+
+@app.task
+def forward_results(results):
+	if isinstance(results, list):
+		for ix, item in enumerate(results):
+			if isinstance(item, dict) and 'results' in item:
+				results[ix] = item['results']
+	elif 'results' in results:
+		results = results['results']
+	results = flatten(results)
+	results = deduplicate(results, attr='_uuid')
+	return results
+
+
+@app.task
+def mark_runner_started(results, runner, enable_hooks=True):
+	"""Mark a runner as started and run on_start hooks.
+
+	Args:
+		results (List): Previous results.
+		runner (Runner): Secator runner instance.
+		enable_hooks (bool): Enable hooks.
+
+	Returns:
+		list: Runner results
+	"""
+	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
+	if results:
+		runner.results = forward_results(results)
+	runner.enable_hooks = enable_hooks
+	if not runner.dry_run:
+		runner.mark_started()
 	return runner.results
+
+
+@app.task
+def mark_runner_completed(results, runner, enable_hooks=True):
+	"""Mark a runner as completed and run on_end hooks.
+
+	Args:
+		results (list): Task results
+		runner (Runner): Secator runner instance
+		enable_hooks (bool): Enable hooks.
+
+	Returns:
+		list: Final results
+	"""
+	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
+	results = forward_results(results)
+	runner.enable_hooks = enable_hooks
+	if not runner.dry_run:
+		[runner.add_result(item) for item in results]
+		runner.mark_completed()
+	return runner.results
+
+
+#--------------#
+# Celery utils #
+#--------------#
+
+
+def is_celery_worker_alive():
+	"""Check if a Celery worker is available."""
+	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
+	result = bool(result)
+	if result:
+		console.print(Info(message='Celery worker is available, running remotely'))
+	else:
+		console.print(Info(message='No Celery worker available, running locally'))
+	return result
 
 
 def break_task(task, task_opts, results=[]):
@@ -182,111 +316,12 @@ def break_task(task, task_opts, results=[]):
 		task.add_result(info)
 		sigs.append(sig)
 
+	# Mark main task as async since it's being chunked
+	task.sync = False
+
 	# Build Celery workflow
 	workflow = chord(
 		tuple(sigs),
-		handle_runner_error.s(runner=task).set(queue='results')
+		mark_runner_completed.s(runner=task).set(queue='results')
 	)
 	return workflow
-
-
-@app.task(bind=True)
-def run_task(self, args=[], kwargs={}):
-	print('run task')
-	console.print(Info(message=f'Running task {self.request.id}'))
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
-	kwargs['context']['celery_id'] = self.request.id
-	task = Task(*args, **kwargs)
-	task.run()
-
-
-@app.task(bind=True)
-def run_workflow(self, args=[], kwargs={}):
-	console.print(Info(message=f'Running workflow {self.request.id}'))
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
-	kwargs['context']['celery_id'] = self.request.id
-	workflow = Workflow(*args, **kwargs)
-	workflow.run()
-
-
-@app.task(bind=True)
-def run_scan(self, args=[], kwargs={}):
-	console.print(Info(message=f'Running scan {self.request.id}'))
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
-	kwargs['context']['celery_id'] = self.request.id
-	scan = Scan(*args, **kwargs)
-	scan.run()
-
-
-@app.task(bind=True)
-def run_command(self, results, name, targets, opts={}):
-	if IN_CELERY_WORKER_PROCESS:
-		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True})
-		routing_key = self.request.delivery_info['routing_key']
-		console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
-
-	# Flatten + dedupe + filter results
-	results = forward_results(results)
-
-	# Set Celery request id in context
-	context = opts.get('context', {})
-	context['celery_id'] = self.request.id
-	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
-	opts['context'] = context
-	opts['results'] = results
-	opts['sync'] = True
-
-	# Initialize task
-	sync = not IN_CELERY_WORKER_PROCESS
-	task_cls = Task.get_task_class(name)
-	task = task_cls(targets, **opts)
-	update_state(self, task, force=True)
-
-	# Chunk task if needed
-	if task.needs_chunking(sync):
-		console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
-		tasks = break_task(task, opts, results=results)
-		update_state(self, task, force=True)
-		return self.replace(tasks)
-
-	# Update state live
-	[update_state(self, task) for _ in task]
-	update_state(self, task, force=True)
-
-	# Garbage collection to save RAM
-	gc.collect()
-
-	return task.results
-
-
-@app.task
-def forward_results(results):
-	if isinstance(results, list):
-		for ix, item in enumerate(results):
-			if isinstance(item, dict) and 'results' in item:
-				results[ix] = item['results']
-	elif 'results' in results:
-		results = results['results']
-	results = flatten(results)
-	results = deduplicate(results, attr='_uuid')
-	if IN_CELERY_WORKER_PROCESS:
-		console.print(Info(message=f'Forwarding {len(results)} results ...'))
-	return results
-
-#--------------#
-# Celery utils #
-#--------------#
-
-
-def is_celery_worker_alive():
-	"""Check if a Celery worker is available."""
-	result = app.control.broadcast('ping', reply=True, limit=1, timeout=1)
-	result = bool(result)
-	if result:
-		console.print(Info(message='Celery worker is available, running remotely'))
-	else:
-		console.print(Info(message='No Celery worker available, running locally'))
-	return result
