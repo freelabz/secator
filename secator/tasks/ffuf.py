@@ -18,7 +18,7 @@ FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[
 @task()
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
-	cmd = 'ffuf -noninteractive -recursion'
+	cmd = 'ffuf -noninteractive'
 	input_flag = '-u'
 	input_chunk_size = 1
 	file_flag = None
@@ -30,6 +30,7 @@ class ffuf(HttpFuzzer):
 	]
 	opts = {
 		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Auto-calibration'},
+		'recursion': {'is_flag': True, 'default': True,'short': 'recursion', 'help': 'Recursion'},
 	}
 	opt_key_map = {
 		HEADER: 'H',
