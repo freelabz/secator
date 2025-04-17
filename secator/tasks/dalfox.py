@@ -8,7 +8,8 @@ from secator.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   USER_AGENT)
 from secator.output_types import Vulnerability
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import VulnHttp
+from secator.tasks._categories import VulnMixin
+from secator.runners import Command
 
 DALFOX_TYPE_MAP = {
 	'G': 'Grep XSS',
@@ -18,12 +19,13 @@ DALFOX_TYPE_MAP = {
 
 
 @task()
-class dalfox(VulnHttp):
+class dalfox(Command, VulnMixin):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox'
 	input_type = URL
 	input_flag = 'url'
 	file_flag = 'file'
+	output_types = [Vulnerability]
 	# input_chunk_size = 1
 	json_flag = '--format json'
 	version_flag = 'version'

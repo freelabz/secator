@@ -4,11 +4,12 @@ from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, USER_AGENT)
 from secator.output_types import Vulnerability
-from secator.tasks._categories import VulnCode
+from secator.runners import Command
+from secator.tasks._categories import VulnMixin
 
 
 @task()
-class grype(VulnCode):
+class grype(Command, VulnMixin):
 	"""Vulnerability scanner for container images and filesystems."""
 	cmd = 'grype --quiet'
 	input_flag = ''
@@ -66,13 +67,13 @@ class grype(VulnCode):
 		if vuln_id.startswith('GHSA'):
 			data['provider'] = 'github.com'
 			data['references'] = [f'https://github.com/advisories/{vuln_id}']
-			vuln = VulnCode.lookup_ghsa(vuln_id)
+			vuln = VulnMixin.lookup_ghsa(vuln_id)
 			if vuln:
 				data.update(vuln)
 				data['severity'] = data['severity'] or severity.lower()
 				extra_data['ghsa_id'] = vuln_id
 		elif vuln_id.startswith('CVE'):
-			vuln = VulnCode.lookup_cve(vuln_id)
+			vuln = VulnMixin.lookup_cve(vuln_id)
 			if vuln:
 				data.update(vuln)
 				data['severity'] = data['severity'] or severity.lower()

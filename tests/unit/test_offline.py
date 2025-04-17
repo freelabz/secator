@@ -17,7 +17,7 @@ class TestOffline(unittest.TestCase):
 		clear_modules()
 
 	def test_cve_lookup(self):
-		from secator.tasks._categories import Vuln
+		from secator.tasks._categories import VulnMixin
 		result = Vuln.lookup_cve('CVE-2022-23491')
 		self.assertEqual(result, None)
 

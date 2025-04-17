@@ -1,19 +1,21 @@
 from secator.decorators import task
-from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
+from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS, HOST)
 from secator.output_types import Record, Ip, Subdomain
 from secator.output_types.ip import IpProtocol
-from secator.tasks._categories import ReconDns
+from secator.tasks._categories import ReconMixin
 from secator.serializers import JSONSerializer
 from secator.utils import extract_domain_info
+from secator.runners import Command
 
 
 @task()
-class dnsx(ReconDns):
+class dnsx(Command, ReconMixin):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -resp -recon'
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
+	input_type = HOST
 	output_types = [Record, Ip, Subdomain]
 	opt_key_map = {
 		RATE_LIMIT: 'rate-limit',

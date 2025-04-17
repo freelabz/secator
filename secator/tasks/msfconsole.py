@@ -8,14 +8,15 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 								 THREADS, TIMEOUT, USER_AGENT)
-from secator.tasks._categories import VulnMulti
+from secator.tasks._categories import VulnMixin
 from secator.utils import get_file_timestamp
+from secator.runners import Command
 
 logger = logging.getLogger(__name__)
 
 
 @task()
-class msfconsole(VulnMulti):
+class msfconsole(Command, VulnMixin):
 	"""CLI to access and work with the Metasploit Framework."""
 	cmd = 'msfconsole --quiet'
 	version_flag = OPT_NOT_SUPPORTED

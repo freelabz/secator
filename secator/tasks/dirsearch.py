@@ -9,18 +9,21 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
-							   THREADS, TIMEOUT, USER_AGENT, WORDLIST)
+							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL)
 from secator.output_types import Url, Info, Error
-from secator.tasks._categories import HttpFuzzer
+from secator.tasks._categories import HttpFuzzerMixin
+from secator.runners import Command
 
 
 @task()
-class dirsearch(HttpFuzzer):
+class dirsearch(Command, HttpFuzzerMixin):
 	"""Advanced web path brute-forcer."""
 	cmd = 'dirsearch'
 	input_flag = '-u'
+	input_type = URL
 	file_flag = '-l'
 	json_flag = '-O json'
+	output_types = [Url, Info, Error]
 	opt_prefix = '--'
 	encoding = 'ansi'
 	opt_key_map = {

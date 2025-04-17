@@ -9,16 +9,19 @@ from secator.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FILTER_CODES,
 							   STATUS_CODE, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Url
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpCrawler
+from secator.tasks._categories import HttpCrawlerMixin
+from secator.runners import Command
 
 
 @task()
-class gospider(HttpCrawler):
+class gospider(Command, HttpCrawlerMixin):
 	"""Fast web spider written in Go."""
 	cmd = 'gospider --js'
 	file_flag = '-S'
 	input_flag = '-s'
+	input_type = URL
 	json_flag = '--json'
+	output_types = [Url]
 	opt_prefix = '--'
 	opt_key_map = {
 		HEADER: 'header',

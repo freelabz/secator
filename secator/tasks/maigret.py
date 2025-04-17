@@ -8,13 +8,13 @@ from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PA
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
 								 TIMEOUT, URL, USERNAME)
 from secator.output_types import UserAccount, Info, Error
-from secator.tasks._categories import ReconUser
+from secator.runners import Command
 
 logger = logging.getLogger(__name__)
 
 
 @task()
-class maigret(ReconUser):
+class maigret(Command):
 	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
 	file_flag = None

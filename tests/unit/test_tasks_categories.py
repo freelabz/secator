@@ -2,7 +2,7 @@ import json
 import unittest
 
 from secator.utils_test import load_fixture, FIXTURES_DIR
-from secator.tasks._categories import Vuln
+from secator.tasks._categories import VulnMixin
 from secator.config import CONFIG
 
 

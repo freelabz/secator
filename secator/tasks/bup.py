@@ -9,11 +9,12 @@ from secator.definitions import (
 	MATCH_CODES, OPT_NOT_SUPPORTED, URL
 )
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import Http
+from secator.tasks._categories import HttpMixin
+from secator.runners import Command
 
 
 @task()
-class bup(Http):
+class bup(Command, HttpMixin):
 	"""40X bypasser."""
 	cmd = 'bup'
 	input_flag = '-u'
