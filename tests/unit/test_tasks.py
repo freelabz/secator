@@ -5,10 +5,7 @@ import unittest
 import unittest.mock
 import warnings
 
-from secator.config import CONFIG
-from secator.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
-							   MATCH_CODES, OPT_NOT_SUPPORTED, RATE_LIMIT,
-							   THREADS, TIMEOUT)
+from secator.definitions import (DEBUG, HOST, OPT_NOT_SUPPORTED)
 from secator.output_types import Url
 from secator.rich import console
 from secator.runners import Command
