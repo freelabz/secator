@@ -9,21 +9,26 @@ input_types:
 tasks:
   naabu:
     description: Find open ports
-    skip_host_discovery: True
+    ports: "-"  # scan all ports
   nmap:
     description: Search for vulnerabilities on open ports
-    skip_host_discovery: True
     version_detection: True
     script: vulners
     targets_: port.host
     ports_: port.port
-  httpx:
-    description: Probe HTTP services on open ports
-    targets_:
-      - type: port
-        field: '{host}:{port}'
-        condition: item._source.startswith('nmap')
-  _group:
+  _group/1:
+    httpx:
+      description: Probe HTTP services on open ports
+      targets_:
+        - type: port
+          field: '{host}:{port}'
+    searchsploit:
+      description: Search for related exploits
+      targets_:
+        - type: port
+          field: service_name
+          condition: len(item.service_name.split('/')) > 1
+  _group/2:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
@@ -34,12 +39,3 @@ tasks:
         - type: url
           field: url
           condition: item.status_code != 0
-results:
-  - type: port
-    condition: item._source.startswith('nmap')
-
-  - type: vulnerability
-  #   condition: item.confidence == 'high'
-
-  - type: url
-    condition: item.status_code != 0

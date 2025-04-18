@@ -640,6 +640,8 @@ def should_update(update_frequency, last_updated=None, timestamp=None):
 	"""
 	if not timestamp:
 		timestamp = time()
+	if update_frequency == -1:
+		return False
 	if last_updated and (timestamp - last_updated) < update_frequency:
 		return False
 	return True

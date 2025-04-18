@@ -145,4 +145,4 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			results.append(result)
 
 		for res in expected_results:
-			self.assertIn(res, workflow.results)
+			self.assertIn(res, workflow.findings)
