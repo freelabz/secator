@@ -6,6 +6,7 @@ INPUTS_TASKS = {
     USERNAME: 'ocervell',
     IP: '127.0.0.1',
     CIDR_RANGE: '192.168.1.0/24',
+    'arjun': 'http://testphp.vulnweb.com/hpp',
 	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
     'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
     'ffuf': 'http://localhost:3000/FUZZ',
@@ -19,7 +20,7 @@ INPUTS_TASKS = {
     'wpscan': 'http://localhost:8000/',
     'h8mail': 'test@test.com',
     'dnsx': 'wikipedia.org',
-    'dnsxbrute': 'wikipedia.org'
+    'dnsxbrute': 'wikipedia.org',
 }
 
 INPUTS_WORKFLOWS = {
