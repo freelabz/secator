@@ -30,7 +30,7 @@ class ffuf(HttpFuzzer):
 	]
 	opts = {
 		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Auto-calibration'},
-		'recursion': {'is_flag': True, 'default': True,'short': 'recursion', 'help': 'Recursion'},
+		'recursion': {'is_flag': True, 'default': True, 'short': 'recursion', 'help': 'Recursion'},
 	}
 	opt_key_map = {
 		HEADER: 'H',
