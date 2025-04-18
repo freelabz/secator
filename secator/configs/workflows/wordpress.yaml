@@ -12,3 +12,6 @@ tasks:
       tags: wordpress
     wpscan:
       description: WPScan
+    wpprobe:
+      description: WPProbe
+      tags: wordpress

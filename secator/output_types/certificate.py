@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
+from enum import Enum, auto
+from secator.output_types import OutputType
+from secator.utils import rich_to_ansi
 
 
 @dataclass
