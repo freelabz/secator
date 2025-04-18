@@ -7,10 +7,15 @@ input_types:
   - host
   - cidr_range
 tasks:
+  naabu:
+    description: Find open ports
+    ports: "-"  # scan all ports
   nmap:
     description: Search for vulnerabilities on open ports
-    skip_host_discovery: True
-    ports: "-"  # scan all ports
+    version_detection: True
+    script: vulners
+    targets_: port.host
+    ports_: port.port
   _group/1:
     httpx:
       description: Probe HTTP services on open ports
