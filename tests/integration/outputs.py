@@ -3,6 +3,14 @@ from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability, Record)
 
 OUTPUTS_TASKS = {
+    'arjun': [
+        Url(
+            url='http://testphp.vulnweb.com/hpp/?pp=FUZZ',
+            status_code=0,
+            method='GET',
+            _source='arjun'
+        )
+    ],
 	'bup': [
         Url(
             url='http://localhost:3000/ftp/coupons_2013.md.bak',

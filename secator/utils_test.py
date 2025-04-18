@@ -102,7 +102,8 @@ META_OPTS = {
 	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
 	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
 	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True),
-	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True)
+	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True),
+	'arjun.output_path': load_fixture('arjun_output', FIXTURES_DIR, only_path=True),
 }
 
 
