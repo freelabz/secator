@@ -16,7 +16,7 @@ from secator.tasks._categories import VulnHttp
 @task()
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
-	cmd = 'wpscan --random-user-agent --force --verbose'
+	cmd = 'wpscan --random-user-agent --force --verbose --disable-tls-checks --ignore-main-redirect'
 	file_flag = None
 	input_flag = '--url'
 	input_type = URL
@@ -82,7 +82,6 @@ class wpscan(VulnHttp):
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	ignore_return_code = True
 	profile = 'io'
 
 	@staticmethod

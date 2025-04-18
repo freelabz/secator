@@ -25,7 +25,7 @@ from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
 from secator.serializers.dataclass import loads_dataclass
-from secator.template import TemplateLoader
+from secator.template import TEMPLATES, TemplateLoader
 from secator.utils import (
 	debug, detect_host, discover_tasks, flatten, print_version, get_file_date,
 	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
@@ -34,9 +34,8 @@ from secator.utils import (
 click.rich_click.USE_RICH_MARKUP = True
 
 ALL_TASKS = discover_tasks()
-ALL_CONFIGS = TemplateLoader.load_all()
-ALL_WORKFLOWS = ALL_CONFIGS.workflow
-ALL_SCANS = ALL_CONFIGS.scan
+ALL_WORKFLOWS = [t for t in TEMPLATES if t.type == 'workflow']
+ALL_SCANS = [t for t in TEMPLATES if t.type == 'scan']
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 
 
@@ -118,11 +117,13 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
+@click.option('--quiet', is_flag=True, help='Quiet mode.')
+@click.option('--loglevel', type=str, default='INFO', help='Log level.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
-def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
+def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show):
 	"""Run a worker."""
 
 	# Check Celery addon is installed
@@ -152,6 +153,8 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'
+	if quiet:
+		celery += ' --quiet'
 
 	if dev:
 		subcmd = 'stop' if stop else 'show' if show else 'start'
@@ -166,12 +169,14 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 
 	cmd += f' -P {pool}' if pool else ''
 	cmd += f' -c {concurrency}' if concurrency else ''
+	cmd += f' -l {loglevel}' if loglevel else ''
 
 	if reload:
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
 
-	Command.execute(cmd, name='secator_worker')
+	ret = Command.execute(cmd, name='secator_worker')
+	sys.exit(ret.return_code)
 
 
 #-------#
@@ -874,21 +879,21 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
-	with console.status(f'[bold yellow] Installing {title}...'):
-		if cmd:
-			from secator.installer import SourceInstaller
-			status = SourceInstaller.install(cmd)
-		elif packages:
-			from secator.installer import PackageInstaller
-			status = PackageInstaller.install(packages)
-		return_code = 1
-		if status.is_ok():
-			return_code = 0
-			if next_steps:
-				console.print('[bold gold3]:wrench: Next steps:[/]')
-				for ix, step in enumerate(next_steps):
-					console.print(f'   :keycap_{ix}: {step}')
-		sys.exit(return_code)
+	# with console.status(f'[bold yellow] Installing {title}...'):
+	if cmd:
+		from secator.installer import SourceInstaller
+		status = SourceInstaller.install(cmd)
+	elif packages:
+		from secator.installer import PackageInstaller
+		status = PackageInstaller.install(packages)
+	return_code = 1
+	if status.is_ok():
+		return_code = 0
+		if next_steps:
+			console.print('[bold gold3]:wrench: Next steps:[/]')
+			for ix, step in enumerate(next_steps):
+				console.print(f'   :keycap_{ix}: {step}')
+	sys.exit(return_code)
 
 
 @cli.group()
@@ -1065,10 +1070,10 @@ def install_tools(cmds, cleanup):
 		console.print(Error(message=f'No tools found for {cmd_str}.'))
 		return
 	for ix, cls in enumerate(tools):
-		with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
-			status = ToolInstaller.install(cls)
-			if not status.is_ok():
-				return_code = 1
+		# with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
+		status = ToolInstaller.install(cls)
+		if not status.is_ok():
+			return_code = 1
 		console.print()
 	if cleanup:
 		distro = get_distro_config()
@@ -1132,10 +1137,10 @@ def update(all):
 			version_flag = None if cls.version_flag == OPT_NOT_SUPPORTED else version_flag
 			info = get_version_info(cmd, version_flag, cls.install_github_handle)
 			if not info['installed'] or info['status'] == 'outdated' or not info['latest_version']:
-				with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
-					status = ToolInstaller.install(cls)
-					if not status.is_ok():
-						return_code = 1
+				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
+				status = ToolInstaller.install(cls)
+				if not status.is_ok():
+					return_code = 1
 		sys.exit(return_code)
 
 #-------#

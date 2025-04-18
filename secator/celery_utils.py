@@ -12,7 +12,7 @@ from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from secator.config import CONFIG
 from secator.definitions import STATE_COLORS
-from secator.output_types import Error
+from secator.output_types import Error, Info, State
 from secator.rich import console
 from secator.utils import debug, traceback_as_string
 
@@ -76,10 +76,31 @@ class CeleryData(object):
 
 			# Get live results and print progress
 			for data in CeleryData.poll(result, ids_map, refresh_interval):
-				yield from data['results']
+				for result in data['results']:
+
+					# Add dynamic subtask to ids_map
+					if isinstance(result, Info):
+						message = result.message
+						if message.startswith('Celery chunked task created: '):
+							task_id = message.split(' ')[-1]
+							ids_map[task_id] = {
+								'id': task_id,
+								'name': result._source,
+								'full_name': result._source,
+								'descr': '',
+								'state': 'PENDING',
+								'count': 0,
+								'progress': 0
+							}
+					yield result
 
 				if print_remote_info:
 					task_id = data['id']
+					if task_id not in progress_cache:
+						if CONFIG.runners.show_subtasks:
+							progress_cache[task_id] = progress.add_task('', advance=0, **data)
+						else:
+							continue
 					progress_id = progress_cache[task_id]
 					CeleryData.update_progress(progress, progress_id, data)
 
@@ -117,9 +138,24 @@ class CeleryData(object):
 		"""
 		while True:
 			try:
+				main_task = State(
+					task_id=result.id,
+					state=result.state,
+					_source='celery'
+				)
+				debug(f"Main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
+				yield {'id': result.id, 'state': result.state, 'results': [main_task]}
 				yield from CeleryData.get_all_data(result, ids_map)
+
 				if result.ready():
 					debug('result is ready', sub='celery.poll', id=result.id)
+					main_task = State(
+						task_id=result.id,
+						state=result.state,
+						_source='celery'
+					)
+					debug(f"Final main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
+					yield {'id': result.id, 'state': result.state, 'results': [main_task]}
 					yield from CeleryData.get_all_data(result, ids_map)
 					break
 			except (KeyboardInterrupt, GreenletExit):
@@ -264,5 +300,5 @@ class CeleryData(object):
 				CeleryData.get_task_ids(result.parent, ids=ids)
 
 		except kombu.exceptions.DecodeError:
-			debug('kombu decode error', sub='celery.data.get_task_ids')
+			debug('kombu decode error', sub='celery.data')
 			return

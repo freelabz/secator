@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import sys
 import uuid
 from datetime import datetime
@@ -12,11 +11,11 @@ import humanize
 from secator.definitions import ADDONS_ENABLED
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target
+from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_folder_id, process_extractor)
-from secator.utils import (debug, import_dynamic, merge_opts, rich_to_ansi, should_update)
+from secator.runners._helpers import (get_task_folder_id, run_extractors)
+from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update)
 
 logger = logging.getLogger(__name__)
 
@@ -65,19 +64,15 @@ class Runner:
 	# Run hooks
 	enable_hooks = True
 
-	# Reports folder
-	reports_folder = None
-
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
+		self.uuids = []
+		self.results = []
+		self.output = ''
+
+		# Runner config
 		self.config = config
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description)
-		if not isinstance(inputs, list):
-			inputs = [inputs]
-		self.inputs = inputs
-		self.uuids = []
-		self.output = ''
-		self.results = []
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
@@ -97,40 +92,19 @@ class Runner:
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
 		self.no_poll = self.run_opts.get('no_poll', False)
-
-		# Determine exporters
-		exporters_str = self.run_opts.get('output') or self.default_exporters
-		self.exporters = self.resolve_exporters(exporters_str)
-
-		# Determine report folder
-		default_reports_folder_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
-		_id = get_task_folder_id(default_reports_folder_base)
-		self.reports_folder = f'{default_reports_folder_base}/{_id}'
-
-		# Make reports folders
-		os.makedirs(self.reports_folder, exist_ok=True)
-		os.makedirs(f'{self.reports_folder}/.inputs', exist_ok=True)
-		os.makedirs(f'{self.reports_folder}/.outputs', exist_ok=True)
-
-		# Profiler
-		self.enable_profiler = self.run_opts.get('enable_profiler', False) and ADDONS_ENABLED['trace']
-		if self.enable_profiler:
-			from pyinstrument import Profiler
-			self.profiler = Profiler(async_mode=False, interval=0.0001)
-			try:
-				self.profiler.start()
-			except RuntimeError:
-				self.enable_profiler = False
-				pass
-
-		# Process opts
 		self.quiet = self.run_opts.get('quiet', False)
+		self.started = False
+		self.enable_reports = self.run_opts.get('enable_reports', not self.sync)
+		self._reports_folder = self.run_opts.get('reports_folder', None)
+
+		# Runner process options
 		self.no_process = self.run_opts.get('no_process', False)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
 		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
+		self.dry_run = self.run_opts.get('dry_run', False)
 
-		# Print opts
+		# Runner print opts
 		self.print_item = self.run_opts.get('print_item', False)
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
@@ -143,19 +117,6 @@ class Runner:
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 
-		# Debug
-		self.debug('Inputs', obj=self.inputs, sub='init')
-		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
-		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
-
-		# Hooks
-		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
-		self.register_hooks(hooks)
-
-		# Validators
-		self.validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
-		self.register_validators(validators)
-
 		# Chunks
 		self.has_parent = self.run_opts.get('has_parent', False)
 		self.has_children = self.run_opts.get('has_children', False)
@@ -164,9 +125,40 @@ class Runner:
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
 
-		# Process prior results
-		for result in results:
-			list(self._process_item(result, print=False))
+		# Add prior results to runner results
+		[self.add_result(result, print=False, output=False) for result in results]
+
+		# Determine inputs
+		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
+		self.filter_results(results)
+
+		# Debug
+		self.debug('Inputs', obj=self.inputs, sub='init')
+		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
+		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
+
+		# Determine exporters
+		exporters_str = self.run_opts.get('output') or self.default_exporters
+		self.exporters = self.resolve_exporters(exporters_str)
+
+		# Profiler
+		self.enable_profiler = self.run_opts.get('enable_profiler', False) and ADDONS_ENABLED['trace']
+		if self.enable_profiler:
+			from pyinstrument import Profiler
+			self.profiler = Profiler(async_mode=False, interval=0.0001)
+			try:
+				self.profiler.start()
+			except RuntimeError:
+				self.enable_profiler = False
+				pass
+
+		# Hooks
+		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
+		self.register_hooks(hooks)
+
+		# Validators
+		self.validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
+		self.register_validators(validators)
 
 		# Input post-process
 		self.run_hooks('before_init')
@@ -220,14 +212,22 @@ class Runner:
 		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES)) if r._source.startswith(self.unique_name)]
 
 	@property
+	def self_errors(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
+		return [r for r in self.results if isinstance(r, Error)]
+
+	@property
 	def self_findings_count(self):
 		return len(self.self_findings)
 
 	@property
 	def status(self):
+		if not self.started:
+			return 'PENDING'
 		if not self.done:
 			return 'RUNNING'
-		return 'FAILURE' if len(self.errors) > 0 else 'SUCCESS'
+		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
 
 	@property
 	def celery_state(self):
@@ -245,6 +245,23 @@ class Runner:
 			'descr': self.config.description or '',
 		}
 
+	@property
+	def reports_folder(self):
+		if self._reports_folder and Path(self._reports_folder).exists():
+			return self._reports_folder
+		_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
+		_id = get_task_folder_id(_base)
+		path = Path(f'{_base}/{_id}')
+		path_inputs = path / '.inputs'
+		path_outputs = path / '.outputs'
+		if not path.exists():
+			self.debug(f'Creating reports folder {path}')
+			path.mkdir(parents=True, exist_ok=True)
+			path_inputs.mkdir(exist_ok=True)
+			path_outputs.mkdir(exist_ok=True)
+		self._reports_folder = path.resolve()
+		return self._reports_folder
+
 	def run(self):
 		"""Run method.
 
@@ -260,21 +277,18 @@ class Runner:
 			OutputType: runner result.
 		"""
 		try:
-			self.log_start()
-			self.run_hooks('on_start')
+			# If sync mode, set started
+			if self.sync:
+				self.mark_started()
 
-			# If any errors happened during valid ation, exit
+			# If any errors happened during validation, exit
 			if self.errors:
 				yield from self.errors
-				self.log_results()
-				self.run_hooks('on_end')
+				self.mark_completed()
 				return
 
-			# Choose yielder
-			yielder = self.yielder_celery if self.celery_result else self.yielder
-
 			# Loop and process items
-			for item in yielder():
+			for item in self.yielder():
 				yield from self._process_item(item)
 				self.run_hooks('on_interval')
 
@@ -290,15 +304,15 @@ class Runner:
 			self.stop_celery_tasks()
 			yield from self.join_threads()
 			yield error
+			self.mark_completed()
 
-		# Mark duplicates and filter results
-		if not self.no_process:
-			self.mark_duplicates()
-			self.results = self.filter_results()
-
-		# Finalize run
-		self.log_results()
-		self.run_hooks('on_end')
+		finally:
+			if self.dry_run:
+				return
+			if self.sync:
+				self.mark_completed()
+			if self.enable_reports:
+				self.export_reports()
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""
@@ -313,16 +327,27 @@ class Runner:
 				self.add_result(error, print=True)
 				yield error
 
-	def add_result(self, item, print=False):
+	def filter_results(self, results):
+		"""Filter results based on the runner's config."""
+		if not self.chunk:
+			inputs, run_opts, errors = run_extractors(results, self.run_opts, self.inputs, self.dry_run)
+			for error in errors:
+				self.add_result(error, print=True)
+			self.inputs = list(set(inputs))
+			self.run_opts = run_opts
+
+	def add_result(self, item, print=False, output=True):
 		"""Add item to runner results.
 
 		Args:
 			item (OutputType): Item.
 			print (bool): Whether to print it or not.
+			output (bool): Whether to add it to the output or not.
 		"""
 		self.uuids.append(item._uuid)
 		self.results.append(item)
-		self.output += repr(item) + '\n'
+		if output:
+			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
 
@@ -468,16 +493,54 @@ class Runner:
 					dupe = self.run_hooks('on_duplicate', dupe)
 
 	def yielder(self):
-		"""Yield results. Should be implemented by derived classes."""
-		raise NotImplementedError()
+		"""Base yielder implementation.
 
-	def yielder_celery(self):
-		"""Yield results from Celery result."""
-		yield from CeleryData.iter_results(
-			self.celery_result,
-			ids_map=self.celery_ids_map,
-			print_remote_info=False
-		)
+		This should be overridden by derived classes if they need custom behavior.
+		Otherwise, they can implement build_celery_workflow() and get standard behavior.
+
+		Yields:
+			secator.output_types.OutputType: Secator output type.
+		"""
+		# Build Celery workflow
+		workflow = self.build_celery_workflow()
+
+		# Run workflow and get results
+		if self.sync:
+			self.print_item = False
+			results = workflow.apply().get()
+			yield from results
+		else:
+			self.celery_result = workflow()
+			self.celery_ids.append(str(self.celery_result.id))
+			yield Info(
+				message=f'Celery task created: {self.celery_result.id}',
+				task_id=self.celery_result.id
+			)
+			if self.no_poll:
+				self.enable_hooks = False
+				self.enable_reports = False
+				self.no_process = True
+				return
+			results = CeleryData.iter_results(
+				self.celery_result,
+				ids_map=self.celery_ids_map,
+				description=True,
+				print_remote_info=self.print_remote_info,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
+			)
+
+		# Yield results
+		yield from results
+
+	def build_celery_workflow(self):
+		"""Build Celery workflow.
+
+		This should be implemented by derived classes.
+
+		Returns:
+			celery.Signature: Celery task signature.
+		"""
+		raise NotImplementedError("Derived classes must implement build_celery_workflow()")
 
 	def toDict(self):
 		"""Dict representation of the runner."""
@@ -525,7 +588,7 @@ class Runner:
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks.db', verbose=True)  # noqa: E501
+					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 					return
 				if not self.enable_hooks or self.no_process:
 					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
@@ -625,31 +688,53 @@ class Runner:
 				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators')
 			self.validators[key].extend(user_validators)
 
+	def mark_started(self):
+		"""Mark runner as started."""
+		if self.started:
+			return
+		self.started = True
+		self.start_time = datetime.fromtimestamp(time())
+		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks})')
+		self.log_start()
+		self.run_hooks('on_start')
+
+	def mark_completed(self):
+		"""Mark runner as completed."""
+		if self.done:
+			return
+		self.started = True
+		self.done = True
+		self.progress = 100
+		self.end_time = datetime.fromtimestamp(time())
+		self.debug(f'completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')
+		self.mark_duplicates()
+		self.run_hooks('on_end')
+		self.export_profiler()
+		self.log_results()
+
 	def log_start(self):
 		"""Log runner start."""
 		if not self.print_remote_info:
 			return
 		remote_str = 'starting' if self.sync else 'sent to Celery worker'
-		runner_name = self.__class__.__name__
-		info = Info(message=f'{runner_name} {self.config.name} {remote_str}...', _source=self.unique_name)
+		info = Info(message=f'{self.config.type.capitalize()} {self.unique_name} {remote_str}...', _source=self.unique_name)
 		self._print_item(info)
 
 	def log_results(self):
 		"""Log runner results."""
-		if self.no_poll:
-			return
-		self.done = True
-		self.progress = 100
-		self.end_time = datetime.fromtimestamp(time())
-		if self.status == 'FAILURE':
-			self.debug('', obj={self.__class__.__name__: self.status, 'errors': [str(_.message) for _ in self.errors]}, sub='status')  # noqa: E501
-		else:
-			self.debug('', obj={self.__class__.__name__: self.status}, sub='status')
-		if self.exporters and not self.no_process:
+		info = Info(message=f'{self.config.type.capitalize()} {self.unique_name} finished with status {self.status} and found {len(self.self_findings)} findings', _source=self.unique_name)  # noqa: E501
+		self._print_item(info)
+
+	def export_reports(self):
+		"""Export reports."""
+		if self.enable_reports and self.exporters and not self.no_process:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()
 			self.report = report
+
+	def export_profiler(self):
+		"""Export profiler."""
 		if self.enable_profiler:
 			self.profiler.stop()
 			profile_path = Path(self.reports_folder) / f'{self.unique_name}_profile.html'
@@ -663,31 +748,6 @@ class Runner:
 		for task_id in self.celery_ids:
 			name = self.celery_ids_map.get(task_id, {}).get('full_name')
 			revoke_task(task_id, name)
-
-	def filter_results(self):
-		"""Filter runner results using extractors defined in config."""
-		extractors = self.config.results
-		results = []
-		if extractors:
-			# Keep results based on extractors
-			opts = merge_opts(self.config.options, self.run_opts)
-			for extractor in extractors:
-				tmp = process_extractor(self.results, extractor, ctx=opts)
-				results.extend(tmp)
-
-			# Keep the field types in results not specified in the extractors.
-			extract_fields = [e['type'] for e in extractors]
-			keep_fields = [
-				_type for _type in FINDING_TYPES
-				if _type not in extract_fields
-			]
-			results.extend([
-				item for item in self.results
-				if item._type in keep_fields
-			])
-		else:
-			results = self.results
-		return results
 
 	def _convert_item_schema(self, item):
 		"""Convert dict item to a secator output type.
@@ -783,19 +843,20 @@ class Runner:
 				count_map[name] = count
 		return count_map
 
-	def _process_item(self, item, print=True):
+	def _process_item(self, item, print=True, output=True):
 		"""Process an item yielded by the derived runner.
 
 		Args:
 			item (dict | str): Input item.
 			print (bool): Print item in console.
+			output (bool): Add to runner output.
 
 		Yields:
 			OutputType: Output type.
 		"""
 		# Item is a string, just print it
 		if isinstance(item, str):
-			self.output += item + '\n'
+			self.output += item + '\n' if output else ''
 			self._print_item(item) if item and print else ''
 			return
 
@@ -817,20 +878,35 @@ class Runner:
 		# Update item context
 		item._context.update(self.context)
 
-		# Return if already seen
-		if item._uuid in self.uuids:
-			return
-
 		# Add uuid to item
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
+
+		# Return if already seen
+		if item._uuid in self.uuids:
+			return
 
 		# Add source to item
 		if not item._source:
 			item._source = self.unique_name
 
+		# Check for state updates
+		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
+			self.debug(f'Sync runner state from remote: {item.state}')
+			if item.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
+				self.started = True
+				self.done = True
+				self.progress = 100
+				self.end_time = datetime.fromtimestamp(time())
+			elif item.state in ['RUNNING']:
+				self.started = True
+				self.start_time = datetime.fromtimestamp(time())
+				self.end_time = None
+			self.last_updated_celery = item._timestamp
+			return
+
 		# If progress item, update runner progress
-		if isinstance(item, Progress) and item._source == self.unique_name:
+		elif isinstance(item, Progress) and item._source == self.unique_name:
 			self.progress = item.percent
 			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
 				return

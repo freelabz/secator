@@ -1,28 +1,29 @@
 from secator.cli import ALL_WORKFLOWS
+from secator.runners import Workflow
 
 
-def generate_class(config):
-	from secator.runners import Workflow
+class DynamicWorkflow(Workflow):
+	def __init__(self, config):
+		self.config = config
 
-	class workflow(Workflow):
-		def __init__(self, inputs=[], **run_opts):
-			hooks = run_opts.pop('hooks', {})
-			results = run_opts.pop('results', [])
-			context = run_opts.pop('context', {})
-			super().__init__(
-				config=config,
-				inputs=inputs,
-				results=results,
-				run_opts=run_opts,
-				hooks=hooks,
-				context=context)
-	return workflow, config.name
+	def __call__(self, targets, **kwargs):
+		hooks = kwargs.pop('hooks', {})
+		results = kwargs.pop('results', [])
+		context = kwargs.pop('context', {})
+		super().__init__(
+			config=self.config,
+			inputs=targets,
+			results=results,
+			hooks=hooks,
+			context=context,
+			run_opts=kwargs)
+		return self
 
 
 DYNAMIC_WORKFLOWS = {}
 for workflow in ALL_WORKFLOWS:
-	cls, name = generate_class(workflow)
-	DYNAMIC_WORKFLOWS[name] = cls
+	instance = DynamicWorkflow(workflow)
+	DYNAMIC_WORKFLOWS[workflow.name] = instance
 
 globals().update(DYNAMIC_WORKFLOWS)
 __all__ = list(DYNAMIC_WORKFLOWS)
