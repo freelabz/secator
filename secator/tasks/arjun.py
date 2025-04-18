@@ -43,7 +43,7 @@ class arjun(Command):
         'casing': '--casing',
     }
     output_types = [Url]
-    install_cmd = 'pipx install arjun'
+    install_cmd = 'pipx install arjun && pipx upgrade arjun'
     install_github_handle = 's0md3v/Arjun'
 
     @staticmethod
