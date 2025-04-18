@@ -225,7 +225,10 @@ def decorate_command_options(opts):
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
 			short_opt = conf.pop('short', None)
-			conf.pop('internal', None)
+			internal = conf.pop('internal', False)
+			display = conf.pop('display', True)
+			if internal and not display:
+				continue
 			conf.pop('prefix', None)
 			conf.pop('shlex', None)
 			conf.pop('meta', None)

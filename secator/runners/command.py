@@ -847,6 +847,9 @@ class Command(Runner):
 		if opts:
 			for opt_conf in opts.values():
 				conf = opt_conf['conf']
+				internal = conf.get('internal', False)
+				if internal:
+					continue
 				if conf.get('requires_sudo', False):
 					self.requires_sudo = True
 				opts_str += ' ' + Command._build_opt_str(opt_conf)

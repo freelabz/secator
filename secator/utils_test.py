@@ -14,7 +14,7 @@ from secator.cli import ALL_WORKFLOWS, ALL_TASKS, ALL_SCANS
 from secator.output_types import EXECUTION_TYPES, STAT_TYPES
 from secator.runners import Command
 from secator.rich import console
-from secator.utils import load_fixture
+from secator.utils import load_fixture, debug
 
 #---------#
 # GLOBALS #
@@ -101,7 +101,8 @@ META_OPTS = {
 	'nuclei.template_id': 'prometheus-metrics',
 	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
 	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
-	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True)
+	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True),
+	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True)
 }
 
 
@@ -158,12 +159,13 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			empty_results_allowed=False):
 
 		console.print(f'[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
+		debug('', sub='unittest')
 
 		if not runner.inputs:
 			console.print('[dim gold3] skipped (no inputs defined).[/]')
 			return
 
-		if not expected_results and not expected_output_keys:
+		if not expected_results and not expected_output_keys and not expected_output_types:
 			console.print('[dim gold3] (no outputs defined).[/]', end='')
 
 		try:
@@ -176,23 +178,29 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			# Check return code
 			if isinstance(runner, Command):
 				if not runner.ignore_return_code:
+					debug(f'{runner.name} should have a 0 return code', sub='unittest')
 					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code')
 
 			# Check results not empty
 			if not empty_results_allowed:
+				debug(f'{runner.name} should return at least 1 result', sub='unittest')
 				self.assertGreater(len(results), 0, f'{runner.name} should return at least 1 result')
 
 			# Check status
+			debug(f'{runner.name} should have the status {expected_status}', sub='unittest')
 			self.assertEqual(runner.status, expected_status, f'{runner.name} should have the status {expected_status}')
 
 			# Check results
 			for item in results:
+				debug(f'{runner.name} yielded {repr(item)}', sub='unittest')
 
 				if expected_output_types:
+					debug(f'{runner.name} item should have an output type in {[_._type for _ in expected_output_types]}', sub='unittest')
 					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}"')  # noqa: E501
 
 				if expected_output_keys:
 					keys = [k for k in list(item.keys()) if not k.startswith('_')]
+					debug(f'{runner.name} item should have output keys {keys}', sub='unittest')
 					self.assertEqual(
 						set(keys).difference(set(expected_output_keys)),
 						set(),
@@ -201,6 +209,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			# Check if runner results in expected results
 			if expected_results:
 				for result in expected_results:
+					debug(f'{runner.name} item should be in expected results {result}', sub='unittest')
 					self.assertIn(result, results, f'{runner.name}: {result} should be in runner results')
 
 		except Exception:
