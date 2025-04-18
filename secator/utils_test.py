@@ -195,7 +195,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 				debug(f'{runner.name} yielded {repr(item)}', sub='unittest')
 
 				if expected_output_types:
-					debug(f'{runner.name} item should have an output type in {[_._type for _ in expected_output_types]}', sub='unittest')
+					debug(f'{runner.name} item should have an output type in {[_._type for _ in expected_output_types]}', sub='unittest')  # noqa: E501
 					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}"')  # noqa: E501
 
 				if expected_output_keys:
