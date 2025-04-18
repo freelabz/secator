@@ -104,6 +104,7 @@ META_OPTS = {
 	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True),
 	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True),
 	'arjun.output_path': load_fixture('arjun_output', FIXTURES_DIR, only_path=True),
+	'arjun.wordlist': None
 }
 
 
@@ -172,6 +173,8 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 		try:
 			# Run runner
 			results = runner.run()
+			for result in results:
+				debug(result.toDict(), sub='unittest')
 
 			# Add execution types to allowed output types
 			expected_output_types.extend(EXECUTION_TYPES + STAT_TYPES)
@@ -180,7 +183,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			if isinstance(runner, Command):
 				if not runner.ignore_return_code:
 					debug(f'{runner.name} should have a 0 return code', sub='unittest')
-					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code')
+					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code. Runner return code: {runner.return_code}')  # noqa: E501
 
 			# Check results not empty
 			if not empty_results_allowed:
@@ -188,8 +191,8 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 				self.assertGreater(len(results), 0, f'{runner.name} should return at least 1 result')
 
 			# Check status
-			debug(f'{runner.name} should have the status {expected_status}', sub='unittest')
-			self.assertEqual(runner.status, expected_status, f'{runner.name} should have the status {expected_status}')
+			debug(f'{runner.name} should have the status {expected_status}.', sub='unittest')
+			self.assertEqual(runner.status, expected_status, f'{runner.name} should have the status {expected_status}. Errors: {runner.errors}')  # noqa: E501
 
 			# Check results
 			for item in results:
@@ -205,13 +208,13 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 					self.assertEqual(
 						set(keys).difference(set(expected_output_keys)),
 						set(),
-						f'{runner.name}: item is missing expected keys {set(expected_output_keys)}')
+						f'{runner.name}: item is missing expected keys {set(expected_output_keys)}. Item keys: {keys}')  # noqa: E501
 
 			# Check if runner results in expected results
 			if expected_results:
 				for result in expected_results:
-					debug(f'{runner.name} item should be in expected results {result}', sub='unittest')
-					self.assertIn(result, results, f'{runner.name}: {result} should be in runner results')
+					debug(f'{runner.name} item should be in expected results {result}.', sub='unittest')
+					self.assertIn(result, results, f'{runner.name}: {result} should be in runner results.')  # noqa: E501
 
 		except Exception:
 			console.print('[dim red] failed[/]')

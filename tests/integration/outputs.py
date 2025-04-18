@@ -5,9 +5,7 @@ from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
 OUTPUTS_TASKS = {
     'arjun': [
         Url(
-            url='http://testphp.vulnweb.com/hpp/?pp=FUZZ',
-            status_code=0,
-            method='GET',
+            url='http://testphp.vulnweb.com/hpp?pp=FUZZ',
             _source='arjun'
         )
     ],
