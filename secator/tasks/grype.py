@@ -1,4 +1,4 @@
-
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
@@ -27,8 +27,11 @@ class grype(VulnCode):
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Vulnerability]
+	install_pre = {
+		'*': ['curl']
+	}
 	install_cmd = (
-		'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin'
+		f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'
 	)
 	install_github_handle = 'anchore/grype'
 
@@ -63,7 +66,6 @@ class grype(VulnCode):
 		if vuln_id.startswith('GHSA'):
 			data['provider'] = 'github.com'
 			data['references'] = [f'https://github.com/advisories/{vuln_id}']
-			data['tags'].extend(['cve', 'ghsa'])
 			vuln = VulnCode.lookup_ghsa(vuln_id)
 			if vuln:
 				data.update(vuln)
@@ -72,7 +74,6 @@ class grype(VulnCode):
 		elif vuln_id.startswith('CVE'):
 			vuln = VulnCode.lookup_cve(vuln_id)
 			if vuln:
-				vuln['tags'].append('cve')
 				data.update(vuln)
 				data['severity'] = data['severity'] or severity.lower()
 		data['extra_data'] = extra_data

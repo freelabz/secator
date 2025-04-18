@@ -2,6 +2,7 @@ name: Install secator
 description: Installs secator
 inputs:
   python-version:
+    description: "Python version"
     required: true
 runs:
   using: "composite"
@@ -15,3 +16,7 @@ runs:
   - name: Install secator with pipx
     shell: bash
     run: pipx install -e .[dev]
+
+  - name: Add secator to $PATH
+    shell: bash
+    run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"

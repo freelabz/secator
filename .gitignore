@@ -134,3 +134,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Project
+.git/
+images/

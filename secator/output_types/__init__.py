@@ -7,6 +7,7 @@ __all__ = [
 	'Progress',
 	'Record',
 	'Stat',
+	'State',
 	'Subdomain',
 	'Url',
 	'UserAccount',
@@ -30,9 +31,10 @@ from secator.output_types.info import Info
 from secator.output_types.warning import Warning
 from secator.output_types.error import Error
 from secator.output_types.stat import Stat
+from secator.output_types.state import State
 
 EXECUTION_TYPES = [
-	Target, Progress, Info, Warning, Error
+	Target, Progress, Info, Warning, Error, State
 ]
 STAT_TYPES = [
 	Stat

@@ -6,85 +6,46 @@ from pathlib import Path
 import yaml
 from dotmap import DotMap
 
-from secator.rich import console
 from secator.config import CONFIG, CONFIGS_FOLDER
+from secator.rich import console
+from secator.utils import convert_functions_to_strings, debug
+from secator.output_types import Error
 
-TEMPLATES_DIR_KEYS = ['workflow', 'scan', 'profile']
-
-
-def load_template(name):
-	"""Load a config by name.
-
-	Args:
-		name: Name of the config, for instances profiles/aggressive or workflows/domain_scan.
-
-	Returns:
-		dict: Loaded config.
-	"""
-	path = CONFIGS_FOLDER / f'{name}.yaml'
-	if not path.exists():
-		console.log(f'Config "{name}" could not be loaded.')
-		return
-	with path.open('r') as f:
-		return yaml.load(f.read(), Loader=yaml.Loader)
-
-
-def find_templates():
-	results = {'scan': [], 'workflow': [], 'profile': []}
-	dirs_type = [CONFIGS_FOLDER]
-	if CONFIG.dirs.templates:
-		dirs_type.append(CONFIG.dirs.templates)
-	paths = []
-	for dir in dirs_type:
-		dir_paths = [
-			Path(path)
-			for path in glob.glob(str(dir).rstrip('/') + '/**/*.y*ml', recursive=True)
-		]
-		paths.extend(dir_paths)
-	for path in paths:
-		with path.open('r') as f:
-			try:
-				config = yaml.load(f.read(), yaml.Loader)
-				type = config.get('type')
-				if type:
-					results[type].append(path)
-			except yaml.YAMLError as exc:
-				console.log(f'Unable to load config at {path}')
-				console.log(str(exc))
-	return results
+TEMPLATES = []
 
 
 class TemplateLoader(DotMap):
 
 	def __init__(self, input={}, name=None, **kwargs):
 		if name:
-			name = name.replace('-', '_')  # so that workflows have a nice '-' in CLI
-			config = self._load_from_name(name)
-		elif isinstance(input, str) or isinstance(input, Path):
-			config = self._load_from_file(input)
-		else:
+			if '/' not in name:
+				console.print(Error(message=f'Cannot load {name}: you should specify a type for the template when loading by name (e.g. workflow/<workflow_name>)'))  # noqa: E501
+				return
+			_type, name = name.split('/')
+			config = next((p for p in TEMPLATES if p['type'] == _type and p['name'] == name in str(p)), None)
+			if not config:
+				console.print(Error(message=f'Template {name} not found in loaded templates'))
+				config = {}
+		elif isinstance(input, dict):
 			config = input
-		super().__init__(config)
+		elif isinstance(input, Path) or Path(input).exists():
+			config = self._load_from_path(input)
+		elif isinstance(input, str):
+			config = self._load(input)
+		super().__init__(config, **kwargs)
 
-	def _load_from_file(self, path):
-		if isinstance(path, str):
-			path = Path(path)
+	def add_to_templates(self):
+		TEMPLATES.append(self)
+
+	def _load_from_path(self, path):
 		if not path.exists():
-			console.log(f'Config path {path} does not exists', style='bold red')
+			console.print(Error(message=f'Config path {path} does not exists'))
 			return
 		with path.open('r') as f:
-			return yaml.load(f.read(), Loader=yaml.Loader)
+			return self._load(f.read())
 
-	def _load_from_name(self, name):
-		return load_template(name)
-
-	@classmethod
-	def load_all(cls):
-		configs = find_templates()
-		return TemplateLoader({
-			key: [TemplateLoader(path) for path in configs[key]]
-			for key in TEMPLATES_DIR_KEYS
-		})
+	def _load(self, input):
+		return yaml.load(input, Loader=yaml.Loader)
 
 	@property
 	def supported_opts(self):
@@ -106,7 +67,7 @@ class TemplateLoader(DotMap):
 				task_opts = task_class.get_supported_opts()
 				for name, conf in task_opts.items():
 					if name not in opts or not opts[name].get('supported', False):
-						opts[name] = conf
+						opts[name] = convert_functions_to_strings(conf)
 		return opts
 
 	def _extract_tasks(self):
@@ -120,7 +81,7 @@ class TemplateLoader(DotMap):
 
 		def parse_config(config, prefix=''):
 			for key, value in config.items():
-				if key == '_group':
+				if key.startswith('_group'):
 					parse_config(value, prefix)
 				elif value:
 					task_name = f'{prefix}/{key}' if prefix else key
@@ -139,7 +100,7 @@ class TemplateLoader(DotMap):
 			# For each workflow in the scan, load it and incorporate it with a unique prefix
 			for wf_name, _ in self.workflows.items():
 				name = wf_name.split('/')[0]
-				config = TemplateLoader(name=f'workflows/{name}')
+				config = TemplateLoader(name=f'workflow/{name}')
 				wf_tasks = config.flat_tasks
 				# Prefix tasks from this workflow with its name to prevent collision
 				for task_key, task_val in wf_tasks.items():
@@ -151,3 +112,26 @@ class TemplateLoader(DotMap):
 			parse_config(self.tasks)
 
 		return dict(tasks)
+
+
+def find_templates():
+	results = []
+	dirs = [CONFIGS_FOLDER]
+	if CONFIG.dirs.templates:
+		dirs.append(CONFIG.dirs.templates)
+	paths = []
+	for dir in dirs:
+		config_paths = [
+			Path(path)
+			for path in glob.glob(str(dir).rstrip('/') + '/**/*.y*ml', recursive=True)
+		]
+		debug(f'Found {len(config_paths)} templates in {dir}', sub='template')
+		paths.extend(config_paths)
+	for path in paths:
+		config = TemplateLoader(input=path)
+		debug(f'Loaded template from {path}', sub='template')
+		results.append(config)
+	return results
+
+
+TEMPLATES = find_templates()

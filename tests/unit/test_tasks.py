@@ -5,10 +5,7 @@ import unittest
 import unittest.mock
 import warnings
 
-from secator.config import CONFIG
-from secator.definitions import (DEBUG, DELAY, FOLLOW_REDIRECT, HEADER, HOST,
-							   MATCH_CODES, OPT_NOT_SUPPORTED, RATE_LIMIT,
-							   THREADS, TIMEOUT)
+from secator.definitions import (DEBUG, HOST, OPT_NOT_SUPPORTED)
 from secator.output_types import Url
 from secator.rich import console
 from secator.runners import Command
@@ -47,11 +44,12 @@ class TestCommandProcessOpts(unittest.TestCase):
 
 	def test_process_opts_defaults(self):
 		run_opts = {}
-		opts_str = FakeCmd._process_opts(
+		opts = FakeCmd._process_opts(
 			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map)
+		opts_str = ' '.join([FakeCmd._build_opt_str(v) for k, v in opts.items()])
 		self.assertEqual(opts_str, '-opt1 10.0 -opt2 1,2,3')
 
 	def test_process_opts(self):
@@ -60,11 +58,12 @@ class TestCommandProcessOpts(unittest.TestCase):
 			'opt2': False, # intentionally omit arg, overriding default value
 			'opt3': True
 		}
-		opts_str = FakeCmd._process_opts(
+		opts = FakeCmd._process_opts(
 			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map)
+		opts_str = ' '.join([FakeCmd._build_opt_str(v) for k, v in opts.items()])
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3')
 
 	def test_process_opts_with_prefix(self):
@@ -74,12 +73,13 @@ class TestCommandProcessOpts(unittest.TestCase):
 			'opt2': False, # intentionally omit arg, overriding default value
 			'opt3': True
 		}
-		opts_str = FakeCmd._process_opts(
+		opts = FakeCmd._process_opts(
 			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
 			command_name='fakecmd')
+		opts_str = ' '.join([FakeCmd._build_opt_str(v) for k, v in opts.items()])
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3')
 
 	def test_process_opts_with_unsupported(self):
@@ -90,12 +90,13 @@ class TestCommandProcessOpts(unittest.TestCase):
 			'opt3': True,
 			'opt4': 'test_unsupported'
 		}
-		opts_str = FakeCmd._process_opts(
+		opts = FakeCmd._process_opts(
 			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
 			command_name='fakecmd')
+		opts_str = ' '.join([FakeCmd._build_opt_str(v) for k, v in opts.items()])
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3')
 
 	def test_process_opts_with_convert_underscore(self):
@@ -107,12 +108,13 @@ class TestCommandProcessOpts(unittest.TestCase):
 			'opt4': 'test_unsupported',
 			'opt_with_underscore': 'test'
 		}
-		opts_str = FakeCmd._process_opts(
+		opts = FakeCmd._process_opts(
 			run_opts,
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
 			command_name='fakecmd')
+		opts_str = ' '.join([FakeCmd._build_opt_str(v) for k, v in opts.items()])
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3 -opt-with-underscore test')
 
 	def test_get_opt_value(self):

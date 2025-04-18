@@ -111,16 +111,34 @@ class TestTemplateLoader(unittest.TestCase):
 		self.assertEqual(tasks['nuclei/host']['opts'], {'opt_4': 'test4'})
 		self.assertEqual(tasks['nuclei/network']['opts'], {'opt_4': 'test4_new', 'opt_5': 'test5'})
 
-	@patch('secator.template.TemplateLoader._load_from_name')
-	def test_extract_tasks_and_supported_opts_scan(self, mock_load_from_name):
-		from secator.template import TemplateLoader
-		mock_load_from_name.return_value = self.workflow_config
+	@patch('secator.template.TemplateLoader._load')
+	def test_extract_tasks_and_supported_opts_scan(self, mock_load):
+		from secator.template import TemplateLoader, TEMPLATES
+		mock_load.return_value = self.workflow_config
+
+		# Check if the loader is added to the TEMPLATES list correctly
 		loader_wf = TemplateLoader(input=self.workflow_config)
+		loader_wf.add_to_templates()
+		self.assertIn(loader_wf, TEMPLATES)
+
+		# Check if loading workflow by name gives the same object
+		loader_wf_by_name = TemplateLoader(name='workflow/test')
+		self.assertEqual(loader_wf, loader_wf_by_name)
+
+		# Check if the tasks are extracted correctly
 		wf_tasks = loader_wf._extract_tasks()
-		loader = TemplateLoader(input=self.scan_config)
-		tasks = loader._extract_tasks()
-		expected_tasks = {}
+		loader_scan = TemplateLoader(input=self.scan_config)
+		loader_scan.add_to_templates()
+		self.assertIn(loader_scan, TEMPLATES)
+
+		# Check if loading scan by name gives the same object
+		loader_scan_by_name = TemplateLoader(name='scan/test')
+		self.assertEqual(loader_scan, loader_scan_by_name)
+
+		# Check if the tasks are extracted correctly
+		scan_tasks = loader_scan._extract_tasks()
+		expected_scan_tasks = {}
 		for workflow in ['test/1', 'test/2']:
 			for task, task_conf in wf_tasks.items():
-				expected_tasks[f'{workflow}/{task}'] = task_conf
-		self.assertEqual(tasks, expected_tasks)
+				expected_scan_tasks[f'{workflow}/{task}'] = task_conf
+		self.assertEqual(scan_tasks, expected_scan_tasks)

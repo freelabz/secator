@@ -1,5 +1,5 @@
 import unittest
-from secator.output_types import Url, Target, Port, Vulnerability, Info
+from secator.output_types import Url, Target, Port, Vulnerability, Info, Warning, Error
 from secator.runners import Command
 from secator.serializers import JSONSerializer
 from time import sleep
@@ -41,7 +41,7 @@ class TestWorker(unittest.TestCase):
 			content_length=4958,
 			_source='httpx'
 		)
-		self.assertIn(url, cmd.results)
+		self.assertIn(url, cmd.findings)
 
 	def test_host_recon(self):
 		cmd = Command.execute(
@@ -49,7 +49,7 @@ class TestWorker(unittest.TestCase):
 			name='secator_w_host_recon',
 			no_process=False,
 			quiet=True,
-			cls_attributes={'output_types': [Target, Url, Port, Vulnerability, Info], 'item_loaders': [JSONSerializer()]}
+			cls_attributes={'output_types': [Target, Url, Port, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
 		self.assertGreater(len(cmd.results), 0)
@@ -82,9 +82,9 @@ class TestWorker(unittest.TestCase):
 			tags=['tech', 'nginx'],
 			_source='nuclei_url'
 		)
-		self.assertIn(port, cmd.results)
-		self.assertIn(url, cmd.results)
-		self.assertIn(vuln, cmd.results)
+		self.assertIn(port, cmd.findings)
+		self.assertIn(url, cmd.findings)
+		self.assertIn(vuln, cmd.findings)
 
 	# def test_pd_pipe(self):
 	# 	cmd = Command.execute(

@@ -13,7 +13,6 @@ class fping(ReconIp):
 	cmd = 'fping -a'
 	file_flag = '-f'
 	input_flag = None
-	ignore_return_code = True
 	opt_prefix = '--'
 	opt_key_map = {
 		DELAY: 'period',
@@ -29,7 +28,7 @@ class fping(ReconIp):
 	}
 	input_type = IP
 	output_types = [Ip]
-	install_cmd = 'sudo apt install -y fping'
+	install_pre = {'*': ['fping']}
 
 	@staticmethod
 	def item_loader(self, line):
