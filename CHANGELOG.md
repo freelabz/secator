@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.0](https://github.com/freelabz/secator/compare/v0.10.0...v0.11.0) (2025-04-18)
+
+
+### Features
+
+* **celery:** simplify task runner logic ([#574](https://github.com/freelabz/secator/issues/574)) ([9eb057c](https://github.com/freelabz/secator/commit/9eb057cee0afcba93e2f5d7d1d9a4807c1ecb1fc))
+* **output_types:** add Certificate output type ([#459](https://github.com/freelabz/secator/issues/459)) ([179f915](https://github.com/freelabz/secator/commit/179f9154d9886245c16b9c38365365b08ee4afb9))
+* restore nmap defaults, del port_scan, mod host_recon ([#581](https://github.com/freelabz/secator/issues/581)) ([e0c7c58](https://github.com/freelabz/secator/commit/e0c7c58c11b462ac161263e2550064387b5c0ff5))
+* **runner:** core improvements ([#582](https://github.com/freelabz/secator/issues/582)) ([11f2dd3](https://github.com/freelabz/secator/commit/11f2dd3cbcf16139e3495b9cb54da6fdff0d95e6))
+* **tasks:** add wpprobe ([#557](https://github.com/freelabz/secator/issues/557)) ([d413097](https://github.com/freelabz/secator/commit/d4130971ac0b7fc9f6e357d3e0f17fc6d6d60004))
+
+
+### Bug Fixes
+
+* add debug of tasks unit tests, internal tasks not added to cmd, add display flag for options ([#587](https://github.com/freelabz/secator/issues/587)) ([3980234](https://github.com/freelabz/secator/commit/3980234d968a893940736daa2bb347951190bce1))
+* add default user agent and remove ffuf recursion ([#586](https://github.com/freelabz/secator/issues/586)) ([332d1bd](https://github.com/freelabz/secator/commit/332d1bd4a63f8338bc9425ccd92d5188fc6e983e))
+* **celery:** kill worker in solo mode ([#568](https://github.com/freelabz/secator/issues/568)) ([c2fd107](https://github.com/freelabz/secator/commit/c2fd107ea1c4248c3eba518dfdc6d777eff8ef15))
+* thread is_started ([9b6c6bb](https://github.com/freelabz/secator/commit/9b6c6bb244a3434db3d398160918bc807288a9ad))
+* wordlist not loaded when local path is provided ([#572](https://github.com/freelabz/secator/issues/572)) ([ef071a9](https://github.com/freelabz/secator/commit/ef071a9aa430220b5cfe0dcb5db271512339a140))
+* wpscan ignore main redirect and ssl ignore ([#577](https://github.com/freelabz/secator/issues/577)) ([35c445d](https://github.com/freelabz/secator/commit/35c445dc9a669c8f73764b712c13e983d7598f90))
+
 ## [0.10.0](https://github.com/freelabz/secator/compare/v0.9.4...v0.10.0) (2025-03-04)
 
 
