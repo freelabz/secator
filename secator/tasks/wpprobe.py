@@ -17,7 +17,7 @@ class wpprobe(Command):
     opt_prefix = '-'
     opts = {
         'mode': {'type': click.Choice(['scan', 'update', 'update-db']), 'default': 'scan', 'help': 'WPProbe mode', 'required': True, 'internal': True},  # noqa: E501
-		'output_path': {'type': str, 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},
+        'output_path': {'type': str, 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},  # noqa: E501
     }
     meta_opts = {
         THREADS: OPTS[THREADS]
