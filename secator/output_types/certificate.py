@@ -9,23 +9,23 @@ from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
 @dataclass
 class Certificate(OutputType):
     host: str
-    ip: str = ''
-    raw_value: str = ''
-    fingerprint_sha256: str = ''
-    subject_cn: str = ''
-    subject_an: list[str] = field(default_factory=list)
-    not_before: datetime = None
-    not_after: datetime = None
-    issuer_dn: str = ''
-    issuer_cn: str = ''
-    issuer: str = ''
-    self_signed: bool = True
-    trusted: bool = False
-    status: str = CERTIFICATE_STATUS_UNKNOWN
-    keysize: int = None
-    serial_number: str = ''
-    ciphers: list[str] = field(default_factory=list)
-    parent_certificate: 'Certificate' = None  # noqa: F821
+    fingerprint_sha256: str = field(default='')
+    ip: str = field(default='', compare=False)
+    raw_value: str = field(default='', compare=False)
+    subject_cn: str = field(default='', compare=False)
+    subject_an: list[str] = field(default_factory=list, compare=False)
+    not_before: datetime = field(default=None, compare=False)
+    not_after: datetime = field(default=None, compare=False)
+    issuer_dn: str = field(default='', compare=False)
+    issuer_cn: str = field(default='', compare=False)
+    issuer: str = field(default='', compare=False)
+    self_signed: bool = field(default=True, compare=False)
+    trusted: bool = field(default=False, compare=False)
+    status: str = field(default=CERTIFICATE_STATUS_UNKNOWN, compare=False)
+    keysize: int = field(default=None, compare=False)
+    serial_number: str = field(default='', compare=False)
+    ciphers: list[str] = field(default_factory=list, compare=False)
+    # parent_certificate: 'Certificate' = None  # noqa: F821
     _source: str = field(default='', repr=True)
     _type: str = field(default='certificate', repr=True)
     _timestamp: int = field(default_factory=lambda: time.time(), compare=False)

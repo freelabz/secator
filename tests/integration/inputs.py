@@ -8,18 +8,19 @@ INPUTS_TASKS = {
     CIDR_RANGE: '192.168.1.0/24',
 	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
     'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
+    'dnsx': 'wikipedia.org',
+    'dnsxbrute': 'wikipedia.org',
     'ffuf': 'http://localhost:3000/FUZZ',
     'gf': 'http://localhost:3000?q=test',
     'gau': 'http://testphp.vulnweb.com',
     'gospider': 'https://danielmiessler.com/',
     'grype': 'redis:7.4.1',
+    'h8mail': 'test@test.com',
     'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
     'subfinder': 'api.github.com',
+    'testssl': 'wikipedia.org',
     'wpscan': 'http://localhost:8000/',
-    'h8mail': 'test@test.com',
-    'dnsx': 'wikipedia.org',
-    'dnsxbrute': 'wikipedia.org'
 }
 
 INPUTS_WORKFLOWS = {

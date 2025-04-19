@@ -5,8 +5,9 @@ from datetime import datetime
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.output_types import Vulnerability, Certificate, Error, Info, Ip, Tag
-from secator.definitions import (PROXY, HOST, OPT_NOT_SUPPORTED, USER_AGENT, HEADER, OUTPUT_PATH,
-                                CERTIFICATE_STATUS_UNKNOWN, CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED)
+from secator.definitions import (PROXY, HOST, USER_AGENT, HEADER, OUTPUT_PATH,
+                                CERTIFICATE_STATUS_UNKNOWN, CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED,
+                                TIMEOUT)
 from secator.tasks._categories import Command, OPTS
 
 
@@ -18,33 +19,39 @@ class testssl(Command):
         f'ln -sf {CONFIG.dirs.share}/testssl.sh/testssl.sh {CONFIG.dirs.bin}'
     )
     cmd = 'testssl.sh'
-    # TODO add more of the default options
     opts = {
-        'verbose': {'is_flag': True, 'default': False, 'internal': True, 'display': True, 'help': 'Record all SSL/TLS info, not only critical info'}  # noqa: E501
+        'verbose': {'is_flag': True, 'default': False, 'internal': True, 'display': True, 'help': 'Record all SSL/TLS info, not only critical info'},  # noqa: E501
+        'parallel': {'is_flag': True, 'default': False, 'help': 'Test multiple hosts in parallel'},
+        'warnings': {'type': str, 'default': None, 'help': 'Set to "batch" to stop on errors, and "off" to skip errors and continue'},  # noqa: E501
+        'ids_friendly': {'is_flag': True, 'default': False, 'help': 'Avoid IDS blocking by skipping a few vulnerability checks'},  # noqa: E501
+        'hints': {'is_flag': True, 'default': False, 'help': 'Additional hints to findings'},
+        'server_defaults': {'is_flag': True, 'default': False, 'help': 'Displays the server default picks and certificate info'},  # noqa: E501
     }
     meta_opts = {
         PROXY: OPTS[PROXY],
         USER_AGENT: OPTS[USER_AGENT],
         HEADER: OPTS[HEADER],
+        TIMEOUT: OPTS[TIMEOUT],
     }
     opt_key_map = {
         PROXY: 'proxy',
         USER_AGENT: 'user-agent',
-        HEADER: OPT_NOT_SUPPORTED,  # TODO : available through 'reqheader' need testing before prod
+        HEADER: 'reqheader',
+        TIMEOUT: '--connect-timeout',
+        'ipv6': '-6',
     }
     opt_prefix = '--'
     input_type = HOST
     input_flag = None
     file_flag = '-iL'
-    #Supported proxy
+    file_eof_newline = True
     proxy_http = True
-    proxychains = False  # Because I did not test could be True
-    proxy_socks5 = False  # Because I did not test could be True
-    profile = 'io'  # Todo confirm
+    proxychains = False
+    proxy_socks5 = False
+    profile = 'io'
 
     @staticmethod
     def on_cmd(self):
-        target = self.inputs[0]
         output_path = self.get_opt_value(OUTPUT_PATH)
         if not output_path:
             output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
@@ -52,8 +59,10 @@ class testssl(Command):
         self.cmd += f' --jsonfile {self.output_path}'
 
         # Hack because target needs to be the last argument in testssl.sh
-        self.cmd = self.cmd.replace(target, '')
-        self.cmd += f' {target}'
+        if len(self.inputs) == 1:
+            target = self.inputs[0]
+            self.cmd = self.cmd.replace(f' {target}', '')
+            self.cmd += f' {target}'
 
     @staticmethod
     def on_cmd_done(self):
@@ -82,6 +91,10 @@ class testssl(Command):
                 if cwe:
                     vuln_tags.append(cwe)
 
+                # Skip ignored items
+                if id.startswith(tuple(ignored_item_ids)):
+                    continue
+
                 # Add IP to address pool
                 host_to_ips.setdefault(host, []).append(ip)
                 if ip not in ip_addresses:
@@ -91,10 +104,6 @@ class testssl(Command):
                         ip=ip,
                         alive=True
                     )
-
-                # Skip ignored items
-                if id.startswith(tuple(ignored_item_ids)):
-                    continue
 
                 # Process errors
                 if id.startswith("scanProblem"):
