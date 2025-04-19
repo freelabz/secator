@@ -373,11 +373,15 @@ def rich_to_ansi(text):
 	Returns:
 		str: Converted text (ANSI).
 	"""
-	from rich.console import Console
-	tmp_console = Console(file=None, highlight=False)
-	with tmp_console.capture() as capture:
-		tmp_console.print(text, end='', soft_wrap=True)
-	return capture.get()
+	try:
+		from rich.console import Console
+		tmp_console = Console(file=None, highlight=False)
+		with tmp_console.capture() as capture:
+			tmp_console.print(text, end='', soft_wrap=True)
+		return capture.get()
+	except Exception:
+		console.print(f'[bold red]Could not convert rich text to ansi: {text}[/]', highlight=False, markup=False)
+		return text
 
 
 def rich_escape(obj):

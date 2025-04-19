@@ -228,6 +228,11 @@ class TestCommandRun(unittest.TestCase, CommandOutputTester):
 	def test_cmd_converted_schema(self):
 		console.print('')
 
+		from secator.config import CONFIG
+		if 'debug_command' in CONFIG.debug.component:
+			META_OPTS['print_cmd'] = True
+			META_OPTS['print_item'] = True
+
 		for cls, fixture in FIXTURES_TASKS.items():
 			console.print(f'\t[bold grey35]{cls.__name__} ...[/] ', end='')
 			with self.subTest(name=cls.__name__):
