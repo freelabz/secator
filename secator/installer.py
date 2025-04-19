@@ -348,6 +348,10 @@ class GithubInstaller:
 		elif url.endswith('.tar.gz'):
 			with tarfile.open(fileobj=io.BytesIO(response.content), mode='r:gz') as tar:
 				tar.extractall(path=temp_dir)
+		else:
+			from pathlib import Path
+			with Path(temp_dir / repo_name).open('wb') as f:
+				f.write(response.content)
 
 		# For archives, find and move the binary that matches the repo name
 		binary_path = cls._find_binary_in_directory(temp_dir, repo_name)
