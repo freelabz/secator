@@ -1,18 +1,15 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
-from enum import Enum, auto
-from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
 
 
 @dataclass
 class Certificate(OutputType):
+    host: str
     ip: str = ''
-    host: str = ''
     raw_value: str = ''
     fingerprint_sha256: str = ''
     subject_cn: str = ''
@@ -48,19 +45,31 @@ class Certificate(OutputType):
             return self.not_after < datetime.now()
         return True
 
+    def is_expired_soon(self, months: int = 1) -> bool:
+        if self.not_after:
+            return self.not_after < datetime.now() + timedelta(days=months * 30)
+        return True
+
+    @staticmethod
+    def format_date(date):
+        return date.strftime("%m/%d/%Y")
+
     def __repr__(self) -> str:
         s = f'📜 [bold white]{self.host}[/]'
         s += f' [cyan]{self.status}[/]'
         if self.subject_cn:
-            s += f' [white]\[cn={self.subject_cn}][/]'
+            s += rf' [white]\[cn={self.subject_cn}][/]'
         if self.subject_an:
-            s += f' [white]\[an={", ".join(self.subject_an)}][/]'
+            s += rf' [white]\[an={", ".join(self.subject_an)}][/]'
         if self.issuer:
-            s += f' [white]\[issuer={self.issuer}][/]'
+            s += rf' [white]\[issuer={self.issuer}][/]'
         elif self.issuer_cn:
-            s += f' [white]\[issuer_cn={self.issuer_cn}][/]'
+            s += rf' [white]\[issuer_cn={self.issuer_cn}][/]'
+        expiry_date = Certificate.format_date(self.not_after)
         if self.is_expired():
-            s += f' [red]expired since {self.not_after.strftime("%m/%d/%Y")}[/]'
+            s += f' [red]expired since {expiry_date}[/red]'
+        elif self.is_expired_soon(months=2):
+            s += f' [yellow]expires <2 months[/yellow], [yellow]valid until {expiry_date}[/yellow]'
         else:
-            s += f' [green]not expired[/green], [yellow]valid until {self.not_after.strftime("%m/%d/%Y")}[/yellow]'
+            s += f' [green]not expired[/green], [yellow]valid until {expiry_date}[/yellow]'
         return rich_to_ansi(s)

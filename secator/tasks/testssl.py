@@ -5,15 +5,13 @@ from datetime import datetime
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.output_types import Vulnerability, Certificate, Error, Info, Ip, Tag
-from secator.definitions import (PROXY, DELAY, RATE_LIMIT, RETRIES,
-                                TIMEOUT, THREADS, OPT_NOT_SUPPORTED,
-                                USER_AGENT, HEADER, OUTPUT_PATH, CERTIFICATE_STATUS_UNKNOWN,
-                                CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED)
-from secator.tasks._categories import VulnMulti
+from secator.definitions import (PROXY, HOST, OPT_NOT_SUPPORTED, USER_AGENT, HEADER, OUTPUT_PATH,
+                                CERTIFICATE_STATUS_UNKNOWN, CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED)
+from secator.tasks._categories import Command, OPTS
 
 
 @task()
-class testssl(VulnMulti):
+class testssl(Command):
     output_types = [Certificate, Vulnerability, Ip, Tag]
     install_cmd = (
         f'git clone --depth 1 https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh || true && '
@@ -24,17 +22,18 @@ class testssl(VulnMulti):
     opts = {
         'verbose': {'is_flag': True, 'default': False, 'internal': True, 'display': True, 'help': 'Record all SSL/TLS info, not only critical info'}  # noqa: E501
     }
+    meta_opts = {
+        PROXY: OPTS[PROXY],
+        USER_AGENT: OPTS[USER_AGENT],
+        HEADER: OPTS[HEADER],
+    }
     opt_key_map = {
         PROXY: 'proxy',
         USER_AGENT: 'user-agent',
         HEADER: OPT_NOT_SUPPORTED,  # TODO : available through 'reqheader' need testing before prod
-        DELAY: OPT_NOT_SUPPORTED,
-        RATE_LIMIT: OPT_NOT_SUPPORTED,
-        RETRIES: OPT_NOT_SUPPORTED,
-        TIMEOUT: OPT_NOT_SUPPORTED,
-        THREADS: OPT_NOT_SUPPORTED,
     }
     opt_prefix = '--'
+    input_type = HOST
     input_flag = None
     file_flag = '-iL'
     #Supported proxy
@@ -44,12 +43,17 @@ class testssl(VulnMulti):
     profile = 'io'  # Todo confirm
 
     @staticmethod
-    def on_init(self):
+    def on_cmd(self):
+        target = self.inputs[0]
         output_path = self.get_opt_value(OUTPUT_PATH)
         if not output_path:
             output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
         self.output_path = output_path
         self.cmd += f' --jsonfile {self.output_path}'
+
+        # Hack because target needs to be the last argument in testssl.sh
+        self.cmd = self.cmd.replace(target, '')
+        self.cmd += f' {target}'
 
     @staticmethod
     def on_cmd_done(self):
@@ -88,24 +92,13 @@ class testssl(VulnMulti):
                         alive=True
                     )
 
-                # Skip ignored items or low severity items
+                # Skip ignored items
                 if id.startswith(tuple(ignored_item_ids)):
                     continue
 
-                # Ignore low severity items if verbose is not set
-                if severity in ['info', 'ok'] and not verbose:
-                    continue
-
-                # If info or ok, create a tag, not a vulnerability
-                if severity in ['info', 'ok']:
-                    yield Tag(
-                        name=f'SSL/TLS [{id}]',
-                        match=host,
-                        extra_data={
-                            'type': id,
-                            'finding': finding,
-                        }
-                    )
+                # Process errors
+                if id.startswith("scanProblem"):
+                    yield Error(message=finding)
 
                 # Process bad ciphers
                 elif id.startswith('cipher-'):
@@ -123,7 +116,20 @@ class testssl(VulnMulti):
                     # TODO: implement this
                     pass
 
-                # Create vulnerability for deprecated protocols, obsolete ciphers and bad ciphers
+                # If info or ok, create a tag only if 'verbose' option is set
+                elif severity in ['info', 'ok']:
+                    if not verbose:
+                        continue
+                    yield Tag(
+                        name=f'SSL/TLS [{id}]',
+                        match=host,
+                        extra_data={
+                            'type': id,
+                            'finding': finding,
+                        }
+                    )
+
+                # Create vulnerability
                 else:
                     if id in ['TLS1', 'TLS1_1']:
                         human_name = f'SSL/TLS deprecated protocol offered: {id}'
@@ -159,8 +165,9 @@ class testssl(VulnMulti):
             # Creating certificates for each founded target
             host_to_ips = {k: set(v) for k, v in host_to_ips.items()}
             for ip, certs in retrieved_certificates.items():
+                host = [k for k, v in host_to_ips.items() if ip in v][0]
                 cert_data = {
-                    'host': [k for k, v in host_to_ips.items() if ip in v][0],
+                    'host': host,
                     'ip': ip,
                     'fingerprint_sha256': None,
                     'subject_cn': None,
@@ -179,9 +186,8 @@ class testssl(VulnMulti):
                     id = cert['id']
                     finding = cert['finding']
 
-                    # OCSP is checked last because it have precedence over CRL
                     if id.startswith('cert_crlDistributionPoints') and finding != '--':
-                        #TODO not implemented, need to find a certificate that is revoked by CRL
+                        # TODO not implemented, need to find a certificate that is revoked by CRL
                         cert_data['status'] = CERTIFICATE_STATUS_UNKNOWN
 
                     if id.startswith('cert_ocspRevoked'):
@@ -225,7 +231,7 @@ class testssl(VulnMulti):
 
                 # For the following attributes commented, it's because at the time of writting it
                 # I did not found the value inside the result of testssl
-                yield Certificate(
+                cert = Certificate(
                     **cert_data
                     # issuer_dn='',
                     # issuer='',
@@ -234,3 +240,19 @@ class testssl(VulnMulti):
                     # TODO: need to find a way to retrieve the parent certificate,
                     # parent_certificate=None,
                 )
+                yield cert
+                if cert.is_expired():
+                    yield Vulnerability(
+                        name='SSL certificate expired',
+                        provider='testssl',
+                        description='The SSL certificate is expired. This can easily lead to domain takeovers',
+                        matched_at=host,
+                        ip=ip,
+                        tags=['ssl', 'tls'],
+                        severity='medium',
+                        confidence='high',
+                        extra_data={
+                            'id': id,
+                            'expiration_date': Certificate.format_date(cert.not_after)
+                        }
+                    )
