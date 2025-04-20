@@ -59,6 +59,7 @@ class Certificate(OutputType):
     def __repr__(self) -> str:
         s = f'📜 [bold white]{self.host}[/]'
         s += f' [cyan]{self.status}[/]'
+        s += rf' [white]\[fingerprint={self.fingerprint_sha256[:10]}][/]'
         if self.subject_cn:
             s += rf' [white]\[cn={self.subject_cn}][/]'
         if self.subject_an:
@@ -67,7 +68,6 @@ class Certificate(OutputType):
             s += rf' [white]\[issuer={self.issuer}][/]'
         elif self.issuer_cn:
             s += rf' [white]\[issuer_cn={self.issuer_cn}][/]'
-        s += rf' [white]\[fingerprint={self.fingerprint_sha256[:10]}][/]'
         expiry_date = Certificate.format_date(self.not_after)
         if self.is_expired():
             s += f' [red]expired since {expiry_date}[/red]'
