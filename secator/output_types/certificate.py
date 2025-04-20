@@ -52,7 +52,9 @@ class Certificate(OutputType):
 
     @staticmethod
     def format_date(date):
-        return date.strftime("%m/%d/%Y")
+        if date:
+            return date.strftime("%m/%d/%Y")
+        return '?'
 
     def __repr__(self) -> str:
         s = f'📜 [bold white]{self.host}[/]'
