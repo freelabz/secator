@@ -67,6 +67,7 @@ class Certificate(OutputType):
             s += rf' [white]\[issuer={self.issuer}][/]'
         elif self.issuer_cn:
             s += rf' [white]\[issuer_cn={self.issuer_cn}][/]'
+        s += rf' [white]\[fingerprint={self.fingerprint_sha256[:10]}][/]'
         expiry_date = Certificate.format_date(self.not_after)
         if self.is_expired():
             s += f' [red]expired since {expiry_date}[/red]'
