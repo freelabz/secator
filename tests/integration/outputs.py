@@ -1,6 +1,6 @@
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability, Record)
+                                Vulnerability, Record, Certificate)
 
 OUTPUTS_TASKS = {
     'arjun': [
@@ -237,6 +237,15 @@ OUTPUTS_TASKS = {
     ],
     'subfinder': [
         Subdomain(host='virusscan.api.github.com', domain='api.github.com', _source='subfinder')
+    ],
+    'wafw00f': [
+        Tag(
+            name='Envoy WAF',
+            match='https://netflix.com',
+            _source='wafw00f')
+    ],
+    'testssl': [
+        Certificate(host='free.fr', fingerprint_sha256='EBC7C611F9A4161B123D3DF03E852BD69DFFDC447D223AE9478D434D55DFAD9B', _source='testssl')
     ],
     'wpscan': [
         Tag(
