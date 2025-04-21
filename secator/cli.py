@@ -1286,6 +1286,14 @@ def unit(tasks, workflows, scans, test):
 	os.environ['SECATOR_HTTP_STORE_RESPONSES'] = '0'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
+	if not test:
+		if tasks:
+			test = 'test_tasks'
+		elif workflows:
+			test = 'test_workflows'
+		elif scans:
+			test = 'test_scans'
+
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/unit'
@@ -1307,6 +1315,14 @@ def integration(tasks, workflows, scans, test):
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
+
+	if not test:
+		if tasks:
+			test = 'test_tasks'
+		elif workflows:
+			test = 'test_workflows'
+		elif scans:
+			test = 'test_scans'
 
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
