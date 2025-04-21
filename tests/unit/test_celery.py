@@ -91,7 +91,7 @@ class TestCelery(unittest.TestCase):
 			return
 
 		nmap_fixture = load_fixture('nmap_output', fixtures_dir=FIXTURES_DIR, ext='.xml', only_path=True)
-		with mock_command(nmap, fixture=[]):
+		with mock_command(nmap, fixture=[FIXTURES_TASKS[nmap]] * len(TARGETS)):
 			workflow = chain(
 				forward_results.s([]),
 				chord((
@@ -100,12 +100,17 @@ class TestCelery(unittest.TestCase):
 			)
 			result = workflow.apply()
 			results = result.get()
+			vulns = [r.id for r in results if r._type == 'vulnerability']
 			targets = [r.name for r in results if r._type == 'target']
 			self.assertEqual(len(targets), len(TARGETS))
+			self.assertEqual(len(vulns), 61)  # number of vulns in the XML fixture
 
 	def test_ffuf_chunked(self):
 		from secator.tasks import ffuf
-		with mock_command(ffuf, fixture=[]):
+		if ffuf not in TEST_TASKS:
+			return
+
+		with mock_command(ffuf, fixture=[FIXTURES_TASKS[ffuf]] * len(TARGETS)):
 			workflow = chain(
 				forward_results.s([]),
 				chord((
@@ -114,4 +119,7 @@ class TestCelery(unittest.TestCase):
 			)
 			result = workflow.apply()
 			results = result.get()
-			self.assertEqual(len(results), len(TARGETS))
+			urls = [r.url for r in results if r._type == 'url']
+			targets = [r.name for r in results if r._type == 'target']
+			self.assertEqual(len(targets), len(TARGETS))
+			self.assertEqual(len(urls), len(TARGETS))

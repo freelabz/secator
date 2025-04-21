@@ -23,7 +23,7 @@ def create_runner(runner_type, targets, index, total):
 	runner = None
 	if runner_type == 'workflow':
 		runner = Workflow
-		config = TemplateLoader(name='workflows/subdomain_recon')
+		config = TemplateLoader(name='workflow/subdomain_recon')
 	elif runner_type == 'task':
 		runner = Task
 		config = TemplateLoader(input={'name': 'httpx', 'type': 'task'})

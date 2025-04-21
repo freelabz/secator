@@ -16,7 +16,6 @@ class nuclei(VulnMulti):
 	cmd = 'nuclei'
 	file_flag = '-l'
 	input_flag = '-u'
-	input_chunk_size = 1
 	json_flag = '-jsonl'
 	opts = {
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
@@ -74,7 +73,6 @@ class nuclei(VulnMulti):
 			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
 		}
 	}
-	ignore_return_code = True
 	install_pre = {
 		'*': ['git']
 	}
