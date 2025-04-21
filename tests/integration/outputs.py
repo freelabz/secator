@@ -244,6 +244,12 @@ OUTPUTS_TASKS = {
             _source='trivy'
         ),
     ],
+    'wafw00f': [
+        Tag(
+            name='Envoy WAF',
+            match='https://netflix.com',
+            _source='wafw00f')
+    ],
     'testssl': [
         Certificate(host='free.fr', fingerprint_sha256='EBC7C611F9A4161B123D3DF03E852BD69DFFDC447D223AE9478D434D55DFAD9B', _source='testssl')
     ],

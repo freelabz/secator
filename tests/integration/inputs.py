@@ -22,6 +22,7 @@ INPUTS_TASKS = {
     'testssl': 'free.fr',
     'trivy': 'https://github.com/blacklanternsecurity/bbot',
     'wpscan': 'http://localhost:8000/',
+    'wafw00f': 'https://netflix.com'
 }
 
 INPUTS_WORKFLOWS = {
