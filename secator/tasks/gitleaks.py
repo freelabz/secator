@@ -2,8 +2,7 @@ import click
 import os
 import yaml
 
-from pathlib import Path
-
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.runners import Command
 from secator.definitions import (OUTPUT_PATH)
@@ -13,16 +12,17 @@ from secator.output_types import Tag, Info, Error
 
 @task()
 class gitleaks(Command):
-	cmd = 'gitleaks --exit-code 0'
+	cmd = 'gitleaks'
 	input_flag = None
 	json_flag = '-f json'
 	opts = {
-		'ignore_path': {'type': str},
-		'mode': {'type': click.Choice(['git', 'dir']), 'default': 'dir', 'help': 'Gitleaks mode'},
-		'c': {'type': str, 'short': 'config', 'help': 'Gitleaks config file path'}
+		'ignore_path': {'type': str, 'help': 'Path to .gitleaksignore file or folder containing one'},
+		'mode': {'type': click.Choice(['git', 'dir']), 'default': 'dir', 'help': 'Gitleaks mode', 'internal': True, 'display': True},
+		'config': {'type': str, 'short': 'config', 'help': 'Gitleaks config file path'}
 	}
 	opt_key_map = {
-		"ignore_path": "i"
+		"ignore_path": "i",
+		"config": "c"
 	}
 	input_type = "folder"
 	output_types = [Tag]
@@ -33,23 +33,19 @@ class gitleaks(Command):
 			'extra_data': lambda x: {caml_to_snake(k): v for k, v in x.items() if k not in ['RuleID', 'File']}
 		}
 	}
-
+	install_pre = {'*': ['git', 'make']}
 	install_cmd = (
-		'export GITLEAKS_VERSION="8.19.3" && '
-		'wget https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz -O gitleaks_latest.tar.gz &&'  # noqa: E501
-		f'tar -zxvf gitleaks_latest.tar.gz gitleaks && mv gitleaks {Path.home()}/.local/bin/ &&'
-		'rm gitleaks_latest.tar.gz'
+		f'git clone https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks || true &&'
+		f'cd {CONFIG.dirs.share}/gitleaks && make build &&'
+		f'mv {CONFIG.dirs.share}/gitleaks/gitleaks {CONFIG.dirs.bin}'
 	)
+	install_github_handle = 'gitleaks/gitleaks'
 
 	@staticmethod
 	def on_cmd(self):
 		# replace fake -mode opt by subcommand
 		mode = self.get_opt_value('mode')
-		self.cmd = self.cmd.replace(
-			f'-mode {mode}', ''
-		).replace(
-			gitleaks.cmd, f'{gitleaks.cmd} {mode}'
-		)
+		self.cmd = self.cmd.replace(gitleaks.cmd, f'{gitleaks.cmd} {mode}')
 
 		# add output path
 		output_path = self.get_opt_value(OUTPUT_PATH)
@@ -57,6 +53,7 @@ class gitleaks(Command):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
 		self.cmd += f' -r {self.output_path}'
+		self.cmd += ' --exit-code 0'
 
 	@staticmethod
 	def on_cmd_done(self):
