@@ -39,7 +39,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
-			'arjun.wordlist': None,
+			'arjun.wordlist': False,
 			'gau.providers': 'wayback',
 			'h8mail.local_breach': load_fixture('h8mail_breach', INTEGRATION_DIR, only_path=True),
 			'nmap.port': '3000,8080',
@@ -48,7 +48,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'nmap.skip_host_discovery': True,
 			'match_codes': '200',
 			'maigret.site': 'github',
-			# 'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
+			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 		}
 
 		# Merge opts
