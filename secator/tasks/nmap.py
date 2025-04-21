@@ -30,15 +30,59 @@ class nmap(VulnMulti):
 	opt_prefix = '--'
 	output_types = [Port, Vulnerability, Exploit]
 	opts = {
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan'},
-		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [full, 100, 1000]'},
-		SCRIPT: {'type': str, 'default': 'vulners', 'help': 'NSE scripts'},
+		# Port specification and scan order
+		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (- to scan all)'},
+		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [100, 1000, full]'},
+
+		# Script scanning
+		SCRIPT: {'type': str, 'default': None, 'help': 'NSE scripts'},
+		'script_args': {'type': str, 'short': 'sargs', 'default': None, 'help': 'NSE script arguments (n1=v1,n2=v2,...)'},
+
+		# Host discovery
 		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
-		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Version detection'},
-		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth'},
+
+		# Service and version detection
+		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Enable version detection (slow)'},
+		'detect_all': {'is_flag': True, 'short': 'A', 'default': False, 'help': 'Enable OS detection, version detection, script scanning, and traceroute on open ports'},  # noqa: E501
+		'detect_os': {'is_flag': True, 'short': 'O', 'default': False, 'help': 'Enable OS detection', 'requires_sudo': True},
+
+		# Scan techniques
+		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth', 'requires_sudo': True},  # noqa: E501
 		'tcp_connect': {'is_flag': True, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
-		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan'},
-		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path'},
+		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan', 'requires_sudo': True},
+		'tcp_null_scan': {'is_flag': True, 'short': 'sN', 'default': False, 'help': 'TCP Null scan', 'requires_sudo': True},
+		'tcp_fin_scan': {'is_flag': True, 'short': 'sF', 'default': False, 'help': 'TCP FIN scan', 'requires_sudo': True},
+		'tcp_xmas_scan': {'is_flag': True, 'short': 'sX', 'default': False, 'help': 'TCP Xmas scan', 'requires_sudo': True},
+		'tcp_ack_scan': {'is_flag': True, 'short': 'sA', 'default': False, 'help': 'TCP ACK scan', 'requires_sudo': True},
+		'tcp_window_scan': {'is_flag': True, 'short': 'sW', 'default': False, 'help': 'TCP Window scan', 'requires_sudo': True},  # noqa: E501
+		'tcp_maimon_scan': {'is_flag': True, 'short': 'sM', 'default': False, 'help': 'TCP Maimon scan', 'requires_sudo': True},  # noqa: E501
+		'sctp_init_scan': {'is_flag': True, 'short': 'sY', 'default': False, 'help': 'SCTP Init scan', 'requires_sudo': True},
+		'sctp_cookie_echo_scan': {'is_flag': True, 'short': 'sZ', 'default': False, 'help': 'SCTP Cookie Echo scan', 'requires_sudo': True},  # noqa: E501
+		'ping_scan': {'is_flag': True, 'short': 'sn', 'default': False, 'help': 'Ping scan (disable port scan)'},
+		'ip_protocol_scan': {'type': str, 'short': 'sO', 'default': None, 'help': 'IP protocol scan', 'requires_sudo': True},
+		'script_scan': {'is_flag': True, 'short': 'sC', 'default': False, 'help': 'Enable default scanning'},
+		'zombie_host': {'type': str, 'short': 'sI', 'default': None, 'help': 'Use a zombie host for idle scan', 'requires_sudo': True},  # noqa: E501
+		'ftp_relay_host': {'type': str, 'short': 'sB', 'default': None, 'help': 'FTP bounce scan relay host'},
+
+		# Firewall / IDS evasion and spoofing
+		'spoof_source_port': {'type': int, 'short': 'g', 'default': None, 'help': 'Send packets from a specific port'},
+		'spoof_source_ip': {'type': str, 'short': 'S', 'default': None, 'help': 'Spoof source IP address'},
+		'spoof_source_mac': {'type': str, 'short': 'spoofmac', 'default': None, 'help': 'Spoof MAC address'},
+		'fragment': {'is_flag': True, 'short': 'fragment', 'default': False, 'help': 'Fragment packets', 'requires_sudo': True},  # noqa: E501
+		'mtu': {'type': int, 'short': 'mtu', 'default': None, 'help': 'Fragment packets with given MTU', 'requires_sudo': True},  # noqa: E501
+		'ttl': {'type': int, 'short': 'ttl', 'default': None, 'help': 'Set TTL', 'requires_sudo': True},
+		'badsum': {'is_flag': True, 'short': 'badsum', 'default': False, 'help': 'Create a bad checksum in the TCP header', 'requires_sudo': True},  # noqa: E501
+		'ipv6': {'is_flag': True, 'short': 'ipv6', 'default': False, 'help': 'Enable IPv6 scanning'},
+
+		# Host discovery
+		'traceroute': {'is_flag': True, 'short': 'traceroute', 'default': False, 'help': 'Traceroute', 'requires_sudo': True},
+		'disable_arp_ping': {'is_flag': True, 'short': 'dap', 'default': False, 'help': 'Disable ARP ping'},
+
+		# Misc
+		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path', 'internal': True, 'display': False},  # noqa: E501
+		'debug': {'is_flag': True, 'short': 'd', 'default': False, 'help': 'Enable debug mode'},
+		'verbose': {'is_flag': True, 'short': 'v', 'default': False, 'help': 'Enable verbose mode'},
+		'timing': {'type': int, 'short': 'T', 'default': None, 'help': 'Timing template (0: paranoid, 1: sneaky, 2: polite, 3: normal, 4: aggressive, 5: insane)'},  # noqa: E501
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
@@ -55,9 +99,34 @@ class nmap(VulnMulti):
 		PORTS: '-p',
 		'skip_host_discovery': '-Pn',
 		'version_detection': '-sV',
-		'tcp_connect': '-sT',
+		'detect_all': '-A',
+		'detect_os': '-O',
 		'tcp_syn_stealth': '-sS',
+		'tcp_connect': '-sT',
+		'tcp_window_scan': '-sW',
+		'tcp_maimon_scan': '-sM',
 		'udp_scan': '-sU',
+		'tcp_null_scan': '-sN',
+		'tcp_fin_scan': '-sF',
+		'tcp_xmas_scan': '-sX',
+		'tcp_ack_scan': '-sA',
+		'sctp_init_scan': '-sY',
+		'sctp_cookie_echo_scan': '-sZ',
+		'ping_scan': '-sn',
+		'ip_protocol_scan': '-sO',
+		'script_scan': '-sC',
+		'zombie_host': '-sI',
+		'ftp_relay_host': '-b',
+		'spoof_source_port': '-g',
+		'spoof_source_ip': '-S',
+		'spoof_source_mac': '--spoof-mac',
+		'fragment': '-f',
+		'mtu': '--mtu',
+		'ttl': '--ttl',
+		'badsum': '--badsum',
+		'ipv6': '-6',
+		'traceroute': '--traceroute',
+		'disable_arp_ping': '--disable-arp-ping',
 		'output_path': '-oX',
 	}
 	opt_value_map = {
@@ -78,20 +147,17 @@ class nmap(VulnMulti):
 	profile = 'io'
 
 	@staticmethod
-	def on_init(self):
+	def on_cmd(self):
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {self.output_path}'
-		tcp_syn_stealth = self.get_opt_value('tcp_syn_stealth')
-		tcp_connect = self.get_opt_value('tcp_connect')
-		udp_scan = self.get_opt_value('udp_scan')
-		if tcp_syn_stealth or udp_scan:
-			self.cmd = f'sudo {self.cmd}'
+		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
+		tcp_connect = self.cmd_options.get('tcp_connect')
 		if tcp_connect and tcp_syn_stealth:
 			self._print(
-				'Options -sT (SYN stealth scan) and -sS (CONNECT scan) are conflicting. Keeping only -sT.',
+				'Options -sT (SYN stealth scan) and -sS (CONNECT scan) are conflicting. Keeping only -sS.',
 				'bold gold3')
 			self.cmd = self.cmd.replace('-sT ', '')
 

@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Info, Error, Target, Stat
+from secator.output_types import Info, Warning, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s
@@ -110,7 +110,7 @@ class Command(Runner):
 	proxy_http = False
 
 	# Profile
-	profile = 'cpu'
+	profile = 'io'
 
 	def __init__(self, inputs=[], **run_opts):
 
@@ -164,6 +164,9 @@ class Command(Runner):
 		# Process
 		self.process = None
 
+		# Sudo
+		self.requires_sudo = False
+
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
@@ -176,6 +179,10 @@ class Command(Runner):
 
 		# Run on_cmd hook
 		self.run_hooks('on_cmd')
+
+		# Add sudo to command if it is required
+		if self.requires_sudo:
+			self.cmd = f'sudo {self.cmd}'
 
 		# Build item loaders
 		instance_func = getattr(self, 'item_loader', None)
@@ -192,6 +199,13 @@ class Command(Runner):
 			'return_code': self.return_code
 		})
 		return res
+
+	def needs_chunking(self, sync):
+		many_targets = len(self.inputs) > 1
+		targets_over_chunk_size = self.input_chunk_size and len(self.inputs) > self.input_chunk_size
+		has_file_flag = self.file_flag is not None
+		chunk_it = (sync and many_targets and not has_file_flag) or (not sync and many_targets and targets_over_chunk_size)
+		return chunk_it
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
@@ -339,12 +353,17 @@ class Command(Runner):
 			if self.has_children:
 				return
 
+			# Abort if dry run
+			if self.dry_run:
+				self.print_command()
+				return
+
 			# Print task description
 			self.print_description()
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Info(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
 				return
 
 			# Yield targets
@@ -457,15 +476,12 @@ class Command(Runner):
 		if line is None:
 			return
 
+		# Yield line if no items were yielded
+		yield line
+
 		# Run item_loader to try parsing as dict
-		item_count = 0
 		for item in self.run_item_loaders(line):
 			yield item
-			item_count += 1
-
-		# Yield line if no items were yielded
-		if item_count == 0:
-			yield line
 
 		# Skip rest of iteration (no process mode)
 		if self.no_process:
@@ -481,9 +497,8 @@ class Command(Runner):
 
 	def print_description(self):
 		"""Print description"""
-		if self.sync and not self.has_children:
-			if self.caller and self.description:
-				self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
+		if self.sync and not self.has_children and self.caller and self.description:
+			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
 
 	def print_command(self):
 		"""Print command."""
@@ -493,6 +508,7 @@ class Command(Runner):
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold cyan', rich=True)
 		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
+		self.debug('Options', obj={'opts': self.cmd_options}, sub='init')
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
@@ -507,7 +523,7 @@ class Command(Runner):
 		if self.config.name in str(exc):
 			message = 'Executable not found.'
 			if self.install_cmd:
-				message += f' Install it with [bold green4]secator install tools {self.config.name}[/].'
+				message += f' Install it with "secator install tools {self.config.name}".'
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)
@@ -652,12 +668,14 @@ class Command(Runner):
 			)
 
 		elif self.return_code != 0:
-			error = f'Command failed with return code {self.return_code}.'
+			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
+			last_lines = [line for line in last_lines if line != '']
 			yield Error(
 				message=error,
 				traceback='\n'.join(last_lines),
+				traceback_title='Last stdout lines',
 				_source=self.unique_name,
 				_uuid=str(uuid.uuid4())
 			)
@@ -679,10 +697,16 @@ class Command(Runner):
 			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
 			opt_prefix (str, default: '-'): Option prefix.
 			command_name (str | None, default: None): Command name.
+
+		Returns:
+			dict: Processed options dict.
 		"""
-		opts_str = ''
+		opts_dict = {}
 		for opt_name, opt_conf in opts_conf.items():
 			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+
+			# Save original opt name
+			original_opt_name = opt_name
 
 			# Get opt value
 			default_val = opt_conf.get('default')
@@ -735,19 +759,14 @@ class Command(Runner):
 
 			# Append opt name + opt value to option string.
 			# Note: does not append opt value if value is True (flag)
-			opts_str += f' {opt_name}'
-			shlex_quote = opt_conf.get('shlex', True)
-			if opt_val is not True:
-				if shlex_quote:
-					opt_val = shlex.quote(str(opt_val))
-				opts_str += f' {opt_val}'
-			debug('final', obj={'name': opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)
+			opts_dict[original_opt_name] = {'name': opt_name, 'value': opt_val, 'conf': opt_conf}
+			debug('final', obj={'name': original_opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)  # noqa: E501
 
-		return opts_str.strip()
+		return opts_dict
 
 	@staticmethod
 	def _validate_chunked_input(self, inputs):
-		"""Command does not suport multiple inputs in non-worker mode. Consider using .delay() instead."""
+		"""Command does not suport multiple inputs in non-worker mode. Consider running with a remote worker instead."""
 		if len(inputs) > 1 and self.sync and self.file_flag is None:
 			return False
 		return True
@@ -798,27 +817,57 @@ class Command(Runner):
 		if self.json_flag:
 			self.cmd += f' {self.json_flag}'
 
+		# Opts str
+		opts_str = ''
+		opts = {}
+
 		# Add options to cmd
-		opts_str = Command._process_opts(
+		opts_dict = Command._process_opts(
 			self.run_opts,
 			self.opts,
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
 			command_name=self.config.name)
-		if opts_str:
-			self.cmd += f' {opts_str}'
 
 		# Add meta options to cmd
-		meta_opts_str = Command._process_opts(
+		meta_opts_dict = Command._process_opts(
 			self.run_opts,
 			self.meta_opts,
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
 			command_name=self.config.name)
-		if meta_opts_str:
-			self.cmd += f' {meta_opts_str}'
+
+		if opts_dict:
+			opts.update(opts_dict)
+		if meta_opts_dict:
+			opts.update(meta_opts_dict)
+
+		if opts:
+			for opt_conf in opts.values():
+				conf = opt_conf['conf']
+				internal = conf.get('internal', False)
+				if internal:
+					continue
+				if conf.get('requires_sudo', False):
+					self.requires_sudo = True
+				opts_str += ' ' + Command._build_opt_str(opt_conf)
+		self.cmd_options = opts
+		self.cmd += opts_str
+
+	@staticmethod
+	def _build_opt_str(opt):
+		"""Build option string."""
+		conf = opt['conf']
+		opts_str = f'{opt["name"]}'
+		shlex_quote = conf.get('shlex', True)
+		value = opt['value']
+		if value is not True:
+			if shlex_quote:
+				value = shlex.quote(str(value))
+			opts_str += f' {value}'
+		return opts_str
 
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a
@@ -856,6 +905,8 @@ class Command(Runner):
 				cmd = f'cat {fpath} | {cmd}'
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
+			else:
+				cmd += f' {fpath}'
 
 			self.inputs_path = fpath
 

@@ -65,12 +65,15 @@ class httpx(Http):
 	}
 	item_loaders = [JSONSerializer()]
 	output_types = [Url, Subdomain]
+	install_pre = {
+		'apk': ['chromium']
+	}
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
 	install_github_handle = 'projectdiscovery/httpx'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'cpu'
+	profile = 'io'
 
 	@staticmethod
 	def on_init(self):
