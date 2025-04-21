@@ -233,7 +233,7 @@ OUTPUTS_TASKS = {
         Subdomain(host='virusscan.api.github.com', domain='api.github.com', _source='subfinder')
     ],
     'testssl': [
-        Certificate(host='wikipedia.org', fingerprint_sha256='4062FBAE315E7D29B82432789DDC4B991DAB8B54EDDF76C812989E22F1BAFD59', _source='testssl')
+        Certificate(host='free.fr', fingerprint_sha256='EBC7C611F9A4161B123D3DF03E852BD69DFFDC447D223AE9478D434D55DFAD9B', _source='testssl')
     ],
     'wpscan': [
         Tag(

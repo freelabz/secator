@@ -19,7 +19,7 @@ INPUTS_TASKS = {
     'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
     'subfinder': 'api.github.com',
-    'testssl': 'wikipedia.org',
+    'testssl': 'free.fr',
     'wpscan': 'http://localhost:8000/',
 }
 
