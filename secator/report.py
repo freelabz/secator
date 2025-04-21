@@ -15,7 +15,7 @@ def remove_duplicates(objects):
 	lock = Lock()
 
 	def add_if_unique(obj):
-		nonlocal unique_objects
+		nonlocal unique_objects  # noqa: F824
 		with lock:
 			# Perform linear search to check for duplicates
 			if all(obj != existing_obj for existing_obj in unique_objects):
@@ -38,7 +38,7 @@ class Report:
 		exporters (list): List of exporter classes.
 	"""
 	def __init__(self, runner, title=None, exporters=[]):
-		self.title = title or f'{runner.__class__.__name__.lower()}_{runner.config.name}'
+		self.title = title or f'{runner.config.type}_{runner.config.name}'
 		self.runner = runner
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
@@ -84,6 +84,7 @@ class Report:
 		if 'results' in data['info']:
 			del data['info']['results']
 		data['info']['title'] = self.title
+		data['info']['errors'] = self.runner.errors
 
 		# Fill report
 		for output_type in FINDING_TYPES:

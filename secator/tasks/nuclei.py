@@ -73,9 +73,14 @@ class nuclei(VulnMulti):
 			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
 		}
 	}
-	ignore_return_code = True
+	install_pre = {
+		'*': ['git']
+	}
 	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest'
 	install_github_handle = 'projectdiscovery/nuclei'
+	install_post = {
+		'*': 'nuclei -ut'
+	}
 	proxychains = False
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same

@@ -20,11 +20,19 @@ MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
 
 logger = logging.getLogger(__name__)
 
-client = pymongo.MongoClient(
-	escape_mongodb_url(MONGODB_URL),
-	maxPoolSize=MONGODB_MAX_POOL_SIZE,
-	serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT
-)
+_mongodb_client = None
+
+
+def get_mongodb_client():
+	"""Get or create MongoDB client"""
+	global _mongodb_client
+	if _mongodb_client is None:
+		_mongodb_client = pymongo.MongoClient(
+			escape_mongodb_url(MONGODB_URL),
+			maxPoolSize=MONGODB_MAX_POOL_SIZE,
+			serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT
+		)
+	return _mongodb_client
 
 
 def get_runner_dbg(runner):
@@ -39,6 +47,7 @@ def get_runner_dbg(runner):
 
 
 def update_runner(self):
+	client = get_mongodb_client()
 	db = client.main
 	type = self.config.type
 	collection = f'{type}s'
@@ -72,6 +81,7 @@ def update_finding(self, item):
 	if type(item) not in FINDING_TYPES:
 		return item
 	start_time = time.time()
+	client = get_mongodb_client()
 	db = client.main
 	update = item.toDict()
 	_type = item._type
@@ -97,15 +107,14 @@ def update_finding(self, item):
 
 
 def find_duplicates(self):
+	from secator.celery import IN_CELERY_WORKER_PROCESS
 	ws_id = self.toDict().get('context', {}).get('workspace_id')
 	if not ws_id:
 		return
-	if self.sync:
-		debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
+	if not IN_CELERY_WORKER_PROCESS:
 		tag_duplicates(ws_id)
 	else:
-		celery_id = tag_duplicates.delay(ws_id)
-		debug(f'running duplicate check on workspace {ws_id}', id=celery_id, sub='hooks.mongodb')
+		tag_duplicates.delay(ws_id)
 
 
 def load_finding(obj):
@@ -132,6 +141,8 @@ def tag_duplicates(ws_id: str = None):
 	Args:
 		ws_id (str): Workspace id.
 	"""
+	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
+	client = get_mongodb_client()
 	db = client.main
 	workspace_query = list(
 		db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': True}).sort('_timestamp', -1))
@@ -172,19 +183,19 @@ def tag_duplicates(ws_id: str = None):
 				'seen dupes': len(seen_dupes)
 			},
 			id=ws_id,
-			sub='hooks.mongodb.duplicates',
+			sub='hooks.mongodb',
 			verbose=True)
 		tmp_duplicates_ids = list(dict.fromkeys([i._uuid for i in tmp_duplicates]))
-		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
+		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb', verbose=True)
 
 		# Update latest object as non-duplicate
 		if tmp_duplicates:
 			duplicates.extend([f for f in tmp_duplicates])
 			db.findings.update_one({'_id': ObjectId(item._uuid)}, {'$set': {'_related': tmp_duplicates_ids}})
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
 			non_duplicates.append(item)
 		else:
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb.duplicates', verbose=True)
+			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
 			non_duplicates.append(item)
 
 	# debug(f'found {len(duplicates)} total duplicates')
@@ -208,7 +219,7 @@ def tag_duplicates(ws_id: str = None):
 			'duplicates': len(duplicates_ids),
 			'non-duplicates': len(non_duplicates_ids)
 		},
-		sub='hooks.mongodb.duplicates')
+		sub='hooks.mongodb')
 
 
 HOOKS = {
@@ -232,6 +243,6 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, find_duplicates]
+		'on_end': [update_runner]
 	}
 }

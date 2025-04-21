@@ -62,7 +62,7 @@ secator z default mydomain.com --worker
 from secator.runners import Workflow
 from secator.template import TemplateLoader
 
-config = TemplateLoader(name='workflows/host_recon')
+config = TemplateLoader(name='workflow/host_recon')
 hooks = {
 	Task: {
 		'on_item': {

@@ -150,7 +150,7 @@ OUTPUTS_TASKS = {
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
     'gospider': [
-        Url(url='https://danielmiessler.com/t/Newsletter', status_code=200, content_length=92, _source='gospider')
+        Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider')
     ],
     'grype': [
 		Vulnerability(
@@ -234,7 +234,7 @@ OUTPUTS_TASKS = {
     ],
     'wpscan': [
         Tag(
-            name='Wordpress theme - twentytwentyfive 1.0',
+            name='Wordpress theme - twentytwentyfive 1.2',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(

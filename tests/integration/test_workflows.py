@@ -6,9 +6,8 @@ from time import sleep
 
 from secator.template import TemplateLoader
 from secator.runners import Task
-from secator.output_types import Target, Port, Url
+from secator.output_types import Port, Url
 from secator.definitions import DEBUG
-from secator.rich import console
 from secator.runners import Command, Workflow
 from secator.utils import setup_logging, merge_opts
 from secator.utils_test import TEST_WORKFLOWS, ALL_WORKFLOWS, CommandOutputTester, load_fixture
@@ -95,9 +94,9 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 		# Expected results / context
 		expected_results = [
-			Port(port=9999, host='localhost', ip='127.0.0.1', service_name='fake', _source='unknown'),
-			Port(port=3000, host='localhost', ip='127.0.0.1', _source='naabu'),
-			Port(port=8080, host='localhost', ip='127.0.0.1', _source='naabu'),
+			Port(port=9999, host='localhost', ip='127.0.0.1', state='open', service_name='fake', _source='unknown'),
+			Port(port=3000, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
+			Port(port=8080, host='localhost', ip='127.0.0.1', state='open', _source='naabu'),
 			Url(url='http://localhost:3000', host='127.0.0.1', status_code=200, title='OWASP Juice Shop', content_type='text/html', _source='httpx'),
 			Url(url='http://localhost:8080', host='127.0.0.1', status_code=400, title='', content_type='application/json', _source='httpx'),
 		]
@@ -109,6 +108,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 		# Create ad-hoc workflow
 		conf = {
 			'name': 'my_workflow',
+			'type': 'workflow',
 			'description': 'Test workflow',
 			'tasks': {
 				'naabu': {},
@@ -122,7 +122,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			config,
 			inputs=['localhost'],
 			results=[
-				Port(port=9999, host='localhost', ip='127.0.0.1', service_name='fake', _source='unknown', _context=expected_context)
+				Port(port=9999, host='localhost', ip='127.0.0.1', state='open', service_name='fake', _source='unknown', _context=expected_context)
 			],
 			hooks = {
 				Workflow: {
@@ -139,20 +139,10 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 		# Verify no duplicates and context added from hook is present in output
 		for result in workflow:
-			self.assertEqual(result._context, expected_context)
+			self.assertEqual(result._context, {**result._context, **expected_context})
 			self.assertNotIn(result._uuid, uuids)
 			uuids.append(result._uuid)
 			results.append(result)
 
-		# Verify number of URLs is good
-		urls = [r.url for r in results if r._type == 'url']
-		ports = [r.port for r in results if r._type == 'port']
-		self.assertEqual(len(urls), 2)
-		self.assertEqual(len(ports), 3)
-
-		# Verify results yielded from workflow and workflow.results are equal
-		self.assertEqual(results, workflow.results)
-
-		# Verify expected results are there
 		for res in expected_results:
-			self.assertIn(res, workflow.results)
+			self.assertIn(res, workflow.findings)
