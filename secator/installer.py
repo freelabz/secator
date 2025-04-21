@@ -228,10 +228,10 @@ class GithubInstaller:
 			return InstallerStatus.GITHUB_LATEST_RELEASE_NOT_FOUND
 
 		# Find the right asset to download
-		os_identifiers, arch_identifiers = cls._get_platform_identifier()
+		system, arch, os_identifiers, arch_identifiers = cls._get_platform_identifier()
 		download_url = cls._find_matching_asset(latest_release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
-			console.print(Error(message='Could not find a GitHub release matching distribution.'))
+			console.print(Error(message=f'Could not find a GitHub release matching distribution (system: {system}, arch: {arch}).'))  # noqa: E501
 			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
 
 		# Download and unpack asset
@@ -286,16 +286,16 @@ class GithubInstaller:
 
 		# Enhanced architecture mapping to avoid conflicts
 		arch_mapping = {
-			'x86_64': ['amd64', 'x86_64', '64bit'],
-			'amd64': ['amd64', 'x86_64', '64bit'],
+			'x86_64': ['amd64', 'x86_64', '64bit', 'x64'],
+			'amd64': ['amd64', 'x86_64', '64bit', 'x64'],
 			'aarch64': ['arm64', 'aarch64'],
 			'armv7l': ['armv7', 'arm'],
-			'386': ['386', 'x86', 'i386', '32bit'],
+			'386': ['386', 'x86', 'i386', '32bit', 'x32'],
 		}
 
 		os_identifiers = os_mapping.get(system, [])
 		arch_identifiers = arch_mapping.get(arch, [])
-		return os_identifiers, arch_identifiers
+		return system, arch, os_identifiers, arch_identifiers
 
 	@classmethod
 	def _find_matching_asset(cls, assets, os_identifiers, arch_identifiers):

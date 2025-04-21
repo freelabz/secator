@@ -155,6 +155,10 @@ OUTPUTS_TASKS = {
     'gf': [
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
+    'gitleaks': [
+        # TODO: allow to test equality for this (dynamic path based on runner)
+        # Tag(name='aws-access-token', match='/path/to/file.py:216', _source='gitleaks')
+    ],
     'gospider': [
         Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider')
     ],
