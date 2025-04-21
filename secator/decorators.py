@@ -19,15 +19,17 @@ RUNNER_OPTS = {
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
-	'show': {'is_flag': True, 'default': False, 'help': 'Show command that will be run (tasks only)'},
-	'no_process': {'is_flag': True, 'default': False, 'help': 'Disable secator processing'},
+	'show': {'is_flag': True, 'short': 'sh', 'default': False, 'help': 'Show command that will be run (tasks only)'},
+	'no_process': {'is_flag': True, 'short': 'nps', 'default': False, 'help': 'Disable secator processing'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
-	'quiet': {'is_flag': True, 'default': False, 'help': 'Enable quiet mode'},
+	'quiet': {'is_flag': True, 'short': 'q', 'default': False, 'help': 'Enable quiet mode'},
+	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
 }
 
 RUNNER_GLOBAL_OPTS = {
 	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
 	'worker': {'is_flag': True, 'default': False, 'help': 'Run tasks in worker'},
+	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
 	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
@@ -223,12 +225,16 @@ def decorate_command_options(opts):
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
 			short_opt = conf.pop('short', None)
-			conf.pop('internal', None)
+			internal = conf.pop('internal', False)
+			display = conf.pop('display', True)
+			if internal and not display:
+				continue
 			conf.pop('prefix', None)
 			conf.pop('shlex', None)
 			conf.pop('meta', None)
 			conf.pop('supported', None)
 			conf.pop('process', None)
+			conf.pop('requires_sudo', None)
 			reverse = conf.pop('reverse', False)
 			long = f'--{opt_name}'
 			short = f'-{short_opt}' if short_opt else f'-{opt_name}'
