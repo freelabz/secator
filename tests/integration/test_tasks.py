@@ -48,6 +48,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'match_codes': '200',
 			'maigret.site': 'github',
 			'trivy.mode': 'repo',
+			'testssl.server_defaults': True,
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 		}
 

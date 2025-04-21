@@ -1,6 +1,6 @@
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability, Record)
+                                Vulnerability, Record, Certificate)
 
 OUTPUTS_TASKS = {
 	'bup': [
@@ -243,6 +243,8 @@ OUTPUTS_TASKS = {
             cvss_score=5.5,
             _source='trivy'
         ),
+    'testssl': [
+        Certificate(host='free.fr', fingerprint_sha256='EBC7C611F9A4161B123D3DF03E852BD69DFFDC447D223AE9478D434D55DFAD9B', _source='testssl')
     ],
     'wpscan': [
         Tag(

@@ -71,6 +71,7 @@ class Command(Runner):
 
 	# Flag to take a file as input
 	file_flag = None
+	file_eof_newline = False
 
 	# Flag to enable output JSON
 	json_flag = None
@@ -900,6 +901,8 @@ class Command(Runner):
 			# Write the input to a file
 			with open(fpath, 'w') as f:
 				f.write('\n'.join(inputs))
+				if self.file_eof_newline:
+					f.write('\n')
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'
