@@ -3,7 +3,8 @@ import os
 import yaml
 
 from secator.decorators import task
-from secator.definitions import THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT
+from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
+								PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT)
 from secator.tasks._categories import Vuln
 from secator.output_types import Vulnerability, Tag, Info, Error
 
