@@ -3,13 +3,13 @@ import os
 import yaml
 
 from secator.decorators import task
-from secator.definitions import THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED
-from secator.tasks._categories import VulnCode
+from secator.definitions import THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT
+from secator.tasks._categories import Vuln
 from secator.output_types import Vulnerability, Tag, Info, Error
 
 
 @task()
-class trivy(VulnCode):
+class trivy(Vuln):
 	"""Comprehensive and versatile security scanner."""
 	cmd = 'trivy'
 	input_flag = None
@@ -18,7 +18,15 @@ class trivy(VulnCode):
 		"mode": {"type": click.Choice(['image', 'fs', 'repo']), 'default': 'image', 'help': 'Trivy mode', 'required': True}  # noqa: E501
 	}
 	opt_key_map = {
-		THREADS: OPT_NOT_SUPPORTED
+		THREADS: OPT_NOT_SUPPORTED,
+		HEADER: OPT_NOT_SUPPORTED,
+		DELAY: OPT_NOT_SUPPORTED,
+		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		PROXY: OPT_NOT_SUPPORTED,
+		RATE_LIMIT: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
+		TIMEOUT: OPT_NOT_SUPPORTED,
+		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Tag, Vulnerability]
 	install_cmd = "sudo apt install trivy"
@@ -42,7 +50,7 @@ class trivy(VulnCode):
 
 		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
-			results = yaml.safe_load(f.read())['Results']
+			results = yaml.safe_load(f.read()).get('Results', [])
 		for item in results:
 			for vuln in item.get('Vulnerabilities', []):
 				vuln_id = vuln['VulnerabilityID']
@@ -52,20 +60,24 @@ class trivy(VulnCode):
 				if 'InstalledVersion' in vuln:
 					extra_data['version'] = vuln['InstalledVersion']
 				cvss = vuln.get('CVSS', {})
-				cvss_score = cvss.get('V3Score', -1) or cvss.get('V2Score', -1)
+				cvss_score = -1
+				for _, cvss_data in cvss.items():
+					cvss_score = cvss_data.get('V3Score', -1) or cvss_data.get('V2Score', -1)
 				data = {
 					'name': vuln_id,
 					'id': vuln_id,
+					'provider': vuln.get('DataSource', {}).get('ID', ''),
 					'description': vuln.get('Description'),
 					'matched_at': self.inputs[0],
 					'confidence': 'high',
 					'severity': vuln['Severity'].lower(),
 					'cvss_score': cvss_score,
+					'reference': vuln.get('PrimaryURL', ''),
 					'references': vuln.get('References', []),
 					'extra_data': extra_data
 				}
 				if vuln_id.startswith('CVE'):
-					remote_data = VulnCode.lookup_cve(vuln_id)
+					remote_data = Vuln.lookup_cve(vuln_id)
 					if remote_data:
 						data.update(remote_data)
 				yield Vulnerability(**data)

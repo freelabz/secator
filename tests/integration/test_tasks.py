@@ -47,6 +47,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'nmap.skip_host_discovery': True,
 			'match_codes': '200',
 			'maigret.site': 'github',
+			'trivy.mode': 'repo',
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 		}
 

@@ -19,7 +19,8 @@ INPUTS_TASKS = {
     'wpscan': 'http://localhost:8000/',
     'h8mail': 'test@test.com',
     'dnsx': 'wikipedia.org',
-    'dnsxbrute': 'wikipedia.org'
+    'dnsxbrute': 'wikipedia.org',
+    'trivy': 'https://github.com/blacklanternsecurity/bbot',
 }
 
 INPUTS_WORKFLOWS = {
