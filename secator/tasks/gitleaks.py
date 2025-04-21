@@ -17,7 +17,7 @@ class gitleaks(Command):
 	json_flag = '-f json'
 	opts = {
 		'ignore_path': {'type': str, 'help': 'Path to .gitleaksignore file or folder containing one'},
-		'mode': {'type': click.Choice(['git', 'dir']), 'default': 'dir', 'help': 'Gitleaks mode', 'internal': True, 'display': True},
+		'mode': {'type': click.Choice(['git', 'dir']), 'default': 'dir', 'help': 'Gitleaks mode', 'internal': True, 'display': True},  # noqa: E501
 		'config': {'type': str, 'short': 'config', 'help': 'Gitleaks config file path'}
 	}
 	opt_key_map = {

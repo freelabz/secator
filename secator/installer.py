@@ -231,7 +231,7 @@ class GithubInstaller:
 		system, arch, os_identifiers, arch_identifiers = cls._get_platform_identifier()
 		download_url = cls._find_matching_asset(latest_release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
-			console.print(Error(message=f'Could not find a GitHub release matching distribution (system: {system}, arch: {arch}).'))
+			console.print(Error(message=f'Could not find a GitHub release matching distribution (system: {system}, arch: {arch}).'))  # noqa: E501
 			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
 
 		# Download and unpack asset
