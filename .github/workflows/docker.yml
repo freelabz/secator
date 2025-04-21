@@ -4,8 +4,6 @@ on:
   push:
     branches:
     - release-please*
-    paths:
-    - '.docker/**'
   pull_request:
     types: [labeled, synchronize]
 
@@ -13,12 +11,19 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: 1
+
 jobs:
   platform:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci-docker')) }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         distribution: ["alpine", "arch", "debian", "kali", "osx", "ubuntu"]
     steps:
