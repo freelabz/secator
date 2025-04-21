@@ -6,7 +6,7 @@ INPUTS_TASKS = {
     USERNAME: 'ocervell',
     IP: '127.0.0.1',
     CIDR_RANGE: '192.168.1.0/24',
-	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
+	  'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
     'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
     'dnsx': 'wikipedia.org',
     'dnsxbrute': 'wikipedia.org',
@@ -17,10 +17,11 @@ INPUTS_TASKS = {
     'grype': 'redis:7.4.1',
     'h8mail': 'test@test.com',
     'nuclei': 'http://localhost:3000/',
-	'searchsploit': 'apache 2.4.5',
+	  'searchsploit': 'apache 2.4.5',
     'subfinder': 'api.github.com',
     'testssl': 'free.fr',
     'wpscan': 'http://localhost:8000/',
+    'wafw00f': 'https://netflix.com'
 }
 
 INPUTS_WORKFLOWS = {
