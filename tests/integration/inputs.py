@@ -19,7 +19,8 @@ INPUTS_TASKS = {
     'wpscan': 'http://localhost:8000/',
     'h8mail': 'test@test.com',
     'dnsx': 'wikipedia.org',
-    'dnsxbrute': 'wikipedia.org'
+    'dnsxbrute': 'wikipedia.org',
+    'wafw00f': 'https://netflix.com'
 }
 
 INPUTS_WORKFLOWS = {

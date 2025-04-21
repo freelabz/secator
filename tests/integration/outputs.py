@@ -232,6 +232,12 @@ OUTPUTS_TASKS = {
     'subfinder': [
         Subdomain(host='virusscan.api.github.com', domain='api.github.com', _source='subfinder')
     ],
+    'wafw00f': [
+        Tag(
+            name='Envoy WAF',
+            match='https://netflix.com',
+            _source='wafw00f')
+    ],
     'wpscan': [
         Tag(
             name='Wordpress theme - twentytwentyfive 1.2',
