@@ -11,6 +11,7 @@ import io
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 import json
 import requests
@@ -349,7 +350,6 @@ class GithubInstaller:
 			with tarfile.open(fileobj=io.BytesIO(response.content), mode='r:gz') as tar:
 				tar.extractall(path=temp_dir)
 		else:
-			from pathlib import Path
 			with Path(f'{temp_dir}/{repo_name}').open('wb') as f:
 				f.write(response.content)
 
