@@ -232,6 +232,18 @@ OUTPUTS_TASKS = {
     'subfinder': [
         Subdomain(host='virusscan.api.github.com', domain='api.github.com', _source='subfinder')
     ],
+    'trivy': [
+        Vulnerability(
+            matched_at='https://github.com/blacklanternsecurity/bbot',
+            provider='ghsa',
+            name='CVE-2024-8775',
+            id='CVE-2024-8775',
+            confidence='high',
+            severity='high',
+            cvss_score=5.5,
+            _source='trivy'
+        ),
+    ],
     'wafw00f': [
         Tag(
             name='Envoy WAF',
