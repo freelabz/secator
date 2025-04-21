@@ -103,6 +103,7 @@ META_OPTS = {
 	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
 	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True),
 	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True),
+	'wafw00f.output_path': load_fixture('wafw00f_output', FIXTURES_DIR, only_path=True),
 	'testssl.output_path': load_fixture('testssl_output', FIXTURES_DIR, only_path=True),
 }
 
