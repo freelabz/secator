@@ -11,6 +11,7 @@ import io
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 import json
 import requests
@@ -65,6 +66,12 @@ class ToolInstaller:
 			tool_cls.install_cmd,
 			tool_cls.install_post]):
 			return InstallerStatus.INSTALL_NOT_SUPPORTED
+
+		# Check PATH
+		path_var = os.environ.get('PATH', '')
+		if not str(CONFIG.dirs.bin) in path_var:
+			console.print(Warning(message=f'Bin directory {CONFIG.dirs.bin} not found in PATH ! Binaries installed by secator will not work'))  # noqa: E501
+			console.print(Warning(message=f'Run "export PATH=$PATH:{CONFIG.dirs.bin}" to add the binaries to your PATH'))
 
 		# Install pre-required packages
 		if tool_cls.install_pre:
@@ -342,6 +349,9 @@ class GithubInstaller:
 		elif url.endswith('.tar.gz'):
 			with tarfile.open(fileobj=io.BytesIO(response.content), mode='r:gz') as tar:
 				tar.extractall(path=temp_dir)
+		else:
+			with Path(f'{temp_dir}/{repo_name}').open('wb') as f:
+				f.write(response.content)
 
 		# For archives, find and move the binary that matches the repo name
 		binary_path = cls._find_binary_in_directory(temp_dir, repo_name)

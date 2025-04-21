@@ -4,8 +4,6 @@ from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
-from secator.celery_utils import CeleryData
-from secator.output_types import Info
 
 
 class Workflow(Runner):
@@ -17,64 +15,68 @@ class Workflow(Runner):
 		from secator.celery import run_workflow
 		return run_workflow.delay(args=args, kwargs=kwargs)
 
-	def yielder(self):
-		"""Run workflow.
+	@classmethod
+	def s(cls, *args, **kwargs):
+		from secator.celery import run_workflow
+		return run_workflow.s(args=args, kwargs=kwargs)
 
-		Yields:
-			secator.output_types.OutputType: Secator output type.
-		"""
-		# Task opts
-		run_opts = self.run_opts.copy()
-		run_opts['hooks'] = self._hooks.get(Task, {})
+	def build_celery_workflow(self, chain_previous_results=False):
+		"""Build Celery workflow for workflow execution.
 
-		# Build Celery workflow
-		workflow = self.build_celery_workflow(
-			run_opts=run_opts,
-			results=self.results
-		)
-		self.celery_ids = list(self.celery_ids_map.keys())
-
-		# Run Celery workflow and get results
-		if self.sync:
-			self.print_item = False
-			results = workflow.apply().get()
-		else:
-			result = workflow()
-			self.celery_ids.append(str(result.id))
-			self.celery_result = result
-			yield Info(
-				message=f'Celery task created: {self.celery_result.id}',
-				task_id=self.celery_result.id
-			)
-			results = CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
-			)
-
-		# Get workflow results
-		yield from results
-
-	def build_celery_workflow(self, run_opts={}, results=[]):
-		""""Build Celery workflow.
+		Args:
+			chain_previous_results (bool): Chain previous results.
 
 		Returns:
-			tuple(celery.chain, List[str]): Celery task chain, Celery task ids.
+			celery.Signature: Celery task signature.
 		"""
 		from celery import chain
-		from secator.celery import forward_results
+		from secator.celery import mark_runner_started, mark_runner_completed
+
+		# Prepare run options
+		opts = self.run_opts.copy()
+		opts.pop('output', None)
+		opts.pop('no_poll', False)
+
+		# Set hooks and reports
+		self.enable_reports = True  # Workflow will handle reports
+		self.enable_hooks = False   # Celery will handle hooks
+
+		# Get hooks
+		hooks = self._hooks.get(Task, {})
+		opts['hooks'] = hooks
+		opts['context'] = self.context.copy()
+		opts['reports_folder'] = str(self.reports_folder)
+		opts['enable_reports'] = False  # Workflow will handle reports
+		opts['enable_duplicate_check'] = False  # Workflow will handle duplicate check
+		opts['has_parent'] = True
+		opts['skip_if_no_inputs'] = True
+		opts['caller'] = 'Workflow'
+
+		forwarded_opts = {}
+		if chain_previous_results:
+			forwarded_opts = {k: v for k, v in self.run_opts.items() if k.endswith('_')}
+
+		# Build task signatures
 		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
 			self.inputs,
 			self.config.options,
-			run_opts)
-		sigs = [forward_results.si(results).set(queue='io')] + sigs + [forward_results.s().set(queue='io')]
-		workflow = chain(*sigs)
-		return workflow
+			opts,
+			forwarded_opts=forwarded_opts
+		)
 
-	def get_tasks(self, config, inputs, workflow_opts, run_opts):
+		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue='results')
+		if chain_previous_results:
+			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue='results')
+
+		# Build workflow chain with lifecycle management
+		return chain(
+			start_sig,
+			*sigs,
+			mark_runner_completed.s(self, enable_hooks=True).set(queue='results'),
+		)
+
+	def get_tasks(self, config, inputs, workflow_opts, run_opts, forwarded_opts={}):
 		"""Get tasks recursively as Celery chains / chords.
 
 		Args:
@@ -82,14 +84,15 @@ class Workflow(Runner):
 			inputs (list): Inputs.
 			workflow_opts (dict): Workflow options.
 			run_opts (dict): Run options.
+			forwarded_opts (dict): Opts forwarded from parent runner (e.g: scan).
 			sync (bool): Synchronous mode (chain of tasks, no chords).
 
 		Returns:
 			tuple (List[celery.Signature], List[str]): Celery signatures, Celery task ids.
 		"""
-		from celery import chain, chord
-		from secator.celery import forward_results
+		from celery import chain, group
 		sigs = []
+		ix = 0
 		for task_name, task_opts in config.items():
 			# Task opts can be None
 			task_opts = task_opts or {}
@@ -102,7 +105,7 @@ class Workflow(Runner):
 					workflow_opts,
 					run_opts
 				)
-				sig = chord((tasks), forward_results.s().set(queue='io'))
+				sig = group(*tasks)
 			elif task_name == '_chain':
 				tasks = self.get_tasks(
 					task_opts,
@@ -117,18 +120,16 @@ class Workflow(Runner):
 
 				# Merge task options (order of priority with overrides)
 				opts = merge_opts(workflow_opts, task_opts, run_opts)
-
-				# Add task context and hooks to options
-				opts['hooks'] = {task: self._hooks.get(Task, {})}
-				opts['context'] = self.context.copy()
+				if ix == 0 and forwarded_opts:
+					opts.update(forwarded_opts)
 				opts['name'] = task_name
-				opts['has_parent'] = True
-				opts['skip_if_no_inputs'] = True
 
 				# Create task signature
 				task_id = str(uuid.uuid4())
+				opts['context'] = self.context.copy()
 				sig = task.s(inputs, **opts).set(queue=task.profile, task_id=task_id)
 				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
+				ix += 1
 			sigs.append(sig)
 		return sigs

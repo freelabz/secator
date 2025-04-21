@@ -62,9 +62,19 @@ class Celery(StrictModel):
 	broker_pool_limit: int = 10
 	broker_connection_timeout: float = 4.0
 	broker_visibility_timeout: int = 3600
+	broker_transport_options: str = ""
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
+	result_backend_transport_options: str = ""
 	result_expires: int = 86400  # 1 day
+	task_acks_late: bool = False
+	task_send_sent_event: bool = False
+	task_reject_on_worker_lost: bool = False
+	worker_max_tasks_per_child: int = 20
+	worker_prefetch_multiplier: int = 1
+	worker_send_task_events: bool = False
+	worker_kill_after_task: bool = False
+	worker_kill_after_idle_seconds: int = -1
 
 
 class Cli(StrictModel):
@@ -83,6 +93,7 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+	show_chunk_progress: bool = False
 
 
 class Security(StrictModel):
@@ -491,8 +502,8 @@ class Config(DotMap):
 					self.set(path, value, set_partial=False)
 					if not self.validate(print_errors=False) and print_errors:
 						console.print(f'[bold red]{var} (override failed)[/]')
-				elif print_errors:
-					console.print(f'[bold red]{var} (override failed: key not found)[/]')
+				# elif print_errors:
+				# 	console.print(f'[bold red]{var} (override failed: key not found)[/]')
 
 
 def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):

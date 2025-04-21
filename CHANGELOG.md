@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.10.0](https://github.com/freelabz/secator/compare/v0.9.4...v0.10.0) (2025-03-04)
+
+
+### Features
+
+* **celery:** add single pool job processing options ([#558](https://github.com/freelabz/secator/issues/558)) ([cca9797](https://github.com/freelabz/secator/commit/cca9797339ed95c15ef42604ba9bf897a76da766))
+
+
+### Bug Fixes
+
+* add poll queue and re-route tasks to it when chunked ([#562](https://github.com/freelabz/secator/issues/562)) ([b9e7576](https://github.com/freelabz/secator/commit/b9e7576dcd46db0e95df09dc8beafb762314cc39))
+* **config:** disable key not found error message (too verbose) ([#563](https://github.com/freelabz/secator/issues/563)) ([3b044da](https://github.com/freelabz/secator/commit/3b044da14f3e399e03e10c97566a25e858e7e7d6))
+* **katana:** add -no-sandbox option ([#566](https://github.com/freelabz/secator/issues/566)) ([50cf2fe](https://github.com/freelabz/secator/commit/50cf2fef5eaa1b7cf67c691360e3349b7bf7bfbe))
+* mongodb document bug ([#564](https://github.com/freelabz/secator/issues/564)) ([29c6af4](https://github.com/freelabz/secator/commit/29c6af4f3a2a49ac973f7193ca334f56e7b178d5))
+* reset nuclei input chunk size ([#561](https://github.com/freelabz/secator/issues/561)) ([683b9ef](https://github.com/freelabz/secator/commit/683b9efb28d2425961e2e64c31b9af5cb07c0923))
+
+## [0.9.4](https://github.com/freelabz/secator/compare/v0.9.3...v0.9.4) (2025-02-25)
+
+
+### Bug Fixes
+
+* **nuclei:** set input_chunk_size to 1 ([cf6bda1](https://github.com/freelabz/secator/commit/cf6bda19e97754a3560e2ed17bfb83c87d889f1e))
+
+## [0.9.4](https://github.com/freelabz/secator/compare/v0.9.3...v0.9.4) (2025-02-25)
+
+
+### Bug Fixes
+
+* **nuclei:** set input_chunk_size to 1 ([cf6bda1](https://github.com/freelabz/secator/commit/cf6bda19e97754a3560e2ed17bfb83c87d889f1e))
+
+## [0.9.3](https://github.com/freelabz/secator/compare/v0.9.2...v0.9.3) (2025-02-24)
+
+
+### Bug Fixes
+
+* add celery monitoring opts ([#552](https://github.com/freelabz/secator/issues/552)) ([51681d3](https://github.com/freelabz/secator/commit/51681d3dad12570a6483c30dda82a40e81675c2e))
+* update tasks profiles ([#553](https://github.com/freelabz/secator/issues/553)) ([cebc50a](https://github.com/freelabz/secator/commit/cebc50a9139f31f5315e5e290e90807744df9db3))
+
+## [0.9.2](https://github.com/freelabz/secator/compare/v0.9.1...v0.9.2) (2025-02-23)
+
+
+### Bug Fixes
+
+* warning bug ([#550](https://github.com/freelabz/secator/issues/550)) ([3853d47](https://github.com/freelabz/secator/commit/3853d4781f4b135ddbf5eab8ccaf5bbf02feb2e0))
+
+## [0.9.1](https://github.com/freelabz/secator/compare/v0.9.0...v0.9.1) (2025-02-22)
+
+
+### Bug Fixes
+
+* add celery broker transport options ([#547](https://github.com/freelabz/secator/issues/547)) ([3703d1e](https://github.com/freelabz/secator/commit/3703d1e10dd605b9c631ff6084713beb36bda469))
+* add celery opts required for remote ([#544](https://github.com/freelabz/secator/issues/544)) ([36d1f2d](https://github.com/freelabz/secator/commit/36d1f2dadbd601ad8866e0b4ada485e3d26ec1b6))
+* bbot port not cast as int ([#542](https://github.com/freelabz/secator/issues/542)) ([744553c](https://github.com/freelabz/secator/commit/744553c597869e0c4811214a00ead740b4dcd2e9))
+* change main dockerfile path ([#546](https://github.com/freelabz/secator/issues/546)) ([6a2faf6](https://github.com/freelabz/secator/commit/6a2faf6966db2bf340311815a46ff4c347c8c136))
+* cli bug warning ([#543](https://github.com/freelabz/secator/issues/543)) ([ca44b12](https://github.com/freelabz/secator/commit/ca44b12dcc5e4869753dc1d186adabd77825ee7e))
+* update Dockerfile symlink ([#549](https://github.com/freelabz/secator/issues/549)) ([1b2bdcf](https://github.com/freelabz/secator/commit/1b2bdcf37eabad7150420a8893bb064a9f9c41cb))
+* **wpscan:** set vuln confidence ([#548](https://github.com/freelabz/secator/issues/548)) ([0d8f13d](https://github.com/freelabz/secator/commit/0d8f13d7830906654778910c3e0e259962e31276))
+
+## [0.9.0](https://github.com/freelabz/secator/compare/v0.8.2...v0.9.0) (2025-02-21)
+
+
+### Features
+
+* add cleanup option to secator install tools ([#530](https://github.com/freelabz/secator/issues/530)) ([bcc11c2](https://github.com/freelabz/secator/commit/bcc11c24e628b527111b1890b3810bf60be14448))
+* add warning if bin dir is not in path ([#528](https://github.com/freelabz/secator/issues/528)) ([59ca31e](https://github.com/freelabz/secator/commit/59ca31e3e4bb07680762213d6f5722afb9586519))
+* improve dockerfile size with multi-stage build ([#534](https://github.com/freelabz/secator/issues/534)) ([ceb3652](https://github.com/freelabz/secator/commit/ceb3652371669bfce525a5e26c38e88e9e03356f))
+
+
+### Bug Fixes
+
+* bbot screenshots copy ([#540](https://github.com/freelabz/secator/issues/540)) ([2cea982](https://github.com/freelabz/secator/commit/2cea9825cf73fb97546c38793c7f280db7c99822))
+* install chromium in httpx ([#541](https://github.com/freelabz/secator/issues/541)) ([1965619](https://github.com/freelabz/secator/commit/19656198351fc0b40f71aeb7fb20035db6b89a37))
+* miscellaneous bugfixes ([#533](https://github.com/freelabz/secator/issues/533)) ([b8c0edf](https://github.com/freelabz/secator/commit/b8c0edf30882bb030dbb6b376e264850d3905307))
+* restore colors to rich defaults to honor TERM and NO_COLOR ([#524](https://github.com/freelabz/secator/issues/524)) ([982fc55](https://github.com/freelabz/secator/commit/982fc55a60c03d03bf871727fafdf6840dab0908))
+* secator update command ([#538](https://github.com/freelabz/secator/issues/538)) ([cf73def](https://github.com/freelabz/secator/commit/cf73def36de7e9e8522d795922daae02252792fd))
+
 ## [0.8.2](https://github.com/freelabz/secator/compare/v0.8.1...v0.8.2) (2025-02-10)
 
 

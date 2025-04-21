@@ -11,7 +11,7 @@ tasks:
   fping:
     description: Check for alive IPs
     targets_: ip.ip
-  naabu:
+  nmap:
     description: Scan alive IPs' ports
     targets_:
     - type: ip

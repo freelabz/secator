@@ -8,7 +8,7 @@ from secator.tasks._categories import Vuln
 from secator.config import CONFIG
 
 
-class TestSerializers(unittest.TestCase):
+class TestHelpers(unittest.TestCase):
 
 	def test_lookup_cve_circle(self):
 		fixture = json.dumps(load_fixture('cve_circle_output', FIXTURES_DIR), sort_keys=True)

@@ -192,7 +192,7 @@ class TestCommandRunner(unittest.TestCase):
 		cmd.run()
 		errors = cmd.errors
 		messages = [e.message for e in errors]
-		self.assertIn("Validator failed: Command does not suport multiple inputs in non-worker mode. Consider using .delay() instead.", messages)
+		self.assertIn("Validator failed: Command does not suport multiple inputs in non-worker mode. Consider running with a remote worker instead.", messages)
 		self.assertEqual(len(cmd.results), 1)
 		self.assertFalse(cmd.inputs_valid)
 		self.assertEqual(cmd.status, 'FAILURE')
