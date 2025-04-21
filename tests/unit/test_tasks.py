@@ -43,7 +43,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 					continue
 
 				# Run command
-				targets = INPUTS_TASKS[cls.input_type]
+				targets = INPUTS_TASKS.get(cls.input_type, 'fake')
 				with mock_command(cls, targets, META_OPTS, fixture) as runner:
 					self._test_runner_output(
 						runner,

@@ -105,6 +105,7 @@ META_OPTS = {
 	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True),
 	'arjun.output_path': load_fixture('arjun_output', FIXTURES_DIR, only_path=True),
 	'arjun.wordlist': False,
+	'trivy.output_path': load_fixture('trivy_output', FIXTURES_DIR, only_path=True),
 	'wafw00f.output_path': load_fixture('wafw00f_output', FIXTURES_DIR, only_path=True),
 	'testssl.output_path': load_fixture('testssl_output', FIXTURES_DIR, only_path=True),
 }
