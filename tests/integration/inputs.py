@@ -6,7 +6,8 @@ INPUTS_TASKS = {
     USERNAME: 'ocervell',
     IP: '127.0.0.1',
     CIDR_RANGE: '192.168.1.0/24',
-	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
+    'arjun': 'http://testphp.vulnweb.com/hpp',
+	  'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
     'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
     'dnsx': 'wikipedia.org',
     'dnsxbrute': 'wikipedia.org',
@@ -17,10 +18,12 @@ INPUTS_TASKS = {
     'grype': 'redis:7.4.1',
     'h8mail': 'test@test.com',
     'nuclei': 'http://localhost:3000/',
-	'searchsploit': 'apache 2.4.5',
+    'searchsploit': 'apache 2.4.5',
     'subfinder': 'api.github.com',
     'testssl': 'free.fr',
+    'trivy': 'https://github.com/blacklanternsecurity/bbot',
     'wpscan': 'http://localhost:8000/',
+    'wafw00f': 'https://netflix.com'
 }
 
 INPUTS_WORKFLOWS = {
@@ -28,7 +31,7 @@ INPUTS_WORKFLOWS = {
     'code_scan': str(ROOT_FOLDER),
     # 'dir_finder': 'localhost:3000',  # TODO: add fixture with directories
     'host_recon': 'localhost',
-	'subdomain_recon': 'api.github.com',
+    'subdomain_recon': 'api.github.com',
     'url_crawl': 'localhost:3000',
     'url_fuzz': 'http://localhost:3000',
     'url_nuclei': ['http://localhost:3000', 'http://localhost:8080'],
