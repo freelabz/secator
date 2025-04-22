@@ -29,5 +29,5 @@ RUN apk add --no-cache \
 	flock \
 	pipx \
 	sudo
-RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup; fi
+RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
 ENTRYPOINT ["secator"]

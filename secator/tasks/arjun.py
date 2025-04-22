@@ -11,9 +11,11 @@ from secator.utils import process_wordlist
 
 @task()
 class arjun(Command):
+	"""HTTP Parameter Discovery Suite."""
 	cmd = 'arjun'
 	input_flag = '-u'
 	input_type = URL
+	version_flag = ' '
 	opts = {
 		'chunk_size': {'type': int, 'help': 'Control query/chunk size'},
 		'stable': {'is_flag': True, 'default': False, 'help': 'Use stable mode'},

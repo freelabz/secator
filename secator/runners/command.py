@@ -237,6 +237,22 @@ class Command(Runner):
 			opt_prefix=self.config.name)
 
 	@classmethod
+	def get_version_flag(cls):
+		if cls.version_flag == OPT_NOT_SUPPORTED:
+			return None
+		return cls.version_flag or f'{cls.opt_prefix}version'
+
+	@classmethod
+	def get_version_info(cls):
+		from secator.installer import get_version_info
+		return get_version_info(
+			cls.__name__,
+			cls.get_version_flag(),
+			cls.install_github_handle,
+			cls.install_cmd
+		)
+
+	@classmethod
 	def get_supported_opts(cls):
 		def convert(d):
 			for k, v in d.items():

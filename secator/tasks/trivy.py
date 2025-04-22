@@ -2,6 +2,7 @@ import click
 import os
 import yaml
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
 								PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT)
@@ -30,7 +31,11 @@ class trivy(Vuln):
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Tag, Vulnerability]
-	install_cmd = "sudo apt install trivy"
+	install_cmd = (
+		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'
+		f'sudo sh -s -- -b {CONFIG.dirs.bin} v0.61.1'
+	)
+	install_github_handle = 'aquasecurity/trivy'
 	install_github_handle = 'aquasecurity/trivy'
 
 	@staticmethod

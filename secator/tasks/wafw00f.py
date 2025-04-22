@@ -10,13 +10,14 @@ from secator.tasks._categories import OPTS
 
 @task()
 class wafw00f(Command):
+	"""Web Application Firewall Fingerprinting tool."""
 	cmd = 'wafw00f'
 	input_type = URL
 	input_flag = None
 	file_flag = '-i'
 	json_flag = '-f json'
 	encoding = 'ansi'
-	opt_prefix = '-'
+	opt_prefix = '--'
 	meta_opts = {
 		PROXY: OPTS[PROXY],
 		HEADER: OPTS[HEADER],
@@ -25,16 +26,15 @@ class wafw00f(Command):
 	opts = {
 		'list': {'is_flag': True, 'default': False, 'help': 'List all WAFs that WAFW00F is able to detect'},
 		'waf_type': {'type': str, 'short': 'wt', 'help': 'Test for one specific WAF'},
-		'test_all': {'is_flag': True, 'short': 'ta', 'default': False, 'help': 'Find all WAFs which match the signatures, do not stop testing on the first one'},  # noqa: E501
+		'find_all': {'is_flag': True, 'short': 'ta', 'default': False, 'help': 'Find all WAFs which match the signatures, do not stop testing on the first one'},  # noqa: E501
 		'no_follow_redirects': {'is_flag': True, 'short': 'nfr', 'default': False, 'help': 'Do not follow redirections given by 3xx responses'},  # noqa: E501
 	}
 	opt_key_map = {
-		HEADER: 'H',
-		PROXY: 'p',
-		'list': 'l',
-		'waf_type': 't',
-		'test_all': 'a',
-		'no_follow_redirects': 'r',
+		HEADER: 'headers',
+		PROXY: 'proxy',
+		'waf_type': 'test',
+		'find_all': 'findall',
+		'no_follow_redirects': 'noredirect',
 	}
 	output_types = [Tag]
 	install_cmd = 'pipx install git+https://github.com/EnableSecurity/wafw00f.git && pipx upgrade wafw00f'

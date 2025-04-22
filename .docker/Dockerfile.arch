@@ -32,5 +32,5 @@ RUN pipx install . && \
 	secator install addons redis && \
 	secator install addons dev
 RUN secator config set security.force_source_install true
-RUN secator install tools --cleanup
+RUN secator install tools --cleanup --fail-fast
 ENTRYPOINT ["secator"]

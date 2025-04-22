@@ -10,6 +10,7 @@ from secator.tasks._categories import OPTS
 
 @task()
 class wpprobe(Command):
+    """Fast wordpress plugin enumeration tool."""
     cmd = 'wpprobe'
     file_flag = '-f'
     input_flag = '-u'
