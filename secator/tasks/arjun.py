@@ -11,6 +11,7 @@ from secator.utils import process_wordlist
 
 @task()
 class arjun(Command):
+	"""HTTP Parameter Discovery Suite."""
 	cmd = 'arjun'
 	input_flag = '-u'
 	input_type = URL

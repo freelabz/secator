@@ -10,6 +10,7 @@ from secator.tasks._categories import OPTS
 
 @task()
 class wafw00f(Command):
+	"""Web Application Firewall Fingerprinting tool."""
 	cmd = 'wafw00f'
 	input_type = URL
 	input_flag = None

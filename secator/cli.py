@@ -1253,17 +1253,28 @@ def test():
 	pass
 
 
-def run_test(cmd, name):
+def run_test(cmd, name=None, exit=True, verbose=False):
 	"""Run a test and return the result.
 
 	Args:
-		cmd: Command to run.
-		name: Name of the test.
+		cmd (str): Command to run.
+		name (str, optional): Name of the test.
+		exit (bool, optional): Exit after running the test with the return code.
+		verbose (bool, optional): Print verbose output.
+
+	Returns:
+		Return code of the test.
 	"""
-	result = Command.execute(cmd, name=name + ' tests', cwd=ROOT_FOLDER)
-	if result.return_code == 0:
-		console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
-	sys.exit(result.return_code)
+	cmd_name = name + ' tests' if name else 'tests'
+	result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
+	if name:
+		if result.return_code == 0:
+			console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
+		else:
+			console.print(f':x: {name.capitalize()} tests failed !', style='bold red')
+	if exit:
+		sys.exit(result.return_code)
+	return result.return_code
 
 
 @test.command()
@@ -1358,6 +1369,80 @@ def performance(tasks, workflows, scans, test):
 		cmd += f' -k "{test_str}"'
 	run_test(cmd, 'performance')
 
+
+@test.command()
+@click.argument('name', type=str)
+@click.option('--verbose', '-v', is_flag=True, default=False, help='Print verbose output')
+def task(name, verbose):
+	"""Test task."""
+	task = [task for task in ALL_TASKS if task.__name__ == name]
+	warnings = []
+	exit_code = 0
+
+	# Check if task is correctly registered
+	check_error(task, 'Check task is registered', f'Task is not registered. Make sure there is no syntax errors in the task class definition.', warnings)
+	task = task[0]
+	task_name = task.__name__
+
+	# Run install
+	console.print(f'\n[bold gold3]:wrench: Running install tests for task {name} ...[/]') if verbose else None
+	cmd = f'secator install tools {task_name}'
+	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
+	version_info = task.get_version_info()
+	check_error(version_info['installed'], 'Check task is installed', f'Failed to install command. Fix your installation command.', warnings)
+	check_error(any(cmd for cmd in [task.install_cmd, task.install_github_handle]), 'Check task installation command is defined', f'Task has no installation command. Please define a `install_cmd` or `install_github_handle` class attribute.', warnings)  # noqa: E501
+	check_error(version_info['version'], 'Check task version can be fetched', f'Failed to detect version info. Fix your `version_flag` class attribute.', warnings)
+
+	# Run task-specific tests
+	console.print(f'\n[bold gold3]:wrench: Running task-specific tests for {name} ...[/]') if verbose else None
+	check_error(task.__doc__, 'Check task description is set (cls.__doc__)', f'Task has no description (class docstring).', warnings)
+	check_error(task.cmd, 'Check task command is set (cls.cmd)', f'Task has no cmd attribute.', warnings)
+	check_error(task.input_type, 'Check task input type is set (cls.input_type)', f'Task has no input_type attribute.', warnings)
+	check_error(task.output_types, 'Check task output types is set (cls.output_types)', f'Task has no output_types attribute.', warnings)
+
+	# Print all warnings
+	exit_code = 1 if len(warnings) > 0 else 0
+	if exit_code == 1:
+		console.print()
+		console.print("[bold red]Issues:[/]")
+		for warning in warnings:
+			console.print(warning)
+		console.print()
+		console.print(Info(message=f'Skipping unit and integration tests for {name} due to previous errors.'))
+		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above before making a PR.'))
+		sys.exit(exit_code)
+
+	# Run unit tests
+	console.print(f'\n[bold gold3]:wrench: Running unit tests for {name} ...[/]') if verbose else None
+	cmd = f'secator test unit --tasks {name}'
+	ret_code = run_test(cmd, exit=False, verbose=verbose)
+	check_error(ret_code == 0, f'Check unit tests pass', f'Unit tests failed.', warnings)
+
+	# Run integration tests
+	console.print(f'\n[bold gold3]:wrench: Running integration tests for {name} ...[/]') if verbose else None
+	cmd = f'secator test integration --tasks {name}'
+	ret_code = run_test(cmd, exit=False, verbose=verbose)
+	check_error(ret_code == 0, f'Check integration tests pass', f'Integration tests failed.', warnings)
+
+	# Exit with exit code
+	exit_code = 1 if len(warnings) > 0 else 0
+	if exit_code == 0:
+		console.print(f':tada: Task {name} tests passed ! You are free to make a PR.', style='bold green')
+	else:
+		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above before making a PR.'))
+
+	sys.exit(exit_code)
+
+
+def check_error(condition, message, error, warnings=[]):
+	console.print(f'[bold magenta]:zap: {message} ...[/]', end='')
+	if not condition:
+		warning = Warning(message=error)
+		warnings.append(warning)
+		console.print(f' [bold red]FAILED[/]', style='dim')
+	else:
+		console.print(f' [bold green]OK[/]', style='dim')
+	return True
 
 @test.command()
 @click.option('--unit-only', '-u', is_flag=True, default=False, help='Only generate coverage for unit tests')

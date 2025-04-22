@@ -13,6 +13,7 @@ from secator.tasks._categories import Command, OPTS
 
 @task()
 class testssl(Command):
+    """SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
     cmd = 'testssl.sh'
     input_type = HOST
     input_flag = None
@@ -47,7 +48,8 @@ class testssl(Command):
     proxy_socks5 = False
     profile = 'io'
     install_pre = {
-        'apk|pacman': ['hexdump'],
+        'apk': ['hexdump'],
+        'pacman': ['util-linux'],
         '*': ['bsdmainutils']
     }
     install_cmd = (

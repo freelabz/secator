@@ -12,6 +12,7 @@ from secator.output_types import Tag, Info, Error
 
 @task()
 class gitleaks(Command):
+	"""Tool for detecting secrets like passwords, API keys, and tokens in git repos, files, and stdin."""
 	cmd = 'gitleaks'
 	input_flag = None
 	json_flag = '-f json'
