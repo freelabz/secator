@@ -1281,7 +1281,7 @@ def run_test(cmd, name=None, exit=True, verbose=False):
 def lint():
 	"""Run lint tests."""
 	cmd = f'{sys.executable} -m flake8 secator/'
-	run_test(cmd, 'lint')
+	run_test(cmd, 'lint', verbose=True)
 
 
 @test.command()
@@ -1313,7 +1313,7 @@ def unit(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'unit')
+	run_test(cmd, 'unit', verbose=True)
 
 
 @test.command()
@@ -1344,7 +1344,7 @@ def integration(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'integration')
+	run_test(cmd, 'integration', verbose=True)
 
 
 @test.command()
@@ -1367,7 +1367,7 @@ def performance(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'performance')
+	run_test(cmd, 'performance', verbose=True)
 
 
 @test.command()
@@ -1380,7 +1380,7 @@ def task(name, verbose):
 	exit_code = 0
 
 	# Check if task is correctly registered
-	check_error(task, 'Check task is registered', f'Task is not registered. Make sure there is no syntax errors in the task class definition.', warnings)
+	check_error(task, 'Check task is registered', 'Task is not registered. Make sure there is no syntax errors in the task class definition.', warnings)  # noqa: E501
 	task = task[0]
 	task_name = task.__name__
 
@@ -1389,16 +1389,16 @@ def task(name, verbose):
 	cmd = f'secator install tools {task_name}'
 	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
 	version_info = task.get_version_info()
-	check_error(version_info['installed'], 'Check task is installed', f'Failed to install command. Fix your installation command.', warnings)
-	check_error(any(cmd for cmd in [task.install_cmd, task.install_github_handle]), 'Check task installation command is defined', f'Task has no installation command. Please define a `install_cmd` or `install_github_handle` class attribute.', warnings)  # noqa: E501
-	check_error(version_info['version'], 'Check task version can be fetched', f'Failed to detect version info. Fix your `version_flag` class attribute.', warnings)
+	check_error(version_info['installed'], 'Check task is installed', 'Failed to install command. Fix your installation command.', warnings)  # noqa: E501
+	check_error(any(cmd for cmd in [task.install_cmd, task.install_github_handle]), 'Check task installation command is defined', 'Task has no installation command. Please define a `install_cmd` or `install_github_handle` class attribute.', warnings)  # noqa: E501
+	check_error(version_info['version'], 'Check task version can be fetched', 'Failed to detect version info. Fix your `version_flag` class attribute.', warnings)  # noqa: E501
 
 	# Run task-specific tests
 	console.print(f'\n[bold gold3]:wrench: Running task-specific tests for {name} ...[/]') if verbose else None
-	check_error(task.__doc__, 'Check task description is set (cls.__doc__)', f'Task has no description (class docstring).', warnings)
-	check_error(task.cmd, 'Check task command is set (cls.cmd)', f'Task has no cmd attribute.', warnings)
-	check_error(task.input_type, 'Check task input type is set (cls.input_type)', f'Task has no input_type attribute.', warnings)
-	check_error(task.output_types, 'Check task output types is set (cls.output_types)', f'Task has no output_types attribute.', warnings)
+	check_error(task.__doc__, 'Check task description is set (cls.__doc__)', 'Task has no description (class docstring).', warnings)  # noqa: E501
+	check_error(task.cmd, 'Check task command is set (cls.cmd)', 'Task has no cmd attribute.', warnings)
+	check_error(task.input_type, 'Check task input type is set (cls.input_type)', 'Task has no input_type attribute.', warnings)  # noqa: E501
+	check_error(task.output_types, 'Check task output types is set (cls.output_types)', 'Task has no output_types attribute.', warnings)  # noqa: E501
 
 	# Print all warnings
 	exit_code = 1 if len(warnings) > 0 else 0
@@ -1416,13 +1416,13 @@ def task(name, verbose):
 	console.print(f'\n[bold gold3]:wrench: Running unit tests for {name} ...[/]') if verbose else None
 	cmd = f'secator test unit --tasks {name}'
 	ret_code = run_test(cmd, exit=False, verbose=verbose)
-	check_error(ret_code == 0, f'Check unit tests pass', f'Unit tests failed.', warnings)
+	check_error(ret_code == 0, 'Check unit tests pass', 'Unit tests failed.', warnings)
 
 	# Run integration tests
 	console.print(f'\n[bold gold3]:wrench: Running integration tests for {name} ...[/]') if verbose else None
 	cmd = f'secator test integration --tasks {name}'
 	ret_code = run_test(cmd, exit=False, verbose=verbose)
-	check_error(ret_code == 0, f'Check integration tests pass', f'Integration tests failed.', warnings)
+	check_error(ret_code == 0, 'Check integration tests pass', 'Integration tests failed.', warnings)
 
 	# Exit with exit code
 	exit_code = 1 if len(warnings) > 0 else 0
@@ -1439,10 +1439,11 @@ def check_error(condition, message, error, warnings=[]):
 	if not condition:
 		warning = Warning(message=error)
 		warnings.append(warning)
-		console.print(f' [bold red]FAILED[/]', style='dim')
+		console.print(' [bold red]FAILED[/]', style='dim')
 	else:
-		console.print(f' [bold green]OK[/]', style='dim')
+		console.print(' [bold green]OK[/]', style='dim')
 	return True
+
 
 @test.command()
 @click.option('--unit-only', '-u', is_flag=True, default=False, help='Only generate coverage for unit tests')
