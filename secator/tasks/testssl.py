@@ -47,8 +47,8 @@ class testssl(Command):
     proxy_socks5 = False
     profile = 'io'
     install_pre = {
-        'apk': 'hexdump',
-        '*': 'bsdmainutils'
+        'apk': ['hexdump'],
+        '*': ['bsdmainutils']
     }
     install_cmd = (
         f'git clone --depth 1 https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh || true && '
