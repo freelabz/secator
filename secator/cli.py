@@ -863,7 +863,7 @@ def health(json, debug, strict):
 		error = False
 		for tool, info in status['tools'].items():
 			if not info['installed']:
-				console.print(Error(message=f'{tool} not installed and strict mode is enabled.'))
+				console.print(Error(message=f'{tool} is not installed.'))
 				error = True
 		if error:
 			sys.exit(1)
@@ -1052,8 +1052,9 @@ def install_ruby():
 
 @install.command('tools')
 @click.argument('cmds', required=False)
-@click.option('--cleanup', is_flag=True, default=False)
-def install_tools(cmds, cleanup):
+@click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
+@click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
+def install_tools(cmds, cleanup, fail_fast):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
@@ -1074,6 +1075,8 @@ def install_tools(cmds, cleanup):
 		status = ToolInstaller.install(cls)
 		if not status.is_ok():
 			return_code = 1
+			if fail_fast:
+				sys.exit(return_code)
 		console.print()
 	if cleanup:
 		distro = get_distro_config()
@@ -1133,8 +1136,7 @@ def update(all):
 		return_code = 0
 		for cls in ALL_TASKS:
 			cmd = cls.cmd.split(' ')[0]
-			version_flag = cls.version_flag or f'{cls.opt_prefix}version'
-			version_flag = None if cls.version_flag == OPT_NOT_SUPPORTED else version_flag
+			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.install_github_handle)
 			if not info['installed'] or info['status'] == 'outdated' or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):

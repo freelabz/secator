@@ -262,6 +262,8 @@ class GithubInstaller:
 			return latest_release
 		except requests.RequestException as e:
 			console.print(Warning(message=f'Failed to fetch latest release for {github_handle}: {str(e)}'))
+			if 'rate limit exceeded' in str(e):
+				console.print(Warning(message=f'Consider setting env variable SECATOR_CLI_GITHUB_TOKEN or use secator config set cli.github_token $TOKEN.'))  # noqa: E501
 			return None
 
 	@classmethod
@@ -401,13 +403,11 @@ def get_version(version_cmd):
 	import re
 	regex = r'[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
-	return_code = ret.return_code
-	if not return_code == 0:
-		return '', ret.return_code
 	match = re.findall(regex, ret.output)
 	if not match:
-		return '', return_code
-	return match[0], return_code
+		console.print(Warning(message=f'Failed to find version in version command output. Command: {version_cmd}; Output: {ret.output}; Return code: {ret.return_code}'))
+		return None
+	return match[0]
 
 
 def parse_version(ver):
@@ -440,14 +440,21 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		'name': name,
 		'installed': False,
 		'version': version,
+		'version_cmd': None,
 		'latest_version': None,
 		'location': None,
-		'status': ''
+		'status': '',
+		'errors': []
 	}
 
 	# Get binary path
 	location = which(name).output
+	if not location or not Path(location).exists():
+		info['installed'] = False
+		info['status'] = 'missing'
+		return info
 	info['location'] = location
+	info['installed'] = True
 
 	# Get latest version
 	latest_version = None
@@ -476,34 +483,35 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 					if ver:
 						latest_version = str(ver)
 						info['latest_version'] = latest_version
+			else:
+				error = f'Failed to get latest version for {name}. Command: apt-cache madison {name}'
+				info['errors'].append(error)
+				console.print(Warning(message=error))
 
 	# Get current version
-	version_ret = 1
 	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag
 	if version_flag:
 		version_cmd = f'{name} {version_flag}'
-		version, version_ret = get_version(version_cmd)
+		info['version_cmd'] = version_cmd
+		version = get_version(version_cmd)
 		info['version'] = version
-		if version_ret != 0:  # version command error
-			info['installed'] = False
-			info['status'] = 'missing'
+		if not version:
+			info['errors'].append(f'Error fetching version for command. Version command: {version_cmd}')
+			info['status'] = 'version fetch error'
 			return info
 
-	if location:
-		info['installed'] = True
-		if version and latest_version:
-			if parse_version(version) < parse_version(latest_version):
-				info['status'] = 'outdated'
-			else:
-				info['status'] = 'latest'
-		elif not version:
-			info['status'] = 'current unknown'
-		elif not latest_version:
-			info['status'] = 'latest unknown'
-			if CONFIG.offline_mode:
-				info['status'] += r' [dim orange1]\[offline][/]'
-	else:
-		info['status'] = 'missing'
+	# Check if up-to-date
+	if version and latest_version:
+		if parse_version(version) < parse_version(latest_version):
+			info['status'] = 'outdated'
+		else:
+			info['status'] = 'latest'
+	elif not version:
+		info['status'] = 'current unknown'
+	elif not latest_version:
+		info['status'] = 'latest unknown'
+		if CONFIG.offline_mode:
+			info['status'] += r' [dim orange1]\[offline][/]'
 
 	return info
 
@@ -582,6 +590,8 @@ def fmt_health_table_row(version_info, category=None):
 		_version = '[bold red]missing[/]'
 	elif status == 'ok':
 		_version = '[bold green]ok        [/]'
+	elif status == 'version fetch error':
+		_version = '[bold orange1]unknown[/]    [dim](current unknown)[/]'
 	elif status:
 		if not version and installed:
 			_version = '[bold green]ok        [/]'

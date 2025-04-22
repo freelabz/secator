@@ -15,14 +15,14 @@ class gitleaks(Command):
 	cmd = 'gitleaks'
 	input_flag = None
 	json_flag = '-f json'
+	opt_prefix = '--'
 	opts = {
 		'ignore_path': {'type': str, 'help': 'Path to .gitleaksignore file or folder containing one'},
 		'mode': {'type': click.Choice(['git', 'dir']), 'default': 'dir', 'help': 'Gitleaks mode', 'internal': True, 'display': True},  # noqa: E501
 		'config': {'type': str, 'short': 'config', 'help': 'Gitleaks config file path'}
 	}
 	opt_key_map = {
-		"ignore_path": "i",
-		"config": "c"
+		"ignore_path": "gitleaks-ignore-path"
 	}
 	input_type = "folder"
 	output_types = [Tag]
@@ -45,7 +45,7 @@ class gitleaks(Command):
 	def on_cmd(self):
 		# replace fake -mode opt by subcommand
 		mode = self.get_opt_value('mode')
-		self.cmd = self.cmd.replace(gitleaks.cmd, f'{gitleaks.cmd} {mode}')
+		self.cmd = self.cmd.replace(f'{gitleaks.cmd} ', f'{gitleaks.cmd} {mode} ')
 
 		# add output path
 		output_path = self.get_opt_value(OUTPUT_PATH)
