@@ -37,13 +37,15 @@ ALL_TASKS = discover_tasks()
 ALL_WORKFLOWS = [t for t in TEMPLATES if t.type == 'workflow']
 ALL_SCANS = [t for t in TEMPLATES if t.type == 'scan']
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 
 #-----#
 # CLI #
 #-----#
 
-@click.group(cls=OrderedGroup, invoke_without_command=True)
+
+@click.group(cls=OrderedGroup, invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
 @click.option('--version', '-version', is_flag=True, default=False)
 @click.pass_context
 def cli(ctx, version):
