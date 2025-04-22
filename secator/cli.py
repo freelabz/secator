@@ -43,7 +43,9 @@ FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 # CLI #
 #-----#
 
-@click.group(cls=OrderedGroup, invoke_without_command=True)
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+
+@click.group(cls=OrderedGroup, invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
 @click.option('--version', '-version', is_flag=True, default=False)
 @click.pass_context
 def cli(ctx, version):
