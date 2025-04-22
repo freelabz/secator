@@ -1,0 +1,237 @@
+{
+  "containers": {
+    "adp": [
+      {
+        "providerMetadata": {
+          "dateUpdated": "2024-08-02T07:59:44.847Z",
+          "orgId": "af854a3a-2127-422b-91ae-364da2661108",
+          "shortName": "CVE"
+        },
+        "references": [
+          {
+            "tags": [
+              "vdb-entry",
+              "x_refsource_REDHAT",
+              "x_transferred"
+            ],
+            "url": "https://access.redhat.com/security/cve/CVE-2023-5568"
+          },
+          {
+            "name": "RHBZ#2245174",
+            "tags": [
+              "issue-tracking",
+              "x_refsource_REDHAT",
+              "x_transferred"
+            ],
+            "url": "https://bugzilla.redhat.com/show_bug.cgi?id=2245174"
+          },
+          {
+            "tags": [
+              "x_transferred"
+            ],
+            "url": "https://bugzilla.samba.org/show_bug.cgi?id=15491"
+          },
+          {
+            "tags": [
+              "x_transferred"
+            ],
+            "url": "https://security.netapp.com/advisory/ntap-20231124-0007/"
+          },
+          {
+            "tags": [
+              "x_transferred"
+            ],
+            "url": "https://www.samba.org/samba/history/samba-4.19.2.html"
+          }
+        ],
+        "title": "CVE Program Container"
+      },
+      {
+        "metrics": [
+          {
+            "other": {
+              "content": {
+                "id": "CVE-2023-5568",
+                "options": [
+                  {
+                    "Exploitation": "none"
+                  },
+                  {
+                    "Automatable": "no"
+                  },
+                  {
+                    "Technical Impact": "partial"
+                  }
+                ],
+                "role": "CISA Coordinator",
+                "timestamp": "2024-08-29T19:44:09.639707Z",
+                "version": "2.0.3"
+              },
+              "type": "ssvc"
+            }
+          }
+        ],
+        "providerMetadata": {
+          "dateUpdated": "2024-08-29T20:00:25.977Z",
+          "orgId": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+          "shortName": "CISA-ADP"
+        },
+        "title": "CISA ADP Vulnrichment"
+      }
+    ],
+    "cna": {
+      "affected": [
+        {
+          "collectionURL": "https://access.redhat.com/downloads/content/package-browser/",
+          "cpes": [
+            "cpe:/o:redhat:enterprise_linux:6"
+          ],
+          "defaultStatus": "unaffected",
+          "packageName": "samba",
+          "product": "Red Hat Enterprise Linux 6",
+          "vendor": "Red Hat"
+        },
+        {
+          "collectionURL": "https://access.redhat.com/downloads/content/package-browser/",
+          "cpes": [
+            "cpe:/o:redhat:enterprise_linux:7"
+          ],
+          "defaultStatus": "unaffected",
+          "packageName": "samba",
+          "product": "Red Hat Enterprise Linux 7",
+          "vendor": "Red Hat"
+        },
+        {
+          "collectionURL": "https://access.redhat.com/downloads/content/package-browser/",
+          "cpes": [
+            "cpe:/o:redhat:enterprise_linux:8"
+          ],
+          "defaultStatus": "unaffected",
+          "packageName": "samba",
+          "product": "Red Hat Enterprise Linux 8",
+          "vendor": "Red Hat"
+        },
+        {
+          "collectionURL": "https://access.redhat.com/downloads/content/package-browser/",
+          "cpes": [
+            "cpe:/o:redhat:enterprise_linux:9"
+          ],
+          "defaultStatus": "unaffected",
+          "packageName": "samba",
+          "product": "Red Hat Enterprise Linux 9",
+          "vendor": "Red Hat"
+        },
+        {
+          "collectionURL": "https://access.redhat.com/downloads/content/package-browser/",
+          "cpes": [
+            "cpe:/a:redhat:storage:3"
+          ],
+          "defaultStatus": "affected",
+          "packageName": "samba",
+          "product": "Red Hat Storage 3",
+          "vendor": "Red Hat"
+        }
+      ],
+      "datePublic": "2023-10-09T00:00:00.000Z",
+      "descriptions": [
+        {
+          "lang": "en",
+          "value": "A heap-based Buffer Overflow flaw was discovered in Samba. It could allow a remote, authenticated attacker to exploit this vulnerability to cause a denial of service."
+        }
+      ],
+      "metrics": [
+        {
+          "other": {
+            "content": {
+              "namespace": "https://access.redhat.com/security/updates/classification/",
+              "value": "Low"
+            },
+            "type": "Red Hat severity rating"
+          }
+        },
+        {
+          "cvssV3_1": {
+            "attackComplexity": "HIGH",
+            "attackVector": "NETWORK",
+            "availabilityImpact": "HIGH",
+            "baseScore": 5.9,
+            "baseSeverity": "MEDIUM",
+            "confidentialityImpact": "NONE",
+            "integrityImpact": "LOW",
+            "privilegesRequired": "LOW",
+            "scope": "UNCHANGED",
+            "userInteraction": "NONE",
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:N/I:L/A:H",
+            "version": "3.1"
+          },
+          "format": "CVSS"
+        }
+      ],
+      "problemTypes": [
+        {
+          "descriptions": [
+            {
+              "cweId": "CWE-122",
+              "description": "Heap-based Buffer Overflow",
+              "lang": "en",
+              "type": "CWE"
+            }
+          ]
+        }
+      ],
+      "providerMetadata": {
+        "dateUpdated": "2025-02-08T02:59:45.226Z",
+        "orgId": "53f830b8-0a3f-465b-8143-3b8a9948e749",
+        "shortName": "redhat"
+      },
+      "references": [
+        {
+          "tags": [
+            "vdb-entry",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://access.redhat.com/security/cve/CVE-2023-5568"
+        },
+        {
+          "name": "RHBZ#2245174",
+          "tags": [
+            "issue-tracking",
+            "x_refsource_REDHAT"
+          ],
+          "url": "https://bugzilla.redhat.com/show_bug.cgi?id=2245174"
+        },
+        {
+          "url": "https://bugzilla.samba.org/show_bug.cgi?id=15491"
+        },
+        {
+          "url": "https://www.samba.org/samba/history/samba-4.19.2.html"
+        }
+      ],
+      "timeline": [
+        {
+          "lang": "en",
+          "time": "2023-10-19T00:00:00+00:00",
+          "value": "Reported to Red Hat."
+        },
+        {
+          "lang": "en",
+          "time": "2023-10-09T00:00:00+00:00",
+          "value": "Made public."
+        }
+      ],
+      "title": "Samba: heap buffer overflow with freshness tokens in the heimdal kdc",
+      "x_redhatCweChain": "CWE-122: Heap-based Buffer Overflow"
+    }
+  },
+  "cveMetadata": {
+    "assignerOrgId": "53f830b8-0a3f-465b-8143-3b8a9948e749",
+    "assignerShortName": "redhat",
+    "cveId": "CVE-2023-5568",
+    "datePublished": "2023-10-24T21:56:41.633Z",
+    "dateReserved": "2023-10-13T07:06:17.684Z",
+    "dateUpdated": "2025-02-08T02:59:45.226Z",
+    "state": "PUBLISHED"
+  },
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.1"
+}

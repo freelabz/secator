@@ -30,7 +30,8 @@ class katana(HttpCrawler):
 		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': True, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
 		'known_files': {'type': str, 'short': 'kf', 'default': 'all', 'help': 'Enable crawling of known files (all, robotstxt, sitemapxml)'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
-		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'}
+		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'},
+		'no_sandbox': {'is_flag': True, 'short': 'ns', 'default': False, 'help': 'Disable sandboxing'},
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -74,7 +75,10 @@ class katana(HttpCrawler):
 			# TAGS: lambda x: x['response'].get('server')
 		}
 	}
-	install_cmd = 'sudo apt install build-essential && go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
+	install_pre = {
+		'apk': ['libc6-compat']
+	}
+	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
 	install_github_handle = 'projectdiscovery/katana'
 	proxychains = False
 	proxy_socks5 = True

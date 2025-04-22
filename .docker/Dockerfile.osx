@@ -1,0 +1,40 @@
+FROM sickcodes/docker-osx:latest
+
+ENV PATH="${PATH}:/home/arch/.local/bin"
+ENV GOBIN="/home/arch/.local/bin"
+RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+RUN echo >> /home/arch/.bashrc
+RUN echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /home/arch/.bashrc
+RUN sudo pacman -Syu --noconfirm && \
+    sudo pacman -S --noconfirm -y \
+	base-devel \
+	bash \
+	curl \
+	git \
+	go \
+    jq \
+    openssl \
+	proxychains \
+	proxychains-ng \
+	python \
+	python-pip \
+	python-pipx \
+	ruby \
+	rubygems \
+	sudo \
+	unzip \
+	vim \
+    wget
+COPY . /code
+WORKDIR /code
+USER arch
+RUN pipx install . && \
+	secator install addons worker && \
+	secator install addons gdrive && \
+	secator install addons gcs && \
+	secator install addons mongodb && \
+	secator install addons redis && \
+	secator install addons dev
+RUN secator config set security.force_source_install true
+RUN secator install tools --cleanup
+ENTRYPOINT ["secator"]

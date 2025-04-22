@@ -41,12 +41,12 @@ class Port(OutputType):
 	def __repr__(self) -> str:
 		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
 		if self.protocol != 'TCP':
-			s += f' \[[yellow3]{self.protocol}[/]]'
+			s += rf' \[[yellow3]{self.protocol}[/]]'
 		if self.service_name:
 			conf = ''
 			if self.confidence == 'low':
 				conf = '?'
-			s += f' \[[bold purple]{self.service_name}{conf}[/]]'
+			s += rf' \[[bold purple]{self.service_name}{conf}[/]]'
 		if self.host:
-			s += f' \[[cyan]{self.host}[/]]'
+			s += rf' \[[cyan]{self.host}[/]]'
 		return rich_to_ansi(s)

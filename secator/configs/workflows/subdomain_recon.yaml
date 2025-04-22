@@ -13,12 +13,12 @@ tasks:
   #   input: vhost
   #   domain_:
   #     - target.name
-  #   wordlist: /usr/share/seclists/Discovery/DNS/combined_subdomains.txt
+  #   wordlist: combined_subdomains
   # gobuster:
   #   input: dns
   #   domain_:
   #     - target.name
-  #   wordlist: /usr/share/seclists/Discovery/DNS/combined_subdomains.txt
+  #   wordlist: combined_subdomains
   _group:
     nuclei:
       description: Check for subdomain takeovers

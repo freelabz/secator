@@ -1,6 +1,7 @@
 import json
 import os
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
@@ -15,7 +16,7 @@ from secator.tasks._categories import VulnHttp
 @task()
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
-	cmd = 'wpscan --random-user-agent --force --verbose'
+	cmd = 'wpscan --random-user-agent --force --verbose --disable-tls-checks --ignore-main-redirect'
 	file_flag = None
 	input_flag = '--url'
 	input_type = URL
@@ -66,11 +67,21 @@ class wpscan(VulnHttp):
 		},
 	}
 	output_types = [Vulnerability, Tag]
-	install_cmd = 'sudo apt install -y build-essential ruby-dev rubygems && sudo gem install wpscan'
+	install_pre = {
+		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
+		'pacman': ['make', 'ruby-erb'],
+		'*': ['make']
+	}
+	install_cmd = f'gem install wpscan --user-install -n {CONFIG.dirs.bin}'
+	install_post = {
+		'kali': (
+			f'gem uninstall nokogiri --user-install -n {CONFIG.dirs.bin} --force --executables && '
+			f'gem install nokogiri --user-install -n {CONFIG.dirs.bin} --platform=ruby'
+		)
+	}
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	ignore_return_code = True
 	profile = 'io'
 
 	@staticmethod
@@ -130,6 +141,7 @@ class wpscan(VulnHttp):
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress theme - {slug} {number} outdated',
+						confidence='high',
 						severity='info'
 					)
 
@@ -159,5 +171,6 @@ class wpscan(VulnHttp):
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress plugin - {slug} {number} outdated',
+						confidence='high',
 						severity='info'
 					)

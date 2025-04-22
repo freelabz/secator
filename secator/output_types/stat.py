@@ -26,8 +26,8 @@ class Stat(OutputType):
 	_sort_by = ('name', 'pid')
 
 	def __repr__(self) -> str:
-		s = f'[dim yellow3]📊 {self.name} \[pid={self.pid}] \[cpu={self.cpu:.2f}%] \[memory={self.memory:.2f}%]'
+		s = rf'[dim yellow3]📊 {self.name} \[pid={self.pid}] \[cpu={self.cpu:.2f}%] \[memory={self.memory:.2f}%]'
 		if self.net_conns:
-			s += f' \[connections={self.net_conns}]'
+			s += rf' \[connections={self.net_conns}]'
 		s += ' [/]'
 		return rich_to_ansi(s)
