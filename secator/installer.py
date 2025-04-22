@@ -263,7 +263,7 @@ class GithubInstaller:
 		except requests.RequestException as e:
 			console.print(Warning(message=f'Failed to fetch latest release for {github_handle}: {str(e)}'))
 			if 'rate limit exceeded' in str(e):
-				console.print(Warning(message=f'Consider setting env variable SECATOR_CLI_GITHUB_TOKEN or use secator config set cli.github_token $TOKEN.'))  # noqa: E501
+				console.print(Warning(message='Consider setting env variable SECATOR_CLI_GITHUB_TOKEN or use secator config set cli.github_token $TOKEN.'))  # noqa: E501
 			return None
 
 	@classmethod
@@ -405,7 +405,7 @@ def get_version(version_cmd):
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
 	match = re.findall(regex, ret.output)
 	if not match:
-		console.print(Warning(message=f'Failed to find version in version command output. Command: {version_cmd}; Output: {ret.output}; Return code: {ret.return_code}'))
+		console.print(Warning(message=f'Failed to find version in version command output. Command: {version_cmd}; Output: {ret.output}; Return code: {ret.return_code}'))  # noqa: E501
 		return None
 	return match[0]
 
