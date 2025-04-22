@@ -47,7 +47,7 @@ class testssl(Command):
     proxy_socks5 = False
     profile = 'io'
     install_pre = {
-        'apk': ['hexdump'],
+        'apk|pacman': ['hexdump'],
         '*': ['bsdmainutils']
     }
     install_cmd = (
