@@ -66,7 +66,7 @@ class grype(VulnCode):
 		if vuln_id.startswith('GHSA'):
 			data['provider'] = 'github.com'
 			data['references'] = [f'https://github.com/advisories/{vuln_id}']
-			vuln = VulnCode.lookup_ghsa(vuln_id)
+			vuln = VulnCode.lookup_cve_from_ghsa(vuln_id)
 			if vuln:
 				data.update(vuln)
 				data['severity'] = data['severity'] or severity.lower()
