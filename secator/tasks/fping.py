@@ -29,6 +29,7 @@ class fping(ReconIp):
 	input_type = IP
 	output_types = [Ip]
 	install_pre = {'*': ['fping']}
+	ignore_return_code = True
 
 	@staticmethod
 	def item_loader(self, line):
