@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.1](https://github.com/freelabz/secator/compare/v0.11.0...v0.11.1) (2025-04-23)
+
+
+### Bug Fixes
+
+* fping ret code ([#593](https://github.com/freelabz/secator/issues/593)) ([f2d0982](https://github.com/freelabz/secator/commit/f2d0982ea665a08d24afd3f80c8f976811daa397))
+* ghsa lookups, startup file downloads ([#592](https://github.com/freelabz/secator/issues/592)) ([021bf11](https://github.com/freelabz/secator/commit/021bf11b6cd7d9ecb5dd95b45d6411d1feeeb86c))
+* wordlist dynamic download ([#595](https://github.com/freelabz/secator/issues/595)) ([9a859ae](https://github.com/freelabz/secator/commit/9a859ae8f391bb73263b356ef166f5685683c30f))
+
 ## [0.11.0](https://github.com/freelabz/secator/compare/v0.10.0...v0.11.0) (2025-04-22)
 
 
