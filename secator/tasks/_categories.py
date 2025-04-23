@@ -393,11 +393,11 @@ class Vuln(Command):
 
 	@cache
 	@staticmethod
-	def lookup_ghsa(ghsa_id):
+	def lookup_cve_from_ghsa(ghsa_id):
 		"""Search for a GHSA on Github and and return associated CVE vulnerability data.
 
 		Args:
-			ghsa (str): CVE ID in the form GHSA-*
+			ghsa (str): GHSA ID in the form GHSA-*
 
 		Returns:
 			dict: vulnerability data.
@@ -410,7 +410,10 @@ class Vuln(Command):
 			return None
 		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
-		cve_id = sidebar_items[2].find('div').text.strip()
+		cve_id = sidebar_items[3].find('div').text.strip()
+		if not cve_id.startswith('CVE'):
+			debug(f'{ghsa_id}: No CVE_ID extracted from https://github.com/advisories/{ghsa_id}', sub='cve')
+			return None
 		vuln = Vuln.lookup_cve(cve_id)
 		if vuln:
 			vuln[TAGS].append('ghsa')
