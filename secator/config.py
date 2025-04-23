@@ -623,8 +623,8 @@ for name, dir in CONFIG.dirs.items():
 		console.print('[bold green]ok.[/]')
 
 # Download wordlists and payloads
-download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
-download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
+# download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
+# download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
 
 # Print config
 if CONFIG.debug.component == 'config':
