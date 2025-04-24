@@ -141,7 +141,6 @@ def find_templates():
 		paths.extend(config_paths)
 	for path in paths:
 		config = TemplateLoader(input=path)
-		config._path = str(path)
 		debug(f'Loaded template from {path}', sub='template')
 		results.append(config)
 	return results
