@@ -372,7 +372,7 @@ class Command(Runner):
 
 			# Abort if dry run
 			if self.dry_run:
-				self._print(" ")
+				self._print('')
 				self.print_command()
 				return
 

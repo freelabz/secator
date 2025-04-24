@@ -19,11 +19,11 @@ RUNNER_OPTS = {
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
-	'show': {'is_flag': True, 'short': 'sh', 'default': False, 'help': 'Show command that will be run (tasks only)'},
 	'no_process': {'is_flag': True, 'short': 'nps', 'default': False, 'help': 'Disable secator processing'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
 	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.runners.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
 	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
+	'show': {'is_flag': True, 'short': 'yml', 'default': False, 'help': 'Show runner yaml'},
 }
 
 RUNNER_GLOBAL_OPTS = {
@@ -331,9 +331,15 @@ def register_runner(cli_endpoint, config):
 		worker = opts.pop('worker')
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
-		show = opts['show']
 		quiet = opts['quiet']
+		dry_run = opts['dry_run']
+		show = opts['show']
 		context = {'workspace_name': ws}
+
+		# Show runner yaml
+		if show:
+			config.print()
+			sys.exit(0)
 
 		# Remove options whose values are default values
 		for k, v in options.items():
@@ -375,7 +381,7 @@ def register_runner(cli_endpoint, config):
 		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
-		if sync or show:
+		if sync or dry_run:
 			sync = True
 		else:
 			from secator.celery import is_celery_worker_alive

@@ -1,4 +1,5 @@
 import glob
+import yaml
 
 from collections import OrderedDict
 from pathlib import Path
@@ -30,6 +31,7 @@ class TemplateLoader(DotMap):
 			config = input
 		elif isinstance(input, Path) or Path(input).exists():
 			config = self._load_from_path(input)
+			config['_path'] = str(input)
 		elif isinstance(input, str):
 			config = self._load(input)
 		super().__init__(config, **kwargs)
@@ -56,6 +58,17 @@ class TemplateLoader(DotMap):
 	def flat_tasks(self):
 		"""Property to access tasks easily."""
 		return self._extract_tasks()
+
+	def print(self):
+		"""Print config as highlighted yaml."""
+		config = self.toDict()
+		_path = config.pop('_path', None)
+		if _path:
+			console.print(f'[italic green]{_path}[/]\n')
+		yaml_str = yaml.dump(config, indent=4)
+		from rich.syntax import Syntax
+		yaml_highlight = Syntax(yaml_str, 'yaml', line_numbers=True)
+		console.print(yaml_highlight)
 
 	def _collect_supported_opts(self):
 		"""Collect supported options from the tasks extracted from the config."""
@@ -129,6 +142,7 @@ def find_templates():
 		paths.extend(config_paths)
 	for path in paths:
 		config = TemplateLoader(input=path)
+		config._path = str(path)
 		debug(f'Loaded template from {path}', sub='template')
 		results.append(config)
 	return results
