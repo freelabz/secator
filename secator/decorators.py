@@ -19,11 +19,11 @@ RUNNER_OPTS = {
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
-	'show': {'is_flag': True, 'short': 'sh', 'default': False, 'help': 'Show command that will be run (tasks only)'},
 	'no_process': {'is_flag': True, 'short': 'nps', 'default': False, 'help': 'Disable secator processing'},
 	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
-	'quiet': {'is_flag': True, 'short': 'q', 'default': False, 'help': 'Enable quiet mode'},
+	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.runners.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
 	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
+	'show': {'is_flag': True, 'short': 'yml', 'default': False, 'help': 'Show runner yaml'},
 }
 
 RUNNER_GLOBAL_OPTS = {
@@ -163,35 +163,39 @@ def get_command_options(config):
 			elif opt in RUNNER_GLOBAL_OPTS:
 				prefix = 'Execution'
 
+			# Get opt value from YAML config
+			opt_conf_value = task_config_opts.get(opt)
+
 			# Get opt conf
 			conf = opt_conf.copy()
+			opt_is_flag = conf.get('is_flag', False)
+			opt_default = conf.get('default', False if opt_is_flag else None)
+			opt_is_required = conf.get('required', False)
 			conf['show_default'] = True
 			conf['prefix'] = prefix
-			opt_default = conf.get('default', None)
-			opt_is_flag = conf.get('is_flag', False)
-			opt_value_in_config = task_config_opts.get(opt)
+			conf['default'] = opt_default
+			conf['reverse'] = False
 
-			# Check if opt already defined in config
-			if opt_value_in_config:
-				if conf.get('required', False):
+			# Change CLI opt defaults if opt was overriden in YAML config
+			if opt_conf_value:
+				if opt_is_required:
 					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)  # noqa: E501
 					continue
 				mapped_value = cls.opt_value_map.get(opt)
 				if callable(mapped_value):
-					opt_value_in_config = mapped_value(opt_value_in_config)
+					opt_conf_value = mapped_value(opt_conf_value)
 				elif mapped_value:
-					opt_value_in_config = mapped_value
-				if opt_value_in_config != opt_default:
+					opt_conf_value = mapped_value
+
+				# Handle option defaults
+				if opt_conf_value != opt_default:
 					if opt in opt_cache:
 						continue
 					if opt_is_flag:
-						conf['reverse'] = True
-						conf['default'] = not conf.get('default', False)
-					# print(f'{opt}: change default to {opt_value_in_config}')
-					conf['default'] = opt_value_in_config
+						conf['default'] = opt_default = opt_conf_value
 
-			# If opt is a flag but the default is True, add opposite flag
-			if opt_is_flag and opt_default is True:
+			# Add reverse flag
+			if opt_default is True:
 				conf['reverse'] = True
 
 			# Check if opt already processed before
@@ -205,7 +209,7 @@ def get_command_options(config):
 			all_opts[opt] = conf
 
 			# Debug
-			debug_conf = OrderedDict({'opt': opt, 'config_val': opt_value_in_config or 'N/A', **conf.copy()})
+			debug_conf = OrderedDict({'opt': opt, 'config_val': opt_conf_value or 'N/A', **conf.copy()})
 			debug('OPT', obj=debug_conf, sub=f'cli.{config.name}', verbose=True)
 
 	return all_opts
@@ -225,7 +229,10 @@ def decorate_command_options(opts):
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
 			short_opt = conf.pop('short', None)
-			conf.pop('internal', None)
+			internal = conf.pop('internal', False)
+			display = conf.pop('display', True)
+			if internal and not display:
+				continue
 			conf.pop('prefix', None)
 			conf.pop('shlex', None)
 			conf.pop('meta', None)
@@ -233,11 +240,17 @@ def decorate_command_options(opts):
 			conf.pop('process', None)
 			conf.pop('requires_sudo', None)
 			reverse = conf.pop('reverse', False)
+			opposite = conf.pop('opposite', None)
 			long = f'--{opt_name}'
 			short = f'-{short_opt}' if short_opt else f'-{opt_name}'
 			if reverse:
-				long += f'/--no-{opt_name}'
-				short += f'/-n{short_opt}' if short else f'/-n{opt_name}'
+				if opposite:
+					long += f'/--{opposite}'
+					short += f'/-{opposite[0]}'
+					conf['help'] = conf['help'].replace(opt_name, f'{opt_name} / {opposite}')
+				else:
+					long += f'/--no-{opt_name}'
+					short += f'/-n{short_opt}' if short else f'/-n{opt_name}'
 			f = click.option(long, short, **conf)(f)
 		return f
 	return decorator
@@ -318,8 +331,15 @@ def register_runner(cli_endpoint, config):
 		worker = opts.pop('worker')
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
+		quiet = opts['quiet']
+		dry_run = opts['dry_run']
 		show = opts['show']
 		context = {'workspace_name': ws}
+
+		# Show runner yaml
+		if show:
+			config.print()
+			sys.exit(0)
 
 		# Remove options whose values are default values
 		for k, v in options.items():
@@ -361,7 +381,7 @@ def register_runner(cli_endpoint, config):
 		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
-		if sync or show:
+		if sync or dry_run:
 			sync = True
 		else:
 			from secator.celery import is_celery_worker_alive
@@ -391,6 +411,7 @@ def register_runner(cli_endpoint, config):
 			'piped_output': ctx.obj['piped_output'],
 			'caller': 'cli',
 			'sync': sync,
+			'quiet': quiet
 		})
 
 		# Start runner

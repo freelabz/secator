@@ -373,11 +373,15 @@ def rich_to_ansi(text):
 	Returns:
 		str: Converted text (ANSI).
 	"""
-	from rich.console import Console
-	tmp_console = Console(file=None, highlight=False)
-	with tmp_console.capture() as capture:
-		tmp_console.print(text, end='', soft_wrap=True)
-	return capture.get()
+	try:
+		from rich.console import Console
+		tmp_console = Console(file=None, highlight=False)
+		with tmp_console.capture() as capture:
+			tmp_console.print(text, end='', soft_wrap=True)
+		return capture.get()
+	except Exception:
+		console.print(f'[bold red]Could not convert rich text to ansi: {text}[/]', highlight=False, markup=False)
+		return text
 
 
 def rich_escape(obj):
@@ -457,6 +461,10 @@ def escape_mongodb_url(url):
 		user, password = quote(user), quote(password)
 		return f'mongodb://{user}:{password}@{url}'
 	return url
+
+
+def caml_to_snake(s):
+	return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
 
 
 def print_version():
@@ -773,8 +781,9 @@ def process_wordlist(val):
 		val = default_wordlist
 	template_wordlist = getattr(CONFIG.wordlists.templates, val)
 	if template_wordlist:
-		return template_wordlist
-	elif Path(val).exists():
+		val = template_wordlist
+
+	if Path(val).exists():
 		return val
 	else:
 		return download_file(

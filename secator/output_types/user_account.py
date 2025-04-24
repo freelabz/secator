@@ -37,5 +37,5 @@ class UserAccount(OutputType):
 		if self.url:
 			s += rf' \[[white]{_s(self.url)}[/]]'
 		if self.extra_data:
-			s += r' \[[bold yellow]' + _s(', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + '[/]]')
+			s += r' \[[bold yellow]' + _s(', '.join(f'{k}:{v}' for k, v in self.extra_data.items())) + '[/]]'
 		return rich_to_ansi(s)

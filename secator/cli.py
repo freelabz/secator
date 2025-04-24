@@ -18,7 +18,7 @@ from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
+from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
@@ -37,13 +37,15 @@ ALL_TASKS = discover_tasks()
 ALL_WORKFLOWS = [t for t in TEMPLATES if t.type == 'workflow']
 ALL_SCANS = [t for t in TEMPLATES if t.type == 'scan']
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 
 #-----#
 # CLI #
 #-----#
 
-@click.group(cls=OrderedGroup, invoke_without_command=True)
+
+@click.group(cls=OrderedGroup, invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
 @click.option('--version', '-version', is_flag=True, default=False)
 @click.pass_context
 def cli(ctx, version):
@@ -117,7 +119,7 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
-@click.option('--quiet', is_flag=True, help='Quiet mode.')
+@click.option('--quiet', is_flag=True, default=False, help='Quiet mode.')
 @click.option('--loglevel', type=str, default='INFO', help='Log level.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
@@ -863,7 +865,7 @@ def health(json, debug, strict):
 		error = False
 		for tool, info in status['tools'].items():
 			if not info['installed']:
-				console.print(Error(message=f'{tool} not installed and strict mode is enabled.'))
+				console.print(Error(message=f'{tool} is not installed.'))
 				error = True
 		if error:
 			sys.exit(1)
@@ -1052,8 +1054,9 @@ def install_ruby():
 
 @install.command('tools')
 @click.argument('cmds', required=False)
-@click.option('--cleanup', is_flag=True, default=False)
-def install_tools(cmds, cleanup):
+@click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
+@click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
+def install_tools(cmds, cleanup, fail_fast):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
@@ -1074,6 +1077,8 @@ def install_tools(cmds, cleanup):
 		status = ToolInstaller.install(cls)
 		if not status.is_ok():
 			return_code = 1
+			if fail_fast:
+				sys.exit(return_code)
 		console.print()
 	if cleanup:
 		distro = get_distro_config()
@@ -1133,8 +1138,7 @@ def update(all):
 		return_code = 0
 		for cls in ALL_TASKS:
 			cmd = cls.cmd.split(' ')[0]
-			version_flag = cls.version_flag or f'{cls.opt_prefix}version'
-			version_flag = None if cls.version_flag == OPT_NOT_SUPPORTED else version_flag
+			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.install_github_handle)
 			if not info['installed'] or info['status'] == 'outdated' or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
@@ -1251,24 +1255,35 @@ def test():
 	pass
 
 
-def run_test(cmd, name):
+def run_test(cmd, name=None, exit=True, verbose=False):
 	"""Run a test and return the result.
 
 	Args:
-		cmd: Command to run.
-		name: Name of the test.
+		cmd (str): Command to run.
+		name (str, optional): Name of the test.
+		exit (bool, optional): Exit after running the test with the return code.
+		verbose (bool, optional): Print verbose output.
+
+	Returns:
+		Return code of the test.
 	"""
-	result = Command.execute(cmd, name=name + ' tests', cwd=ROOT_FOLDER)
-	if result.return_code == 0:
-		console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
-	sys.exit(result.return_code)
+	cmd_name = name + ' tests' if name else 'tests'
+	result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
+	if name:
+		if result.return_code == 0:
+			console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
+		else:
+			console.print(f':x: {name.capitalize()} tests failed !', style='bold red')
+	if exit:
+		sys.exit(result.return_code)
+	return result.return_code
 
 
 @test.command()
 def lint():
 	"""Run lint tests."""
 	cmd = f'{sys.executable} -m flake8 secator/'
-	run_test(cmd, 'lint')
+	run_test(cmd, 'lint', verbose=True)
 
 
 @test.command()
@@ -1286,13 +1301,21 @@ def unit(tasks, workflows, scans, test):
 	os.environ['SECATOR_HTTP_STORE_RESPONSES'] = '0'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
+	if not test:
+		if tasks:
+			test = 'test_tasks'
+		elif workflows:
+			test = 'test_workflows'
+		elif scans:
+			test = 'test_scans'
+
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/unit'
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'unit')
+	run_test(cmd, 'unit', verbose=True)
 
 
 @test.command()
@@ -1308,6 +1331,14 @@ def integration(tasks, workflows, scans, test):
 	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
 
+	if not test:
+		if tasks:
+			test = 'test_tasks'
+		elif workflows:
+			test = 'test_workflows'
+		elif scans:
+			test = 'test_scans'
+
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 
@@ -1315,7 +1346,7 @@ def integration(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'integration')
+	run_test(cmd, 'integration', verbose=True)
 
 
 @test.command()
@@ -1338,7 +1369,82 @@ def performance(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'performance')
+	run_test(cmd, 'performance', verbose=True)
+
+
+@test.command()
+@click.argument('name', type=str)
+@click.option('--verbose', '-v', is_flag=True, default=False, help='Print verbose output')
+def task(name, verbose):
+	"""Test task."""
+	task = [task for task in ALL_TASKS if task.__name__ == name]
+	warnings = []
+	exit_code = 0
+
+	# Check if task is correctly registered
+	check_error(task, 'Check task is registered', 'Task is not registered. Make sure there is no syntax errors in the task class definition.', warnings)  # noqa: E501
+	task = task[0]
+	task_name = task.__name__
+
+	# Run install
+	console.print(f'\n[bold gold3]:wrench: Running install tests for task {name} ...[/]') if verbose else None
+	cmd = f'secator install tools {task_name}'
+	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
+	version_info = task.get_version_info()
+	check_error(version_info['installed'], 'Check task is installed', 'Failed to install command. Fix your installation command.', warnings)  # noqa: E501
+	check_error(any(cmd for cmd in [task.install_cmd, task.install_github_handle]), 'Check task installation command is defined', 'Task has no installation command. Please define a `install_cmd` or `install_github_handle` class attribute.', warnings)  # noqa: E501
+	check_error(version_info['version'], 'Check task version can be fetched', 'Failed to detect version info. Fix your `version_flag` class attribute.', warnings)  # noqa: E501
+
+	# Run task-specific tests
+	console.print(f'\n[bold gold3]:wrench: Running task-specific tests for {name} ...[/]') if verbose else None
+	check_error(task.__doc__, 'Check task description is set (cls.__doc__)', 'Task has no description (class docstring).', warnings)  # noqa: E501
+	check_error(task.cmd, 'Check task command is set (cls.cmd)', 'Task has no cmd attribute.', warnings)
+	check_error(task.input_type, 'Check task input type is set (cls.input_type)', 'Task has no input_type attribute.', warnings)  # noqa: E501
+	check_error(task.output_types, 'Check task output types is set (cls.output_types)', 'Task has no output_types attribute.', warnings)  # noqa: E501
+
+	# Print all warnings
+	exit_code = 1 if len(warnings) > 0 else 0
+	if exit_code == 1:
+		console.print()
+		console.print("[bold red]Issues:[/]")
+		for warning in warnings:
+			console.print(warning)
+		console.print()
+		console.print(Info(message=f'Skipping unit and integration tests for {name} due to previous errors.'))
+		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above before making a PR.'))
+		sys.exit(exit_code)
+
+	# Run unit tests
+	console.print(f'\n[bold gold3]:wrench: Running unit tests for {name} ...[/]') if verbose else None
+	cmd = f'secator test unit --tasks {name}'
+	ret_code = run_test(cmd, exit=False, verbose=verbose)
+	check_error(ret_code == 0, 'Check unit tests pass', 'Unit tests failed.', warnings)
+
+	# Run integration tests
+	console.print(f'\n[bold gold3]:wrench: Running integration tests for {name} ...[/]') if verbose else None
+	cmd = f'secator test integration --tasks {name}'
+	ret_code = run_test(cmd, exit=False, verbose=verbose)
+	check_error(ret_code == 0, 'Check integration tests pass', 'Integration tests failed.', warnings)
+
+	# Exit with exit code
+	exit_code = 1 if len(warnings) > 0 else 0
+	if exit_code == 0:
+		console.print(f':tada: Task {name} tests passed ! You are free to make a PR.', style='bold green')
+	else:
+		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above before making a PR.'))
+
+	sys.exit(exit_code)
+
+
+def check_error(condition, message, error, warnings=[]):
+	console.print(f'[bold magenta]:zap: {message} ...[/]', end='')
+	if not condition:
+		warning = Warning(message=error)
+		warnings.append(warning)
+		console.print(' [bold red]FAILED[/]', style='dim')
+	else:
+		console.print(' [bold green]OK[/]', style='dim')
+	return True
 
 
 @test.command()

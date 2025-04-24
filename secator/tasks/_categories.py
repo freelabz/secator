@@ -18,9 +18,14 @@ from secator.config import CONFIG
 from secator.runners import Command
 from secator.utils import debug, process_wordlist
 
+USER_AGENTS = {
+	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+	'chrome_134.0_macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+}
+
 
 OPTS = {
-	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
+	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"', 'default': 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']},  # noqa: E501
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
 	DEPTH: {'type': int, 'help': 'Scan depth'},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
@@ -388,11 +393,11 @@ class Vuln(Command):
 
 	@cache
 	@staticmethod
-	def lookup_ghsa(ghsa_id):
+	def lookup_cve_from_ghsa(ghsa_id):
 		"""Search for a GHSA on Github and and return associated CVE vulnerability data.
 
 		Args:
-			ghsa (str): CVE ID in the form GHSA-*
+			ghsa (str): GHSA ID in the form GHSA-*
 
 		Returns:
 			dict: vulnerability data.
@@ -405,7 +410,10 @@ class Vuln(Command):
 			return None
 		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
-		cve_id = sidebar_items[2].find('div').text.strip()
+		cve_id = sidebar_items[3].find('div').text.strip()
+		if not cve_id.startswith('CVE'):
+			debug(f'{ghsa_id}: No CVE_ID extracted from https://github.com/advisories/{ghsa_id}', sub='cve')
+			return None
 		vuln = Vuln.lookup_cve(cve_id)
 		if vuln:
 			vuln[TAGS].append('ghsa')

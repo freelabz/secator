@@ -26,6 +26,7 @@ from secator.output_types.url import Url
 from secator.output_types.user_account import UserAccount
 from secator.output_types.vulnerability import Vulnerability
 from secator.output_types.record import Record
+from secator.output_types.certificate import Certificate
 from secator.output_types.info import Info
 from secator.output_types.warning import Warning
 from secator.output_types.error import Error
@@ -39,6 +40,6 @@ STAT_TYPES = [
 	Stat
 ]
 FINDING_TYPES = [
-	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability
+	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate
 ]
 OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES

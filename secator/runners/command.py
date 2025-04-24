@@ -71,6 +71,7 @@ class Command(Runner):
 
 	# Flag to take a file as input
 	file_flag = None
+	file_eof_newline = False
 
 	# Flag to enable output JSON
 	json_flag = None
@@ -236,6 +237,22 @@ class Command(Runner):
 			opt_prefix=self.config.name)
 
 	@classmethod
+	def get_version_flag(cls):
+		if cls.version_flag == OPT_NOT_SUPPORTED:
+			return None
+		return cls.version_flag or f'{cls.opt_prefix}version'
+
+	@classmethod
+	def get_version_info(cls):
+		from secator.installer import get_version_info
+		return get_version_info(
+			cls.__name__,
+			cls.get_version_flag(),
+			cls.install_github_handle,
+			cls.install_cmd
+		)
+
+	@classmethod
 	def get_supported_opts(cls):
 		def convert(d):
 			for k, v in d.items():
@@ -355,6 +372,7 @@ class Command(Runner):
 
 			# Abort if dry run
 			if self.dry_run:
+				self._print('')
 				self.print_command()
 				return
 
@@ -847,6 +865,9 @@ class Command(Runner):
 		if opts:
 			for opt_conf in opts.values():
 				conf = opt_conf['conf']
+				internal = conf.get('internal', False)
+				if internal:
+					continue
 				if conf.get('requires_sudo', False):
 					self.requires_sudo = True
 				opts_str += ' ' + Command._build_opt_str(opt_conf)
@@ -897,6 +918,8 @@ class Command(Runner):
 			# Write the input to a file
 			with open(fpath, 'w') as f:
 				f.write('\n'.join(inputs))
+				if self.file_eof_newline:
+					f.write('\n')
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'

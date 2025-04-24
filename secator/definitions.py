@@ -103,6 +103,9 @@ TAGS = 'tags'
 WEBSERVER = 'webserver'
 WORDLIST = 'wordlist'
 WORDS = 'words'
+CERTIFICATE_STATUS_UNKNOWN = 'Unknown'
+CERTIFICATE_STATUS_TRUSTED = 'Trusted'
+CERTIFICATE_STATUS_REVOKED = 'Revoked'
 
 
 def is_importable(module_to_import):
