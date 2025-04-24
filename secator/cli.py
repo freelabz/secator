@@ -860,13 +860,21 @@ def health(json, debug, strict):
 		import json as _json
 		print(_json.dumps(status))
 
+	# Print errors and warnings
+	error = False
+	for tool, info in status['tools'].items():
+		if not info['installed']:
+			console.print(Warning(message=f'{tool} is not installed.'))
+			error = True
+		elif info['status'] == 'outdated':
+			message = (
+				f'{tool} is outdated (current:{info["version"]}, latest:{info["latest_version"]}).'
+				f' Run `secator install tools {tool}` to update it.'
+			)
+			console.print(Warning(message=message))
+
 	# Strict mode
 	if strict:
-		error = False
-		for tool, info in status['tools'].items():
-			if not info['installed']:
-				console.print(Error(message=f'{tool} is not installed.'))
-				error = True
 		if error:
 			sys.exit(1)
 		console.print(Info(message='Strict healthcheck passed !'))

@@ -55,7 +55,7 @@ class dalfox(VulnHttp):
 			SEVERITY: lambda x: x['severity'].lower()
 		}
 	}
-	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@v2.9.3'
+	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
 	install_github_handle = 'hahwul/dalfox'
 	encoding = 'ansi'
 	proxychains = False
