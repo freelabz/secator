@@ -119,7 +119,7 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
-@click.option('--quiet', is_flag=True, help='Quiet mode.')
+@click.option('--quiet', is_flag=True, default=CONFIG.runners.hide_command_output, help='Quiet mode.')
 @click.option('--loglevel', type=str, default='INFO', help='Log level.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
