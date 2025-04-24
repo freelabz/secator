@@ -14,8 +14,12 @@ tasks:
     description: Search for vulnerabilities on open ports
     version_detection: True
     script: vulners
-    targets_: port.host
-    ports_: port.port
+    targets_:
+    - port.host
+    - target.name
+    ports_:
+    - port.port
+    ports: "-"  # default if no port found by naabu
   _group/1:
     httpx:
       description: Probe HTTP services on open ports
