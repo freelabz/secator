@@ -11,6 +11,8 @@ tasks:
   ffuf:
     description: Fuzz URL params
     wordlist: https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt
+    auto_calibration: true
+    follow_redirect: true
     targets_:
       - type: url
         field: url
