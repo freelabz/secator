@@ -1,5 +1,4 @@
 import glob
-import yaml
 
 from collections import OrderedDict
 from pathlib import Path
