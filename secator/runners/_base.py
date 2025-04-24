@@ -130,8 +130,8 @@ class Runner:
 
 		# Determine inputs
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
-		[self.add_result(Target(name=target)) for target in self.inputs]
-		self.filter_results(results)
+		targets = [Target(name=target) for target in self.inputs]
+		self.filter_results(results + targets)
 
 		# Debug
 		self.debug('Inputs', obj=self.inputs, sub='init')

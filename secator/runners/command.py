@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Info, Warning, Error, Stat
+from secator.output_types import Info, Warning, Error, Target, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s
@@ -383,6 +383,10 @@ class Command(Runner):
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
 				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
 				return
+
+			# Yield targets
+			for input in self.inputs:
+				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
 			# Check for sudo requirements and prepare the password if needed
 			sudo_password, error = self._prompt_sudo(self.cmd)
