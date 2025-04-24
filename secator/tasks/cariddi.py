@@ -23,7 +23,7 @@ class cariddi(HttpCrawler):
 		'info': {'is_flag': True, 'short': 'info', 'help': 'Hunt for useful informations in websites.'},
 		'secrets': {'is_flag': True, 'short': 'secrets', 'help': 'Hunt for secrets.'},
 		'errors': {'is_flag': True, 'short': 'err', 'help': 'Hunt for errors in websites.'},
-		'juicy_extensions': {'type': int, 'short': 'jext', 'help': 'Hunt for juicy file extensions. Integer from 1(juicy) to 7(not juicy)'},
+		'juicy_extensions': {'type': int, 'short': 'jext', 'help': 'Hunt for juicy file extensions. Integer from 1(juicy) to 7(not juicy)'},  # noqa: E501
 		'juicy_endpoints': {'is_flag': True, 'short': 'jep', 'help': 'Hunt for juicy endpoints.'}
 	}
 	opt_key_map = {

@@ -25,7 +25,7 @@ class nuclei(VulnMulti):
 		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
 		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
 		'headless_bulk_size': {'type': int, 'short': 'hbs', 'help': 'Maximum number of headless hosts to be analzyed in parallel per template'},  # noqa: E501
-		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},
+		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
 		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
 		'stats': {'is_flag': True, 'short': 'stats', 'default': True, 'help': 'Display statistics about the running scan'},
