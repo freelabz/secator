@@ -416,8 +416,6 @@ def register_runner(cli_endpoint, config):
 
 		# Start runner
 		runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
-		# print(runner.get_tasks(config.tasks, inputs, {}, opts))
-		# print(runner.celery_ids_map)
 		runner.run()
 
 	generate_cli_subcommand(cli_endpoint, func, **command_opts)
