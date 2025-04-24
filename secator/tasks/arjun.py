@@ -2,7 +2,8 @@ import os
 import yaml
 
 from secator.decorators import task
-from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST, HEADER, URL)
+from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
+								 HEADER, URL, FOLLOW_REDIRECT)
 from secator.output_types import Info, Url, Warning, Error
 from secator.runners import Command
 from secator.tasks._categories import OPTS
@@ -31,6 +32,7 @@ class arjun(Command):
 		RATE_LIMIT: OPTS[RATE_LIMIT],
 		METHOD: OPTS[METHOD],
 		HEADER: OPTS[HEADER],
+		FOLLOW_REDIRECT: OPTS[FOLLOW_REDIRECT],
 	}
 	opt_key_map = {
 		THREADS: 't',
@@ -44,6 +46,7 @@ class arjun(Command):
 		'stable': '--stable',
 		'passive': '--passive',
 		'casing': '--casing',
+		'follow_redirect': '--follow-redirect',
 	}
 	output_types = [Url]
 	install_cmd = 'pipx install arjun && pipx upgrade arjun'
@@ -57,6 +60,11 @@ class arjun(Command):
 
 	@staticmethod
 	def on_cmd(self):
+		follow_redirect = self.get_opt_value(FOLLOW_REDIRECT)
+		self.cmd = self.cmd.replace(' --follow-redirect', '')
+		if not follow_redirect:
+			self.cmd += ' --disable-redirects'
+
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
