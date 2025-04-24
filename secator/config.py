@@ -94,6 +94,7 @@ class Runners(StrictModel):
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
 	show_chunk_progress: bool = False
+	show_command_output: bool = False
 
 
 class Security(StrictModel):
