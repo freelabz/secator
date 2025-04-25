@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0](https://github.com/freelabz/secator/compare/v0.11.1...v0.12.0) (2025-04-24)
+
+
+### Features
+
+* add --show option to display yaml ([#601](https://github.com/freelabz/secator/issues/601)) ([8edffe9](https://github.com/freelabz/secator/commit/8edffe9f879bb7a99a7e5fead1a18dbf6da5d140))
+* **arjun:** add --disable-redirects opts ([#598](https://github.com/freelabz/secator/issues/598)) ([17618c7](https://github.com/freelabz/secator/commit/17618c7ca647536207a96ce2c235ec5227db2cef))
+* **workflows:** improve url params fuzz workflow ([#597](https://github.com/freelabz/secator/issues/597)) ([38fa1bc](https://github.com/freelabz/secator/commit/38fa1bcd76c9c6dbe0bc85c9c8c707ae642b9830))
+
+
+### Bug Fixes
+
+* better options overrides for CLI ([#596](https://github.com/freelabz/secator/issues/596)) ([74e256b](https://github.com/freelabz/secator/commit/74e256b434d36f1e16390f8d06571e726517f5ce))
+* worker quiet option ([#602](https://github.com/freelabz/secator/issues/602)) ([9b2c084](https://github.com/freelabz/secator/commit/9b2c08458e3412a89ec39547a728a26885fe1162))
+
 ## [0.11.1](https://github.com/freelabz/secator/compare/v0.11.0...v0.11.1) (2025-04-23)
 
 
