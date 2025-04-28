@@ -23,24 +23,21 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-      - name: Detect changed or all tasks
-        id: tasks
-        run: |
-          if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
-            CHANGED_TASKS=$(secator x --list)
-            echo "Running all tasks"
-          else
-            CHANGED_TASKS=$(git diff --name-only --diff-filter=AMR ${{ github.event.before }} ${{ github.sha }} | grep '^secator/tasks/.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
-            echo "Changed tasks: $CHANGED_TASKS"
-          fi
-          echo "tasks=$CHANGED_TASKS" >> $GITHUB_ENV
+    - name: Detect changed or all tasks
+      run: |
+        if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
+          TASKS=$(secator x --list)
+          echo "Running all tasks"
+        else
+          TASKS=$(git diff --name-only --diff-filter=AMR ${{ github.event.before }} ${{ github.sha }} | grep '^secator/tasks/.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
+          echo "Changed tasks: $TASKS"
+        fi
+        echo "TASKS=$TASKS" >> $GITHUB_ENV
 
-      - name: Test tasks
-        run: |
-          for task in ${GITHUB_ENV#*=}; do
-            echo "Testing task: $task"
-            secator test task -c $task
-          done
-        env:
-          TASKS: ${{ env.tasks }}
-        shell: bash
+    - name: Test tasks
+      run: |
+        echo "$TASKS"
+        for task in $TASKS; do
+          echo "Testing task: $task"
+          secator test task $task
+        done
