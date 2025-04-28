@@ -100,6 +100,7 @@ def workflow(ctx, list=False):
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
+
 for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 	register_runner(workflow, config)
 
@@ -1457,7 +1458,7 @@ def task(name, verbose, check):
 	check_test(
 		status != 'latest unknown',
 		'Check latest version',
-		f'Failed to detect latest version.',
+		'Failed to detect latest version.',
 		warnings,
 		warn=True
 	)
