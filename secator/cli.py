@@ -1543,7 +1543,7 @@ def task(name, verbose, check):
 		for warning in warnings:
 			console.print(warning)
 
-	console.print("")
+	console.print("\n")
 	sys.exit(exit_code)
 
 
