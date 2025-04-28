@@ -45,7 +45,7 @@ jobs:
 
         FAILED=0
         for task in $TASKS; do
-          if ! secator test task -c -v $task; then
+          if ! secator test task -c $task; then
             FAILED=1
           fi
           echo ""
