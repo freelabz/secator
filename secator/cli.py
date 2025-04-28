@@ -1524,12 +1524,12 @@ def task(name, verbose, check):
 	# Exit with exit code
 	exit_code = 1 if len(errors) > 0 else 0
 	if exit_code == 0:
-		console.print(f':tada: Task {name} tests passed ! You are free to make a PR.', style='bold green')
+		console.print(f':tada: Task {name} tests passed !', style='bold green')
 	else:
 		console.print('\n[bold gold3]Errors:[/]')
 		for error in errors:
 			console.print(error)
-		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above before making a PR.'))
+		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above.'))
 
 	if warnings:
 		console.print('\n[bold gold3]Warnings:[/]')
