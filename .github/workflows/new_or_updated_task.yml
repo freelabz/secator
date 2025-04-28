@@ -11,12 +11,19 @@ on:
     paths:
       - 'secator/tasks/*.py'
 
-matrix:
-  os: [ubuntu-latest, macos-latest]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-tasks:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu:24.04", "ubuntu:22.04", "debian", "archlinux", "fedora", "kalilinux/kali-rolling", "parrotsec/security"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
