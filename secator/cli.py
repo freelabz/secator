@@ -1493,7 +1493,8 @@ def task(name, verbose, check):
 		task.install_version,
 		'Check task install_version is set (cls.install_version)',
 		'Task has no install_version attribute.',
-		errors
+		warnings,
+		warn=True
 	)
 
 	if not check:
