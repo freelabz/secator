@@ -39,5 +39,5 @@ jobs:
         echo "$TASKS"
         for task in $TASKS; do
           echo "Testing task: $task"
-          secator test task $task
+          secator test task -c $task
         done
