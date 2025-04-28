@@ -20,7 +20,7 @@ class dirsearch(HttpFuzzer):
 	cmd = 'dirsearch'
 	input_flag = '-u'
 	file_flag = '-l'
-	json_flag = '--format json'
+	json_flag = '-O json'
 	opt_prefix = '--'
 	encoding = 'ansi'
 	opt_key_map = {
