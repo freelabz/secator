@@ -1499,7 +1499,6 @@ def task(name, verbose, check):
 	if not check:
 
 		# Run unit tests
-		console.print(f'\n[bold gold3]:wrench: Running unit tests for {name} ...[/]') if verbose else None
 		cmd = f'secator test unit --tasks {name}'
 		ret_code = run_test(cmd, exit=False, verbose=verbose)
 		check_test(
@@ -1510,7 +1509,6 @@ def task(name, verbose, check):
 		)
 
 		# Run integration tests
-		console.print(f'\n[bold gold3]:wrench: Running integration tests for {name} ...[/]') if verbose else None
 		cmd = f'secator test integration --tasks {name}'
 		ret_code = run_test(cmd, exit=False, verbose=verbose)
 		check_test(
