@@ -37,7 +37,7 @@ ALL_TASKS = discover_tasks()
 ALL_WORKFLOWS = [t for t in TEMPLATES if t.type == 'workflow']
 ALL_SCANS = [t for t in TEMPLATES if t.type == 'scan']
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
-CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '-help','--help'])
 
 
 #-----#
@@ -46,8 +46,8 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 
 @click.group(cls=OrderedGroup, invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
-@click.option('--version', '-v', is_flag=True, default=False)
-@click.option('--quiet', '-q', is_flag=True, default=False)
+@click.option('--version', '-version', '-v', is_flag=True, default=False)
+@click.option('--quiet', '-quiet', '-q', is_flag=True, default=False)
 @click.pass_context
 def cli(ctx, version, quiet):
 	"""Secator CLI."""
@@ -1445,8 +1445,9 @@ def task(name, verbose, check):
 	check_test(
 		version_info['version'],
 		'Check task version can be fetched',
-		'Failed to detect current version. Fix your `version_flag` class attribute.',
-		errors
+		'Failed to detect current version. Consider updating your `version_flag` class attribute.',
+		warnings,
+		warn=True
 	)
 	check_test(
 		status != 'latest unknown',
@@ -1486,8 +1487,9 @@ def task(name, verbose, check):
 	check_test(
 		task.output_types,
 		'Check task output types is set (cls.output_types)',
-		'Task has no output_types attribute.',
-		errors
+		'Task has no output_types attribute. Consider setting some so that secator can load your task outputs.',
+		warnings,
+		warn=True
 	)
 	check_test(
 		task.install_version,
