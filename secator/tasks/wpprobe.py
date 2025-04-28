@@ -27,7 +27,8 @@ class wpprobe(Command):
         THREADS: 't'
     }
     output_types = [Vulnerability, Tag]
-    install_cmd = 'go install github.com/Chocapikk/wpprobe@latest'
+    install_version = 'v0.5.6'
+    install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
     install_github_handle = 'Chocapikk/wpprobe'
     install_post = {
         '*': 'wpprobe update && wpprobe update-db'

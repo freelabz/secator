@@ -31,11 +31,11 @@ class trivy(Vuln):
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	output_types = [Tag, Vulnerability]
+	install_version = 'v0.61.1'
 	install_cmd = (
 		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'
-		f'sudo sh -s -- -b {CONFIG.dirs.bin} v0.61.1'
+		f'sudo sh -s -- -b {CONFIG.dirs.bin} [install_version]'
 	)
-	install_github_handle = 'aquasecurity/trivy'
 	install_github_handle = 'aquasecurity/trivy'
 
 	@staticmethod

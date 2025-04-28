@@ -48,14 +48,15 @@ class msfconsole(VulnMulti):
 		'pacman': ['ruby-erb', 'postgresql-libs', 'make'],
 		'yum|zypper': ['postgresql-devel', 'make'],
 	}
+	install_version = '6.4.59'
 	install_cmd = (
-		f'git clone --depth 1 --single-branch https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework || true && '  # noqa: E501
-		f'cd {CONFIG.dirs.share}/metasploit-framework && '
+		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework_[install_version] || true && '  # noqa: E501
+		f'cd {CONFIG.dirs.share}/metasploit-framework_[install_version] && '
 		f'gem install bundler --user-install -n {CONFIG.dirs.bin} && '
 		f'bundle config set --local path "{CONFIG.dirs.share}" && '
 		'bundle lock --normalize-platforms &&'
 		'bundle install && '
-		f'ln -sf $HOME/.local/share/metasploit-framework/msfconsole {CONFIG.dirs.bin}/msfconsole'
+		f'ln -sf $HOME/.local/share/metasploit-framework_[install_version]/msfconsole {CONFIG.dirs.bin}/msfconsole'
 	)
 
 	@staticmethod

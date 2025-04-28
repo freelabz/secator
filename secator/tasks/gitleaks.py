@@ -35,10 +35,11 @@ class gitleaks(Command):
 		}
 	}
 	install_pre = {'*': ['git', 'make']}
+	install_version = 'v8.24.3'
 	install_cmd = (
-		f'git clone https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks || true &&'
-		f'cd {CONFIG.dirs.share}/gitleaks && make build &&'
-		f'mv {CONFIG.dirs.share}/gitleaks/gitleaks {CONFIG.dirs.bin}'
+		f'git clone https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks_[install_version] || true &&'
+		f'cd {CONFIG.dirs.share}/gitleaks_[install_version] && make build &&'
+		f'mv {CONFIG.dirs.share}/gitleaks_[install_version]/gitleaks {CONFIG.dirs.bin}'
 	)
 	install_github_handle = 'gitleaks/gitleaks'
 

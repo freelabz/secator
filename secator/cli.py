@@ -46,15 +46,16 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 
 @click.group(cls=OrderedGroup, invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
-@click.option('--version', '-version', is_flag=True, default=False)
+@click.option('--version', '-v', is_flag=True, default=False)
+@click.option('--quiet', '-q', is_flag=True, default=False)
 @click.pass_context
-def cli(ctx, version):
+def cli(ctx, version, quiet):
 	"""Secator CLI."""
 	ctx.obj = {
 		'piped_input': S_ISFIFO(os.fstat(0).st_mode),
 		'piped_output': not sys.stdout.isatty()
 	}
-	if not ctx.obj['piped_output']:
+	if not ctx.obj['piped_output'] and not quiet:
 		console.print(ASCII, highlight=False)
 	if ctx.invoked_subcommand is None:
 		if version:
@@ -67,11 +68,14 @@ def cli(ctx, version):
 # TASK #
 #------#
 
-@cli.group(aliases=['x', 't'])
+@cli.group(aliases=['x', 't'], invoke_without_command=True)
+@click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def task(ctx):
+def task(ctx, list):
 	"""Run a task."""
-	pass
+	if list:
+		print("\n".join(sorted([t.__name__ for t in ALL_TASKS])))
+		return
 
 
 for cls in ALL_TASKS:
@@ -83,11 +87,14 @@ for cls in ALL_TASKS:
 #----------#
 
 
-@cli.group(cls=OrderedGroup, aliases=['w'])
+@cli.group(cls=OrderedGroup, aliases=['w'], invoke_without_command=True)
+@click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def workflow(ctx):
+def workflow(ctx, list):
 	"""Run a workflow."""
-	pass
+	if list:
+		print("\n".join(sorted([t.name for t in ALL_WORKFLOWS])))
+		return
 
 
 for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
@@ -98,11 +105,14 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 # SCAN #
 #------#
 
-@cli.group(cls=OrderedGroup, aliases=['s'])
+@cli.group(cls=OrderedGroup, aliases=['s'], invoke_without_command=True)
+@click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def scan(ctx):
+def scan(ctx, list):
 	"""Run a scan."""
-	pass
+	if list:
+		print("\n".join(sorted([t.name for t in ALL_SCANS])))
+		return
 
 
 for config in sorted(ALL_SCANS, key=lambda x: x['name']):
@@ -866,7 +876,7 @@ def health(json, debug, strict):
 		if not info['installed']:
 			console.print(Warning(message=f'{tool} is not installed.'))
 			error = True
-		elif info['status'] == 'outdated':
+		elif info['outdated']:
 			message = (
 				f'{tool} is outdated (current:{info["version"]}, latest:{info["latest_version"]}).'
 				f' Run `secator install tools {tool}` to update it.'
@@ -1069,16 +1079,27 @@ def install_tools(cmds, cleanup, fail_fast):
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
+	tools = []
 	if cmds is not None:
 		cmds = cmds.split(',')
-		tools = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
+		for cmd in cmds:
+			if '==' in cmd:
+				cmd, version = tuple(cmd.split('=='))
+			else:
+				cmd, version = cmd, None
+			cls = next((cls for cls in ALL_TASKS if cls.__name__ == cmd), None)
+			if cls:
+				if version:
+					cls.install_version = version
+				tools.append(cls)
+			else:
+				console.print(Warning(message=f'Tool {cmd} is not supported or inexistent.'))
 	else:
 		tools = ALL_TASKS
 	tools.sort(key=lambda x: x.__name__)
 	return_code = 0
 	if not tools:
-		cmd_str = ' '.join(cmds)
-		console.print(Error(message=f'No tools found for {cmd_str}.'))
+		console.print(Error(message='No tools found for installing.'))
 		return
 	for ix, cls in enumerate(tools):
 		# with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
@@ -1148,7 +1169,7 @@ def update(all):
 			cmd = cls.cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.install_github_handle)
-			if not info['installed'] or info['status'] == 'outdated' or not info['latest_version']:
+			if not info['installed'] or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
 				status = ToolInstaller.install(cls)
 				if not status.is_ok():
@@ -1383,14 +1404,22 @@ def performance(tasks, workflows, scans, test):
 @test.command()
 @click.argument('name', type=str)
 @click.option('--verbose', '-v', is_flag=True, default=False, help='Print verbose output')
-def task(name, verbose):
-	"""Test task."""
+@click.option('--check', '-c', is_flag=True, default=False, help='Check task semantics only (no unit + integration tests)')  # noqa: E501
+def task(name, verbose, check):
+	"""Test a single task for semantics errors, and run unit + integration tests."""
+	console.print(f'[bold gold3]:wrench: Testing task {name} ...[/]')
 	task = [task for task in ALL_TASKS if task.__name__ == name]
 	warnings = []
+	errors = []
 	exit_code = 0
 
 	# Check if task is correctly registered
-	check_error(task, 'Check task is registered', 'Task is not registered. Make sure there is no syntax errors in the task class definition.', warnings)  # noqa: E501
+	check_test(
+		task,
+		'Check task is registered',
+		'Task is not registered. Make sure there is no syntax errors in the task class definition.',
+		errors
+	)
 	task = task[0]
 	task_name = task.__name__
 
@@ -1399,57 +1428,130 @@ def task(name, verbose):
 	cmd = f'secator install tools {task_name}'
 	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
 	version_info = task.get_version_info()
-	check_error(version_info['installed'], 'Check task is installed', 'Failed to install command. Fix your installation command.', warnings)  # noqa: E501
-	check_error(any(cmd for cmd in [task.install_cmd, task.install_github_handle]), 'Check task installation command is defined', 'Task has no installation command. Please define a `install_cmd` or `install_github_handle` class attribute.', warnings)  # noqa: E501
-	check_error(version_info['version'], 'Check task version can be fetched', 'Failed to detect version info. Fix your `version_flag` class attribute.', warnings)  # noqa: E501
+	if verbose:
+		console.print(f'Version info:\n{version_info}')
+	status = version_info['status']
+	check_test(
+		version_info['installed'],
+		'Check task is installed',
+		'Failed to install command. Fix your installation command.',
+		errors
+	)
+	check_test(
+		any(cmd for cmd in [task.install_cmd, task.install_github_handle]),
+		'Check task installation command is defined',
+		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `install_github_handle`.',  # noqa: E501
+		errors
+	)
+	check_test(
+		version_info['version'],
+		'Check task version can be fetched',
+		'Failed to detect current version. Fix your `version_flag` class attribute.',
+		errors
+	)
+	check_test(
+		status != 'latest unknown',
+		'Check latest version',
+		'Failed to detect latest version.',
+		warnings,
+		warn=True
+	)
+	check_test(
+		not version_info['outdated'],
+		'Check task version is up to date',
+		f'Task is not up to date (current version: {version_info["version"]}, latest: {version_info["latest_version"]}). Consider updating your `install_version` class attribute.',  # noqa: E501
+		warnings,
+		warn=True
+	)
 
 	# Run task-specific tests
 	console.print(f'\n[bold gold3]:wrench: Running task-specific tests for {name} ...[/]') if verbose else None
-	check_error(task.__doc__, 'Check task description is set (cls.__doc__)', 'Task has no description (class docstring).', warnings)  # noqa: E501
-	check_error(task.cmd, 'Check task command is set (cls.cmd)', 'Task has no cmd attribute.', warnings)
-	check_error(task.input_type, 'Check task input type is set (cls.input_type)', 'Task has no input_type attribute.', warnings)  # noqa: E501
-	check_error(task.output_types, 'Check task output types is set (cls.output_types)', 'Task has no output_types attribute.', warnings)  # noqa: E501
+	check_test(
+		task.__doc__,
+		'Check task description is set (cls.__doc__)',
+		'Task has no description (class docstring).',
+		errors
+	)
+	check_test(
+		task.cmd,
+		'Check task command is set (cls.cmd)',
+		'Task has no cmd attribute.',
+		errors
+	)
+	check_test(
+		task.input_type,
+		'Check task input type is set (cls.input_type)',
+		'Task has no input_type attribute.',
+		warnings,
+		warn=True
+	)
+	check_test(
+		task.output_types,
+		'Check task output types is set (cls.output_types)',
+		'Task has no output_types attribute.',
+		errors
+	)
+	check_test(
+		task.install_version,
+		'Check task install_version is set (cls.install_version)',
+		'Task has no install_version attribute.',
+		errors
+	)
 
-	# Print all warnings
-	exit_code = 1 if len(warnings) > 0 else 0
-	if exit_code == 1:
-		console.print()
-		console.print("[bold red]Issues:[/]")
-		for warning in warnings:
-			console.print(warning)
-		console.print()
-		console.print(Info(message=f'Skipping unit and integration tests for {name} due to previous errors.'))
-		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above before making a PR.'))
-		sys.exit(exit_code)
+	if not check:
 
-	# Run unit tests
-	console.print(f'\n[bold gold3]:wrench: Running unit tests for {name} ...[/]') if verbose else None
-	cmd = f'secator test unit --tasks {name}'
-	ret_code = run_test(cmd, exit=False, verbose=verbose)
-	check_error(ret_code == 0, 'Check unit tests pass', 'Unit tests failed.', warnings)
+		# Run unit tests
+		console.print(f'\n[bold gold3]:wrench: Running unit tests for {name} ...[/]') if verbose else None
+		cmd = f'secator test unit --tasks {name}'
+		ret_code = run_test(cmd, exit=False, verbose=verbose)
+		check_test(
+			ret_code == 0,
+			'Check unit tests pass',
+			'Unit tests failed.',
+			errors
+		)
 
-	# Run integration tests
-	console.print(f'\n[bold gold3]:wrench: Running integration tests for {name} ...[/]') if verbose else None
-	cmd = f'secator test integration --tasks {name}'
-	ret_code = run_test(cmd, exit=False, verbose=verbose)
-	check_error(ret_code == 0, 'Check integration tests pass', 'Integration tests failed.', warnings)
+		# Run integration tests
+		console.print(f'\n[bold gold3]:wrench: Running integration tests for {name} ...[/]') if verbose else None
+		cmd = f'secator test integration --tasks {name}'
+		ret_code = run_test(cmd, exit=False, verbose=verbose)
+		check_test(
+			ret_code == 0,
+			'Check integration tests pass',
+			'Integration tests failed.',
+			errors
+		)
 
 	# Exit with exit code
-	exit_code = 1 if len(warnings) > 0 else 0
+	exit_code = 1 if len(errors) > 0 else 0
 	if exit_code == 0:
 		console.print(f':tada: Task {name} tests passed ! You are free to make a PR.', style='bold green')
 	else:
+		console.print('\n[bold gold3]Errors:[/]')
+		for error in errors:
+			console.print(error)
 		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above before making a PR.'))
 
+	if warnings:
+		console.print('\n[bold gold3]Warnings:[/]')
+		for warning in warnings:
+			console.print(warning)
+
+	console.print("")
 	sys.exit(exit_code)
 
 
-def check_error(condition, message, error, warnings=[]):
+def check_test(condition, message, fail_message, results=[], warn=False):
 	console.print(f'[bold magenta]:zap: {message} ...[/]', end='')
 	if not condition:
-		warning = Warning(message=error)
-		warnings.append(warning)
-		console.print(' [bold red]FAILED[/]', style='dim')
+		if not warn:
+			error = Error(message=fail_message)
+			console.print(' [bold red]FAILED[/]', style='dim')
+			results.append(error)
+		else:
+			warning = Warning(message=fail_message)
+			console.print(' [bold yellow]WARNING[/]', style='dim')
+			results.append(warning)
 	else:
 		console.print(' [bold green]OK[/]', style='dim')
 	return True

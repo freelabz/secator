@@ -48,13 +48,14 @@ class testssl(Command):
     proxy_socks5 = False
     profile = 'io'
     install_pre = {
-        'apk': ['hexdump'],
+        'apk': ['hexdump', 'coreutils', 'procps'],
         'pacman': ['util-linux'],
         '*': ['bsdmainutils']
     }
+    install_version = 'v3.2.0'
     install_cmd = (
-        f'git clone --depth 1 https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh || true && '
-        f'ln -sf {CONFIG.dirs.share}/testssl.sh/testssl.sh {CONFIG.dirs.bin}'
+        f'git clone --depth 1 --single-branch -b [install_version] https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh_[install_version] || true && '  # noqa: E501
+        f'ln -sf {CONFIG.dirs.share}/testssl.sh_[install_version]/testssl.sh {CONFIG.dirs.bin}'
     )
 
     @staticmethod

@@ -81,7 +81,8 @@ class nuclei(VulnMulti):
 	install_pre = {
 		'*': ['git']
 	}
-	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest'
+	install_version = 'v3.4.2'
+	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@[install_version]'
 	install_github_handle = 'projectdiscovery/nuclei'
 	install_post = {
 		'*': 'nuclei -ut'

@@ -58,9 +58,16 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 		# Remove unit tests options
 		del opts['nmap.output_path']
-		del opts['maigret.output_path']
 		del opts['dirsearch.output_path']
+		del opts['gitleaks_output_path']
+		del opts['maigret.output_path']
 		del opts['wpscan.output_path']
+		del opts['h8mail.output_path']
+		del opts['wpprobe.output_path']
+		del opts['arjun.output_path']
+		del opts['trivy.output_path']
+		del opts['wafw00f.output_path']
+		del opts['testssl.output_path']
 		del opts['timeout']
 
 		for cls in TEST_TASKS:

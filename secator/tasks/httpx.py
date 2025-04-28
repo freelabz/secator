@@ -68,7 +68,8 @@ class httpx(Http):
 	install_pre = {
 		'apk': ['chromium']
 	}
-	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
+	install_version = 'v1.7.0'
+	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@[install_version]'
 	install_github_handle = 'projectdiscovery/httpx'
 	proxychains = False
 	proxy_socks5 = True

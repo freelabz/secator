@@ -84,6 +84,7 @@ class Command(Runner):
 	install_post = None
 	install_cmd = None
 	install_github_handle = None
+	install_version = None
 
 	# Serializer
 	item_loader = None

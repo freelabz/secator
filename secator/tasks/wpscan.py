@@ -74,7 +74,8 @@ class wpscan(VulnHttp):
 		'pacman': ['make', 'ruby-erb'],
 		'*': ['make']
 	}
-	install_cmd = f'gem install wpscan --user-install -n {CONFIG.dirs.bin}'
+	install_version = '3.8.28'
+	install_cmd = f'gem install wpscan -v [install_version] --user-install -n {CONFIG.dirs.bin}'
 	install_post = {
 		'kali': (
 			f'gem uninstall nokogiri --user-install -n {CONFIG.dirs.bin} --force --executables && '
