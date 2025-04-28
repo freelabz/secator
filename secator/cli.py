@@ -71,11 +71,13 @@ def cli(ctx, version, quiet):
 @cli.group(aliases=['x', 't'], invoke_without_command=True)
 @click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def task(ctx, list):
+def task(ctx, list=False):
 	"""Run a task."""
 	if list:
 		print("\n".join(sorted([t.__name__ for t in ALL_TASKS])))
 		return
+	if ctx.invoked_subcommand is None:
+		ctx.get_help()
 
 
 for cls in ALL_TASKS:
@@ -90,12 +92,13 @@ for cls in ALL_TASKS:
 @cli.group(cls=OrderedGroup, aliases=['w'], invoke_without_command=True)
 @click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def workflow(ctx, list):
+def workflow(ctx, list=False):
 	"""Run a workflow."""
 	if list:
 		print("\n".join(sorted([t.name for t in ALL_WORKFLOWS])))
 		return
-
+	if ctx.invoked_subcommand is None:
+		ctx.get_help()
 
 for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 	register_runner(workflow, config)
@@ -108,11 +111,13 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 @cli.group(cls=OrderedGroup, aliases=['s'], invoke_without_command=True)
 @click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def scan(ctx, list):
+def scan(ctx, list=False):
 	"""Run a scan."""
 	if list:
 		print("\n".join(sorted([t.name for t in ALL_SCANS])))
 		return
+	if ctx.invoked_subcommand is None:
+		ctx.get_help()
 
 
 for config in sorted(ALL_SCANS, key=lambda x: x['name']):
@@ -1452,7 +1457,7 @@ def task(name, verbose, check):
 	check_test(
 		status != 'latest unknown',
 		'Check latest version',
-		'Failed to detect latest version.',
+		f'Failed to detect latest version.',
 		warnings,
 		warn=True
 	)
