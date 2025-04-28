@@ -1492,7 +1492,7 @@ def task(name, verbose, check):
 	check_test(
 		task.install_version,
 		'Check task install_version is set (cls.install_version)',
-		'Task has no install_version attribute.',
+		'Task has no install_version attribute. Consider setting it to pin the tool version and ensure it does not break in the future.',  # noqa: E501
 		warnings,
 		warn=True
 	)
