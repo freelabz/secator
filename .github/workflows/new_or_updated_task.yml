@@ -31,7 +31,7 @@ jobs:
           TASKS=$(secator x --list)
           echo "Running all tasks"
         else
-          TASKS=$(git diff --name-only --diff-filter=AMR origin/main HEAD | grep '^secator/tasks/.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
+          TASKS=$(git diff --name-only --diff-filter=AMR origin/main HEAD | grep '^secator/tasks/.*\.py$' | grep -v '_.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
           echo "Changed tasks: $TASKS"
         fi
 
