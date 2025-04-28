@@ -1,4 +1,4 @@
-name: Test Secator Tasks
+name: Tasks
 
 on:
   push:
