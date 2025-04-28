@@ -11,9 +11,12 @@ on:
     paths:
       - 'secator/tasks/*.py'
 
+matrix:
+  os: [ubuntu-latest, macos-latest]
+
 jobs:
   test-tasks:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
