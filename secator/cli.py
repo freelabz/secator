@@ -1420,17 +1420,10 @@ def task(name, verbose, check):
 	exit_code = 0
 
 	# Check if task is correctly registered
-	check_test(
-		task,
-		'Check task is registered',
-		'Task is not registered. Make sure there is no syntax errors in the task class definition.',
-		errors
-	)
 	task = task[0]
 	task_name = task.__name__
 
 	# Run install
-	console.print(f'\n[bold gold3]:wrench: Running install tests for task {name} ...[/]') if verbose else None
 	cmd = f'secator install tools {task_name}'
 	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
 	version_info = task.get_version_info()
@@ -1471,7 +1464,6 @@ def task(name, verbose, check):
 	)
 
 	# Run task-specific tests
-	console.print(f'\n[bold gold3]:wrench: Running task-specific tests for {name} ...[/]') if verbose else None
 	check_test(
 		task.__doc__,
 		'Check task description is set (cls.__doc__)',
