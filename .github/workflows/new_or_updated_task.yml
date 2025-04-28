@@ -34,12 +34,7 @@ jobs:
           TASKS=$(git diff --name-only --diff-filter=AMR origin/main HEAD | grep '^secator/tasks/.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
           echo "Changed tasks: $TASKS"
         fi
-        echo "TASKS=$(echo -n "$TASKS" | base64)" >> $GITHUB_ENV
 
-    - name: Test tasks
-      run: |
-        TASKS=$(echo -n "$TASKS" | base64 --decode)
-        echo "$TASKS"
         FAILED=0
         for task in $TASKS; do
           if ! secator test task -c $task; then
