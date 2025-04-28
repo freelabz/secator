@@ -37,7 +37,12 @@ jobs:
     - name: Test tasks
       run: |
         echo "$TASKS"
+        FAILED=0
         for task in $TASKS; do
-          echo "Testing task: $task"
-          secator test task -c $task
+          if ! secator test task -c $task; then
+            FAILED=1
+          fi
         done
+        if [ $FAILED -eq 1 ]; then
+          exit 1
+        fi
