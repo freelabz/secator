@@ -17,13 +17,11 @@ concurrency:
 
 jobs:
   test-tasks:
-    runs-on: ubuntu-latest
-    container:
-      image: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu:24.04", "ubuntu:22.04", "debian", "archlinux", "fedora", "kalilinux/kali-rolling", "parrotsec/security"]
+        os: ["ubuntu-latest", "macos-latest"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
