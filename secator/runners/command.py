@@ -84,6 +84,7 @@ class Command(Runner):
 	install_post = None
 	install_cmd = None
 	install_github_handle = None
+	install_version = None
 
 	# Serializer
 	item_loader = None
@@ -246,7 +247,7 @@ class Command(Runner):
 	def get_version_info(cls):
 		from secator.installer import get_version_info
 		return get_version_info(
-			cls.__name__,
+			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
 			cls.install_github_handle,
 			cls.install_cmd

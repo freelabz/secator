@@ -44,7 +44,8 @@ class gau(HttpCrawler):
 	install_pre = {
 		'apk': ['libc6-compat']
 	}
-	install_cmd = 'go install -v github.com/lc/gau/v2/cmd/gau@latest'
+	install_version = 'v2.2.4'
+	install_cmd = 'go install -v github.com/lc/gau/v2/cmd/gau@[install_version]'
 	install_github_handle = 'lc/gau'
 	proxychains = False
 	proxy_socks5 = True

@@ -18,14 +18,25 @@ def run_extractors(results, opts, inputs=[], dry_run=False):
 	"""
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
 	errors = []
+	computed_inputs = []
+	computed_opts = {}
 	for key, val in extractors.items():
 		key = key.rstrip('_')
 		values, err = extract_from_results(results, val)
 		errors.extend(err)
 		if key == 'targets':
-			inputs = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			targets = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			computed_inputs.extend(targets)
 		else:
-			opts[key] = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			computed_opt = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			if computed_opt:
+				computed_opts[key] = computed_opt
+				opts[key] = computed_opts[key]
+	if computed_inputs:
+		debug('computed_inputs', obj=computed_inputs, sub='extractors')
+		inputs = computed_inputs
+	if computed_opts:
+		debug('computed_opts', obj=computed_opts, sub='extractors')
 	return inputs, opts, errors
 
 

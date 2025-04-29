@@ -31,8 +31,10 @@ class InstallerStatus(Enum):
 	INSTALL_FAILED = 'INSTALL_FAILED'
 	INSTALL_NOT_SUPPORTED = 'INSTALL_NOT_SUPPORTED'
 	INSTALL_SKIPPED_OK = 'INSTALL_SKIPPED_OK'
+	INSTALL_VERSION_NOT_SPECIFIED = 'INSTALL_VERSION_NOT_SPECIFIED'
 	GITHUB_LATEST_RELEASE_NOT_FOUND = 'GITHUB_LATEST_RELEASE_NOT_FOUND'
 	GITHUB_RELEASE_NOT_FOUND = 'RELEASE_NOT_FOUND'
+	GITHUB_RELEASE_UNMATCHED_DISTRIBUTION = 'RELEASE_UNMATCHED_DISTRIBUTION'
 	GITHUB_RELEASE_FAILED_DOWNLOAD = 'GITHUB_RELEASE_FAILED_DOWNLOAD'
 	GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE = 'GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE'
 	UNKNOWN_DISTRIBUTION = 'UNKNOWN_DISTRIBUTION'
@@ -83,12 +85,12 @@ class ToolInstaller:
 		# Install binaries from GH
 		gh_status = InstallerStatus.UNKNOWN
 		if tool_cls.install_github_handle and not CONFIG.security.force_source_install:
-			gh_status = GithubInstaller.install(tool_cls.install_github_handle)
+			gh_status = GithubInstaller.install(tool_cls.install_github_handle, version=tool_cls.install_version or 'latest')
 			status = gh_status
 
 		# Install from source
 		if tool_cls.install_cmd and not gh_status.is_ok():
-			status = SourceInstaller.install(tool_cls.install_cmd)
+			status = SourceInstaller.install(tool_cls.install_cmd, tool_cls.install_version)
 			if not status.is_ok():
 				cls.print_status(status, name)
 				return status
@@ -167,12 +169,14 @@ class SourceInstaller:
 	"""Install a tool from source."""
 
 	@classmethod
-	def install(cls, config, install_prereqs=True):
+	def install(cls, config, version=None, install_prereqs=True):
 		"""Install from source.
 
 		Args:
 			cls: ToolInstaller class.
 			config (dict): A dict of distros as keys and a command as value.
+			version (str, optional): Version to install.
+			install_prereqs (bool, optional): Install pre-requisites.
 
 		Returns:
 			Status: install status.
@@ -204,6 +208,11 @@ class SourceInstaller:
 				if not status.is_ok():
 					return status
 
+		# Handle version
+		if '[install_version]' in install_cmd:
+			version = version or 'latest'
+			install_cmd = install_cmd.replace('[install_version]', version)
+
 		# Run command
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
 		return InstallerStatus.SUCCESS if ret.return_code == 0 else InstallerStatus.INSTALL_FAILED
@@ -213,7 +222,7 @@ class GithubInstaller:
 	"""Install a tool from GitHub releases."""
 
 	@classmethod
-	def install(cls, github_handle):
+	def install(cls, github_handle, version='latest'):
 		"""Find and install a release from a GitHub handle {user}/{repo}.
 
 		Args:
@@ -223,35 +232,38 @@ class GithubInstaller:
 			InstallerStatus: status.
 		"""
 		_, repo = tuple(github_handle.split('/'))
-		latest_release = cls.get_latest_release(github_handle)
-		if not latest_release:
-			return InstallerStatus.GITHUB_LATEST_RELEASE_NOT_FOUND
+		release = cls.get_release(github_handle, version=version)
+		if not release:
+			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
 
 		# Find the right asset to download
 		system, arch, os_identifiers, arch_identifiers = cls._get_platform_identifier()
-		download_url = cls._find_matching_asset(latest_release['assets'], os_identifiers, arch_identifiers)
+		download_url = cls._find_matching_asset(release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
 			console.print(Error(message=f'Could not find a GitHub release matching distribution (system: {system}, arch: {arch}).'))  # noqa: E501
-			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
+			return InstallerStatus.GITHUB_RELEASE_UNMATCHED_DISTRIBUTION
 
 		# Download and unpack asset
 		console.print(Info(message=f'Found release URL: {download_url}'))
 		return cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
 
 	@classmethod
-	def get_latest_release(cls, github_handle):
-		"""Get latest release from GitHub.
+	def get_release(cls, github_handle, version='latest'):
+		"""Get release from GitHub.
 
 		Args:
 			github_handle (str): A GitHub handle {user}/{repo}.
 
 		Returns:
-			dict: Latest release JSON from GitHub releases.
+			dict: Release JSON from GitHub releases.
 		"""
 		if not github_handle:
 			return False
 		owner, repo = tuple(github_handle.split('/'))
-		url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+		if version == 'latest':
+			url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+		else:
+			url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{version}"
 		headers = {}
 		if CONFIG.cli.github_token:
 			headers['Authorization'] = f'Bearer {CONFIG.cli.github_token}'
@@ -268,7 +280,7 @@ class GithubInstaller:
 
 	@classmethod
 	def get_latest_version(cls, github_handle):
-		latest_release = cls.get_latest_release(github_handle)
+		latest_release = cls.get_release(github_handle, version='latest')
 		if not latest_release:
 			return None
 		return latest_release['tag_name'].lstrip('v')
@@ -444,6 +456,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		'latest_version': None,
 		'location': None,
 		'status': '',
+		'outdated': False,
 		'errors': []
 	}
 
@@ -504,6 +517,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 	if version and latest_version:
 		if parse_version(version) < parse_version(latest_version):
 			info['status'] = 'outdated'
+			info['outdated'] = True
 		else:
 			info['status'] = 'latest'
 	elif not version:

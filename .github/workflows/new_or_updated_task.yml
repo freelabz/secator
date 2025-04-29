@@ -1,0 +1,56 @@
+name: Tasks
+
+on:
+  push:
+    paths:
+      - 'secator/tasks/*.py'
+    branches:
+      - release-please*
+  pull_request:
+    types: [labeled, synchronize]
+    paths:
+      - 'secator/tasks/*.py'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-tasks:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # os: ["ubuntu-latest", "macos-latest"]
+        os: ["ubuntu-latest"]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Detect changed or all tasks
+      run: |
+        if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
+          TASKS=$(secator x --list)
+          echo "Running all tasks"
+        else
+          TASKS=$(git diff --name-only --diff-filter=AMR origin/main HEAD | grep '^secator/tasks/.*\.py$' | grep -v '_.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
+          echo "Changed tasks: $TASKS"
+        fi
+
+        FAILED=0
+        for task in $TASKS; do
+          if ! secator test task -c $task; then
+            FAILED=1
+          fi
+          echo ""
+        done
+        if [ $FAILED -eq 1 ]; then
+          exit 1
+        fi

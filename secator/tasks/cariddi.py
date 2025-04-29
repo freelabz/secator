@@ -13,12 +13,19 @@ from secator.tasks._categories import HttpCrawler
 @task()
 class cariddi(HttpCrawler):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
-	cmd = 'cariddi -info -s -err -e -ext 1'
+	cmd = 'cariddi'
 	input_type = URL
 	input_flag = OPT_PIPE_INPUT
 	output_types = [Url, Tag]
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '-json'
+	opts = {
+		'info': {'is_flag': True, 'short': 'info', 'help': 'Hunt for useful informations in websites.'},
+		'secrets': {'is_flag': True, 'short': 'secrets', 'help': 'Hunt for secrets.'},
+		'errors': {'is_flag': True, 'short': 'err', 'help': 'Hunt for errors in websites.'},
+		'juicy_extensions': {'type': int, 'short': 'jext', 'help': 'Hunt for juicy file extensions. Integer from 1(juicy) to 7(not juicy)'},  # noqa: E501
+		'juicy_endpoints': {'is_flag': True, 'short': 'jep', 'help': 'Hunt for juicy endpoints.'}
+	}
 	opt_key_map = {
 		HEADER: 'headers',
 		DELAY: 'd',
@@ -38,10 +45,15 @@ class cariddi(HttpCrawler):
 		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: 'c',
 		TIMEOUT: 't',
-		USER_AGENT: 'ua'
+		USER_AGENT: 'ua',
+		'secrets': 's',
+		'errors': 'err',
+		'juicy_endpoints': 'e',
+		'juicy_extensions': 'ext'
 	}
 	item_loaders = [JSONSerializer()]
-	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@latest'
+	install_version = 'v1.3.6'
+	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@[install_version]'
 	install_github_handle = 'edoardottt/cariddi'
 	encoding = 'ansi'
 	proxychains = False
