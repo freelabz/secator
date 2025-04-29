@@ -121,6 +121,29 @@ BBOT_PRESETS = [
 	'web-screenshots',
 	'web-thorough'
 ]
+BBOT_FLAGS = [
+	'active',
+	'affiliates',
+	'aggressive',
+	'baddns',
+	'cloud-enum,'
+	'code-enum,deadly',
+	'email-enum',
+	'iis-shortnames',
+	'passive',
+	'portscan',
+	'report',
+	'safe',
+	'service-enum',
+	'slow',
+	'social-enum',
+	'subdomain-enum',
+	'subdomain-hijack',
+	'web-basic',
+	'web-paramminer',
+	'web-screenshots',
+	'web-thorough'
+]
 BBOT_MODULES_STR = ' '.join(BBOT_MODULES)
 BBOT_MAP_TYPES = {
 	'IP_ADDRESS': Ip,
@@ -159,12 +182,14 @@ class bbot(Command):
 	file_flag = None
 	version_flag = '--help'
 	opts = {
-		'modules': {'type': str, 'short': 'm', 'default': '', 'help': ','.join(BBOT_MODULES)},
-		'presets': {'type': str, 'short': 'ps', 'default': 'kitchen-sink', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
+		'modules': {'type': str, 'short': 'm', 'help': ','.join(BBOT_MODULES)},
+		'presets': {'type': str, 'short': 'ps', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
+		'flags': {'type': str, 'short': 'fl', 'help': ','.join(BBOT_FLAGS)}
 	}
 	opt_key_map = {
 		'modules': 'm',
-		'presets': 'p'
+		'presets': 'p',
+		'flags': 'f'
 	}
 	opt_value_map = {
 		'presets': lambda x: ' '.join(x.split(','))
@@ -222,7 +247,8 @@ class bbot(Command):
 		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
 		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
 	}
-	install_cmd = 'pipx install bbot && pipx upgrade bbot'
+	install_version = '2.4.2'
+	install_cmd = 'pipx install bbot==[install_version] --force'
 	install_post = {
 		'*': f'rm -fr {CONFIG.dirs.share}/pipx/venvs/bbot/lib/python3.12/site-packages/ansible_collections/*'
 	}

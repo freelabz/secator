@@ -49,7 +49,8 @@ class arjun(Command):
 		'follow_redirect': '--follow-redirect',
 	}
 	output_types = [Url]
-	install_cmd = 'pipx install arjun && pipx upgrade arjun'
+	install_version = '2.2.7'
+	install_cmd = 'pipx install arjun==[install_version] --force'
 	install_github_handle = 's0md3v/Arjun'
 
 	@staticmethod

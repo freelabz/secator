@@ -37,7 +37,8 @@ class wafw00f(Command):
 		'no_follow_redirects': 'noredirect',
 	}
 	output_types = [Tag]
-	install_cmd = 'pipx install git+https://github.com/EnableSecurity/wafw00f.git && pipx upgrade wafw00f'
+	install_version = 'v2.3.1'
+	install_cmd = 'pipx install git+https://github.com/EnableSecurity/wafw00f.git@[install_version] --force'
 	install_github_handle = 'EnableSecurity/wafw00f'
 	proxy_http = True
 

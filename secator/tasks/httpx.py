@@ -33,7 +33,7 @@ class httpx(Http):
 		'system_chrome': {'is_flag': True, 'default': False, 'help': 'Use local installed Chrome for screenshot'},
 		'headless_options': {'is_flag': False, 'short': 'ho', 'default': None, 'help': 'Headless Chrome additional options'},
 		'follow_host_redirects': {'is_flag': True, 'short': 'fhr', 'default': None, 'help': 'Follow redirects on the same host'},  # noqa: E501
-		'tech_detect': {'is_flag': True, 'short': 'td', 'default': True, 'help': 'Tech detection'},
+		'tech_detect': {'is_flag': True, 'short': 'td', 'default': False, 'help': 'Tech detection'},
 		'tls_grab': {'is_flag': True, 'short': 'tlsg', 'default': False, 'help': 'Grab some informations from the tls certificate'},  # noqa: E501
 		'rstr': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},
 		'rsts': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to save (bytes)'}
@@ -68,7 +68,8 @@ class httpx(Http):
 	install_pre = {
 		'apk': ['chromium']
 	}
-	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest'
+	install_version = 'v1.7.0'
+	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@[install_version]'
 	install_github_handle = 'projectdiscovery/httpx'
 	proxychains = False
 	proxy_socks5 = True

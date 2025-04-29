@@ -52,7 +52,7 @@ class dirsearch(HttpFuzzer):
 			STATUS_CODE: 'status'
 		}
 	}
-	install_cmd = 'pipx install --force git+https://github.com/maurosoria/dirsearch'
+	install_cmd = 'pipx install git+https://github.com/maurosoria/dirsearch.git --force'
 	proxychains = True
 	proxy_socks5 = True
 	proxy_http = True
