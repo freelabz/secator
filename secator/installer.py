@@ -559,9 +559,6 @@ def get_distro_config():
 		else:
 			installer = "scoop"  # Alternative package manager for Windows
 
-	if installer is None:
-		return None
-
 	manager = installer.split(' ')[0]
 	config = Distribution(
 		pm_installer=installer,
