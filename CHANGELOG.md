@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/freelabz/secator/compare/v0.12.0...v0.13.0) (2025-04-29)
+
+
+### Features
+
+* **core:** restore default task opts, improve workflows ([#560](https://github.com/freelabz/secator/issues/560)) ([4849d44](https://github.com/freelabz/secator/commit/4849d44448f52529380a6d9163a1b4db54114958))
+
+
+### Bug Fixes
+
+* use distro.like() instead of distro.id() ([#604](https://github.com/freelabz/secator/issues/604)) ([15157d4](https://github.com/freelabz/secator/commit/15157d433a0c60292ed91bb26f513a10f15924c2))
+
 ## [0.12.0](https://github.com/freelabz/secator/compare/v0.11.1...v0.12.0) (2025-04-24)
 
 
