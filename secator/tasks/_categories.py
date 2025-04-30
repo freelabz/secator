@@ -27,7 +27,7 @@ USER_AGENTS = {
 OPTS = {
 	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"', 'default': 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']},  # noqa: E501
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
-	DEPTH: {'type': int, 'help': 'Scan depth', 'default': 2},
+	DEPTH: {'type': int, 'help': 'Scan depth'},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
 	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
@@ -41,7 +41,7 @@ OPTS = {
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
 	RETRIES: {'type': int, 'help': 'Retries'},
-	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
+	THREADS: {'type': int, 'help': 'Number of threads to run'},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
 	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use'}
@@ -393,11 +393,11 @@ class Vuln(Command):
 
 	@cache
 	@staticmethod
-	def lookup_ghsa(ghsa_id):
+	def lookup_cve_from_ghsa(ghsa_id):
 		"""Search for a GHSA on Github and and return associated CVE vulnerability data.
 
 		Args:
-			ghsa (str): CVE ID in the form GHSA-*
+			ghsa (str): GHSA ID in the form GHSA-*
 
 		Returns:
 			dict: vulnerability data.
@@ -410,7 +410,10 @@ class Vuln(Command):
 			return None
 		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
-		cve_id = sidebar_items[2].find('div').text.strip()
+		cve_id = sidebar_items[3].find('div').text.strip()
+		if not cve_id.startswith('CVE'):
+			debug(f'{ghsa_id}: No CVE_ID extracted from https://github.com/advisories/{ghsa_id}', sub='cve')
+			return None
 		vuln = Vuln.lookup_cve(cve_id)
 		if vuln:
 			vuln[TAGS].append('ghsa')

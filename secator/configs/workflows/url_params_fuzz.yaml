@@ -1,0 +1,25 @@
+type: workflow
+name: url_params_fuzz
+alias: url_params_fuzz
+description: Extract parameters from an URL and fuzz them
+tags: [http, fuzz]
+input_types:
+  - url
+tasks:
+  arjun:
+    description: Extract parameters from URLs
+  ffuf:
+    description: Fuzz URL params
+    wordlist: https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt
+    auto_calibration: true
+    follow_redirect: true
+    targets_:
+      - type: url
+        field: url
+        condition: item._source.startswith('arjun')
+  httpx:
+    description: Probe fuzzed URLs
+    targets_:
+      - type: url
+        field: url
+        condition: item._source.startswith('ffuf')

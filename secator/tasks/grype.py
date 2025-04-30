@@ -30,6 +30,7 @@ class grype(VulnCode):
 	install_pre = {
 		'*': ['curl']
 	}
+	install_version = 'v0.91.2'
 	install_cmd = (
 		f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'
 	)
@@ -66,7 +67,7 @@ class grype(VulnCode):
 		if vuln_id.startswith('GHSA'):
 			data['provider'] = 'github.com'
 			data['references'] = [f'https://github.com/advisories/{vuln_id}']
-			vuln = VulnCode.lookup_ghsa(vuln_id)
+			vuln = VulnCode.lookup_cve_from_ghsa(vuln_id)
 			if vuln:
 				data.update(vuln)
 				data['severity'] = data['severity'] or severity.lower()
