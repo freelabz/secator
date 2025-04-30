@@ -64,7 +64,7 @@ class TemplateLoader(DotMap):
 		_path = config.pop('_path', None)
 		if _path:
 			console.print(f'[italic green]{_path}[/]\n')
-		yaml_str = yaml.dump(config, indent=4)
+		yaml_str = yaml.dump(config, indent=4, sort_keys=False)
 		from rich.syntax import Syntax
 		yaml_highlight = Syntax(yaml_str, 'yaml', line_numbers=True)
 		console.print(yaml_highlight)
