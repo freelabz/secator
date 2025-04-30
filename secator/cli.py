@@ -685,7 +685,7 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 					all_results.extend(runner.results)
 					continue
 				report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
-				report.build(extractors=extractors if not unified else [])
+				report.build(extractors=extractors if not unified else [], dedupe=unified)
 				file_date = get_file_date(path)
 				runner_name = data['info']['name']
 				console.print(
@@ -1423,6 +1423,16 @@ def task(name, verbose, check):
 	task = task[0]
 	task_name = task.__name__
 
+	# Check task command is set
+	check_test(
+		task.cmd,
+		'Check task command is set (cls.cmd)',
+		'Task has no cmd attribute.',
+		errors
+	)
+	if errors:
+		sys.exit(0)
+
 	# Run install
 	cmd = f'secator install tools {task_name}'
 	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
@@ -1437,7 +1447,7 @@ def task(name, verbose, check):
 		errors
 	)
 	check_test(
-		any(cmd for cmd in [task.install_cmd, task.install_github_handle]),
+		any(cmd for cmd in [task.install_pre, task.install_cmd, task.install_github_handle]),
 		'Check task installation command is defined',
 		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `install_github_handle`.',  # noqa: E501
 		errors
@@ -1469,12 +1479,6 @@ def task(name, verbose, check):
 		task.__doc__,
 		'Check task description is set (cls.__doc__)',
 		'Task has no description (class docstring).',
-		errors
-	)
-	check_test(
-		task.cmd,
-		'Check task command is set (cls.cmd)',
-		'Task has no cmd attribute.',
 		errors
 	)
 	check_test(
