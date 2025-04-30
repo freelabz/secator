@@ -32,7 +32,7 @@ class Task(Runner):
 		# Run opts
 		opts = self.run_opts.copy()
 		opts.pop('output', None)
-    opts.pop('profiles', None)
+		opts.pop('profiles', None)
 		opts.pop('no_poll', False)
 
 		# Set output types
