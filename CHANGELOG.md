@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/freelabz/secator/compare/v0.13.0...v0.14.0) (2025-04-30)
+
+
+### Features
+
+* add support for profiles ([#532](https://github.com/freelabz/secator/issues/532)) ([6f499b7](https://github.com/freelabz/secator/commit/6f499b72ec18dddde717e00318be4e2b53cc0478))
+
+
+### Bug Fixes
+
+* **cli:** restore --unified option, delete port_scan workflow ([#606](https://github.com/freelabz/secator/issues/606)) ([6dc647d](https://github.com/freelabz/secator/commit/6dc647d7205d15faa1c675485af441549d798118))
+
 ## [0.13.0](https://github.com/freelabz/secator/compare/v0.12.0...v0.13.0) (2025-04-29)
 
 
