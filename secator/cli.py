@@ -36,6 +36,7 @@ click.rich_click.USE_RICH_MARKUP = True
 ALL_TASKS = discover_tasks()
 ALL_WORKFLOWS = [t for t in TEMPLATES if t.type == 'workflow']
 ALL_SCANS = [t for t in TEMPLATES if t.type == 'scan']
+ALL_PROFILES = [t for t in TEMPLATES if t.type == 'profile']
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '-help', '--help'])
 
@@ -123,6 +124,25 @@ def scan(ctx, list=False):
 
 for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
+
+
+@cli.group(aliases=['p'])
+@click.pass_context
+def profile(ctx):
+	"""Show profiles"""
+	pass
+
+
+@profile.command('list')
+def profile_list():
+	table = Table()
+	table.add_column("Profile name", style="bold gold3")
+	table.add_column("Description", overflow='fold')
+	table.add_column("Options", overflow='fold')
+	for profile in ALL_PROFILES:
+		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
+		table.add_row(profile.name, profile.description, opts_str)
+	console.print(table)
 
 
 #--------#

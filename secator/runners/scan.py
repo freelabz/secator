@@ -33,6 +33,7 @@ class Scan(Runner):
 		sigs = []
 		for name, workflow_opts in self.config.workflows.items():
 			run_opts = self.run_opts.copy()
+			run_opts.pop('profiles', None)
 			run_opts['no_poll'] = True
 			run_opts['caller'] = 'Scan'
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
