@@ -13,6 +13,7 @@ from secator.tasks._categories import HttpCrawler
 class gau(HttpCrawler):
 	"""Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan."""
 	cmd = 'gau'
+	tags = ['url', 'crawl', 'passive']
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'

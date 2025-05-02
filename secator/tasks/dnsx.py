@@ -11,6 +11,7 @@ from secator.utils import extract_domain_info
 class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -resp -recon'
+	tags = ['dns', 'recon']
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT

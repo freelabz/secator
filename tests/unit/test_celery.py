@@ -1,7 +1,7 @@
 import unittest
 from secator.celery import app, forward_results
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS, FIXTURES_DIR, load_fixture
-from secator.output_types import Url
+from secator.output_types import Url, OutputTypeList
 from celery import chain, chord
 
 TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
@@ -18,11 +18,9 @@ class TestCelery(unittest.TestCase):
 			sigs = [forward_results.si([])] + [httpx.s(target) for target in TARGETS]
 			workflow = chain(*sigs)
 			result = workflow.apply()
-			results = result.get()
-			urls = [r.url for r in results if r._type == 'url']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(urls), len(TARGETS))
-			self.assertEqual(len(targets), len(TARGETS))
+			results = OutputTypeList(result.get())
+			self.assertEqual(len(results.urls), len(TARGETS))
+			self.assertEqual(len(results.targets), len(TARGETS))
 
 	def test_httpx_chain_with_results(self):
 		from secator.tasks import httpx
@@ -47,11 +45,9 @@ class TestCelery(unittest.TestCase):
 			sigs = [forward_results.s(existing_results)] + [httpx.s(target) for target in TARGETS]
 			workflow = chain(*sigs)
 			result = workflow.apply()
-			results = result.get()
-			urls = [r.url for r in results if r._type == 'url']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(urls), len(TARGETS) + 1)
-			self.assertEqual(len(targets), len(TARGETS))
+			results = OutputTypeList(result.get())
+			self.assertEqual(len(results.urls), len(TARGETS) + 1)
+			self.assertEqual(len(results.targets), len(TARGETS))
 			self.assertIn(existing_results[0], results)
 
 	def test_httpx_workflow(self):
@@ -79,11 +75,9 @@ class TestCelery(unittest.TestCase):
 				), forward_results.s())
 			)
 			result = workflow.apply()
-			results = result.get()
-			urls = [r.url for r in results if r._type == 'url']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(targets), len(TARGETS))
-			self.assertEqual(len(urls), len(TARGETS))
+			results = OutputTypeList(result.get())
+			self.assertEqual(len(results.targets), len(TARGETS))
+			self.assertEqual(len(results.urls), len(TARGETS))
 
 	def test_nmap_workflow(self):
 		from secator.tasks import nmap
@@ -99,11 +93,9 @@ class TestCelery(unittest.TestCase):
 				), forward_results.s()),
 			)
 			result = workflow.apply()
-			results = result.get()
-			vulns = [r.id for r in results if r._type == 'vulnerability']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(targets), len(TARGETS))
-			self.assertEqual(len(vulns), 61)  # number of vulns in the XML fixture
+			results = OutputTypeList(result.get())
+			self.assertEqual(len(results.targets), len(TARGETS))
+			self.assertEqual(len(results.vulnerabilities), 61)  # number of vulns in the XML fixture
 
 	def test_ffuf_chunked(self):
 		from secator.tasks import ffuf
@@ -118,8 +110,6 @@ class TestCelery(unittest.TestCase):
 				), forward_results.s()),
 			)
 			result = workflow.apply()
-			results = result.get()
-			urls = [r.url for r in results if r._type == 'url']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(targets), len(TARGETS))
-			self.assertEqual(len(urls), len(TARGETS))
+			results = OutputTypeList(result.get())
+			self.assertEqual(len(results.targets), len(TARGETS))
+			self.assertEqual(len(results.urls), len(TARGETS))

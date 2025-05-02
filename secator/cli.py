@@ -20,7 +20,7 @@ from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_p
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
-from secator.output_types import FINDING_TYPES, Info, Warning, Error
+from secator.output_types import FINDING_TYPES, Info, Warning, Error, OutputTypeList
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
@@ -691,7 +691,7 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 	paths = sort_files_by_date(paths)
 
 	# Load reports, extract results
-	all_results = []
+	all_results = OutputTypeList()
 	for ix, path in enumerate(paths):
 		if unified:
 			console.print(rf'Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
@@ -700,7 +700,7 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 			try:
 				info = get_info_from_report_path(path)
 				runner_type = info.get('type', 'unknowns')[:-1]
-				runner.results = flatten(list(data['results'].values()))
+				runner.results = OutputTypeList(flatten(list(data['results'].values())))
 				if unified:
 					all_results.extend(runner.results)
 					continue
@@ -783,7 +783,7 @@ def report_list(workspace, runner_type, time_delta):
 @report.command('export')
 @click.argument('json_path', type=str)
 @click.option('--output-folder', '-of', type=str)
-@click.option('-output', '-o', type=str)
+@click.option('-output', '-o', type=str, required=True)
 def report_export(json_path, output_folder, output):
 	with open(json_path, 'r') as f:
 		data = loads_dataclass(f.read())
@@ -1502,9 +1502,9 @@ def task(name, verbose, check):
 		errors
 	)
 	check_test(
-		task.input_type,
-		'Check task input type is set (cls.input_type)',
-		'Task has no input_type attribute.',
+		task.input_types,
+		'Check task input types is set (cls.input_types)',
+		'Task has no input_types attribute.',
 		warnings,
 		warn=True
 	)

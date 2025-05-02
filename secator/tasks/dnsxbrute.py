@@ -11,6 +11,7 @@ from secator.utils import process_wordlist
 class dnsxbrute(ReconDns):
     """dnsx is a fast and multi-purpose DNS toolkit designed for running various library."""
     cmd = 'dnsx'
+    tags = ['dns', 'fuzz']
     json_flag = '-json'
     input_flag = '-domain'
     file_flag = '-domain'

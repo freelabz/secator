@@ -16,8 +16,9 @@ from secator.tasks._categories import Http
 class bup(Http):
 	"""40X bypasser."""
 	cmd = 'bup'
+	tags = ['url', 'bypass']
 	input_flag = '-u'
-	input_type = URL
+	input_types = [URL]
 	json_flag = '--jsonl'
 	opt_prefix = '--'
 	opts = {

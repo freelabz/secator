@@ -164,7 +164,8 @@ def discover_internal_tasks():
 	# Sort task_classes by category
 	task_classes = sorted(
 		task_classes,
-		key=lambda x: (get_command_category(x), x.__name__))
+		# key=lambda x: (get_command_category(x), x.__name__))
+		key=lambda x: x.__name__)
 
 	return task_classes
 
@@ -262,9 +263,9 @@ def get_command_category(command):
 	Returns:
 		str: Command category.
 	"""
-	base_cls = command.__bases__[0].__name__.replace('Command', '').replace('Runner', 'misc')
-	category = re.sub(r'(?<!^)(?=[A-Z])', '/', base_cls).lower()
-	return category
+	if not command.tags:
+		return 'misc'
+	return '/'.join(command.tags)
 
 
 def merge_opts(*options):
@@ -309,6 +310,8 @@ def pluralize(word):
 	"""
 	if word.endswith('y'):
 		return word.rstrip('y') + 'ies'
+	elif word.endswith('s'):
+		return word + 'es'
 	return f'{word}s'
 
 
@@ -418,14 +421,16 @@ def format_object(obj, obj_breaklines=False):
 
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
-		return
 
-	if sub:
-		if verbose and sub not in DEBUG_COMPONENT:
-			sub = f'debug.{sub}'
-		if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+	if not DEBUG_COMPONENT == ['all']:
+		if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
 			return
+
+		if sub:
+			if verbose and sub not in DEBUG_COMPONENT:
+				sub = f'debug.{sub}'
+			if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+				return
 
 	if lazy:
 		msg = lazy(msg)

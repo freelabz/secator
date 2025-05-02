@@ -69,16 +69,22 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['wafw00f.output_path']
 		del opts['testssl.output_path']
 		del opts['timeout']
+		console.print('')
 
 		for cls in TEST_TASKS:
 			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
 				continue
 			with self.subTest(name=cls.__name__):
-				input = INPUTS_TASKS.get(cls.__name__) or INPUTS_TASKS.get(cls.input_type, [])
+				input = INPUTS_TASKS.get(cls.__name__)
+				if input is None:
+					input = INPUTS_TASKS.get(cls.input_types[0], [])
 				outputs = OUTPUTS_TASKS.get(cls.__name__, [])
+				if not input:
+					console.print(f'\tTesting task {cls.__name__} ... [dim gold3] skipped (no input)[/]')
+					continue
 				task = cls(input, **opts)
 				self._test_runner_output(
 					task,
 					expected_output_types=cls.output_types,
 					expected_results=outputs,
-					empty_results_allowed=True)
+					empty_results_allowed=False)

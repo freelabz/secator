@@ -17,6 +17,7 @@ from secator.tasks._categories import HttpCrawler
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana'
+	tags = ['url', 'crawl']
 	file_flag = '-list'
 	input_flag = '-u'
 	json_flag = '-jsonl'

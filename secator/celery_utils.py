@@ -12,7 +12,7 @@ from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from secator.config import CONFIG
 from secator.definitions import STATE_COLORS
-from secator.output_types import Error, Info, State
+from secator.output_types import Error, Info, State, OutputTypeList
 from secator.rich import console
 from secator.utils import debug, traceback_as_string
 
@@ -231,7 +231,7 @@ class CeleryData(object):
 		data.update({
 			'state': res.state,
 			'ready': False,
-			'results': []
+			'results': OutputTypeList()
 		})
 
 		# Get remote task data
@@ -247,10 +247,10 @@ class CeleryData(object):
 			raise info
 
 		elif isinstance(info, list):
+			info = OutputTypeList(info)
 			data['results'] = info
-			errors = [e for e in info if e._type == 'error']
-			status = 'FAILURE' if errors else 'SUCCESS'
-			data['count'] = len([c for c in info if c._source.startswith(data['name'])])
+			status = 'FAILURE' if info.errors else 'SUCCESS'
+			data['count'] = len(info.filter_by_source(data['name']))
 			data['state'] = status
 
 		elif isinstance(info, dict):
@@ -263,7 +263,7 @@ class CeleryData(object):
 		if data['ready']:
 			data['progress'] = 100
 		elif data['results']:
-			progresses = [e for e in data['results'] if e._type == 'progress' and e._source == data['full_name']]
+			progresses = data['results'].progresses.filter_by_source(data['full_name'])
 			if progresses:
 				data['progress'] = progresses[-1].percent
 

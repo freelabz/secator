@@ -23,11 +23,10 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		if not fixture:
 			if len(FIXTURES_TASKS.keys()) == 1: # make test fail.
 				raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory (must not be an empty file / empty json / empty list).')
-			console.print('[dim gold3] skipped (no fixture)[/]')
 			return False
 		return True
 
-	def test_cmd_converted_schema(self):
+	def test_tasks(self):
 		console.print('')
 
 		from secator.config import CONFIG
@@ -36,16 +35,18 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			META_OPTS['print_item'] = True
 
 		for cls, fixture in FIXTURES_TASKS.items():
-			console.print(f'\t[bold grey35]{cls.__name__} ...[/] ', end='')
+			# console.print(f'\t[bold grey35]{cls.__name__} ...[/] ', end='')
 			with self.subTest(name=cls.__name__):
 				# Validate fixture
 				if not self._valid_fixture(cls, fixture):
+					console.print(f'\tTesting task {cls.__name__} ... [dim gold3] skipped (no fixture)[/]')
 					continue
 
 				# Run command
-				targets = INPUTS_TASKS.get(cls.input_type, 'fake')
+				input_type = cls.input_types[0] if cls.input_types else 'fake'
+				targets = INPUTS_TASKS.get(input_type, [])
 				with mock_command(cls, targets, META_OPTS, fixture) as runner:
 					self._test_runner_output(
 						runner,
-						expected_output_types=cls.output_types
+						expected_output_types=cls.output_types,
 					)

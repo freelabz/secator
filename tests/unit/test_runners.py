@@ -171,7 +171,7 @@ class TestCommandRunner(unittest.TestCase):
 		MyCommand.item_loaders = [failing_loader]
 		with mock_command(MyCommand, TARGETS, {}, FIXTURE) as command:
 			results = command.run()
-			errors = [e.message for e in results if e._type == 'error']
+			errors = [e.message for e in results.errors]
 			self.assertIn('Exception: Loader failed', errors)
 			self.assertEqual(len(command.results), 2)
 			self.assertEqual(command.status, 'FAILURE')

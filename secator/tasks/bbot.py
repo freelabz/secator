@@ -2,6 +2,7 @@ import shutil
 
 from secator.config import CONFIG
 from secator.decorators import task
+from secator.definitions import HOST, IP, PORT, URL, USERNAME, ORG_NAME, FILENAME
 from secator.runners import Command
 from secator.serializers import RegexSerializer
 from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error
@@ -177,8 +178,10 @@ def output_discriminator(self, item):
 class bbot(Command):
 	"""Multipurpose scanner."""
 	cmd = 'bbot -y --allow-deadly --force'
+	tags = ['vuln', 'scan']
 	json_flag = '--json'
 	input_flag = '-t'
+	input_types = [HOST, IP, URL, PORT, ORG_NAME, USERNAME, FILENAME]
 	file_flag = None
 	version_flag = '--help'
 	opts = {

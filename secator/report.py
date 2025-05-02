@@ -1,7 +1,7 @@
 import operator
 
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType
+from secator.output_types import FINDING_TYPES
 from secator.utils import merge_opts, get_file_timestamp, traceback_as_string
 from secator.rich import console
 from secator.runners._helpers import extract_from_results
@@ -90,10 +90,7 @@ class Report:
 		for output_type in FINDING_TYPES:
 			output_name = output_type.get_name()
 			sort_by, _ = get_table_fields(output_type)
-			items = [
-				item for item in self.runner.results
-				if isinstance(item, OutputType) and item._type == output_name
-			]
+			items = self.runner.results.filter_by_type(output_name)
 			if items:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))

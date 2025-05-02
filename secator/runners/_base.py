@@ -11,7 +11,8 @@ import humanize
 from secator.definitions import ADDONS_ENABLED
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
+from secator.output_types import (FINDING_TYPES, OutputType, OutputTypeList,
+								 Progress, Info, Warning, Error, Target, State)
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
@@ -52,8 +53,8 @@ class Runner:
 		OutputType: Output types.
 	"""
 
-	# Input field (mostly for tests and CLI)
-	input_type = None
+	# Input types
+	input_types = []
 
 	# Output types
 	output_types = []
@@ -66,7 +67,7 @@ class Runner:
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		self.uuids = []
-		self.results = []
+		self.results = OutputTypeList()
 		self.output = ''
 
 		# Runner config
@@ -186,27 +187,27 @@ class Runner:
 
 	@property
 	def targets(self):
-		return [r for r in self.results if isinstance(r, Target)]
+		return self.results.targets
 
 	@property
 	def infos(self):
-		return [r for r in self.results if isinstance(r, Info)]
+		return self.results.infos
 
 	@property
 	def warnings(self):
-		return [r for r in self.results if isinstance(r, Warning)]
+		return self.results.warnings
 
 	@property
 	def errors(self):
-		return [r for r in self.results if isinstance(r, Error)]
+		return self.results.errors
 
 	@property
 	def self_results(self):
-		return [r for r in self.results if r._source.startswith(self.unique_name)]
+		return self.results.filter_by_source(self.unique_name)
 
 	@property
 	def findings(self):
-		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES))]
+		return self.results.filter_by_types(FINDING_TYPES)
 
 	@property
 	def findings_count(self):
@@ -214,13 +215,13 @@ class Runner:
 
 	@property
 	def self_findings(self):
-		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES)) if r._source.startswith(self.unique_name)]
+		return self.findings.filter_by_source(self.unique_name)
 
 	@property
 	def self_errors(self):
 		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
-		return [r for r in self.results if isinstance(r, Error)]
+			return self.errors.filter_by_source(self.unique_name)
+		return self.errors
 
 	@property
 	def self_findings_count(self):
@@ -271,9 +272,9 @@ class Runner:
 		"""Run method.
 
 		Returns:
-			List[OutputType]: List of runner results.
+			OutputTypeList: List of runner results.
 		"""
-		return list(self.__iter__())
+		return OutputTypeList(list(self.__iter__()))
 
 	def __iter__(self):
 		"""Process results from derived runner class in real-time and yield results.
@@ -831,7 +832,7 @@ class Runner:
 			if isinstance(data, (OutputType, dict)):
 				if getattr(data, 'toDict', None):
 					data = data.toDict()
-				data = json.dumps(data)
+				data = json.dumps(data, default=str)
 			print(data, file=out)
 
 	def _get_findings_count(self):

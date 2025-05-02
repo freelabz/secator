@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class maigret(ReconUser):
 	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
+	tags = ['user', 'recon', 'username']
 	file_flag = None
 	input_flag = None
 	json_flag = '--json ndjson'
@@ -32,7 +33,7 @@ class maigret(ReconUser):
 		TIMEOUT: 'timeout',
 		THREADS: OPT_NOT_SUPPORTED
 	}
-	input_type = USERNAME
+	input_types = [USERNAME]
 	output_types = [UserAccount]
 	output_map = {
 		UserAccount: {

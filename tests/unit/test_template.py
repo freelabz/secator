@@ -51,9 +51,9 @@ class TestTemplate(unittest.TestCase):
 		self.assertIsNotNone(ls_workflow)
 		workflow = Workflow(ls_workflow, inputs=[str(self.template_dir)])
 		workflow.run()
-		findings = workflow.findings
-		self.assertEqual(len(findings), 1)
-		vuln = [r for r in findings if r._type == 'vulnerability'][0]
+		vulns = workflow.results.vulnerabilities
+		self.assertEqual(len(vulns), 1)
+		vuln = vulns[0]
 		self.assertTrue(self.expected_vuln == Vulnerability.load(vuln.toDict()))
 
 

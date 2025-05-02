@@ -30,6 +30,9 @@ class Command(Runner):
 	# Base cmd
 	cmd = None
 
+	# Tags
+	tags = []
+
 	# Meta options
 	meta_opts = {}
 

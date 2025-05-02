@@ -4,7 +4,7 @@ import unittest
 import unittest.mock
 
 from secator.definitions import (DEBUG, HOST, OPT_NOT_SUPPORTED)
-from secator.output_types import Url
+from secator.output_types import Url, OutputTypeList
 from secator.runners import Command
 from secator.tasks import httpx
 from secator.utils import setup_logging
@@ -222,7 +222,7 @@ class TestCommandHooks(unittest.TestCase):
 			return item
 
 		def on_end(self):
-			self.results = [{'url': 'test_changed_result'}]
+			self.results = OutputTypeList([Url(url='test_changed_result')])
 
 		def on_init(self):
 			self.cmd = 'test_changed_cmd_init'
@@ -249,7 +249,7 @@ class TestCommandHooks(unittest.TestCase):
 			self.assertEqual(item.status_code, 500)
 			self.assertEqual(item.url, 'test_changed_url')
 			self.assertEqual(cls.cmd.split(' ')[0], 'test_changed_cmd_start')
-			self.assertEqual(cls.results, [{'url': 'test_changed_result'}])
+			self.assertEqual(cls.results, OutputTypeList([Url(url='test_changed_result')]))
 
 	def test_cmd_failed_hook(self):
 		if httpx not in TEST_TASKS:

@@ -12,7 +12,8 @@ from secator.tasks._categories import OPTS
 class wafw00f(Command):
 	"""Web Application Firewall Fingerprinting tool."""
 	cmd = 'wafw00f'
-	input_type = URL
+	tags = ['waf', 'scan']
+	input_types = [URL]
 	input_flag = None
 	file_flag = '-i'
 	json_flag = '-f json'

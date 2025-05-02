@@ -14,6 +14,7 @@ from secator.tasks._categories import VulnMulti
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
 	cmd = 'nuclei'
+	tags = ['vuln', 'scan']
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-jsonl'

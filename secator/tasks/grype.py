@@ -11,6 +11,7 @@ from secator.tasks._categories import VulnCode
 class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
 	cmd = 'grype --quiet'
+	tags = ['vuln', 'scan', 'passive']
 	input_flag = ''
 	file_flag = OPT_NOT_SUPPORTED
 	json_flag = None

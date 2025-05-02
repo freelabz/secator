@@ -14,8 +14,9 @@ from secator.utils import process_wordlist
 class arjun(Command):
 	"""HTTP Parameter Discovery Suite."""
 	cmd = 'arjun'
+	tags = ['url', 'fuzz', 'params']
 	input_flag = '-u'
-	input_type = URL
+	input_types = [URL]
 	version_flag = ' '
 	opts = {
 		'chunk_size': {'type': int, 'help': 'Control query/chunk size'},

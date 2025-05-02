@@ -15,6 +15,7 @@ from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
 	cmd = 'httpx'
+	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-json'
