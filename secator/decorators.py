@@ -271,7 +271,6 @@ def generate_cli_subcommand(cli_endpoint, func, **opts):
 def register_runner(cli_endpoint, config):
 	name = config.name
 	input_required = True
-	input_type = 'targets'
 	command_opts = {
 		'no_args_is_help': True,
 		'context_settings': {
@@ -288,6 +287,7 @@ def register_runner(cli_endpoint, config):
 			'name': name,
 			'short_help': short_help
 		})
+		input_types = config.input_types
 
 	elif cli_endpoint.name == 'workflow':
 		runner_cls = Workflow
@@ -297,22 +297,24 @@ def register_runner(cli_endpoint, config):
 			'name': name,
 			'short_help': short_help
 		})
+		input_types = config.input_types
 
 	elif cli_endpoint.name == 'task':
 		runner_cls = Task
 		input_required = False  # allow targets from stdin
 		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
-		input_type = task_cls.input_type or 'targets'
-		short_help = f'[magenta]{task_category:<15}[/]{task_cls.__doc__}'
+		short_help = f'[magenta]{task_category:<25}[/] {task_cls.__doc__}'
 		command_opts.update({
 			'name': name,
 			'short_help': short_help,
 			'no_args_is_help': False
 		})
+		input_types = task_cls.input_types
 
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
+	input_types_str = '|'.join(input_types) if input_types else 'targets'
 	options = get_command_options(config)
 
 	# TODO: maybe allow this in the future
@@ -324,7 +326,7 @@ def register_runner(cli_endpoint, config):
 	# 		for i in range(0, len(ctx.args), 2)
 	# 	}
 
-	@click.argument(input_type, required=input_required)
+	@click.argument(input_types_str, required=input_required)
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, **opts):
@@ -353,7 +355,7 @@ def register_runner(cli_endpoint, config):
 		# opts.update(unknown_opts)
 
 		# Expand input
-		inputs = opts.pop(input_type)
+		inputs = opts.pop(input_types_str)
 		inputs = expand_input(inputs, ctx)
 
 		# Build hooks from driver name
@@ -420,10 +422,10 @@ def register_runner(cli_endpoint, config):
 		runner.run()
 
 	generate_cli_subcommand(cli_endpoint, func, **command_opts)
-	generate_rich_click_opt_groups(cli_endpoint, name, input_type, options)
+	generate_rich_click_opt_groups(cli_endpoint, name, input_types, options)
 
 
-def generate_rich_click_opt_groups(cli_endpoint, name, input_type, options):
+def generate_rich_click_opt_groups(cli_endpoint, name, input_types, options):
 	sortorder = {
 		'Execution': 0,
 		'Output': 1,
@@ -434,7 +436,7 @@ def generate_rich_click_opt_groups(cli_endpoint, name, input_type, options):
 	opt_group = [
 		{
 			'name': 'Targets',
-			'options': [input_type],
+			'options': input_types,
 		},
 	]
 	for prefix in prefixes:

@@ -21,7 +21,8 @@ DALFOX_TYPE_MAP = {
 class dalfox(VulnHttp):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox'
-	input_type = URL
+	tags = ['url', 'fuzz']
+	input_types = [URL]
 	input_flag = 'url'
 	file_flag = 'file'
 	# input_chunk_size = 1

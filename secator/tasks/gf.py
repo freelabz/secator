@@ -8,6 +8,7 @@ from secator.tasks._categories import Tagger
 class gf(Tagger):
 	"""Wrapper around grep, to help you grep for things."""
 	cmd = 'gf'
+	tags = ['pattern', 'scan']
 	file_flag = OPT_PIPE_INPUT
 	input_flag = OPT_PIPE_INPUT
 	version_flag = OPT_NOT_SUPPORTED
@@ -17,7 +18,7 @@ class gf(Tagger):
 	opt_key_map = {
 		'pattern': ''
 	}
-	input_type = URL
+	input_types = [URL]
 	install_cmd = (
 		'go install -v github.com/tomnomnom/gf@latest && '
 		'git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true'

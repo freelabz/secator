@@ -9,7 +9,8 @@ from fp.fp import FreeProxy
 from secator.definitions import (CIDR_RANGE, DELAY, DEPTH, EMAIL,
 							   FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
 							   METHOD, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
+							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME, PATH,
+							   DOCKER_IMAGE, GIT_REPOSITORY)
 from secator.cli import ALL_WORKFLOWS, ALL_TASKS, ALL_SCANS
 from secator.output_types import EXECUTION_TYPES, STAT_TYPES
 from secator.runners import Command
@@ -61,7 +62,9 @@ INPUTS_TASKS = {
 	IP: '192.168.1.23',
 	CIDR_RANGE: '192.168.1.0/24',
 	EMAIL: 'fake@fake.com',
-	'folder': '.'
+	PATH: '.',
+	DOCKER_IMAGE: 'redis:latest',
+	GIT_REPOSITORY: 'https://github.com/freelabz/secator',
 }
 
 #---------------------#
@@ -165,7 +168,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			expected_status='SUCCESS',
 			empty_results_allowed=False):
 
-		console.print(f'[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
+		console.print(f'\t[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
 		debug('', sub='unittest')
 
 		if not runner.inputs:
@@ -176,6 +179,8 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			console.print('[dim gold3] (no outputs defined).[/]', end='')
 
 		try:
+			debug(f'{runner.name} starting command: {runner.cmd}', sub='unittest') if isinstance(runner, Command) else None
+
 			# Run runner
 			results = runner.run()
 			for result in results:
@@ -202,6 +207,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			# Check results
 			for item in results:
 				debug(f'{runner.name} yielded {repr(item)}', sub='unittest')
+				debug(f'{runner.name} yielded (JSON): {json.dumps(item.toDict(), default=str)}', sub='unittest.dict', verbose=True)
 
 				if expected_output_types:
 					debug(f'{runner.name} item should have an output type in {[_._type for _ in expected_output_types]}', sub='unittest')  # noqa: E501

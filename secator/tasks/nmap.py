@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap'
+	tags = ['port', 'scan']
 	input_flag = None
+	input_types = [HOST, IP]
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'

@@ -14,7 +14,8 @@ from secator.tasks._categories import HttpCrawler
 class cariddi(HttpCrawler):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
 	cmd = 'cariddi'
-	input_type = URL
+	tags = ['url', 'crawl']
+	input_types = [URL]
 	input_flag = OPT_PIPE_INPUT
 	output_types = [Url, Tag]
 	file_flag = OPT_PIPE_INPUT

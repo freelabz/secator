@@ -5,7 +5,7 @@ import yaml
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.runners import Command
-from secator.definitions import (OUTPUT_PATH)
+from secator.definitions import (OUTPUT_PATH, PATH, GIT_REPOSITORY)
 from secator.utils import caml_to_snake
 from secator.output_types import Tag, Info, Error
 
@@ -14,6 +14,8 @@ from secator.output_types import Tag, Info, Error
 class gitleaks(Command):
 	"""Tool for detecting secrets like passwords, API keys, and tokens in git repos, files, and stdin."""
 	cmd = 'gitleaks'
+	tags = ['secret', 'scan']
+	input_types = [PATH, GIT_REPOSITORY]
 	input_flag = None
 	json_flag = '-f json'
 	opt_prefix = '--'

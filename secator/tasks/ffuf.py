@@ -7,7 +7,7 @@ from secator.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 								 PERCENT, PROXY, RATE_LIMIT, RETRIES,
 								 STATUS_CODE, THREADS, TIME, TIMEOUT,
-								 USER_AGENT, WORDLIST)
+								 USER_AGENT, WORDLIST, URL)
 from secator.output_types import Progress, Url
 from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
@@ -19,6 +19,8 @@ FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
 	cmd = 'ffuf -noninteractive'
+	tags = ['url', 'fuzz']
+	input_types = [URL]
 	input_flag = '-u'
 	input_chunk_size = 1
 	file_flag = None
