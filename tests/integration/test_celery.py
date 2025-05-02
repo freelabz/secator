@@ -10,9 +10,10 @@ from celery import chain, chord
 
 from secator.celery import app, forward_results
 from secator.config import CONFIG
-from secator.utils_test import TEST_TASKS, TEST_WORKFLOWS,load_fixture
+from secator.utils_test import TEST_TASKS, TEST_WORKFLOWS, load_fixture
 from secator.runners import Command
-from secator.output_types import Url, OutputTypeList
+from secator.output_types import Url
+from secator.utils import deduplicate
 from tests.integration.inputs import INPUTS_SCANS
 
 
@@ -63,7 +64,7 @@ class TestCelery(unittest.TestCase):
 		sigs = [forward_results.si([])] + [httpx.s(target) for target in URL_TARGETS]
 		workflow = chain(*sigs)
 		result = workflow.apply()
-		results = OutputTypeList(result.get())
+		results = result.get()
 		self.assertEqual(len(results.urls), len(URL_TARGETS))
 		self.assertEqual(len(results.targets), len(URL_TARGETS))
 
@@ -86,11 +87,10 @@ class TestCelery(unittest.TestCase):
 			"_source": "httpx",
 			"_type": "url"
 		})]
-		targets = INPUTS_SCANS['url']
 		sigs = [forward_results.s(existing_results)] + [httpx.s(target) for target in URL_TARGETS]
 		workflow = chain(*sigs)
 		result = workflow.apply()
-		results = OutputTypeList(result.get())
+		results = result.get()
 		self.assertEqual(len(results.urls), len(URL_TARGETS) + 1)
 		self.assertEqual(len(results.targets), len(URL_TARGETS))
 		self.assertIn(existing_results[0], results)
@@ -133,7 +133,7 @@ class TestCelery(unittest.TestCase):
 			), forward_results.s())
 		)
 		result = workflow.apply()
-		results = OutputTypeList(result.get())
+		results = result.get()
 		self.assertIn(existing_results[0], results)
 		self.assertEqual(len(results.urls), len(URL_TARGETS))
 		self.assertEqual(len(results.targets), len(URL_TARGETS))
@@ -149,7 +149,7 @@ class TestCelery(unittest.TestCase):
 		for _ in range(size):
 			targets.append(URL_TARGETS[0] + '?id=' + str(uuid.uuid4()))
 		result = httpx.delay(targets)
-		results = OutputTypeList(result.get())
+		results = result.get()
 		self.assertEqual(len(results.urls), size)  # same URL, but twice because 2 chunks and same input
 		# self.assertEqual(len(results.infos), 2) # one chunk message for each chunk
 		# for message in results.infos:
@@ -167,7 +167,7 @@ class TestCelery(unittest.TestCase):
 			), forward_results.s()),
 		)
 		result = workflow.apply()
-		results = OutputTypeList(result.get())
+		results = result.get()
 		self.assertEqual(len(results.targets), len(URL_TARGETS))
 
 	def test_ffuf_chunked(self):
@@ -183,7 +183,7 @@ class TestCelery(unittest.TestCase):
 			), forward_results.s()),
 		)
 		result = workflow.apply()
-		results = OutputTypeList(result.get())
+		results = result.get()
 		self.assertEqual(len(results.targets), len(URL_TARGETS))
 		self.assertEqual(len(results.urls), sum(URL_RESULTS_COUNT))
 
@@ -192,6 +192,6 @@ class TestCelery(unittest.TestCase):
 		workflow = url_vuln([t + '?id=1' for t in URL_TARGETS])
 		workflow = workflow.build_celery_workflow()
 		result = workflow.apply()
-		results = OutputTypeList(result.get())
+		results = result.get()
 		self.assertEqual(len(results.targets), 16)
 		self.assertEqual(len(results.tags), 6)

@@ -14,7 +14,7 @@ from retry import retry
 
 from secator.celery_signals import IN_CELERY_WORKER_PROCESS, setup_handlers
 from secator.config import CONFIG
-from secator.output_types import Info
+from secator.output_types import Info, OutputTypeList
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.utils import (debug, deduplicate, flatten, should_update)
@@ -219,7 +219,7 @@ def forward_results(results):
 		results = results['results']
 	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
-	return results
+	return OutputTypeList(results)
 
 
 @app.task
