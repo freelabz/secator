@@ -42,6 +42,8 @@ class Tag(OutputType):
 					if len(v) > 1000:
 						v = v.replace('\n', '\n' + sep)
 						sep = '\n    '
+				elif isinstance(v, list):
+					v = ', '.join([str(_) for _ in v])
 				ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed

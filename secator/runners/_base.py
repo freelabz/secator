@@ -207,7 +207,7 @@ class Runner:
 
 	@property
 	def findings(self):
-		return self.results.filter_by_types(FINDING_TYPES)
+		return self.results.filter_by_types([_.get_name() for _ in FINDING_TYPES])
 
 	@property
 	def findings_count(self):

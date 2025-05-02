@@ -15,7 +15,7 @@ from secator.cli import ALL_WORKFLOWS, ALL_TASKS, ALL_SCANS
 from secator.output_types import EXECUTION_TYPES, STAT_TYPES
 from secator.runners import Command
 from secator.rich import console
-from secator.utils import load_fixture, debug
+from secator.utils import load_fixture, debug, rich_escape as _s
 
 #---------#
 # GLOBALS #
@@ -204,8 +204,8 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 
 			# Check results
 			for item in results:
-				debug(f'{runner.name} yielded {repr(item)}', sub='unittest')
-				debug(f'{runner.name} yielded (JSON): {json.dumps(item.toDict())}', sub='unittest.dict', verbose=True)
+				debug(f'{runner.name} yielded (JSON): {json.dumps(item.toDict(), default=str)}', sub='unittest.dict', verbose=True)
+				debug(f'{runner.name} yielded {_s(repr(item))}', sub='unittest')
 
 				if expected_output_types:
 					debug(f'{runner.name} item should have an output type in {[_._type for _ in expected_output_types]}', sub='unittest')  # noqa: E501

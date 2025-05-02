@@ -20,6 +20,7 @@ class TestTemplate(unittest.TestCase):
 		shutil.copy(f'{FIXTURES_DIR}/ls.yml', self.custom_workflow_path)
 		self.writeable_file.touch()
 		os.chmod(self.writeable_file, 0o007)
+		print(f'copied writable file to {self.writeable_file}')
 		self.expected_vuln = Vulnerability(
 			name='World-writeable path',
 			severity='high',
