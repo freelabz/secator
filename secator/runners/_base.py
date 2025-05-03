@@ -53,7 +53,7 @@ class Runner:
 	"""
 
 	# Input field (mostly for tests and CLI)
-	input_type = None
+	input_types = []
 
 	# Output types
 	output_types = []
@@ -831,7 +831,7 @@ class Runner:
 			if isinstance(data, (OutputType, dict)):
 				if getattr(data, 'toDict', None):
 					data = data.toDict()
-				data = json.dumps(data)
+				data = json.dumps(data, default=str)
 			print(data, file=out)
 
 	def _get_findings_count(self):

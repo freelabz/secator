@@ -5,7 +5,8 @@ import yaml
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
-								PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT)
+								DOCKER_IMAGE, PATH, GIT_REPOSITORY, PROXY, RATE_LIMIT, RETRIES, TIMEOUT,
+								USER_AGENT)
 from secator.tasks._categories import Vuln
 from secator.output_types import Vulnerability, Tag, Info, Error
 
@@ -14,7 +15,9 @@ from secator.output_types import Vulnerability, Tag, Info, Error
 class trivy(Vuln):
 	"""Comprehensive and versatile security scanner."""
 	cmd = 'trivy'
+	tags = ['vuln', 'scan']
 	input_flag = None
+	input_types = [DOCKER_IMAGE, PATH, GIT_REPOSITORY]
 	json_flag = '-f json'
 	version_flag = '--version'
 	opts = {

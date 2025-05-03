@@ -15,7 +15,8 @@ from secator.tasks._categories import Command, OPTS
 class testssl(Command):
     """SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
     cmd = 'testssl.sh'
-    input_type = HOST
+    tags = ['dns', 'recon', 'tls']
+    input_types = [HOST]
     input_flag = None
     file_flag = '-iL'
     file_eof_newline = True

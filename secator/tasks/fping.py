@@ -11,8 +11,10 @@ from secator.tasks._categories import ReconIp
 class fping(ReconIp):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
 	cmd = 'fping -a'
+	tags = ['ip', 'recon']
 	file_flag = '-f'
 	input_flag = None
+	input_types = [IP]
 	opt_prefix = '--'
 	opt_key_map = {
 		DELAY: 'period',
@@ -26,7 +28,7 @@ class fping(ReconIp):
 		DELAY: lambda x: x * 1000,  # convert s to ms
 		TIMEOUT: lambda x: x * 1000  # convert s to ms
 	}
-	input_type = IP
+	input_types = [IP]
 	output_types = [Ip]
 	install_github_handle = 'schweikert/fping'
 	install_version = 'v5.1'

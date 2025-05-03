@@ -783,7 +783,7 @@ def report_list(workspace, runner_type, time_delta):
 @report.command('export')
 @click.argument('json_path', type=str)
 @click.option('--output-folder', '-of', type=str)
-@click.option('-output', '-o', type=str)
+@click.option('-output', '-o', type=str, required=True)
 def report_export(json_path, output_folder, output):
 	with open(json_path, 'r') as f:
 		data = loads_dataclass(f.read())
@@ -1558,7 +1558,7 @@ def task(name, verbose, check):
 		errors
 	)
 	check_test(
-		task.input_type,
+		task.input_types,
 		'Check task input type is set (cls.input_type)',
 		'Task has no input_type attribute.',
 		warnings,
