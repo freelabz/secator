@@ -16,6 +16,7 @@ class trivy(Vuln):
 	cmd = 'trivy'
 	input_flag = None
 	json_flag = '-f json'
+	version_flag = '--version'
 	opts = {
 		"mode": {"type": click.Choice(['image', 'fs', 'repo']), 'default': 'image', 'help': 'Trivy mode', 'required': True}  # noqa: E501
 	}

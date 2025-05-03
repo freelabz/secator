@@ -30,7 +30,7 @@ from secator.utils import (
 	debug, detect_host, discover_tasks, flatten, print_version, get_file_date,
 	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
 )
-
+from contextlib import nullcontext
 click.rich_click.USE_RICH_MARKUP = True
 
 ALL_TASKS = discover_tasks()
@@ -830,91 +830,144 @@ def report_export(json_path, output_folder, output):
 #--------#
 
 @cli.command(name='health')
-@click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
+@click.option('--json', '-json', 'json_', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
 @click.option('--strict', '-strict', is_flag=True, default=False, help='Fail if missing tools')
-def health(json, debug, strict):
+@click.option('--bleeding', '-bleeding', is_flag=True, default=False, help='Check bleeding edge version of tools')
+def health(json_, debug, strict, bleeding):
 	"""[dim]Get health status.[/]"""
 	tools = ALL_TASKS
-	status = {'secator': {}, 'languages': {}, 'tools': {}, 'addons': {}}
+	upgrade_cmd = ''
+	results = []
+	messages = []
 
 	# Check secator
-	console.print(':wrench: [bold gold3]Checking secator ...[/]')
+	console.print(':wrench: [bold gold3]Checking secator ...[/]') if not json_ else None
 	info = get_version_info('secator', '-version', 'freelabz/secator')
+	info['_type'] = 'core'
+	if info['outdated']:
+		messages.append(f'secator is outdated (latest:{info["latest_version"]}).')
+	results.append(info)
 	table = get_health_table()
-	with Live(table, console=console):
+	contextmanager = Live(table, console=console) if not json_ else nullcontext()
+	with contextmanager:
 		row = fmt_health_table_row(info)
 		table.add_row(*row)
-	status['secator'] = info
 
 	# Check addons
-	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	console.print('\n:wrench: [bold gold3]Checking addons ...[/]') if not json_ else None
 	table = get_health_table()
-	with Live(table, console=console):
+	contextmanager = Live(table, console=console) if not json_ else nullcontext()
+	with contextmanager:
 		for addon, installed in ADDONS_ENABLED.items():
 			info = {
 				'name': addon,
 				'version': None,
-				'status': 'ok' if installed else 'missing',
+				'status': 'ok' if installed else 'missing_ok',
 				'latest_version': None,
 				'installed': installed,
 				'location': None
 			}
+			info['_type'] = 'addon'
+			results.append(info)
 			row = fmt_health_table_row(info, 'addons')
 			table.add_row(*row)
-			status['addons'][addon] = info
+			if json_:
+				print(json.dumps(info))
 
 	# Check languages
-	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
+	console.print('\n:wrench: [bold gold3]Checking languages ...[/]') if not json_ else None
 	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
 	table = get_health_table()
-	with Live(table, console=console):
+	contextmanager = Live(table, console=console) if not json_ else nullcontext()
+	with contextmanager:
 		for lang, version_flag in version_cmds.items():
 			info = get_version_info(lang, version_flag)
 			row = fmt_health_table_row(info, 'langs')
 			table.add_row(*row)
-			status['languages'][lang] = info
+			info['_type'] = 'lang'
+			results.append(info)
+			if json_:
+				print(json.dumps(info))
 
 	# Check tools
-	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
+	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]') if not json_ else None
 	table = get_health_table()
-	with Live(table, console=console):
+	error = False
+	contextmanager = Live(table, console=console) if not json_ else nullcontext()
+	upgrade_cmd = 'secator install tools'
+	with contextmanager:
 		for tool in tools:
 			info = get_version_info(
 				tool.cmd.split(' ')[0],
 				tool.version_flag or f'{tool.opt_prefix}version',
 				tool.install_github_handle,
-				tool.install_cmd
+				tool.install_cmd,
+				tool.install_version if not bleeding else None
 			)
+			info['_name'] = tool.__name__
+			info['_type'] = 'tool'
 			row = fmt_health_table_row(info, 'tools')
 			table.add_row(*row)
-			status['tools'][tool.__name__] = info
-	console.print('')
+			if not info['installed']:
+				messages.append(f'{tool.__name__} is not installed.')
+				info['next_version'] = tool.install_version
+				error = True
+			elif info['outdated']:
+				msg = 'latest' if bleeding else 'supported'
+				message = (
+					f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+				)
+				messages.append(message)
+				info['upgrade'] = True
+				info['next_version'] = info['latest_version']
+	
+			elif info['bleeding']:
+				msg = 'latest' if bleeding else 'supported'
+				message = (
+					f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+				)
+				messages.append(message)
+				info['downgrade'] = True
+				info['next_version'] = info['latest_version']
+			results.append(info)
+			if json_:
+				print(json.dumps(info))
+	console.print('') if not json_ else None
 
-	# Print JSON health
-	if json:
-		import json as _json
-		print(_json.dumps(status))
-
-	# Print errors and warnings
-	error = False
-	for tool, info in status['tools'].items():
-		if not info['installed']:
-			console.print(Warning(message=f'{tool} is not installed.'))
-			error = True
-		elif info['outdated']:
-			message = (
-				f'{tool} is outdated (current:{info["version"]}, latest:{info["latest_version"]}).'
-				f' Run `secator install tools {tool}` to update it.'
-			)
+	if not json_ and messages:
+		console.print('\n[bold red]Issues found:[/]')
+		for message in messages:
 			console.print(Warning(message=message))
 
 	# Strict mode
 	if strict:
 		if error:
 			sys.exit(1)
-		console.print(Info(message='Strict healthcheck passed !'))
+		console.print(Info(message='Strict healthcheck passed !')) if not json_ else None
 
+	# Build upgrade command
+	cmds = []
+	tool_cmd = ''
+	for info in results:
+		if info['_type'] == 'core' and info['outdated']:
+			cmds.append('secator update')
+		elif info['_type'] == 'tool' and info.get('next_version'):
+			tool_cmd += f',{info["_name"]}=={info["next_version"]}'
+
+	if tool_cmd:
+		tool_cmd = f'secator install tools {tool_cmd.lstrip(",")}'
+		cmds.append(tool_cmd)
+	upgrade_cmd = ' && '.join(cmds)
+	console.print('') if not json_ else None
+	if upgrade_cmd:
+		console.print(Info(message=f'Run the following to upgrade secator and tools:')) if not json_ else None
+		if json_:
+			print(json.dumps({'upgrade_cmd': upgrade_cmd}))
+		else:
+			print(upgrade_cmd)
+	else:
+		console.print(Info(message='Everything is up to date !')) if not json_ else None
 
 #---------#
 # INSTALL #
@@ -1116,6 +1169,8 @@ def install_tools(cmds, cleanup, fail_fast):
 			cls = next((cls for cls in ALL_TASKS if cls.__name__ == cmd), None)
 			if cls:
 				if version:
+					if cls.install_version and cls.install_version.startswith('v') and not version.startswith('v'):
+						version = f'v{version}'
 					cls.install_version = version
 				tools.append(cls)
 			else:

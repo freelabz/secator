@@ -1,0 +1,67 @@
+# .github/workflows/daily-schedule.yml
+
+name: Check Updates
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+
+  integration:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+        os: [ubuntu-latest]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Setup docker compose
+      uses: KengoTODA/actions-setup-docker-compose@v1
+      with:
+        version: '1.29.2'
+
+    - name: Add GOBIN to PATH
+      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
+
+    - name: Add GOPATH to PATH
+      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        secator install addons worker
+        secator install langs go
+        secator install langs ruby
+        secator install tools --fail-fast
+        secator health --bleeding > to_install.sh
+        chmod +x to_install.sh
+        ./to_install.sh
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
+
+    - name: Run integration tests
+      run: |
+        secator test integration --test test_celery,test_worker,test_tasks
+
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-integration
+        include-hidden-files: true
+        path: .coverage.integration

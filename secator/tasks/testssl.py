@@ -52,6 +52,7 @@ class testssl(Command):
         'pacman': ['util-linux'],
         '*': ['bsdmainutils']
     }
+    install_github_handle = 'testssl/testssl.sh'
     install_version = 'v3.2.0'
     install_cmd = (
         f'git clone --depth 1 --single-branch -b [install_version] https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh_[install_version] || true && '  # noqa: E501
