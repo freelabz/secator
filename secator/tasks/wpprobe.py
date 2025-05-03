@@ -12,9 +12,10 @@ from secator.tasks._categories import OPTS
 class wpprobe(Command):
     """Fast wordpress plugin enumeration tool."""
     cmd = 'wpprobe'
+    tags = ['vuln', 'scan', 'wordpress']
     file_flag = '-f'
     input_flag = '-u'
-    input_type = URL
+    input_types = [URL]
     opt_prefix = '-'
     opts = {
         'mode': {'type': click.Choice(['scan', 'update', 'update-db']), 'default': 'scan', 'help': 'WPProbe mode', 'required': True, 'internal': True},  # noqa: E501

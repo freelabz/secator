@@ -17,9 +17,10 @@ from secator.tasks._categories import VulnHttp
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
 	cmd = 'wpscan --force --verbose'
+	tags = ['vuln', 'scan', 'wordpress']
 	file_flag = None
 	input_flag = '--url'
-	input_type = URL
+	input_types = [URL]
 	json_flag = '-f json'
 	opt_prefix = '--'
 	opts = {

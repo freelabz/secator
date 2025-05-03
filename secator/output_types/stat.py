@@ -25,6 +25,9 @@ class Stat(OutputType):
 	_table_fields = ['name', 'pid', 'cpu', 'memory']
 	_sort_by = ('name', 'pid')
 
+	def __str__(self) -> str:
+		return f'{self.name} [pid={self.pid}] [cpu={self.cpu:.2f}%] [memory={self.memory:.2f}%]'
+
 	def __repr__(self) -> str:
 		s = rf'[dim yellow3]📊 {self.name} \[pid={self.pid}] \[cpu={self.cpu:.2f}%] \[memory={self.memory:.2f}%]'
 		if self.net_conns:

@@ -4,7 +4,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 								 MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT,
 								 PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
 								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
-								 USER_AGENT)
+								 USER_AGENT, HOST, URL)
 from secator.output_types import Progress, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
@@ -14,6 +14,8 @@ from secator.tasks._categories import VulnMulti
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
 	cmd = 'nuclei'
+	tags = ['vuln', 'scan']
+	input_types = [HOST, IP, URL]
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-jsonl'

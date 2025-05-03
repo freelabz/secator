@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (DELAY, HOST, OPT_NOT_SUPPORTED, PORT, PORTS,
+from secator.definitions import (DELAY, HOST, IP, OPT_NOT_SUPPORTED, PORT, PORTS,
 								 PROXY, RATE_LIMIT, RETRIES, STATE, THREADS,
 								 TIMEOUT, TOP_PORTS)
 from secator.output_types import Port
@@ -11,7 +11,9 @@ from secator.tasks._categories import ReconPort
 class naabu(ReconPort):
 	"""Port scanning tool written in Go."""
 	cmd = 'naabu'
+	tags = ['port', 'scan']
 	input_flag = '-host'
+	input_types = [HOST, IP]
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {

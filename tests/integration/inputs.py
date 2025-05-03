@@ -7,6 +7,7 @@ INPUTS_TASKS = {
 	IP: '127.0.0.1',
 	CIDR_RANGE: '192.168.1.0/24',
 	'arjun': 'http://testphp.vulnweb.com/hpp',
+    'bbot': False, # disable bbot test
 	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
 	'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
 	'dnsx': 'wikipedia.org',
@@ -17,6 +18,7 @@ INPUTS_TASKS = {
     'gitleaks': str(ROOT_FOLDER),
 	'gospider': 'https://danielmiessler.com/',
 	'grype': 'redis:7.4.1',
+    'httpx': 'http://localhost:3000/',
 	'h8mail': 'test@test.com',
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',

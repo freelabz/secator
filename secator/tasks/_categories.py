@@ -73,19 +73,19 @@ OPTS_VULN = [
 
 class Http(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
-	input_type = URL
+	input_types = [URL]
 	output_types = [Url]
 
 
 class HttpCrawler(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
-	input_type = URL
+	input_types = [URL]
 	output_types = [Url]
 
 
 class HttpFuzzer(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
-	input_type = URL
+	input_types = [URL]
 	output_types = [Url]
 
 
@@ -99,22 +99,22 @@ class Recon(Command):
 
 
 class ReconDns(Recon):
-	input_type = HOST
+	input_types = [HOST]
 	output_types = [Subdomain]
 
 
 class ReconUser(Recon):
-	input_type = USERNAME
+	input_types = [USERNAME]
 	output_types = [UserAccount]
 
 
 class ReconIp(Recon):
-	input_type = CIDR_RANGE
+	input_types = [CIDR_RANGE]
 	output_types = [Ip]
 
 
 class ReconPort(Recon):
-	input_type = IP
+	input_types = [IP]
 	output_types = [Port]
 
 
@@ -434,15 +434,15 @@ class Vuln(Command):
 
 
 class VulnHttp(Vuln):
-	input_type = HOST
+	input_types = [HOST]
 
 
 class VulnCode(Vuln):
-	input_type = PATH
+	input_types = [PATH]
 
 
 class VulnMulti(Vuln):
-	input_type = HOST
+	input_types = [HOST]
 	output_types = [Vulnerability]
 
 
@@ -451,7 +451,7 @@ class VulnMulti(Vuln):
 #--------------#
 
 class Tagger(Command):
-	input_type = URL
+	input_types = [URL]
 	output_types = [Tag]
 
 #----------------#
