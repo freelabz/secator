@@ -921,7 +921,7 @@ def health(json_, debug, strict, bleeding):
 				messages.append(message)
 				info['upgrade'] = True
 				info['next_version'] = info['latest_version']
-	
+
 			elif info['bleeding']:
 				msg = 'latest' if bleeding else 'supported'
 				message = (
@@ -961,7 +961,7 @@ def health(json_, debug, strict, bleeding):
 	upgrade_cmd = ' && '.join(cmds)
 	console.print('') if not json_ else None
 	if upgrade_cmd:
-		console.print(Info(message=f'Run the following to upgrade secator and tools:')) if not json_ else None
+		console.print(Info(message='Run the following to upgrade secator and tools:')) if not json_ else None
 		if json_:
 			print(json.dumps({'upgrade_cmd': upgrade_cmd}))
 		else:

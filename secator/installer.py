@@ -440,7 +440,7 @@ def parse_version(ver):
 		return None
 
 
-def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, recommended_version=None, version=None):
+def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, recommended_version=None, version=None):  # noqa: E501
 	"""Get version info for a command.
 
 	Args:
@@ -507,7 +507,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 							info['latest_version'] = latest_version
 							info['source'] = 'pypi'
 			else:
-				info['errors'].append(f'Cannot get latest version for query method (github, pip) is available')
+				info['errors'].append('Cannot get latest version for query method (github, pip) is available')
 
 	# Get current version
 	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag
