@@ -440,7 +440,7 @@ def parse_version(ver):
 		return None
 
 
-def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, recommended_version=None, version=None):  # noqa: E501
+def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, install_version=None, version=None, bleeding=False):  # noqa: E501
 	"""Get version info for a command.
 
 	Args:
@@ -448,7 +448,9 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		version_flag (str): Version flag.
 		install_github_handle (str): Github handle.
 		install_cmd (str): Install command.
+		install_version (str): Install version.
 		version (str): Existing version.
+		bleeding (bool): Bleeding edge.
 
 	Return:
 		dict: Version info.
@@ -460,7 +462,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		'version': version,
 		'version_cmd': None,
 		'latest_version': None,
-		'recommended_version': None,
+		'install_version': None,
 		'location': None,
 		'status': '',
 		'outdated': False,
@@ -478,15 +480,15 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 	info['location'] = location
 	info['installed'] = True
 
-	# Get recommended version
-	if recommended_version:
-		ver = parse_version(recommended_version)
+	# Get latest / recommanded version
+	latest_version = None
+	if install_version and not bleeding:
+		ver = parse_version(install_version)
 		info['latest_version'] = str(ver)
-		info['recommended_version'] = str(ver)
+		info['install_version'] = str(ver)
 		info['source'] = 'supported'
 		latest_version = str(ver)
 	else:
-		# Get latest version
 		latest_version = None
 		if not CONFIG.offline_mode:
 			if install_github_handle:
@@ -504,10 +506,10 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 						if ver and not ver.is_prerelease:
 							version = max(version, ver)
 							latest_version = str(version)
-							info['latest_version'] = latest_version
 							info['source'] = 'pypi'
 			else:
 				info['errors'].append('Cannot get latest version for query method (github, pip) is available')
+	info['latest_version'] = f'v{latest_version}' if install_version and install_version.startswith('v') else latest_version
 
 	# Get current version
 	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag
@@ -533,10 +535,10 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		else:
 			info['status'] = 'bleeding'
 			info['bleeding'] = True
-			if recommended_version:
-				info['errors'].append(f'Version {version} is superior to the latest recommended version {recommended_version}')
+			if install_version:
+				info['errors'].append(f'Version {version} is greather than the latest recommended version {install_version}')
 			else:
-				info['errors'].append(f'Version {version} is superior to the latest version {latest_version}')
+				info['errors'].append(f'Version {version} is greather than the latest version {latest_version}')
 	elif not version:
 		info['status'] = 'current unknown'
 	elif not latest_version:
@@ -608,6 +610,8 @@ def fmt_health_table_row(version_info, category=None):
 	status = version_info['status']
 	installed = version_info['installed']
 	latest_version = version_info['latest_version']
+	if latest_version:
+		latest_version = latest_version.lstrip('v')
 	source = version_info.get('source')
 	name_str = f'[magenta]{name:<13}[/]'
 

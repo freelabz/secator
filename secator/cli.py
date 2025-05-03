@@ -891,7 +891,7 @@ def health(json_, debug, strict, bleeding):
 				print(json.dumps(info))
 
 	# Check tools
-	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]') if not json_ else None
+	console.print('\n:wrench: [bold gold3]Checking tools ...[/]') if not json_ else None
 	table = get_health_table()
 	error = False
 	contextmanager = Live(table, console=console) if not json_ else nullcontext()
@@ -903,7 +903,8 @@ def health(json_, debug, strict, bleeding):
 				tool.version_flag or f'{tool.opt_prefix}version',
 				tool.install_github_handle,
 				tool.install_cmd,
-				tool.install_version if not bleeding else None
+				tool.install_version,
+				bleeding=bleeding
 			)
 			info['_name'] = tool.__name__
 			info['_type'] = 'tool'

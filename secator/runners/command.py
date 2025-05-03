@@ -250,7 +250,8 @@ class Command(Runner):
 			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
 			cls.install_github_handle,
-			cls.install_cmd
+			cls.install_cmd,
+			cls.install_version
 		)
 
 	@classmethod
