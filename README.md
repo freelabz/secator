@@ -21,7 +21,8 @@
   <a href="#supported-commands">Supported commands</a> •
   <a href="#install-secator">Installation</a> •
   <a href="#usage">Usage</a> •
-  <a href="https://docs.freelabz.com">Documentation</a>
+  <a href="https://docs.freelabz.com">Documentation</a>  •
+  <a href="https://discord.gg/nyHjC2aTrq">Join us on Discord !</a>
 </p>
 
 `secator` is a task and workflow runner used for security assessments. It supports dozens of well-known security tools
