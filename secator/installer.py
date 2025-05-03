@@ -509,7 +509,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 							info['source'] = 'pypi'
 			else:
 				info['errors'].append('Cannot get latest version for query method (github, pip) is available')
-	info['latest_version'] = f'v{latest_version}' if install_version and install_version.startswith('v') else latest_version
+	info['latest_version'] = f'v{latest_version}' if install_version and install_version.startswith('v') else latest_version  # noqa: E501
 
 	# Get current version
 	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag
