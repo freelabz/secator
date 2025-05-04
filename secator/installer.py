@@ -539,7 +539,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 			info['status'] = 'bleeding'
 			info['bleeding'] = True
 			if install_version:
-				info['errors'].append(f'Version {version} is greather than the latest recommended version {latest_version}')
+				info['errors'].append(f'Version {version} is greather than the recommended version {latest_version}')
 			else:
 				info['errors'].append(f'Version {version} is greather than the latest version {latest_version}')
 	elif not version:
