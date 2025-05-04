@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.0](https://github.com/freelabz/secator/compare/v0.14.0...v0.15.0) (2025-05-04)
+
+
+### Features
+
+* improve cli usage and add multi input types ([#609](https://github.com/freelabz/secator/issues/609)) ([b850914](https://github.com/freelabz/secator/commit/b8509141e62dfd72e0b4f15c2b9b5466089e9818))
+
+
+### Bug Fixes
+
+* installer issue on non-standard distribs ([#613](https://github.com/freelabz/secator/issues/613)) ([194e911](https://github.com/freelabz/secator/commit/194e911b420fcbb0feec3b563a098a3f36cc09cd))
+
 ## [0.14.0](https://github.com/freelabz/secator/compare/v0.13.0...v0.14.0) (2025-04-30)
 
 
