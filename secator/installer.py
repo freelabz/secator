@@ -47,6 +47,7 @@ class InstallerStatus(Enum):
 @dataclass
 class Distribution:
 	name: str
+	system: str
 	pm_name: str
 	pm_installer: str
 	pm_finalizer: str
@@ -189,6 +190,8 @@ class SourceInstaller:
 			install_cmd = config
 		else:
 			distribution = get_distro_config()
+			if not distribution.pm_installer:
+				return InstallerStatus.UNKNOWN_DISTRIBUTION
 			for distros, command in config.items():
 				if distribution.name in distros.split("|") or distros == '*':
 					install_cmd = command
@@ -562,7 +565,7 @@ def get_distro_config():
 	distrib = system
 
 	if system == "Linux":
-		distrib = distro.id() or distro.like()
+		distrib = distro.like() or distro.id()
 
 		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
 			installer = "apt install -y --no-install-recommends"
@@ -592,12 +595,16 @@ def get_distro_config():
 		else:
 			installer = "scoop"  # Alternative package manager for Windows
 
-	manager = installer.split(' ')[0]
+	if not installer:
+		console.print(Error(message=f'Could not find installer for your distribution (system: {system}, distrib: {distrib})'))  # noqa: E501
+
+	manager = installer.split(' ')[0] if installer else ''
 	config = Distribution(
 		pm_installer=installer,
 		pm_finalizer=finalizer,
 		pm_name=manager,
-		name=distrib
+		name=distrib,
+		system=system
 	)
 	return config
 
