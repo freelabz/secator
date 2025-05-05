@@ -10,7 +10,7 @@ echo ""
 echo "Outdated lines:"
 echo "$outdated"
 
-tool_version=$(echo "$outdated" | sed -n 's/.*\[WRN\] \([^ ]*\) is .* latest:\([^)]*\)\.*)\./\1 \2/p')
+tool_version=$(echo "$outdated" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2};?)?)?[mGK]//g" | sed -n 's/.*\[WRN\] \([^ ]*\) is .* latest:\([^)]*\)\.*)\./\1 \2/p')
 echo ""
 echo "Tool versions to update:"
 echo "$tool_version"
