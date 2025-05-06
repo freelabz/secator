@@ -2,8 +2,6 @@ secator health --bleeding 1> to_install.sh 2> output.log
 chmod +x to_install.sh
 ./to_install.sh
 
-echo "changes_made=false" >> $GITHUB_OUTPUT
-
 echo "Parsing health check output..."
 outdated=$(grep -E 'is outdated' output.log)
 echo ""
@@ -15,6 +13,7 @@ echo ""
 echo "Tool versions to update:"
 echo "$tool_version"
 
+changes_made=no
 while read -r tool version; do
   echo "Processing update for '$tool' to version '$version'"
   file_path="secator/tasks/${tool}.py" # Construct file path
@@ -24,7 +23,7 @@ while read -r tool version; do
     sed -i "s|install_version = '.*'|install_version = '${version}'|" "$file_path"
     if ! git diff --quiet "$file_path"; then
         echo "File $file_path updated successfully."
-        echo "changes_made=true" >> $GITHUB_OUTPUT
+        changes_made=true
     else
         echo "Warning: sed command did not modify $file_path as expected."
     fi
@@ -32,3 +31,5 @@ while read -r tool version; do
     echo "Warning: Task file $file_path not found for tool '$tool'."
   fi
 done <<< "$tool_version"
+
+echo "changes_made=$changes_made" >> "$GITHUB_OUTPUT

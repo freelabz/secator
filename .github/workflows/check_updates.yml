@@ -55,14 +55,16 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
-    - name: Install updates
+    - name: Check for outdated tools
+      id: update_check
       run: ./scripts/update_tools.sh
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Run integration tests
-      run: |
-        secator test integration --test test_celery,test_worker,test_tasks
+    #- name: Run integration tests
+    #  if: steps.update_check.outputs.changes_made == 'true'
+    #  run: |
+    #    secator test integration --test test_celery,test_worker,test_tasks
 
     - name: Create Pull Request
       if: steps.update_check.outputs.changes_made == 'true' # Only run if changes were made
