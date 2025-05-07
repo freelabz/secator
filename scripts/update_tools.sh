@@ -32,4 +32,4 @@ while read -r tool version; do
   fi
 done <<< "$tool_version"
 
-echo "changes_made=$changes_made" >> "$GITHUB_OUTPUT
+echo "changes_made=$changes_made" >> $GITHUB_OUTPUT
