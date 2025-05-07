@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/freelabz/secator/compare/v0.15.0...v0.16.0) (2025-05-07)
+
+
+### Features
+
+* update on_item to process all output types ([#615](https://github.com/freelabz/secator/issues/615)) ([48f9dd3](https://github.com/freelabz/secator/commit/48f9dd319fa78d5cf707f5d741ee724cee586cf5))
+
 ## [0.15.0](https://github.com/freelabz/secator/compare/v0.14.0...v0.15.0) (2025-05-04)
 
 
