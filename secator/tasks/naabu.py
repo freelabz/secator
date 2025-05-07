@@ -74,6 +74,7 @@ class naabu(ReconPort):
 
 	@staticmethod
 	def on_item(self, item):
-		if item.host == '127.0.0.1':
-			item.host = 'localhost'
+		if isinstance(item, Port):
+			if item.host == '127.0.0.1':
+				item.host = 'localhost'
 		return item

@@ -86,6 +86,8 @@ class searchsploit(Command):
 
 	@staticmethod
 	def on_item(self, item):
+		if not isinstance(item, Exploit):
+			return item
 		match = SEARCHSPLOIT_TITLE_REGEX.match(item.name)
 		# if not match:
 		# 	self._print(f'[bold red]{item.name} ({item.reference}) did not match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
