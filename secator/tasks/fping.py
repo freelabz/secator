@@ -31,7 +31,7 @@ class fping(ReconIp):
 	input_types = [IP]
 	output_types = [Ip]
 	install_github_handle = 'schweikert/fping'
-	install_version = 'v5.1'
+	install_version = 'v5.3'
 	install_pre = {'*': ['fping']}
 	ignore_return_code = True
 
