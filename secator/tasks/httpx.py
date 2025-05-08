@@ -9,6 +9,7 @@ from secator.output_types import Url, Subdomain
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
 from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
+from secator.utils import headers_to_dict
 
 
 @task()
@@ -79,7 +80,13 @@ class httpx(Http):
 	profile = 'io'
 
 	@staticmethod
-	def on_init(self):
+	def before_init(self):
+		header_opt = self.get_opt_value('header')
+		headers = headers_to_dict(header_opt)
+		self.headers = headers
+
+	@staticmethod
+	def on_cmd(self):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
@@ -90,6 +97,12 @@ class httpx(Http):
 		if screenshot:
 			self.cmd += ' -esb -ehb'
 		self.domains = []
+
+		# Add headers to the command
+		for k, v in self.headers.items():
+			header_str = f" -header '{k}: {v}'"
+			if f'{k}:{v}'.replace(' ', '') not in self.cmd.replace(' ', ''):
+				self.cmd += header_str
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -133,6 +146,7 @@ class httpx(Http):
 			elif k == URL:
 				item[k] = sanitize_url(v)
 		item[URL] = item.get('final_url') or item[URL]
+		item['headers'] = self.headers
 		return item
 
 	def _create_subdomain_from_tls_cert(self, domain, url):

@@ -816,3 +816,13 @@ def convert_functions_to_strings(data):
 		return json.dumps(data.__name__)  # or use inspect.getsource(data) if you want the actual function code
 	else:
 		return data
+
+
+def headers_to_dict(header_opt):
+	headers = {}
+	for header in header_opt.split(';;'):
+		split = header.strip().split(':')
+		key = split[0].strip()
+		val = ':'.join(split[1:]).strip()
+		headers[key] = val
+	return headers

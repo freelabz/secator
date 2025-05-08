@@ -79,16 +79,22 @@ def process_extractor(results, extractor, ctx={}):
 		_field = extractor.get('field')
 		_condition = extractor.get('condition', 'True')
 	else:
-		_type, _field = tuple(extractor.split('.'))
-		_condition = 'True'
-	items = [
+		parts = tuple(extractor.split('.'))
+		if len(parts) == 2:
+			_type = parts[0]
+			_field = parts[1]
+			_condition = 'True'
+		else:
+			return results
+	results = [
 		item for item in results if item._type == _type and eval(_condition)
 	]
 	if _field:
-		_field = '{' + _field + '}' if not _field.startswith('{') else _field
-		items = [_field.format(**item.toDict()) for item in items]
-	debug('after extract', obj={'items': items}, sub='extractor')
-	return items
+		already_formatted = '{' in _field and '}' in _field
+		_field = '{' + _field + '}' if not already_formatted else _field
+		results = [_field.format(**item.toDict()) for item in results]
+	debug('after extract', obj={'results': results}, sub='extractor')
+	return results
 
 
 def get_task_folder_id(path):

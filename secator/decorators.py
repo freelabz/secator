@@ -251,7 +251,7 @@ def decorate_command_options(opts):
 					conf['help'] = conf['help'].replace(opt_name, f'{opt_name} / {opposite}')
 				else:
 					long += f'/--no-{opt_name}'
-					short += f'/-n{short_opt}' if short else f'/-n{opt_name}'
+					short += f'/-n{short_opt}' if short_opt else f'/-n{opt_name}'
 			f = click.option(long, short, **conf)(f)
 		return f
 	return decorator
