@@ -79,4 +79,8 @@ class Url(OutputType):
 			s += rf' \[[magenta]{cl}[/]]'
 		if self.screenshot_path:
 			s += rf' \[[magenta]{_s(self.screenshot_path)}[/]]'
+		if self.headers:
+			for k, v in self.headers.items():
+				if k != 'User-Agent':
+					s += rf' \[[gold3]{k}: {v}[/]]'
 		return rich_to_ansi(s)
