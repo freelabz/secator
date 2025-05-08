@@ -25,6 +25,7 @@ RUNNER_OPTS = {
 	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.runners.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
 	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
 	'show': {'is_flag': True, 'short': 'yml', 'default': False, 'help': 'Show runner yaml'},
+	'version': {'is_flag': True, 'help': 'Show version'},
 }
 
 RUNNER_GLOBAL_OPTS = {
@@ -32,7 +33,7 @@ RUNNER_GLOBAL_OPTS = {
 	'worker': {'is_flag': True, 'default': False, 'help': 'Run tasks in worker'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
 	'proxy': {'type': str, 'help': 'HTTP proxy'},
-	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'}
+	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'},
 	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 }
 
@@ -334,6 +335,8 @@ def register_runner(cli_endpoint, config):
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, **opts):
+		console = _get_rich_console()
+		version = opts['version']
 		sync = opts['sync']
 		worker = opts.pop('worker')
 		ws = opts.pop('workspace')
@@ -342,6 +345,18 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		show = opts['show']
 		context = {'workspace_name': ws}
+
+		# Show version
+		if version:
+			data = task_cls.get_version_info()
+			current = data['version']
+			latest = data['latest_version']
+			installed = data['installed']
+			if not installed:
+				console.print(f'[bold red]{task_cls.__name__} is not installed.[/]')
+			else:
+				console.print(f'{task_cls.__name__} version: [bold green]{current}[/] (recommended: [bold green]{latest}[/])')
+			sys.exit(0)
 
 		# Show runner yaml
 		if show:
@@ -365,7 +380,6 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = []
 		drivers = driver.split(',') if driver else []
-		console = _get_rich_console()
 		supported_drivers = ['mongodb', 'gcs']
 		for driver in drivers:
 			if driver in supported_drivers:
