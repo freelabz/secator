@@ -498,6 +498,7 @@ def extract_domain_info(input, domain_only=False):
 
 	Args:
 		input (str): An URL or FQDN.
+		domain_only (bool): Return only the registered domain name.
 
 	Returns:
 		tldextract.ExtractResult: Extracted info.

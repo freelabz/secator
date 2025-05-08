@@ -34,7 +34,7 @@ def clear_task_running():
     lock_file = get_lock_file_path()
     if lock_file.exists():
         lock_file.unlink()
-        
+
 
 def is_task_running():
     """Check if a task is currently running"""
