@@ -117,6 +117,6 @@ class ffuf(HttpFuzzer):
 		if isinstance(item, Url):
 			item.method = self.get_opt_value(METHOD) or 'GET'
 			item.headers = self.headers.copy()
-			if 'FUZZ' in self.headers.get('Host'):
+			if 'FUZZ' in self.headers.get('Host', ''):
 				item.headers['Host'] = self.current_host
 		return item
