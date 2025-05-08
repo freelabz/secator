@@ -12,7 +12,7 @@
 <a href="https://pypi.org/project/secator/"><img src="https://img.shields.io/pypi/dm/secator"></a>
 <a href="https://twitter.com/freelabz"><img src="https://img.shields.io/twitter/follow/freelabz.svg?logo=twitter"></a>
 <a href="https://youtube.com/@FreeLabz"><img src="https://img.shields.io/youtube/channel/subscribers/UCu-F6SpU0h2NP18zBBP04cw?style=social&label=Subscribe%20%40FreeLabz"></a>
-<!-- <a href="https://discord.gg/freelabz"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a> -->
+<a href="https://discord.gg/nyHjC2aTrq"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a>
 </p>
 
 
@@ -21,7 +21,8 @@
   <a href="#supported-commands">Supported commands</a> •
   <a href="#install-secator">Installation</a> •
   <a href="#usage">Usage</a> •
-  <a href="https://docs.freelabz.com">Documentation</a>
+  <a href="https://docs.freelabz.com">Documentation</a>  •
+  <a href="https://discord.gg/nyHjC2aTrq">Join us on Discord !</a>
 </p>
 
 `secator` is a task and workflow runner used for security assessments. It supports dozens of well-known security tools
@@ -52,6 +53,11 @@ and it is designed to improve productivity for pentesters and security researche
 
 | Name                                                          | Description                                                                    | Category        |
 |---------------------------------------------------------------|--------------------------------------------------------------------------------|-----------------|
+| [arjun](https://github.com/s0md3v/Arjun)                      | HTTP Parameter Discovery Suite.                                                |                 |
+| [gitleaks](https://github.com/gitleaks/gitleaks)              | Tool for detecting secrets like passwords, API keys, tokens, etc.              |                 |
+| [testssl](https://github.com/testssl/testssl.sh)              | SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws.|                 |
+| [wafw00f](https://github.com/EnableSecurity/wafw00f)          | Web Application Firewall Fingerprinting tool.                                  |                 |
+| [wpprobe](https://github.com/Chocapikk/wpprobe)               | Fast wordpress plugin enumeration tool.                                        |                 |
 | [httpx](https://github.com/projectdiscovery/httpx)            | Fast HTTP prober.                                                              | `http`          |
 | [cariddi](https://github.com/edoardottt/cariddi)              | Fast crawler and endpoint secrets / api keys / tokens matcher.                 | `http/crawler`  |
 | [gau](https://github.com/lc/gau)                              | Offline URL crawler (Alien Vault, The Wayback Machine, Common Crawl, URLScan). | `http/crawler`  |
@@ -69,6 +75,7 @@ and it is designed to improve productivity for pentesters and security researche
 | [naabu](https://github.com/projectdiscovery/naabu)            | Fast port discovery tool.                                                      | `recon/port`    |
 | [maigret](https://github.com/soxoj/maigret)                   | Hunt for user accounts across many websites.                                   | `recon/user`    |
 | [gf](https://github.com/tomnomnom/gf)                         | A wrapper around grep to avoid typing common patterns.                         | `tagger`        |
+| [trivy](https://github.com/aquasecurity/trivy)                | Comprehensive and versatile security scanner.                                  | `vuln`          |
 | [grype](https://github.com/anchore/grype)                     | A vulnerability scanner for container images and filesystems.                  | `vuln/code`     |
 | [dalfox](https://github.com/hahwul/dalfox)                    | Powerful XSS scanning tool and parameter analyzer.                             | `vuln/http`     |
 | [msfconsole](https://docs.rapid7.com/metasploit/msf-overview) | CLI to access and work with the Metasploit Framework.                          | `vuln/http`     |

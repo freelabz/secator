@@ -1,71 +1,71 @@
 {
-    "info": {
-        "args": "/home/vagrant/.secator/bin/dirsearch -q -o /home/vagrant/secator/tests/fixtures/dirsearch_output.json -u http://localhost:3000/ --format json --header User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1 --max-recursion-depth 2 --follow-redirects --include-status 200 --http-method GET --max-rate 10000 --threads 50 --user-agent Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1",
-        "time": "Tue Apr  4 09:46:23 2023"
+  "info": {
+    "args": "/home/vagrant/.secator/bin/dirsearch -q -o /home/vagrant/secator/tests/fixtures/dirsearch_output.json -u http://localhost:3000/ --format json --header User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1 --max-recursion-depth 2 --follow-redirects --include-status 200 --http-method GET --max-rate 10000 --threads 50 --user-agent Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1",
+    "time": "Tue Apr  4 09:46:23 2023"
+  },
+  "results": [
+    {
+      "content-length": 403,
+      "content-type": "text/plain",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/.well-known/security.txt"
     },
-    "results": [
-        {
-            "content-length": 403,
-            "content-type": "text/plain",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/.well-known/security.txt"
-        },
-        {
-            "content-length": 3103,
-            "content-type": "text/html",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/api-docs/"
-        },
-        {
-            "content-length": 11081,
-            "content-type": "text/html",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/ftp"
-        },
-        {
-            "content-length": 399134,
-            "content-type": "application/javascript",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/main.js"
-        },
-        {
-            "content-length": 23627,
-            "content-type": "text/plain",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/metrics"
-        },
-        {
-            "content-length": 23570,
-            "content-type": "text/plain",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/metrics/"
-        },
-        {
-            "content-length": 28,
-            "content-type": "text/plain",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/robots.txt"
-        },
-        {
-            "content-length": 403,
-            "content-type": "text/plain",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/security.txt"
-        },
-        {
-            "content-length": 10075518,
-            "content-type": "video/mp4",
-            "redirect": "",
-            "status": 200,
-            "url": "http://localhost:3000/video"
-        }
-    ]
+    {
+      "content-length": 3103,
+      "content-type": "text/html",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/api-docs/"
+    },
+    {
+      "content-length": 11081,
+      "content-type": "text/html",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/ftp"
+    },
+    {
+      "content-length": 399134,
+      "content-type": "application/javascript",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/main.js"
+    },
+    {
+      "content-length": 23627,
+      "content-type": "text/plain",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/metrics"
+    },
+    {
+      "content-length": 23570,
+      "content-type": "text/plain",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/metrics/"
+    },
+    {
+      "content-length": 28,
+      "content-type": "text/plain",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/robots.txt"
+    },
+    {
+      "content-length": 403,
+      "content-type": "text/plain",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/security.txt"
+    },
+    {
+      "content-length": 10075518,
+      "content-type": "video/mp4",
+      "redirect": "",
+      "status": 200,
+      "url": "http://localhost:3000/video"
+    }
+  ]
 }

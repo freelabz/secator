@@ -65,16 +65,6 @@ def setup_idle_timer(timeout):
     timer.start()
 
 
-def maybe_override_logging():
-    def decorator(func):
-        if CONFIG.celery.override_default_logging:
-            return signals.setup_logging.connect(func)
-        else:
-            return func
-    return decorator
-
-
-@maybe_override_logging()
 def setup_logging(*args, **kwargs):
     """Override celery's logging setup to prevent it from altering our settings.
     github.com/celery/celery/issues/1867
@@ -134,8 +124,9 @@ def worker_shutdown_handler(**kwargs):
 
 
 def setup_handlers():
+    if CONFIG.celery.override_default_logging:
+        signals.setup_logging.connect(setup_logging)
     signals.celeryd_after_setup.connect(capture_worker_name)
-    signals.setup_logging.connect(setup_logging)
     signals.task_prerun.connect(task_prerun_handler)
     signals.task_postrun.connect(task_postrun_handler)
     signals.task_revoked.connect(task_revoked_handler)

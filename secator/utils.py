@@ -164,7 +164,8 @@ def discover_internal_tasks():
 	# Sort task_classes by category
 	task_classes = sorted(
 		task_classes,
-		key=lambda x: (get_command_category(x), x.__name__))
+		# key=lambda x: (get_command_category(x), x.__name__)
+		key=lambda x: x.__name__)
 
 	return task_classes
 
@@ -262,9 +263,9 @@ def get_command_category(command):
 	Returns:
 		str: Command category.
 	"""
-	base_cls = command.__bases__[0].__name__.replace('Command', '').replace('Runner', 'misc')
-	category = re.sub(r'(?<!^)(?=[A-Z])', '/', base_cls).lower()
-	return category
+	if not command.tags:
+		return 'misc'
+	return '/'.join(command.tags)
 
 
 def merge_opts(*options):
@@ -309,6 +310,8 @@ def pluralize(word):
 	"""
 	if word.endswith('y'):
 		return word.rstrip('y') + 'ies'
+	elif word.endswith('s'):
+		return word + 'es'
 	return f'{word}s'
 
 
@@ -373,11 +376,15 @@ def rich_to_ansi(text):
 	Returns:
 		str: Converted text (ANSI).
 	"""
-	from rich.console import Console
-	tmp_console = Console(file=None, highlight=False)
-	with tmp_console.capture() as capture:
-		tmp_console.print(text, end='', soft_wrap=True)
-	return capture.get()
+	try:
+		from rich.console import Console
+		tmp_console = Console(file=None, highlight=False)
+		with tmp_console.capture() as capture:
+			tmp_console.print(text, end='', soft_wrap=True)
+		return capture.get()
+	except Exception:
+		console.print(f'[bold red]Could not convert rich text to ansi: {text}[/]', highlight=False, markup=False)
+		return text
 
 
 def rich_escape(obj):
@@ -414,14 +421,15 @@ def format_object(obj, obj_breaklines=False):
 
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
-		return
-
-	if sub:
-		if verbose and sub not in DEBUG_COMPONENT:
-			sub = f'debug.{sub}'
-		if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+	if not DEBUG_COMPONENT == ['all']:
+		if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
 			return
+
+		if sub:
+			if verbose and sub not in DEBUG_COMPONENT:
+				sub = f'debug.{sub}'
+			if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+				return
 
 	if lazy:
 		msg = lazy(msg)
@@ -457,6 +465,10 @@ def escape_mongodb_url(url):
 		user, password = quote(user), quote(password)
 		return f'mongodb://{user}:{password}@{url}'
 	return url
+
+
+def caml_to_snake(s):
+	return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
 
 
 def print_version():
@@ -640,6 +652,8 @@ def should_update(update_frequency, last_updated=None, timestamp=None):
 	"""
 	if not timestamp:
 		timestamp = time()
+	if update_frequency == -1:
+		return False
 	if last_updated and (timestamp - last_updated) < update_frequency:
 		return False
 	return True
@@ -771,8 +785,9 @@ def process_wordlist(val):
 		val = default_wordlist
 	template_wordlist = getattr(CONFIG.wordlists.templates, val)
 	if template_wordlist:
-		return template_wordlist
-	elif Path(val).exists():
+		val = template_wordlist
+
+	if Path(val).exists():
 		return val
 	else:
 		return download_file(

@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (DELAY, DOMAIN, OPT_NOT_SUPPORTED, PROXY,
+from secator.definitions import (DELAY, DOMAIN, HOST, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secator.output_types import Subdomain
 from secator.serializers import JSONSerializer
@@ -9,7 +9,9 @@ from secator.tasks._categories import ReconDns
 @task()
 class subfinder(ReconDns):
 	"""Fast passive subdomain enumeration tool."""
-	cmd = 'subfinder -silent -cs'
+	cmd = 'subfinder -cs'
+	tags = ['dns', 'recon']
+	input_types = [HOST]
 	file_flag = '-dL'
 	input_flag = '-d'
 	json_flag = '-json'
@@ -31,7 +33,8 @@ class subfinder(ReconDns):
 		}
 	}
 	output_types = [Subdomain]
-	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
+	install_version = 'v2.7.0'
+	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@[install_version]'
 	install_github_handle = 'projectdiscovery/subfinder'
 	proxychains = False
 	proxy_http = True

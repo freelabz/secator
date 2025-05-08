@@ -10,15 +10,17 @@ from secator.tasks._categories import ReconIp
 @task()
 class mapcidr(ReconIp):
 	"""Utility program to perform multiple operations for a given subnet/cidr ranges."""
-	cmd = 'mapcidr -silent'
+	cmd = 'mapcidr'
+	tags = ['ip', 'recon']
 	input_flag = '-cidr'
 	file_flag = '-cl'
 	install_pre = {
 		'apk': ['libc6-compat']
 	}
-	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest'
+	install_version = 'v1.1.34'
+	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@[install_version]'
 	install_github_handle = 'projectdiscovery/mapcidr'
-	input_type = CIDR_RANGE
+	input_types = [CIDR_RANGE]
 	output_types = [Ip]
 	opt_key_map = {
 		THREADS: OPT_NOT_SUPPORTED,

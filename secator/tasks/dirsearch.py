@@ -9,7 +9,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DELAY, DEPTH,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
-							   THREADS, TIMEOUT, USER_AGENT, WORDLIST)
+							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL)
 from secator.output_types import Url, Info, Error
 from secator.tasks._categories import HttpFuzzer
 
@@ -18,6 +18,8 @@ from secator.tasks._categories import HttpFuzzer
 class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
 	cmd = 'dirsearch'
+	tags = ['url', 'fuzz']
+	input_types = [URL]
 	input_flag = '-u'
 	file_flag = '-l'
 	json_flag = '-O json'
@@ -52,7 +54,7 @@ class dirsearch(HttpFuzzer):
 			STATUS_CODE: 'status'
 		}
 	}
-	install_cmd = 'pipx install --force git+https://github.com/maurosoria/dirsearch'
+	install_cmd = 'pipx install git+https://github.com/maurosoria/dirsearch.git --force'
 	proxychains = True
 	proxy_socks5 = True
 	proxy_http = True

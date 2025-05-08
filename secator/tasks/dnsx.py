@@ -12,8 +12,11 @@ from secator.utils import extract_domain_info, process_wordlist
 class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -silent -resp -recon'
+	cmd = 'dnsx -resp -recon'
+	tags = ['dns', 'fuzz']
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
+	input_types = [HOST]
 	file_flag = OPT_PIPE_INPUT
 	output_types = [Record, Ip, Subdomain]
 	opt_key_map = {
@@ -28,7 +31,8 @@ class dnsx(ReconDns):
 		WORDLIST: {'type': str, 'short': 'w', 'default': None, 'process': process_wordlist, 'help': 'Wordlist to use'},  # noqa: E501
 	}
 	item_loaders = [JSONSerializer()]
-	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
+	install_version = 'v1.2.2'
+	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
 	install_github_handle = 'projectdiscovery/dnsx'
 	profile = 'io'
 

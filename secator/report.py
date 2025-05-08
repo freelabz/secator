@@ -15,7 +15,7 @@ def remove_duplicates(objects):
 	lock = Lock()
 
 	def add_if_unique(obj):
-		nonlocal unique_objects
+		nonlocal unique_objects  # noqa: F824
 		with lock:
 			# Perform linear search to check for duplicates
 			if all(obj != existing_obj for existing_obj in unique_objects):
@@ -38,7 +38,7 @@ class Report:
 		exporters (list): List of exporter classes.
 	"""
 	def __init__(self, runner, title=None, exporters=[]):
-		self.title = title or f'{runner.__class__.__name__.lower()}_{runner.config.name}'
+		self.title = title or f'{runner.config.type}_{runner.config.name}'
 		self.runner = runner
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
@@ -55,7 +55,7 @@ class Report:
 					f'{str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',
 				)
 
-	def build(self, extractors=[], dedupe=False):
+	def build(self, extractors=[], dedupe=CONFIG.runners.remove_duplicates):
 		# Trim options
 		from secator.decorators import DEFAULT_CLI_OPTIONS
 		opts = merge_opts(self.runner.config.options, self.runner.run_opts)
@@ -97,7 +97,7 @@ class Report:
 			if items:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))
-				if dedupe and CONFIG.runners.remove_duplicates:
+				if dedupe:
 					items = remove_duplicates(items)
 					# items = [item for item in items if not item._duplicate and item not in dedupe_from]
 				for extractor in extractors:

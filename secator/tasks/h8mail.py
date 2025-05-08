@@ -11,9 +11,10 @@ from secator.output_types import UserAccount, Info, Error
 class h8mail(OSInt):
 	"""Email information and password lookup tool."""
 	cmd = 'h8mail'
+	tags = ['user', 'recon', 'email']
 	json_flag = '--json '
 	input_flag = '--targets'
-	input_type = EMAIL
+	input_types = [EMAIL]
 	file_flag = '-domain'
 	version_flag = '--help'
 	opt_prefix = '--'
@@ -21,7 +22,8 @@ class h8mail(OSInt):
 		'config': {'type': str, 'help': 'Configuration file for API keys'},
 		'local_breach': {'type': str, 'short': 'lb', 'help': 'Local breach file'}
 	}
-	install_cmd = 'pipx install h8mail && pipx upgrade h8mail'
+	install_version = '2.5.6'
+	install_cmd = 'pipx install h8mail==[install_version] --force'
 
 	@staticmethod
 	def on_start(self):

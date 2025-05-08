@@ -32,6 +32,6 @@ RUN pipx install . && \
 	secator install addons mongodb && \
 	secator install addons redis && \
 	secator install addons dev
-RUN secator config set security.force_source_install true
-RUN secator install tools --cleanup
+RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi
+RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
 ENTRYPOINT ["secator"]

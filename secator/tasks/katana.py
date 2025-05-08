@@ -17,8 +17,10 @@ from secator.tasks._categories import HttpCrawler
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana'
+	tags = ['url', 'crawl']
 	file_flag = '-list'
 	input_flag = '-u'
+	input_types = [URL]
 	json_flag = '-jsonl'
 	opts = {
 		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
@@ -26,8 +28,8 @@ class katana(HttpCrawler):
 		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'},
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'},  # noqa: E501
 		'form_fill': {'is_flag': True, 'short': 'ff', 'help': 'Enable form filling'},
-		'js_crawl': {'is_flag': True, 'short': 'jc', 'default': True, 'help': 'Enable endpoint parsing / crawling in javascript file'},  # noqa: E501
-		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': True, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
+		'js_crawl': {'is_flag': True, 'short': 'jc', 'default': False, 'help': 'Enable endpoint parsing / crawling in javascript file'},  # noqa: E501
+		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': False, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
 		'known_files': {'type': str, 'short': 'kf', 'default': 'all', 'help': 'Enable crawling of known files (all, robotstxt, sitemapxml)'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
 		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'},
@@ -78,7 +80,8 @@ class katana(HttpCrawler):
 	install_pre = {
 		'apk': ['libc6-compat']
 	}
-	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
+	install_version = 'v1.1.3'
+	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@[install_version]'
 	install_github_handle = 'projectdiscovery/katana'
 	proxychains = False
 	proxy_socks5 = True
