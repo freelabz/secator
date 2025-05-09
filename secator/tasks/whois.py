@@ -5,7 +5,7 @@ import json
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
 								 HEADER, URL, FOLLOW_REDIRECT)
-from secator.output_types import Info
+from secator.output_types import Info, Domain
 from secator.runners import Command
 from secator.tasks._categories import OPTS
 from secator.utils import process_wordlist
@@ -31,6 +31,12 @@ class whois(Command):
 	@staticmethod
 	def item_loader(self, line):
 		data = json.loads(line)
-		yield Info(
-					message=data['name'],
+		yield Domain(
+					domain=data['name'],
+					registrar=data['registrar'],
+					creation_date=data['creation_date'],
+					expiration_date=data['expiration_date'],
+					registrant=data['registrant'],
+					extra_data={'emails':data['emails']}
 				)
+		

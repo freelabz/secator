@@ -1,4 +1,5 @@
 __all__ = [
+	'Domain',
 	'Error',
 	'OutputType',
 	'Info',
@@ -32,6 +33,8 @@ from secator.output_types.warning import Warning
 from secator.output_types.error import Error
 from secator.output_types.stat import Stat
 from secator.output_types.state import State
+from secator.output_types.domain import Domain
+
 
 EXECUTION_TYPES = [
 	Target, Progress, Info, Warning, Error, State
@@ -40,6 +43,6 @@ STAT_TYPES = [
 	Stat
 ]
 FINDING_TYPES = [
-	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate
+	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Domain
 ]
 OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES
