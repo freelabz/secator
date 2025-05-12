@@ -33,7 +33,7 @@ jobs:
       id: generate_tools_table
       run: source /opt/pipx/venvs/secator/bin/activate && python3 ./scripts/generate_tools_md_table.py
       env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Check if README.md changed
       id: check_readme
