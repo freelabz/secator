@@ -63,7 +63,7 @@ jobs:
 
     - name: Check for outdated tools
       id: update_check
-      run: python3 ./scripts/generate_tools_md_table.py
+      run: source ${HOME}/.local/pipx/venvs/secator/bin/activate && python3 ./scripts/generate_tools_md_table.py
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
