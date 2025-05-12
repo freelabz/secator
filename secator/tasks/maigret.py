@@ -43,6 +43,7 @@ class maigret(ReconUser):
 			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
 	}
+	install_version = '0.5.0a'
 	install_cmd = 'pipx install git+https://github.com/soxoj/maigret --force'
 	socks5_proxy = True
 	profile = 'io'
