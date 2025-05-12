@@ -78,12 +78,6 @@ jobs:
           echo "readme_changed=true" >> $GITHUB_OUTPUT
         fi
 
-    - name: Commit and push changes
-      if: ${{ github.event_name == 'pull_request' && steps.check_readme.outputs.readme_changed == 'true' }}
-      uses: stefanzweifel/git-auto-commit-action@v5
-      with:
-        commit_message: "chore(deps): update tools table in README"
-
     - name: Create Pull Request
       if: ${{ github.event_name == 'push' && steps.check_readme.outputs.readme_changed == 'true' }}
       uses: peter-evans/create-pull-request@v6
