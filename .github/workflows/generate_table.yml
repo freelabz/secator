@@ -1,0 +1,65 @@
+name: generate_table
+
+on:
+  push:
+    branches:
+    - release-please*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-table:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest"]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Generate tools table in README
+      id: generate_tools_table
+      run: source /opt/pipx/venvs/secator/bin/activate && python3 ./scripts/generate_tools_md_table.py
+      env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Check if README.md changed
+      id: check_readme
+      run: |
+        if git diff --quiet README.md; then
+          echo "readme_changed=false" >> $GITHUB_OUTPUT
+        else
+          echo "readme_changed=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Pull Request
+      if: ${{ github.event_name == 'push' && steps.check_readme.outputs.readme_changed == 'true' }}
+      uses: peter-evans/create-pull-request@v6
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }} # Or a PAT if you need to trigger other workflows
+        commit-message: "chore(deps): update tools table in README"
+        committer: GitHub <noreply@github.com>
+        author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+        signoff: false
+        branch: chore/update-tools-${{ github.run_id }}
+        delete-branch: true
+        title: 'Update tools table in README'
+        body: |
+          Automated updates for tools table in README.
+
+          Please review the changes and merge if appropriate.
+        labels: |
+          dependencies
+          automated

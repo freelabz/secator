@@ -18,6 +18,8 @@ concurrency:
 jobs:
   test-tasks:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -60,47 +62,3 @@ jobs:
         if [ $FAILED -eq 1 ]; then
           exit 1
         fi
-
-    - name: Generate tools table in README
-      id: generate_tools_table
-      run: source ${HOME}/.local/pipx/venvs/secator/bin/activate && python3 ./scripts/generate_tools_md_table.py
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Check if README.md changed
-      id: check_readme
-      run: |
-        if git diff --quiet README.md; then
-          echo "readme_changed=false" >> $GITHUB_OUTPUT
-        else
-          echo "readme_changed=true" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Commit and push changes
-      if: ${{ github.event_name == 'pull_request' && steps.check_readme.outputs.readme_changed == 'true' }}
-      run: |
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git config --global user.name "github-actions[bot]"
-        git add .
-        git commit -m "chore(deps): update tools table in README"
-        git push origin HEAD:${{ github.head_ref }}
-
-    - name: Create Pull Request
-      if: ${{ github.event_name == 'push' && steps.check_readme.outputs.readme_changed == 'true' }}
-      uses: peter-evans/create-pull-request@v6
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }} # Or a PAT if you need to trigger other workflows
-        commit-message: "chore(deps): update tools table in README"
-        committer: GitHub <noreply@github.com>
-        author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
-        signoff: false
-        branch: chore/update-tools-${{ github.run_id }}
-        delete-branch: true
-        title: 'Update tools table in README'
-        body: |
-          Automated updates for tools table in README.
-
-          Please review the changes and merge if appropriate.
-        labels: |
-          dependencies
-          automated
