@@ -10,6 +10,14 @@ README_FILENAME = "README.md"
 def get_tools_data():
     data = []
     hardcoded_urls = {
+        'bbot': 'https://github.com/blacklanternsecurity/bbot',
+        'bup': 'https://github.com/laluka/bypass-url-parser',
+        'gf': 'https://github.com/tomnomnom/gf',
+        'testssl': 'https://github.com/testssl/testssl.sh',
+        'wpscan': 'https://github.com/wpscanteam/wpscan',
+        'nmap': 'https://github.com/nmap/nmap',
+        'maigret': 'https://github.com/soxoj/maigret',
+        'h8mail': 'https://github.com/khast3x/h8mail',
         'fping': 'https://github.com/schweikert/fping',
         'msfconsole': 'https://docs.rapid7.com/metasploit/msf-overview/',
         'searchsploit': 'https://gitlab.com/exploit-database/exploitdb'
@@ -113,4 +121,6 @@ data = get_tools_data()
 md_table = generate_tools_table_markdown(data)
 with open('tools.md', 'w') as f:
     f.write(md_table)
-update_readme_table('../README.md', md_table)
+
+path = os.path.join(os.path.dirname(__file__), '../README.md')
+update_readme_table(path, md_table)
