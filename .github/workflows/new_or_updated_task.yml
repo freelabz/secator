@@ -84,6 +84,8 @@ jobs:
         git add .
         git commit -m "chore(deps): update tools table in README"
         git push origin HEAD:${{ github.head_ref }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Create Pull Request
       if: ${{ github.event_name == 'push' && steps.check_readme.outputs.readme_changed == 'true' }}
