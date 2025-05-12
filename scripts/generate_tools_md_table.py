@@ -1,7 +1,7 @@
 from secator.cli import ALL_TASKS
 
 import re
-import os
+from pathlib import Path
 
 TABLE_START_MARKER = "<!-- START_TOOLS_TABLE -->"
 TABLE_END_MARKER = "<!-- END_TOOLS_TABLE -->"
@@ -12,6 +12,7 @@ def get_tools_data():
     hardcoded_urls = {
         'bbot': 'https://github.com/blacklanternsecurity/bbot',
         'bup': 'https://github.com/laluka/bypass-url-parser',
+        'dirsearch': 'https://github.com/maurosoria/dirsearch',
         'gf': 'https://github.com/tomnomnom/gf',
         'testssl': 'https://github.com/testssl/testssl.sh',
         'wpscan': 'https://github.com/wpscanteam/wpscan',
@@ -23,9 +24,14 @@ def get_tools_data():
         'searchsploit': 'https://gitlab.com/exploit-database/exploitdb'
     }
     for task in ALL_TASKS:
+        url = task.install_github_handle
+        if url:
+            url = f'https://github.com/{url}'
+        else:
+            url = hardcoded_urls.get(task.__name__)
         data.append({
             'name': task.__name__,
-            'url': hardcoded_urls.get(task.__name__) or task.install_github_handle,
+            'url': url,
             'description': task.__doc__,
             'category': '/'.join(task.tags)
         })
@@ -79,7 +85,7 @@ def update_readme_table(readme_path, new_table_content):
     with the new table content, and writes it back.
     """
     try:
-        with open(readme_path, 'r', encoding='utf-8') as f:
+        with readme_path.open('r', encoding='utf-8') as f:
             content = f.read()
     except FileNotFoundError:
         print(f"Error: README file not found at '{readme_path}'")
@@ -109,7 +115,7 @@ def update_readme_table(readme_path, new_table_content):
         # Consider stopping if > 1 found for safety.
 
     try:
-        with open(readme_path, 'w', encoding='utf-8') as f:
+        with readme_path.open('w', encoding='utf-8') as f:
             f.write(new_content)
         print(f"Successfully updated the supported tools table in '{readme_path}'")
         return True
@@ -119,8 +125,5 @@ def update_readme_table(readme_path, new_table_content):
 
 data = get_tools_data()
 md_table = generate_tools_table_markdown(data)
-with open('tools.md', 'w') as f:
-    f.write(md_table)
-
-path = os.path.join(os.path.dirname(__file__), '../README.md')
+path = Path(__file__).parent.parent / 'README.md'
 update_readme_table(path, md_table)
