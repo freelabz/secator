@@ -19,6 +19,7 @@ class trivy(Vuln):
 	input_flag = None
 	input_types = [DOCKER_IMAGE, PATH, GIT_REPOSITORY]
 	json_flag = '-f json'
+	version_flag = '--version'
 	opts = {
 		"mode": {"type": click.Choice(['image', 'fs', 'repo']), 'default': 'image', 'help': 'Trivy mode', 'required': True}  # noqa: E501
 	}
