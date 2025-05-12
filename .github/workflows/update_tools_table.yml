@@ -1,27 +1,22 @@
-name: Tasks
+name: generate_table
 
 on:
   push:
-    paths:
-      - 'secator/tasks/*.py'
     branches:
-      - release-please*
-  pull_request:
-    types: [labeled, synchronize]
-    paths:
-      - 'secator/tasks/*.py'
+    - release-please*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test-tasks:
+  generate-table:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
-        # os: ["ubuntu-latest", "macos-latest"]
         os: ["ubuntu-latest"]
     steps:
     - name: Checkout repository
@@ -34,38 +29,11 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Add GOBIN to PATH
-      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
-
-    - name: Add GOPATH to PATH
-      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
-
-    - name: Detect changed or all tasks
-      run: |
-        if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
-          TASKS=$(secator x --list)
-          echo "Running all tasks"
-        else
-          TASKS=$(git diff --name-only --diff-filter=AMR origin/main HEAD | grep '^secator/tasks/.*\.py$' | grep -v '_.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
-          echo "Changed tasks: $TASKS"
-        fi
-
-        FAILED=0
-        for task in $TASKS; do
-          if ! secator test task -c $task; then
-            FAILED=1
-          fi
-          echo ""
-        done
-        if [ $FAILED -eq 1 ]; then
-          exit 1
-        fi
-
     - name: Generate tools table in README
       id: generate_tools_table
-      run: source ${HOME}/.local/pipx/venvs/secator/bin/activate && python3 ./scripts/generate_tools_md_table.py
+      run: source /opt/pipx/venvs/secator/bin/activate && python3 ./scripts/generate_tools_md_table.py
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Check if README.md changed
       id: check_readme
@@ -75,15 +43,6 @@ jobs:
         else
           echo "readme_changed=true" >> $GITHUB_OUTPUT
         fi
-
-    - name: Commit and push changes
-      if: ${{ github.event_name == 'pull_request' && steps.check_readme.outputs.readme_changed == 'true' }}
-      run: |
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git config --global user.name "github-actions[bot]"
-        git add .
-        git commit -m "chore(deps): update tools table in README"
-        git push origin HEAD:${{ github.head_ref }}
 
     - name: Create Pull Request
       if: ${{ github.event_name == 'push' && steps.check_readme.outputs.readme_changed == 'true' }}
