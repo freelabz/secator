@@ -15,9 +15,11 @@ from secator.tasks._categories import HttpCrawler
 @task()
 class gospider(HttpCrawler):
 	"""Fast web spider written in Go."""
-	cmd = 'gospider --js'
+	cmd = 'gospider'
+	tags = ['url', 'crawl']
 	file_flag = '-S'
 	input_flag = '-s'
+	input_types = [URL]
 	json_flag = '--json'
 	opt_prefix = '--'
 	opt_key_map = {
@@ -53,7 +55,8 @@ class gospider(HttpCrawler):
 			CONTENT_LENGTH: 'length',
 		}
 	}
-	install_cmd = 'go install -v github.com/jaeles-project/gospider@latest'
+	install_version = 'v1.1.6'
+	install_cmd = 'go install -v github.com/jaeles-project/gospider@[install_version]'
 	install_github_handle = 'jaeles-project/gospider'
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61

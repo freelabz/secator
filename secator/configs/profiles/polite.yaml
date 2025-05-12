@@ -1,0 +1,8 @@
+type: profile
+name: polite
+description: "Avoid overloading network"
+opts:
+    rate_limit: 100
+    delay: 0
+    timeout: 10
+    retries: 5

@@ -21,7 +21,8 @@ DALFOX_TYPE_MAP = {
 class dalfox(VulnHttp):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox'
-	input_type = URL
+	tags = ['url', 'fuzz']
+	input_types = [URL]
 	input_flag = 'url'
 	file_flag = 'file'
 	# input_chunk_size = 1
@@ -55,7 +56,8 @@ class dalfox(VulnHttp):
 			SEVERITY: lambda x: x['severity'].lower()
 		}
 	}
-	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@v2.9.3'
+	install_version = 'v2.11.0'
+	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
 	install_github_handle = 'hahwul/dalfox'
 	encoding = 'ansi'
 	proxychains = False

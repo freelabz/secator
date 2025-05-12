@@ -23,10 +23,6 @@ ASCII = rf"""
 DEBUG = CONFIG.debug.level
 DEBUG_COMPONENT = CONFIG.debug.component.split(',')
 
-# Default tasks settings
-DEFAULT_NUCLEI_FLAGS = os.environ.get('DEFAULT_NUCLEI_FLAGS', '-stats -sj -si 20 -hm -or')
-DEFAULT_FEROXBUSTER_FLAGS = os.environ.get('DEFAULT_FEROXBUSTER_FLAGS', '--auto-bail --no-state')
-
 # Constants
 OPT_NOT_SUPPORTED = -1
 OPT_PIPE_INPUT = -1
@@ -44,6 +40,9 @@ AUTO_CALIBRATION = 'auto_calibration'
 CONTENT_TYPE = 'content_type'
 CONTENT_LENGTH = 'content_length'
 CIDR_RANGE = 'cidr_range'
+DOCKER_IMAGE = 'docker_image'
+FILENAME = 'filename'
+GIT_REPOSITORY = 'git_repository'
 CPES = 'cpes'
 CVES = 'cves'
 DELAY = 'delay'
@@ -66,6 +65,7 @@ MATCH_CODES = 'match_codes'
 MATCH_REGEX = 'match_regex'
 MATCH_SIZE = 'match_size'
 MATCH_WORDS = 'match_words'
+ORG_NAME = 'org_name'
 OUTPUT_PATH = 'output_path'
 PATH = 'path'
 PERCENT = 'percent'
@@ -104,6 +104,7 @@ REFERENCE = 'reference'
 REFERENCES = 'references'
 SEVERITY = 'severity'
 TAGS = 'tags'
+TECHNOLOGY = 'technology'
 WEBSERVER = 'webserver'
 WORDLIST = 'wordlist'
 WORDS = 'words'

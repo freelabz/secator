@@ -1,7 +1,8 @@
 type: profile
 name: aggressive
-options:
-  rate_limit: 100000
-  delay: 0
-  proxy: random
-  user_agent: random
+description: "Internal networks or time-sensitive scans"
+opts:
+    rate_limit: 10000
+    delay: 0
+    timeout: 1
+    retries: 1

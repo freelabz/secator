@@ -13,12 +13,15 @@ from secator.tasks._categories import Command, OPTS
 
 @task()
 class testssl(Command):
-    output_types = [Certificate, Vulnerability, Ip, Tag]
-    install_cmd = (
-        f'git clone --depth 1 https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh || true && '
-        f'ln -sf {CONFIG.dirs.share}/testssl.sh/testssl.sh {CONFIG.dirs.bin}'
-    )
+    """SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
     cmd = 'testssl.sh'
+    tags = ['dns', 'recon', 'tls']
+    input_types = [HOST]
+    input_flag = None
+    file_flag = '-iL'
+    file_eof_newline = True
+    version_flag = ''
+    opt_prefix = '--'
     opts = {
         'verbose': {'is_flag': True, 'default': False, 'internal': True, 'display': True, 'help': 'Record all SSL/TLS info, not only critical info'},  # noqa: E501
         'parallel': {'is_flag': True, 'default': False, 'help': 'Test multiple hosts in parallel'},
@@ -37,18 +40,25 @@ class testssl(Command):
         PROXY: 'proxy',
         USER_AGENT: 'user-agent',
         HEADER: 'reqheader',
-        TIMEOUT: '--connect-timeout',
+        TIMEOUT: 'connect-timeout',
         'ipv6': '-6',
     }
-    opt_prefix = '--'
-    input_type = HOST
-    input_flag = None
-    file_flag = '-iL'
-    file_eof_newline = True
+    output_types = [Certificate, Vulnerability, Ip, Tag]
     proxy_http = True
     proxychains = False
     proxy_socks5 = False
     profile = 'io'
+    install_pre = {
+        'apk': ['hexdump', 'coreutils', 'procps'],
+        'pacman': ['util-linux'],
+        '*': ['bsdmainutils']
+    }
+    install_github_handle = 'testssl/testssl.sh'
+    install_version = 'v3.2.0'
+    install_cmd = (
+        f'git clone --depth 1 --single-branch -b [install_version] https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh_[install_version] || true && '  # noqa: E501
+        f'ln -sf {CONFIG.dirs.share}/testssl.sh_[install_version]/testssl.sh {CONFIG.dirs.bin}'
+    )
 
     @staticmethod
     def on_cmd(self):

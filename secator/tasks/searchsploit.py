@@ -3,7 +3,7 @@ import re
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
-								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
+								 PROVIDER, REFERENCE, TAGS, TECHNOLOGY, OPT_NOT_SUPPORTED)
 from secator.output_types import Exploit
 from secator.runners import Command
 from secator.serializers import JSONSerializer
@@ -16,7 +16,9 @@ SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*
 class searchsploit(Command):
 	"""Exploit searcher based on ExploitDB."""
 	cmd = 'searchsploit'
+	tags = ['exploit', 'recon']
 	input_flag = None
+	input_types = [TECHNOLOGY]
 	json_flag = '--json'
 	version_flag = OPT_NOT_SUPPORTED
 	opts = {
@@ -41,9 +43,10 @@ class searchsploit(Command):
 	install_pre = {
 		'apk': ['ncurses']
 	}
+	install_version = '2025-04-23'
 	install_cmd = (
-		f'git clone  --depth 1 --single-branch https://gitlab.com/exploit-database/exploitdb.git {CONFIG.dirs.share}/exploitdb || true && '  # noqa: E501
-		f'ln -sf $HOME/.local/share/exploitdb/searchsploit {CONFIG.dirs.bin}/searchsploit'
+		f'git clone  --depth 1 --single-branch -b [install_version] https://gitlab.com/exploit-database/exploitdb.git {CONFIG.dirs.share}/exploitdb_[install_version] || true && '  # noqa: E501
+		f'ln -sf $HOME/.local/share/exploitdb_[install_version]/searchsploit {CONFIG.dirs.bin}/searchsploit'
 	)
 	proxychains = False
 	proxy_socks5 = False
@@ -83,6 +86,8 @@ class searchsploit(Command):
 
 	@staticmethod
 	def on_item(self, item):
+		if not isinstance(item, Exploit):
+			return item
 		match = SEARCHSPLOIT_TITLE_REGEX.match(item.name)
 		# if not match:
 		# 	self._print(f'[bold red]{item.name} ({item.reference}) did not match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501

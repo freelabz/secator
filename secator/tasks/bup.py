@@ -16,8 +16,9 @@ from secator.tasks._categories import Http
 class bup(Http):
 	"""40X bypasser."""
 	cmd = 'bup'
+	tags = ['url', 'bypass']
 	input_flag = '-u'
-	input_type = URL
+	input_types = [URL]
 	json_flag = '--jsonl'
 	opt_prefix = '--'
 	opts = {
@@ -63,7 +64,8 @@ class bup(Http):
 			'stored_response_path': 'response_html_filename',
 		}
 	}
-	install_cmd = 'pipx install bypass-url-parser && pipx upgrade bypass-url-parser'
+	install_version = '0.4.4'
+	install_cmd = 'pipx install bypass-url-parser==[install_version] --force'
 
 	@staticmethod
 	def on_init(self):

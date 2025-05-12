@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
+from secator.definitions import (HOST, OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS)
 from secator.output_types import Record, Ip, Subdomain
 from secator.output_types.ip import IpProtocol
 from secator.tasks._categories import ReconDns
@@ -11,8 +11,10 @@ from secator.utils import extract_domain_info
 class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -resp -recon'
+	tags = ['dns', 'fuzz']
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
+	input_types = [HOST]
 	file_flag = OPT_PIPE_INPUT
 	output_types = [Record, Ip, Subdomain]
 	opt_key_map = {
@@ -26,7 +28,8 @@ class dnsx(ReconDns):
 		'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Domain name for wildcard filtering'},
 	}
 	item_loaders = [JSONSerializer()]
-	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
+	install_version = 'v1.2.2'
+	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
 	install_github_handle = 'projectdiscovery/dnsx'
 	profile = 'io'
 

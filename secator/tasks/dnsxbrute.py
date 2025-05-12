@@ -11,8 +11,10 @@ from secator.utils import process_wordlist
 class dnsxbrute(ReconDns):
     """dnsx is a fast and multi-purpose DNS toolkit designed for running various library."""
     cmd = 'dnsx'
+    tags = ['dns', 'fuzz']
     json_flag = '-json'
     input_flag = '-domain'
+    input_types = [HOST]
     file_flag = '-domain'
     opt_key_map = {
         RATE_LIMIT: 'rate-limit',
@@ -34,6 +36,7 @@ class dnsxbrute(ReconDns):
 			}
         }
     }
-    install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest'
+    install_version = 'v1.2.2'
+    install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
     install_github_handle = 'projectdiscovery/dnsx'
     profile = 'io'

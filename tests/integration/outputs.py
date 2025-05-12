@@ -3,6 +3,12 @@ from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability, Record, Certificate)
 
 OUTPUTS_TASKS = {
+    'arjun': [
+        Url(
+            url='http://testphp.vulnweb.com/hpp?pp=FUZZ',
+            _source='arjun'
+        )
+    ],
 	'bup': [
         Url(
             url='http://localhost:3000/ftp/coupons_2013.md.bak',
@@ -149,6 +155,10 @@ OUTPUTS_TASKS = {
     'gf': [
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
+    'gitleaks': [
+        # TODO: allow to test equality for this (dynamic path based on runner)
+        # Tag(name='aws-access-token', match='/path/to/file.py:216', _source='gitleaks')
+    ],
     'gospider': [
         Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider')
     ],
@@ -231,6 +241,18 @@ OUTPUTS_TASKS = {
     ],
     'subfinder': [
         Subdomain(host='virusscan.api.github.com', domain='api.github.com', _source='subfinder')
+    ],
+    'trivy': [
+        Vulnerability(
+            matched_at='https://github.com/blacklanternsecurity/bbot',
+            provider='ghsa',
+            name='CVE-2024-8775',
+            id='CVE-2024-8775',
+            confidence='high',
+            severity='high',
+            cvss_score=5.5,
+            _source='trivy'
+        ),
     ],
     'wafw00f': [
         Tag(

@@ -11,7 +11,7 @@ import humanize
 from secator.definitions import ADDONS_ENABLED
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
+from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
@@ -53,7 +53,7 @@ class Runner:
 	"""
 
 	# Input field (mostly for tests and CLI)
-	input_type = None
+	input_types = []
 
 	# Output types
 	output_types = []
@@ -130,12 +130,17 @@ class Runner:
 
 		# Determine inputs
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
-		self.filter_results(results)
+		targets = [Target(name=target) for target in self.inputs]
+		self.filter_results(results + targets)
 
 		# Debug
 		self.debug('Inputs', obj=self.inputs, sub='init')
 		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
 		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
+
+		# Load profiles
+		profiles_str = run_opts.get('profiles', [])
+		self.load_profiles(profiles_str)
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -826,7 +831,7 @@ class Runner:
 			if isinstance(data, (OutputType, dict)):
 				if getattr(data, 'toDict', None):
 					data = data.toDict()
-				data = json.dumps(data)
+				data = json.dumps(data, default=str)
 			print(data, file=out)
 
 	def _get_findings_count(self):
@@ -919,8 +924,8 @@ class Runner:
 		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
 			self.celery_ids.append(item.task_id)
 
-		# If finding, run on_item hooks
-		elif isinstance(item, tuple(FINDING_TYPES)):
+		# If output type, run on_item hooks
+		elif isinstance(item, tuple(OUTPUT_TYPES)):
 			item = self.run_hooks('on_item', item)
 			if not item:
 				return
@@ -951,6 +956,32 @@ class Runner:
 			if o
 		]
 		return [cls for cls in classes if cls]
+
+	def load_profiles(self, profiles):
+		"""Load profiles and update run options.
+
+		Args:
+			profiles (list[str]): List of profile names to resolve.
+
+		Returns:
+			list: List of profiles.
+		"""
+		from secator.cli import ALL_PROFILES
+		if isinstance(profiles, str):
+			profiles = profiles.split(',')
+		templates = []
+		for pname in profiles:
+			matches = [p for p in ALL_PROFILES if p.name == pname]
+			if not matches:
+				self._print(Warning(message=f'Profile "{pname}" was not found'), rich=True)
+			else:
+				templates.append(matches[0])
+		opts = {}
+		for profile in templates:
+			self._print(Info(message=f'Loaded profile {profile.name} ({profile.description})'), rich=True)
+			opts.update(profile.opts)
+		opts = {k: v for k, v in opts.items() if k not in self.run_opts}
+		self.run_opts.update(opts)
 
 	@classmethod
 	def get_func_path(cls, func):

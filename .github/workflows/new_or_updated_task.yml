@@ -1,0 +1,106 @@
+name: Tasks
+
+on:
+  push:
+    paths:
+      - 'secator/tasks/*.py'
+    branches:
+      - release-please*
+  pull_request:
+    types: [labeled, synchronize]
+    paths:
+      - 'secator/tasks/*.py'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-tasks:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # os: ["ubuntu-latest", "macos-latest"]
+        os: ["ubuntu-latest"]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Add GOBIN to PATH
+      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
+
+    - name: Add GOPATH to PATH
+      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
+
+    - name: Detect changed or all tasks
+      run: |
+        if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
+          TASKS=$(secator x --list)
+          echo "Running all tasks"
+        else
+          TASKS=$(git diff --name-only --diff-filter=AMR origin/main HEAD | grep '^secator/tasks/.*\.py$' | grep -v '_.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
+          echo "Changed tasks: $TASKS"
+        fi
+
+        FAILED=0
+        for task in $TASKS; do
+          if ! secator test task -c $task; then
+            FAILED=1
+          fi
+          echo ""
+        done
+        if [ $FAILED -eq 1 ]; then
+          exit 1
+        fi
+
+    - name: Check for outdated tools
+      id: update_check
+      run: python3 ./scripts/generate_tools_md_table.py
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Check if README.md changed
+      id: check_readme
+      run: |
+        if git diff --quiet README.md; then
+          echo "readme_changed=false" >> $GITHUB_OUTPUT
+        else
+          echo "readme_changed=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Commit and push changes
+      if: ${{ github.event_name == 'pull_request' && steps.check_readme.outputs.readme_changed == 'true' }}
+      run: |
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+        git add .
+        git commit -m "chore(deps): update tools table in README"
+        git push origin HEAD:${{ github.head_ref }}
+
+    - name: Create Pull Request
+      if: ${{ github.event_name == 'push' && steps.check_readme.outputs.readme_changed == 'true' }}
+      uses: peter-evans/create-pull-request@v6
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }} # Or a PAT if you need to trigger other workflows
+        commit-message: "chore(deps): update tools table in README"
+        committer: GitHub <noreply@github.com>
+        author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+        signoff: false
+        branch: chore/update-tools-${{ github.run_id }}
+        delete-branch: true
+        title: 'Update tools table in README'
+        body: |
+          Automated updates for tools table in README.
+
+          Please review the changes and merge if appropriate.
+        labels: |
+          dependencies
+          automated

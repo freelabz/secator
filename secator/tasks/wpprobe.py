@@ -10,10 +10,12 @@ from secator.tasks._categories import OPTS
 
 @task()
 class wpprobe(Command):
+    """Fast wordpress plugin enumeration tool."""
     cmd = 'wpprobe'
+    tags = ['vuln', 'scan', 'wordpress']
     file_flag = '-f'
     input_flag = '-u'
-    input_type = URL
+    input_types = [URL]
     opt_prefix = '-'
     opts = {
         'mode': {'type': click.Choice(['scan', 'update', 'update-db']), 'default': 'scan', 'help': 'WPProbe mode', 'required': True, 'internal': True},  # noqa: E501
@@ -26,7 +28,8 @@ class wpprobe(Command):
         THREADS: 't'
     }
     output_types = [Vulnerability, Tag]
-    install_cmd = 'go install github.com/Chocapikk/wpprobe@latest'
+    install_version = 'v0.5.6'
+    install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
     install_github_handle = 'Chocapikk/wpprobe'
     install_post = {
         '*': 'wpprobe update && wpprobe update-db'

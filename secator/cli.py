@@ -18,7 +18,7 @@ from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
 from secator.decorators import OrderedGroup, register_runner
-from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
+from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
@@ -30,29 +30,33 @@ from secator.utils import (
 	debug, detect_host, discover_tasks, flatten, print_version, get_file_date,
 	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
 )
-
+from contextlib import nullcontext
 click.rich_click.USE_RICH_MARKUP = True
 
 ALL_TASKS = discover_tasks()
 ALL_WORKFLOWS = [t for t in TEMPLATES if t.type == 'workflow']
 ALL_SCANS = [t for t in TEMPLATES if t.type == 'scan']
+ALL_PROFILES = [t for t in TEMPLATES if t.type == 'profile']
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '-help', '--help'])
 
 
 #-----#
 # CLI #
 #-----#
 
-@click.group(cls=OrderedGroup, invoke_without_command=True)
-@click.option('--version', '-version', is_flag=True, default=False)
+
+@click.group(cls=OrderedGroup, invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
+@click.option('--version', '-version', '-v', is_flag=True, default=False)
+@click.option('--quiet', '-quiet', '-q', is_flag=True, default=False)
 @click.pass_context
-def cli(ctx, version):
+def cli(ctx, version, quiet):
 	"""Secator CLI."""
 	ctx.obj = {
 		'piped_input': S_ISFIFO(os.fstat(0).st_mode),
 		'piped_output': not sys.stdout.isatty()
 	}
-	if not ctx.obj['piped_output']:
+	if not ctx.obj['piped_output'] and not quiet:
 		console.print(ASCII, highlight=False)
 	if ctx.invoked_subcommand is None:
 		if version:
@@ -65,11 +69,16 @@ def cli(ctx, version):
 # TASK #
 #------#
 
-@cli.group(aliases=['x', 't'])
+@cli.group(aliases=['x', 't'], invoke_without_command=True)
+@click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def task(ctx):
+def task(ctx, list=False):
 	"""Run a task."""
-	pass
+	if list:
+		print("\n".join(sorted([t.__name__ for t in ALL_TASKS])))
+		return
+	if ctx.invoked_subcommand is None:
+		ctx.get_help()
 
 
 for cls in ALL_TASKS:
@@ -81,11 +90,16 @@ for cls in ALL_TASKS:
 #----------#
 
 
-@cli.group(cls=OrderedGroup, aliases=['w'])
+@cli.group(cls=OrderedGroup, aliases=['w'], invoke_without_command=True)
+@click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def workflow(ctx):
+def workflow(ctx, list=False):
 	"""Run a workflow."""
-	pass
+	if list:
+		print("\n".join(sorted([t.name for t in ALL_WORKFLOWS])))
+		return
+	if ctx.invoked_subcommand is None:
+		ctx.get_help()
 
 
 for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
@@ -96,15 +110,39 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 # SCAN #
 #------#
 
-@cli.group(cls=OrderedGroup, aliases=['s'])
+@cli.group(cls=OrderedGroup, aliases=['s'], invoke_without_command=True)
+@click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def scan(ctx):
+def scan(ctx, list=False):
 	"""Run a scan."""
-	pass
+	if list:
+		print("\n".join(sorted([t.name for t in ALL_SCANS])))
+		return
+	if ctx.invoked_subcommand is None:
+		ctx.get_help()
 
 
 for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
+
+
+@cli.group(aliases=['p'])
+@click.pass_context
+def profile(ctx):
+	"""Show profiles"""
+	pass
+
+
+@profile.command('list')
+def profile_list():
+	table = Table()
+	table.add_column("Profile name", style="bold gold3")
+	table.add_column("Description", overflow='fold')
+	table.add_column("Options", overflow='fold')
+	for profile in ALL_PROFILES:
+		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
+		table.add_row(profile.name, profile.description, opts_str)
+	console.print(table)
 
 
 #--------#
@@ -117,7 +155,7 @@ for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
-@click.option('--quiet', is_flag=True, help='Quiet mode.')
+@click.option('--quiet', is_flag=True, default=False, help='Quiet mode.')
 @click.option('--loglevel', type=str, default='INFO', help='Log level.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
@@ -667,7 +705,7 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 					all_results.extend(runner.results)
 					continue
 				report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
-				report.build(extractors=extractors if not unified else [])
+				report.build(extractors=extractors if not unified else [], dedupe=unified)
 				file_date = get_file_date(path)
 				runner_name = data['info']['name']
 				console.print(
@@ -745,7 +783,7 @@ def report_list(workspace, runner_type, time_delta):
 @report.command('export')
 @click.argument('json_path', type=str)
 @click.option('--output-folder', '-of', type=str)
-@click.option('-output', '-o', type=str)
+@click.option('-output', '-o', type=str, required=True)
 def report_export(json_path, output_folder, output):
 	with open(json_path, 'r') as f:
 		data = loads_dataclass(f.read())
@@ -792,83 +830,145 @@ def report_export(json_path, output_folder, output):
 #--------#
 
 @cli.command(name='health')
-@click.option('--json', '-json', is_flag=True, default=False, help='JSON lines output')
+@click.option('--json', '-json', 'json_', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
 @click.option('--strict', '-strict', is_flag=True, default=False, help='Fail if missing tools')
-def health(json, debug, strict):
+@click.option('--bleeding', '-bleeding', is_flag=True, default=False, help='Check bleeding edge version of tools')
+def health(json_, debug, strict, bleeding):
 	"""[dim]Get health status.[/]"""
 	tools = ALL_TASKS
-	status = {'secator': {}, 'languages': {}, 'tools': {}, 'addons': {}}
+	upgrade_cmd = ''
+	results = []
+	messages = []
 
 	# Check secator
-	console.print(':wrench: [bold gold3]Checking secator ...[/]')
+	console.print(':wrench: [bold gold3]Checking secator ...[/]') if not json_ else None
 	info = get_version_info('secator', '-version', 'freelabz/secator')
+	info['_type'] = 'core'
+	if info['outdated']:
+		messages.append(f'secator is outdated (latest:{info["latest_version"]}).')
+	results.append(info)
 	table = get_health_table()
-	with Live(table, console=console):
+	contextmanager = Live(table, console=console) if not json_ else nullcontext()
+	with contextmanager:
 		row = fmt_health_table_row(info)
 		table.add_row(*row)
-	status['secator'] = info
 
 	# Check addons
-	console.print('\n:wrench: [bold gold3]Checking installed addons ...[/]')
+	console.print('\n:wrench: [bold gold3]Checking addons ...[/]') if not json_ else None
 	table = get_health_table()
-	with Live(table, console=console):
+	contextmanager = Live(table, console=console) if not json_ else nullcontext()
+	with contextmanager:
 		for addon, installed in ADDONS_ENABLED.items():
 			info = {
 				'name': addon,
 				'version': None,
-				'status': 'ok' if installed else 'missing',
+				'status': 'ok' if installed else 'missing_ok',
 				'latest_version': None,
 				'installed': installed,
 				'location': None
 			}
+			info['_type'] = 'addon'
+			results.append(info)
 			row = fmt_health_table_row(info, 'addons')
 			table.add_row(*row)
-			status['addons'][addon] = info
+			if json_:
+				print(json.dumps(info))
 
 	# Check languages
-	console.print('\n:wrench: [bold gold3]Checking installed languages ...[/]')
+	console.print('\n:wrench: [bold gold3]Checking languages ...[/]') if not json_ else None
 	version_cmds = {'go': 'version', 'python3': '--version', 'ruby': '--version'}
 	table = get_health_table()
-	with Live(table, console=console):
+	contextmanager = Live(table, console=console) if not json_ else nullcontext()
+	with contextmanager:
 		for lang, version_flag in version_cmds.items():
 			info = get_version_info(lang, version_flag)
 			row = fmt_health_table_row(info, 'langs')
 			table.add_row(*row)
-			status['languages'][lang] = info
+			info['_type'] = 'lang'
+			results.append(info)
+			if json_:
+				print(json.dumps(info))
 
 	# Check tools
-	console.print('\n:wrench: [bold gold3]Checking installed tools ...[/]')
+	console.print('\n:wrench: [bold gold3]Checking tools ...[/]') if not json_ else None
 	table = get_health_table()
-	with Live(table, console=console):
+	error = False
+	contextmanager = Live(table, console=console) if not json_ else nullcontext()
+	upgrade_cmd = 'secator install tools'
+	with contextmanager:
 		for tool in tools:
 			info = get_version_info(
 				tool.cmd.split(' ')[0],
 				tool.version_flag or f'{tool.opt_prefix}version',
 				tool.install_github_handle,
-				tool.install_cmd
+				tool.install_cmd,
+				tool.install_version,
+				bleeding=bleeding
 			)
+			info['_name'] = tool.__name__
+			info['_type'] = 'tool'
 			row = fmt_health_table_row(info, 'tools')
 			table.add_row(*row)
-			status['tools'][tool.__name__] = info
-	console.print('')
+			if not info['installed']:
+				messages.append(f'{tool.__name__} is not installed.')
+				info['next_version'] = tool.install_version
+				error = True
+			elif info['outdated']:
+				msg = 'latest' if bleeding else 'supported'
+				message = (
+					f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+				)
+				messages.append(message)
+				info['upgrade'] = True
+				info['next_version'] = info['latest_version']
 
-	# Print JSON health
-	if json:
-		import json as _json
-		print(_json.dumps(status))
+			elif info['bleeding']:
+				msg = 'latest' if bleeding else 'supported'
+				message = (
+					f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+				)
+				messages.append(message)
+				info['downgrade'] = True
+				info['next_version'] = info['latest_version']
+			results.append(info)
+			if json_:
+				print(json.dumps(info))
+	console.print('') if not json_ else None
+
+	if not json_ and messages:
+		console.print('\n[bold red]Issues found:[/]')
+		for message in messages:
+			console.print(Warning(message=message))
 
 	# Strict mode
 	if strict:
-		error = False
-		for tool, info in status['tools'].items():
-			if not info['installed']:
-				console.print(Error(message=f'{tool} not installed and strict mode is enabled.'))
-				error = True
 		if error:
 			sys.exit(1)
-		console.print(Info(message='Strict healthcheck passed !'))
+		console.print(Info(message='Strict healthcheck passed !')) if not json_ else None
 
+	# Build upgrade command
+	cmds = []
+	tool_cmd = ''
+	for info in results:
+		if info['_type'] == 'core' and info['outdated']:
+			cmds.append('secator update')
+		elif info['_type'] == 'tool' and info.get('next_version'):
+			tool_cmd += f',{info["_name"]}=={info["next_version"]}'
+
+	if tool_cmd:
+		tool_cmd = f'secator install tools {tool_cmd.lstrip(",")}'
+		cmds.append(tool_cmd)
+	upgrade_cmd = ' && '.join(cmds)
+	console.print('') if not json_ else None
+	if upgrade_cmd:
+		console.print(Info(message='Run the following to upgrade secator and tools:')) if not json_ else None
+		if json_:
+			print(json.dumps({'upgrade_cmd': upgrade_cmd}))
+		else:
+			print(upgrade_cmd)
+	else:
+		console.print(Info(message='Everything is up to date !')) if not json_ else None
 
 #---------#
 # INSTALL #
@@ -1052,28 +1152,44 @@ def install_ruby():
 
 @install.command('tools')
 @click.argument('cmds', required=False)
-@click.option('--cleanup', is_flag=True, default=False)
-def install_tools(cmds, cleanup):
+@click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
+@click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
+def install_tools(cmds, cleanup, fail_fast):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
+	tools = []
 	if cmds is not None:
 		cmds = cmds.split(',')
-		tools = [cls for cls in ALL_TASKS if cls.__name__ in cmds]
+		for cmd in cmds:
+			if '==' in cmd:
+				cmd, version = tuple(cmd.split('=='))
+			else:
+				cmd, version = cmd, None
+			cls = next((cls for cls in ALL_TASKS if cls.__name__ == cmd), None)
+			if cls:
+				if version:
+					if cls.install_version and cls.install_version.startswith('v') and not version.startswith('v'):
+						version = f'v{version}'
+					cls.install_version = version
+				tools.append(cls)
+			else:
+				console.print(Warning(message=f'Tool {cmd} is not supported or inexistent.'))
 	else:
 		tools = ALL_TASKS
 	tools.sort(key=lambda x: x.__name__)
 	return_code = 0
 	if not tools:
-		cmd_str = ' '.join(cmds)
-		console.print(Error(message=f'No tools found for {cmd_str}.'))
+		console.print(Error(message='No tools found for installing.'))
 		return
 	for ix, cls in enumerate(tools):
 		# with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 		status = ToolInstaller.install(cls)
 		if not status.is_ok():
 			return_code = 1
+			if fail_fast:
+				sys.exit(return_code)
 		console.print()
 	if cleanup:
 		distro = get_distro_config()
@@ -1133,10 +1249,9 @@ def update(all):
 		return_code = 0
 		for cls in ALL_TASKS:
 			cmd = cls.cmd.split(' ')[0]
-			version_flag = cls.version_flag or f'{cls.opt_prefix}version'
-			version_flag = None if cls.version_flag == OPT_NOT_SUPPORTED else version_flag
+			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.install_github_handle)
-			if not info['installed'] or info['status'] == 'outdated' or not info['latest_version']:
+			if not info['installed'] or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
 				status = ToolInstaller.install(cls)
 				if not status.is_ok():
@@ -1251,24 +1366,35 @@ def test():
 	pass
 
 
-def run_test(cmd, name):
+def run_test(cmd, name=None, exit=True, verbose=False):
 	"""Run a test and return the result.
 
 	Args:
-		cmd: Command to run.
-		name: Name of the test.
+		cmd (str): Command to run.
+		name (str, optional): Name of the test.
+		exit (bool, optional): Exit after running the test with the return code.
+		verbose (bool, optional): Print verbose output.
+
+	Returns:
+		Return code of the test.
 	"""
-	result = Command.execute(cmd, name=name + ' tests', cwd=ROOT_FOLDER)
-	if result.return_code == 0:
-		console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
-	sys.exit(result.return_code)
+	cmd_name = name + ' tests' if name else 'tests'
+	result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
+	if name:
+		if result.return_code == 0:
+			console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
+		else:
+			console.print(f':x: {name.capitalize()} tests failed !', style='bold red')
+	if exit:
+		sys.exit(result.return_code)
+	return result.return_code
 
 
 @test.command()
 def lint():
 	"""Run lint tests."""
 	cmd = f'{sys.executable} -m flake8 secator/'
-	run_test(cmd, 'lint')
+	run_test(cmd, 'lint', verbose=True)
 
 
 @test.command()
@@ -1300,7 +1426,7 @@ def unit(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'unit')
+	run_test(cmd, 'unit', verbose=True)
 
 
 @test.command()
@@ -1331,7 +1457,7 @@ def integration(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'integration')
+	run_test(cmd, 'integration', verbose=True)
 
 
 @test.command()
@@ -1354,7 +1480,160 @@ def performance(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'performance')
+	run_test(cmd, 'performance', verbose=True)
+
+
+@test.command()
+@click.argument('name', type=str)
+@click.option('--verbose', '-v', is_flag=True, default=False, help='Print verbose output')
+@click.option('--check', '-c', is_flag=True, default=False, help='Check task semantics only (no unit + integration tests)')  # noqa: E501
+def task(name, verbose, check):
+	"""Test a single task for semantics errors, and run unit + integration tests."""
+	console.print(f'[bold gold3]:wrench: Testing task {name} ...[/]')
+	task = [task for task in ALL_TASKS if task.__name__ == name]
+	warnings = []
+	errors = []
+	exit_code = 0
+
+	# Check if task is correctly registered
+	task = task[0]
+	task_name = task.__name__
+
+	# Check task command is set
+	check_test(
+		task.cmd,
+		'Check task command is set (cls.cmd)',
+		'Task has no cmd attribute.',
+		errors
+	)
+	if errors:
+		sys.exit(0)
+
+	# Run install
+	cmd = f'secator install tools {task_name}'
+	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
+	version_info = task.get_version_info()
+	if verbose:
+		console.print(f'Version info:\n{version_info}')
+	status = version_info['status']
+	check_test(
+		version_info['installed'],
+		'Check task is installed',
+		'Failed to install command. Fix your installation command.',
+		errors
+	)
+	check_test(
+		any(cmd for cmd in [task.install_pre, task.install_cmd, task.install_github_handle]),
+		'Check task installation command is defined',
+		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `install_github_handle`.',  # noqa: E501
+		errors
+	)
+	check_test(
+		version_info['version'],
+		'Check task version can be fetched',
+		'Failed to detect current version. Consider updating your `version_flag` class attribute.',
+		warnings,
+		warn=True
+	)
+	check_test(
+		status != 'latest unknown',
+		'Check latest version',
+		'Failed to detect latest version.',
+		warnings,
+		warn=True
+	)
+	check_test(
+		not version_info['outdated'],
+		'Check task version is up to date',
+		f'Task is not up to date (current version: {version_info["version"]}, latest: {version_info["latest_version"]}). Consider updating your `install_version` class attribute.',  # noqa: E501
+		warnings,
+		warn=True
+	)
+
+	# Run task-specific tests
+	check_test(
+		task.__doc__,
+		'Check task description is set (cls.__doc__)',
+		'Task has no description (class docstring).',
+		errors
+	)
+	check_test(
+		task.input_types,
+		'Check task input type is set (cls.input_type)',
+		'Task has no input_type attribute.',
+		warnings,
+		warn=True
+	)
+	check_test(
+		task.output_types,
+		'Check task output types is set (cls.output_types)',
+		'Task has no output_types attribute. Consider setting some so that secator can load your task outputs.',
+		warnings,
+		warn=True
+	)
+	check_test(
+		task.install_version,
+		'Check task install_version is set (cls.install_version)',
+		'Task has no install_version attribute. Consider setting it to pin the tool version and ensure it does not break in the future.',  # noqa: E501
+		warnings,
+		warn=True
+	)
+
+	if not check:
+
+		# Run unit tests
+		cmd = f'secator test unit --tasks {name}'
+		ret_code = run_test(cmd, exit=False, verbose=verbose)
+		check_test(
+			ret_code == 0,
+			'Check unit tests pass',
+			'Unit tests failed.',
+			errors
+		)
+
+		# Run integration tests
+		cmd = f'secator test integration --tasks {name}'
+		ret_code = run_test(cmd, exit=False, verbose=verbose)
+		check_test(
+			ret_code == 0,
+			'Check integration tests pass',
+			'Integration tests failed.',
+			errors
+		)
+
+	# Exit with exit code
+	exit_code = 1 if len(errors) > 0 else 0
+	if exit_code == 0:
+		console.print(f':tada: Task {name} tests passed !', style='bold green')
+	else:
+		console.print('\n[bold gold3]Errors:[/]')
+		for error in errors:
+			console.print(error)
+		console.print(Error(message=f'Task {name} tests failed. Please fix the issues above.'))
+
+	if warnings:
+		console.print('\n[bold gold3]Warnings:[/]')
+		for warning in warnings:
+			console.print(warning)
+
+	console.print("\n")
+	sys.exit(exit_code)
+
+
+def check_test(condition, message, fail_message, results=[], warn=False):
+	console.print(f'[bold magenta]:zap: {message} ...[/]', end='')
+	if not condition:
+		if not warn:
+			error = Error(message=fail_message)
+			console.print(' [bold red]FAILED[/]', style='dim')
+			results.append(error)
+		else:
+			warning = Warning(message=fail_message)
+			console.print(' [bold yellow]WARNING[/]', style='dim')
+			results.append(warning)
+	else:
+		console.print(' [bold green]OK[/]', style='dim')
+	return True
 
 
 @test.command()

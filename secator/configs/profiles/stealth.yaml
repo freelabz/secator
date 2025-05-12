@@ -1,7 +1,0 @@
-type: profile
-name: stealth
-options:
-  rate_limit: 100
-  delay: 1
-  proxy: proxychains
-  user_agent: random
