@@ -74,7 +74,7 @@ def expand_input(input, ctx):
 		str: Input.
 	"""
 	piped_input = ctx.obj['piped_input']
-	dry_run = ctx.obj['dry_run']	
+	dry_run = ctx.obj['dry_run']
 	if input is None:  # read from stdin
 		if not piped_input and not dry_run:
 			console.print('No input passed on stdin. Showing help page.', style='bold red')
