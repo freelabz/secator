@@ -31,5 +31,6 @@ class gf(Tagger):
 
 	@staticmethod
 	def on_item(self, item):
-		item.extra_data = {'source': 'url'}
+		if isinstance(item, Tag):
+			item.extra_data = {'source': 'url'}
 		return item

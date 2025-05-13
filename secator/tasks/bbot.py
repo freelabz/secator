@@ -1,3 +1,4 @@
+import re
 import shutil
 
 from secator.config import CONFIG
@@ -5,7 +6,7 @@ from secator.decorators import task
 from secator.definitions import FILENAME, HOST, IP, ORG_NAME, PORT, URL, USERNAME
 from secator.runners import Command
 from secator.serializers import RegexSerializer
-from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error
+from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error, UserAccount, Warning
 from secator.serializers import JSONSerializer
 
 
@@ -151,12 +152,16 @@ BBOT_MAP_TYPES = {
 	'PROTOCOL': Port,
 	'OPEN_TCP_PORT': Port,
 	'URL': Url,
-	'TECHNOLOGY': Tag,
+	'URL_HINT': Url,
 	'ASN': Record,
 	'DNS_NAME': Record,
 	'WEBSCREENSHOT': Url,
 	'VULNERABILITY': Vulnerability,
-	'FINDING': Tag
+	'EMAIL_ADDRESS': UserAccount,
+	'FINDING': Tag,
+	'AZURE_TENANT': Tag,
+	'STORAGE_BUCKET': Tag,
+	'TECHNOLOGY': Tag,
 }
 BBOT_DESCRIPTION_REGEX = RegexSerializer(
 	regex=r'(?P<name>[\w ]+): \[(?P<value>[^\[\]]+)\]',
@@ -209,7 +214,7 @@ class bbot(Command):
 		},
 		Tag: {
 			'name': 'name',
-			'match': lambda x: x['data'].get('url') or x['data'].get('host'),
+			'match': lambda x: x['data'].get('url') or x['data'].get('host') or '',
 			'extra_data': 'extra_data',
 			'_source': lambda x: 'bbot-' + x['module']
 		},
@@ -233,8 +238,9 @@ class bbot(Command):
 		},
 		Vulnerability: {
 			'name': 'name',
-			'match': lambda x: x['data'].get('url') or x['data']['host'],
+			'matched_at': lambda x: x['data'].get('url') or x['data'].get('host') or '',
 			'extra_data': 'extra_data',
+			'confidence': 'high',
 			'severity': lambda x: x['data']['severity'].lower()
 		},
 		Record: {
@@ -244,6 +250,12 @@ class bbot(Command):
 		},
 		Error: {
 			'message': 'message'
+		},
+		UserAccount: {
+			'username': lambda x: x['data'].split('@')[0],
+			'email': 'data',
+			'site_name': 'host',
+			'extra_data': 'extra_data',
 		}
 	}
 	install_pre = {
@@ -270,7 +282,8 @@ class bbot(Command):
 			return
 
 		if _type not in BBOT_MAP_TYPES:
-			self._print(f'[bold orange3]Found unsupported bbot type: {_type}.[/] [bold green]Skipping.[/]', rich=True)
+			yield Warning(message=f'Found unsupported bbot type: {_type}. Skipping.')
+			self.debug(f'Found unsupported bbot type: {item}')
 			return
 
 		if isinstance(item['data'], str):
@@ -279,23 +292,37 @@ class bbot(Command):
 			return
 
 		item['extra_data'] = item['data']
+		if self.scan_config:
+			modules = self.scan_config.get('preset', {}).get('modules', [])
+			item['extra_data']['bbot_modules'] = modules
 
 		# Parse bbot description into extra_data
 		description = item['data'].get('description')
 		if description:
-			del item['data']['description']
-			match = BBOT_DESCRIPTION_REGEX.run(description)
-			for chunk in match:
-				key, val = tuple([c.strip() for c in chunk])
-				if ',' in val:
-					val = val.split(',')
-				key = '_'.join(key.split(' ')).lower()
-				item['extra_data'][key] = val
+			parts = description.split(':')
+			if len(parts) == 2:
+				description = parts[0].strip()
+			match = list(BBOT_DESCRIPTION_REGEX.run(description))
+			if match:
+				del item['data']['description']
+				for chunk in match:
+					key, val = tuple([c.strip() for c in chunk])
+					if ',' in val:
+						val = val.split(',')
+					key = '_'.join(key.split(' ')).lower()
+					item['extra_data'][key] = val
+			description = re.split(r'\s*(\(|\.|Detected.)', description.strip(), 1)[0].rstrip()
 
-		# Set technology as name for Tag
-		if item['type'] == 'TECHNOLOGY':
-			item['name'] = item['data']['technology']
-			del item['data']['technology']
+		# Set tag name for objects mapping Tag
+		if item['type'] in ['AZURE_TENANT', 'STORAGE_BUCKET', 'TECHNOLOGY']:
+			item['name'] = ' '.join(item['type'].split('_')).lower().title()
+			keys = ['technology', 'tenant-names', 'url']
+			info = next((item['data'].get(key) for key in keys if key in item['data']))
+			if info:
+				item['extra_data']['info'] = info
+				for key in keys:
+					if key in item['data']:
+						del item['data'][key]
 
 		# If 'name' key is present in 'data', set it as name
 		elif 'name' in item['data'].keys():
@@ -306,6 +333,11 @@ class bbot(Command):
 		elif 'extra_data' in item and 'name' in item['extra_data'].keys():
 			item['name'] = item['extra_data']['name']
 			del item['extra_data']['name']
+
+		# If 'description' key is present in 'data', set it as name
+		elif description:
+			item['name'] = description
+			del item['data']['description']
 
 		# If 'discovery_context' and no name set yet, set it as name
 		else:

@@ -252,7 +252,7 @@ def decorate_command_options(opts):
 					conf['help'] = conf['help'].replace(opt_name, f'{opt_name} / {opposite}')
 				else:
 					long += f'/--no-{opt_name}'
-					short += f'/-n{short_opt}' if short else f'/-n{opt_name}'
+					short += f'/-n{short_opt}' if short_opt else f'/-n{opt_name}'
 			f = click.option(long, short, **conf)(f)
 		return f
 	return decorator
@@ -345,6 +345,19 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		show = opts['show']
 		context = {'workspace_name': ws}
+		ctx.obj['dry_run'] = dry_run
+
+		# Show version
+		if version:
+			data = task_cls.get_version_info()
+			current = data['version']
+			latest = data['latest_version']
+			installed = data['installed']
+			if not installed:
+				console.print(f'[bold red]{task_cls.__name__} is not installed.[/]')
+			else:
+				console.print(f'{task_cls.__name__} version: [bold green]{current}[/] (recommended: [bold green]{latest}[/])')
+			sys.exit(0)
 
 		# Show version
 		if version:

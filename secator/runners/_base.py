@@ -11,7 +11,7 @@ import humanize
 from secator.definitions import ADDONS_ENABLED
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
+from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
@@ -924,8 +924,8 @@ class Runner:
 		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
 			self.celery_ids.append(item.task_id)
 
-		# If finding, run on_item hooks
-		elif isinstance(item, tuple(FINDING_TYPES)):
+		# If output type, run on_item hooks
+		elif isinstance(item, tuple(OUTPUT_TYPES)):
 			item = self.run_hooks('on_item', item)
 			if not item:
 				return
