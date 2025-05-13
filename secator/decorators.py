@@ -345,6 +345,7 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		show = opts['show']
 		context = {'workspace_name': ws}
+		ctx.obj['dry_run'] = dry_run
 
 		# Show version
 		if version:
