@@ -601,6 +601,10 @@ class Runner:
 				# self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim yellow]started[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 				result = hook(self, *args)
 				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim green]success[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
+				if isinstance(result, Error):
+					result._source = self.unique_name
+					result._uuid = str(uuid.uuid4())
+					self.add_result(result, print=True)
 			except Exception as e:
 				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim red]failed[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 				error = Error.from_exception(e)
