@@ -105,6 +105,9 @@ class Command(Runner):
 	# Return code
 	return_code = -1
 
+	# Exit ok
+	exit_ok = False
+
 	# Output
 	output = ''
 
@@ -246,14 +249,15 @@ class Command(Runner):
 		return cls.version_flag or f'{cls.opt_prefix}version'
 
 	@classmethod
-	def get_version_info(cls):
+	def get_version_info(cls, bleeding=False):
 		from secator.installer import get_version_info
 		return get_version_info(
 			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
 			cls.install_github_handle,
 			cls.install_cmd,
-			cls.install_version
+			cls.install_version,
+			bleeding=bleeding
 		)
 
 	@classmethod
@@ -553,12 +557,14 @@ class Command(Runner):
 		error._uuid = str(uuid.uuid4())
 		yield error
 
-	def stop_process(self):
+	def stop_process(self, exit_ok=False):
 		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
 		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
 		self.process.send_signal(signal.SIGINT)
+		if exit_ok:
+			self.exit_ok = True
 
 	def stats(self):
 		"""Gather stats about the current running process, if any."""
@@ -674,7 +680,7 @@ class Command(Runner):
 		for line in self.process.stdout.readlines():
 			yield from self.process_line(line)
 		self.process.wait()
-		self.return_code = self.process.returncode
+		self.return_code = 0 if self.exit_ok else self.process.returncode
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
 		self.output = self.output.strip()
@@ -875,6 +881,8 @@ class Command(Runner):
 				if conf.get('requires_sudo', False):
 					self.requires_sudo = True
 				opts_str += ' ' + Command._build_opt_str(opt_conf)
+				if '{target}' in opts_str:
+					opts_str = opts_str.replace('{target}', self.inputs[0])
 		self.cmd_options = opts
 		self.cmd += opts_str
 

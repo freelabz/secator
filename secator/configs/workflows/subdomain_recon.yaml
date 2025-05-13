@@ -6,20 +6,30 @@ tags: [recon, dns, takeovers]
 input_types:
   - host
 tasks:
-  subfinder:
-    description: List subdomains (passive)
-  # TODO: add subdomain bruteforcers
-  # gobuster:
-  #   input: vhost
-  #   domain_:
-  #     - target.name
-  #   wordlist: combined_subdomains
-  # gobuster:
-  #   input: dns
-  #   domain_:
-  #     - target.name
-  #   wordlist: combined_subdomains
-  _group:
+  _group/1:
+    subfinder:
+      description: List subdomains (passive)
+    # dnsx:
+    #   description: Bruteforce subdomains (DNS)
+    #   subdomains_only: True
+    #   wordlist: combined_subdomains
+  ffuf:
+    description: Bruteforce subdomains (Host header)
+    header: "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
+    fuzz_host_header: True
+    auto_calibration: True
+    wordlist: combined_subdomains
+    targets_:
+    - type: target
+      field: 'http://{name}'
+    - type: target
+      field: 'https://{name}'
+  _group/2:
+    dnsx:
+      description: Check if subdomains are alive (DNS)
+      subdomains_only: True
+      targets_:
+      - subdomain.host
     nuclei:
       description: Check for subdomain takeovers
       targets_:

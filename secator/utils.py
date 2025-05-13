@@ -73,18 +73,21 @@ def expand_input(input, ctx):
 	Returns:
 		str: Input.
 	"""
+	piped_input = ctx.obj['piped_input']
+	dry_run = ctx.obj['dry_run']
 	if input is None:  # read from stdin
-		if not ctx.obj['piped_input']:
-			console.print('Waiting for input on stdin ...', style='bold yellow')
-		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
-		if rlist:
-			data = sys.stdin.read().splitlines()
-		else:
-			console.print(
-				'No input passed on stdin. Showing help page.',
-				style='bold red')
-			return None
-		return data
+		if not piped_input and not dry_run:
+			console.print('No input passed on stdin. Showing help page.', style='bold red')
+			ctx.get_help()
+			sys.exit(1)
+		elif piped_input:
+			rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
+			if rlist:
+				data = sys.stdin.read().splitlines()
+				return data
+			else:
+				console.print('No input passed on stdin.', style='bold red')
+				sys.exit(1)
 	elif os.path.exists(input):
 		if os.path.isfile(input):
 			with open(input, 'r') as f:
@@ -98,6 +101,9 @@ def expand_input(input, ctx):
 	# Usefull for commands that can take only one input at a time.
 	if isinstance(input, list) and len(input) == 1:
 		return input[0]
+
+	if ctx.obj['dry_run'] and not input:
+		return ['TARGET']
 
 	return input
 
@@ -498,6 +504,7 @@ def extract_domain_info(input, domain_only=False):
 
 	Args:
 		input (str): An URL or FQDN.
+		domain_only (bool): Return only the registered domain name.
 
 	Returns:
 		tldextract.ExtractResult: Extracted info.
@@ -815,3 +822,13 @@ def convert_functions_to_strings(data):
 		return json.dumps(data.__name__)  # or use inspect.getsource(data) if you want the actual function code
 	else:
 		return data
+
+
+def headers_to_dict(header_opt):
+	headers = {}
+	for header in header_opt.split(';;'):
+		split = header.strip().split(':')
+		key = split[0].strip()
+		val = ':'.join(split[1:]).strip()
+		headers[key] = val
+	return headers
