@@ -8,6 +8,10 @@ on:
     branches:
     - release-please*
 
+permissions:
+  contents: write
+  pull-requests: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -54,7 +58,7 @@ jobs:
       if: ${{ github.event_name == 'push' && steps.check_readme.outputs.readme_changed == 'true' }}
       uses: peter-evans/create-pull-request@v6
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.RELEASE_TOKEN }}
         commit-message: "chore(deps): update tools table in README"
         committer: GitHub <noreply@github.com>
         author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
