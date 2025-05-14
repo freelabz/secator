@@ -48,14 +48,14 @@ jobs:
       if: ${{ github.event_name == 'push' && steps.check_readme.outputs.readme_changed == 'true' }}
       uses: peter-evans/create-pull-request@v6
       with:
-        token: ${{ secrets.GITHUB_TOKEN }} # Or a PAT if you need to trigger other workflows
+        token: ${{ secrets.GITHUB_TOKEN }}
         commit-message: "chore(deps): update tools table in README"
         committer: GitHub <noreply@github.com>
         author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
         signoff: false
-        branch: chore/update-tools-${{ github.run_id }}
+        branch: chore/update-tools-table
         delete-branch: true
-        title: 'Update tools table in README'
+        title: 'chore(deps): update tools table in README'
         body: |
           Automated updates for tools table in README.
 
