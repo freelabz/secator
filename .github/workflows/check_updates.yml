@@ -70,14 +70,14 @@ jobs:
       if: steps.update_check.outputs.changes_made == 'true' # Only run if changes were made
       uses: peter-evans/create-pull-request@v6
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.GITHUB_TOKEN }} # Or a PAT if you need to trigger other workflows
         commit-message: "chore(deps): update tool versions"
         committer: GitHub <noreply@github.com>
         author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
         signoff: false
-        branch: chore/update-tools-version
+        branch: chore/update-tools-${{ github.run_id }}
         delete-branch: true
-        title: 'chore(deps): update tools versions'
+        title: 'Update Tool Dependencies'
         body: |
           Automated updates for tool versions based on `secator health --bleeding`.
 
