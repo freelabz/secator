@@ -249,14 +249,15 @@ class Command(Runner):
 		return cls.version_flag or f'{cls.opt_prefix}version'
 
 	@classmethod
-	def get_version_info(cls):
+	def get_version_info(cls, bleeding=False):
 		from secator.installer import get_version_info
 		return get_version_info(
 			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
 			cls.install_github_handle,
 			cls.install_cmd,
-			cls.install_version
+			cls.install_version,
+			bleeding=bleeding
 		)
 
 	@classmethod

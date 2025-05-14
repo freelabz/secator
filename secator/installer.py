@@ -506,7 +506,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 					releases = j.get('releases', [])
 					for release in releases:
 						ver = parse_version(release)
-						if ver and not ver.is_prerelease:
+						if ver and not ver.is_prerelease and not ver.is_postrelease and not ver.is_devrelease:
 							version = max(version, ver)
 							latest_version = str(version)
 							info['source'] = 'pypi'
