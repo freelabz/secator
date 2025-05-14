@@ -1,6 +1,9 @@
 name: Update tools table
 
 on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
   push:
     branches:
     - release-please*
@@ -8,6 +11,9 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  FORCE_COLOR: 1
 
 jobs:
   update-tools-table:
