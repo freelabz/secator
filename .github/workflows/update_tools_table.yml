@@ -1,4 +1,4 @@
-name: generate_table
+name: Update tools table
 
 on:
   push:
@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  generate-table:
+  update-tools-table:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
