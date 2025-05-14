@@ -1,6 +1,4 @@
-# .github/workflows/daily-schedule.yml
-
-name: Check Updates
+name: Update tools versions
 
 on:
   schedule:
@@ -18,8 +16,7 @@ env:
   FORCE_COLOR: 1
 
 jobs:
-
-  update_check:
+  update-tools-versions:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
