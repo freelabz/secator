@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TIME, TITLE, URL, WEBSERVER)
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, trim_string, format_object,rich_escape as _s
+from secator.utils import rich_to_ansi, trim_string, format_object, rich_escape as _s
 from secator.config import CONFIG
 
 
@@ -84,7 +84,7 @@ class Url(OutputType):
 		if self.screenshot_path:
 			s += rf' \[[magenta]{_s(self.screenshot_path)}[/]]'
 		if self.response_headers and CONFIG.http.show_response_headers:
-			s += rf'{format_object(self.response_headers, "magenta", skip_keys=["content_type", "content_length", "date", "server", "x_powered_by"])}'
+			s += rf'{format_object(self.response_headers, "magenta", skip_keys=["content_type", "content_length", "date", "server", "x_powered_by"])}'  # noqa: E501
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
 		return rich_to_ansi(s)

@@ -1,5 +1,3 @@
-import os
-
 import yaml
 
 from secator.decorators import task
@@ -10,7 +8,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DATA, DELAY, DEPT
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
 							   PERCENT, EXTRA_DATA, THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL)
-from secator.output_types import Url, Info, Error, Progress
+from secator.output_types import Url, Progress
 from secator.tasks._categories import HttpFuzzer
 from secator.serializers import RegexSerializer, FileSerializer
 

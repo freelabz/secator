@@ -27,6 +27,9 @@ class cariddi(HttpCrawler):
 		'juicy_extensions': {'type': int, 'short': 'jext', 'help': 'Hunt for juicy file extensions. Integer from 1(juicy) to 7(not juicy)'},  # noqa: E501
 		'juicy_endpoints': {'is_flag': True, 'short': 'jep', 'help': 'Hunt for juicy endpoints.'}
 	}
+	opt_value_map = {
+		HEADER: lambda headers: headers
+	}
 	opt_key_map = {
 		HEADER: 'headers',
 		DELAY: 'd',

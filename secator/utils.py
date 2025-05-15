@@ -846,5 +846,5 @@ def format_object(obj, color='magenta', skip_keys=[]):
 	elif isinstance(obj, dict) and obj.keys():
 		obj = {k: v for k, v in obj.items() if k.lower().replace('-', '_') not in skip_keys}
 		if obj:
-			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'
+			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
 	return ''

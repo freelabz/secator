@@ -50,7 +50,7 @@ class arjun(Command):
 		'follow_redirect': '--follow-redirect',
 	}
 	opt_value_map = {
-		HEADER: lambda headers: headers.replace(';;', '\n')
+		HEADER: lambda headers: "\\n".join(c.strip() for c in headers.split(";;"))
 	}
 	output_types = [Url]
 	install_version = '2.2.7'

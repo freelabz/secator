@@ -51,7 +51,8 @@ class feroxbuster(HttpFuzzer):
 		THREADS: 'threads',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent',
-		WORDLIST: 'wordlist'
+		WORDLIST: 'wordlist',
+		'request_headers': 'headers'
 	}
 	item_loaders = [JSONSerializer()]
 	output_map = {

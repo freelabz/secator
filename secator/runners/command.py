@@ -855,7 +855,7 @@ class Command(Runner):
 		return None
 
 	@staticmethod
-	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None, preprocess=True, process=True):
+	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None, preprocess=False, process=False):
 		default = default or Command._get_opt_default(opt_name, opts_conf)
 		opt_names = [
 			f'{opt_prefix}.{opt_name}',
@@ -873,6 +873,13 @@ class Command(Runner):
 			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='command.options', verbose=True)
 			return None
 		value = next((v for v in opt_values if v is not None), default)
+		if opt_conf:
+			preprocessor = opt_conf.get('pre_process')
+			processor = opt_conf.get('process')
+			if preprocess and preprocessor:
+				value = preprocessor(value)
+			if process and processor:
+				value = processor(value)
 		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 		if opt_conf:
 			preprocessor = opt_conf.get('pre_process')

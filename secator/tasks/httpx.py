@@ -9,7 +9,6 @@ from secator.output_types import Url, Subdomain
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
 from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
-from secator.utils import headers_to_dict
 
 
 @task()

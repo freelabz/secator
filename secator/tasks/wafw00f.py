@@ -31,6 +31,9 @@ class wafw00f(Command):
 		'find_all': {'is_flag': True, 'short': 'ta', 'default': False, 'help': 'Find all WAFs which match the signatures, do not stop testing on the first one'},  # noqa: E501
 		'no_follow_redirects': {'is_flag': True, 'short': 'nfr', 'default': False, 'help': 'Do not follow redirections given by 3xx responses'},  # noqa: E501
 	}
+	opt_value_map = {
+		HEADER: lambda x: wafw00f.headers_to_file(x)
+	}
 	opt_key_map = {
 		HEADER: 'headers',
 		PROXY: 'proxy',
@@ -74,7 +77,12 @@ class wafw00f(Command):
 			yield Tag(
 				name=waf_name + ' WAF',
 				match=url,
-				extra_data={'waf_name': waf_name, 'manufacter': manufacter, 'trigger_url': match}
+				extra_data={
+					'waf_name': waf_name,
+					'manufacter': manufacter,
+					'trigger_url': match,
+					'headers': self.get_opt_value('header', preprocess=True)
+				}
 			)
 
 	@staticmethod

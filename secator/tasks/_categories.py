@@ -18,11 +18,19 @@ from secator.config import CONFIG
 from secator.runners import Command
 from secator.utils import debug, process_wordlist, headers_to_dict
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> fix-headers-opts
 def process_headers(headers_dict):
 	headers = []
 	for key, value in headers_dict.items():
 		headers.append(f'{key}:{value}')
 	return headers
+<<<<<<< HEAD
+=======
+
+>>>>>>> fix-headers-opts
 
 USER_AGENTS = {
 	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
