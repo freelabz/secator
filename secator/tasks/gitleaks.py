@@ -5,10 +5,10 @@ import yaml
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.runners import Command
-from secator.definitions import (OUTPUT_PATH, PATH, GIT_REPOSITORY)
+from secator.definitions import PATH, GIT_REPOSITORY
 from secator.utils import caml_to_snake
-from secator.output_types import Tag, Info, Error
-
+from secator.output_types import Tag
+from secator.serializers import FileSerializer
 
 @task()
 class gitleaks(Command):
@@ -29,6 +29,7 @@ class gitleaks(Command):
 	}
 	input_type = "folder"
 	output_types = [Tag]
+	item_loaders = [FileSerializer(output_flag='-r')]
 	output_map = {
 		Tag: {
 			'name': 'RuleID',
@@ -47,27 +48,13 @@ class gitleaks(Command):
 
 	@staticmethod
 	def on_cmd(self):
-		# replace fake -mode opt by subcommand
 		mode = self.get_opt_value('mode')
 		self.cmd = self.cmd.replace(f'{gitleaks.cmd} ', f'{gitleaks.cmd} {mode} ')
-
-		# add output path
-		output_path = self.get_opt_value(OUTPUT_PATH)
-		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.output_path = output_path
-		self.cmd += f' -r {self.output_path}'
 		self.cmd += ' --exit-code 0'
 
 	@staticmethod
-	def on_cmd_done(self):
-		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find JSON results in {self.output_path}')
-			return
-
-		yield Info(message=f'JSON results saved to {self.output_path}')
-		with open(self.output_path, 'r') as f:
-			results = yaml.safe_load(f.read())
+	def on_file_loaded(self, content):
+		results = yaml.safe_load(content)
 		for result in results:
 			yield Tag(
 				name=result['RuleID'],

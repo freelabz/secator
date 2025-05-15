@@ -111,7 +111,7 @@ class Runner:
 		self.print_json = self.run_opts.get('print_json', False)
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
-		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
+		self.print_progress = self.run_opts.get('print_progress', False) and not self.print_raw
 		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
 		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
@@ -773,7 +773,8 @@ class Runner:
 
 		# Init the new item and the list of output types to load from
 		new_item = None
-		output_types = getattr(self, 'output_types', [])
+		output_types = getattr(self, 'output_types', []) + list(getattr(self, 'output_map', {}).keys())
+		output_types = set(output_types)
 		self.debug(f'Input item: {item}', sub='klass.load', verbose=True)
 
 		# Use a function to pick proper output types

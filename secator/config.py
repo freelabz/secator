@@ -85,7 +85,7 @@ class Cli(StrictModel):
 
 class Runners(StrictModel):
 	input_chunk_size: int = 100
-	progress_update_frequency: int = 20
+	progress_update_frequency: int = 10
 	stat_update_frequency: int = 20
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5
@@ -107,6 +107,7 @@ class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
 	store_responses: bool = False
+	show_response_headers: bool = False
 	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1

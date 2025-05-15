@@ -1,10 +1,11 @@
-import os
+import tempfile
 import yaml
 
 from secator.decorators import task
 from secator.runners import Command
-from secator.definitions import (OUTPUT_PATH, HEADER, PROXY, URL, TIMEOUT)
-from secator.output_types import Tag, Info, Error
+from secator.definitions import HEADER, PROXY, URL, TIMEOUT
+from secator.output_types import Tag
+from secator.serializers.file import FileSerializer
 from secator.tasks._categories import OPTS
 
 
@@ -37,6 +38,10 @@ class wafw00f(Command):
 		'find_all': 'findall',
 		'no_follow_redirects': 'noredirect',
 	}
+	opt_value_map = {
+		HEADER: lambda x: wafw00f.headers_to_file(x)
+	}
+	item_loaders = [FileSerializer(output_flag='-o')]
 	output_types = [Tag]
 	install_version = 'v2.3.1'
 	install_cmd = 'pipx install git+https://github.com/EnableSecurity/wafw00f.git@[install_version] --force'
@@ -45,11 +50,6 @@ class wafw00f(Command):
 
 	@staticmethod
 	def on_cmd(self):
-		self.output_path = self.get_opt_value(OUTPUT_PATH)
-		if not self.output_path:
-			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.cmd += f' -o {self.output_path}'
-
 		self.headers = self.get_opt_value(HEADER)
 		if self.headers:
 			header_file = f'{self.reports_folder}/.inputs/headers.txt'
@@ -59,20 +59,13 @@ class wafw00f(Command):
 			self.cmd = self.cmd.replace(self.headers, header_file)
 
 	@staticmethod
-	def on_cmd_done(self):
+	def on_file_loaded(self, content):
 		# Skip parsing if list mode
 		list_mode = self.get_opt_value('list')
 		if list_mode:
 			return
 
-		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find JSON results in {self.output_path}')
-			return
-
-		yield Info(message=f'JSON results saved to {self.output_path}')
-		with open(self.output_path, 'r') as f:
-			results = yaml.safe_load(f.read())
-
+		results = yaml.safe_load(content)
 		if len(results) > 0 and results[0]['detected']:
 			waf_name = results[0]['firewall']
 			url = results[0]['url']
@@ -83,3 +76,12 @@ class wafw00f(Command):
 				match=url,
 				extra_data={'waf_name': waf_name, 'manufacter': manufacter, 'trigger_url': match}
 			)
+
+	@staticmethod
+	def headers_to_file(headers):
+		temp_dir = tempfile.gettempdir()
+		header_file = f'{temp_dir}/headers.txt'
+		with open(header_file, 'w') as f:
+			for header in headers.split(';;'):
+				f.write(f'{header}\n')
+		return header_file

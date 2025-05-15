@@ -49,6 +49,9 @@ class arjun(Command):
 		'casing': '--casing',
 		'follow_redirect': '--follow-redirect',
 	}
+	opt_value_map = {
+		HEADER: lambda headers: headers.replace(';;', '\n')
+	}
 	output_types = [Url]
 	install_version = '2.2.7'
 	install_cmd = 'pipx install arjun==[install_version] --force'
@@ -87,6 +90,6 @@ class arjun(Command):
 			for param in values['params']:
 				yield Url(
 					url=url + '?' + param + '=' + 'FUZZ',
-					headers=values['headers'],
+					request_headers=values['headers'],
 					method=values['method'],
 				)

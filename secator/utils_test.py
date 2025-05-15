@@ -79,7 +79,7 @@ FIXTURES_TASKS = {
 # TEST OPTS #
 #-----------#
 META_OPTS = {
-	HEADER: 'User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
+	HEADER: 'User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1;; Hello: World',
 	DELAY: 0,
 	DEPTH: 2,
 	FOLLOW_REDIRECT: True,

@@ -1,16 +1,17 @@
 import json
 import logging
-import os
-import re
 
 from secator.decorators import task
-from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
+from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, PROXY,
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
 								 TIMEOUT, URL, USERNAME)
-from secator.output_types import UserAccount, Info, Error
+from secator.output_types import UserAccount
 from secator.tasks._categories import ReconUser
-
+from secator.serializers.file import FileSerializer
 logger = logging.getLogger(__name__)
+
+
+MAIGRET_OUTPUT_FILE_REGEX = rf'JSON ndjson report for .* saved in (.*)'
 
 
 @task()
@@ -22,6 +23,7 @@ class maigret(ReconUser):
 	input_flag = None
 	input_types = [USERNAME]
 	json_flag = '--json ndjson'
+	item_loaders = [FileSerializer(output_path_regex=MAIGRET_OUTPUT_FILE_REGEX)]
 	opt_prefix = '--'
 	opts = {
 		'site': {'type': str, 'help': 'Sites to check'},
@@ -49,32 +51,10 @@ class maigret(ReconUser):
 	profile = 'io'
 
 	@staticmethod
-	def on_init(self):
-		self.output_path = self.get_opt_value(OUTPUT_PATH)
-
-	@staticmethod
-	def on_cmd_done(self):
-		# Search output path in cmd output
-		if not self.output_path:
-			matches = re.findall('JSON ndjson report for .* saved in (.*)', self.output)
-			if not matches:
-				yield Error(message='JSON output file not found in command output.')
-				return
-			self.output_path = matches
-
-		if not isinstance(self.output_path, list):
-			self.output_path = [self.output_path]
-
-		for path in self.output_path:
-			if not os.path.exists(path):
-				yield Error(message=f'Could not find JSON results in {path}')
-				return
-
-			yield Info(message=f'JSON results saved to {path}')
-			with open(path, 'r') as f:
-				data = [json.loads(line) for line in f.read().splitlines()]
-			for item in data:
-				yield item
+	def on_file_loaded(self, content):
+		data = [json.loads(line) for line in content.splitlines()]
+		for item in data:
+			yield item
 
 	@staticmethod
 	def validate_item(self, item):

@@ -2,10 +2,10 @@ import os
 import json
 
 from secator.decorators import task
-from secator.definitions import EMAIL, OUTPUT_PATH
+from secator.definitions import EMAIL
 from secator.tasks._categories import OSInt
-from secator.output_types import UserAccount, Info, Error
-
+from secator.output_types import UserAccount
+from secator.serializers import FileSerializer
 
 @task()
 class h8mail(OSInt):
@@ -15,6 +15,7 @@ class h8mail(OSInt):
 	json_flag = '--json '
 	input_flag = '--targets'
 	input_types = [EMAIL]
+	item_loaders = [FileSerializer(output_flag='--json')]
 	file_flag = '-domain'
 	version_flag = '--help'
 	opt_prefix = '--'
@@ -26,23 +27,8 @@ class h8mail(OSInt):
 	install_cmd = 'pipx install h8mail==[install_version] --force'
 
 	@staticmethod
-	def on_start(self):
-		output_path = self.get_opt_value(OUTPUT_PATH)
-		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.output_path = output_path
-		self.cmd = self.cmd.replace('--json', f'--json {self.output_path}')
-
-	@staticmethod
-	def on_cmd_done(self):
-		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find JSON results in {self.output_path}')
-			return
-
-		yield Info(message=f'JSON results saved to {self.output_path}')
-		with open(self.output_path, 'r') as f:
-			data = json.load(f)
-
+	def on_file_loaded(self, content):
+		data = json.loads(content)
 		targets = data['targets']
 		for target in targets:
 			email = target['target']

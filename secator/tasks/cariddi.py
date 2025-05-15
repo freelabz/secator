@@ -52,6 +52,9 @@ class cariddi(HttpCrawler):
 		'juicy_endpoints': 'e',
 		'juicy_extensions': 'ext'
 	}
+	opt_value_map = {
+		HEADER: lambda headers: headers
+	}
 	item_loaders = [JSONSerializer()]
 	install_version = 'v1.3.6'
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@[install_version]'
@@ -65,7 +68,10 @@ class cariddi(HttpCrawler):
 	@staticmethod
 	def on_json_loaded(self, item):
 		url_item = {k: v for k, v in item.items() if k != 'matches'}
+		url_item['request_headers'] = self.get_opt_value(HEADER, preprocess=True)
 		yield Url(**url_item)
+
+		# Get matches, params, errors, secrets, infos
 		url = url_item[URL]
 		matches = item.get('matches', {})
 		params = matches.get('parameters', [])

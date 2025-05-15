@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TIME, TITLE, URL, WEBSERVER)
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
+from secator.utils import rich_to_ansi, trim_string, format_object,rich_escape as _s
 from secator.config import CONFIG
 
 
@@ -24,7 +24,9 @@ class Url(OutputType):
 	lines: int = field(default=0, compare=False)
 	screenshot_path: str = field(default='', compare=False)
 	stored_response_path: str = field(default='', compare=False)
-	headers: dict = field(default_factory=dict, repr=True, compare=False)
+	response_headers: dict = field(default_factory=dict, repr=True, compare=False)
+	request_headers: dict = field(default_factory=dict, repr=True, compare=False)
+	extra_data: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='url', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -59,15 +61,17 @@ class Url(OutputType):
 		s = f'🔗 [white]{_s(self.url)}'
 		if self.method and self.method != 'GET':
 			s += rf' \[[turquoise4]{self.method}[/]]'
+		if self.request_headers:
+			s += rf'{format_object(self.request_headers, "gold3", skip_keys=["user_agent"])}'
 		if self.status_code and self.status_code != 0:
 			if self.status_code < 400:
 				s += rf' \[[green]{self.status_code}[/]]'
 			else:
 				s += rf' \[[red]{self.status_code}[/]]'
 		if self.title:
-			s += rf' \[[green]{trim_string(self.title)}[/]]'
+			s += rf' \[[spring_green3]{trim_string(self.title)}[/]]'
 		if self.webserver:
-			s += rf' \[[magenta]{_s(self.webserver)}[/]]'
+			s += rf' \[[bold magenta]{_s(self.webserver)}[/]]'
 		if self.tech:
 			techs_str = ', '.join([f'[magenta]{_s(tech)}[/]' for tech in self.tech])
 			s += f' [{techs_str}]'
@@ -79,8 +83,8 @@ class Url(OutputType):
 			s += rf' \[[magenta]{cl}[/]]'
 		if self.screenshot_path:
 			s += rf' \[[magenta]{_s(self.screenshot_path)}[/]]'
-		if self.headers:
-			for k, v in self.headers.items():
-				if k != 'User-Agent':
-					s += rf' \[[gold3]{k}: {v}[/]]'
+		if self.response_headers and CONFIG.http.show_response_headers:
+			s += rf'{format_object(self.response_headers, "magenta", skip_keys=["content_type", "content_length", "date", "server", "x_powered_by"])}'
+		if self.extra_data:
+			s += format_object(self.extra_data, 'yellow')
 		return rich_to_ansi(s)
