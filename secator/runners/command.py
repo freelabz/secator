@@ -95,6 +95,7 @@ class Command(Runner):
 	# Hooks
 	hooks = [
 		'on_cmd',
+		'on_cmd_opts',
 		'on_cmd_done',
 		'on_line'
 	]
@@ -235,12 +236,21 @@ class Command(Runner):
 		from secator.celery import run_command
 		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
 
-	def get_opt_value(self, opt_name):
+	def get_opt_value(self, opt_name, preprocess=False, process=False):
+		"""Get option value as inputed by the user.
+		Args:
+			opt_name (str): Option name.
+			process (bool): Process the value with the option processor function if it exists.
+		Returns:
+			Any: Option value.
+		"""
 		return Command._get_opt_value(
 			self.run_opts,
 			opt_name,
 			dict(self.opts, **self.meta_opts),
-			opt_prefix=self.config.name)
+			opt_prefix=self.config.name,
+			preprocess=preprocess,
+			process=process)
 
 	@classmethod
 	def get_version_flag(cls):
@@ -715,7 +725,9 @@ class Command(Runner):
 			opt_key_map={},
 			opt_value_map={},
 			opt_prefix='-',
-			command_name=None):
+			command_name=None,
+			preprocess=False,
+			process=True):
 		"""Process a dict of options using a config, option key map / value map and option character like '-' or '--'.
 
 		Args:
@@ -725,6 +737,8 @@ class Command(Runner):
 			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
 			opt_prefix (str, default: '-'): Option prefix.
 			command_name (str | None, default: None): Command name.
+			preprocess (bool, default: True): Preprocess the value with the option preprocessor function if it exists.
+			process (bool, default: True): Process the value with the option processor function if it exists.
 
 		Returns:
 			dict: Processed options dict.
@@ -736,34 +750,38 @@ class Command(Runner):
 			# Save original opt name
 			original_opt_name = opt_name
 
+			# Copy opt conf
+			conf = opt_conf.copy()
+
 			# Get opt value
-			default_val = opt_conf.get('default')
+			default_val = conf.get('default')
 			opt_val = Command._get_opt_value(
 				opts,
 				opt_name,
 				opts_conf,
 				opt_prefix=command_name,
-				default=default_val)
+				default=default_val,
+				preprocess=preprocess,
+				process=process)
 
-			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 
 			# Skip option if value is falsy
 			if opt_val in [None, False, []]:
 				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 				continue
 
-			# Apply process function on opt value
-			if 'process' in opt_conf:
-				func = opt_conf['process']
-				opt_val = func(opt_val)
-
 			# Convert opt value to expected command opt value
 			mapped_opt_val = opt_value_map.get(opt_name)
 			if mapped_opt_val:
+				conf.pop('pre_process', None)
+				conf.pop('process', None)
 				if callable(mapped_opt_val):
 					opt_val = mapped_opt_val(opt_val)
 				else:
 					opt_val = mapped_opt_val
+			elif 'pre_process' in conf:
+				opt_val = conf['pre_process'](opt_val)
 
 			# Convert opt name to expected command opt name
 			mapped_opt_name = opt_key_map.get(opt_name)
@@ -787,7 +805,7 @@ class Command(Runner):
 
 			# Append opt name + opt value to option string.
 			# Note: does not append opt value if value is True (flag)
-			opts_dict[original_opt_name] = {'name': opt_name, 'value': opt_val, 'conf': opt_conf}
+			opts_dict[original_opt_name] = {'name': opt_name, 'value': opt_val, 'conf': conf}
 			debug('final', obj={'name': original_opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)  # noqa: E501
 
 		return opts_dict
@@ -820,7 +838,7 @@ class Command(Runner):
 		return None
 
 	@staticmethod
-	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
+	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None, preprocess=False, process=False):
 		default = default or Command._get_opt_default(opt_name, opts_conf)
 		opt_names = [
 			f'{opt_prefix}.{opt_name}',
@@ -828,13 +846,23 @@ class Command(Runner):
 			opt_name,
 		]
 		opt_values = [opts.get(o) for o in opt_names]
-		alias = [conf.get('short') for _, conf in opts_conf.items() if conf.get('short') in opts and _ == opt_name]
-		if alias:
-			opt_values.append(opts.get(alias[0]))
+		opt_conf = [conf for _, conf in opts_conf.items() if _ == opt_name]
+		if opt_conf:
+			opt_conf = opt_conf[0]
+			alias = opt_conf.get('short')
+			if alias:
+				opt_values.append(opts.get(alias))
 		if OPT_NOT_SUPPORTED in opt_values:
 			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='command.options', verbose=True)
 			return None
 		value = next((v for v in opt_values if v is not None), default)
+		if opt_conf:
+			preprocessor = opt_conf.get('pre_process')
+			processor = opt_conf.get('process')
+			if preprocess and preprocessor:
+				value = preprocessor(value)
+			if process and processor:
+				value = processor(value)
 		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
 		return value
 
@@ -856,7 +884,9 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name)
+			command_name=self.config.name,
+			preprocess=False,
+			process=False)
 
 		# Add meta options to cmd
 		meta_opts_dict = Command._process_opts(
@@ -865,16 +895,23 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name)
+			command_name=self.config.name,
+			preprocess=False,
+			process=False)
 
 		if opts_dict:
 			opts.update(opts_dict)
 		if meta_opts_dict:
 			opts.update(meta_opts_dict)
 
+		self.run_hooks('on_cmd_opts', opts)
+
 		if opts:
 			for opt_conf in opts.values():
 				conf = opt_conf['conf']
+				process = conf.get('process')
+				if process:
+					opt_conf['value'] = process(opt_conf['value'])
 				internal = conf.get('internal', False)
 				if internal:
 					continue
@@ -890,14 +927,19 @@ class Command(Runner):
 	def _build_opt_str(opt):
 		"""Build option string."""
 		conf = opt['conf']
-		opts_str = f'{opt["name"]}'
 		shlex_quote = conf.get('shlex', True)
 		value = opt['value']
-		if value is not True:
-			if shlex_quote:
-				value = shlex.quote(str(value))
-			opts_str += f' {value}'
-		return opts_str
+		opt_name = opt['name']
+		opts_str = ''
+		value = [value] if not isinstance(value, list) else value
+		for val in value:
+			if val is True:
+				opts_str += f'{opt_name}'
+			else:
+				if shlex_quote:
+					val = shlex.quote(str(val))
+				opts_str += f'{opt_name} {val} '
+		return opts_str.strip()
 
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a

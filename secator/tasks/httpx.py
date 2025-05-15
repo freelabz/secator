@@ -15,7 +15,7 @@ from secator.utils import headers_to_dict
 @task()
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
-	cmd = 'httpx'
+	cmd = 'httpx -irh'
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -90,39 +90,10 @@ class httpx(Http):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
-		screenshot = self.get_opt_value('screenshot')
-		store_responses = self.get_opt_value('store_responses')
-		if store_responses or screenshot:
-			self.cmd += f' -srd {self.reports_folder}/.outputs'
-		if screenshot:
-			self.cmd += ' -esb -ehb'
-		self.domains = []
-
-		# Add headers to the command
-		for k, v in self.headers.items():
-			header_str = f" -header '{k}: {v}'"
-			if f'{k}:{v}'.replace(' ', '') not in self.cmd.replace(' ', ''):
-				self.cmd += header_str
-
-	@staticmethod
-	def on_json_loaded(self, item):
-		item = self._preprocess_url(item)
-		yield item
-		tls = item.get('tls', None)
-		if tls:
-			subject_cn = tls.get('subject_cn', None)
-			subject_an = tls.get('subject_an', [])
-			cert_domains = subject_an
-			if subject_cn:
-				cert_domains.append(subject_cn)
-			for cert_domain in cert_domains:
-				subdomain = self._create_subdomain_from_tls_cert(cert_domain, item['url'])
-				if subdomain:
-					yield subdomain
 
 	@staticmethod
 	def on_end(self):
-		store_responses = self.get_opt_value('store_responses')
+		store_responses = self.get_opt_value('store_responses') or CONFIG.http.store_responses
 		response_dir = f'{self.reports_folder}/.outputs'
 		if store_responses:
 			index_rpath = f'{response_dir}/response/index.txt'
@@ -146,7 +117,8 @@ class httpx(Http):
 			elif k == URL:
 				item[k] = sanitize_url(v)
 		item[URL] = item.get('final_url') or item[URL]
-		item['headers'] = self.headers
+		item['request_headers'] = self.get_opt_value('header', preprocess=True)
+		item['response_headers'] = item.get('header', {})
 		return item
 
 	def _create_subdomain_from_tls_cert(self, domain, url):

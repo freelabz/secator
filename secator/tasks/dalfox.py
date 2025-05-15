@@ -6,7 +6,7 @@ from secator.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   OPT_NOT_SUPPORTED, PROVIDER, PROXY, RATE_LIMIT,
 							   SEVERITY, TAGS, THREADS, TIMEOUT, URL,
 							   USER_AGENT)
-from secator.output_types import Vulnerability
+from secator.output_types import Vulnerability, Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnHttp
 
@@ -41,6 +41,7 @@ class dalfox(VulnHttp):
 		USER_AGENT: 'user-agent'
 	}
 	item_loaders = [JSONSerializer()]
+	output_types = [Vulnerability, Url]
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: None,
@@ -49,10 +50,7 @@ class dalfox(VulnHttp):
 			TAGS: lambda x: [x['cwe']] if x['cwe'] else [],
 			CONFIDENCE: lambda x: 'high',
 			MATCHED_AT: lambda x: urlparse(x['data'])._replace(query='').geturl(),
-			EXTRA_DATA: lambda x: {
-				k: v for k, v in x.items()
-				if k not in ['type', 'severity', 'cwe']
-			},
+			EXTRA_DATA: lambda x: dalfox.extra_data_extractor(x),
 			SEVERITY: lambda x: x['severity'].lower()
 		}
 	}
@@ -70,3 +68,23 @@ class dalfox(VulnHttp):
 	def on_line(self, line):
 		line = line.rstrip(',')
 		return line
+
+	@staticmethod
+	def on_json_loaded(self, item):
+		if item.get('type', '') == 'V':
+			item['request_headers'] = self.get_opt_value(HEADER, preprocess=True)
+			yield Url(
+				url=item['data'],
+				method=item['method'],
+				request_headers=item['request_headers'],
+				extra_data={k: v for k, v in item.items() if k not in ['type', 'severity', 'cwe', 'request_headers', 'method', 'data']}  # noqa: E501
+			)
+		yield item
+
+	@staticmethod
+	def extra_data_extractor(item):
+		extra_data = {}
+		for key, value in item.items():
+			if key not in ['type', 'severity', 'cwe']:
+				extra_data[key] = value
+		return extra_data

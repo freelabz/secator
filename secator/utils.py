@@ -407,7 +407,7 @@ def rich_escape(obj):
 	return obj
 
 
-def format_object(obj, obj_breaklines=False):
+def format_debug_object(obj, obj_breaklines=False):
 	"""Format the debug object for printing.
 
 	Args:
@@ -441,7 +441,7 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 		msg = lazy(msg)
 
 	formatted_msg = f'[yellow4]{sub:13s}[/] ' if sub else ''
-	obj_str = format_object(obj, obj_breaklines) if obj else ''
+	obj_str = format_debug_object(obj, obj_breaklines) if obj else ''
 
 	# Constructing the message string based on object position
 	if obj_str and not obj_after:
@@ -832,3 +832,13 @@ def headers_to_dict(header_opt):
 		val = ':'.join(split[1:]).strip()
 		headers[key] = val
 	return headers
+
+
+def format_object(obj, color='magenta', skip_keys=[]):
+	if isinstance(obj, list) and obj:
+		return ' [' + ', '.join([f'[{color}]{rich_escape(item)}[/]' for item in obj]) + ']'
+	elif isinstance(obj, dict) and obj.keys():
+		obj = {k: v for k, v in obj.items() if k.lower().replace('-', '_') not in skip_keys}
+		if obj:
+			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
+	return ''
