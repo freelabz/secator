@@ -12,8 +12,9 @@ from secator.output_types import Url, Progress
 from secator.tasks._categories import HttpFuzzer
 from secator.serializers import RegexSerializer, FileSerializer
 
-DIRSEARCH_PROGRESS_REGEX =r'\s+(?P<percent>\d+)%\s+(?P<reqs_current>\d+)/(?P<req_total>\d+)\s+(?P<rps>\d+)/s\s+job:(?P<job_current>\d+)/(?P<job_total>\d+)\s+errors:(?P<errors>\d+)'
+DIRSEARCH_PROGRESS_REGEX = r'\s+(?P<percent>\d+)%\s+(?P<reqs_current>\d+)/(?P<req_total>\d+)\s+(?P<rps>\d+)/s\s+job:(?P<job_current>\d+)/(?P<job_total>\d+)\s+errors:(?P<errors>\d+)'  # noqa: E501
 DIRSEARCH_PROGRESS_FIELDS = ['percent', 'reqs_current', 'req_total', 'rps', 'job_current', 'job_total', 'errors']
+
 
 @task()
 class dirsearch(HttpFuzzer):

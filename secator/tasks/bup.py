@@ -1,6 +1,5 @@
 import json
 import re
-import itertools
 from secator.decorators import task
 from secator.output_types import Url, Progress
 from secator.definitions import (

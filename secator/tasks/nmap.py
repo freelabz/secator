@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 
 import xmltodict
@@ -9,11 +8,11 @@ from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
-								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
+								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability, Info, Error
+from secator.output_types import Exploit, Port, Vulnerability, Error
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug, traceback_as_string
 from secator.serializers import FileSerializer
@@ -166,7 +165,7 @@ class nmap(VulnMulti):
 			yield from nmapData(results)
 		except Exception as exc:
 			yield Error(
-				message=f'Cannot parse XML output to valid JSON.',
+				message='Cannot parse XML output to valid JSON.',
 				traceback=traceback_as_string(exc)
 			)
 

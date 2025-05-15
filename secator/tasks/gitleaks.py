@@ -1,5 +1,4 @@
 import click
-import os
 import yaml
 
 from secator.config import CONFIG
@@ -9,6 +8,7 @@ from secator.definitions import PATH, GIT_REPOSITORY
 from secator.utils import caml_to_snake
 from secator.output_types import Tag
 from secator.serializers import FileSerializer
+
 
 @task()
 class gitleaks(Command):

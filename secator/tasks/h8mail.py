@@ -1,4 +1,3 @@
-import os
 import json
 
 from secator.decorators import task
@@ -6,6 +5,7 @@ from secator.definitions import EMAIL
 from secator.tasks._categories import OSInt
 from secator.output_types import UserAccount
 from secator.serializers import FileSerializer
+
 
 @task()
 class h8mail(OSInt):

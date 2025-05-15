@@ -1,5 +1,4 @@
 import click
-import os
 import yaml
 
 from secator.config import CONFIG

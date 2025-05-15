@@ -11,7 +11,7 @@ from secator.serializers.file import FileSerializer
 logger = logging.getLogger(__name__)
 
 
-MAIGRET_OUTPUT_FILE_REGEX = rf'JSON ndjson report for .* saved in (.*)'
+MAIGRET_OUTPUT_FILE_REGEX = r'JSON ndjson report for .* saved in (.*)'
 
 
 @task()
