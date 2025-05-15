@@ -240,6 +240,7 @@ def decorate_command_options(opts):
 			conf.pop('meta', None)
 			conf.pop('supported', None)
 			conf.pop('process', None)
+			conf.pop('pre_process', None)
 			conf.pop('requires_sudo', None)
 			reverse = conf.pop('reverse', False)
 			opposite = conf.pop('opposite', None)
