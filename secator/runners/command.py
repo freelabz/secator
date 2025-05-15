@@ -904,7 +904,7 @@ class Command(Runner):
 		if meta_opts_dict:
 			opts.update(meta_opts_dict)
 
-		self.run_hooks('on_cmd_opts', opts)
+		opts = self.run_hooks('on_cmd_opts', opts)
 
 		if opts:
 			for opt_conf in opts.values():
