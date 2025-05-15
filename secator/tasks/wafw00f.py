@@ -85,7 +85,12 @@ class wafw00f(Command):
 			yield Tag(
 				name=waf_name + ' WAF',
 				match=url,
-				extra_data={'waf_name': waf_name, 'manufacter': manufacter, 'trigger_url': match}
+				extra_data={
+					'waf_name': waf_name,
+					'manufacter': manufacter,
+					'trigger_url': match,
+					'headers': self.get_opt_value('header', preprocess=True)
+				}
 			)
 
 	@staticmethod
