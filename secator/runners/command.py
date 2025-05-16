@@ -533,8 +533,8 @@ class Command(Runner):
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold cyan', rich=True)
-		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
-		self.debug('Options', obj={'opts': self.cmd_options}, sub='init')
+		self.debug('Command', obj={'cmd': self.cmd}, sub='start', verbose=self.print_cmd)
+		self.debug('Command options', obj={'opts': self.cmd_options}, sub='start', verbose=False)
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
