@@ -389,7 +389,7 @@ def rich_to_ansi(text):
 			tmp_console.print(text, end='', soft_wrap=True)
 		return capture.get()
 	except Exception:
-		console.print(f'[bold red]Could not convert rich text to ansi: {text}[/]', highlight=False, markup=False)
+		print(f'Could not convert rich text to ansi: {text}[/]', file=sys.stderr)
 		return text
 
 
@@ -403,7 +403,7 @@ def rich_escape(obj):
 		any: Initial object, or escaped Rich string.
 	"""
 	if isinstance(obj, str):
-		return obj.replace('[', r'\[').replace(']', r'\]')
+		return obj.replace('[', r'\[').replace(']', r'\]').replace(r'\[/', r'\[\/')
 	return obj
 
 
@@ -427,14 +427,19 @@ def format_debug_object(obj, obj_breaklines=False):
 
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG_COMPONENT == ['all']:
+	if not DEBUG_COMPONENT == ['all'] and not DEBUG_COMPONENT == ['1']:
 		if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
 			return
 
 		if sub:
-			if verbose and sub not in DEBUG_COMPONENT:
-				sub = f'debug.{sub}'
-			if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+			for s in DEBUG_COMPONENT:
+				if '*' in s and re.match(s + '$', sub):
+					break
+				elif not verbose and sub.startswith(s):
+					break
+				elif verbose and sub == s:
+					break
+			else:
 				return
 
 	if lazy:
@@ -452,7 +457,12 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 	if id:
 		formatted_msg += rf' [italic gray11]\[{id}][/]'
 
-	console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+	try:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+	except Exception:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]')
+		if 'rich' in DEBUG_COMPONENT:
+			raise
 
 
 def escape_mongodb_url(url):
