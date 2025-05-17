@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DATA, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
 								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, IP,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
 								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
@@ -16,7 +16,15 @@ from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTI
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
 from secator.runners import Command
-from secator.utils import debug, process_wordlist
+from secator.utils import debug, process_wordlist, headers_to_dict
+
+
+def process_headers(headers_dict):
+	headers = []
+	for key, value in headers_dict.items():
+		headers.append(f'{key}:{value}')
+	return headers
+
 
 USER_AGENTS = {
 	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
@@ -25,7 +33,8 @@ USER_AGENTS = {
 
 
 OPTS = {
-	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'default': 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']},  # noqa: E501
+	HEADER: {'type': str, 'short': 'H', 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'pre_process': headers_to_dict, 'process': process_headers, 'default': 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']},  # noqa: E501
+	DATA: {'type': str, 'help': 'Data to send in the request body'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
 	DEPTH: {'type': int, 'help': 'Scan depth'},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
@@ -56,7 +65,7 @@ OPTS_HTTP_CRAWLERS = OPTS_HTTP + [
 	MATCH_CODES
 ]
 
-OPTS_HTTP_FUZZERS = OPTS_HTTP_CRAWLERS + [WORDLIST]
+OPTS_HTTP_FUZZERS = OPTS_HTTP_CRAWLERS + [WORDLIST, DATA]
 
 OPTS_RECON = [
 	DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT

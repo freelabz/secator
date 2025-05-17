@@ -24,7 +24,7 @@ class bup(Http):
 	opts = {
 		'spoofport': {'type': int, 'short': 'sp', 'help': 'Port(s) to inject in port-specific headers'},
 		'spoofip': {'type': str, 'short': 'si', 'help': 'IP(s) to inject in ip-specific headers'},
-		'mode': {'type': str, 'help': 'Bypass modes.'},
+		'mode': {'type': str, 'help': 'Bypass modes (comma-delimited) amongst: all, mid_paths, end_paths, case_substitution, char_encode, http_methods, http_versions, http_headers_method, http_headers_scheme, http_headers_ip, http_headers_port, http_headers_url, user_agent'},  # noqa: E501},
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -53,7 +53,8 @@ class bup(Http):
 		Url: {
 			'url': 'request_url',
 			'method': lambda x: bup.method_extractor(x),
-			'headers': lambda x: bup.headers_extractor(x),
+			'request_headers': lambda x: bup.request_headers_extractor(x),
+			'response_headers': lambda x: bup.response_headers_extractor(x),
 			'status_code': 'response_status_code',
 			'content_type': 'response_content_type',
 			'content_length': 'response_content_length',
@@ -90,7 +91,20 @@ class bup(Http):
 		return 'GET'
 
 	@staticmethod
-	def headers_extractor(item):
+	def request_headers_extractor(item):
+		headers = {}
+		match1 = list(re.finditer(r'-H\s*\'?([^\']*)\'?', str(item['request_curl_payload'])))
+		match2 = list(re.finditer(r'-H\s*\'?([^\']*)\"?', str(item['request_curl_cmd'])))
+		matches = match1
+		matches.extend(match2)
+		for match in matches:
+			header = match.group(1).split(':', 1)
+			if len(header) == 2:
+				headers[header[0].strip()] = header[1].strip()
+		return headers
+
+	@staticmethod
+	def response_headers_extractor(item):
 		headers_list = item['response_headers'].split('\n')[1:]
 		headers = {}
 		for header in headers_list:

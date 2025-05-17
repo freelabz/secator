@@ -1,6 +1,6 @@
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
+from secator.definitions import (CONTENT_TYPE, DATA, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, LINES, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
@@ -32,6 +32,7 @@ class feroxbuster(HttpFuzzer):
 	}
 	opt_key_map = {
 		HEADER: 'headers',
+		DATA: 'data',
 		DELAY: OPT_NOT_SUPPORTED,
 		DEPTH: 'depth',
 		FILTER_CODES: 'filter-status',
@@ -50,7 +51,8 @@ class feroxbuster(HttpFuzzer):
 		THREADS: 'threads',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent',
-		WORDLIST: 'wordlist'
+		WORDLIST: 'wordlist',
+		'request_headers': 'headers'
 	}
 	item_loaders = [JSONSerializer()]
 	output_map = {
@@ -84,3 +86,8 @@ class feroxbuster(HttpFuzzer):
 		if isinstance(item, dict):
 			return item['type'] == 'response'
 		return True
+
+	@staticmethod
+	def on_item(self, item):
+		item.request_headers = self.get_opt_value('header', preprocess=True)
+		return item

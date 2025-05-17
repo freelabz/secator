@@ -389,7 +389,7 @@ def rich_to_ansi(text):
 			tmp_console.print(text, end='', soft_wrap=True)
 		return capture.get()
 	except Exception:
-		console.print(f'[bold red]Could not convert rich text to ansi: {text}[/]', highlight=False, markup=False)
+		print(f'Could not convert rich text to ansi: {text}[/]', file=sys.stderr)
 		return text
 
 
@@ -403,11 +403,11 @@ def rich_escape(obj):
 		any: Initial object, or escaped Rich string.
 	"""
 	if isinstance(obj, str):
-		return obj.replace('[', r'\[').replace(']', r'\]')
+		return obj.replace('[', r'\[').replace(']', r'\]').replace(r'\[/', r'\[\/')
 	return obj
 
 
-def format_object(obj, obj_breaklines=False):
+def format_debug_object(obj, obj_breaklines=False):
 	"""Format the debug object for printing.
 
 	Args:
@@ -427,21 +427,26 @@ def format_object(obj, obj_breaklines=False):
 
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG_COMPONENT == ['all']:
+	if not DEBUG_COMPONENT == ['all'] and not DEBUG_COMPONENT == ['1']:
 		if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
 			return
 
 		if sub:
-			if verbose and sub not in DEBUG_COMPONENT:
-				sub = f'debug.{sub}'
-			if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+			for s in DEBUG_COMPONENT:
+				if '*' in s and re.match(s + '$', sub):
+					break
+				elif not verbose and sub.startswith(s):
+					break
+				elif verbose and sub == s:
+					break
+			else:
 				return
 
 	if lazy:
 		msg = lazy(msg)
 
 	formatted_msg = f'[yellow4]{sub:13s}[/] ' if sub else ''
-	obj_str = format_object(obj, obj_breaklines) if obj else ''
+	obj_str = format_debug_object(obj, obj_breaklines) if obj else ''
 
 	# Constructing the message string based on object position
 	if obj_str and not obj_after:
@@ -452,7 +457,12 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 	if id:
 		formatted_msg += rf' [italic gray11]\[{id}][/]'
 
-	console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+	try:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+	except Exception:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]')
+		if 'rich' in DEBUG_COMPONENT:
+			raise
 
 
 def escape_mongodb_url(url):
@@ -832,3 +842,13 @@ def headers_to_dict(header_opt):
 		val = ':'.join(split[1:]).strip()
 		headers[key] = val
 	return headers
+
+
+def format_object(obj, color='magenta', skip_keys=[]):
+	if isinstance(obj, list) and obj:
+		return ' [' + ', '.join([f'[{color}]{rich_escape(item)}[/]' for item in obj]) + ']'
+	elif isinstance(obj, dict) and obj.keys():
+		obj = {k: v for k, v in obj.items() if k.lower().replace('-', '_') not in skip_keys}
+		if obj:
+			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
+	return ''

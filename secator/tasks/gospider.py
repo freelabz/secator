@@ -76,3 +76,8 @@ class gospider(HttpCrawler):
 		except ValueError:  # gospider returns invalid URLs for output sometimes
 			return False
 		return True
+
+	@staticmethod
+	def on_json_loaded(self, item):
+		item['request_headers'] = self.get_opt_value('header', preprocess=True)
+		yield item
