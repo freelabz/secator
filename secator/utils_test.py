@@ -192,7 +192,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			results = runner.run()
 			results_str = "\n".join([repr(r) for r in results])
 			debug(f'{runner.name} yielded results\n{results_str}', sub='unittest')
-			debug(f'{runner.name} yielded results\n{json.dumps([r.toDict() for r in results], default=str,indent=2)}', sub='unittest.dict', verbose=True)  # noqa: E501
+			debug(f'{runner.name} yielded results\n{json.dumps([r.toDict() for r in results], default=str, indent=2)}', sub='unittest.dict', verbose=True)  # noqa: E501
 
 			debug('-' * 10 + f' RUNNER {runner.name} TESTS ' + '-' * 10, sub='unittest')
 
