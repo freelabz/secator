@@ -239,11 +239,9 @@ class Command(Runner):
 
 	def get_opt_value(self, opt_name, preprocess=False, process=False):
 		"""Get option value as inputed by the user.
-
 		Args:
 			opt_name (str): Option name.
 			process (bool): Process the value with the option processor function if it exists.
-
 		Returns:
 			Any: Option value.
 		"""

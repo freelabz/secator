@@ -360,6 +360,18 @@ def register_runner(cli_endpoint, config):
 				console.print(f'{task_cls.__name__} version: [bold green]{current}[/] (recommended: [bold green]{latest}[/])')
 			sys.exit(0)
 
+		# Show version
+		if version:
+			data = task_cls.get_version_info()
+			current = data['version']
+			latest = data['latest_version']
+			installed = data['installed']
+			if not installed:
+				console.print(f'[bold red]{task_cls.__name__} is not installed.[/]')
+			else:
+				console.print(f'{task_cls.__name__} version: [bold green]{current}[/] (recommended: [bold green]{latest}[/])')
+			sys.exit(0)
+
 		# Show runner yaml
 		if show:
 			config.print()

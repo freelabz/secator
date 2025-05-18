@@ -73,7 +73,7 @@ class dirsearch(HttpFuzzer):
 	proxy_http = True
 	profile = 'io'
 
-	@staticmethod
+  @staticmethod
 	def on_file_loaded(self, content):
 		results = yaml.safe_load(content).get('results', [])
 		for result in results:

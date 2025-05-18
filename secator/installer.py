@@ -516,7 +516,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 
 	# Get current version
 	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag
-	if version_flag:
+	if version_flag and not version:
 		version_cmd = f'{name} {version_flag}'
 		info['version_cmd'] = version_cmd
 		version = get_version(version_cmd)
