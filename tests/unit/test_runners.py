@@ -42,6 +42,9 @@ class TestCommandRunner(unittest.TestCase):
 			if hook in ['on_item_pre_convert', 'on_item', 'on_line', 'on_duplicate']:
 				def func(self, item):
 					return item
+			elif hook in ['on_cmd_opts']:
+				def func(self, opts):
+					return opts
 			else:
 				def func(self):
 					return None

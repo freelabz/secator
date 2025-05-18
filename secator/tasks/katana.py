@@ -73,7 +73,7 @@ class katana(HttpCrawler):
 			CONTENT_LENGTH: lambda x: x['response'].get('headers', {}).get('content_length', 0),
 			WEBSERVER: lambda x: x['response'].get('headers', {}).get('server', ''),
 			TECH: lambda x: x['response'].get('technologies', []),
-			STORED_RESPONSE_PATH: lambda x: x['response'].get('stored_response_path', '')
+			STORED_RESPONSE_PATH: lambda x: x['response'].get('stored_response_path', ''),
 			# TAGS: lambda x: x['response'].get('server')
 		}
 	}
@@ -95,7 +95,12 @@ class katana(HttpCrawler):
 		if forms:
 			for form in forms:
 				method = form['method']
-				yield Url(form['action'], host=urlparse(item['request']['endpoint']).netloc, method=method)
+				yield Url(
+					form['action'],
+					host=urlparse(item['request']['endpoint']).netloc,
+					method=method,
+					request_headers=self.get_opt_value('header', preprocess=True)
+				)
 				yield Tag(
 					name='form',
 					match=form['action'],
@@ -105,6 +110,7 @@ class katana(HttpCrawler):
 						'parameters': ','.join(form.get('parameters', []))
 					}
 				)
+		item['request_headers'] = self.get_opt_value('header', preprocess=True)
 		yield item
 
 	@staticmethod
