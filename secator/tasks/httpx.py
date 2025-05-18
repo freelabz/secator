@@ -14,7 +14,7 @@ from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains
 @task()
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
-	cmd = 'httpx'
+	cmd = 'httpx -irh'
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -109,7 +109,7 @@ class httpx(Http):
 
 	@staticmethod
 	def on_end(self):
-		store_responses = self.get_opt_value('store_responses')
+		store_responses = self.get_opt_value('store_responses') or CONFIG.http.store_responses
 		response_dir = f'{self.reports_folder}/.outputs'
 		if store_responses:
 			index_rpath = f'{response_dir}/response/index.txt'
@@ -133,6 +133,8 @@ class httpx(Http):
 			elif k == URL:
 				item[k] = sanitize_url(v)
 		item[URL] = item.get('final_url') or item[URL]
+		item['request_headers'] = self.get_opt_value('header', preprocess=True)
+		item['response_headers'] = item.get('header', {})
 		return item
 
 	def _create_subdomain_from_tls_cert(self, domain, url):
