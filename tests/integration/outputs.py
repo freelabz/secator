@@ -2,6 +2,32 @@ from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability, Record, Certificate)
 
+
+OUTPUTS_CHECKS = {
+    'output_types': {
+        Url: {
+            'checks': [
+                {
+                    'info': 'should have request header "Hello"',
+                    'error': 'Request header "Hello" not present in URL object',
+                    'function': lambda item: 'Hello' in item.request_headers,
+                },
+                {
+                    'info': 'should have request header "Hello" set to "World"',
+                    'error': 'Request header "Hello" not set to "World"',
+                    'function': lambda item: item.request_headers['Hello'] == 'World',
+                }
+            ],
+            'runner': '^(?!gau$).*',
+        }
+    },
+    # 'runner': {
+    #     Command: {
+
+    #     }
+    # }
+}
+
 OUTPUTS_TASKS = {
     'arjun': [
         Url(
