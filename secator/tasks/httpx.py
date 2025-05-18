@@ -9,13 +9,12 @@ from secator.output_types import Url, Subdomain
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
 from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
-from secator.utils import headers_to_dict
 
 
 @task()
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
-	cmd = 'httpx -irh'
+	cmd = 'httpx'
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -80,13 +79,7 @@ class httpx(Http):
 	profile = 'io'
 
 	@staticmethod
-	def before_init(self):
-		header_opt = self.get_opt_value('header')
-		headers = headers_to_dict(header_opt)
-		self.headers = headers
-
-	@staticmethod
-	def on_cmd(self):
+	def on_init(self):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
@@ -97,12 +90,6 @@ class httpx(Http):
 		if screenshot:
 			self.cmd += ' -esb -ehb'
 		self.domains = []
-
-		# Add headers to the command
-		for k, v in self.headers.items():
-			header_str = f" -header '{k}: {v}'"
-			if f'{k}:{v}'.replace(' ', '') not in self.cmd.replace(' ', ''):
-				self.cmd += header_str
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -122,7 +109,7 @@ class httpx(Http):
 
 	@staticmethod
 	def on_end(self):
-		store_responses = self.get_opt_value('store_responses') or CONFIG.http.store_responses
+		store_responses = self.get_opt_value('store_responses')
 		response_dir = f'{self.reports_folder}/.outputs'
 		if store_responses:
 			index_rpath = f'{response_dir}/response/index.txt'
@@ -146,8 +133,6 @@ class httpx(Http):
 			elif k == URL:
 				item[k] = sanitize_url(v)
 		item[URL] = item.get('final_url') or item[URL]
-		item['request_headers'] = self.get_opt_value('header', preprocess=True)
-		item['response_headers'] = item.get('header', {})
 		return item
 
 	def _create_subdomain_from_tls_cert(self, domain, url):
