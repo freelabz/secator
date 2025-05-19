@@ -223,7 +223,9 @@ class SourceInstaller:
 			install_cmd = install_cmd.replace('[install_version_strip]', version.lstrip('v'))
 
 		# Run command
-		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
+		ret = Command.execute(install_cmd, cls_attributes={'shell': True, 'no_process': False}, quiet=False)
+		for error in ret.errors:
+			console.print(error)
 		return InstallerStatus.SUCCESS if ret.return_code == 0 else InstallerStatus.INSTALL_FAILED
 
 
