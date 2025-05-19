@@ -6,7 +6,6 @@ import json
 import logging
 import operator
 import os
-import rich
 import tldextract
 import re
 import select
