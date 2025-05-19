@@ -221,6 +221,8 @@ class SourceInstaller:
 		elif '[install_version_strip]' in install_cmd:
 			version = version or 'latest'
 			install_cmd = install_cmd.replace('[install_version_strip]', version.lstrip('v'))
+		if getpass.getuser() != 'root':
+			install_cmd = f'sudo {install_cmd}'
 
 		# Run command
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
