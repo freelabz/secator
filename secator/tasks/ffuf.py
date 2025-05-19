@@ -72,7 +72,7 @@ class ffuf(HttpFuzzer):
 		},
 		Progress: {
 			PERCENT: lambda x: int(int(x['count']) * 100 / int(x['total'])),
-			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['count', 'total', 'errors']}
+			EXTRA_DATA: lambda x: x
 		},
 	}
 	encoding = 'ansi'
