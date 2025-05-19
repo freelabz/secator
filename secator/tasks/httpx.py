@@ -79,7 +79,7 @@ class httpx(Http):
 	profile = 'io'
 
 	@staticmethod
-	def on_init(self):
+	def on_cmd(self):
 		debug_resp = self.get_opt_value('debug_resp')
 		if debug_resp:
 			self.cmd = self.cmd.replace('-silent', '')
