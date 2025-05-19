@@ -384,6 +384,10 @@ class Command(Runner):
 			dict: Serialized object.
 		"""
 		try:
+			# Abort if it has children tasks
+			if self.has_children:
+				return
+
 			# Run on_cmd_start hook
 			self.run_hooks('on_cmd_start')
 
@@ -391,10 +395,6 @@ class Command(Runner):
 			for item_loader in self.item_loaders:
 				if hasattr(item_loader, 'on_cmd_start'):
 					item_loader.on_cmd_start(self)
-
-			# Abort if it has children tasks
-			if self.has_children:
-				return
 
 			# Abort if dry run
 			if self.dry_run:
@@ -407,21 +407,17 @@ class Command(Runner):
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				yield Warning(message=f'{self.unique_name} skipped (no inputs)')
 				return
 
 			# Yield targets
 			for input in self.inputs:
-				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				yield Target(name=input)
 
 			# Check for sudo requirements and prepare the password if needed
 			sudo_password, error = self._prompt_sudo(self.cmd)
 			if error:
-				yield Error(
-					message=error,
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
+				yield Error(message=error)
 				return
 
 			# Prepare cmds
@@ -431,18 +427,10 @@ class Command(Runner):
 			if not self.no_process and not self.is_installed():
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
-					yield Info(
-						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noqa: E501
-						_source=self.unique_name,
-						_uuid=str(uuid.uuid4())
-					)
+					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
 					status = ToolInstaller.install(self.__class__)
 					if not status.is_ok():
-						yield Error(
-							message=f'Failed installing {self.cmd_name}',
-							_source=self.unique_name,
-							_uuid=str(uuid.uuid4())
-						)
+						yield Error(message=f'Failed installing {self.cmd_name}')
 						return
 
 			# Output and results
@@ -474,23 +462,13 @@ class Command(Runner):
 					break
 				yield from self.process_line(line)
 
-			# Run hooks after cmd has completed successfully
-			result = self.run_hooks('on_cmd_done')
-			if result:
-				yield from result
-
-			# Run on_cmd_done hooks for item loaders
-			result = self.run_item_loaders('on_cmd_done', self)
-			if result:
-				yield from result
-
 		except FileNotFoundError as e:
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='error')
 			self.stop_process()
-			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error.from_exception(e)
 
 		finally:
 			yield from self._wait_for_end()
@@ -705,6 +683,17 @@ class Command(Runner):
 		for line in self.process.stdout.readlines():
 			yield from self.process_line(line)
 		self.process.wait()
+
+		# Run hooks after cmd has completed
+		result = self.run_hooks('on_cmd_done')
+		if result:
+			yield from result
+
+		# Run on_cmd_done hooks for item loaders
+		result = self.run_item_loaders('on_cmd_done', self)
+		if result:
+			yield from result
+
 		self.return_code = 0 if self.exit_ok else self.process.returncode
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
@@ -714,11 +703,7 @@ class Command(Runner):
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			yield Error(message=error)
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
@@ -729,8 +714,6 @@ class Command(Runner):
 				message=error,
 				traceback='\n'.join(last_lines),
 				traceback_title='Last stdout lines',
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
 			)
 
 	@staticmethod
@@ -879,13 +862,6 @@ class Command(Runner):
 			if process and processor:
 				value = processor(value)
 		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
-		if opt_conf:
-			preprocessor = opt_conf.get('pre_process')
-			processor = opt_conf.get('process')
-			if preprocess and preprocessor:
-				value = preprocessor(value)
-			if process and processor:
-				value = processor(value)
 		return value
 
 	def _build_cmd(self):

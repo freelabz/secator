@@ -29,7 +29,7 @@ class nmap(VulnMulti):
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
-	item_loaders = [FileSerializer(output_flag='-oX')]
+	item_loaders = [FileSerializer(output_flag='-oX', output_ext='xml')]
 	output_types = [Port, Vulnerability, Exploit]
 	opts = {
 		# Port specification and scan order
@@ -166,7 +166,7 @@ class nmap(VulnMulti):
 		except Exception as exc:
 			yield Error(
 				message='Cannot parse XML output to valid JSON.',
-				traceback=traceback_as_string(exc)
+				traceback=traceback_as_string(exc) + f'\nXML content:\n{content}'
 			)
 
 

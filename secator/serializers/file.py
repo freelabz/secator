@@ -6,9 +6,10 @@ from secator.output_types import Info, Warning
 
 class FileSerializer:
 
-	def __init__(self, output_flag=None, output_path_regex=None):
+	def __init__(self, output_flag=None, output_ext=None, output_path_regex=None):
 		self.output_flag = output_flag
 		self.output_path_regex = output_path_regex
+		self.output_ext = output_ext or 'json'
 
 	def on_cmd_start(self, runner):
 		# Output path regex set
@@ -18,7 +19,7 @@ class FileSerializer:
 		# Check if output path is set
 		self.output_path = runner.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
-			self.output_path = f'{runner.reports_folder}/.outputs/{runner.unique_name}.json'
+			self.output_path = f'{runner.reports_folder}/.outputs/{runner.unique_name}.{self.output_ext}'
 
 		# Add output flag to command
 		if self.output_flag:
@@ -32,7 +33,7 @@ class FileSerializer:
 		if self.output_path_regex:
 			matches = re.findall(self.output_path_regex, runner.output)
 			if not matches:
-				runner.add_result(Warning(message=f'Could not find output file from regex {self.output_path_regex}'), print=True)
+				runner.add_result(Warning(message=f'Could not find output file from regex {self.output_path_regex}'), print=True)  # noqa: E501
 				return
 			self.output_path = matches
 

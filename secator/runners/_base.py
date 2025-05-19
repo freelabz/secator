@@ -303,8 +303,6 @@ class Runner:
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='error')
 			error = Error.from_exception(e)
-			error._source = self.unique_name
-			error._uuid = str(uuid.uuid4())
 			self.add_result(error, print=True)
 			self.stop_celery_tasks()
 			yield from self.join_threads()
@@ -327,8 +325,6 @@ class Runner:
 		for thread in self.threads:
 			error = thread.join()
 			if error:
-				error._source = self.unique_name
-				error._uuid = str(uuid.uuid4())
 				self.add_result(error, print=True)
 				yield error
 
@@ -349,6 +345,10 @@ class Runner:
 			print (bool): Whether to print it or not.
 			output (bool): Whether to add it to the output or not.
 		"""
+		if not item._uuid:
+			item._uuid = str(uuid.uuid4())
+		if not item._source:
+			item._source = self.unique_name
 		self.uuids.append(item._uuid)
 		self.results.append(item)
 		if output:
@@ -640,11 +640,7 @@ class Runner:
 					message = 'Validator failed'
 					if doc:
 						message += f': {doc}'
-					error = Error(
-						message=message,
-						_source=self.unique_name,
-						_uuid=str(uuid.uuid4())
-					)
+					error = Error(message=message)
 					self.add_result(error, print=True)
 				return False
 			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: '[dim green]success[/]'}, id=_id, verbose=True, sub='validators')  # noqa: E501
