@@ -13,6 +13,10 @@ tasks:
     #   description: Bruteforce subdomains (DNS)
     #   subdomains_only: True
     #   wordlist: combined_subdomains
+    httpx:
+      description: Run HTTP probe on domain
+      targets_:
+      - target.name
   ffuf:
     description: Bruteforce subdomains (Host header)
     header: "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
@@ -20,10 +24,8 @@ tasks:
     auto_calibration: True
     wordlist: combined_subdomains
     targets_:
-    - type: target
-      field: 'http://{name}'
-    - type: target
-      field: 'https://{name}'
+    - type: url
+      field: url
   _group/2:
     dnsx:
       description: Check if subdomains are alive (DNS)
