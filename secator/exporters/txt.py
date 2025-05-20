@@ -11,7 +11,7 @@ class TxtExporter(Exporter):
 		txt_paths = []
 
 		for output_type, items in results.items():
-			items = [str(i) for i in items]
+			items = list(set(str(i) for i in items))
 			if not items:
 				continue
 			txt_path = f'{self.report.output_folder}/report_{output_type}.txt'

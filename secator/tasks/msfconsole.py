@@ -6,8 +6,8 @@ from rich.panel import Panel
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-								 THREADS, TIMEOUT, USER_AGENT)
+from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
+								 RETRIES, THREADS, TIMEOUT, USER_AGENT, URL)
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
 
@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class msfconsole(VulnMulti):
 	"""CLI to access and work with the Metasploit Framework."""
 	cmd = 'msfconsole --quiet'
+	tags = ['exploit', 'attack']
 	version_flag = OPT_NOT_SUPPORTED
-	input_type = HOST
+	input_types = [HOST, IP, URL]
 	input_chunk_size = 1
 	output_types = []
 	opt_prefix = '--'
@@ -48,14 +49,15 @@ class msfconsole(VulnMulti):
 		'pacman': ['ruby-erb', 'postgresql-libs', 'make'],
 		'yum|zypper': ['postgresql-devel', 'make'],
 	}
+	install_version = '6.4.59'
 	install_cmd = (
-		f'git clone --depth 1 --single-branch https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework || true && '  # noqa: E501
-		f'cd {CONFIG.dirs.share}/metasploit-framework && '
+		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework_[install_version] || true && '  # noqa: E501
+		f'cd {CONFIG.dirs.share}/metasploit-framework_[install_version] && '
 		f'gem install bundler --user-install -n {CONFIG.dirs.bin} && '
 		f'bundle config set --local path "{CONFIG.dirs.share}" && '
 		'bundle lock --normalize-platforms &&'
 		'bundle install && '
-		f'ln -sf $HOME/.local/share/metasploit-framework/msfconsole {CONFIG.dirs.bin}/msfconsole'
+		f'ln -sf $HOME/.local/share/metasploit-framework_[install_version]/msfconsole {CONFIG.dirs.bin}/msfconsole'
 	)
 
 	@staticmethod

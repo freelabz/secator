@@ -73,18 +73,21 @@ def expand_input(input, ctx):
 	Returns:
 		str: Input.
 	"""
+	piped_input = ctx.obj['piped_input']
+	dry_run = ctx.obj['dry_run']
 	if input is None:  # read from stdin
-		if not ctx.obj['piped_input']:
-			console.print('Waiting for input on stdin ...', style='bold yellow')
-		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
-		if rlist:
-			data = sys.stdin.read().splitlines()
-		else:
-			console.print(
-				'No input passed on stdin. Showing help page.',
-				style='bold red')
-			return None
-		return data
+		if not piped_input and not dry_run:
+			console.print('No input passed on stdin. Showing help page.', style='bold red')
+			ctx.get_help()
+			sys.exit(1)
+		elif piped_input:
+			rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
+			if rlist:
+				data = sys.stdin.read().splitlines()
+				return data
+			else:
+				console.print('No input passed on stdin.', style='bold red')
+				sys.exit(1)
 	elif os.path.exists(input):
 		if os.path.isfile(input):
 			with open(input, 'r') as f:
@@ -98,6 +101,9 @@ def expand_input(input, ctx):
 	# Usefull for commands that can take only one input at a time.
 	if isinstance(input, list) and len(input) == 1:
 		return input[0]
+
+	if ctx.obj['dry_run'] and not input:
+		return ['TARGET']
 
 	return input
 
@@ -164,7 +170,8 @@ def discover_internal_tasks():
 	# Sort task_classes by category
 	task_classes = sorted(
 		task_classes,
-		key=lambda x: (get_command_category(x), x.__name__))
+		# key=lambda x: (get_command_category(x), x.__name__)
+		key=lambda x: x.__name__)
 
 	return task_classes
 
@@ -262,9 +269,9 @@ def get_command_category(command):
 	Returns:
 		str: Command category.
 	"""
-	base_cls = command.__bases__[0].__name__.replace('Command', '').replace('Runner', 'misc')
-	category = re.sub(r'(?<!^)(?=[A-Z])', '/', base_cls).lower()
-	return category
+	if not command.tags:
+		return 'misc'
+	return '/'.join(command.tags)
 
 
 def merge_opts(*options):
@@ -309,6 +316,8 @@ def pluralize(word):
 	"""
 	if word.endswith('y'):
 		return word.rstrip('y') + 'ies'
+	elif word.endswith('s'):
+		return word + 'es'
 	return f'{word}s'
 
 
@@ -373,11 +382,15 @@ def rich_to_ansi(text):
 	Returns:
 		str: Converted text (ANSI).
 	"""
-	from rich.console import Console
-	tmp_console = Console(file=None, highlight=False)
-	with tmp_console.capture() as capture:
-		tmp_console.print(text, end='', soft_wrap=True)
-	return capture.get()
+	try:
+		from rich.console import Console
+		tmp_console = Console(file=None, highlight=False)
+		with tmp_console.capture() as capture:
+			tmp_console.print(text, end='', soft_wrap=True)
+		return capture.get()
+	except Exception:
+		print(f'Could not convert rich text to ansi: {text}[/]', file=sys.stderr)
+		return text
 
 
 def rich_escape(obj):
@@ -390,11 +403,11 @@ def rich_escape(obj):
 		any: Initial object, or escaped Rich string.
 	"""
 	if isinstance(obj, str):
-		return obj.replace('[', r'\[').replace(']', r'\]')
+		return obj.replace('[', r'\[').replace(']', r'\]').replace(r'\[/', r'\[\/')
 	return obj
 
 
-def format_object(obj, obj_breaklines=False):
+def format_debug_object(obj, obj_breaklines=False):
 	"""Format the debug object for printing.
 
 	Args:
@@ -414,20 +427,26 @@ def format_object(obj, obj_breaklines=False):
 
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
-		return
-
-	if sub:
-		if verbose and sub not in DEBUG_COMPONENT:
-			sub = f'debug.{sub}'
-		if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
+	if not DEBUG_COMPONENT == ['all'] and not DEBUG_COMPONENT == ['1']:
+		if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
 			return
+
+		if sub:
+			for s in DEBUG_COMPONENT:
+				if '*' in s and re.match(s + '$', sub):
+					break
+				elif not verbose and sub.startswith(s):
+					break
+				elif verbose and sub == s:
+					break
+			else:
+				return
 
 	if lazy:
 		msg = lazy(msg)
 
 	formatted_msg = f'[yellow4]{sub:13s}[/] ' if sub else ''
-	obj_str = format_object(obj, obj_breaklines) if obj else ''
+	obj_str = format_debug_object(obj, obj_breaklines) if obj else ''
 
 	# Constructing the message string based on object position
 	if obj_str and not obj_after:
@@ -438,7 +457,12 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 	if id:
 		formatted_msg += rf' [italic gray11]\[{id}][/]'
 
-	console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+	try:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+	except Exception:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]')
+		if 'rich' in DEBUG_COMPONENT:
+			raise
 
 
 def escape_mongodb_url(url):
@@ -457,6 +481,10 @@ def escape_mongodb_url(url):
 		user, password = quote(user), quote(password)
 		return f'mongodb://{user}:{password}@{url}'
 	return url
+
+
+def caml_to_snake(s):
+	return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
 
 
 def print_version():
@@ -486,6 +514,7 @@ def extract_domain_info(input, domain_only=False):
 
 	Args:
 		input (str): An URL or FQDN.
+		domain_only (bool): Return only the registered domain name.
 
 	Returns:
 		tldextract.ExtractResult: Extracted info.
@@ -773,8 +802,9 @@ def process_wordlist(val):
 		val = default_wordlist
 	template_wordlist = getattr(CONFIG.wordlists.templates, val)
 	if template_wordlist:
-		return template_wordlist
-	elif Path(val).exists():
+		val = template_wordlist
+
+	if Path(val).exists():
 		return val
 	else:
 		return download_file(
@@ -802,3 +832,23 @@ def convert_functions_to_strings(data):
 		return json.dumps(data.__name__)  # or use inspect.getsource(data) if you want the actual function code
 	else:
 		return data
+
+
+def headers_to_dict(header_opt):
+	headers = {}
+	for header in header_opt.split(';;'):
+		split = header.strip().split(':')
+		key = split[0].strip()
+		val = ':'.join(split[1:]).strip()
+		headers[key] = val
+	return headers
+
+
+def format_object(obj, color='magenta', skip_keys=[]):
+	if isinstance(obj, list) and obj:
+		return ' [' + ', '.join([f'[{color}]{rich_escape(item)}[/]' for item in obj]) + ']'
+	elif isinstance(obj, dict) and obj.keys():
+		obj = {k: v for k, v in obj.items() if k.lower().replace('-', '_') not in skip_keys}
+		if obj:
+			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
+	return ''

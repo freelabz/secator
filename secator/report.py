@@ -55,7 +55,7 @@ class Report:
 					f'{str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',
 				)
 
-	def build(self, extractors=[], dedupe=False):
+	def build(self, extractors=[], dedupe=CONFIG.runners.remove_duplicates):
 		# Trim options
 		from secator.decorators import DEFAULT_CLI_OPTIONS
 		opts = merge_opts(self.runner.config.options, self.runner.run_opts)
@@ -97,7 +97,7 @@ class Report:
 			if items:
 				if sort_by and all(sort_by):
 					items = sorted(items, key=operator.attrgetter(*sort_by))
-				if dedupe and CONFIG.runners.remove_duplicates:
+				if dedupe:
 					items = remove_duplicates(items)
 					# items = [item for item in items if not item._duplicate and item not in dedupe_from]
 				for extractor in extractors:

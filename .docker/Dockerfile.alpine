@@ -21,6 +21,7 @@ RUN pipx install --pip-args="--no-cache-dir" . && \
 
 FROM python:3.12-alpine
 ARG flavor=full
+ARG build_from_source=false
 ENV TERM="xterm-256color"
 ENV PATH="${PATH}:/root/.local/bin"
 ENV GOBIN="/root/.local/bin"
@@ -29,5 +30,6 @@ RUN apk add --no-cache \
 	flock \
 	pipx \
 	sudo
-RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup; fi
+RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi
+RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
 ENTRYPOINT ["secator"]

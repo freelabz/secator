@@ -92,7 +92,7 @@ jobs:
         secator install addons worker
         secator install langs go
         secator install langs ruby
-        secator install tools
+        secator install tools --fail-fast
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 

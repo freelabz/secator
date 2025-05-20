@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DATA, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
 								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, IP,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
 								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
@@ -16,7 +16,15 @@ from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DELAY, DEPTH, DESCRIPTI
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
 from secator.runners import Command
-from secator.utils import debug, process_wordlist
+from secator.utils import debug, process_wordlist, headers_to_dict
+
+
+def process_headers(headers_dict):
+	headers = []
+	for key, value in headers_dict.items():
+		headers.append(f'{key}:{value}')
+	return headers
+
 
 USER_AGENTS = {
 	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
@@ -25,9 +33,10 @@ USER_AGENTS = {
 
 
 OPTS = {
-	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"', 'default': 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']},  # noqa: E501
+	HEADER: {'type': str, 'short': 'H', 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'pre_process': headers_to_dict, 'process': process_headers, 'default': 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']},  # noqa: E501
+	DATA: {'type': str, 'help': 'Data to send in the request body'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
-	DEPTH: {'type': int, 'help': 'Scan depth', 'default': 2},
+	DEPTH: {'type': int, 'help': 'Scan depth'},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
 	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
@@ -41,7 +50,7 @@ OPTS = {
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
 	RETRIES: {'type': int, 'help': 'Retries'},
-	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
+	THREADS: {'type': int, 'help': 'Number of threads to run'},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
 	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use'}
@@ -56,7 +65,7 @@ OPTS_HTTP_CRAWLERS = OPTS_HTTP + [
 	MATCH_CODES
 ]
 
-OPTS_HTTP_FUZZERS = OPTS_HTTP_CRAWLERS + [WORDLIST]
+OPTS_HTTP_FUZZERS = OPTS_HTTP_CRAWLERS + [WORDLIST, DATA]
 
 OPTS_RECON = [
 	DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
@@ -73,19 +82,19 @@ OPTS_VULN = [
 
 class Http(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
-	input_type = URL
+	input_types = [URL]
 	output_types = [Url]
 
 
 class HttpCrawler(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
-	input_type = URL
+	input_types = [URL]
 	output_types = [Url]
 
 
 class HttpFuzzer(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
-	input_type = URL
+	input_types = [URL]
 	output_types = [Url]
 
 
@@ -99,22 +108,22 @@ class Recon(Command):
 
 
 class ReconDns(Recon):
-	input_type = HOST
+	input_types = [HOST]
 	output_types = [Subdomain]
 
 
 class ReconUser(Recon):
-	input_type = USERNAME
+	input_types = [USERNAME]
 	output_types = [UserAccount]
 
 
 class ReconIp(Recon):
-	input_type = CIDR_RANGE
+	input_types = [CIDR_RANGE]
 	output_types = [Ip]
 
 
 class ReconPort(Recon):
-	input_type = IP
+	input_types = [IP]
 	output_types = [Port]
 
 
@@ -412,11 +421,11 @@ class Vuln(Command):
 
 	@cache
 	@staticmethod
-	def lookup_ghsa(ghsa_id):
+	def lookup_cve_from_ghsa(ghsa_id):
 		"""Search for a GHSA on Github and and return associated CVE vulnerability data.
 
 		Args:
-			ghsa (str): CVE ID in the form GHSA-*
+			ghsa (str): GHSA ID in the form GHSA-*
 
 		Returns:
 			dict: vulnerability data.
@@ -429,7 +438,10 @@ class Vuln(Command):
 			return None
 		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
-		cve_id = sidebar_items[2].find('div').text.strip()
+		cve_id = sidebar_items[3].find('div').text.strip()
+		if not cve_id.startswith('CVE'):
+			debug(f'{ghsa_id}: No CVE_ID extracted from https://github.com/advisories/{ghsa_id}', sub='cve')
+			return None
 		vuln = Vuln.lookup_cve(cve_id)
 		if vuln:
 			vuln[TAGS].append('ghsa')
@@ -450,15 +462,15 @@ class Vuln(Command):
 
 
 class VulnHttp(Vuln):
-	input_type = HOST
+	input_types = [HOST]
 
 
 class VulnCode(Vuln):
-	input_type = PATH
+	input_types = [PATH]
 
 
 class VulnMulti(Vuln):
-	input_type = HOST
+	input_types = [HOST]
 	output_types = [Vulnerability]
 
 
@@ -467,7 +479,7 @@ class VulnMulti(Vuln):
 #--------------#
 
 class Tagger(Command):
-	input_type = URL
+	input_types = [URL]
 	output_types = [Tag]
 
 #----------------#

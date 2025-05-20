@@ -18,14 +18,25 @@ def run_extractors(results, opts, inputs=[], dry_run=False):
 	"""
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
 	errors = []
+	computed_inputs = []
+	computed_opts = {}
 	for key, val in extractors.items():
 		key = key.rstrip('_')
 		values, err = extract_from_results(results, val)
 		errors.extend(err)
 		if key == 'targets':
-			inputs = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			targets = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			computed_inputs.extend(targets)
 		else:
-			opts[key] = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			computed_opt = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			if computed_opt:
+				computed_opts[key] = computed_opt
+				opts[key] = computed_opts[key]
+	if computed_inputs:
+		debug('computed_inputs', obj=computed_inputs, sub='extractors')
+		inputs = computed_inputs
+	if computed_opts:
+		debug('computed_opts', obj=computed_opts, sub='extractors')
 	return inputs, opts, errors
 
 
@@ -68,16 +79,22 @@ def process_extractor(results, extractor, ctx={}):
 		_field = extractor.get('field')
 		_condition = extractor.get('condition', 'True')
 	else:
-		_type, _field = tuple(extractor.split('.'))
-		_condition = 'True'
-	items = [
+		parts = tuple(extractor.split('.'))
+		if len(parts) == 2:
+			_type = parts[0]
+			_field = parts[1]
+			_condition = 'True'
+		else:
+			return results
+	results = [
 		item for item in results if item._type == _type and eval(_condition)
 	]
 	if _field:
-		_field = '{' + _field + '}' if not _field.startswith('{') else _field
-		items = [_field.format(**item.toDict()) for item in items]
-	debug('after extract', obj={'items': items}, sub='extractor')
-	return items
+		already_formatted = '{' in _field and '}' in _field
+		_field = '{' + _field + '}' if not already_formatted else _field
+		results = [_field.format(**item.toDict()) for item in results]
+	debug('after extract', obj={'results': results}, sub='extractor')
+	return results
 
 
 def get_task_folder_id(path):

@@ -16,10 +16,11 @@ from secator.tasks._categories import VulnHttp
 @task()
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
-	cmd = 'wpscan --random-user-agent --force --verbose --disable-tls-checks --ignore-main-redirect'
+	cmd = 'wpscan --force --verbose'
+	tags = ['vuln', 'scan', 'wordpress']
 	file_flag = None
 	input_flag = '--url'
-	input_type = URL
+	input_types = [URL]
 	json_flag = '-f json'
 	opt_prefix = '--'
 	opts = {
@@ -30,7 +31,9 @@ class wpscan(VulnHttp):
 		'passwords': {'type': str, 'help': 'List of passwords to use during the password attack.'},
 		'usernames': {'type': str, 'help': 'List of usernames to use during the password attack.'},
 		'login_uri': {'type': str, 'short': 'lu', 'help': 'URI of the login page if different from /wp-login.php'},
-		'detection_mode': {'type': str, 'short': 'dm', 'help': 'Detection mode between mixed, passive, and aggressive'}
+		'detection_mode': {'type': str, 'short': 'dm', 'help': 'Detection mode between mixed, passive, and aggressive'},
+		'random_user_agent': {'is_flag': True, 'short': 'rua', 'help': 'Random user agent'},
+		'disable_tls_checks': {'is_flag': True, 'short': 'dtc', 'help': 'Disable TLS checks'}
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
@@ -72,7 +75,9 @@ class wpscan(VulnHttp):
 		'pacman': ['make', 'ruby-erb'],
 		'*': ['make']
 	}
-	install_cmd = f'gem install wpscan --user-install -n {CONFIG.dirs.bin}'
+	install_github_handle = 'wpscanteam/wpscan'
+	install_version = 'v3.8.28'
+	install_cmd = f'gem install wpscan -v [install_version_strip] --user-install -n {CONFIG.dirs.bin}'
 	install_post = {
 		'kali': (
 			f'gem uninstall nokogiri --user-install -n {CONFIG.dirs.bin} --force --executables && '

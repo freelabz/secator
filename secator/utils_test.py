@@ -1,6 +1,7 @@
 import contextlib
 import json
 import os
+import re
 import sys
 import unittest.mock
 
@@ -9,12 +10,13 @@ from fp.fp import FreeProxy
 from secator.definitions import (CIDR_RANGE, DELAY, DEPTH, EMAIL,
 							   FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
 							   METHOD, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
+							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME, PATH,
+							   DOCKER_IMAGE, GIT_REPOSITORY)
 from secator.cli import ALL_WORKFLOWS, ALL_TASKS, ALL_SCANS
 from secator.output_types import EXECUTION_TYPES, STAT_TYPES
 from secator.runners import Command
 from secator.rich import console
-from secator.utils import load_fixture, debug
+from secator.utils import load_fixture, debug, traceback_as_string
 
 #---------#
 # GLOBALS #
@@ -60,7 +62,10 @@ INPUTS_TASKS = {
 	USERNAME: 'test',
 	IP: '192.168.1.23',
 	CIDR_RANGE: '192.168.1.0/24',
-	EMAIL: 'fake@fake.com'
+	EMAIL: 'fake@fake.com',
+	PATH: '.',
+	DOCKER_IMAGE: 'redis:latest',
+	GIT_REPOSITORY: 'https://github.com/freelabz/secator',
 }
 
 #---------------------#
@@ -75,7 +80,7 @@ FIXTURES_TASKS = {
 # TEST OPTS #
 #-----------#
 META_OPTS = {
-	HEADER: 'User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
+	HEADER: 'User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1;; Hello: World',
 	DELAY: 0,
 	DEPTH: 2,
 	FOLLOW_REDIRECT: True,
@@ -97,12 +102,18 @@ META_OPTS = {
 	'nmap.skip_host_discovery': True,
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
 	'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
+	'gitleaks_output_path': load_fixture('gitleaks_output', FIXTURES_DIR, only_path=True),
 	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True),
 	'nuclei.template_id': 'prometheus-metrics',
 	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
 	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
 	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True),
-	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True)
+	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True),
+	'arjun.output_path': load_fixture('arjun_output', FIXTURES_DIR, only_path=True),
+	'arjun.wordlist': False,
+	'trivy.output_path': load_fixture('trivy_output', FIXTURES_DIR, only_path=True),
+	'wafw00f.output_path': load_fixture('wafw00f_output', FIXTURES_DIR, only_path=True),
+	'testssl.output_path': load_fixture('testssl_output', FIXTURES_DIR, only_path=True),
 }
 
 
@@ -149,6 +160,10 @@ def mock_command(cls, inputs=[], opts={}, fixture=None, method=''):
 
 class CommandOutputTester:  # Mixin for unittest.TestCase
 
+	@staticmethod
+	def get_item_str(item):
+		return f"Item: {repr(item)}\nItem dict: {json.dumps(item.toDict(), default=str, indent=2)}"
+
 	def _test_runner_output(
 			self,
 			runner,
@@ -156,10 +171,12 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			expected_output_types=[],
 			expected_results=[],
 			expected_status='SUCCESS',
-			empty_results_allowed=False):
+			empty_results_allowed=False,
+			additional_checks=[]):
 
-		console.print(f'[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
+		console.print(f'\t[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
 		debug('', sub='unittest')
+		debug('-' * 10 + f' RUNNER {runner.name} STARTING ' + '-' * 10, sub='unittest')
 
 		if not runner.inputs:
 			console.print('[dim gold3] skipped (no inputs defined).[/]')
@@ -169,8 +186,15 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			console.print('[dim gold3] (no outputs defined).[/]', end='')
 
 		try:
+			debug(f'{runner.name} starting command: {runner.cmd}', sub='unittest') if isinstance(runner, Command) else None
+
 			# Run runner
 			results = runner.run()
+			results_str = "\n".join([repr(r) for r in results])
+			debug(f'{runner.name} yielded results\n{results_str}', sub='unittest')
+			debug(f'{runner.name} yielded results\n{json.dumps([r.toDict() for r in results], default=str, indent=2)}', sub='unittest.dict', verbose=True)  # noqa: E501
+
+			debug('-' * 10 + f' RUNNER {runner.name} TESTS ' + '-' * 10, sub='unittest')
 
 			# Add execution types to allowed output types
 			expected_output_types.extend(EXECUTION_TYPES + STAT_TYPES)
@@ -179,7 +203,7 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			if isinstance(runner, Command):
 				if not runner.ignore_return_code:
 					debug(f'{runner.name} should have a 0 return code', sub='unittest')
-					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code')
+					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code. Runner return code: {runner.return_code}')  # noqa: E501
 
 			# Check results not empty
 			if not empty_results_allowed:
@@ -187,16 +211,21 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 				self.assertGreater(len(results), 0, f'{runner.name} should return at least 1 result')
 
 			# Check status
-			debug(f'{runner.name} should have the status {expected_status}', sub='unittest')
-			self.assertEqual(runner.status, expected_status, f'{runner.name} should have the status {expected_status}')
+			debug(f'{runner.name} should have the status {expected_status}.', sub='unittest')
+			self.assertEqual(runner.status, expected_status, f'{runner.name} should have the status {expected_status}. Errors: {runner.errors}')  # noqa: E501
 
 			# Check results
+			failures = []
+			debug('-' * 10 + f' RUNNER {runner.name} ITEM TESTS ' + '-' * 10, sub='unittest')
 			for item in results:
-				debug(f'{runner.name} yielded {repr(item)}', sub='unittest')
+				item_str = self.get_item_str(item)
+				debug('--' * 5, sub='unittest')
+				debug(f'{runner.name} item {repr(item)}', sub='unittest')
+				debug(f'{runner.name} item [{item.toDict()}]', sub='unittest.item', verbose=True)
 
 				if expected_output_types:
 					debug(f'{runner.name} item should have an output type in {[_._type for _ in expected_output_types]}', sub='unittest')  # noqa: E501
-					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}"')  # noqa: E501
+					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}". Expected types: {expected_output_types}.\n{item_str}')  # noqa: E501
 
 				if expected_output_keys:
 					keys = [k for k in list(item.keys()) if not k.startswith('_')]
@@ -204,13 +233,35 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 					self.assertEqual(
 						set(keys).difference(set(expected_output_keys)),
 						set(),
-						f'{runner.name}: item is missing expected keys {set(expected_output_keys)}')
+						f'{runner.name}: item is missing expected keys {set(expected_output_keys)}.\nItem keys: {keys}.\n{item_str}')  # noqa: E501
+
+				if additional_checks and item.__class__ in additional_checks.get('output_types', {}):
+					config = additional_checks['output_types'][item.__class__]
+					runner_regex = config.get('runner', '*')
+					if not re.match(runner_regex, runner.name):
+						continue
+					checks = config.get('checks', [])
+					for check in checks:
+						error = check['error']
+						info = check['info']
+						func = check['function']
+						debug(f'{runner.name} item {info}', sub='unittest')
+						try:
+							result = func(item)
+							if not result:
+								failures.append(f'ERROR ({runner.name}): {error}.\n{item_str}')
+						except Exception as e:
+							failures.append(f'ERROR ({runner.name}): {error}.\n{item_str}\n{traceback_as_string(e)}')
+
+			# Additional checks failures
+			if failures:
+				self.fail("\n\n" + "\n\n".join(failures))
 
 			# Check if runner results in expected results
 			if expected_results:
 				for result in expected_results:
-					debug(f'{runner.name} item should be in expected results {result}', sub='unittest')
-					self.assertIn(result, results, f'{runner.name}: {result} should be in runner results')
+					debug(f'{runner.name} item should be in expected results {result}.', sub='unittest')
+					self.assertIn(result, results, f'{runner.name}: {result} should be in runner results.')  # noqa: E501
 
 		except Exception:
 			console.print('[dim red] failed[/]')

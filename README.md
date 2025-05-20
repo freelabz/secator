@@ -12,7 +12,7 @@
 <a href="https://pypi.org/project/secator/"><img src="https://img.shields.io/pypi/dm/secator"></a>
 <a href="https://twitter.com/freelabz"><img src="https://img.shields.io/twitter/follow/freelabz.svg?logo=twitter"></a>
 <a href="https://youtube.com/@FreeLabz"><img src="https://img.shields.io/youtube/channel/subscribers/UCu-F6SpU0h2NP18zBBP04cw?style=social&label=Subscribe%20%40FreeLabz"></a>
-<!-- <a href="https://discord.gg/freelabz"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a> -->
+<a href="https://discord.gg/nyHjC2aTrq"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a>
 </p>
 
 
@@ -21,7 +21,8 @@
   <a href="#supported-commands">Supported commands</a> •
   <a href="#install-secator">Installation</a> •
   <a href="#usage">Usage</a> •
-  <a href="https://docs.freelabz.com">Documentation</a>
+  <a href="https://docs.freelabz.com">Documentation</a>  •
+  <a href="https://discord.gg/nyHjC2aTrq">Join us on Discord !</a>
 </p>
 
 `secator` is a task and workflow runner used for security assessments. It supports dozens of well-known security tools
@@ -50,35 +51,42 @@ and it is designed to improve productivity for pentesters and security researche
 
 `secator` integrates the following tools:
 
-| Name                                                          | Description                                                                    | Category        |
-|---------------------------------------------------------------|--------------------------------------------------------------------------------|-----------------|
-| [httpx](https://github.com/projectdiscovery/httpx)            | Fast HTTP prober.                                                              | `http`          |
-| [cariddi](https://github.com/edoardottt/cariddi)              | Fast crawler and endpoint secrets / api keys / tokens matcher.                 | `http/crawler`  |
-| [gau](https://github.com/lc/gau)                              | Offline URL crawler (Alien Vault, The Wayback Machine, Common Crawl, URLScan). | `http/crawler`  |
-| [gospider](https://github.com/jaeles-project/gospider)        | Fast web spider written in Go.                                                 | `http/crawler`  |
-| [katana](https://github.com/projectdiscovery/katana)          | Next-generation crawling and spidering framework.                              | `http/crawler`  |
-| [dirsearch](https://github.com/maurosoria/dirsearch)          | Web path discovery.                                                            | `http/fuzzer`   |
-| [feroxbuster](https://github.com/epi052/feroxbuster)          | Simple, fast, recursive content discovery tool written in Rust.                | `http/fuzzer`   |
-| [ffuf](https://github.com/ffuf/ffuf)                          | Fast web fuzzer written in Go.                                                 | `http/fuzzer`   |
-| [h8mail](https://github.com/khast3x/h8mail)                   | Email OSINT and breach hunting tool.                                           | `osint`         |
-| [dnsx](https://github.com/projectdiscovery/dnsx)              | Fast and multi-purpose DNS toolkit.                                            | `recon/dns`     |
-| [dnsxbrute](https://github.com/projectdiscovery/dnsx)         | Fast and multi-purpose DNS toolkit (bruteforce mode).                          | `recon/dns`     |
-| [subfinder](https://github.com/projectdiscovery/subfinder)    | Fast subdomain finder.                                                         | `recon/dns`     |
-| [fping](https://fping.org/)                                   | Find alive hosts on local networks.                                            | `recon/ip`      |
-| [mapcidr](https://github.com/projectdiscovery/mapcidr)        | Expand CIDR ranges into IPs.                                                   | `recon/ip`      |
-| [naabu](https://github.com/projectdiscovery/naabu)            | Fast port discovery tool.                                                      | `recon/port`    |
-| [maigret](https://github.com/soxoj/maigret)                   | Hunt for user accounts across many websites.                                   | `recon/user`    |
-| [gf](https://github.com/tomnomnom/gf)                         | A wrapper around grep to avoid typing common patterns.                         | `tagger`        |
-| [grype](https://github.com/anchore/grype)                     | A vulnerability scanner for container images and filesystems.                  | `vuln/code`     |
-| [dalfox](https://github.com/hahwul/dalfox)                    | Powerful XSS scanning tool and parameter analyzer.                             | `vuln/http`     |
-| [msfconsole](https://docs.rapid7.com/metasploit/msf-overview) | CLI to access and work with the Metasploit Framework.                          | `vuln/http`     |
-| [wpscan](https://github.com/wpscanteam/wpscan)                | WordPress Security Scanner                                                     | `vuln/multi`    |
-| [nmap](https://github.com/nmap/nmap)                          | Vulnerability scanner using NSE scripts.                                       | `vuln/multi`    |
-| [nuclei](https://github.com/projectdiscovery/nuclei)          | Fast and customisable vulnerability scanner based on simple YAML based DSL.    | `vuln/multi`    |
-| [bbot](https://github.com/blacklanternsecurity/bbot)          | Multipurpose scanner.                                                          | `multi`         |
-| [searchsploit](https://gitlab.com/exploit-database/exploitdb) | Exploit searcher based on ExploitDB.                                           | `exploit/search`|
-| [bup](https://github.com/laluka/bypass-url-parser)            | 40X bypasser.                                                                  | `http`          |
-
+<!-- START_TOOLS_TABLE -->
+| Name                                                            | Description                                                                      | Category          |
+|-----------------------------------------------------------------|----------------------------------------------------------------------------------|-------------------|
+| [arjun](https://github.com/s0md3v/Arjun)                                                           | HTTP Parameter Discovery Suite.                                                  | `url/fuzz/params` |
+| [bbot](https://github.com/blacklanternsecurity/bbot)                                                            | Multipurpose scanner.                                                            | `vuln/scan`       |
+| [bup](https://github.com/laluka/bypass-url-parser)                                                             | 40X bypasser.                                                                    | `url/bypass`      |
+| [cariddi](https://github.com/edoardottt/cariddi)                                                         | Crawl endpoints, secrets, api keys, extensions, tokens...                        | `url/crawl`       |
+| [dalfox](https://github.com/hahwul/dalfox)                                                          | Powerful open source XSS scanning tool.                                          | `url/fuzz`        |
+| [dirsearch](https://github.com/maurosoria/dirsearch)                                                       | Advanced web path brute-forcer.                                                  | `url/fuzz`        |
+| [dnsx](https://github.com/projectdiscovery/dnsx)                                                            | dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library. | `dns/fuzz`        |
+| [dnsxbrute](https://github.com/projectdiscovery/dnsx)                                                       | dnsx is a fast and multi-purpose DNS toolkit designed for running various library. | `dns/fuzz`        |
+| [feroxbuster](https://github.com/epi052/feroxbuster)                                                     | Simple, fast, recursive content discovery tool written in Rust                   | `url/fuzz`        |
+| [ffuf](https://github.com/ffuf/ffuf)                                                            | Fast web fuzzer written in Go.                                                   | `url/fuzz`        |
+| [fping](https://github.com/schweikert/fping)                                                           | Send ICMP echo probes to network hosts, similar to ping, but much better.        | `ip/recon`        |
+| [gau](https://github.com/lc/gau)                                                             | Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan. | `pattern/scan`    |
+| [gf](https://github.com/tomnomnom/gf)                                                              | Wrapper around grep, to help you grep for things.                                | `pattern/scan`    |
+| [gitleaks](https://github.com/gitleaks/gitleaks)                                                        | Tool for detecting secrets like passwords, API keys, and tokens in git repos, files, and stdin. | `secret/scan`     |
+| [gospider](https://github.com/jaeles-project/gospider)                                                        | Fast web spider written in Go.                                                   | `url/crawl`       |
+| [grype](https://github.com/anchore/grype)                                                           | Vulnerability scanner for container images and filesystems.                      | `vuln/scan`       |
+| [h8mail](https://github.com/khast3x/h8mail)                                                          | Email information and password lookup tool.                                      | `user/recon/email` |
+| [httpx](https://github.com/projectdiscovery/httpx)                                                           | Fast and multi-purpose HTTP toolkit.                                             | `url/probe`       |
+| [katana](https://github.com/projectdiscovery/katana)                                                          | Next-generation crawling and spidering framework.                                | `url/crawl`       |
+| [maigret](https://github.com/soxoj/maigret)                                                         | Collect a dossier on a person by username.                                       | `user/recon/username` |
+| [mapcidr](https://github.com/projectdiscovery/mapcidr)                                                         | Utility program to perform multiple operations for a given subnet/cidr ranges.   | `ip/recon`        |
+| [msfconsole](https://docs.rapid7.com/metasploit/msf-overview/)                                                      | CLI to access and work with the Metasploit Framework.                            | `exploit/attack`  |
+| [naabu](https://github.com/projectdiscovery/naabu)                                                           | Port scanning tool written in Go.                                                | `port/scan`       |
+| [nmap](https://github.com/nmap/nmap)                                                            | Network Mapper is a free and open source utility for network discovery and security auditing. | `port/scan`       |
+| [nuclei](https://github.com/projectdiscovery/nuclei)                                                          | Fast and customisable vulnerability scanner based on simple YAML based DSL.      | `vuln/scan`       |
+| [searchsploit](https://gitlab.com/exploit-database/exploitdb)                                                    | Exploit searcher based on ExploitDB.                                             | `exploit/recon`   |
+| [subfinder](https://github.com/projectdiscovery/subfinder)                                                       | Fast passive subdomain enumeration tool.                                         | `dns/recon`       |
+| [testssl](https://github.com/testssl/testssl.sh)                                                         | SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws.  | `dns/recon/tls`   |
+| [trivy](https://github.com/aquasecurity/trivy)                                                           | Comprehensive and versatile security scanner.                                    | `vuln/scan`       |
+| [wafw00f](https://github.com/EnableSecurity/wafw00f)                                                         | Web Application Firewall Fingerprinting tool.                                    | `waf/scan`        |
+| [wpprobe](https://github.com/Chocapikk/wpprobe)                                                         | Fast wordpress plugin enumeration tool.                                          | `vuln/scan/wordpress` |
+| [wpscan](https://github.com/wpscanteam/wpscan)                                                          | Wordpress security scanner.                                                      | `vuln/scan/wordpress` |
+<!-- END_TOOLS_TABLE -->
 
 Feel free to request new tools to be added by opening an issue, but please 
 check that the tool complies with our selection criterias before doing so. If it doesn't but you still want to integrate it into `secator`, you can plug it in (see the [dev guide](https://docs.freelabz.com/for-developers/writing-custom-tasks)).

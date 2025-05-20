@@ -1,8 +1,40 @@
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability, Record)
+                                Vulnerability, Record, Certificate)
+
+
+OUTPUTS_CHECKS = {
+    'output_types': {
+        Url: {
+            'checks': [
+                {
+                    'info': 'should have request header "Hello"',
+                    'error': 'Request header "Hello" not present in URL object',
+                    'function': lambda item: 'Hello' in item.request_headers,
+                },
+                {
+                    'info': 'should have request header "Hello" set to "World"',
+                    'error': 'Request header "Hello" not set to "World"',
+                    'function': lambda item: item.request_headers['Hello'] == 'World',
+                }
+            ],
+            'runner': '^(?!gau$).*',
+        }
+    },
+    # 'runner': {
+    #     Command: {
+
+    #     }
+    # }
+}
 
 OUTPUTS_TASKS = {
+    'arjun': [
+        Url(
+            url='http://testphp.vulnweb.com/hpp?pp=FUZZ',
+            _source='arjun'
+        )
+    ],
 	'bup': [
         Url(
             url='http://localhost:3000/ftp/coupons_2013.md.bak',
@@ -51,40 +83,38 @@ OUTPUTS_TASKS = {
     ],
     'dnsx': [
         Record(
-            name='ns0.wikimedia.org',
-            type='NS',
-            host='wikipedia.org',
-            _source='dnsx'
-		),
-        Record(
-            name='host',
-            type='AXFR',
-            host='wikipedia.org',
-            _source='dnsx'
-		),
-        Record(
-            name= "wikipedia.org",
-            type= "SOA",
-            host= "wikipedia.org",
+            name= "dyna.wikimedia.org",
+            type= "CNAME",
+            host= "be.wikipedia.org",
             _source= "dnsx"
 		),
         Record(
-            name='digicert.com',
-            type='CAA',
-            host='wikipedia.org',
-            _source='dnsx'
+            name= "be.wikipedia.org",
+            type= "AXFR",
+            host= "be.wikipedia.org",
+            _source= "dnsx"
 		),
         Record(
-            name='v=spf1 include:_cidrs.wikimedia.org ~all',
-            type='TXT',
-            host='wikipedia.org',
-            _source='dnsx'
+            name= "wikimedia.org",
+            type= "SOA",
+            host= "be.wikipedia.org",
+            _source= "dnsx"
 		),
-	],
-    'dnsxbrute': [
-        Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
-        Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
-		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+        # Record(
+        #     name='digicert.com',
+        #     type='CAA',
+        #     host='wikipedia.org',
+        #     _source='dnsx'
+		# ),
+        # Record(
+        #     name='v=spf1 include:_cidrs.wikimedia.org ~all',
+        #     type='TXT',
+        #     host='wikipedia.org',
+        #     _source='dnsx'
+		# ),
+        Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
+        Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
+		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
 	],
     'dalfox': [
         Vulnerability(
@@ -148,6 +178,10 @@ OUTPUTS_TASKS = {
     ],
     'gf': [
         Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
+    ],
+    'gitleaks': [
+        # TODO: allow to test equality for this (dynamic path based on runner)
+        # Tag(name='aws-access-token', match='/path/to/file.py:216', _source='gitleaks')
     ],
     'gospider': [
         Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider')
@@ -231,6 +265,27 @@ OUTPUTS_TASKS = {
     ],
     'subfinder': [
         Subdomain(host='virusscan.api.github.com', domain='api.github.com', _source='subfinder')
+    ],
+    'trivy': [
+        Vulnerability(
+            matched_at='https://github.com/blacklanternsecurity/bbot',
+            provider='ghsa',
+            name='CVE-2024-8775',
+            id='CVE-2024-8775',
+            confidence='high',
+            severity='high',
+            cvss_score=5.5,
+            _source='trivy'
+        ),
+    ],
+    'wafw00f': [
+        Tag(
+            name='Envoy WAF',
+            match='https://netflix.com',
+            _source='wafw00f')
+    ],
+    'testssl': [
+        Certificate(host='free.fr', fingerprint_sha256='EBC7C611F9A4161B123D3DF03E852BD69DFFDC447D223AE9478D434D55DFAD9B', _source='testssl')
     ],
     'wpscan': [
         Tag(

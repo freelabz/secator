@@ -17,8 +17,10 @@ logger = logging.getLogger(__name__)
 class maigret(ReconUser):
 	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
+	tags = ['user', 'recon', 'username']
 	file_flag = None
 	input_flag = None
+	input_types = [USERNAME]
 	json_flag = '--json ndjson'
 	opt_prefix = '--'
 	opts = {
@@ -32,7 +34,7 @@ class maigret(ReconUser):
 		TIMEOUT: 'timeout',
 		THREADS: OPT_NOT_SUPPORTED
 	}
-	input_type = USERNAME
+	input_types = [USERNAME]
 	output_types = [UserAccount]
 	output_map = {
 		UserAccount: {
@@ -41,7 +43,8 @@ class maigret(ReconUser):
 			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
 	}
-	install_cmd = 'pipx install git+https://github.com/soxoj/maigret'
+	install_version = '0.5.0a'
+	install_cmd = 'pipx install git+https://github.com/soxoj/maigret --force'
 	socks5_proxy = True
 	profile = 'io'
 

@@ -2,7 +2,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, USER_AGENT)
+							   THREADS, TIMEOUT, USER_AGENT, PATH, DOCKER_IMAGE)
 from secator.output_types import Vulnerability
 from secator.tasks._categories import VulnCode
 
@@ -11,6 +11,8 @@ from secator.tasks._categories import VulnCode
 class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
 	cmd = 'grype --quiet'
+	tags = ['vuln', 'scan']
+	input_types = [PATH, DOCKER_IMAGE]
 	input_flag = ''
 	file_flag = OPT_NOT_SUPPORTED
 	json_flag = None
@@ -30,6 +32,7 @@ class grype(VulnCode):
 	install_pre = {
 		'*': ['curl']
 	}
+	install_version = 'v0.91.2'
 	install_cmd = (
 		f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'
 	)
@@ -66,7 +69,7 @@ class grype(VulnCode):
 		if vuln_id.startswith('GHSA'):
 			data['provider'] = 'github.com'
 			data['references'] = [f'https://github.com/advisories/{vuln_id}']
-			vuln = VulnCode.lookup_ghsa(vuln_id)
+			vuln = VulnCode.lookup_cve_from_ghsa(vuln_id)
 			if vuln:
 				data.update(vuln)
 				data['severity'] = data['severity'] or severity.lower()

@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (DELAY, HOST, OPT_NOT_SUPPORTED, PORT, PORTS,
+from secator.definitions import (DELAY, HOST, IP, OPT_NOT_SUPPORTED, PORT, PORTS,
 								 PROXY, RATE_LIMIT, RETRIES, STATE, THREADS,
 								 TIMEOUT, TOP_PORTS)
 from secator.output_types import Port
@@ -10,14 +10,17 @@ from secator.tasks._categories import ReconPort
 @task()
 class naabu(ReconPort):
 	"""Port scanning tool written in Go."""
-	cmd = 'naabu -Pn'
+	cmd = 'naabu'
+	tags = ['port', 'scan']
 	input_flag = '-host'
+	input_types = [HOST, IP]
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports'},
 		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Top ports'},
 		'scan_type': {'type': str, 'short': 'st', 'help': 'Scan type (SYN (s)/CONNECT(c))'},
+		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery'},
 		# 'health_check': {'is_flag': True, 'short': 'hc', 'help': 'Health check'}
 	}
 	opt_key_map = {
@@ -47,7 +50,8 @@ class naabu(ReconPort):
 		}
 	}
 	output_types = [Port]
-	install_cmd = 'go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@v2.3.3'
+	install_version = 'v2.3.3'
+	install_cmd = 'go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@[install_version]'
 	install_github_handle = 'projectdiscovery/naabu'
 	install_pre = {'apt': ['libpcap-dev'], 'apk': ['libpcap-dev', 'libc6-compat'], 'pacman|brew': ['libpcap']}
 	install_post = {'arch|alpine': 'sudo ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8'}
@@ -70,6 +74,7 @@ class naabu(ReconPort):
 
 	@staticmethod
 	def on_item(self, item):
-		if item.host == '127.0.0.1':
-			item.host = 'localhost'
+		if isinstance(item, Port):
+			if item.host == '127.0.0.1':
+				item.host = 'localhost'
 		return item
