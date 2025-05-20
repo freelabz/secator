@@ -566,6 +566,7 @@ def get_distro_config():
 
 	if system == "Linux":
 		distrib = distro.like() or distro.id()
+		distrib = distrib.split(' ')[0] if distrib else None
 
 		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
 			installer = "apt install -y --no-install-recommends"

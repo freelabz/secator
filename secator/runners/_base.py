@@ -916,11 +916,12 @@ class Runner:
 
 		# If progress item, update runner progress
 		elif isinstance(item, Progress) and item._source == self.unique_name:
+			# self._print(item.toDict())
 			self.progress = item.percent
 			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
 				return
-			elif int(item.percent) in [0, 100]:
-				return
+			# elif int(item.percent) in [0, 100]:
+				# return
 			else:
 				self.last_updated_progress = item._timestamp
 

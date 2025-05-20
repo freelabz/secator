@@ -77,7 +77,7 @@ class nuclei(VulnMulti):
 		},
 		Progress: {
 			PERCENT: lambda x: int(x['percent']),
-			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
+			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['percent']}
 		}
 	}
 	install_pre = {
