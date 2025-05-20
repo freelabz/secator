@@ -33,6 +33,7 @@ from secator.rich import console
 logger = logging.getLogger(__name__)
 
 _tasks = []
+_utils = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
 
@@ -146,11 +147,19 @@ def deduplicate(array, attr=None):
 	return sorted(list(dict.fromkeys(array)))
 
 
-def discover_internal_tasks():
-	"""Find internal secator tasks."""
-	from secator.runners import Runner
-	package_dir = Path(__file__).resolve().parent / 'tasks'
-	task_classes = []
+def find_classes(package_dir, attr_name, base_class=None):
+	"""Find classes with an attribute and possibly inheriting from a given base class.
+
+	Args:
+		package_dir (str): Package dir, relative to secator/ directory.
+		attr_name (str): Attribute name that needs to be present in the class.
+		base_class (str, Optional): Base class that our matches need to inherit from.
+
+	Returns:
+		list: List of matching classes.
+	"""
+	package_dir = Path(__file__).resolve().parent / package_dir
+	classes = []
 	for (_, module_name, _) in iter_modules([str(package_dir)]):
 		if module_name.startswith('_'):
 			continue
@@ -162,18 +171,23 @@ def discover_internal_tasks():
 			continue
 		for attribute_name in dir(module):
 			attribute = getattr(module, attribute_name)
-			if isclass(attribute):
-				bases = inspect.getmro(attribute)
-				if Runner in bases and hasattr(attribute, '__task__'):
-					task_classes.append(attribute)
+			if isclass(attribute):  # our attribute is a class !
+				if not base_class:
+					classes.append(attribute)
+				else:
+					bases = [_.__name__ for _ in inspect.getmro(attribute)]
+					if base_class in bases and hasattr(attribute, attr_name):
+						classes.append(attribute)
 
-	# Sort task_classes by category
-	task_classes = sorted(
-		task_classes,
-		# key=lambda x: (get_command_category(x), x.__name__)
-		key=lambda x: x.__name__)
+	# Sort classes by name
+	classes = sorted(classes, key=lambda x: x.__name__)
 
-	return task_classes
+	return classes
+
+
+def discover_internal_tasks():
+	"""Find internal secator tasks."""
+	return find_classes('tasks', '__task__', base_class='Runner')
 
 
 def discover_external_tasks():
@@ -213,6 +227,14 @@ def discover_tasks():
 	if not _tasks:
 		_tasks = discover_internal_tasks() + discover_external_tasks()
 	return _tasks
+
+
+def discover_utils():
+	"""Find all secator utils."""
+	global _utils
+	if not _utils:
+		_utils = find_classes('tasks', '__util__', base_class='Runner')
+	return _utils
 
 
 def import_dynamic(path, name=None):

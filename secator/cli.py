@@ -1127,13 +1127,16 @@ def langs():
 @langs.command('go')
 def install_go():
 	"""Install Go."""
-	run_install(
-		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
-		title='Go',
-		next_steps=[
-			'Add ~/go/bin to your $PATH'
-		]
-	)
+	from secator.tasks import go
+	from secator.installer import ToolInstaller
+	ToolInstaller.install(go)
+	# run_install(
+	# 	cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
+	# 	title='Go',
+	# 	next_steps=[
+	# 		'Add ~/go/bin to your $PATH'
+	# 	]
+	# )
 
 
 @langs.command('ruby')

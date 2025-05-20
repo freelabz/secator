@@ -266,6 +266,13 @@ def task():
 	return decorator
 
 
+def util():
+	def decorator(cls):
+		cls.__util__ = True
+		return cls
+	return decorator
+
+
 def generate_cli_subcommand(cli_endpoint, func, **opts):
 	return cli_endpoint.command(**opts)(func)
 
