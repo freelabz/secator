@@ -37,7 +37,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		opts = META_OPTS.copy()
 		extra_opts = {
 			'dirsearch.filter_size': 1987,
-			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
+			'dnsx.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
 			'arjun.wordlist': False,
