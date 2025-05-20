@@ -1,9 +1,12 @@
 import uuid
 
+from dotmap import DotMap
+
 from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
+from secator.output_types import Info
 
 
 class Workflow(Runner):
@@ -36,6 +39,7 @@ class Workflow(Runner):
 		opts = self.run_opts.copy()
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
+		opts.pop('print_profiles', False)
 
 		# Set hooks and reports
 		self.enable_reports = True  # Workflow will handle reports
@@ -60,7 +64,7 @@ class Workflow(Runner):
 		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
 			self.inputs,
-			self.config.options,
+			self.config.default_options.toDict(),
 			opts,
 			forwarded_opts=forwarded_opts
 		)
@@ -115,6 +119,13 @@ class Workflow(Runner):
 				)
 				sig = chain(*tasks)
 			else:
+				# Skip task if condition is not met
+				condition = task_opts.pop('if', None)
+				local_ns = {'opts': DotMap(run_opts)}
+				if condition and not eval(condition, {"__builtins__": {}}, local_ns):
+					self.add_result(Info(message=f'Skipping task {task_name} because condition is not met: {condition}'), print=True)
+					continue
+
 				# Get task class
 				task = Task.get_task_class(task_name)
 

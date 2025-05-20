@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from time import time
 
+from dotmap import DotMap
 import humanize
 
 from secator.definitions import ADDONS_ENABLED
@@ -61,6 +62,9 @@ class Runner:
 	# Default exporters
 	default_exporters = []
 
+	# Profiles
+	profiles = []
+
 	# Run hooks
 	enable_hooks = True
 
@@ -98,7 +102,7 @@ class Runner:
 		self._reports_folder = self.run_opts.get('reports_folder', None)
 
 		# Runner process options
-		self.no_process = self.run_opts.get('no_process', False)
+		self.no_process = not self.run_opts.get('process', True)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
 		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
@@ -116,6 +120,7 @@ class Runner:
 		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
+		self.print_profiles = self.run_opts.get('print_profiles', False)
 
 		# Chunks
 		self.has_parent = self.run_opts.get('has_parent', False)
@@ -140,7 +145,7 @@ class Runner:
 
 		# Load profiles
 		profiles_str = run_opts.get('profiles', [])
-		self.load_profiles(profiles_str)
+		self.profiles = self.load_profiles(profiles_str)
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -335,7 +340,13 @@ class Runner:
 	def filter_results(self, results):
 		"""Filter results based on the runner's config."""
 		if not self.chunk:
-			inputs, run_opts, errors = run_extractors(results, self.run_opts, self.inputs, self.dry_run)
+			ctx = {'opts': DotMap(self.run_opts)}
+			inputs, run_opts, errors = run_extractors(
+				results,
+				self.run_opts,
+				self.inputs,
+				ctx=ctx,
+				dry_run=self.dry_run)
 			for error in errors:
 				self.add_result(error, print=True)
 			self.inputs = list(set(inputs))
@@ -983,10 +994,12 @@ class Runner:
 				templates.append(matches[0])
 		opts = {}
 		for profile in templates:
-			self._print(Info(message=f'Loaded profile {profile.name} ({profile.description})'), rich=True)
+			if self.print_profiles:
+				self._print(Info(message=f'Loaded profile {profile.name} ({profile.description})'), rich=True)
 			opts.update(profile.opts)
 		opts = {k: v for k, v in opts.items() if k not in self.run_opts}
 		self.run_opts.update(opts)
+		return templates
 
 	@classmethod
 	def get_func_path(cls, func):

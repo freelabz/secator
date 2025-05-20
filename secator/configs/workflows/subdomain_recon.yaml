@@ -5,6 +5,13 @@ description: Subdomain discovery
 tags: [recon, dns, takeovers]
 input_types:
   - host
+options:
+  active:
+    is_flag: True
+    help: Run active reconnaissance only (no direct requests to target)
+    default: False
+    internal: True
+    opposite: passive
 tasks:
   _group/1:
     subfinder:
@@ -17,15 +24,18 @@ tasks:
       description: Run HTTP probe on domain
       targets_:
       - target.name
+      if: opts.active
   ffuf:
     description: Bruteforce subdomains (Host header)
     header: "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
     fuzz_host_header: True
     auto_calibration: True
     wordlist: combined_subdomains
+    stop_on_error: True
     targets_:
     - type: url
       field: url
+    if: opts.active
   _group/2:
     dnsx:
       description: Check if subdomains are alive (DNS)
@@ -38,8 +48,10 @@ tasks:
       - target.name
       - subdomain.host
       tags: [takeover, dns]
+      if: opts.active
     httpx:
       description: Run HTTP probes on subdomains
       targets_:
       - target.name
       - subdomain.host
+      if: opts.active

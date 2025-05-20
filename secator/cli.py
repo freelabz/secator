@@ -17,7 +17,8 @@ from rich.rule import Rule
 from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
-from secator.decorators import OrderedGroup, register_runner
+from secator.click import OrderedGroup
+from secator.decorators import register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error

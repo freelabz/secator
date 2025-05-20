@@ -4,13 +4,14 @@ from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
 
-def run_extractors(results, opts, inputs=[], dry_run=False):
+def run_extractors(results, opts, inputs=[], ctx={}, dry_run=False):
 	"""Run extractors and merge extracted values with option dict.
 
 	Args:
 		results (list): List of results.
 		opts (dict): Options.
 		inputs (list): Original inputs.
+		ctx (dict): Context.
 		dry_run (bool): Dry run.
 
 	Returns:
@@ -22,7 +23,7 @@ def run_extractors(results, opts, inputs=[], dry_run=False):
 	computed_opts = {}
 	for key, val in extractors.items():
 		key = key.rstrip('_')
-		values, err = extract_from_results(results, val)
+		values, err = extract_from_results(results, val, ctx=ctx)
 		errors.extend(err)
 		if key == 'targets':
 			targets = ['<COMPUTED>'] if dry_run else deduplicate(values)
@@ -40,12 +41,13 @@ def run_extractors(results, opts, inputs=[], dry_run=False):
 	return inputs, opts, errors
 
 
-def extract_from_results(results, extractors):
+def extract_from_results(results, extractors, ctx={}):
 	"""Extract sub extractors from list of results dict.
 
 	Args:
 		results (list): List of dict.
 		extractors (list): List of extractors to extract from.
+		ctx (dict, optional): Context.
 
 	Returns:
 		tuple: List of extracted results (flat), list of errors.
@@ -56,7 +58,7 @@ def extract_from_results(results, extractors):
 		extractors = [extractors]
 	for extractor in extractors:
 		try:
-			extracted_results.extend(process_extractor(results, extractor))
+			extracted_results.extend(process_extractor(results, extractor, ctx=ctx))
 		except Exception as e:
 			error = Error.from_exception(e)
 			errors.append(error)
@@ -73,27 +75,42 @@ def process_extractor(results, extractor, ctx={}):
 	Returns:
 		list: List of extracted results.
 	"""
-	debug('before extract', obj={'results': results, 'extractor': extractor}, sub='extractor')
+	debug('before extract', obj={'results_count': len(results), 'extractor': extractor}, sub='extractor')
+
+	# Parse extractor, it can be a dict or a string (shortcut)
 	if isinstance(extractor, dict):
 		_type = extractor['type']
 		_field = extractor.get('field')
-		_condition = extractor.get('condition', 'True')
+		_condition = extractor.get('condition')
 	else:
 		parts = tuple(extractor.split('.'))
 		if len(parts) == 2:
 			_type = parts[0]
 			_field = parts[1]
-			_condition = 'True'
+			_condition = None
 		else:
 			return results
-	results = [
-		item for item in results if item._type == _type and eval(_condition)
-	]
+
+	# Evaluate condition for each result
+	if _condition:
+		tmp_results = []
+		for item in results:
+			if item._type == _type:
+				ctx['item'] = item
+				eval_result = eval(_condition, {}, ctx)
+				if eval_result:
+					tmp_results.append(item)
+		debug(f'kept {len(tmp_results)} out of {len(results)} items after condition {_condition}', sub='extractor')
+		results = tmp_results
+	else:
+		results = [item for item in results if item._type == _type]
+
+	# Format field if needed
 	if _field:
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
 		results = [_field.format(**item.toDict()) for item in results]
-	debug('after extract', obj={'results': results}, sub='extractor')
+	debug('after extract', obj={'results_count': len(results)}, sub='extractor')
 	return results
 
 

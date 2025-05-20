@@ -320,7 +320,7 @@ class Command(Runner):
 		name = name or cmd.split(' ')[0]
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
-		kwargs['no_process'] = kwargs.get('no_process', True)
+		kwargs['process'] = kwargs.get('process', False)
 		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
