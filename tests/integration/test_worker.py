@@ -45,7 +45,7 @@ class TestWorker(unittest.TestCase):
 
 	def test_host_recon(self):
 		cmd = Command.execute(
-			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',
+			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version --nuclei',
 			name='secator_w_host_recon',
 			process=True,
 			quiet=True,
