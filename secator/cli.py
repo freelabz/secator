@@ -70,14 +70,10 @@ def cli(ctx, version, quiet):
 # TASK #
 #------#
 
-@cli.group(aliases=['x', 't'], invoke_without_command=True)
-@click.option('--list', '-list', is_flag=True, default=False)
+@cli.group(aliases=['x', 't', 'tasks'], invoke_without_command=True)
 @click.pass_context
-def task(ctx, list=False):
+def task(ctx):
 	"""Run a task."""
-	if list:
-		print("\n".join(sorted([t.__name__ for t in ALL_TASKS])))
-		return
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
@@ -91,14 +87,10 @@ for cls in ALL_TASKS:
 #----------#
 
 
-@cli.group(cls=OrderedGroup, aliases=['w'], invoke_without_command=True)
-@click.option('--list', '-list', is_flag=True, default=False)
+@cli.group(cls=OrderedGroup, aliases=['w', 'workflows'], invoke_without_command=True)
 @click.pass_context
-def workflow(ctx, list=False):
+def workflow(ctx):
 	"""Run a workflow."""
-	if list:
-		print("\n".join(sorted([t.name for t in ALL_WORKFLOWS])))
-		return
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
@@ -112,38 +104,15 @@ for config in sorted(ALL_WORKFLOWS, key=lambda x: x['name']):
 #------#
 
 @cli.group(cls=OrderedGroup, aliases=['s'], invoke_without_command=True)
-@click.option('--list', '-list', is_flag=True, default=False)
 @click.pass_context
-def scan(ctx, list=False):
+def scan(ctx):
 	"""Run a scan."""
-	if list:
-		print("\n".join(sorted([t.name for t in ALL_SCANS])))
-		return
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
 
 for config in sorted(ALL_SCANS, key=lambda x: x['name']):
 	register_runner(scan, config)
-
-
-@cli.group(aliases=['p'])
-@click.pass_context
-def profile(ctx):
-	"""Show profiles"""
-	pass
-
-
-@profile.command('list')
-def profile_list():
-	table = Table()
-	table.add_column("Profile name", style="bold gold3")
-	table.add_column("Description", overflow='fold')
-	table.add_column("Options", overflow='fold')
-	for profile in ALL_PROFILES:
-		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
-		table.add_row(profile.name, profile.description, opts_str)
-	console.print(table)
 
 
 #--------#
@@ -561,7 +530,7 @@ def config_default(save):
 #-----------#
 # WORKSPACE #
 #-----------#
-@cli.group(aliases=['ws'])
+@cli.group(aliases=['ws', 'workspaces'])
 def workspace():
 	"""Workspaces."""
 	pass
@@ -594,15 +563,181 @@ def workspace_list():
 	console.print(table)
 
 
+#----------#
+# PROFILES #
+#----------#
+
+@cli.group(aliases=['p', 'profiles'])
+@click.pass_context
+def profile(ctx):
+	"""Profiles"""
+	pass
+
+
+@profile.command('list')
+def profile_list():
+	table = Table()
+	table.add_column("Profile name", style="bold gold3")
+	table.add_column("Description", overflow='fold')
+	table.add_column("Options", overflow='fold')
+	for profile in ALL_PROFILES:
+		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
+		table.add_row(profile.name, profile.description, opts_str)
+	console.print(table)
+
+
+#-------#
+# ALIAS #
+#-------#
+
+@cli.group(aliases=['a', 'aliases'])
+def alias():
+	"""Aliases."""
+	pass
+
+
+@alias.command('enable')
+@click.pass_context
+def enable_aliases(ctx):
+	"""Enable aliases."""
+	fpath = f'{CONFIG.dirs.data}/.aliases'
+	aliases = ctx.invoke(list_aliases, silent=True)
+	aliases_str = '\n'.join(aliases)
+	with open(fpath, 'w') as f:
+		f.write(aliases_str)
+	console.print('')
+	console.print(f':file_cabinet: Alias file written to {fpath}', style='bold green')
+	console.print('To load the aliases, run:')
+	md = f"""
+```sh
+source {fpath}                     # load the aliases in the current shell
+echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load them automatically
+```
+"""
+	console.print(Markdown(md))
+	console.print()
+
+
+@alias.command('disable')
+@click.pass_context
+def disable_aliases(ctx):
+	"""Disable aliases."""
+	fpath = f'{CONFIG.dirs.data}/.unalias'
+	aliases = ctx.invoke(list_aliases, silent=True)
+	aliases_str = ''
+	for alias in aliases:
+		aliases_str += alias.split('=')[0].replace('alias', 'unalias') + '\n'
+	console.print(f':file_cabinet: Unalias file written to {fpath}', style='bold green')
+	console.print('To unload the aliases, run:')
+	with open(fpath, 'w') as f:
+		f.write(aliases_str)
+	md = f"""
+```sh
+source {fpath}
+```
+"""
+	console.print(Markdown(md))
+	console.print()
+
+
+@alias.command('list')
+@click.option('--silent', is_flag=True, default=False, help='No print')
+def list_aliases(silent):
+	"""List aliases"""
+	aliases = []
+	aliases.extend([
+		f'alias {task.__name__}="secator x {task.__name__}"'
+		for task in ALL_TASKS
+	])
+	aliases.extend([
+		f'alias {workflow.alias}="secator w {workflow.name}"'
+		for workflow in ALL_WORKFLOWS
+	])
+	aliases.extend([
+		f'alias {workflow.name}="secator w {workflow.name}"'
+		for workflow in ALL_WORKFLOWS
+	])
+	aliases.extend([
+		f'alias scan_{scan.name}="secator s {scan.name}"'
+		for scan in ALL_SCANS
+	])
+	aliases.append('alias listx="secator x"')
+	aliases.append('alias listw="secator w"')
+	aliases.append('alias lists="secator s"')
+	aliases.append('alias listws="secator ws"')
+	aliases.append('alias listr="secator r list"')
+	aliases.append('alias showr="secator r show"')
+
+	if silent:
+		return aliases
+	console.print('Aliases:')
+	for alias in aliases:
+		alias_split = alias.split('=')
+		alias_name, alias_cmd = alias_split[0].replace('alias ', ''), alias_split[1].replace('"', '')
+		console.print(f'[bold magenta]{alias_name:<15}-> {alias_cmd}')
+
+	return aliases
+
+
 #--------#
 # REPORT #
 #--------#
 
 
-@cli.group(aliases=['r'])
+@cli.group(aliases=['r', 'reports'])
 def report():
 	"""Reports."""
 	pass
+
+
+def process_query(query, fields=[]):
+	otypes = [o.__name__.lower() for o in FINDING_TYPES]
+	extractors = []
+
+	# Process fields
+	fields_filter = {}
+	if fields:
+		for field in fields:
+			parts = field.split('.')
+			if len(parts) == 2:
+				type, field = parts
+			else:
+				type = parts[0]
+				field = None
+			if type not in otypes:
+				console.print(Error(message='Invalid output type: ' + type))
+				sys.exit(1)
+			fields_filter[type] = field
+
+	# No query
+	if not query:
+		if fields:
+			extractors = [{'type': field_type, 'field': field, 'condition': 'True', 'op': 'or'} for field_type, field in fields_filter.items()]  # noqa: E501
+		return extractors
+
+	# Process query
+	operator = '&&' if '&&' in query else '||'
+	query = query.split(operator)
+	for part in query:
+		part = part.strip()
+		split_part = part.split('.')
+		_type = split_part[0]
+		if _type not in otypes:
+			console.print(Error(message='Invalid output type: ' + _type))
+			sys.exit(1)
+		if fields and _type not in fields_filter:
+			console.print(Warning(message='Type not allowed by --filter field: ' + _type + ' (allowed: ' + ', '.join(fields_filter.keys()) + '). Ignoring extractor.'))  # noqa: E501
+			continue
+		extractor = {
+			'type': _type,
+			'condition': part or 'True',
+			'op': 'and' if operator == '&&' else 'or'
+		}
+		field = fields_filter.get(_type)
+		if field:
+			extractor['field'] = field
+		extractors.append(extractor)
+	return extractors
 
 
 @report.command('show')
@@ -610,41 +745,27 @@ def report():
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('-t', '--type', type=str, default='', help=f'Filter by output type. Choices: {FINDING_TYPES_LOWER}')
+@click.option('-f', '--filter', "_filter", type=str, default='', help=f'Filter by output type. Choices: {FINDING_TYPES_LOWER}')  # noqa: E501
 @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
-def report_show(report_query, output, runner_type, time_delta, type, query, workspace, unified):
+@click.pass_context
+def report_show(ctx, report_query, output, runner_type, time_delta, _filter, query, workspace, unified):
 	"""Show report results and filter on them."""
 
+	# Get report query from piped input
+	if ctx.obj['piped_input']:
+		report_query = ','.join(sys.stdin.read().splitlines())
+		unified = True
+
 	# Get extractors
-	otypes = [o.__name__.lower() for o in FINDING_TYPES]
-	extractors = []
-	if type:
-		type = type.split(',')
-		for typedef in type:
-			if typedef:
-				if '.' in typedef:
-					_type, _field = tuple(typedef.split('.'))
-				else:
-					_type = typedef
-					_field = None
-				extractors.append({
-					'type': _type,
-					'field': _field,
-					'condition': query or 'True'
-				})
-	elif query:
-		query = query.split(';')
-		for part in query:
-			_type = part.split('.')[0]
-			if _type in otypes:
-				part = part.replace(_type, 'item')
-				extractor = {
-					'type': _type,
-					'condition': part or 'True'
-				}
-				extractors.append(extractor)
+	extractors = process_query(query, fields=_filter.split(',') if _filter else [])
+	if extractors:
+		console.print(':wrench: [bold gold3]Showing query summary[/]')
+		op = extractors[0]['op']
+		console.print(f':carousel_horse: [bold blue]Op[/] [bold orange3]->[/] [bold green]{op.upper()}[/]')
+		for ix, extractor in enumerate(extractors):
+			console.print(f':zap: [bold blue]{extractor["type"].title()}[/] [bold orange3]->[/] [bold green]{extractor["condition"]}[/]', highlight=False)  # noqa: E501
 
 	# Build runner instance
 	current = get_file_timestamp()
@@ -660,19 +781,13 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 
 	# Build report queries from fuzzy input
 	paths = []
-	if report_query:
-		report_query = report_query.split(',')
-	else:
-		report_query = []
-
-	# Load all report paths
-	load_all_reports = any([not Path(p).exists() for p in report_query])
+	report_query = report_query.split(',') if report_query else []
+	load_all_reports = not report_query or any([not Path(p).exists() for p in report_query])  # fuzzy query, need to load all reports  # noqa: E501
 	all_reports = []
 	if load_all_reports or workspace:
 		all_reports = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	if not report_query:
 		report_query = all_reports
-
 	for query in report_query:
 		query = str(query)
 		if not query.endswith('/'):
@@ -695,10 +810,12 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 	all_results = []
 	for ix, path in enumerate(paths):
 		if unified:
-			console.print(rf'Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
+			if ix == 0:
+				console.print(f'\n:wrench: [bold gold3]Loading {len(paths)} reports ...[/]')
+			console.print(f':file_cabinet: Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
 		with open(path, 'r') as f:
-			data = loads_dataclass(f.read())
 			try:
+				data = loads_dataclass(f.read())
 				info = get_info_from_report_path(path)
 				runner_type = info.get('type', 'unknowns')[:-1]
 				runner.results = flatten(list(data['results'].values()))
@@ -709,21 +826,20 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 				report.build(extractors=extractors if not unified else [], dedupe=unified)
 				file_date = get_file_date(path)
 				runner_name = data['info']['name']
-				console.print(
-					f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner_type}[/]) ([dim]{file_date}[/]):')
+				if not report.is_empty():
+					console.print(
+						f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner_type}[/]) ([dim]{file_date}[/]):')
 				if report.is_empty():
 					if len(paths) == 1:
 						console.print(Warning(message='No results in report.'))
-					else:
-						console.print(Warning(message='No new results since previous scan.'))
 					continue
 				report.send()
 			except json.decoder.JSONDecodeError as e:
 				console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if unified:
-		console.print(f'\n:wrench: [bold gold3]Building report by crunching {len(all_results)} results ...[/]')
-		console.print(':coffee: [dim]Note that this can take a while when the result count is high...[/]')
+		console.print(f'\n:wrench: [bold gold3]Building report by crunching {len(all_results)} results ...[/]', end='')
+		console.print(' (:coffee: [dim]this can take a while ...[/])')
 		runner.results = all_results
 		report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
 		report.build(extractors=extractors, dedupe=True)
@@ -734,7 +850,8 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-def report_list(workspace, runner_type, time_delta):
+@click.pass_context
+def report_list(ctx, workspace, runner_type, time_delta):
 	"""List all secator reports."""
 	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
@@ -747,6 +864,12 @@ def report_list(workspace, runner_type, time_delta):
 	table.add_column("Id")
 	table.add_column("Date")
 	table.add_column("Status", style="green")
+
+	# Print paths if piped
+	if ctx.obj['piped_output']:
+		for path in paths:
+			print(path)
+		return
 
 	# Load each report
 	for path in paths:
@@ -777,6 +900,7 @@ def report_list(workspace, runner_type, time_delta):
 
 	if len(paths) > 0:
 		console.print(table)
+		console.print(Info(message=f'Found {len(paths)} reports.'))
 	else:
 		console.print(Error(message='No results found.'))
 
@@ -830,13 +954,13 @@ def report_export(json_path, output_folder, output):
 # HEALTH #
 #--------#
 
-@cli.command(name='health')
+@cli.command(name='health', aliases=['h'])
 @click.option('--json', '-json', 'json_', is_flag=True, default=False, help='JSON lines output')
 @click.option('--debug', '-debug', is_flag=True, default=False, help='Debug health output')
 @click.option('--strict', '-strict', is_flag=True, default=False, help='Fail if missing tools')
 @click.option('--bleeding', '-bleeding', is_flag=True, default=False, help='Check bleeding edge version of tools')
 def health(json_, debug, strict, bleeding):
-	"""[dim]Get health status.[/]"""
+	"""Get health status."""
 	tools = ALL_TASKS
 	upgrade_cmd = ''
 	results = []
@@ -997,9 +1121,9 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	sys.exit(return_code)
 
 
-@cli.group()
+@cli.group(aliases=['i'])
 def install():
-	"""[dim]Install langs, tools and addons.[/]"""
+	"""Install langs, tools and addons."""
 	pass
 
 
@@ -1215,7 +1339,7 @@ def install_tools(cmds, cleanup, fail_fast):
 @cli.command('update')
 @click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (addons, tools, ...)')
 def update(all):
-	"""[dim]Update to latest version.[/]"""
+	"""Update to latest version."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
@@ -1259,96 +1383,6 @@ def update(all):
 					return_code = 1
 		sys.exit(return_code)
 
-#-------#
-# ALIAS #
-#-------#
-
-
-@cli.group()
-def alias():
-	"""[dim]Configure aliases.[/]"""
-	pass
-
-
-@alias.command('enable')
-@click.pass_context
-def enable_aliases(ctx):
-	"""Enable aliases."""
-	fpath = f'{CONFIG.dirs.data}/.aliases'
-	aliases = ctx.invoke(list_aliases, silent=True)
-	aliases_str = '\n'.join(aliases)
-	with open(fpath, 'w') as f:
-		f.write(aliases_str)
-	console.print('')
-	console.print(f':file_cabinet: Alias file written to {fpath}', style='bold green')
-	console.print('To load the aliases, run:')
-	md = f"""
-```sh
-source {fpath}                     # load the aliases in the current shell
-echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load them automatically
-```
-"""
-	console.print(Markdown(md))
-	console.print()
-
-
-@alias.command('disable')
-@click.pass_context
-def disable_aliases(ctx):
-	"""Disable aliases."""
-	fpath = f'{CONFIG.dirs.data}/.unalias'
-	aliases = ctx.invoke(list_aliases, silent=True)
-	aliases_str = ''
-	for alias in aliases:
-		aliases_str += alias.split('=')[0].replace('alias', 'unalias') + '\n'
-	console.print(f':file_cabinet: Unalias file written to {fpath}', style='bold green')
-	console.print('To unload the aliases, run:')
-	with open(fpath, 'w') as f:
-		f.write(aliases_str)
-	md = f"""
-```sh
-source {fpath}
-```
-"""
-	console.print(Markdown(md))
-	console.print()
-
-
-@alias.command('list')
-@click.option('--silent', is_flag=True, default=False, help='No print')
-def list_aliases(silent):
-	"""List aliases"""
-	aliases = []
-	aliases.extend([
-		f'alias {task.__name__}="secator x {task.__name__}"'
-		for task in ALL_TASKS
-	])
-	aliases.extend([
-		f'alias {workflow.alias}="secator w {workflow.name}"'
-		for workflow in ALL_WORKFLOWS
-	])
-	aliases.extend([
-		f'alias {workflow.name}="secator w {workflow.name}"'
-		for workflow in ALL_WORKFLOWS
-	])
-	aliases.extend([
-		f'alias scan_{scan.name}="secator s {scan.name}"'
-		for scan in ALL_SCANS
-	])
-	aliases.append('alias listx="secator x"')
-	aliases.append('alias listw="secator w"')
-	aliases.append('alias lists="secator s"')
-
-	if silent:
-		return aliases
-	console.print('Aliases:')
-	for alias in aliases:
-		alias_split = alias.split('=')
-		alias_name, alias_cmd = alias_split[0].replace('alias ', ''), alias_split[1].replace('"', '')
-		console.print(f'[bold magenta]{alias_name:<15}-> {alias_cmd}')
-
-	return aliases
-
 
 #------#
 # TEST #
@@ -1357,7 +1391,7 @@ def list_aliases(silent):
 
 @cli.group(cls=OrderedGroup)
 def test():
-	"""[dim]Run tests."""
+	"""[dim]Run tests (dev build only)."""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to run tests.'))
 		sys.exit(1)

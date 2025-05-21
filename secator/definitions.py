@@ -20,8 +20,7 @@ ASCII = rf"""
 """  # noqa: W605,W291
 
 # Debug
-DEBUG = CONFIG.debug.level
-DEBUG_COMPONENT = CONFIG.debug.component.split(',')
+DEBUG = CONFIG.debug.split(',')
 
 # Constants
 OPT_NOT_SUPPORTED = -1

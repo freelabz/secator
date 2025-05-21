@@ -52,11 +52,6 @@ class Directories(StrictModel):
 		return self
 
 
-class Debug(StrictModel):
-	level: int = 0
-	component: str = ''
-
-
 class Celery(StrictModel):
 	broker_url: str = 'filesystem://'
 	broker_pool_limit: int = 10
@@ -174,8 +169,8 @@ class Addons(StrictModel):
 
 
 class SecatorConfig(StrictModel):
+	debug: str = ''
 	dirs: Directories = Directories()
-	debug: Debug = Debug()
 	celery: Celery = Celery()
 	cli: Cli = Cli()
 	runners: Runners = Runners()
@@ -628,5 +623,5 @@ for name, dir in CONFIG.dirs.items():
 # download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
 
 # Print config
-if CONFIG.debug.component == 'config':
+if 'config' in CONFIG.debug:
 	CONFIG.print()

@@ -44,7 +44,7 @@ class Scan(Runner):
 			config = TemplateLoader(name=f'workflow/{name}')
 
 			# Skip workflow if condition is not met
-			condition = workflow_opts.pop('if', None)
+			condition = workflow_opts.pop('if', None) if workflow_opts else None
 			local_ns = {'opts': DotMap(opts)}
 			if condition and not eval(condition, {"__builtins__": {}}, local_ns):
 				self.add_result(Info(message=f'Skipping workflow {name} because condition is not met: {condition}'), print=True)

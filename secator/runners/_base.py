@@ -115,11 +115,7 @@ class Runner:
 		self.print_json = self.run_opts.get('print_json', False)
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
-		self.print_progress = self.run_opts.get('print_progress', False) and not self.quiet and not self.print_raw
-		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
-		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
-		self.print_opts = {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
 		self.print_profiles = self.run_opts.get('print_profiles', False)
 
 		# Chunks
@@ -130,30 +126,38 @@ class Runner:
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
 
+		# Begin initialization
+		self.debug('begin initialization', sub='init')
+
 		# Add prior results to runner results
+		self.debug(f'adding {len(results)} prior results to runner', sub='init')
 		[self.add_result(result, print=False, output=False) for result in results]
 
 		# Determine inputs
+		self.debug('resolving inputs', obj={'extractors': [i for i in self.run_opts if i.endswith('_')], 'result_count': len(results)}, sub='init')  # noqa: E501
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		targets = [Target(name=target) for target in self.inputs]
 		self.filter_results(results + targets)
 
 		# Debug
-		self.debug('Inputs', obj=self.inputs, sub='init')
-		self.debug('Run opts', obj={k: v for k, v in self.run_opts.items() if v is not None}, sub='init')
-		self.debug('Print opts', obj={k: v for k, v in self.print_opts.items() if v is not None}, sub='init')
+		self.debug('inputs', obj=self.inputs, sub='init')
+		self.debug('run opts', obj=self.resolved_opts, sub='init')
+		self.debug('print opts', obj=self.resolved_print_opts, sub='init')
 
 		# Load profiles
 		profiles_str = run_opts.get('profiles', [])
-		self.profiles = self.load_profiles(profiles_str)
+		self.debug('resolving profiles', obj={'profiles': profiles_str}, sub='init')
+		self.profiles = self.resolve_profiles(profiles_str)
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
+		self.debug('resolving exporters', obj={'exporters': exporters_str}, sub='init')
 		self.exporters = self.resolve_exporters(exporters_str)
 
 		# Profiler
 		self.enable_profiler = self.run_opts.get('enable_profiler', False) and ADDONS_ENABLED['trace']
 		if self.enable_profiler:
+			self.debug('enabling profiler', sub='init')
 			from pyinstrument import Profiler
 			self.profiler = Profiler(async_mode=False, interval=0.0001)
 			try:
@@ -164,20 +168,34 @@ class Runner:
 
 		# Hooks
 		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
+		self.debug('registering hooks', obj=list(self.hooks.keys()), sub='init')
 		self.register_hooks(hooks)
 
 		# Validators
 		self.validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
+		self.debug('registering validators', obj={'validators': list(self.validators.keys())}, sub='init')
 		self.register_validators(validators)
 
 		# Input post-process
-		self.run_hooks('before_init')
+		self.run_hooks('before_init', sub='init')
 
 		# Check if input is valid
-		self.inputs_valid = self.run_validators('validate_input', self.inputs)
+		self.inputs_valid = self.run_validators('validate_input', self.inputs, sub='init')
 
 		# Run hooks
-		self.run_hooks('on_init')
+		self.run_hooks('on_init', sub='init')
+
+	@property
+	def resolved_opts(self):
+		return {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+
+	@property
+	def resolved_print_opts(self):
+		return {k: v for k, v in self.__dict__.items() if k.startswith('print_') if v}
+
+	@property
+	def dynamic_opts(self):
+		return {k: v for k, v in self.run_opts.items() if k.endswith('_')}
 
 	@property
 	def elapsed(self):
@@ -265,12 +283,16 @@ class Runner:
 		path_inputs = path / '.inputs'
 		path_outputs = path / '.outputs'
 		if not path.exists():
-			self.debug(f'Creating reports folder {path}')
+			self.debug(f'creating reports folder {path}', sub='start')
 			path.mkdir(parents=True, exist_ok=True)
 			path_inputs.mkdir(exist_ok=True)
 			path_outputs.mkdir(exist_ok=True)
 		self._reports_folder = path.resolve()
 		return self._reports_folder
+
+	@property
+	def id(self):
+		return self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 
 	def run(self):
 		"""Run method.
@@ -300,13 +322,13 @@ class Runner:
 			# Loop and process items
 			for item in self.yielder():
 				yield from self._process_item(item)
-				self.run_hooks('on_interval')
+				self.run_hooks('on_interval', sub='item')
 
 			# Wait for threads to finish
 			yield from self.join_threads()
 
 		except BaseException as e:
-			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='error')
+			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
 			error = Error.from_exception(e)
 			error._source = self.unique_name
 			error._uuid = str(uuid.uuid4())
@@ -328,7 +350,7 @@ class Runner:
 		"""Wait for all running threads to complete."""
 		if not self.threads:
 			return
-		self.debug(f'waiting for {len(self.threads)} threads to complete')
+		self.debug(f'waiting for {len(self.threads)} threads to complete', sub='end')
 		for thread in self.threads:
 			error = thread.join()
 			if error:
@@ -339,18 +361,17 @@ class Runner:
 
 	def filter_results(self, results):
 		"""Filter results based on the runner's config."""
-		if not self.chunk:
-			ctx = {'opts': DotMap(self.run_opts)}
-			inputs, run_opts, errors = run_extractors(
-				results,
-				self.run_opts,
-				self.inputs,
-				ctx=ctx,
-				dry_run=self.dry_run)
-			for error in errors:
-				self.add_result(error, print=True)
-			self.inputs = list(set(inputs))
-			self.run_opts = run_opts
+		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs}
+		inputs, run_opts, errors = run_extractors(
+			results,
+			self.run_opts,
+			self.inputs,
+			ctx=ctx,
+			dry_run=self.dry_run)
+		for error in errors:
+			self.add_result(error, print=True)
+		self.inputs = list(set(inputs))
+		self.run_opts = run_opts
 
 	def add_result(self, item, print=False, output=True):
 		"""Add item to runner results.
@@ -397,7 +418,7 @@ class Runner:
 
 		# Item is an output type
 		if isinstance(item, OutputType):
-			self.debug(item, lazy=lambda x: repr(x), sub='item', allow_no_process=False, verbose=True)
+			self.debug(item, lazy=lambda x: repr(x), sub='item.print', allow_no_process=False, verbose=True)
 			_type = item._type
 			print_this_type = getattr(self, f'print_{_type}', True)
 			if not print_this_type:
@@ -432,13 +453,13 @@ class Runner:
 				# Repr output
 				if item_out:
 					item_repr = repr(item)
-					if isinstance(item, OutputType) and self.print_remote_info:
+					if isinstance(item, OutputType) and self.print_remote_info and item._source:
 						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
 					self._print(item_repr, out=item_out)
 
 		# Item is a line
 		elif isinstance(item, str):
-			self.debug(item, sub='line', allow_no_process=False, verbose=True)
+			self.debug(item, sub='line.print', allow_no_process=False, verbose=True)
 			if self.print_line or force:
 				self._print(item, out=sys.stderr, end='\n', rich=False)
 
@@ -457,13 +478,15 @@ class Runner:
 		if sub:
 			new_sub += f'.{sub}'
 		kwargs['sub'] = new_sub
+		if self.id and not self.sync:
+			kwargs['id'] = self.id
 		debug(*args, **kwargs)
 
 	def mark_duplicates(self):
 		"""Check for duplicates and mark items as duplicates."""
 		if not self.enable_duplicate_check:
 			return
-		self.debug('running duplicate check', id=self.config.name, sub='duplicates')
+		self.debug('running duplicate check', sub='end')
 		# dupe_count = 0
 		import concurrent.futures
 		executor = concurrent.futures.ThreadPoolExecutor(max_workers=100)
@@ -474,7 +497,7 @@ class Runner:
 		# if duplicates:
 		# 	duplicates_str = '\n\t'.join(duplicates)
 		# 	self.debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='duplicates', verbose=True)
-		# self.debug(f'duplicate check completed: {dupe_count} found', id=self.config.name, sub='duplicates')
+		# self.debug(f'duplicate check completed: {dupe_count} found', sub='duplicates')
 
 	def check_duplicate(self, item):
 		"""Check if an item is a duplicate in the list of results and mark it like so.
@@ -482,7 +505,7 @@ class Runner:
 		Args:
 			item (OutputType): Secator output type.
 		"""
-		self.debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='duplicates', verbose=True)
+		self.debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)  # noqa: E501
 		others = [f for f in self.results if f == item and f._uuid != item._uuid]
 		if others:
 			main = max(item, *others)
@@ -491,22 +514,21 @@ class Runner:
 			main._related.extend([dupe._uuid for dupe in dupes])
 			main._related = list(dict.fromkeys(main._related))
 			if main._uuid != item._uuid:
-				self.debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='duplicates', verbose=True)  # noqa: E501
+				self.debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)  # noqa: E501
 				item._duplicate = True
-				item = self.run_hooks('on_item', item)
+				item = self.run_hooks('on_item', item, sub='item.duplicate')
 				if item._uuid not in main._related:
 					main._related.append(item._uuid)
-				main = self.run_hooks('on_duplicate', main)
-				item = self.run_hooks('on_duplicate', item)
+				main = self.run_hooks('on_duplicate', main, sub='item.duplicate')
+				item = self.run_hooks('on_duplicate', item, sub='item.duplicate')
 
 			for dupe in dupes:
 				if not dupe._duplicate:
 					self.debug(
 						'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-						sub='duplicates', verbose=True)
-					# dupe_count += 1
+						sub='item.duplicate', verbose=True)
 					dupe._duplicate = True
-					dupe = self.run_hooks('on_duplicate', dupe)
+					dupe = self.run_hooks('on_duplicate', dupe, sub='item.duplicate')
 
 	def yielder(self):
 		"""Base yielder implementation.
@@ -518,14 +540,17 @@ class Runner:
 			secator.output_types.OutputType: Secator output type.
 		"""
 		# Build Celery workflow
+		self.debug('building celery workflow', sub='start')
 		workflow = self.build_celery_workflow()
 
 		# Run workflow and get results
 		if self.sync:
+			self.debug('running workflow in sync mode', sub='start')
 			self.print_item = False
 			results = workflow.apply().get()
 			yield from results
 		else:
+			self.debug('running workflow in async mode', sub='start')
 			self.celery_result = workflow()
 			self.celery_ids.append(str(self.celery_result.id))
 			yield Info(
@@ -537,6 +562,7 @@ class Runner:
 				self.enable_reports = False
 				self.no_process = True
 				return
+			self.debug('polling results', sub='start')
 			results = CeleryData.iter_results(
 				self.celery_result,
 				ids_map=self.celery_ids_map,
@@ -568,7 +594,7 @@ class Runner:
 			'end_time': self.end_time,
 			'elapsed': self.elapsed.total_seconds(),
 			'elapsed_human': self.elapsed_human,
-			'run_opts': {k: v for k, v in self.run_opts.items() if k not in self.print_opts},
+			'run_opts': self.resolved_opts,
 		}
 		data.update({
 			'config': self.config.toDict(),
@@ -587,37 +613,35 @@ class Runner:
 		})
 		return data
 
-	def run_hooks(self, hook_type, *args):
+	def run_hooks(self, hook_type, *args, sub='hooks'):
 		""""Run hooks of a certain type.
 
 		Args:
 			hook_type (str): Hook type.
 			args (list): List of arguments to pass to the hook.
+			sub (str): Debug id.
 
 		Returns:
 			any: Hook return value.
 		"""
 		result = args[0] if len(args) > 0 else None
-		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 		for hook in self.hooks[hook_type]:
-			name = f'{self.__class__.__name__}.{hook_type}'
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
+					self.debug('hook skipped (backend update frequency)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
 					return
 				if not self.enable_hooks or self.no_process:
-					self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim gray11]skipped[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
+					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
 					continue
-				# self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim yellow]started[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
 				result = hook(self, *args)
-				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim green]success[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
+				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
 				if isinstance(result, Error):
 					result._source = self.unique_name
 					result._uuid = str(uuid.uuid4())
 					self.add_result(result, print=True)
 			except Exception as e:
-				self.debug('', obj={f'{name} [dim yellow]->[/] {fun}': '[dim red]failed[/]'}, id=_id, sub='hooks', verbose=True)  # noqa: E501
+				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
 				error = Error.from_exception(e)
 				error.message = f'Hook "{fun}" execution failed.'
 				error._source = self.unique_name
@@ -627,25 +651,25 @@ class Runner:
 					raise e
 		return result
 
-	def run_validators(self, validator_type, *args, error=True):
+	def run_validators(self, validator_type, *args, error=True, sub='validators'):
 		"""Run validators of a certain type.
 
 		Args:
 			validator_type (str): Validator type. E.g: on_start.
 			args (list): List of arguments to pass to the validator.
 			error (bool): Whether to add an error to runner results if the validator failed.
+			sub (str): Debug id.
 
 		Returns:
 			bool: Validator return value.
 		"""
 		if self.no_process:
+			self.debug('validator skipped (no_process)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
 			return True
-		_id = self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 		for validator in self.validators[validator_type]:
-			name = f'{self.__class__.__name__}.{validator_type}'
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
-				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: '[dim red]failed[/]'}, id=_id, verbose=True, sub='validators')  # noqa: E501
+				self.debug('validator failed', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
 				doc = validator.__doc__
 				if error:
 					message = 'Validator failed'
@@ -658,7 +682,7 @@ class Runner:
 					)
 					self.add_result(error, print=True)
 				return False
-			self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: '[dim green]success[/]'}, id=_id, verbose=True, sub='validators')  # noqa: E501
+			self.debug('validator success', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
 		return True
 
 	def register_hooks(self, hooks):
@@ -671,18 +695,16 @@ class Runner:
 			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
 			if class_hook:
-				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(class_hook)
-				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='hooks')
+				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
 				self.hooks[key].append(class_hook)
 
 			# Register user hooks
 			user_hooks = hooks.get(self.__class__, {}).get(key, [])
 			user_hooks.extend(hooks.get(key, []))
 			for hook in user_hooks:
-				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(hook)
-				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='hooks')
+				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
 			self.hooks[key].extend(user_hooks)
 
 	def register_validators(self, validators):
@@ -695,17 +717,15 @@ class Runner:
 		for key in self.validators:
 			class_validator = getattr(self, key, None)
 			if class_validator:
-				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(class_validator)
 				self.validators[key].append(class_validator)
-				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered'}, sub='validators')
+				self.debug('validator registered', obj={'name': key, 'fun': fun}, sub='init')
 
 			# Register user hooks
 			user_validators = validators.get(key, [])
 			for validator in user_validators:
-				name = f'{self.__class__.__name__}.{key}'
 				fun = self.get_func_path(validator)
-				self.debug('', obj={name + ' [dim yellow]->[/] ' + fun: 'registered (user)'}, sub='validators')
+				self.debug('validator registered', obj={'name': key, 'fun': fun}, sub='init')
 			self.validators[key].extend(user_validators)
 
 	def mark_started(self):
@@ -714,9 +734,9 @@ class Runner:
 			return
 		self.started = True
 		self.start_time = datetime.fromtimestamp(time())
-		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks})')
+		self.debug('started (sync: {self.sync}, hooks: {self.enable_hooks})', sub='start')
 		self.log_start()
-		self.run_hooks('on_start')
+		self.run_hooks('on_start', sub='start')
 
 	def mark_completed(self):
 		"""Mark runner as completed."""
@@ -726,9 +746,9 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-		self.debug(f'completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')
+		self.debug('completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')
 		self.mark_duplicates()
-		self.run_hooks('on_end')
+		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
 		self.log_results()
 
@@ -756,6 +776,7 @@ class Runner:
 	def export_profiler(self):
 		"""Export profiler."""
 		if self.enable_profiler:
+			self.debug('stopping profiler', sub='end')
 			self.profiler.stop()
 			profile_path = Path(self.reports_folder) / f'{self.unique_name}_profile.html'
 			with profile_path.open('w', encoding='utf-8') as f_html:
@@ -785,14 +806,14 @@ class Runner:
 		# Init the new item and the list of output types to load from
 		new_item = None
 		output_types = getattr(self, 'output_types', [])
-		self.debug(f'Input item: {item}', sub='klass.load', verbose=True)
+		self.debug(f'input item: {item}', sub='item.convert', verbose=True)
 
 		# Use a function to pick proper output types
 		output_discriminator = getattr(self, 'output_discriminator', None)
 		if output_discriminator:
 			result = output_discriminator(item)
 			if result:
-				self.debug(f'Discriminated output type: {result.__name__}', sub='klass.load', verbose=True)
+				self.debug('discriminated output type with output_discriminator', sub='item.convert', verbose=True)
 				output_types = [result]
 			else:
 				output_types = []
@@ -802,21 +823,21 @@ class Runner:
 			otypes = [o for o in output_types if o.get_name() == item['_type']]
 			if otypes:
 				output_types = [otypes[0]]
-				self.debug(f'_type key is present in item and matches {otypes[0]}', sub='klass.load', verbose=True)
+				self.debug('discriminated output type with _type key', sub='item.convert', verbose=True)
 
 		# Load item using picked output types
-		self.debug(f'Output types to try: {[o.__name__ for o in output_types]}', sub='klass.load', verbose=True)
+		self.debug(f'output types to try: {[str(o) for o in output_types]}', sub='item.convert', verbose=True)
 		for klass in output_types:
-			self.debug(f'Loading item as {klass.__name__}', sub='klass.load', verbose=True)
+			self.debug(f'loading item as {str(klass)}', sub='item.convert', verbose=True)
 			output_map = getattr(self, 'output_map', {}).get(klass, {})
 			try:
 				new_item = klass.load(item, output_map)
-				self.debug(f'[dim green]Successfully loaded item as {klass.__name__}[/]', sub='klass.load', verbose=True)
+				self.debug(f'successfully loaded item as {str(klass)}', sub='item.convert', verbose=True)
 				break
 			except (TypeError, KeyError) as e:
 				self.debug(
-					f'[dim red]Failed loading item as {klass.__name__}: {type(e).__name__}: {str(e)}.[/] [dim green]Continuing.[/]',
-					sub='klass.load', verbose=True)
+					f'failed loading item as {str(klass)}: {type(e).__name__}: {str(e)}.',
+					sub='item.convert', verbose=True)
 				# error = Error.from_exception(e)
 				# self.debug(repr(error), sub='debug.klass.load')
 				continue
@@ -824,7 +845,7 @@ class Runner:
 		if not new_item:
 			new_item = Warning(message=f'Failed to load item as output type:\n  {item}')
 
-		self.debug(f'Output item: {new_item.toDict()}', sub='klass.load', verbose=True)
+		self.debug(f'output item: {new_item.toDict()}', sub='item.convert', verbose=True)
 
 		return new_item
 
@@ -885,12 +906,12 @@ class Runner:
 			return
 
 		# Run item validators
-		if not self.run_validators('validate_item', item, error=False):
+		if not self.run_validators('validate_item', item, error=False, sub='item'):
 			return
 
 		# Convert output dict to another schema
 		if isinstance(item, dict):
-			item = self.run_hooks('on_item_pre_convert', item)
+			item = self.run_hooks('on_item_pre_convert', item, sub='item')
 			if not item:
 				return
 			item = self._convert_item_schema(item)
@@ -912,7 +933,7 @@ class Runner:
 
 		# Check for state updates
 		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
-			self.debug(f'Sync runner state from remote: {item.state}')
+			self.debug(f'update runner state from remote state: {item.state}', sub='item')
 			if item.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
 				self.started = True
 				self.done = True
@@ -927,22 +948,21 @@ class Runner:
 
 		# If progress item, update runner progress
 		elif isinstance(item, Progress) and item._source == self.unique_name:
-			# self._print(item.toDict())
+			self.debug(f'update runner progress: {item.percent}', sub='item')
 			self.progress = item.percent
 			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
 				return
-			# elif int(item.percent) in [0, 100]:
-				# return
 			else:
 				self.last_updated_progress = item._timestamp
 
 		# If info item and task_id is defined, update runner celery_ids
 		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
+			self.debug(f'update runner celery_ids from remote: {item.task_id}', sub='item')
 			self.celery_ids.append(item.task_id)
 
 		# If output type, run on_item hooks
 		elif isinstance(item, tuple(OUTPUT_TYPES)):
-			item = self.run_hooks('on_item', item)
+			item = self.run_hooks('on_item', item, sub='item')
 			if not item:
 				return
 
@@ -973,8 +993,8 @@ class Runner:
 		]
 		return [cls for cls in classes if cls]
 
-	def load_profiles(self, profiles):
-		"""Load profiles and update run options.
+	def resolve_profiles(self, profiles):
+		"""Resolve profiles and update run options.
 
 		Args:
 			profiles (list[str]): List of profile names to resolve.
@@ -995,7 +1015,7 @@ class Runner:
 		opts = {}
 		for profile in templates:
 			if self.print_profiles:
-				self._print(Info(message=f'Loaded profile {profile.name} ({profile.description})'), rich=True)
+				self._print(Info(message=f'Loaded profile [bold pink3]{profile.name}[/] ([dim]{profile.description}[/])'), rich=True)  # noqa: E501
 			opts.update(profile.opts)
 		opts = {k: v for k, v in opts.items() if k not in self.run_opts}
 		self.run_opts.update(opts)

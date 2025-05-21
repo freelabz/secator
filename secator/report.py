@@ -2,7 +2,7 @@ import operator
 
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType
-from secator.utils import merge_opts, get_file_timestamp, traceback_as_string
+from secator.utils import get_file_timestamp, traceback_as_string
 from secator.rich import console
 from secator.runners._helpers import extract_from_results
 
@@ -56,14 +56,7 @@ class Report:
 				)
 
 	def build(self, extractors=[], dedupe=CONFIG.runners.remove_duplicates):
-		# Trim options
-		from secator.decorators import DEFAULT_CLI_OPTIONS
-		opts = merge_opts(self.runner.config.options, self.runner.run_opts)
-		opts = {
-			k: v for k, v in opts.items()
-			if k not in DEFAULT_CLI_OPTIONS and k not in self.runner.print_opts
-			and v is not None
-		}
+		# Prepare report structure
 		runner_fields = {
 			'name',
 			'status',
@@ -75,8 +68,6 @@ class Report:
 			'run_opts',
 			'results_count'
 		}
-
-		# Prepare report structure
 		data = {
 			'info': {k: v for k, v in self.runner.toDict().items() if k in runner_fields},
 			'results': {}
@@ -96,12 +87,33 @@ class Report:
 			]
 			if items:
 				if sort_by and all(sort_by):
-					items = sorted(items, key=operator.attrgetter(*sort_by))
+					try:
+						items = sorted(items, key=operator.attrgetter(*sort_by))
+					except TypeError as e:
+						console.print(f'[bold red]Could not sort {output_name} by {sort_by}: {str(e)}[/]')
+						console.print(f'[dim]{traceback_as_string(e)}[/]')
 				if dedupe:
 					items = remove_duplicates(items)
-					# items = [item for item in items if not item._duplicate and item not in dedupe_from]
-				for extractor in extractors:
-					items = extract_from_results(items, extractors=[extractor])
+				if extractors:
+					all_res = []
+					extractors_type = [extractor for extractor in extractors if extractor.get('type') == output_name]
+					for extractor in extractors_type:
+						op = extractor.get('op', 'or')
+						res, errors = extract_from_results(items, extractors=[extractor])
+						# console.print(f'{extractor} --> {len(res)} results')
+						if not res:
+							continue
+						if errors:
+							data['info']['errors'] = errors
+						if res:
+							if op == 'or':
+								all_res = all_res + res
+							else:
+								if not all_res:
+									all_res = res
+								else:
+									all_res = [item for item in res if item in all_res]
+					items = all_res
 				data['results'][output_name] = items
 
 		# Save data

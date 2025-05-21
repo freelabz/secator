@@ -11,7 +11,7 @@ from secator.utils import setup_logging
 from secator.utils_test import (FIXTURES_TASKS, FIXTURES_DIR, INPUTS_TASKS,
 							  TEST_TASKS, load_fixture, mock_subprocess_popen)
 
-level = logging.DEBUG if DEBUG > 0 else logging.ERROR
+level = logging.DEBUG if DEBUG == ["1"] else logging.ERROR
 setup_logging(level)
 
 

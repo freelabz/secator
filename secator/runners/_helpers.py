@@ -23,11 +23,13 @@ def run_extractors(results, opts, inputs=[], ctx={}, dry_run=False):
 	computed_opts = {}
 	for key, val in extractors.items():
 		key = key.rstrip('_')
+		ctx['key'] = key
 		values, err = extract_from_results(results, val, ctx=ctx)
 		errors.extend(err)
 		if key == 'targets':
 			targets = ['<COMPUTED>'] if dry_run else deduplicate(values)
 			computed_inputs.extend(targets)
+			ctx['targets'] = computed_inputs
 		else:
 			computed_opt = ['<COMPUTED>'] if dry_run else deduplicate(values)
 			if computed_opt:
@@ -52,17 +54,18 @@ def extract_from_results(results, extractors, ctx={}):
 	Returns:
 		tuple: List of extracted results (flat), list of errors.
 	"""
-	extracted_results = []
+	all_results = []
 	errors = []
 	if not isinstance(extractors, list):
 		extractors = [extractors]
 	for extractor in extractors:
 		try:
-			extracted_results.extend(process_extractor(results, extractor, ctx=ctx))
+			extractor_results = process_extractor(results, extractor, ctx=ctx)
+			all_results.extend(extractor_results)
 		except Exception as e:
 			error = Error.from_exception(e)
 			errors.append(error)
-	return extracted_results, errors
+	return all_results, errors
 
 
 def process_extractor(results, extractor, ctx={}):
@@ -75,7 +78,7 @@ def process_extractor(results, extractor, ctx={}):
 	Returns:
 		list: List of extracted results.
 	"""
-	debug('before extract', obj={'results_count': len(results), 'extractor': extractor}, sub='extractor')
+	debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
 
 	# Parse extractor, it can be a dict or a string (shortcut)
 	if isinstance(extractor, dict):
@@ -97,10 +100,13 @@ def process_extractor(results, extractor, ctx={}):
 		for item in results:
 			if item._type == _type:
 				ctx['item'] = item
+				ctx[f'{_type}'] = item
 				eval_result = eval(_condition, {}, ctx)
 				if eval_result:
 					tmp_results.append(item)
-		debug(f'kept {len(tmp_results)} out of {len(results)} items after condition {_condition}', sub='extractor')
+				del ctx['item']
+				del ctx[f'{_type}']
+		debug(f'kept {len(tmp_results)} out of {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
 		results = tmp_results
 	else:
 		results = [item for item in results if item._type == _type]
@@ -110,7 +116,7 @@ def process_extractor(results, extractor, ctx={}):
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
 		results = [_field.format(**item.toDict()) for item in results]
-	debug('after extract', obj={'results_count': len(results)}, sub='extractor')
+	debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 
 

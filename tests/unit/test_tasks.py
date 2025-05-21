@@ -9,7 +9,7 @@ from secator.utils import setup_logging
 from secator.utils_test import (FIXTURES_TASKS, INPUTS_TASKS, META_OPTS,
 							  CommandOutputTester, mock_command)
 
-level = logging.DEBUG if DEBUG > 0 else logging.ERROR
+level = logging.DEBUG if DEBUG == ["1"] else logging.ERROR
 setup_logging(level)
 
 
@@ -30,7 +30,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		console.print('')
 
 		from secator.config import CONFIG
-		if 'debug_command' in CONFIG.debug.component:
+		if 'debug_command' in CONFIG.debug:
 			META_OPTS['print_cmd'] = True
 			META_OPTS['print_item'] = True
 

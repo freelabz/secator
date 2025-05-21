@@ -33,7 +33,7 @@ logging.basicConfig(
 	handlers=[rich_handler],
 	force=True)
 logging.getLogger('kombu').setLevel(logging.ERROR)
-logging.getLogger('celery').setLevel(logging.INFO if CONFIG.debug.level > 6 else logging.WARNING)
+logging.getLogger('celery').setLevel(logging.DEBUG if 'celery.debug' in CONFIG.debug or 'celery.*' in CONFIG.debug else logging.WARNING)  # noqa: E501
 logger = logging.getLogger(__name__)
 trace.LOG_SUCCESS = "Task %(name)s[%(id)s] succeeded in %(runtime)ss"
 
@@ -169,9 +169,10 @@ def run_scan(self, args=[], kwargs={}):
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
 	if IN_CELERY_WORKER_PROCESS:
-		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True, 'print_profiles': True})
-		# routing_key = self.request.delivery_info['routing_key']
-		# console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
+		quiet = not CONFIG.runners.show_command_output
+		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True, 'print_profiles': True, 'quiet': quiet})
+		routing_key = self.request.delivery_info['routing_key']
+		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 
 	# Flatten + dedupe + filter results
 	results = forward_results(results)
@@ -305,11 +306,24 @@ def break_task(task, task_opts, results=[]):
 		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
 			opts['chunk'] = ix + 1
 			opts['chunk_count'] = len(chunks)
+
+		# Chunk results if needed for extractors to work
+		chunked_results = results.copy()
+		if task_opts.get('chunk_by'):  # remove results that have a different chunk_by value
+			_type, attr = task_opts['chunk_by'].split('.')
+			temp = [item for item in results if item._type == _type]
+			for item in temp:
+				item_attr = getattr(item, attr)
+				if item_attr not in chunk:
+					chunked_results.remove(item)
+		debug('', obj={task.unique_name: 'CHUNKED', 'chunked_targets': chunk, 'chunked_results': chunked_results}, sub='celery.state')  # noqa: E501
+
+		# Construct chunked signature
 		task_id = str(uuid.uuid4())
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
-		opts['results'] = results
-		sig = type(task).si(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
+		opts['results'] = chunked_results
+		sig = type(task).si(chunk, **opts).set(task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
 		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
