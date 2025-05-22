@@ -9,8 +9,7 @@ from secator.runners._helpers import (
     process_extractor,
     get_task_folder_id
 )
--from secator.output_types import OutputType, Url, Vulnerability, Target, Error
-+from secator.output_types import OutputType, Url, Vulnerability, Target
+from secator.output_types import OutputType, Url, Vulnerability, Target
 from dataclasses import dataclass, field
 
 
