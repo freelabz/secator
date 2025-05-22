@@ -22,8 +22,9 @@ CLI_OPTS = {
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
-	'process': {'is_flag': True, 'short': 'nps', 'default': True, 'help': 'Disable secator processing'},
-	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.runners.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
+    'process': {'is_flag': True, 'short': 'nps', 'default': True,
+                'help': 'Enable secator processing', 'reverse': True},
+    'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.runners.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
 	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
 	'show': {'is_flag': True, 'short': 'yml', 'default': False, 'help': 'Show runner yaml'},
 	'tree': {'is_flag': True, 'short': 'tree', 'default': False, 'help': 'Show runner tree'},
