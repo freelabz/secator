@@ -5,7 +5,7 @@ from unittest import mock
 
 from secator.cli import cli
 from secator.definitions import VERSION
-from secator.installer import InstallerStatus, PackageInstaller, SourceInstaller
+from secator.installer import InstallerStatus
 
 
 class TestCli(unittest.TestCase):
