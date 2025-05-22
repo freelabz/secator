@@ -1,6 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
-import os
+from unittest.mock import patch
 
 from secator.runners._helpers import (
     run_extractors,
@@ -12,6 +11,7 @@ from secator.runners._helpers import (
 )
 from secator.output_types import OutputType, Url, Vulnerability, Target, Error
 from dataclasses import dataclass, field
+
 
 @dataclass
 class MockOutputType(OutputType):
