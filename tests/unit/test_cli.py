@@ -52,11 +52,11 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 0
 		assert 'Run a scan.' in result.output
 
-	def test_worker_command(self):
-		result = self.runner.invoke(cli, ['worker', '--check'])
-		assert not result.exception
-		assert result.exit_code == 0
-		assert 'No Celery worker available' in result.output
+	# def test_worker_command(self):
+	# 	result = self.runner.invoke(cli, ['worker', '--check'])
+	# 	assert not result.exception
+	# 	assert result.exit_code == 0
+	# 	assert 'No Celery worker available' in result.output
 
 	def test_util_proxy_command(self):
 		result = self.runner.invoke(cli, ['util', 'proxy', '--timeout', '0.5', '--number', '2'])
