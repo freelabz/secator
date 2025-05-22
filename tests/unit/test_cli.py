@@ -1,3 +1,4 @@
+import tempfile
 from click.testing import CliRunner
 import os
 import unittest
@@ -184,9 +185,11 @@ class TestCli(unittest.TestCase):
 	@mock.patch('secator.cli.list_reports')
 	def test_report_show_command(self, mock_list_reports):
 		mock_list_reports.return_value = []
-		with open('tmp_report.json', 'w') as f:
+		tf = tempfile.NamedTemporaryFile(delete=False)
+		with open(tf.name, 'w') as f:
 			f.write('{"info":{"name":"test", "title": "test"}, "results":{}}')
-		result = self.runner.invoke(cli, ['report', 'show', 'tmp_report.json'])
+		result = self.runner.invoke(cli, ['report', 'show', tf.name])
+		os.remove(tf.name)
 		assert not result.exception
 		assert result.exit_code == 0
 
@@ -200,9 +203,9 @@ class TestCli(unittest.TestCase):
 
 	def test_report_export_command(self):
 		# Since this would need an actual JSON file, we'll mock the file opening
-		with mock.patch('builtins.open', mock.mock_open(read_data='{"info":{"name":"test", "title": "test"}, "results":{}}')):
-			with mock.patch('secator.cli.loads_dataclass', return_value={"info": {"name": "test", "title": "test"}, "results": {}}):
-				result = self.runner.invoke(cli, ['report', 'export', 'test.json', '-output', 'console'])
+		with mock.patch('builtins.open', mock.mock_open(read_data='{"info":{"name":"test", "title": "test"}, "results":{}}')), \
+			 mock.patch('secator.cli.loads_dataclass', return_value={"info": {"name": "test", "title": "test"}, "results": {}}):
+				result = self.runner.invoke(cli, ['report', 'export', 'test.json', '--output', 'console'])
 				assert not result.exception
 				assert result.exit_code == 0
 

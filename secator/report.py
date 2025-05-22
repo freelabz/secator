@@ -113,7 +113,7 @@ class Report:
 									all_res = res
 								else:
 									all_res = [item for item in res if item in all_res]
-					items = all_res
+					items = remove_duplicates(all_res) if dedupe else all_res
 				data['results'][output_name] = items
 
 		# Save data

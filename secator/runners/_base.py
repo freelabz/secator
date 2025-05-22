@@ -773,7 +773,7 @@ class Runner:
 		"""Log runner start."""
 		if not self.print_start:
 			return
-		if not self.has_parent and not self.config.type == 'task':
+		if not self.has_parent and self.config.type != 'task':
 			tree = build_runner_tree(self.config).render_tree()
 			info = Info(message=f'{self.config.type.capitalize()} tree built:\n{tree}', _source=self.unique_name)
 			self._print(info, rich=True)

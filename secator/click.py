@@ -10,9 +10,11 @@ class ListParamType(click.ParamType):
 	name = "list"
 
 	def convert(self, value, param, ctx):
+		if value is None:
+			return []
 		if isinstance(value, list):
 			return value
-		return value.split(',')
+		return [v.strip() for v in value.split(',') if v.strip()]
 
 
 CLICK_LIST = ListParamType()

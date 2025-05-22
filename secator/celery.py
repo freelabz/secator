@@ -295,7 +295,7 @@ def break_task(task, task_opts, results=[]):
 	)
 
 	# Clone opts
-	opts = task_opts.copy()
+	base_opts = task_opts.copy()
 
 	# Build signatures
 	sigs = []
@@ -303,19 +303,20 @@ def break_task(task, task_opts, results=[]):
 	for ix, chunk in enumerate(chunks):
 		if not isinstance(chunk, list):
 			chunk = [chunk]
-		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
-			opts['chunk'] = ix + 1
-			opts['chunk_count'] = len(chunks)
+
+		# Add chunk info to opts
+		opts = base_opts.copy()
+		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
 
 		# Chunk results if needed for extractors to work
-		chunked_results = results.copy()
-		if task_opts.get('chunk_by'):  # remove results that have a different chunk_by value
-			_type, attr = task_opts['chunk_by'].split('.')
-			temp = [item for item in results if item._type == _type]
-			for item in temp:
-				item_attr = getattr(item, attr)
-				if item_attr not in chunk:
-					chunked_results.remove(item)
+		if opts.get('chunk_by'):  # remove results that have a different chunk_by value
+			_type, attr = opts['chunk_by'].split('.')
+			chunked_results = [
+				r for r in results
+				if not (r._type == _type and getattr(r, attr) not in chunk)
+			]
+		else:
+			chunked_results = results
 		debug('', obj={task.unique_name: 'CHUNKED', 'chunked_targets': chunk, 'chunked_results': chunked_results}, sub='celery.state')  # noqa: E501
 
 		# Construct chunked signature
@@ -325,7 +326,7 @@ def break_task(task, task_opts, results=[]):
 		opts['results'] = chunked_results
 		sig = type(task).si(chunk, **opts).set(task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
-		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
+		task.add_subtask(task_id, task.name, full_name)
 		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
 		task.add_result(info)
 		sigs.append(sig)

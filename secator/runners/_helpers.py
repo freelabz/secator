@@ -4,7 +4,7 @@ from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
 
-def run_extractors(results, opts, inputs=[], ctx={}, dry_run=False):
+def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	"""Run extractors and merge extracted values with option dict.
 
 	Args:
@@ -17,6 +17,10 @@ def run_extractors(results, opts, inputs=[], ctx={}, dry_run=False):
 	Returns:
 		tuple: inputs, options, errors.
 	"""
+	if inputs is None:
+		inputs = []
+	if ctx is None:
+		ctx = {}
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
 	errors = []
 	computed_inputs = []
@@ -62,7 +66,7 @@ def fmt_extractor(extractor):
 	return f'<DYNAMIC({s})>'
 
 
-def extract_from_results(results, extractors, ctx={}):
+def extract_from_results(results, extractors, ctx=None):
 	"""Extract sub extractors from list of results dict.
 
 	Args:
@@ -73,6 +77,8 @@ def extract_from_results(results, extractors, ctx={}):
 	Returns:
 		tuple: List of extracted results (flat), list of errors.
 	"""
+	if ctx is None:
+		ctx = {}
 	all_results = []
 	errors = []
 	if not isinstance(extractors, list):
@@ -112,7 +118,7 @@ def parse_extractor(extractor):
 	return _type, _field, _condition
 
 
-def process_extractor(results, extractor, ctx={}):
+def process_extractor(results, extractor, ctx=None):
 	"""Process extractor.
 
 	Args:
@@ -122,6 +128,8 @@ def process_extractor(results, extractor, ctx={}):
 	Returns:
 		list: List of extracted results.
 	"""
+	if ctx is None:
+		ctx = {}
 	debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
 
 	# Parse extractor, it can be a dict or a string (shortcut)
@@ -134,7 +142,7 @@ def process_extractor(results, extractor, ctx={}):
 	if _condition:
 		tmp_results = []
 		for item in results:
-			if not item._type == _type:
+			if item._type != _type:
 				continue
 			ctx['item'] = item
 			ctx[f'{_type}'] = item

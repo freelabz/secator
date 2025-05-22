@@ -96,10 +96,9 @@ class ffuf(HttpFuzzer):
 	@staticmethod
 	def on_cmd_opts(self, opts):
 		# Fuzz host header
-		if self.get_opt_value('fuzz_host_header'):
-			if 'http://' in self.inputs[0]:
-				host = self.inputs[0].split('://')[1].split('/')[0]
-				opts['header']['value']['Host'] = f'FUZZ.{host}'
+		if self.get_opt_value('fuzz_host_header') and 'http://' in self.inputs[0]:
+			host = self.inputs[0].split('://')[1].split('/')[0]
+			opts['header']['value']['Host'] = f'FUZZ.{host}'
 		self.headers = opts['header']['value'].copy()
 
 		# Check FUZZ keyword

@@ -690,7 +690,9 @@ def report():
 	pass
 
 
-def process_query(query, fields=[]):
+def process_query(query, fields=None):
+	if fields is None:
+		fields = []
 	otypes = [o.__name__.lower() for o in FINDING_TYPES]
 	extractors = []
 
@@ -700,14 +702,14 @@ def process_query(query, fields=[]):
 		for field in fields:
 			parts = field.split('.')
 			if len(parts) == 2:
-				type, field = parts
+				_type, field = parts
 			else:
-				type = parts[0]
+				_type = parts[0]
 				field = None
-			if type not in otypes:
-				console.print(Error(message='Invalid output type: ' + type))
+			if _type not in otypes:
+				console.print(Error(message='Invalid output type: ' + _type))
 				sys.exit(1)
-			fields_filter[type] = field
+			fields_filter[_type] = field
 
 	# No query
 	if not query:
@@ -715,8 +717,17 @@ def process_query(query, fields=[]):
 			extractors = [{'type': field_type, 'field': field, 'condition': 'True', 'op': 'or'} for field_type, field in fields_filter.items()]  # noqa: E501
 		return extractors
 
+	# Get operator
+	operator = '||'
+	if '&&' in query and '||' in query:
+	    console.print(Error(message='Cannot mix && and || in the same query'))
+	    sys.exit(1)
+	elif '&&' in query:
+	    operator = '&&'
+	elif '||' in query:
+	    operator = '||'
+
 	# Process query
-	operator = '&&' if '&&' in query else '||'
 	query = query.split(operator)
 	for part in query:
 		part = part.strip()
@@ -764,7 +775,7 @@ def report_show(ctx, report_query, output, runner_type, time_delta, _filter, que
 		console.print(':wrench: [bold gold3]Showing query summary[/]')
 		op = extractors[0]['op']
 		console.print(f':carousel_horse: [bold blue]Op[/] [bold orange3]->[/] [bold green]{op.upper()}[/]')
-		for ix, extractor in enumerate(extractors):
+		for extractor in extractors:
 			console.print(f':zap: [bold blue]{extractor["type"].title()}[/] [bold orange3]->[/] [bold green]{extractor["condition"]}[/]', highlight=False)  # noqa: E501
 
 	# Build runner instance
@@ -911,16 +922,13 @@ def report_list(ctx, workspace, runner_type, time_delta):
 @report.command('export')
 @click.argument('json_path', type=str)
 @click.option('--output-folder', '-of', type=str)
-@click.option('-output', '-o', type=str, required=True)
+@click.option('--output', '-o', type=str, required=True)
 def report_export(json_path, output_folder, output):
 	with open(json_path, 'r') as f:
 		data = loads_dataclass(f.read())
 
 	split = json_path.split('/')
-	if len(split) > 4:
-		workspace_name = '/'.join(split[:-4])
-	else:
-		workspace_name = '_default'
+	workspace_name = '/'.join(split[:-4]) if len(split) > 4 else '_default'
 	runner_instance = DotMap({
 		"config": {
 			"name": data['info']['name']
@@ -1465,7 +1473,7 @@ def unit(tasks, workflows, scans, test):
 
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -v tests/unit'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=0'
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
@@ -1496,7 +1504,7 @@ def integration(tasks, workflows, scans, test):
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.integration -m pytest -s -v tests/integration'  # noqa: E501
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.integration -m pytest -s -vv tests/integration --durations=0'  # noqa: E501
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
@@ -1527,7 +1535,7 @@ def template(tasks, workflows, scans, test):
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.templates -m pytest -s -v tests/template'  # noqa: E501
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.templates -m pytest -s -v tests/template --durations=0'  # noqa: E501
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'

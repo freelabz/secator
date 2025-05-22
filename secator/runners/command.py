@@ -234,11 +234,11 @@ class Command(Runner):
 		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=profile)
 
 	@classmethod
-	def si(cls, *args, results=[], **kwargs):
+	def si(cls, *args, results=None, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
 		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
-		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=profile)
+		return run_command.si(results or [], cls.__name__, *args, opts=kwargs).set(queue=profile)
 
 	def get_opt_value(self, opt_name, preprocess=False, process=False):
 		"""Get option value as inputed by the user.

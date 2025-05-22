@@ -89,17 +89,13 @@ def build_runner_tree(config: TemplateLoader, condition: Optional[str] = None) -
         # Add tasks to the tree
         for task_name, task_details in config.tasks.items():
             if task_name.startswith('_group'):
-                # This is a group task
                 group_node = TaskNode(task_name, 'group')
                 root_node.add_child(group_node)
-
-                # Add the tasks within the group as children
                 for subtask_name, subtask_details in task_details.items():
                     condition = subtask_details.get('if')
                     subtask_node = TaskNode(subtask_name, 'task', condition)
                     group_node.add_child(subtask_node)
             else:
-                # This is a regular task
                 condition = task_details.get('if')
                 task_node = TaskNode(task_name, 'task', condition)
                 root_node.add_child(task_node)
@@ -110,16 +106,10 @@ def build_runner_tree(config: TemplateLoader, condition: Optional[str] = None) -
 
         # Add workflows to the tree
         for workflow_name, workflow_details in config.workflows.items():
-            # Create a node for the workflow
             condition = workflow_details.get('if') if isinstance(workflow_details, dict) else None
-            # workflow_node = TaskNode(workflow_name, 'workflow', condition)
-            # root_node.add_child(workflow_node)
-
-            # Load the workflow configuration and add its tasks as children
-            config = TemplateLoader(name=f'workflow/{workflow_name}')
-            workflow_tree = build_runner_tree(config, condition)
-            if isinstance(workflow_tree, RunnerTree):
-                # Add all root nodes from the workflow tree as children of this workflow node
-                for workflow_root_node in workflow_tree.root_nodes:
-                    root_node.add_child(workflow_root_node)
+            wf_config = TemplateLoader(name=f'workflow/{workflow_name}')
+            wf_tree = build_runner_tree(wf_config, condition)
+            if isinstance(wf_tree, RunnerTree):
+                for wf_root_node in wf_tree.root_nodes:
+                    root_node.add_child(wf_root_node)
     return tree

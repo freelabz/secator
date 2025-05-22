@@ -313,18 +313,6 @@ def register_runner(cli_endpoint, config):
 				console.print(f'{task_cls.__name__} version: [bold green]{current}[/] (recommended: [bold green]{latest}[/])')
 			sys.exit(0)
 
-		# Show version
-		if version:
-			data = task_cls.get_version_info()
-			current = data['version']
-			latest = data['latest_version']
-			installed = data['installed']
-			if not installed:
-				console.print(f'[bold red]{task_cls.__name__} is not installed.[/]')
-			else:
-				console.print(f'{task_cls.__name__} version: [bold green]{current}[/] (recommended: [bold green]{latest}[/])')
-			sys.exit(0)
-
 		# Show runner yaml
 		if show:
 			config.print()
@@ -335,14 +323,6 @@ def register_runner(cli_endpoint, config):
 			tree = build_runner_tree(config)
 			console.print(tree.render_tree())
 			sys.exit(0)
-
-		# Remove options whose values are default values
-		# for k, v in options.items():
-		# 	if k in config.options.toDict():
-		# 		continue
-		# 	opt_name = k.replace('-', '_')
-		# 	if opt_name in opts and opts[opt_name] == v.get('default', None):
-		# 		del opts[opt_name]
 
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
