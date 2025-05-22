@@ -134,14 +134,16 @@ def process_extractor(results, extractor, ctx={}):
 	if _condition:
 		tmp_results = []
 		for item in results:
-			if item._type == _type:
-				ctx['item'] = item
-				ctx[f'{_type}'] = item
-				eval_result = eval(_condition, {}, ctx)
-				if eval_result:
-					tmp_results.append(item)
-				del ctx['item']
-				del ctx[f'{_type}']
+			if not item._type == _type:
+				continue
+			ctx['item'] = item
+			ctx[f'{_type}'] = item
+			safe_globals = {'__builtins__': {'len': len}}
+			eval_result = eval(_condition, safe_globals, ctx)
+			if eval_result:
+				tmp_results.append(item)
+			del ctx['item']
+			del ctx[f'{_type}']
 		debug(f'kept {len(tmp_results)} out of {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
 		results = tmp_results
 	else:
