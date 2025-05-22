@@ -47,8 +47,12 @@ class Task(Runner):
 		opts['hooks'] = hooks
 		opts['context'] = self.context.copy()
 		opts['reports_folder'] = str(self.reports_folder)
-		opts['enable_reports'] = False  # Task will handle reports
-		opts['enable_duplicate_check'] = False  # Task will handle duplicate check
+
+		# Task class will handle those
+		opts['enable_reports'] = False
+		opts['enable_duplicate_check'] = False
+		opts['print_start'] = False
+		opts['print_end'] = False
 		opts['has_parent'] = False
 		opts['skip_if_no_inputs'] = False
 		opts['caller'] = 'Task'

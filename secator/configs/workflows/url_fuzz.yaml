@@ -29,7 +29,3 @@ tasks:
       type: url
       field: url
       condition: "'Index of' in item.title"
-results:
-  - type: url
-    condition: item._source == 'httpx'
-    # TODO: add deduplication based on the 'url' field

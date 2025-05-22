@@ -31,10 +31,4 @@ tasks:
   httpx:
     description: Run HTTP probes on crawled URLs
     targets_:
-      type: url
-      field: url
-results:
-  - type: url
-    condition: item._source == 'httpx'
-
-  - type: tag
+    - url.url

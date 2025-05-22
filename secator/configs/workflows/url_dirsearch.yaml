@@ -29,6 +29,3 @@ tasks:
       - type: url
         field: url
         condition: item.status_code == 0
-results:
-- type: url
-  condition: item.status_code != 0

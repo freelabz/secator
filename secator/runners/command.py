@@ -394,12 +394,9 @@ class Command(Runner):
 
 			# Abort if dry run
 			if self.dry_run:
-				self._print('')
+				self.print_description()
 				self.print_command()
 				return
-
-			# Print task description
-			self.print_description()
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:

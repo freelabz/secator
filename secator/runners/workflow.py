@@ -96,6 +96,7 @@ class Workflow(Runner):
 		"""
 		from celery import chain, group
 		sigs = []
+		sig = None
 		ix = 0
 		for task_name, task_opts in config.items():
 			# Task opts can be None
@@ -123,7 +124,7 @@ class Workflow(Runner):
 				condition = task_opts.pop('if', None)
 				local_ns = {'opts': DotMap(run_opts)}
 				if condition and not eval(condition, {"__builtins__": {}}, local_ns):
-					self.add_result(Info(message=f'Skipping task [bold gold3]{task_name}[/] because condition is not met: [bold green]{condition}[/]'), print=True)  # noqa: E501
+					self.add_result(Info(message=f'Skipped task [bold gold3]{task_name}[/] because condition is not met: [bold green]{condition}[/]'), print=True)  # noqa: E501
 					continue
 
 				# Get task class
@@ -143,5 +144,6 @@ class Workflow(Runner):
 				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
 				ix += 1
-			sigs.append(sig)
+			if sig:
+				sigs.append(sig)
 		return sigs

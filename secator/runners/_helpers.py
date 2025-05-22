@@ -27,11 +27,11 @@ def run_extractors(results, opts, inputs=[], ctx={}, dry_run=False):
 		values, err = extract_from_results(results, val, ctx=ctx)
 		errors.extend(err)
 		if key == 'targets':
-			targets = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			targets = [fmt_extractor(v) for v in val] if dry_run else deduplicate(values)
 			computed_inputs.extend(targets)
 			ctx['targets'] = computed_inputs
 		else:
-			computed_opt = ['<COMPUTED>'] if dry_run else deduplicate(values)
+			computed_opt = [fmt_extractor(v) for v in val] if dry_run else deduplicate(values)
 			if computed_opt:
 				computed_opts[key] = computed_opt
 				opts[key] = computed_opts[key]
@@ -41,6 +41,25 @@ def run_extractors(results, opts, inputs=[], ctx={}, dry_run=False):
 	if computed_opts:
 		debug('computed_opts', obj=computed_opts, sub='extractors')
 	return inputs, opts, errors
+
+
+def fmt_extractor(extractor):
+	"""Format extractor.
+
+	Args:
+		extractor (dict / str): extractor definition.
+
+	Returns:
+		str: formatted extractor.
+	"""
+	parsed_extractor = parse_extractor(extractor)
+	if not parsed_extractor:
+		return '<DYNAMIC[INVALID_EXTRACTOR]>'
+	_type, _field, _condition = parsed_extractor
+	s = f'{_type}.{_field}'
+	if _condition:
+		s = f'{s} if {_condition}'
+	return f'<DYNAMIC({s})>'
 
 
 def extract_from_results(results, extractors, ctx={}):
@@ -68,6 +87,31 @@ def extract_from_results(results, extractors, ctx={}):
 	return all_results, errors
 
 
+def parse_extractor(extractor):
+	"""Parse extractor.
+
+	Args:
+		extractor (dict / str): extractor definition.
+
+	Returns:
+		tuple|None: type, field, condition or None if invalid.
+	"""
+	# Parse extractor, it can be a dict or a string (shortcut)
+	if isinstance(extractor, dict):
+		_type = extractor['type']
+		_field = extractor.get('field')
+		_condition = extractor.get('condition')
+	else:
+		parts = tuple(extractor.split('.'))
+		if len(parts) == 2:
+			_type = parts[0]
+			_field = parts[1]
+			_condition = None
+		else:
+			return None
+	return _type, _field, _condition
+
+
 def process_extractor(results, extractor, ctx={}):
 	"""Process extractor.
 
@@ -81,18 +125,10 @@ def process_extractor(results, extractor, ctx={}):
 	debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
 
 	# Parse extractor, it can be a dict or a string (shortcut)
-	if isinstance(extractor, dict):
-		_type = extractor['type']
-		_field = extractor.get('field')
-		_condition = extractor.get('condition')
-	else:
-		parts = tuple(extractor.split('.'))
-		if len(parts) == 2:
-			_type = parts[0]
-			_field = parts[1]
-			_condition = None
-		else:
-			return results
+	parsed_extractor = parse_extractor(extractor)
+	if not parsed_extractor:
+		return results
+	_type, _field, _condition = parsed_extractor
 
 	# Evaluate condition for each result
 	if _condition:

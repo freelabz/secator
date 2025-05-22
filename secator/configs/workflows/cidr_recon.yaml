@@ -22,7 +22,3 @@ tasks:
     targets_:
     - type: port
       field: '{ip}:{port}'
-results:
-  - type: ip
-    condition: item.alive
-  - type: url

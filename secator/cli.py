@@ -1500,6 +1500,37 @@ def integration(tasks, workflows, scans, test):
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
+def template(tasks, workflows, scans, test):
+	"""Run integration tests."""
+	os.environ['TEST_TASKS'] = tasks or ''
+	os.environ['TEST_WORKFLOWS'] = workflows or ''
+	os.environ['TEST_SCANS'] = scans or ''
+	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
+	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
+
+	if not test:
+		if tasks:
+			test = 'test_tasks'
+		elif workflows:
+			test = 'test_workflows'
+		elif scans:
+			test = 'test_scans'
+
+	import shutil
+	shutil.rmtree('/tmp/.secator', ignore_errors=True)
+
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.templates -m pytest -s -v tests/template'  # noqa: E501
+	if test:
+		test_str = ' or '.join(test.split(','))
+		cmd += f' -k "{test_str}"'
+	run_test(cmd, 'template', verbose=True)
+
+
+@test.command()
+@click.option('--tasks', type=str, default='', help='Secator tasks to test (comma-separated)')
+@click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
+@click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
+@click.option('--test', '-t', type=str, help='Secator test to run')
 def performance(tasks, workflows, scans, test):
 	"""Run integration tests."""
 	os.environ['TEST_TASKS'] = tasks or ''

@@ -34,11 +34,13 @@ class Scan(Runner):
 
 		# Build chain of workflows
 		sigs = []
+		sig = None
 		for name, workflow_opts in self.config.workflows.items():
 			run_opts = self.run_opts.copy()
 			run_opts.pop('profiles', None)
 			run_opts['no_poll'] = True
 			run_opts['caller'] = 'Scan'
+			run_opts['has_parent'] = True
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			name = name.split('/')[0]
 			config = TemplateLoader(name=f'workflow/{name}')
@@ -47,7 +49,7 @@ class Scan(Runner):
 			condition = workflow_opts.pop('if', None) if workflow_opts else None
 			local_ns = {'opts': DotMap(opts)}
 			if condition and not eval(condition, {"__builtins__": {}}, local_ns):
-				self.add_result(Info(message=f'Skipping workflow {name} because condition is not met: {condition}'), print=True)
+				self.add_result(Info(message=f'Skipped workflow {name} because condition is not met: {condition}'), print=True)
 				continue
 
 			# Build workflow
@@ -64,8 +66,10 @@ class Scan(Runner):
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
 
-		return chain(
-			mark_runner_started.si([], self).set(queue='results'),
-			*sigs,
-			mark_runner_completed.s(self).set(queue='results'),
-		)
+		if sigs:
+			sig = chain(
+				mark_runner_started.si([], self).set(queue='results'),
+				*sigs,
+				mark_runner_completed.s(self).set(queue='results'),
+			)
+		return sig

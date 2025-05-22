@@ -9,6 +9,7 @@ from secator.config import CONFIG
 from secator.click import CLICK_LIST
 from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
+from secator.tree import build_runner_tree
 from secator.utils import (deduplicate, expand_input, get_command_category)
 
 
@@ -25,6 +26,7 @@ CLI_OPTS = {
 	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.runners.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
 	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
 	'show': {'is_flag': True, 'short': 'yml', 'default': False, 'help': 'Show runner yaml'},
+	'tree': {'is_flag': True, 'short': 'tree', 'default': False, 'help': 'Show runner tree'},
 	'version': {'is_flag': True, 'help': 'Show version'},
 }
 
@@ -293,6 +295,7 @@ def register_runner(cli_endpoint, config):
 		quiet = opts['quiet']
 		dry_run = opts['dry_run']
 		show = opts['show']
+		tree = opts['tree']
 		context = {'workspace_name': ws}
 		ctx.obj['dry_run'] = dry_run
 
@@ -323,6 +326,12 @@ def register_runner(cli_endpoint, config):
 		# Show runner yaml
 		if show:
 			config.print()
+			sys.exit(0)
+
+		# Show runner tree
+		if tree:
+			tree = build_runner_tree(config)
+			console.print(tree.render_tree())
 			sys.exit(0)
 
 		# Remove options whose values are default values
@@ -394,6 +403,8 @@ def register_runner(cli_endpoint, config):
 			'print_line': True,
 			'print_progress': True,
 			'print_profiles': True,
+			'print_start': True,
+			'print_end': True,
 			'print_remote_info': not sync,
 			'piped_input': ctx.obj['piped_input'],
 			'piped_output': ctx.obj['piped_output'],

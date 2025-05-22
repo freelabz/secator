@@ -17,6 +17,8 @@ from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
 from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update)
+from secator.tree import build_runner_tree
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,16 @@ VALIDATORS = [
 	'validate_input',
 	'validate_item'
 ]
+
+
+def format_runner_name(runner):
+	"""Format runner name."""
+	colors = {
+		'task': 'bold gold3',
+		'workflow': 'bold orange3',
+		'scan': 'bold blue3',
+	}
+	return f'[{colors[runner.config.type]}]{runner.unique_name}[/]'
 
 
 class Runner:
@@ -112,6 +124,8 @@ class Runner:
 		self.print_item = self.run_opts.get('print_item', False)
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
+		self.print_start = self.run_opts.get('print_start', False) and not self.piped_output and not self.piped_output and not self.dry_run  # noqa: E501
+		self.print_end = self.run_opts.get('print_end', False) and not self.piped_input and not self.piped_output and not self.dry_run  # noqa: E501
 		self.print_json = self.run_opts.get('print_json', False)
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
@@ -140,9 +154,9 @@ class Runner:
 		self.filter_results(results + targets)
 
 		# Debug
-		self.debug('inputs', obj=self.inputs, sub='init')
-		self.debug('run opts', obj=self.resolved_opts, sub='init')
-		self.debug('print opts', obj=self.resolved_print_opts, sub='init')
+		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
+		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
+		self.debug(f'print opts ({len(self.resolved_print_opts)})', obj=self.resolved_print_opts, sub='init')
 
 		# Load profiles
 		profiles_str = run_opts.get('profiles', [])
@@ -167,13 +181,13 @@ class Runner:
 				pass
 
 		# Hooks
-		self.hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
-		self.debug('registering hooks', obj=list(self.hooks.keys()), sub='init')
+		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
+		self.debug('registering hooks', obj=list(self.resolved_hooks.keys()), sub='init')
 		self.register_hooks(hooks)
 
 		# Validators
-		self.validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
-		self.debug('registering validators', obj={'validators': list(self.validators.keys())}, sub='init')
+		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
+		self.debug('registering validators', obj={'validators': list(self.resolved_validators.keys())}, sub='init')
 		self.register_validators(validators)
 
 		# Input post-process
@@ -334,6 +348,9 @@ class Runner:
 			error._uuid = str(uuid.uuid4())
 			self.add_result(error, print=True)
 			self.stop_celery_tasks()
+			if not self.sync:
+				for item in self.yielder():
+					yield self._process_item(item)
 			yield from self.join_threads()
 			yield error
 			self.mark_completed()
@@ -625,7 +642,7 @@ class Runner:
 			any: Hook return value.
 		"""
 		result = args[0] if len(args) > 0 else None
-		for hook in self.hooks[hook_type]:
+		for hook in self.resolved_hooks[hook_type]:
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
@@ -666,7 +683,7 @@ class Runner:
 		if self.no_process:
 			self.debug('validator skipped (no_process)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
 			return True
-		for validator in self.validators[validator_type]:
+		for validator in self.resolved_validators[validator_type]:
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
 				self.debug('validator failed', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
@@ -691,13 +708,13 @@ class Runner:
 		Args:
 			hooks (dict[str, List[Callable]]): List of hooks to register.
 		"""
-		for key in self.hooks:
+		for key in self.resolved_hooks:
 			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
 			if class_hook:
 				fun = self.get_func_path(class_hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
-				self.hooks[key].append(class_hook)
+				self.resolved_hooks[key].append(class_hook)
 
 			# Register user hooks
 			user_hooks = hooks.get(self.__class__, {}).get(key, [])
@@ -705,7 +722,7 @@ class Runner:
 			for hook in user_hooks:
 				fun = self.get_func_path(hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
-			self.hooks[key].extend(user_hooks)
+			self.resolved_hooks[key].extend(user_hooks)
 
 	def register_validators(self, validators):
 		"""Register validators.
@@ -714,11 +731,11 @@ class Runner:
 			validators (dict[str, List[Callable]]): Validators to register.
 		"""
 		# Register class + derived class hooks
-		for key in self.validators:
+		for key in self.resolved_validators:
 			class_validator = getattr(self, key, None)
 			if class_validator:
 				fun = self.get_func_path(class_validator)
-				self.validators[key].append(class_validator)
+				self.resolved_validators[key].append(class_validator)
 				self.debug('validator registered', obj={'name': key, 'fun': fun}, sub='init')
 
 			# Register user hooks
@@ -726,7 +743,7 @@ class Runner:
 			for validator in user_validators:
 				fun = self.get_func_path(validator)
 				self.debug('validator registered', obj={'name': key, 'fun': fun}, sub='init')
-			self.validators[key].extend(user_validators)
+			self.resolved_validators[key].extend(user_validators)
 
 	def mark_started(self):
 		"""Mark runner as started."""
@@ -734,7 +751,7 @@ class Runner:
 			return
 		self.started = True
 		self.start_time = datetime.fromtimestamp(time())
-		self.debug('started (sync: {self.sync}, hooks: {self.enable_hooks})', sub='start')
+		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks})', sub='start')
 		self.log_start()
 		self.run_hooks('on_start', sub='start')
 
@@ -746,7 +763,7 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-		self.debug('completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')
+		self.debug(f'completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')
 		self.mark_duplicates()
 		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
@@ -754,16 +771,26 @@ class Runner:
 
 	def log_start(self):
 		"""Log runner start."""
-		if not self.print_remote_info:
+		if not self.print_start:
 			return
-		remote_str = 'starting' if self.sync else 'sent to Celery worker'
-		info = Info(message=f'{self.config.type.capitalize()} {self.unique_name} {remote_str}...', _source=self.unique_name)
-		self._print_item(info)
+		if not self.has_parent and not self.config.type == 'task':
+			tree = build_runner_tree(self.config).render_tree()
+			info = Info(message=f'{self.config.type.capitalize()} tree built:\n{tree}', _source=self.unique_name)
+			self._print(info, rich=True)
+		remote_str = 'started' if self.sync else 'sent to Celery worker'
+		msg = f'{self.config.type.capitalize()} {format_runner_name(self)}'
+		if self.config.description:
+			msg += f' ([dim]{self.config.description}[/])'
+		self._print('[dim]--[/]', rich=True)
+		info = Info(message=f'{msg} {remote_str}', _source=self.unique_name)
+		self._print(info, rich=True)
 
 	def log_results(self):
 		"""Log runner results."""
-		info = Info(message=f'{self.config.type.capitalize()} {self.unique_name} finished with status {self.status} and found {len(self.self_findings)} findings', _source=self.unique_name)  # noqa: E501
-		self._print_item(info)
+		if not self.print_end:
+			return
+		info = Info(message=f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status {self.status} and found {len(self.self_findings)} findings', _source=self.unique_name)  # noqa: E501
+		self._print(info, rich=True)
 
 	def export_reports(self):
 		"""Export reports."""
