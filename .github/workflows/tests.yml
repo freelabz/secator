@@ -107,6 +107,44 @@ jobs:
         include-hidden-files: true
         path: .coverage.integration
 
+  template:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+        os: [ubuntu-latest]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install secator
+      uses: ./.github/actions/install
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Setup docker compose
+      uses: KengoTODA/actions-setup-docker-compose@v1
+      with:
+        version: '1.29.2'
+
+    - name: Add GOBIN to PATH
+      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
+
+    - name: Add GOPATH to PATH
+      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
+
+    - name: Run template tests
+      run: |
+        secator test template
+
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-template
+        include-hidden-files: true
+        path: .coverage.template
+
   coverage:
     runs-on: ubuntu-latest
     needs: [ unit, integration]

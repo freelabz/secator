@@ -1705,13 +1705,16 @@ def check_test(condition, message, fail_message, results=[], warn=False):
 @test.command()
 @click.option('--unit-only', '-u', is_flag=True, default=False, help='Only generate coverage for unit tests')
 @click.option('--integration-only', '-i', is_flag=True, default=False, help='Only generate coverage for integration tests')  # noqa: E501
-def coverage(unit_only, integration_only):
+@click.option('--template-only', '-t', is_flag=True, default=False, help='Only generate coverage for template tests')  # noqa: E501
+def coverage(unit_only, integration_only, template_only):
 	"""Run coverage combine + coverage report."""
 	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*,*/templates/*'
 	if unit_only:
 		cmd += ' --data-file=.coverage.unit'
 	elif integration_only:
 		cmd += ' --data-file=.coverage.integration'
+	elif template_only:
+		cmd += ' --data-file=.coverage.template'
 	else:
 		Command.execute(f'{sys.executable} -m coverage combine --keep', name='coverage combine', cwd=ROOT_FOLDER)
-	run_test(cmd, 'coverage')
+	run_test(cmd, 'coverage', verbose=True)
