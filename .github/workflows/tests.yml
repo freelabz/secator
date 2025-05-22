@@ -147,7 +147,7 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
-    needs: [ unit, integration]
+    needs: [ unit, integration, template]
     strategy:
       fail-fast: false
       matrix:
