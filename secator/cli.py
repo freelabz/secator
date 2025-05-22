@@ -1473,7 +1473,7 @@ def unit(tasks, workflows, scans, test):
 
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=0'
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=0'  # noqa: E501
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
@@ -1535,7 +1535,7 @@ def template(tasks, workflows, scans, test):
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
 
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.templates -m pytest -s -v tests/template --durations=0'  # noqa: E501
+	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.templates -m pytest -s -vv tests/template --durations=0'  # noqa: E501
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'

@@ -121,9 +121,9 @@ def get_command_options(config):
 	# Convert YAML options to CLI options
 	for k, v in runner_opts.items():
 		if 'type' in v:
-      type_mapping = {'str': str, 'list': CLICK_LIST, 'int': int, 'float': float}
-      type_str = v['type']
-      runner_opts[k]['type'] = type_mapping.get(type_str, str)
+			type_mapping = {'str': str, 'list': CLICK_LIST, 'int': int, 'float': float}
+			type_str = v['type']
+			runner_opts[k]['type'] = type_mapping.get(type_str, str)
 
 	# Loop through tasks and set options
 	for cls in tasks_cls:
