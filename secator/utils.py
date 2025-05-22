@@ -524,7 +524,7 @@ def extract_domain_info(input, domain_only=False):
 	if not result or not result.domain or not result.suffix:
 		return None
 	if domain_only:
-		if not validators.domain(result.registered_domain):
+		if not validators.domain(result.top_domain_under_public_suffix):
 			return None
 		return result.registered_domain
 	return result

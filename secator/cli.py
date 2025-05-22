@@ -205,7 +205,7 @@ def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
-		return
+		sys.exit(1)
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
 	for _ in range(number):
 		url = proxy.get()
@@ -225,7 +225,7 @@ def revshell(name, host, port, interface, listen, force):
 		host = detect_host(interface)
 		if not host:
 			console.print(Error(message=f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces'))  # noqa: E501
-			return
+			sys.exit(1)
 		else:
 			console.print(Info(message=f'Detected host IP: {host}'))
 
@@ -234,7 +234,7 @@ def revshell(name, host, port, interface, listen, force):
 	if not os.path.exists(revshells_json) or force:
 		if CONFIG.offline_mode:
 			console.print(Error(message='Cannot run this command in offline mode'))
-			return
+			sys.exit(1)
 		ret = Command.execute(
 			f'wget https://raw.githubusercontent.com/freelabz/secator/main/scripts/revshells.json && mv revshells.json {CONFIG.dirs.revshells}',  # noqa: E501
 			cls_attributes={'shell': True}
@@ -867,6 +867,9 @@ def report_list(ctx, workspace, runner_type, time_delta):
 
 	# Print paths if piped
 	if ctx.obj['piped_output']:
+		if not paths:
+			console.print(Error(message='No reports found.'))
+			return
 		for path in paths:
 			print(path)
 		return
@@ -902,7 +905,7 @@ def report_list(ctx, workspace, runner_type, time_delta):
 		console.print(table)
 		console.print(Info(message=f'Found {len(paths)} reports.'))
 	else:
-		console.print(Error(message='No results found.'))
+		console.print(Error(message='No reports found.'))
 
 
 @report.command('export')
@@ -913,11 +916,16 @@ def report_export(json_path, output_folder, output):
 	with open(json_path, 'r') as f:
 		data = loads_dataclass(f.read())
 
+	split = json_path.split('/')
+	if len(split) > 4:
+		workspace_name = '/'.join(split[:-4])
+	else:
+		workspace_name = '_default'
 	runner_instance = DotMap({
 		"config": {
 			"name": data['info']['name']
 		},
-		"workspace_name": json_path.split('/')[-4],
+		"workspace_name": workspace_name,
 		"reports_folder": output_folder or Path.cwd(),
 		"data": data,
 		"results": flatten(list(data['results'].values()))
@@ -1103,7 +1111,7 @@ def health(json_, debug, strict, bleeding):
 def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
-		return
+		sys.exit(1)
 	# with console.status(f'[bold yellow] Installing {title}...'):
 	if cmd:
 		from secator.installer import SourceInstaller
@@ -1283,7 +1291,7 @@ def install_tools(cmds, cleanup, fail_fast):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
-		return
+		sys.exit(1)
 	tools = []
 	if cmds is not None:
 		cmds = cmds.split(',')

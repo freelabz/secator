@@ -404,6 +404,7 @@ class Command(Runner):
 				return
 
 			# Print command
+			self.print_description()
 			self.print_command()
 
 			# Yield targets
