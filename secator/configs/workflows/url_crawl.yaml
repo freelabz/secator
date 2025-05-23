@@ -9,10 +9,15 @@ input_types:
 options:
   crawlers:
     type: list
-    required: True
-    help: Crawlers to use
+    help: Crawlers to use (gospider, cariddi, katana)
     default: ['katana']
     internal: True
+
+  hunt_patterns:
+    is_flag: True
+    help: Hunt patterns in HTTP responses (cariddi)
+    default: True
+    short: hp
 
 default_options:
   match_codes: 200,204,301,302,307,401,403,405,500
@@ -21,21 +26,31 @@ tasks:
   _group:
     gau:
       description: Search for passive URLs
-      if: "'gau' in opts.crawlers"
 
     gospider:
       description: Crawl URLs
       if: "'gospider' in opts.crawlers"
 
-    cariddi:
-      description: Hunt URLs patterns
-      if: "'cariddi' in opts.crawlers"
-
     katana:
       description: Crawl URLs
       if: "'katana' in opts.crawlers"
 
+  cariddi:
+    description: Hunt URLs patterns
+    info: True
+    secrets: True
+    errors: True
+    juicy_extensions: 1
+    juicy_endpoints: True
+    targets_:
+    - target.name
+    - url.url
+    if: opts.hunt_patterns
+
   httpx:
     description: Run HTTP probes on crawled URLs
     targets_:
-    - url.url
+    - target.name
+    - type: url
+      field: url
+      condition: url.status_code != 0
