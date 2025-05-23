@@ -189,11 +189,13 @@ def run_command(self, results, name, targets, opts={}):
 	sync = not IN_CELERY_WORKER_PROCESS
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
+	chunk_it = task.needs_chunking(sync)
+	task.has_children = chunk_it
 	task.mark_started()
 	update_state(self, task, force=True)
 
 	# Chunk task if needed
-	if task.needs_chunking(sync):
+	if chunk_it:
 		if IN_CELERY_WORKER_PROCESS:
 			console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
 		tasks = break_task(task, opts, results=results)

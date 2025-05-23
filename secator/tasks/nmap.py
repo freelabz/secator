@@ -412,7 +412,7 @@ class nmapData(dict):
 				NAME: vuln_id,
 				DESCRIPTION: vuln_title,
 				PROVIDER: provider_name,
-				TAGS: [vuln_id, provider_name]
+				TAGS: [provider_name]
 			}
 			if provider_name == 'MITRE CVE':
 				data = VulnMulti.lookup_cve(vuln['id'], *cpes)

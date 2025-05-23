@@ -5,7 +5,7 @@ DEFAULT_RENDER_OPTS = {
     'group': lambda x: f"[dim]{x.name}[/]",
     'task': lambda x: f"[bold gold3]:wrench: {x.name}[/]",
     'workflow': lambda x: f"[bold orange3]:gear: {x.name}[/]",
-    'scan': lambda x: f"[bold green3]:magnifying_glass_tilted_left: {x.name}[/]",
+    'scan': lambda x: f"[bold blue]:magnifying_glass_tilted_left: {x.name}[/]",
     'condition': lambda x: f"[dim blue]# if {x}[/]" if x else ''
 }
 

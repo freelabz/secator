@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+import textwrap
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -773,21 +774,24 @@ class Runner:
 		"""Log runner start."""
 		if not self.print_start:
 			return
-		if not self.has_parent and self.config.type != 'task':
-			tree = build_runner_tree(self.config).render_tree()
-			info = Info(message=f'{self.config.type.capitalize()} tree built:\n{tree}', _source=self.unique_name)
+		if self.has_parent:
+			return
+		if self.config.type != 'task':
+			tree = textwrap.indent(build_runner_tree(self.config).render_tree(), '      ')
+			info = Info(message=f'{self.config.type.capitalize()} built:\n{tree}', _source=self.unique_name)
 			self._print(info, rich=True)
 		remote_str = 'started' if self.sync else 'sent to Celery worker'
 		msg = f'{self.config.type.capitalize()} {format_runner_name(self)}'
 		if self.config.description:
 			msg += f' ([dim]{self.config.description}[/])'
-		self._print('[dim]--[/]', rich=True)
 		info = Info(message=f'{msg} {remote_str}', _source=self.unique_name)
 		self._print(info, rich=True)
 
 	def log_results(self):
 		"""Log runner results."""
 		if not self.print_end:
+			return
+		if self.has_parent:
 			return
 		info = Info(message=f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status {self.status} and found {len(self.self_findings)} findings', _source=self.unique_name)  # noqa: E501
 		self._print(info, rich=True)
