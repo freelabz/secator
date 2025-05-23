@@ -1,5 +1,5 @@
 from secator.exporters._base import Exporter
-from secator.rich import console
+from secator.rich import console_stdout
 
 
 class ConsoleExporter(Exporter):
@@ -7,4 +7,4 @@ class ConsoleExporter(Exporter):
 		results = self.report.data['results']
 		for items in results.values():
 			for item in items:
-				console.print(item)
+				console_stdout.print(item)

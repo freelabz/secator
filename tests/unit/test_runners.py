@@ -92,8 +92,8 @@ class TestCommandRunner(unittest.TestCase):
 
 		with patch.object(Command, 'run_hooks') as mock_run_hooks:
 			MyCommand(TARGETS)
-			mock_run_hooks.assert_any_call('before_init')
-			mock_run_hooks.assert_any_call('on_init')
+			mock_run_hooks.assert_any_call('before_init', sub='init')
+			mock_run_hooks.assert_any_call('on_init', sub='init')
 
 		# Clean up after test
 		delattr(MyCommand, 'before_init')

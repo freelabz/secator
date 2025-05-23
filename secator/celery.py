@@ -33,7 +33,7 @@ logging.basicConfig(
 	handlers=[rich_handler],
 	force=True)
 logging.getLogger('kombu').setLevel(logging.ERROR)
-logging.getLogger('celery').setLevel(logging.INFO if CONFIG.debug.level > 6 else logging.WARNING)
+logging.getLogger('celery').setLevel(logging.DEBUG if 'celery.debug' in CONFIG.debug or 'celery.*' in CONFIG.debug else logging.WARNING)  # noqa: E501
 logger = logging.getLogger(__name__)
 trace.LOG_SUCCESS = "Task %(name)s[%(id)s] succeeded in %(runtime)ss"
 
@@ -169,9 +169,10 @@ def run_scan(self, args=[], kwargs={}):
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
 	if IN_CELERY_WORKER_PROCESS:
-		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True})
-		# routing_key = self.request.delivery_info['routing_key']
-		# console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
+		quiet = not CONFIG.cli.worker_command_verbose
+		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True, 'print_profiles': True, 'quiet': quiet})
+		routing_key = self.request.delivery_info['routing_key']
+		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 
 	# Flatten + dedupe + filter results
 	results = forward_results(results)
@@ -188,11 +189,13 @@ def run_command(self, results, name, targets, opts={}):
 	sync = not IN_CELERY_WORKER_PROCESS
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
+	chunk_it = task.needs_chunking(sync)
+	task.has_children = chunk_it
 	task.mark_started()
 	update_state(self, task, force=True)
 
 	# Chunk task if needed
-	if task.needs_chunking(sync):
+	if chunk_it:
 		if IN_CELERY_WORKER_PROCESS:
 			console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
 		tasks = break_task(task, opts, results=results)
@@ -294,7 +297,7 @@ def break_task(task, task_opts, results=[]):
 	)
 
 	# Clone opts
-	opts = task_opts.copy()
+	base_opts = task_opts.copy()
 
 	# Build signatures
 	sigs = []
@@ -302,16 +305,30 @@ def break_task(task, task_opts, results=[]):
 	for ix, chunk in enumerate(chunks):
 		if not isinstance(chunk, list):
 			chunk = [chunk]
-		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
-			opts['chunk'] = ix + 1
-			opts['chunk_count'] = len(chunks)
+
+		# Add chunk info to opts
+		opts = base_opts.copy()
+		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
+
+		# Chunk results if needed for extractors to work
+		if opts.get('chunk_by'):  # remove results that have a different chunk_by value
+			_type, attr = opts['chunk_by'].split('.')
+			chunked_results = [
+				r for r in results
+				if not (r._type == _type and getattr(r, attr) not in chunk)
+			]
+		else:
+			chunked_results = results
+		debug('', obj={task.unique_name: 'CHUNKED', 'chunked_targets': chunk, 'chunked_results': chunked_results}, sub='celery.state')  # noqa: E501
+
+		# Construct chunked signature
 		task_id = str(uuid.uuid4())
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
-		opts['results'] = results
-		sig = type(task).si(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
+		opts['results'] = chunked_results
+		sig = type(task).si(chunk, **opts).set(task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
-		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
+		task.add_subtask(task_id, task.name, full_name)
 		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
 		task.add_result(info)
 		sigs.append(sig)

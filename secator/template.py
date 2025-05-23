@@ -70,9 +70,15 @@ class TemplateLoader(DotMap):
 		console.print(yaml_highlight)
 
 	def _collect_supported_opts(self):
-		"""Collect supported options from the tasks extracted from the config."""
+		"""Collect supported options from the tasks and workflows extracted from the config."""
 		tasks = self._extract_tasks()
-		opts = {}
+		workflows = self._extract_workflows()
+		opts = self.options.toDict()
+		for wf_name, workflow in workflows.items():
+			for k, v in workflow.options.toDict().items():
+				if k not in opts or not opts[k].get('supported', False):
+					opts[k] = convert_functions_to_strings(v)
+					opts[k]['meta'] = wf_name
 		for _, task_info in tasks.items():
 			task_class = task_info['class']
 			if task_class:
@@ -109,21 +115,26 @@ class TemplateLoader(DotMap):
 			tasks[self.name] = {'name': self.name, 'class': Task.get_task_class(self.name)}
 
 		elif self.type == 'scan':
-			# For each workflow in the scan, load it and incorporate it with a unique prefix
-			for wf_name, _ in self.workflows.items():
-				name = wf_name.split('/')[0]
-				config = TemplateLoader(name=f'workflow/{name}')
+			workflows = self._extract_workflows()
+			for wf_name, config in workflows.items():
 				wf_tasks = config.flat_tasks
-				# Prefix tasks from this workflow with its name to prevent collision
 				for task_key, task_val in wf_tasks.items():
-					unique_task_key = f"{wf_name}/{task_key}"  # Append workflow name to task key
+					unique_task_key = f"{wf_name}/{task_key}"  # prefix task with workflow name
 					tasks[unique_task_key] = task_val
 
 		elif self.type == 'workflow':
-			# Normal parsing of a workflow
 			parse_config(self.tasks)
 
 		return dict(tasks)
+
+	def _extract_workflows(self):
+		"""Extract workflows from the config."""
+		workflows = OrderedDict()
+		for wf_name, _ in self.workflows.items():
+			name = wf_name.split('/')[0]
+			config = TemplateLoader(name=f'workflow/{name}')
+			workflows[wf_name] = config
+		return workflows
 
 
 def find_templates():

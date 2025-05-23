@@ -9,9 +9,7 @@ tasks:
   _group:
     nuclei:
       description: Nuclei Wordpress scan
-      tags: wordpress
     wpscan:
       description: WPScan
     wpprobe:
       description: WPProbe
-      tags: wordpress

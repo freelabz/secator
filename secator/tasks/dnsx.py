@@ -66,7 +66,8 @@ class dnsx(ReconDns):
 		if status_code and status_code == 'NOERROR' and not is_ip:
 			yield Subdomain(
 				host=host,
-				domain=extract_domain_info(host, domain_only=True)
+				domain=extract_domain_info(host, domain_only=True),
+				sources=['dns']
 			)
 		if self.get_opt_value('subdomains_only'):
 			return

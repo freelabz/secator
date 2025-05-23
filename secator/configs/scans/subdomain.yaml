@@ -4,5 +4,10 @@ description: Subdomain scan
 profile: default
 input_types:
   - host
+options:
+  test:
+    type: str
+    default: test
 workflows:
   subdomain_recon:
+    if: opts.test == 'test'

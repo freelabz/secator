@@ -26,7 +26,7 @@ import humanize
 import ifaddr
 import yaml
 
-from secator.definitions import (DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
@@ -419,7 +419,7 @@ def format_debug_object(obj, obj_breaklines=False):
 	"""
 	sep = '\n ' if obj_breaklines else ', '
 	if isinstance(obj, dict):
-		return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
+		return sep.join(f'[bold blue]{k}[/] [yellow]->[/] [blue]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
 	elif isinstance(obj, list):
 		return f'[dim green]{sep.join(obj)}[/]'
 	return ''
@@ -427,12 +427,11 @@ def format_debug_object(obj, obj_breaklines=False):
 
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG_COMPONENT == ['all'] and not DEBUG_COMPONENT == ['1']:
-		if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
+	if not DEBUG == ['all'] and not DEBUG == ['1']:
+		if not DEBUG or DEBUG == [""]:
 			return
-
 		if sub:
-			for s in DEBUG_COMPONENT:
+			for s in DEBUG:
 				if '*' in s and re.match(s + '$', sub):
 					break
 				elif not verbose and sub.startswith(s):
@@ -461,7 +460,7 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
 	except Exception:
 		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]')
-		if 'rich' in DEBUG_COMPONENT:
+		if 'rich' in DEBUG:
 			raise
 
 
@@ -524,9 +523,9 @@ def extract_domain_info(input, domain_only=False):
 	if not result or not result.domain or not result.suffix:
 		return None
 	if domain_only:
-		if not validators.domain(result.registered_domain):
+		if not validators.domain(result.top_domain_under_public_suffix):
 			return None
-		return result.registered_domain
+		return result.top_domain_under_public_suffix
 	return result
 
 
@@ -804,15 +803,12 @@ def process_wordlist(val):
 	if template_wordlist:
 		val = template_wordlist
 
-	if Path(val).exists():
-		return val
-	else:
-		return download_file(
-			val,
-			target_folder=CONFIG.dirs.wordlists,
-			offline_mode=CONFIG.offline_mode,
-			type='wordlist'
-		)
+	return download_file(
+		val,
+		target_folder=CONFIG.dirs.wordlists,
+		offline_mode=CONFIG.offline_mode,
+		type='wordlist'
+	)
 
 
 def convert_functions_to_strings(data):

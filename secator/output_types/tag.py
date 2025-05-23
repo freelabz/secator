@@ -10,6 +10,7 @@ class Tag(OutputType):
 	name: str
 	match: str
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
+	stored_response_path: str = field(default='', compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='tag', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -32,6 +33,8 @@ class Tag(OutputType):
 		s = f'🏷️  [bold magenta]{self.name}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
+		if self.stored_response_path:
+			s += rf' [link=file://{self.stored_response_path}]:incoming_envelope:[/]'
 		if self.extra_data:
 			for k, v in self.extra_data.items():
 				sep = ' '

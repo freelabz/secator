@@ -3,27 +3,39 @@ name: url_crawl
 alias: urlcrawl
 description: URL crawl (fast)
 tags: [http, crawl]
-options:
-  match_codes: 200,204,301,302,307,401,403,405,500
 input_types:
   - url
+
+options:
+  crawlers:
+    type: list
+    required: True
+    help: Crawlers to use
+    default: ['katana']
+    internal: True
+
+default_options:
+  match_codes: 200,204,301,302,307,401,403,405,500
+
 tasks:
   _group:
-    # gau:
-    #   description: Search for passive URLs
-    # gospider:
-    #   description: Crawl URLs
+    gau:
+      description: Search for passive URLs
+      if: "'gau' in opts.crawlers"
+
+    gospider:
+      description: Crawl URLs
+      if: "'gospider' in opts.crawlers"
+
     cariddi:
       description: Hunt URLs patterns
+      if: "'cariddi' in opts.crawlers"
+
     katana:
       description: Crawl URLs
+      if: "'katana' in opts.crawlers"
+
   httpx:
     description: Run HTTP probes on crawled URLs
     targets_:
-      type: url
-      field: url
-results:
-  - type: url
-    condition: item._source == 'httpx'
-
-  - type: tag
+    - url.url

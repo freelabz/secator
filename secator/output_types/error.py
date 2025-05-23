@@ -26,14 +26,14 @@ class Error(OutputType):
 		if str(e):
 			message += f': {str(e)}'
 		traceback = traceback_as_string(e) if errtype not in ['KeyboardInterrupt', 'GreenletExit'] else ''
-		error = Error(message=message, traceback=traceback, **kwargs)
+		error = Error(message=_s(message), traceback=traceback, **kwargs)
 		return error
 
 	def __str__(self):
 		return self.message
 
 	def __repr__(self):
-		s = rf"\[[bold red]ERR[/]] {_s(self.message)}"
+		s = rf"\[[bold red]ERR[/]] {self.message}"
 		if self.traceback:
 			s += ':'
 			traceback_pretty = '   ' + _s(self.traceback).replace('\n', '\n   ')

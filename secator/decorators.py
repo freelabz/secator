@@ -4,14 +4,16 @@ from collections import OrderedDict
 
 import rich_click as click
 from rich_click.rich_click import _get_rich_console
-from rich_click.rich_group import RichGroup
 
 from secator.config import CONFIG
+from secator.click import CLICK_LIST
 from secator.definitions import ADDONS_ENABLED, OPT_NOT_SUPPORTED
 from secator.runners import Scan, Task, Workflow
+from secator.tree import build_runner_tree
 from secator.utils import (deduplicate, expand_input, get_command_category)
 
-RUNNER_OPTS = {
+
+CLI_OPTS = {
 	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
 	'profiles': {'type': str, 'default': 'default', 'help': 'Profiles', 'short': 'pf'},
 	'workspace': {'type': str, 'default': 'default', 'help': 'Workspace', 'short': 'ws'},
@@ -20,201 +22,28 @@ RUNNER_OPTS = {
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
-	'no_process': {'is_flag': True, 'short': 'nps', 'default': False, 'help': 'Disable secator processing'},
-	# 'filter': {'default': '', 'short': 'f', 'help': 'Results filter', 'short': 'of'}, # TODO add this
-	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.runners.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
+	'process': {'is_flag': True, 'short': 'nps', 'default': True, 'help': 'Enable secator processing', 'reverse': True},
+	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.cli.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
 	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
 	'show': {'is_flag': True, 'short': 'yml', 'default': False, 'help': 'Show runner yaml'},
+	'tree': {'is_flag': True, 'short': 'tree', 'default': False, 'help': 'Show runner tree'},
 	'version': {'is_flag': True, 'help': 'Show version'},
 }
 
-RUNNER_GLOBAL_OPTS = {
-	'sync': {'is_flag': True, 'help': 'Run tasks synchronously (automatic if no worker is alive)'},
-	'worker': {'is_flag': True, 'default': False, 'help': 'Run tasks in worker'},
+CLI_GLOBAL_OPTS = {
+	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
-	'proxy': {'type': str, 'help': 'HTTP proxy'},
 	'driver': {'type': str, 'help': 'Export real-time results. E.g: "mongodb"'},
-	# 'debug': {'type': int, 'default': 0, 'help': 'Debug mode'},
 }
 
-DEFAULT_CLI_OPTIONS = list(RUNNER_OPTS.keys()) + list(RUNNER_GLOBAL_OPTS.keys())
+DEFAULT_CLI_OPTIONS = list(CLI_OPTS.keys()) + list(CLI_GLOBAL_OPTS.keys())
 
 
-class OrderedGroup(RichGroup):
-	def __init__(self, name=None, commands=None, **attrs):
-		super(OrderedGroup, self).__init__(name, commands, **attrs)
-		self.commands = commands or OrderedDict()
-
-	def command(self, *args, **kwargs):
-		"""Behaves the same as `click.Group.command()` but supports aliases.
-		"""
-		def decorator(f):
-			aliases = kwargs.pop("aliases", None)
-			if aliases:
-				max_width = _get_rich_console().width
-				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
-				padding = max_width // 4
-
-				name = kwargs.pop("name", None)
-				if not name:
-					raise click.UsageError("`name` command argument is required when using aliases.")
-
-				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
-				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
-				base_command = super(OrderedGroup, self).command(
-					name, *args, **kwargs
-				)(f)
-				for alias in aliases:
-					cmd = super(OrderedGroup, self).command(alias, *args, hidden=True, **kwargs)(f)
-					cmd.help = f"Alias for '{name}'.\n\n{cmd.help}"
-					cmd.params = base_command.params
-
-			else:
-				cmd = super(OrderedGroup, self).command(*args, **kwargs)(f)
-
-			return cmd
-		return decorator
-
-	def group(self, *args, **kwargs):
-		"""Behaves the same as `click.Group.group()` but supports aliases.
-		"""
-		def decorator(f):
-			aliases = kwargs.pop('aliases', [])
-			aliased_group = []
-			if aliases:
-				max_width = _get_rich_console().width
-				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
-				padding = max_width // 4
-				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)
-				f.__doc__ = f'{f.__doc__:<{padding}}[dim](aliases)[/] {aliases_str}'
-				for alias in aliases:
-					grp = super(OrderedGroup, self).group(
-						alias, *args, hidden=True, **kwargs)(f)
-					aliased_group.append(grp)
-
-			# create the main group
-			grp = super(OrderedGroup, self).group(*args, **kwargs)(f)
-			grp.aliases = aliases
-
-			# for all of the aliased groups, share the main group commands
-			for aliased in aliased_group:
-				aliased.commands = grp.commands
-
-			return grp
-		return decorator
-
-	def list_commands(self, ctx):
-		return self.commands
-
-
-def get_command_options(config):
-	"""Get unified list of command options from a list of secator tasks classes and optionally a Runner config.
-
-	Args:
-		config (TemplateLoader): Current runner config.
-
-	Returns:
-		list: List of deduplicated options.
-	"""
-	from secator.utils import debug
-	opt_cache = []
-	all_opts = OrderedDict({})
-	tasks = config.flat_tasks
-	tasks_cls = set([c['class'] for c in tasks.values()])
-
-	# Loop through tasks and set options
-	for cls in tasks_cls:
-		opts = OrderedDict(RUNNER_GLOBAL_OPTS, **RUNNER_OPTS, **cls.meta_opts, **cls.opts)
-
-		# Find opts defined in config corresponding to this task class
-		# TODO: rework this as this ignores subsequent tasks of the same task class
-		task_config_opts = {}
-		if config.type != 'task':
-			for k, v in tasks.items():
-				if v['class'] == cls:
-					task_config_opts = v['opts']
-
-		# Loop through options
-		for opt, opt_conf in opts.items():
-
-			# Get opt key map if any
-			opt_key_map = getattr(cls, 'opt_key_map', {})
-
-			# Opt is not supported by this task
-			if opt not in opt_key_map\
-				and opt not in cls.opts\
-				and opt not in RUNNER_OPTS\
-				and opt not in RUNNER_GLOBAL_OPTS:
-				continue
-
-			# Opt is defined as unsupported
-			if opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
-				continue
-
-			# Get opt prefix
-			prefix = None
-			if opt in cls.opts:
-				prefix = cls.__name__
-			elif opt in cls.meta_opts:
-				# TODO: Add options categories
-				# category = get_command_category(cls)
-				# prefix = category
-				prefix = 'Meta'
-			elif opt in RUNNER_OPTS:
-				prefix = 'Output'
-			elif opt in RUNNER_GLOBAL_OPTS:
-				prefix = 'Execution'
-
-			# Get opt value from YAML config
-			opt_conf_value = task_config_opts.get(opt)
-
-			# Get opt conf
-			conf = opt_conf.copy()
-			opt_is_flag = conf.get('is_flag', False)
-			opt_default = conf.get('default', False if opt_is_flag else None)
-			opt_is_required = conf.get('required', False)
-			conf['show_default'] = True
-			conf['prefix'] = prefix
-			conf['default'] = opt_default
-			conf['reverse'] = False
-
-			# Change CLI opt defaults if opt was overriden in YAML config
-			if opt_conf_value:
-				if opt_is_required:
-					debug('OPT (skipped: opt is required and defined in config)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)  # noqa: E501
-					continue
-				mapped_value = cls.opt_value_map.get(opt)
-				if callable(mapped_value):
-					opt_conf_value = mapped_value(opt_conf_value)
-				elif mapped_value:
-					opt_conf_value = mapped_value
-
-				# Handle option defaults
-				if opt_conf_value != opt_default:
-					if opt in opt_cache:
-						continue
-					if opt_is_flag:
-						conf['default'] = opt_default = opt_conf_value
-
-			# Add reverse flag
-			if opt_default is True:
-				conf['reverse'] = True
-
-			# Check if opt already processed before
-			if opt in opt_cache:
-				# debug('OPT (skipped: opt is already in opt cache)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)
-				continue
-
-			# Build help
-			opt_cache.append(opt)
-			opt = opt.replace('_', '-')
-			all_opts[opt] = conf
-
-			# Debug
-			debug_conf = OrderedDict({'opt': opt, 'config_val': opt_conf_value or 'N/A', **conf.copy()})
-			debug('OPT', obj=debug_conf, sub=f'cli.{config.name}', verbose=True)
-
-	return all_opts
+def task():
+	def decorator(cls):
+		cls.__task__ = True
+		return cls
+	return decorator
 
 
 def decorate_command_options(opts):
@@ -249,7 +78,7 @@ def decorate_command_options(opts):
 			if reverse:
 				if opposite:
 					long += f'/--{opposite}'
-					short += f'/-{opposite[0]}'
+					short += f'/-{opposite}'
 					conf['help'] = conf['help'].replace(opt_name, f'{opt_name} / {opposite}')
 				else:
 					long += f'/--no-{opt_name}'
@@ -259,11 +88,135 @@ def decorate_command_options(opts):
 	return decorator
 
 
-def task():
-	def decorator(cls):
-		cls.__task__ = True
-		return cls
-	return decorator
+def get_command_options(config):
+	"""Get unified list of command options.
+
+	Args:
+		config (TemplateLoader): Current runner config.
+
+	Returns:
+		list: List of deduplicated options.
+	"""
+	# TODO: refactor this function to use runner.supported_opts instead.
+	from secator.utils import debug
+	opt_cache = []
+	all_opts = OrderedDict({})
+	runner_opts = config.options.toDict()
+	runner_default_opts = config.default_options.toDict()
+	tasks = config.flat_tasks
+	tasks_cls = set([c['class'] for c in tasks.values()])
+
+	# Get runner children options (for scans)
+	children = config._extract_workflows()
+	for child in children.values():
+		if not child:
+			continue
+		for k, v in child.options.toDict().items():
+			if k not in runner_opts:
+				runner_opts[k] = v
+				runner_opts[k]['meta'] = child.name
+			if k not in runner_default_opts:
+				runner_default_opts[k] = v['default']
+
+	# Convert YAML options to CLI options
+	for k, v in runner_opts.items():
+		if 'type' in v:
+			type_mapping = {'str': str, 'list': CLICK_LIST, 'int': int, 'float': float}
+			type_str = v['type']
+			runner_opts[k]['type'] = type_mapping.get(type_str, str)
+
+	# Loop through tasks and set options
+	for cls in tasks_cls:
+		opts = OrderedDict(CLI_GLOBAL_OPTS, **CLI_OPTS, **cls.meta_opts, **cls.opts, **runner_opts)
+
+		# Find opts defined in config corresponding to this task class
+		# TODO: rework this as this ignores subsequent tasks of the same task class
+		task_config_opts = {}
+		if config.type != 'task':
+			for k, v in tasks.items():
+				if v['class'] == cls:
+					task_config_opts = v['opts']
+
+		# Loop through options
+		for opt, opt_conf in opts.items():
+
+			# Get opt key map if any
+			opt_key_map = getattr(cls, 'opt_key_map', {})
+
+			# Opt is not supported by this runner
+			if opt not in opt_key_map\
+				and opt not in cls.opts\
+				and opt not in CLI_OPTS\
+				and opt not in CLI_GLOBAL_OPTS\
+				and opt not in runner_opts:
+				continue
+
+			# Opt is defined as unsupported
+			if opt_key_map.get(opt) == OPT_NOT_SUPPORTED:
+				continue
+
+			# Get opt prefix
+			prefix = None
+			if opt in cls.opts:
+				prefix = cls.__name__
+			elif opt in cls.meta_opts:
+				prefix = 'Meta'
+			elif opt in runner_opts:
+				prefix = opt_conf.get('meta', config.type)
+			elif opt in CLI_OPTS:
+				prefix = 'Output'
+			elif opt in CLI_GLOBAL_OPTS:
+				prefix = 'Execution'
+
+			# Get opt value from YAML config
+			opt_conf_value = task_config_opts.get(opt) or runner_default_opts.get(opt)
+
+			# Get opt conf
+			conf = opt_conf.copy()
+			opt_is_flag = conf.get('is_flag', False)
+			opt_default = conf.get('default', False if opt_is_flag else None)
+			opt_is_required = conf.get('required', False)
+			conf['show_default'] = True
+			conf['prefix'] = prefix
+			conf['default'] = opt_default
+			conf['reverse'] = False
+
+			# Change CLI opt defaults if opt was overriden in YAML config
+			if opt_conf_value:
+				if opt_is_required:  # required, but defined in config
+					conf['required'] = False
+				mapped_value = cls.opt_value_map.get(opt)
+				if callable(mapped_value):
+					opt_conf_value = mapped_value(opt_conf_value)
+				elif mapped_value:
+					opt_conf_value = mapped_value
+
+				# Handle option defaults
+				if opt_conf_value != opt_default:
+					if opt in opt_cache:
+						continue
+					if opt_is_flag:
+						conf['default'] = opt_default = opt_conf_value
+
+			# Add reverse flag
+			if isinstance(opt_default, bool):
+				conf['reverse'] = True
+
+			# Check if opt already processed before
+			if opt in opt_cache:
+				# debug('OPT (skipped: opt is already in opt cache)', obj={'opt': opt}, sub=f'cli.{config.name}', verbose=True)
+				continue
+
+			# Build help
+			opt_cache.append(opt)
+			opt = opt.replace('_', '-')
+			all_opts[opt] = conf
+
+			# Debug
+			debug_conf = OrderedDict({'opt': opt, 'config_val': opt_conf_value or 'N/A', **conf.copy()})
+			debug('OPT', obj=debug_conf, sub=f'cli.{config.name}', verbose=True)
+
+	return all_opts
 
 
 def generate_cli_subcommand(cli_endpoint, func, **opts):
@@ -339,26 +292,14 @@ def register_runner(cli_endpoint, config):
 		console = _get_rich_console()
 		version = opts['version']
 		sync = opts['sync']
-		worker = opts.pop('worker')
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
 		quiet = opts['quiet']
 		dry_run = opts['dry_run']
 		show = opts['show']
+		tree = opts['tree']
 		context = {'workspace_name': ws}
 		ctx.obj['dry_run'] = dry_run
-
-		# Show version
-		if version:
-			data = task_cls.get_version_info()
-			current = data['version']
-			latest = data['latest_version']
-			installed = data['installed']
-			if not installed:
-				console.print(f'[bold red]{task_cls.__name__} is not installed.[/]')
-			else:
-				console.print(f'{task_cls.__name__} version: [bold green]{current}[/] (recommended: [bold green]{latest}[/])')
-			sys.exit(0)
 
 		# Show version
 		if version:
@@ -377,11 +318,11 @@ def register_runner(cli_endpoint, config):
 			config.print()
 			sys.exit(0)
 
-		# Remove options whose values are default values
-		for k, v in options.items():
-			opt_name = k.replace('-', '_')
-			if opt_name in opts and opts[opt_name] == v.get('default', None):
-				del opts[opt_name]
+		# Show runner tree
+		if tree:
+			tree = build_runner_tree(config)
+			console.print(tree.render_tree())
+			sys.exit(0)
 
 		# TODO: maybe allow this in the future
 		# unknown_opts = get_unknown_opts(ctx)
@@ -395,6 +336,7 @@ def register_runner(cli_endpoint, config):
 		hooks = []
 		drivers = driver.split(',') if driver else []
 		supported_drivers = ['mongodb', 'gcs']
+		actual_drivers = []
 		for driver in drivers:
 			if driver in supported_drivers:
 				if not ADDONS_ENABLED[driver]:
@@ -406,6 +348,7 @@ def register_runner(cli_endpoint, config):
 					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
 					sys.exit(1)
 				hooks.append(driver_hooks)
+				actual_drivers.append(driver)
 			else:
 				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
 				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
@@ -421,7 +364,7 @@ def register_runner(cli_endpoint, config):
 		else:
 			from secator.celery import is_celery_worker_alive
 			worker_alive = is_celery_worker_alive()
-			if not worker_alive and not worker:
+			if not worker_alive and not sync:
 				sync = True
 			else:
 				sync = False
@@ -441,6 +384,9 @@ def register_runner(cli_endpoint, config):
 			'print_item': True,
 			'print_line': True,
 			'print_progress': True,
+			'print_profiles': True,
+			'print_start': True,
+			'print_end': True,
 			'print_remote_info': not sync,
 			'piped_input': ctx.obj['piped_input'],
 			'piped_output': ctx.obj['piped_output'],
