@@ -83,8 +83,8 @@ class Url(OutputType):
 			cl = str(self.content_length)
 			cl += '[bold red]+[/]' if self.content_length == CONFIG.http.response_max_size_bytes else ''
 			s += rf' \[[magenta]{cl}[/]]'
-		if self.response_headers and CONFIG.http.show_response_headers:
-			s += rf'{format_object(self.response_headers, "magenta", skip_keys=["content_type", "content_length", "date", "server", "x_powered_by"])}'  # noqa: E501
+		if self.response_headers and CONFIG.cli.show_http_response_headers:
+			s += rf'{format_object(self.response_headers, "magenta", skip_keys=CONFIG.cli.exclude_http_response_headers)}'  # noqa: E501
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
 		if self.screenshot_path:

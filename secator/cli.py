@@ -16,7 +16,7 @@ from rich.markdown import Markdown
 from rich.rule import Rule
 from rich.table import Table
 
-from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
+from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path, download_files
 from secator.click import OrderedGroup
 from secator.decorators import register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
@@ -300,9 +300,16 @@ def revshell(name, host, port, interface, listen, force):
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
 	"""Run HTTP server to serve payloads."""
+	fnames = list(os.listdir(directory))
+	if not fnames:
+		console.print(Warning(message=f'No payloads found in {directory}.'))
+		download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
+		fnames = list(os.listdir(directory))
+
 	console.print(Rule())
 	console.print(f'Available payloads in {directory}: ', style='bold yellow')
-	for fname in os.listdir(directory):
+	fnames.sort()
+	for fname in fnames:
 		if not host:
 			host = detect_host(interface)
 			if not host:
@@ -312,7 +319,7 @@ def serve(directory, host, port, interface):
 		console.print(f'wget http://{host}:{port}/{fname}', style='dim italic')
 		console.print('')
 	console.print(Rule())
-	console.print(f'Started HTTP server on port {port}, waiting for incoming connections ...', style='bold yellow')
+	console.print(Info(message=f'[bold yellow]Started HTTP server on port {port}, waiting for incoming connections ...[/]'))  # noqa: E501
 	Command.execute(f'{sys.executable} -m http.server {port}', cwd=directory)
 
 

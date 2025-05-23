@@ -804,15 +804,12 @@ def process_wordlist(val):
 	if template_wordlist:
 		val = template_wordlist
 
-	if Path(val).exists():
-		return val
-	else:
-		return download_file(
-			val,
-			target_folder=CONFIG.dirs.wordlists,
-			offline_mode=CONFIG.offline_mode,
-			type='wordlist'
-		)
+	return download_file(
+		val,
+		target_folder=CONFIG.dirs.wordlists,
+		offline_mode=CONFIG.offline_mode,
+		type='wordlist'
+	)
 
 
 def convert_functions_to_strings(data):

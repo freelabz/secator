@@ -74,6 +74,7 @@ class katana(HttpCrawler):
 			WEBSERVER: lambda x: x['response'].get('headers', {}).get('server', ''),
 			TECH: lambda x: x['response'].get('technologies', []),
 			STORED_RESPONSE_PATH: lambda x: x['response'].get('stored_response_path', ''),
+			'response_headers': lambda x: x['response'].get('headers', {}),
 			# TAGS: lambda x: x['response'].get('server')
 		}
 	}
