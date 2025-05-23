@@ -830,7 +830,7 @@ def report_show(ctx, report_query, output, runner_type, time_delta, _filter, que
 		if unified:
 			if ix == 0:
 				console.print(f'\n:wrench: [bold gold3]Loading {len(paths)} reports ...[/]')
-			console.print(f':file_cabinet: Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
+			console.print(rf':file_cabinet: Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
 		with open(path, 'r') as f:
 			try:
 				data = loads_dataclass(f.read())
