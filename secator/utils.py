@@ -430,7 +430,6 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 	if not DEBUG == ['all'] and not DEBUG == ['1']:
 		if not DEBUG or DEBUG == [""]:
 			return
-
 		if sub:
 			for s in DEBUG:
 				if '*' in s and re.match(s + '$', sub):

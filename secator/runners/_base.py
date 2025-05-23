@@ -653,7 +653,7 @@ class Runner:
 					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
 					continue
 				result = hook(self, *args)
-				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
+				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)  # noqa: E501
 				if isinstance(result, Error):
 					result._source = self.unique_name
 					result._uuid = str(uuid.uuid4())
@@ -979,7 +979,7 @@ class Runner:
 
 		# If progress item, update runner progress
 		elif isinstance(item, Progress) and item._source == self.unique_name:
-			self.debug(f'update runner progress: {item.percent}', sub='item')
+			self.debug(f'update runner progress: {item.percent}', sub='item', verbose=True)
 			self.progress = item.percent
 			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
 				return

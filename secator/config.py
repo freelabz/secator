@@ -561,16 +561,15 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 		target_path = target_folder / local_path.name
 		if not name:
 			name = url_or_path.split('/')[-1]
-		if not CONFIG.security.allow_local_file_access:
-			try:
-				local_path.resolve().relative_to(CONFIG.dirs.data.resolve())
-			except ValueError:
+		try:
+			local_path.resolve().relative_to(CONFIG.dirs.data.resolve())
+		except ValueError:
+			if not CONFIG.security.allow_local_file_access:
 				console.print(Error(message=f'File {local_path.resolve()} is not in {CONFIG.dirs.data} and security.allow_local_file_access is disabled.'))  # noqa: E501
 				return None
-		if not target_path.exists():
 			from secator.output_types import Info
-			console.print(repr(Info(message=f'[bold turquoise4]Moving {type} [bold magenta]{name}[/] to {target_folder} ...[/] ')), highlight=False, end='')  # noqa: E501
-			shutil.move(local_path, target_folder)
+			console.print(repr(Info(message=f'[bold turquoise4]Copying {type} [bold magenta]{name}[/] to {target_folder} ...[/] ')), highlight=False, end='')  # noqa: E501
+			shutil.copyfile(local_path, target_folder / name)
 			target_path = target_folder / local_path.name
 			console.print('[bold green]ok.[/]')
 		return target_path.resolve()

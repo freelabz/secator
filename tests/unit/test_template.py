@@ -16,8 +16,8 @@ class TestTemplate(unittest.TestCase):
 		self.custom_task_path = self.template_dir / 'ls.py'
 		self.writeable_file = self.template_dir / 'test.txt'
 		self.custom_workflow_path = self.template_dir / 'ls.yml'
-		shutil.copy(f'{FIXTURES_DIR}/ls.py', self.custom_task_path)
-		shutil.copy(f'{FIXTURES_DIR}/ls.yml', self.custom_workflow_path)
+		shutil.copyfile(f'{FIXTURES_DIR}/ls.py', self.custom_task_path)
+		shutil.copyfile(f'{FIXTURES_DIR}/ls.yml', self.custom_workflow_path)
 		self.writeable_file.touch()
 		os.chmod(self.writeable_file, 0o007)
 		self.expected_vuln = Vulnerability(

@@ -350,7 +350,7 @@ class bbot(Command):
 			name = path.as_posix().split('/')[-1]
 			secator_path = f'{self.reports_folder}/.outputs/{name}'
 			yield Info(f'Copying screenshot {path} to {secator_path}')
-			shutil.copy(path, secator_path)
+			shutil.copyfile(path, secator_path)
 			item['data']['path'] = secator_path
 
 		yield item
