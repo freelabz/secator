@@ -219,6 +219,13 @@ def get_command_options(config):
 	return all_opts
 
 
+def util():
+	def decorator(cls):
+		cls.__util__ = True
+		return cls
+	return decorator
+
+
 def generate_cli_subcommand(cli_endpoint, func, **opts):
 	return cli_endpoint.command(**opts)(func)
 
