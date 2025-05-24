@@ -4,10 +4,15 @@ description: Subdomain scan
 profile: default
 input_types:
   - host
-options:
-  test:
-    type: str
-    default: test
 workflows:
   subdomain_recon:
-    if: opts.test == 'test'
+  host_recon:
+    targets_:
+    - target.name
+    - subdomain.host
+  url_crawl:
+    targets_:
+    - url.url
+  url_vuln:
+    targets_:
+    - url.url

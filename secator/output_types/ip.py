@@ -37,4 +37,6 @@ class Ip(OutputType):
 		s = f'💻 [bold white]{self.ip}[/]'
 		if self.host:
 			s += rf' \[[bold magenta]{self.host}[/]]'
+		if self.alive:
+			s += r' [bold green]🟢[/]'
 		return rich_to_ansi(s)

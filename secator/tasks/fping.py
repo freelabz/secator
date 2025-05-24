@@ -10,12 +10,15 @@ from secator.tasks._categories import ReconIp
 @task()
 class fping(ReconIp):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
-	cmd = 'fping -a -A -d'
+	cmd = 'fping -a -A'
 	input_types = [IP, HOST]
 	output_types = [Ip]
 	tags = ['ip', 'recon']
 	file_flag = '-f'
 	input_flag = None
+	opts = {
+		'reverse_dns': {'is_flag': True, 'default': False, 'short': 'r', 'help': 'Reverse DNS lookup (slower)'}
+	}
 	opt_prefix = '--'
 	opt_key_map = {
 		DELAY: 'period',
@@ -23,7 +26,8 @@ class fping(ReconIp):
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: 'retry',
 		TIMEOUT: 'timeout',
-		THREADS: OPT_NOT_SUPPORTED
+		THREADS: OPT_NOT_SUPPORTED,
+		'reverse_dns': 'r'
 	}
 	opt_value_map = {
 		DELAY: lambda x: x * 1000,  # convert s to ms
