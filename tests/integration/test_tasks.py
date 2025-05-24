@@ -71,6 +71,8 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['testssl.output_path']
 		del opts['timeout']
 
+		failures = []
+
 		for cls in TEST_TASKS:
 			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
 				continue
@@ -83,10 +85,16 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 					continue
 				outputs = OUTPUTS_TASKS.get(cls.__name__, [])
 				task = cls(input, **opts)
-				self._test_runner_output(
-					task,
-					expected_output_types=cls.output_types,
-					expected_results=outputs,
-					empty_results_allowed=False,
-					additional_checks=OUTPUTS_CHECKS
-				)
+				try:
+					self._test_runner_output(
+						task,
+						expected_output_types=cls.output_types,
+						expected_results=outputs,
+						empty_results_allowed=False,
+						additional_checks=OUTPUTS_CHECKS
+					)
+				except AssertionError as e:
+					failures.append(f'ERROR ({cls.__name__}): {e}')
+
+		if failures:
+			raise AssertionError("\n\n" + "\n\n".join(failures))

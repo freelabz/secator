@@ -15,10 +15,11 @@ from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
 	cmd = 'httpx -irh'
+	input_types = [HOST, IP, URL]
+	output_types = [Url, Subdomain]
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
-	input_types = [HOST, IP, URL]
 	json_flag = '-json'
 	opts = {
 		# 'silent': {'is_flag': True, 'default': False, 'help': 'Silent mode'},
@@ -66,7 +67,6 @@ class httpx(Http):
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
 	item_loaders = [JSONSerializer()]
-	output_types = [Url, Subdomain]
 	install_pre = {
 		'apk': ['chromium']
 	}

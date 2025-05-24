@@ -5,6 +5,7 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, USER_AGENT, URL)
+from secator.output_types.url import Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
@@ -13,8 +14,9 @@ from secator.tasks._categories import HttpCrawler
 class gau(HttpCrawler):
 	"""Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan."""
 	cmd = 'gau'
-	tags = ['pattern', 'scan']
 	input_types = [URL]
+	output_types = [Url]
+	tags = ['pattern', 'scan']
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'

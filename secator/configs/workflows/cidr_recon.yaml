@@ -5,6 +5,7 @@ description: Local network recon
 tags: [recon, cidr, network]
 input_types:
   - cidr_range
+  - ip
 
 tasks:
   mapcidr:

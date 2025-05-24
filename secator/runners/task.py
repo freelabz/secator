@@ -53,6 +53,7 @@ class Task(Runner):
 		opts['enable_duplicate_check'] = False
 		opts['print_start'] = False
 		opts['print_end'] = False
+		opts['print_target'] = False
 		opts['has_parent'] = False
 		opts['skip_if_no_inputs'] = False
 		opts['caller'] = 'Task'

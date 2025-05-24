@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Info, Warning, Error, Target, Stat
+from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s
@@ -126,6 +126,7 @@ class Command(Runner):
 		config = TemplateLoader(input={
 			'name': self.__class__.__name__,
 			'type': 'task',
+			'input_types': self.input_types,
 			'description': run_opts.get('description', None)
 		})
 
@@ -407,10 +408,6 @@ class Command(Runner):
 			self.print_description()
 			self.print_command()
 
-			# Yield targets
-			for input in self.inputs:
-				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
-
 			# Check for sudo requirements and prepare the password if needed
 			sudo_password, error = self._prompt_sudo(self.cmd)
 			if error:
@@ -543,7 +540,7 @@ class Command(Runner):
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = _s(self.cmd)
+			cmd_str = f':zap: {_s(self.cmd)}'
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold green', rich=True)
@@ -817,7 +814,7 @@ class Command(Runner):
 
 	@staticmethod
 	def _validate_chunked_input(self, inputs):
-		"""Command does not suport multiple inputs in non-worker mode. Consider running with a remote worker instead."""
+		"""Command does not support multiple inputs in non-worker mode. Consider running with a remote worker instead."""
 		if len(inputs) > 1 and self.sync and self.file_flag is None:
 			return False
 		return True

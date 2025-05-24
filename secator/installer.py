@@ -421,14 +421,27 @@ def get_version(version_cmd):
 		tuple[str]: Version string, return code.
 	"""
 	from secator.runners import Command
-	import re
-	regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
-	match = re.findall(regex, ret.output)
-	if not match:
-		console.print(Warning(message=f'Failed to find version in version command output. Command: {version_cmd}; Output: {ret.output}; Return code: {ret.return_code}'))  # noqa: E501
+	versions = get_versions_from_string(ret.output)
+	if not versions:
 		return None
-	return match[0]
+	return versions[0]
+
+
+def get_versions_from_string(string):
+	"""Get versions from a string.
+
+	Args:
+		string (str): String to get versions from.
+
+	Returns:
+		list[str]: List of versions.
+	"""
+	regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
+	matches = re.findall(regex, string)
+	if not matches:
+		return []
+	return matches
 
 
 def parse_version(ver):

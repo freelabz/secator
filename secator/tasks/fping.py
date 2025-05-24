@@ -1,7 +1,7 @@
 import validators
 
 from secator.decorators import task
-from secator.definitions import (DELAY, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
+from secator.definitions import (DELAY, IP, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
 							   RETRIES, THREADS, TIMEOUT)
 from secator.output_types import Ip
 from secator.tasks._categories import ReconIp
@@ -10,11 +10,12 @@ from secator.tasks._categories import ReconIp
 @task()
 class fping(ReconIp):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
-	cmd = 'fping -a'
+	cmd = 'fping -a -A -d'
+	input_types = [IP, HOST]
+	output_types = [Ip]
 	tags = ['ip', 'recon']
 	file_flag = '-f'
 	input_flag = None
-	input_types = [IP]
 	opt_prefix = '--'
 	opt_key_map = {
 		DELAY: 'period',
@@ -28,8 +29,6 @@ class fping(ReconIp):
 		DELAY: lambda x: x * 1000,  # convert s to ms
 		TIMEOUT: lambda x: x * 1000  # convert s to ms
 	}
-	input_types = [IP]
-	output_types = [Ip]
 	install_github_handle = 'schweikert/fping'
 	install_version = 'v5.1'
 	install_pre = {'*': ['fping']}
@@ -37,9 +36,16 @@ class fping(ReconIp):
 
 	@staticmethod
 	def item_loader(self, line):
-		if not (validators.ipv4(line) or validators.ipv6(line)):
+		if '(' in line:
+			host, ip = tuple(t.strip() for t in line.rstrip(')').split('('))
+			if (validators.ipv4(host) or validators.ipv6(host)):
+				host = ''
+		else:
+			ip = line.strip()
+			host = ''
+		if not (validators.ipv4(ip) or validators.ipv6(ip)):
 			return
-		yield {'ip': line, 'alive': True}
+		yield {'ip': ip, 'alive': True, 'host': host}
 
 	@staticmethod
 	def on_line(self, line):

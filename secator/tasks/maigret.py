@@ -6,7 +6,7 @@ import re
 from secator.decorators import task
 from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
-								 TIMEOUT, URL, USERNAME)
+								 TIMEOUT, URL, STRING)
 from secator.output_types import UserAccount, Info, Error
 from secator.tasks._categories import ReconUser
 
@@ -17,10 +17,11 @@ logger = logging.getLogger(__name__)
 class maigret(ReconUser):
 	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
+	input_types = [STRING]
+	output_types = [UserAccount]
 	tags = ['user', 'recon', 'username']
 	file_flag = None
 	input_flag = None
-	input_types = [USERNAME]
 	json_flag = '--json ndjson'
 	opt_prefix = '--'
 	opts = {
@@ -34,8 +35,6 @@ class maigret(ReconUser):
 		TIMEOUT: 'timeout',
 		THREADS: OPT_NOT_SUPPORTED
 	}
-	input_types = [USERNAME]
-	output_types = [UserAccount]
 	output_map = {
 		UserAccount: {
 			SITE_NAME: 'sitename',

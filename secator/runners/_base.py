@@ -10,14 +10,14 @@ from time import time
 from dotmap import DotMap
 import humanize
 
-from secator.definitions import ADDONS_ENABLED
+from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
-from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update)
+from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update, autodetect_type)
 from secator.tree import build_runner_tree
 
 
@@ -120,22 +120,24 @@ class Runner:
 		self.piped_output = self.run_opts.get('piped_output', False)
 		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
 		self.dry_run = self.run_opts.get('dry_run', False)
+		self.has_parent = self.run_opts.get('has_parent', False)
+		self.has_children = self.run_opts.get('has_children', False)
 
 		# Runner print opts
 		self.print_item = self.run_opts.get('print_item', False)
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
-		self.print_start = self.run_opts.get('print_start', False) and not self.piped_input and not self.piped_output and not self.dry_run  # noqa: E501
-		self.print_end = self.run_opts.get('print_end', False) and not self.piped_input and not self.piped_output and not self.dry_run  # noqa: E501
+		self.print_start = self.run_opts.get('print_start', False) and not self.dry_run  # noqa: E501
+		self.print_end = self.run_opts.get('print_end', False) and not self.dry_run  # noqa: E501
+		self.print_target = self.run_opts.get('print_target', False) and not self.dry_run and not self.has_parent
 		self.print_json = self.run_opts.get('print_json', False)
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
+		self.print_stat = self.run_opts.get('print_stat', False)
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 		self.print_profiles = self.run_opts.get('print_profiles', False)
 
 		# Chunks
-		self.has_parent = self.run_opts.get('has_parent', False)
-		self.has_children = self.run_opts.get('has_children', False)
 		self.chunk = self.run_opts.get('chunk', None)
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
@@ -151,10 +153,11 @@ class Runner:
 		# Determine inputs
 		self.debug('resolving inputs', obj={'extractors': [i for i in self.run_opts if i.endswith('_')], 'result_count': len(results)}, sub='init')  # noqa: E501
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
-		targets = [Target(name=target) for target in self.inputs]
-		self.filter_results(results + targets)
+		targets = [Target(name=target) for target in self.inputs if target not in results]
+		[self.add_result(target, print=False, output=True) for target in targets]
 
-		# Debug
+		# Run extractors on results and targets
+		self._run_extractors(results + targets)
 		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
 		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
 		self.debug(f'print opts ({len(self.resolved_print_opts)})', obj=self.resolved_print_opts, sub='init')
@@ -189,6 +192,8 @@ class Runner:
 		# Validators
 		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
 		self.debug('registering validators', obj={'validators': list(self.resolved_validators.keys())}, sub='init')
+		if not self.dry_run:
+			self.resolved_validators['validate_input'].append(self._validate_inputs)
 		self.register_validators(validators)
 
 		# Input post-process
@@ -196,6 +201,13 @@ class Runner:
 
 		# Check if input is valid
 		self.inputs_valid = self.run_validators('validate_input', self.inputs, sub='init')
+
+		# Print targets
+		if self.print_target:
+			pluralize = 'targets' if len(self.self_targets) > 1 else 'target'
+			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize}:'), rich=True)
+			for target in self.self_targets:
+				self._print(f'      {repr(target)}', rich=True)
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
@@ -225,6 +237,10 @@ class Runner:
 	@property
 	def targets(self):
 		return [r for r in self.results if isinstance(r, Target)]
+
+	@property
+	def self_targets(self):
+		return [r for r in self.results if isinstance(r, Target) and r._source.startswith(self.unique_name)]
 
 	@property
 	def infos(self):
@@ -328,10 +344,13 @@ class Runner:
 			if self.sync:
 				self.mark_started()
 
+			# Yield targets
+			yield from self.targets
+
 			# If any errors happened during validation, exit
 			if self.errors:
 				yield from self.errors
-				self.mark_completed()
+				self._finalize()
 				return
 
 			# Loop and process items
@@ -354,15 +373,19 @@ class Runner:
 					yield self._process_item(item)
 			yield from self.join_threads()
 			yield error
-			self.mark_completed()
+			self._finalize()
 
 		finally:
-			if self.dry_run:
-				return
-			if self.sync:
-				self.mark_completed()
-			if self.enable_reports:
-				self.export_reports()
+			self._finalize()
+
+	def _finalize(self):
+		"""Finalize the runner."""
+		if self.dry_run:
+			return
+		if self.sync:
+			self.mark_completed()
+		if self.enable_reports:
+			self.export_reports()
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""
@@ -377,8 +400,8 @@ class Runner:
 				self.add_result(error, print=True)
 				yield error
 
-	def filter_results(self, results):
-		"""Filter results based on the runner's config."""
+	def _run_extractors(self, results):
+		"""Run extractors on results and targets."""
 		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs}
 		inputs, run_opts, errors = run_extractors(
 			results,
@@ -399,6 +422,10 @@ class Runner:
 			print (bool): Whether to print it or not.
 			output (bool): Whether to add it to the output or not.
 		"""
+		if not item._uuid:
+			item._uuid = str(uuid.uuid4())
+		if not item._source:
+			item._source = self.unique_name
 		self.uuids.append(item._uuid)
 		self.results.append(item)
 		if output:
@@ -471,7 +498,7 @@ class Runner:
 				# Repr output
 				if item_out:
 					item_repr = repr(item)
-					if isinstance(item, OutputType) and self.print_remote_info and item._source:
+					if self.print_remote_info and item._source:
 						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
 					self._print(item_repr, out=item_out)
 
@@ -764,7 +791,7 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time())
-		self.debug(f'completed (sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')
+		self.debug(f'completed (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')  # noqa: E501
 		self.mark_duplicates()
 		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
@@ -793,7 +820,14 @@ class Runner:
 			return
 		if self.has_parent:
 			return
-		info = Info(message=f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status {self.status} and found {len(self.self_findings)} findings', _source=self.unique_name)  # noqa: E501
+		info = Info(
+			message=(
+				f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status '
+				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found '
+				f'[bold]{len(self.self_findings)}[/] findings'
+			),
+			_source=self.unique_name
+		)
 		self._print(info, rich=True)
 
 	def export_reports(self):
@@ -1002,6 +1036,26 @@ class Runner:
 
 		# Yield item
 		yield item
+
+	@staticmethod
+	def _validate_inputs(self, inputs):
+		"""Input type is not supported by runner"""
+		supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
+		for input in inputs:
+			input_type = autodetect_type(input)
+			if self.config.input_types and input_type not in self.config.input_types:
+				self.add_result(
+					Error(
+						message=(
+							f'Validator failed: target [bold blue]{input}[/] of type [bold green]{input_type}[/] '
+							f'is not supported by [bold gold3]{self.config.name}[/]. Supported types: [bold green]{supported_types}'
+						)
+					),
+					print=True,
+					output=True
+				)
+				return False
+		return True
 
 	@staticmethod
 	def resolve_exporters(exporters):
