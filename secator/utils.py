@@ -28,7 +28,7 @@ import ifaddr
 import yaml
 
 from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE, IP, HOST, CIDR_RANGE,
-								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH)
+								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
@@ -869,6 +869,8 @@ def autodetect_type(target):
 		return IP
 	elif validators.domain(target):
 		return HOST
+	elif validators.domain(target.split(':')[0]):
+		return HOST_PORT
 	elif validators.mac_address(target):
 		return MAC_ADDRESS
 	elif validators.email(target):
