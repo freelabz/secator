@@ -153,7 +153,7 @@ class Runner:
 		# Determine inputs
 		self.debug('resolving inputs', obj={'extractors': [i for i in self.run_opts if i.endswith('_')], 'result_count': len(results)}, sub='init')  # noqa: E501
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
-		targets = [Target(name=target) for target in self.inputs if target not in results]
+		targets = [Target(name=target) for target in self.inputs]
 		[self.add_result(target, print=False, output=True) for target in targets]
 
 		# Run extractors on results and targets
