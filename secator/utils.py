@@ -1,6 +1,7 @@
 import fnmatch
 import inspect
 import importlib
+import ipaddress
 import itertools
 import json
 import logging
@@ -26,7 +27,8 @@ import humanize
 import ifaddr
 import yaml
 
-from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE)
+from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE, IP, HOST, CIDR_RANGE,
+								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
@@ -457,9 +459,9 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 		formatted_msg += rf' [italic gray11]\[{id}][/]'
 
 	try:
-		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]', highlight=False)
 	except Exception:
-		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]')
+		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]', highlight=False)  # noqa: E501
 		if 'rich' in DEBUG:
 			raise
 
@@ -848,3 +850,64 @@ def format_object(obj, color='magenta', skip_keys=[]):
 		if obj:
 			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
 	return ''
+
+
+def autodetect_type(target):
+	"""Autodetect the type of a target.
+
+	Args:
+		target (str): The target to autodetect the type of.
+
+	Returns:
+		str: The type of the target.
+	"""
+	if validators.url(target, simple_host=True):
+		return URL
+	elif validate_cidr_range(target):
+		return CIDR_RANGE
+	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
+		return IP
+	elif validators.domain(target):
+		return HOST
+	elif validators.domain(target.split(':')[0]):
+		return HOST_PORT
+	elif validators.mac_address(target):
+		return MAC_ADDRESS
+	elif validators.email(target):
+		return EMAIL
+	elif validators.iban(target):
+		return IBAN
+	elif validators.uuid(target):
+		return UUID
+	elif Path(target).exists():
+		return PATH
+	elif validators.slug(target):
+		return SLUG
+
+	return str(type(target).__name__).lower()
+
+
+def validate_cidr_range(target):
+	if '/' not in target:
+		return False
+	try:
+		ipaddress.ip_network(target, False)
+		return True
+	except ValueError:
+		return False
+
+
+def get_versions_from_string(string):
+	"""Get versions from a string.
+
+	Args:
+		string (str): String to get versions from.
+
+	Returns:
+		list[str]: List of versions.
+	"""
+	regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
+	matches = re.findall(regex, string)
+	if not matches:
+		return []
+	return matches

@@ -20,8 +20,9 @@ FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
 	cmd = 'ffuf -noninteractive'
-	tags = ['url', 'fuzz']
 	input_types = [URL]
+	output_types = [Url, Progress]
+	tags = ['url', 'fuzz']
 	input_flag = '-u'
 	input_chunk_size = 1
 	file_flag = None
@@ -64,7 +65,6 @@ class ffuf(HttpFuzzer):
 		AUTO_CALIBRATION: 'ac',
 		'stop_on_error': 'sa',
 	}
-	output_types = [Url, Progress]
 	output_map = {
 		Url: {
 			STATUS_CODE: 'status',
@@ -105,7 +105,7 @@ class ffuf(HttpFuzzer):
 		data = self.get_opt_value('data') or ''
 		headers = self.get_opt_value('header')
 		if not len(self.inputs) > 1 and 'FUZZ' not in self.inputs[0] and 'FUZZ' not in headers and 'FUZZ' not in data:
-			self._print(Warning(message='Keyword FUZZ is not present in the URL, header or body'), rich=True)
+			self.add_result(Warning(message='Keyword FUZZ is not present in the URL, header or body'), print=True, output=True)
 
 		return opts
 

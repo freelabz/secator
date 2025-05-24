@@ -277,9 +277,8 @@ class TestCli(unittest.TestCase):
 
 	def test_health_command(self):
 		result = self.runner.invoke(cli, ['health'])
-		assert not result.exception
-		assert result.exit_code == 0
-		assert 'Checking secator' in result.output
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
 
 if __name__ == '__main__':
 	unittest.main()

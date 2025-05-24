@@ -581,13 +581,11 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 		filename = f'{name}.{ext}' if not name.endswith(ext) else name
 		target_path = target_folder / filename
 		try:
-			console.print(repr(Info(message=f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ')), highlight=False, end='')  # noqa: E501
 			if offline_mode:
-				console.print('[bold orange1]skipped [dim](offline)[/].[/]')
 				return
 			if target_path.exists():
-				console.print('[bold green]skipped (already exists).[/]')
 				return target_path.resolve()
+			console.print(repr(Info(message=f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ')), highlight=False, end='')  # noqa: E501
 			resp = requests.get(url_or_path, timeout=3)
 			resp.raise_for_status()
 			with open(target_path, 'wb') as f:

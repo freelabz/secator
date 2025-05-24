@@ -386,6 +386,7 @@ def register_runner(cli_endpoint, config):
 			'print_progress': True,
 			'print_profiles': True,
 			'print_start': True,
+			'print_target': True,
 			'print_end': True,
 			'print_remote_info': not sync,
 			'piped_input': ctx.obj['piped_input'],

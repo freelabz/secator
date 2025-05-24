@@ -16,9 +16,10 @@ from secator.tasks._categories import Http
 class bup(Http):
 	"""40X bypasser."""
 	cmd = 'bup'
+	input_types = [URL]
+	output_types = [Url, Progress]
 	tags = ['url', 'bypass']
 	input_flag = '-u'
-	input_types = [URL]
 	json_flag = '--jsonl'
 	opt_prefix = '--'
 	opts = {
@@ -48,7 +49,6 @@ class bup(Http):
 		PROXY: 'proxy',
 	}
 	item_loaders = [JSONSerializer()]
-	output_types = [Url, Progress]
 	output_map = {
 		Url: {
 			'url': 'request_url',

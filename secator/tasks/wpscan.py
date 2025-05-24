@@ -17,10 +17,11 @@ from secator.tasks._categories import VulnHttp
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
 	cmd = 'wpscan --force --verbose'
+	input_types = [URL]
+	output_types = [Vulnerability, Tag]
 	tags = ['vuln', 'scan', 'wordpress']
 	file_flag = None
 	input_flag = '--url'
-	input_types = [URL]
 	json_flag = '-f json'
 	opt_prefix = '--'
 	opts = {
@@ -69,7 +70,6 @@ class wpscan(VulnHttp):
 			PROVIDER: 'wpscan',
 		},
 	}
-	output_types = [Vulnerability, Tag]
 	install_pre = {
 		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
 		'pacman': ['make', 'ruby-erb'],

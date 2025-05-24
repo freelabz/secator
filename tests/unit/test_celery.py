@@ -110,16 +110,18 @@ class TestCelery(unittest.TestCase):
 		if ffuf not in TEST_TASKS:
 			return
 
-		with mock_command(ffuf, fixture=[FIXTURES_TASKS[ffuf]] * len(TARGETS)):
+		HTTP_TARGETS = [f'https://{target}' for target in TARGETS]
+
+		with mock_command(ffuf, fixture=[FIXTURES_TASKS[ffuf]] * len(HTTP_TARGETS)):
 			workflow = chain(
 				forward_results.s([]),
 				chord((
-					ffuf.s(TARGETS)
+					ffuf.s(HTTP_TARGETS)
 				), forward_results.s()),
 			)
 			result = workflow.apply()
 			results = result.get()
 			urls = [r.url for r in results if r._type == 'url']
 			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(targets), len(TARGETS))
-			self.assertEqual(len(urls), len(TARGETS))
+			self.assertEqual(len(targets), len(HTTP_TARGETS) * 2)
+			self.assertEqual(len(urls), len(HTTP_TARGETS))

@@ -16,10 +16,11 @@ from secator.tasks._categories import HttpCrawler
 class gospider(HttpCrawler):
 	"""Fast web spider written in Go."""
 	cmd = 'gospider'
+	input_types = [URL]
+	output_types = [Url]
 	tags = ['url', 'crawl']
 	file_flag = '-S'
 	input_flag = '-s'
-	input_types = [URL]
 	json_flag = '--json'
 	opt_prefix = '--'
 	opt_key_map = {

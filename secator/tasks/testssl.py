@@ -15,8 +15,9 @@ from secator.tasks._categories import Command, OPTS
 class testssl(Command):
     """SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
     cmd = 'testssl.sh'
-    tags = ['dns', 'recon', 'tls']
     input_types = [HOST]
+    output_types = [Certificate, Vulnerability, Ip, Tag]
+    tags = ['dns', 'recon', 'tls']
     input_flag = None
     file_flag = '-iL'
     file_eof_newline = True
@@ -43,7 +44,6 @@ class testssl(Command):
         TIMEOUT: 'connect-timeout',
         'ipv6': '-6',
     }
-    output_types = [Certificate, Vulnerability, Ip, Tag]
     proxy_http = True
     proxychains = False
     proxy_socks5 = False
