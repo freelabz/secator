@@ -195,7 +195,7 @@ class TestCelery(unittest.TestCase):
 		results = result.get()
 		targets = [r.name for r in results if r._type == 'target']
 		urls = [r.url for r in results if r._type == 'url']
-		self.assertEqual(len(targets), len(URL_TARGETS))
+		self.assertEqual(len(targets), len(URL_TARGETS) * 2)
 		self.assertEqual(len(urls), sum(URL_RESULTS_COUNT))
 
 	def test_url_vuln_workflow(self):
@@ -206,5 +206,5 @@ class TestCelery(unittest.TestCase):
 		results = result.get()
 		targets = [r.name for r in results if r._type == 'target']
 		tags = [r.name for r in results if r._type == 'tag']
-		self.assertEqual(len(targets), 16)
+		self.assertEqual(len(targets), 20)
 		self.assertEqual(len(tags), 6)
