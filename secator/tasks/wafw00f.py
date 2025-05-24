@@ -13,8 +13,9 @@ from secator.tasks._categories import OPTS
 class wafw00f(Command):
 	"""Web Application Firewall Fingerprinting tool."""
 	cmd = 'wafw00f'
-	tags = ['waf', 'scan']
 	input_types = [URL]
+	output_types = [Tag]
+	tags = ['waf', 'scan']
 	input_flag = None
 	file_flag = '-i'
 	json_flag = '-f json'
@@ -41,7 +42,6 @@ class wafw00f(Command):
 		'find_all': 'findall',
 		'no_follow_redirects': 'noredirect',
 	}
-	output_types = [Tag]
 	install_version = 'v2.3.1'
 	install_cmd = 'pipx install git+https://github.com/EnableSecurity/wafw00f.git@[install_version] --force'
 	install_github_handle = 'EnableSecurity/wafw00f'

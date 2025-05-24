@@ -79,7 +79,7 @@ def task(ctx):
 
 
 for cls in ALL_TASKS:
-	config = TemplateLoader(input={'name': cls.__name__, 'type': 'task'})
+	config = TemplateLoader(input={'name': cls.__name__, 'type': 'task', 'input_types': cls.input_types})
 	register_runner(task, config)
 
 #----------#
@@ -988,6 +988,11 @@ def health(json_, debug, strict, bleeding):
 	upgrade_cmd = ''
 	results = []
 	messages = []
+
+	# Abort if offline mode is enabled
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
 
 	# Check secator
 	console.print(':wrench: [bold gold3]Checking secator ...[/]') if not json_ else None

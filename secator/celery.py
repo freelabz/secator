@@ -170,7 +170,14 @@ def run_scan(self, args=[], kwargs={}):
 def run_command(self, results, name, targets, opts={}):
 	if IN_CELERY_WORKER_PROCESS:
 		quiet = not CONFIG.cli.worker_command_verbose
-		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True, 'print_profiles': True, 'quiet': quiet})
+		opts.update({
+			'print_item': True,
+			'print_line': True,
+			'print_cmd': True,
+			'print_target': True,
+			'print_profiles': True,
+			'quiet': quiet
+		})
 		routing_key = self.request.delivery_info['routing_key']
 		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 

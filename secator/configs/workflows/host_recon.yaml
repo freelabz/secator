@@ -12,6 +12,7 @@ options:
     is_flag: True
     default: False
     help: Run nuclei scans (slow)
+
   full:
     is_flag: True
     default: False

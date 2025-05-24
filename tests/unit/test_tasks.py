@@ -34,6 +34,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			META_OPTS['print_cmd'] = True
 			META_OPTS['print_item'] = True
 
+		failures = []
 		for cls, fixture in FIXTURES_TASKS.items():
 			with self.subTest(name=cls.__name__):
 				# Validate fixture
@@ -45,7 +46,13 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 				input_type = cls.input_types[0] if cls.input_types else 'fake'
 				targets = INPUTS_TASKS.get(input_type, [])
 				with mock_command(cls, targets, META_OPTS, fixture) as runner:
-					self._test_runner_output(
-						runner,
-						expected_output_types=cls.output_types
-					)
+					try:
+						self._test_runner_output(
+							runner,
+							expected_output_types=cls.output_types
+						)
+					except Exception as e:
+						failures.append(f'ERROR ({cls.__name__}): {e}')
+
+		if failures:
+			raise AssertionError("\n\n" + "\n\n".join(failures))
