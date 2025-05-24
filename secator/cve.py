@@ -1,14 +1,8 @@
-import json
 import re
 from packaging import version
 from typing import List, Dict, Any, Optional, Tuple
 
-
-def get_versions_from_string(string):
-    """Get versions from a string."""
-    regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
-    matches = re.findall(regex, string)
-    return matches if matches else []
+from secator.utils import get_versions_from_string
 
 
 def extract_software_and_version(version_string: str) -> Tuple[Optional[str], Optional[str]]:

@@ -24,6 +24,7 @@ from secator.definitions import OPT_NOT_SUPPORTED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
+from secator.utils import get_versions_from_string
 
 
 class InstallerStatus(Enum):
@@ -426,22 +427,6 @@ def get_version(version_cmd):
 	if not versions:
 		return None
 	return versions[0]
-
-
-def get_versions_from_string(string):
-	"""Get versions from a string.
-
-	Args:
-		string (str): String to get versions from.
-
-	Returns:
-		list[str]: List of versions.
-	"""
-	regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
-	matches = re.findall(regex, string)
-	if not matches:
-		return []
-	return matches
 
 
 def parse_version(ver):

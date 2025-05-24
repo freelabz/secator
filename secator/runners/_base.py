@@ -344,14 +344,14 @@ class Runner:
 			if self.sync:
 				self.mark_started()
 
-			# Yield targets
-			yield from self.targets
-
 			# If any errors happened during validation, exit
 			if self.errors:
 				yield from self.errors
 				self._finalize()
 				return
+
+			# Yield targets
+			yield from self.targets
 
 			# Loop and process items
 			for item in self.yielder():

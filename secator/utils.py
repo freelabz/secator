@@ -895,3 +895,19 @@ def validate_cidr_range(target):
 		return True
 	except ValueError:
 		return False
+
+
+def get_versions_from_string(string):
+	"""Get versions from a string.
+
+	Args:
+		string (str): String to get versions from.
+
+	Returns:
+		list[str]: List of versions.
+	"""
+	regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
+	matches = re.findall(regex, string)
+	if not matches:
+		return []
+	return matches
