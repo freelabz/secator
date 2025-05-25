@@ -1,5 +1,8 @@
-from secator.cli import ALL_SCANS
+from secator.loader import get_configs_by_type
 from secator.runners import Scan
+
+
+SCANS = get_configs_by_type('scan')
 
 
 class DynamicScan(Scan):
@@ -21,7 +24,7 @@ class DynamicScan(Scan):
 
 
 DYNAMIC_SCANS = {}
-for scan in ALL_SCANS:
+for scan in SCANS:
 	instance = DynamicScan(scan)
 	DYNAMIC_SCANS[scan.name] = instance
 

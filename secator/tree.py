@@ -1,5 +1,7 @@
 from typing import List, Optional, Union
 from secator.template import TemplateLoader
+from dotmap import DotMap
+
 
 DEFAULT_RENDER_OPTS = {
     'group': lambda x: f"[dim]{x.name}[/]",
@@ -70,12 +72,12 @@ class RunnerTree:
                 self._render_children(child, new_prefix, lines)
 
 
-def build_runner_tree(config: TemplateLoader, condition: Optional[str] = None) -> Union[RunnerTree, str]:
+def build_runner_tree(config: DotMap, condition: Optional[str] = None) -> Union[RunnerTree, str]:
     """
     Build a tree representation from a runner config.
 
     Args:
-        config (TemplateLoader): The runner config.
+        config (DotMap): The runner config.
 
     Returns:
         A RunnerTree object or an error message string
@@ -96,7 +98,7 @@ def build_runner_tree(config: TemplateLoader, condition: Optional[str] = None) -
                     subtask_node = TaskNode(subtask_name, 'task', condition)
                     group_node.add_child(subtask_node)
             else:
-                condition = task_details.get('if')
+                condition = task_details.get('if') if task_details else None
                 task_node = TaskNode(task_name, 'task', condition)
                 root_node.add_child(task_node)
 

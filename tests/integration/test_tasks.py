@@ -3,6 +3,7 @@ import unittest
 import warnings
 from time import sleep
 
+from secator.loader import discover_tasks
 from secator.rich import console
 from secator.runners import Command
 from secator.utils import merge_opts
@@ -73,7 +74,11 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 		failures = []
 
-		for cls in TEST_TASKS:
+		tasks = discover_tasks()
+		test_tasks_names = [t.name for t in TEST_TASKS]
+		TASKS = [t for t in tasks if t.__name__ in test_tasks_names]
+
+		for cls in TASKS:
 			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
 				continue
 			with self.subTest(name=cls.__name__):

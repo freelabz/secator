@@ -10,7 +10,7 @@ from secator.output_types import Port, Url
 from secator.definitions import DEBUG
 from secator.runners import Command, Workflow
 from secator.utils import setup_logging, merge_opts
-from secator.utils_test import TEST_WORKFLOWS, ALL_WORKFLOWS, CommandOutputTester, load_fixture
+from secator.utils_test import TEST_WORKFLOWS, get_configs_by_type, CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_WORKFLOWS
 from tests.integration.outputs import OUTPUTS_WORKFLOWS
 
@@ -82,7 +82,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 	def test_inline_workflow(self):
 		# Ignore if TEST_WORKFLOWS are defined
-		if TEST_WORKFLOWS != ALL_WORKFLOWS:
+		if TEST_WORKFLOWS != get_configs_by_type('workflow'):
 			return
 
 		# Expected results / context

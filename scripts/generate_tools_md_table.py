@@ -1,11 +1,14 @@
-from secator.cli import ALL_TASKS
+from secator.loader import discover_tasks
 
 import re
 from pathlib import Path
 
+
 TABLE_START_MARKER = "<!-- START_TOOLS_TABLE -->"
 TABLE_END_MARKER = "<!-- END_TOOLS_TABLE -->"
 README_FILENAME = "README.md"
+TASKS = discover_tasks()
+
 
 def get_tools_data():
     data = []
@@ -23,7 +26,7 @@ def get_tools_data():
         'msfconsole': 'https://docs.rapid7.com/metasploit/msf-overview/',
         'searchsploit': 'https://gitlab.com/exploit-database/exploitdb'
     }
-    for task in ALL_TASKS:
+    for task in TASKS:
         url = task.install_github_handle
         if url:
             url = f'https://github.com/{url}'
@@ -32,7 +35,7 @@ def get_tools_data():
         data.append({
             'name': task.__name__,
             'url': url,
-            'description': task.__doc__,
+            'description': task.__doc__ or '',
             'category': '/'.join(task.tags)
         })
     return data
