@@ -32,7 +32,7 @@ class grype(VulnCode):
 	install_pre = {
 		'*': ['curl']
 	}
-	install_version = 'v0.91.2'
+	install_version = 'v0.92.2'
 	install_cmd = (
 		f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'
 	)
