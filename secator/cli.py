@@ -1329,7 +1329,7 @@ def install_tools(cmds, cleanup, fail_fast):
 			else:
 				console.print(Warning(message=f'Tool {cmd} is not supported or inexistent.'))
 	else:
-		tools = TASKS
+		tools = discover_tasks()
 	tools.sort(key=lambda x: x.__name__)
 	return_code = 0
 	if not tools:
