@@ -24,13 +24,13 @@ logger = logging.getLogger(__name__)
 class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap'
+	input_types = [HOST, IP]
+	output_types = [Port, Vulnerability, Exploit]
 	tags = ['port', 'scan']
 	input_flag = None
-	input_types = [HOST, IP]
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
-	output_types = [Port, Vulnerability, Exploit]
 	opts = {
 		# Port specification and scan order
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (- to scan all)'},
@@ -248,7 +248,7 @@ class nmapData(dict):
 						EXTRA_DATA: extra_data,
 					}
 					if not func:
-						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve')
+						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve.nmap')
 						continue
 					for data in func(output, cpes=cpes):
 						data.update(metadata)
@@ -257,7 +257,7 @@ class nmapData(dict):
 							confidence = 'high' if version_exact else 'medium'
 						data[CONFIDENCE] = confidence
 						if (CONFIG.runners.skip_cve_low_confidence and data[CONFIDENCE] == 'low'):
-							debug(f'{data[ID]}: ignored (low confidence).', sub='cve')
+							debug(f'{data[ID]}: ignored (low confidence).', sub='cve.nmap')
 							continue
 						if data in datas:
 							continue
@@ -349,7 +349,7 @@ class nmapData(dict):
 		if not isinstance(cpes, list):
 			cpes = [cpes]
 			extra_data['cpe'] = cpes
-		debug(f'Found CPEs: {",".join(cpes)}', sub='cve')
+		debug(f'Found CPEs: {",".join(cpes)}', sub='cve.nmap')
 
 		# Grab confidence
 		conf = int(extra_data.get('conf', 0))
@@ -368,7 +368,7 @@ class nmapData(dict):
 			cpe = VulnMulti.create_cpe_string(product, version_cpe)
 			if cpe not in cpes:
 				cpes.append(cpe)
-				debug(f'Added new CPE from identified product and version: {cpe}', sub='cve')
+				debug(f'Added new CPE from identified product and version: {cpe}', sub='cve.nmap')
 
 		return extra_data
 
@@ -412,7 +412,7 @@ class nmapData(dict):
 				NAME: vuln_id,
 				DESCRIPTION: vuln_title,
 				PROVIDER: provider_name,
-				TAGS: [vuln_id, provider_name]
+				TAGS: [provider_name]
 			}
 			if provider_name == 'MITRE CVE':
 				data = VulnMulti.lookup_cve(vuln['id'], *cpes)
@@ -483,6 +483,6 @@ class nmapData(dict):
 						vuln.update(data)
 					yield vuln
 				else:
-					debug(f'Vulners parser for "{vuln_type}" is not implemented YET.', sub='cve')
+					debug(f'Vulners parser for "{vuln_type}" is not implemented YET.', sub='cve.nmap')
 			else:
-				debug(f'Unrecognized vulners output: {elems}', sub='cve')
+				debug(f'Unrecognized vulners output: {elems}', sub='cve.nmap')

@@ -1,9 +1,12 @@
 import uuid
 
+from dotmap import DotMap
+
 from secator.config import CONFIG
 from secator.runners._base import Runner
 from secator.runners.task import Task
 from secator.utils import merge_opts
+from secator.output_types import Info
 
 
 class Workflow(Runner):
@@ -36,10 +39,11 @@ class Workflow(Runner):
 		opts = self.run_opts.copy()
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
+		opts.pop('print_profiles', False)
 
 		# Set hooks and reports
-		self.enable_reports = True  # Workflow will handle reports
 		self.enable_hooks = False   # Celery will handle hooks
+		self.enable_reports = True  # Workflow will handle reports
 
 		# Get hooks
 		hooks = self._hooks.get(Task, {})
@@ -54,13 +58,13 @@ class Workflow(Runner):
 
 		forwarded_opts = {}
 		if chain_previous_results:
-			forwarded_opts = {k: v for k, v in self.run_opts.items() if k.endswith('_')}
+			forwarded_opts = self.dynamic_opts
 
 		# Build task signatures
 		sigs = self.get_tasks(
 			self.config.tasks.toDict(),
 			self.inputs,
-			self.config.options,
+			self.config.default_options.toDict(),
 			opts,
 			forwarded_opts=forwarded_opts
 		)
@@ -92,6 +96,7 @@ class Workflow(Runner):
 		"""
 		from celery import chain, group
 		sigs = []
+		sig = None
 		ix = 0
 		for task_name, task_opts in config.items():
 			# Task opts can be None
@@ -115,6 +120,13 @@ class Workflow(Runner):
 				)
 				sig = chain(*tasks)
 			else:
+				# Skip task if condition is not met
+				condition = task_opts.pop('if', None)
+				local_ns = {'opts': DotMap(run_opts)}
+				if condition and not eval(condition, {"__builtins__": {}}, local_ns):
+					self.add_result(Info(message=f'Skipped task [bold gold3]{task_name}[/] because condition is not met: [bold green]{condition}[/]'), print=True)  # noqa: E501
+					continue
+
 				# Get task class
 				task = Task.get_task_class(task_name)
 
@@ -127,9 +139,11 @@ class Workflow(Runner):
 				# Create task signature
 				task_id = str(uuid.uuid4())
 				opts['context'] = self.context.copy()
-				sig = task.s(inputs, **opts).set(queue=task.profile, task_id=task_id)
+				profile = task.profile(opts) if callable(task.profile) else task.profile
+				sig = task.s(inputs, **opts).set(queue=profile, task_id=task_id)
 				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
 				ix += 1
-			sigs.append(sig)
+			if sig:
+				sigs.append(sig)
 		return sigs

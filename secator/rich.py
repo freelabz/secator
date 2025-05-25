@@ -1,4 +1,5 @@
 import operator
+from pathlib import Path
 
 import yaml
 from rich.console import Console
@@ -37,14 +38,18 @@ def status_to_color(value):
 
 
 FORMATTERS = {
-	'confidence': criticity_to_color,
+	'confidence': lambda x: f'[dim]{x.upper()}[/]',
 	'severity': criticity_to_color,
 	'cvss_score': lambda score: '' if score == -1 else f'[bold cyan]{score}[/]',
 	'port': lambda port: f'[bold cyan]{port}[/]',
-	'url': lambda host: f'[bold underline blue]{host}[/]',
+	'url': lambda host: f'[bold underline blue link={host}]{host}[/]',
+	'stored_response_path': lambda path: f'[link=file://{path}]:pencil:[/]' if path and Path(path).exists() else '',
+	'screenshot_path': lambda path: f'[link=file://{path}]:camera:[/]' if path and Path(path).exists() else '',
 	'ip': lambda ip: f'[bold yellow]{ip}[/]',
 	'status_code': status_to_color,
-	'reference': lambda reference: f'[link={reference}]🡕[/]',
+	'reference': lambda reference: f'[link={reference}]{reference}[/]' if reference else '',
+	'matched_at': lambda matched_at: f'[link={matched_at}]{matched_at}[/]' if matched_at and matched_at.startswith('http') else '',  # noqa: E501
+	'match': lambda match: f'[link={match}]{match}[/]' if match else '',
 	'_source': lambda source: f'[bold gold3]{source}[/]'
 }
 
@@ -89,13 +94,16 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 			key_str = key
 			if not key.startswith('_'):
 				key_str = ' '.join(key.split('_')).title()
-			no_wrap = key in ['url', 'reference', 'references', 'matched_at']
-			overflow = None if no_wrap else 'fold'
-			table.add_column(
-				key_str,
-				overflow=overflow,
-				min_width=10,
-				no_wrap=no_wrap)
+			# TODO: remove this as it's not needed anymore
+			# no_wrap = key in ['url', 'reference', 'references', 'matched_at']
+			# overflow = None if no_wrap else 'fold'
+			# print('key: ', key_str, 'overflow: ', overflow, 'no_wrap: ', no_wrap)
+			# table.add_column(
+			# 	key_str,
+			# 	overflow=overflow,
+			# 	min_width=10,
+			# 	no_wrap=no_wrap)
+			table.add_column(key_str)
 
 	if not keys:
 		table.add_column(

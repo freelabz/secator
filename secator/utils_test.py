@@ -12,9 +12,9 @@ from secator.definitions import (CIDR_RANGE, DELAY, DEPTH, EMAIL,
 							   METHOD, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME, PATH,
 							   DOCKER_IMAGE, GIT_REPOSITORY)
-from secator.cli import ALL_WORKFLOWS, ALL_TASKS, ALL_SCANS
+from secator.loader import get_configs_by_type
 from secator.output_types import EXECUTION_TYPES, STAT_TYPES
-from secator.runners import Command
+from secator.runners import Command, Task
 from secator.rich import console
 from secator.utils import load_fixture, debug, traceback_as_string
 
@@ -25,33 +25,37 @@ USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/tests/'
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
+TASKS = get_configs_by_type('task')
+WORKFLOWS = get_configs_by_type('workflow')
+SCANS = get_configs_by_type('scan')
+
 
 #------------#
 # TEST TASKS #
 #------------#
 TEST_TASKS = os.environ.get('TEST_TASKS', '')
 if TEST_TASKS:
-	TEST_TASKS = [cls for cls in ALL_TASKS if cls.__name__ in TEST_TASKS.split(',')]
+	TEST_TASKS = [config for config in TASKS if config.name in TEST_TASKS.split(',')]
 else:
-	TEST_TASKS = ALL_TASKS
+	TEST_TASKS = TASKS
 
 #----------------#
 # TEST WORKFLOWS #
 #----------------#
 TEST_WORKFLOWS = os.environ.get('TEST_WORKFLOWS', '')
 if TEST_WORKFLOWS:
-	TEST_WORKFLOWS = [config for config in ALL_WORKFLOWS if config.name in TEST_WORKFLOWS.split(',')]
+	TEST_WORKFLOWS = [config for config in WORKFLOWS if config.name in TEST_WORKFLOWS.split(',')]
 else:
-	TEST_WORKFLOWS = ALL_WORKFLOWS
+	TEST_WORKFLOWS = WORKFLOWS
 
 #------------#
 # TEST SCANS #
 #------------#
 TEST_SCANS = os.environ.get('TEST_SCANS', '')
 if TEST_SCANS:
-	TEST_SCANS = [config for config in ALL_SCANS if config.name in TEST_SCANS.split(',')]
+	TEST_SCANS = [config for config in SCANS if config.name in TEST_SCANS.split(',')]
 else:
-	TEST_SCANS = ALL_SCANS
+	TEST_SCANS = SCANS
 
 #-------------------#
 # TEST INPUTS_TASKS #
@@ -72,8 +76,8 @@ INPUTS_TASKS = {
 # TEST FIXTURES_TASKS #
 #---------------------#
 FIXTURES_TASKS = {
-	tool_cls: load_fixture(f'{tool_cls.__name__}_output', FIXTURES_DIR)
-	for tool_cls in TEST_TASKS
+	Task.get_task_class(task.name): load_fixture(f'{task.name}_output', FIXTURES_DIR)
+	for task in TASKS
 }
 
 #-----------#

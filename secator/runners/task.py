@@ -1,7 +1,7 @@
 import uuid
 from secator.config import CONFIG
 from secator.runners import Runner
-from secator.utils import discover_tasks
+from secator.loader import discover_tasks
 from celery import chain
 
 
@@ -47,16 +47,22 @@ class Task(Runner):
 		opts['hooks'] = hooks
 		opts['context'] = self.context.copy()
 		opts['reports_folder'] = str(self.reports_folder)
-		opts['enable_reports'] = False  # Task will handle reports
-		opts['enable_duplicate_check'] = False  # Task will handle duplicate check
+
+		# Task class will handle those
+		opts['enable_reports'] = False
+		opts['enable_duplicate_check'] = False
+		opts['print_start'] = False
+		opts['print_end'] = False
+		opts['print_target'] = False
 		opts['has_parent'] = False
 		opts['skip_if_no_inputs'] = False
 		opts['caller'] = 'Task'
 
 		# Create task signature
 		task_id = str(uuid.uuid4())
-		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=task_cls.profile, task_id=task_id)
-		self.add_subtask(task_id, self.config.name, self.config.description or '')
+		profile = task_cls.profile(opts) if callable(task_cls.profile) else task_cls.profile
+		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=profile, task_id=task_id)
+		self.add_subtask(task_id, self.config.name, self.description)
 		return chain(sig)
 
 	@staticmethod

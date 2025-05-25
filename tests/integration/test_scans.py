@@ -5,15 +5,14 @@ import warnings
 from time import sleep
 
 from secator.definitions import DEBUG
-from secator.rich import console
 from secator.runners import Command, Scan
-from secator.utils import setup_logging, merge_opts
+from secator.utils import setup_logging
 from secator.utils_test import TEST_SCANS, CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_SCANS
 from tests.integration.outputs import OUTPUTS_SCANS
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
-level = logging.DEBUG if DEBUG > 0 else logging.INFO
+level = logging.DEBUG if DEBUG == ["1"] else logging.INFO
 setup_logging(level)
 
 

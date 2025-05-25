@@ -5,8 +5,17 @@ description: URL fuzz (slow)
 tags: [http, fuzz]
 input_types:
   - url
-# options:
-#   match_codes: 200,204,301,302,307,401,403,405,500
+
+default_options:
+  match_codes: 200,204,301,302,307,401,403,405,500
+
+options:
+  crawl_directories:
+    is_flag: True
+    help: Crawl found directories
+    default: False
+    short: cdir
+
 tasks:
   _group:
     # dirsearch:
@@ -18,18 +27,17 @@ tasks:
       targets_:
         - type: target
           field: '{name}/FUZZ'
+
   httpx:
     description: Run HTTP probes on crawled URLs
     targets_:
       type: url
       field: url
+
   katana:
     description: Run crawler on found directories
     targets_:
       type: url
       field: url
       condition: "'Index of' in item.title"
-results:
-  - type: url
-    condition: item._source == 'httpx'
-    # TODO: add deduplication based on the 'url' field
+    if: opts.crawl_directories

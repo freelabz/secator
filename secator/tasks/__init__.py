@@ -1,4 +1,5 @@
-from secator.utils import discover_tasks, discover_utils
+from secator.loader import discover_tasks, discover_utils
+
 TASKS = discover_tasks()
 UTILS = discover_utils()
 ALL = TASKS + UTILS

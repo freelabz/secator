@@ -15,7 +15,7 @@ class IpProtocol(str, Enum):
 @dataclass
 class Ip(OutputType):
 	ip: str
-	host: str = ''
+	host: str = field(default='', repr=True, compare=False)
 	alive: bool = False
 	protocol: str = field(default=IpProtocol.IPv4)
 	_source: str = field(default='', repr=True)
@@ -37,4 +37,6 @@ class Ip(OutputType):
 		s = f'💻 [bold white]{self.ip}[/]'
 		if self.host:
 			s += rf' \[[bold magenta]{self.host}[/]]'
+		if self.alive:
+			s += r' [bold green]🟢[/]'
 		return rich_to_ansi(s)
