@@ -14,11 +14,11 @@ class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -resp -recon'
 	tags = ['dns', 'fuzz']
+	input_types = [HOST, CIDR_RANGE, IP]
+	output_types = [Record, Ip, Subdomain]
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
-	input_types = [HOST, CIDR_RANGE, IP]
 	file_flag = OPT_PIPE_INPUT
-	output_types = [Record, Ip, Subdomain]
 	opt_key_map = {
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retry',
@@ -66,7 +66,8 @@ class dnsx(ReconDns):
 		if status_code and status_code == 'NOERROR' and not is_ip:
 			yield Subdomain(
 				host=host,
-				domain=extract_domain_info(host, domain_only=True)
+				domain=extract_domain_info(host, domain_only=True),
+				sources=['dns']
 			)
 		if self.get_opt_value('subdomains_only'):
 			return

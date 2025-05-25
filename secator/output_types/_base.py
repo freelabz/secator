@@ -12,6 +12,9 @@ class OutputType:
 	_table_fields = []
 	_sort_by = ()
 
+	def __str__(self):
+		return self.__class__.__name__
+
 	def __gt__(self, other):
 		if not self.__eq__(other):
 			return False

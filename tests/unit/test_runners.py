@@ -11,6 +11,7 @@ from secator.serializers.json import JSONSerializer
 
 
 class MyCommand(Command):
+	input_types = ['slug']
 	cmd = 'dummy'
 	input_flag = '-u'
 	file_flag = None
@@ -92,8 +93,8 @@ class TestCommandRunner(unittest.TestCase):
 
 		with patch.object(Command, 'run_hooks') as mock_run_hooks:
 			MyCommand(TARGETS)
-			mock_run_hooks.assert_any_call('before_init')
-			mock_run_hooks.assert_any_call('on_init')
+			mock_run_hooks.assert_any_call('before_init', sub='init')
+			mock_run_hooks.assert_any_call('on_init', sub='init')
 
 		# Clean up after test
 		delattr(MyCommand, 'before_init')
@@ -195,8 +196,8 @@ class TestCommandRunner(unittest.TestCase):
 		cmd.run()
 		errors = cmd.errors
 		messages = [e.message for e in errors]
-		self.assertIn("Validator failed: Command does not suport multiple inputs in non-worker mode. Consider running with a remote worker instead.", messages)
-		self.assertEqual(len(cmd.results), 1)
+		self.assertIn("Validator failed: Command does not support multiple inputs in non-worker mode. Consider running with a remote worker instead.", messages)
+		self.assertEqual(len(cmd.results), 3)
 		self.assertFalse(cmd.inputs_valid)
 		self.assertEqual(cmd.status, 'FAILURE')
 

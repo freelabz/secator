@@ -3,7 +3,7 @@ import os
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
 								 HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
-								 PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT, HOST, IP)
+								 PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT, HOST, IP, HOST_PORT)
 from secator.config import CONFIG
 from secator.output_types import Url, Subdomain
 from secator.serializers import JSONSerializer
@@ -15,10 +15,11 @@ from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
 	cmd = 'httpx -irh'
+	input_types = [HOST, HOST_PORT, IP, URL]
+	output_types = [Url, Subdomain]
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
-	input_types = [HOST, IP, URL]
 	json_flag = '-json'
 	opts = {
 		# 'silent': {'is_flag': True, 'default': False, 'help': 'Silent mode'},
@@ -66,7 +67,6 @@ class httpx(Http):
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
 	item_loaders = [JSONSerializer()]
-	output_types = [Url, Subdomain]
 	install_pre = {
 		'apk': ['chromium']
 	}
@@ -77,6 +77,17 @@ class httpx(Http):
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'io'
+	profile = lambda opts: httpx.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def dynamic_profile(opts):
+		screenshot = httpx._get_opt_value(
+			opts,
+			'screenshot',
+			opts_conf=dict(httpx.opts, **httpx.meta_opts),
+			opt_prefix='httpx'
+		)
+		return 'cpu' if screenshot is True else 'io'
 
 	@staticmethod
 	def on_init(self):

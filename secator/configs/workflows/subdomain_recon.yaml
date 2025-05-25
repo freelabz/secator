@@ -5,39 +5,72 @@ description: Subdomain discovery
 tags: [recon, dns, takeovers]
 input_types:
   - host
+
+options:
+  probe:
+    is_flag: True
+    help: Probe domain and subdomains (HTTP)
+    default: True
+    internal: True
+
+  brute_http:
+    is_flag: True
+    help: Bruteforce subdomains with HTTP Host header (ffuf)
+    short: bhttp
+    default: False
+
+  brute_dns:
+    is_flag: True
+    help: Bruteforce subdomains with DNS queries (dnsx)
+    short: bdns
+    default: False
+
 tasks:
   _group/1:
     subfinder:
       description: List subdomains (passive)
-    # dnsx:
-    #   description: Bruteforce subdomains (DNS)
-    #   subdomains_only: True
-    #   wordlist: combined_subdomains
+
+    dnsx:
+      description: Bruteforce subdomains (DNS)
+      subdomains_only: True
+      wordlist: combined_subdomains
+      if: opts.brute_dns
+
+    httpx:
+      description: Run HTTP probe on domain
+      targets_:
+      - target.name
+      if: opts.probe or opts.brute_http
+
   ffuf:
     description: Bruteforce subdomains (Host header)
     header: "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
     fuzz_host_header: True
     auto_calibration: True
     wordlist: combined_subdomains
+    stop_on_error: True
     targets_:
-    - type: target
-      field: 'http://{name}'
-    - type: target
-      field: 'https://{name}'
+    - type: url
+      field: url
+    if: opts.brute_http
+
   _group/2:
     dnsx:
-      description: Check if subdomains are alive (DNS)
+      description: Check if subdomains actually exist (DNS)
       subdomains_only: True
       targets_:
       - subdomain.host
+
     nuclei:
       description: Check for subdomain takeovers
       targets_:
       - target.name
       - subdomain.host
       tags: [takeover, dns]
+
     httpx:
       description: Run HTTP probes on subdomains
       targets_:
       - target.name
       - subdomain.host
+      if: opts.probe

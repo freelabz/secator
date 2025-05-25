@@ -1,30 +1,29 @@
-import glob
+import yaml
 
 from collections import OrderedDict
+from dotmap import DotMap
 from pathlib import Path
 
-import yaml
-from dotmap import DotMap
-
-from secator.config import CONFIG, CONFIGS_FOLDER
-from secator.rich import console
-from secator.utils import convert_functions_to_strings, debug
 from secator.output_types import Error
-
-TEMPLATES = []
+from secator.rich import console
+from secator.utils import convert_functions_to_strings
 
 
 class TemplateLoader(DotMap):
 
 	def __init__(self, input={}, name=None, **kwargs):
 		if name:
-			if '/' not in name:
+			split = name.split('/')
+			if len(split) != 2:
 				console.print(Error(message=f'Cannot load {name}: you should specify a type for the template when loading by name (e.g. workflow/<workflow_name>)'))  # noqa: E501
 				return
-			_type, name = name.split('/')
-			config = next((p for p in TEMPLATES if p['type'] == _type and p['name'] == name in str(p)), None)
+			_type, _name = tuple(split)
+			if _type.endswith('s'):
+				_type = _type[:-1]
+			from secator.loader import find_templates
+			config = next((p for p in find_templates() if p['type'] == _type and p['name'] == _name), None)
 			if not config:
-				console.print(Error(message=f'Template {name} not found in loaded templates'))
+				console.print(Error(message=f'Template {_type}/{_name} not found in loaded templates'))
 				config = {}
 		elif isinstance(input, dict):
 			config = input
@@ -35,9 +34,6 @@ class TemplateLoader(DotMap):
 			config = self._load(input)
 		super().__init__(config, **kwargs)
 
-	def add_to_templates(self):
-		TEMPLATES.append(self)
-
 	def _load_from_path(self, path):
 		if not path.exists():
 			console.print(Error(message=f'Config path {path} does not exists'))
@@ -47,16 +43,6 @@ class TemplateLoader(DotMap):
 
 	def _load(self, input):
 		return yaml.load(input, Loader=yaml.Loader)
-
-	@property
-	def supported_opts(self):
-		"""Property to access supported options easily."""
-		return self._collect_supported_opts()
-
-	@property
-	def flat_tasks(self):
-		"""Property to access tasks easily."""
-		return self._extract_tasks()
 
 	def print(self):
 		"""Print config as highlighted yaml."""
@@ -69,10 +55,29 @@ class TemplateLoader(DotMap):
 		yaml_highlight = Syntax(yaml_str, 'yaml', line_numbers=True)
 		console.print(yaml_highlight)
 
+	# TODO: deprecate
+	@property
+	def supported_opts(self):
+		"""Property to access supported options easily."""
+		return self._collect_supported_opts()
+
+	# TODO: deprecate
+	@property
+	def flat_tasks(self):
+		"""Property to access tasks easily."""
+		return self._extract_tasks()
+
+	# TODO: deprecate
 	def _collect_supported_opts(self):
-		"""Collect supported options from the tasks extracted from the config."""
+		"""Collect supported options from the tasks and workflows extracted from the config."""
 		tasks = self._extract_tasks()
-		opts = {}
+		workflows = self._extract_workflows()
+		opts = self.options.toDict()
+		for wf_name, workflow in workflows.items():
+			for k, v in workflow.options.toDict().items():
+				if k not in opts or not opts[k].get('supported', False):
+					opts[k] = convert_functions_to_strings(v)
+					opts[k]['meta'] = wf_name
 		for _, task_info in tasks.items():
 			task_class = task_info['class']
 			if task_class:
@@ -82,6 +87,7 @@ class TemplateLoader(DotMap):
 						opts[name] = convert_functions_to_strings(conf)
 		return opts
 
+	# TODO: deprecate
 	def _extract_tasks(self):
 		"""Extract tasks from any workflow or scan config.
 
@@ -95,7 +101,8 @@ class TemplateLoader(DotMap):
 			for key, value in config.items():
 				if key.startswith('_group'):
 					parse_config(value, prefix)
-				elif value:
+				else:
+					value = value or TemplateLoader()
 					task_name = f'{prefix}/{key}' if prefix else key
 					name = key.split('/')[0]
 					if task_name not in tasks:
@@ -109,41 +116,24 @@ class TemplateLoader(DotMap):
 			tasks[self.name] = {'name': self.name, 'class': Task.get_task_class(self.name)}
 
 		elif self.type == 'scan':
-			# For each workflow in the scan, load it and incorporate it with a unique prefix
-			for wf_name, _ in self.workflows.items():
-				name = wf_name.split('/')[0]
-				config = TemplateLoader(name=f'workflow/{name}')
+			workflows = self._extract_workflows()
+			for wf_name, config in workflows.items():
 				wf_tasks = config.flat_tasks
-				# Prefix tasks from this workflow with its name to prevent collision
 				for task_key, task_val in wf_tasks.items():
-					unique_task_key = f"{wf_name}/{task_key}"  # Append workflow name to task key
+					unique_task_key = f"{wf_name}/{task_key}"  # prefix task with workflow name
 					tasks[unique_task_key] = task_val
 
 		elif self.type == 'workflow':
-			# Normal parsing of a workflow
 			parse_config(self.tasks)
 
 		return dict(tasks)
 
-
-def find_templates():
-	results = []
-	dirs = [CONFIGS_FOLDER]
-	if CONFIG.dirs.templates:
-		dirs.append(CONFIG.dirs.templates)
-	paths = []
-	for dir in dirs:
-		config_paths = [
-			Path(path)
-			for path in glob.glob(str(dir).rstrip('/') + '/**/*.y*ml', recursive=True)
-		]
-		debug(f'Found {len(config_paths)} templates in {dir}', sub='template')
-		paths.extend(config_paths)
-	for path in paths:
-		config = TemplateLoader(input=path)
-		debug(f'Loaded template from {path}', sub='template')
-		results.append(config)
-	return results
-
-
-TEMPLATES = find_templates()
+	# TODO: deprecate
+	def _extract_workflows(self):
+		"""Extract workflows from the config."""
+		workflows = OrderedDict()
+		for wf_name, _ in self.workflows.items():
+			name = wf_name.split('/')[0]
+			config = TemplateLoader(name=f'workflow/{name}')
+			workflows[wf_name] = config
+		return workflows

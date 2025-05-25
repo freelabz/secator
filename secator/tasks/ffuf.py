@@ -20,8 +20,9 @@ FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
 	cmd = 'ffuf -noninteractive'
-	tags = ['url', 'fuzz']
 	input_types = [URL]
+	output_types = [Url, Progress]
+	tags = ['url', 'fuzz']
 	input_flag = '-u'
 	input_chunk_size = 1
 	file_flag = None
@@ -34,6 +35,7 @@ class ffuf(HttpFuzzer):
 	opts = {
 		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Auto-calibration'},
 		'recursion': {'is_flag': True, 'default': False, 'short': 'recursion', 'help': 'Recursion'},
+		'stop_on_error': {'is_flag': True, 'default': False, 'short': 'soe', 'help': 'Stop on error'},
 		'fuzz_host_header': {'is_flag': True, 'default': False, 'internal': True, 'short': 'fhh', 'help': 'Fuzz host header'},
 	}
 	opt_key_map = {
@@ -61,8 +63,8 @@ class ffuf(HttpFuzzer):
 		# ffuf opts
 		WORDLIST: 'w',
 		AUTO_CALIBRATION: 'ac',
+		'stop_on_error': 'sa',
 	}
-	output_types = [Url, Progress]
 	output_map = {
 		Url: {
 			STATUS_CODE: 'status',
@@ -94,17 +96,16 @@ class ffuf(HttpFuzzer):
 	@staticmethod
 	def on_cmd_opts(self, opts):
 		# Fuzz host header
-		if self.get_opt_value('fuzz_host_header'):
-			if len(self.inputs) > 0:  # for dry-run
-				host = self.inputs[0].split('://')[1].split('/')[0]
-				opts['header']['value']['Host'] = f'FUZZ.{host}'
+		if self.get_opt_value('fuzz_host_header') and 'http://' in self.inputs[0]:
+			host = self.inputs[0].split('://')[1].split('/')[0]
+			opts['header']['value']['Host'] = f'FUZZ.{host}'
 		self.headers = opts['header']['value'].copy()
 
 		# Check FUZZ keyword
 		data = self.get_opt_value('data') or ''
 		headers = self.get_opt_value('header')
 		if not len(self.inputs) > 1 and 'FUZZ' not in self.inputs[0] and 'FUZZ' not in headers and 'FUZZ' not in data:
-			self._print(Warning(message='Keyword FUZZ is not present in the URL, header or body'), rich=True)
+			self.add_result(Warning(message='Keyword FUZZ is not present in the URL, header or body'), print=True, output=True)
 
 		return opts
 
