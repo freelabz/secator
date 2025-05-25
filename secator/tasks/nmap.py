@@ -27,7 +27,6 @@ class nmap(VulnMulti):
 	input_types = [HOST, IP]
 	output_types = [Port, Vulnerability, Exploit]
 	tags = ['port', 'scan']
-	input_flag = None
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
