@@ -21,8 +21,9 @@ DALFOX_TYPE_MAP = {
 class dalfox(VulnHttp):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox'
-	tags = ['url', 'fuzz']
 	input_types = [URL]
+	output_types = [Vulnerability, Url]
+	tags = ['url', 'fuzz']
 	input_flag = 'url'
 	file_flag = 'file'
 	# input_chunk_size = 1
@@ -41,7 +42,6 @@ class dalfox(VulnHttp):
 		USER_AGENT: 'user-agent'
 	}
 	item_loaders = [JSONSerializer()]
-	output_types = [Vulnerability, Url]
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: None,

@@ -3,6 +3,7 @@ import unittest
 import warnings
 from time import sleep
 
+from secator.loader import discover_tasks
 from secator.rich import console
 from secator.runners import Command
 from secator.utils import merge_opts
@@ -37,7 +38,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		opts = META_OPTS.copy()
 		extra_opts = {
 			'dirsearch.filter_size': 1987,
-			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
+			'dnsx.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
 			'arjun.wordlist': False,
@@ -71,7 +72,13 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['testssl.output_path']
 		del opts['timeout']
 
-		for cls in TEST_TASKS:
+		failures = []
+
+		tasks = discover_tasks()
+		test_tasks_names = [t.name for t in TEST_TASKS]
+		TASKS = [t for t in tasks if t.__name__ in test_tasks_names]
+
+		for cls in TASKS:
 			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
 				continue
 			with self.subTest(name=cls.__name__):
@@ -83,10 +90,16 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 					continue
 				outputs = OUTPUTS_TASKS.get(cls.__name__, [])
 				task = cls(input, **opts)
-				self._test_runner_output(
-					task,
-					expected_output_types=cls.output_types,
-					expected_results=outputs,
-					empty_results_allowed=False,
-					additional_checks=OUTPUTS_CHECKS
-				)
+				try:
+					self._test_runner_output(
+						task,
+						expected_output_types=cls.output_types,
+						expected_results=outputs,
+						empty_results_allowed=False,
+						additional_checks=OUTPUTS_CHECKS
+					)
+				except AssertionError as e:
+					failures.append(f'ERROR ({cls.__name__}): {e}')
+
+		if failures:
+			raise AssertionError("\n\n" + "\n\n".join(failures))

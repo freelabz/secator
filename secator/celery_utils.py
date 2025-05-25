@@ -5,6 +5,7 @@ import kombu
 import kombu.exceptions
 
 from celery.result import AsyncResult, GroupResult
+from celery.exceptions import TaskRevokedError
 from greenlet import GreenletExit
 from rich.panel import Panel
 from rich.padding import Padding
@@ -238,13 +239,18 @@ class CeleryData(object):
 		info = res.info
 
 		# Depending on the task state, info will be either an Exception (FAILURE), a list (SUCCESS), or a dict (RUNNING).
-		# - If it's an Exception, it's an unhandled error.
+		# - If it's an Exception, it's a TaskRevokedError or an unhandled error.
 		# - If it's a list, it's the task results.
 		# - If it's a dict, it's the custom user metadata.
 
 		if isinstance(info, Exception):
-			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
-			raise info
+			if isinstance(info, TaskRevokedError):
+				data['results'] = [Error(message='Task was revoked', _source=data['name'])]
+				data['state'] = 'REVOKED'
+				data['ready'] = True
+			else:
+				debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
+				raise info
 
 		elif isinstance(info, list):
 			data['results'] = info

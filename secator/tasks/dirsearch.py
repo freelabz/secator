@@ -20,8 +20,9 @@ DIRSEARCH_PROGRESS_FIELDS = ['percent', 'reqs_current', 'req_total', 'rps', 'job
 class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
 	cmd = 'dirsearch'
-	tags = ['url', 'fuzz']
 	input_types = [URL]
+	output_types = [Url]
+	tags = ['url', 'fuzz']
 	input_flag = '-u'
 	file_flag = '-l'
 	json_flag = '-O json'

@@ -9,13 +9,13 @@ from secator.runners import Task
 from secator.output_types import Port, Url
 from secator.definitions import DEBUG
 from secator.runners import Command, Workflow
-from secator.utils import setup_logging, merge_opts
-from secator.utils_test import TEST_WORKFLOWS, ALL_WORKFLOWS, CommandOutputTester, load_fixture
+from secator.utils import setup_logging
+from secator.utils_test import TEST_WORKFLOWS, get_configs_by_type, CommandOutputTester, load_fixture
 from tests.integration.inputs import INPUTS_WORKFLOWS
 from tests.integration.outputs import OUTPUTS_WORKFLOWS
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
-level = logging.DEBUG if DEBUG > 0 else logging.INFO
+level = logging.DEBUG if DEBUG == ["1"] else logging.INFO
 setup_logging(level)
 
 
@@ -54,12 +54,6 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 		)
 
 	def test_default_workflows(self):
-		fmt_opts = {
-			'print_item': DEBUG > 1,
-			'print_line': DEBUG > 2,
-			'table': DEBUG > 1,
-			'output': 'table' if DEBUG > 1 else ''
-		}
 		opts = {
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
@@ -76,7 +70,6 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 			'depth': 2,
 			'ports': '9999,3000,8080'
 		}
-		opts = merge_opts(opts, fmt_opts)
 
 		for conf in TEST_WORKFLOWS:
 			with self.subTest(name=conf.name):
@@ -89,7 +82,7 @@ class TestWorkflows(unittest.TestCase, CommandOutputTester):
 
 	def test_inline_workflow(self):
 		# Ignore if TEST_WORKFLOWS are defined
-		if TEST_WORKFLOWS != ALL_WORKFLOWS:
+		if get_configs_by_type('workflow') != TEST_WORKFLOWS:
 			return
 
 		# Expected results / context

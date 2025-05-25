@@ -90,3 +90,4 @@ class wpprobe(Command):
                                 matched_at=url,
                                 confidence='high'
                             )
+

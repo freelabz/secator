@@ -11,10 +11,11 @@ from secator.serializers import FileSerializer
 class h8mail(OSInt):
 	"""Email information and password lookup tool."""
 	cmd = 'h8mail'
+	input_types = [EMAIL]
+	output_types = [UserAccount]
 	tags = ['user', 'recon', 'email']
 	json_flag = '--json '
 	input_flag = '--targets'
-	input_types = [EMAIL]
 	item_loaders = [FileSerializer(output_flag='--json')]
 	file_flag = '-domain'
 	version_flag = '--help'

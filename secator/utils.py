@@ -1,6 +1,6 @@
 import fnmatch
-import inspect
 import importlib
+import ipaddress
 import itertools
 import json
 import logging
@@ -15,9 +15,7 @@ import warnings
 
 from datetime import datetime, timedelta
 from functools import reduce
-from inspect import isclass
 from pathlib import Path
-from pkgutil import iter_modules
 from time import time
 import traceback
 from urllib.parse import urlparse, quote
@@ -26,7 +24,8 @@ import humanize
 import ifaddr
 import yaml
 
-from secator.definitions import (DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
+from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE, IP, HOST, CIDR_RANGE,
+								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
@@ -146,75 +145,6 @@ def deduplicate(array, attr=None):
 	return sorted(list(dict.fromkeys(array)))
 
 
-def discover_internal_tasks():
-	"""Find internal secator tasks."""
-	from secator.runners import Runner
-	package_dir = Path(__file__).resolve().parent / 'tasks'
-	task_classes = []
-	for (_, module_name, _) in iter_modules([str(package_dir)]):
-		if module_name.startswith('_'):
-			continue
-		try:
-			module = importlib.import_module(f'secator.tasks.{module_name}')
-		except ImportError as e:
-			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
-			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
-			continue
-		for attribute_name in dir(module):
-			attribute = getattr(module, attribute_name)
-			if isclass(attribute):
-				bases = inspect.getmro(attribute)
-				if Runner in bases and hasattr(attribute, '__task__'):
-					task_classes.append(attribute)
-
-	# Sort task_classes by category
-	task_classes = sorted(
-		task_classes,
-		# key=lambda x: (get_command_category(x), x.__name__)
-		key=lambda x: x.__name__)
-
-	return task_classes
-
-
-def discover_external_tasks():
-	"""Find external secator tasks."""
-	output = []
-	sys.dont_write_bytecode = True
-	for path in CONFIG.dirs.templates.glob('**/*.py'):
-		try:
-			task_name = path.stem
-			module_name = f'secator.tasks.{task_name}'
-
-			# console.print(f'Importing module {module_name} from {path}')
-			spec = importlib.util.spec_from_file_location(module_name, path)
-			module = importlib.util.module_from_spec(spec)
-			# console.print(f'Adding module "{module_name}" to sys path')
-			sys.modules[module_name] = module
-
-			# console.print(f'Executing module "{module}"')
-			spec.loader.exec_module(module)
-
-			# console.print(f'Checking that {module} contains task {task_name}')
-			if not hasattr(module, task_name):
-				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
-				continue
-			cls = getattr(module, task_name)
-			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
-			output.append(cls)
-		except Exception as e:
-			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
-	sys.dont_write_bytecode = False
-	return output
-
-
-def discover_tasks():
-	"""Find all secator tasks (internal + external)."""
-	global _tasks
-	if not _tasks:
-		_tasks = discover_internal_tasks() + discover_external_tasks()
-	return _tasks
-
-
 def import_dynamic(path, name=None):
 	"""Import class or module dynamically from path.
 
@@ -242,22 +172,6 @@ def import_dynamic(path, name=None):
 			path += f'.{name}'
 		warnings.warn(f'"{path}" not found.', category=UserWarning, stacklevel=2)
 		return None
-
-
-def get_command_cls(cls_name):
-	"""Get secator command by class name.
-
-	Args:
-		cls_name (str): Class name to load.
-
-	Returns:
-		cls: Class.
-	"""
-	tasks_classes = discover_tasks()
-	for task_cls in tasks_classes:
-		if task_cls.__name__ == cls_name:
-			return task_cls
-	return None
 
 
 def get_command_category(command):
@@ -419,7 +333,7 @@ def format_debug_object(obj, obj_breaklines=False):
 	"""
 	sep = '\n ' if obj_breaklines else ', '
 	if isinstance(obj, dict):
-		return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
+		return sep.join(f'[bold blue]{k}[/] [yellow]->[/] [blue]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
 	elif isinstance(obj, list):
 		return f'[dim green]{sep.join(obj)}[/]'
 	return ''
@@ -427,12 +341,11 @@ def format_debug_object(obj, obj_breaklines=False):
 
 def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
 	"""Print debug log if DEBUG >= level."""
-	if not DEBUG_COMPONENT == ['all'] and not DEBUG_COMPONENT == ['1']:
-		if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
+	if not DEBUG == ['all'] and not DEBUG == ['1']:
+		if not DEBUG or DEBUG == [""]:
 			return
-
 		if sub:
-			for s in DEBUG_COMPONENT:
+			for s in DEBUG:
 				if '*' in s and re.match(s + '$', sub):
 					break
 				elif not verbose and sub.startswith(s):
@@ -458,10 +371,10 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 		formatted_msg += rf' [italic gray11]\[{id}][/]'
 
 	try:
-		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]')
+		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]', highlight=False)
 	except Exception:
-		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]')
-		if 'rich' in DEBUG_COMPONENT:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]', highlight=False)  # noqa: E501
+		if 'rich' in DEBUG:
 			raise
 
 
@@ -524,9 +437,9 @@ def extract_domain_info(input, domain_only=False):
 	if not result or not result.domain or not result.suffix:
 		return None
 	if domain_only:
-		if not validators.domain(result.registered_domain):
+		if not validators.domain(result.top_domain_under_public_suffix):
 			return None
-		return result.registered_domain
+		return result.top_domain_under_public_suffix
 	return result
 
 
@@ -804,15 +717,12 @@ def process_wordlist(val):
 	if template_wordlist:
 		val = template_wordlist
 
-	if Path(val).exists():
-		return val
-	else:
-		return download_file(
-			val,
-			target_folder=CONFIG.dirs.wordlists,
-			offline_mode=CONFIG.offline_mode,
-			type='wordlist'
-		)
+	return download_file(
+		val,
+		target_folder=CONFIG.dirs.wordlists,
+		offline_mode=CONFIG.offline_mode,
+		type='wordlist'
+	)
 
 
 def convert_functions_to_strings(data):
@@ -852,3 +762,64 @@ def format_object(obj, color='magenta', skip_keys=[]):
 		if obj:
 			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
 	return ''
+
+
+def autodetect_type(target):
+	"""Autodetect the type of a target.
+
+	Args:
+		target (str): The target to autodetect the type of.
+
+	Returns:
+		str: The type of the target.
+	"""
+	if validators.url(target, simple_host=True):
+		return URL
+	elif validate_cidr_range(target):
+		return CIDR_RANGE
+	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
+		return IP
+	elif validators.domain(target):
+		return HOST
+	elif validators.domain(target.split(':')[0]):
+		return HOST_PORT
+	elif validators.mac_address(target):
+		return MAC_ADDRESS
+	elif validators.email(target):
+		return EMAIL
+	elif validators.iban(target):
+		return IBAN
+	elif validators.uuid(target):
+		return UUID
+	elif Path(target).exists():
+		return PATH
+	elif validators.slug(target):
+		return SLUG
+
+	return str(type(target).__name__).lower()
+
+
+def validate_cidr_range(target):
+	if '/' not in target:
+		return False
+	try:
+		ipaddress.ip_network(target, False)
+		return True
+	except ValueError:
+		return False
+
+
+def get_versions_from_string(string):
+	"""Get versions from a string.
+
+	Args:
+		string (str): String to get versions from.
+
+	Returns:
+		list[str]: List of versions.
+	"""
+	regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
+	matches = re.findall(regex, string)
+	if not matches:
+		return []
+	return matches

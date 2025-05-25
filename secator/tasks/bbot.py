@@ -183,10 +183,11 @@ def output_discriminator(self, item):
 class bbot(Command):
 	"""Multipurpose scanner."""
 	cmd = 'bbot -y --allow-deadly --force'
+	input_types = [HOST, IP, URL, PORT, ORG_NAME, USERNAME, FILENAME]
+	output_types = [Vulnerability, Port, Url, Record, Ip]
 	tags = ['vuln', 'scan']
 	json_flag = '--json'
 	input_flag = '-t'
-	input_types = [HOST, IP, URL, PORT, ORG_NAME, USERNAME, FILENAME]
 	file_flag = None
 	version_flag = '--help'
 	opts = {
@@ -203,7 +204,6 @@ class bbot(Command):
 		'presets': lambda x: ' '.join(x.split(','))
 	}
 	item_loaders = [JSONSerializer()]
-	output_types = [Vulnerability, Port, Url, Record, Ip]
 	output_discriminator = output_discriminator
 	output_map = {
 		Ip: {
@@ -350,7 +350,7 @@ class bbot(Command):
 			name = path.as_posix().split('/')[-1]
 			secator_path = f'{self.reports_folder}/.outputs/{name}'
 			yield Info(f'Copying screenshot {path} to {secator_path}')
-			shutil.copy(path, secator_path)
+			shutil.copyfile(path, secator_path)
 			item['data']['path'] = secator_path
 
 		yield item

@@ -83,40 +83,38 @@ OUTPUTS_TASKS = {
     ],
     'dnsx': [
         Record(
-            name='ns0.wikimedia.org',
-            type='NS',
-            host='wikipedia.org',
-            _source='dnsx'
-		),
-        Record(
-            name='host',
-            type='AXFR',
-            host='wikipedia.org',
-            _source='dnsx'
-		),
-        Record(
-            name= "wikipedia.org",
-            type= "SOA",
-            host= "wikipedia.org",
+            name= "dyna.wikimedia.org",
+            type= "CNAME",
+            host= "be.wikipedia.org",
             _source= "dnsx"
 		),
         Record(
-            name='digicert.com',
-            type='CAA',
-            host='wikipedia.org',
-            _source='dnsx'
+            name= "be.wikipedia.org",
+            type= "AXFR",
+            host= "be.wikipedia.org",
+            _source= "dnsx"
 		),
         Record(
-            name='v=spf1 include:_cidrs.wikimedia.org ~all',
-            type='TXT',
-            host='wikipedia.org',
-            _source='dnsx'
+            name= "wikimedia.org",
+            type= "SOA",
+            host= "be.wikipedia.org",
+            _source= "dnsx"
 		),
-	],
-    'dnsxbrute': [
-        Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
-        Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
-		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+        # Record(
+        #     name='digicert.com',
+        #     type='CAA',
+        #     host='wikipedia.org',
+        #     _source='dnsx'
+		# ),
+        # Record(
+        #     name='v=spf1 include:_cidrs.wikimedia.org ~all',
+        #     type='TXT',
+        #     host='wikipedia.org',
+        #     _source='dnsx'
+		# ),
+        Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
+        Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
+		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
 	],
     'dalfox': [
         Vulnerability(

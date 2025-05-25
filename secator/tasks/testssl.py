@@ -15,8 +15,9 @@ from secator.serializers import FileSerializer
 class testssl(Command):
     """SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
     cmd = 'testssl.sh'
-    tags = ['dns', 'recon', 'tls']
     input_types = [HOST]
+    output_types = [Certificate, Vulnerability, Ip, Tag]
+    tags = ['dns', 'recon', 'tls']
     input_flag = None
     json_flag = '--jsonfile'
     file_flag = '-iL'
@@ -45,7 +46,6 @@ class testssl(Command):
         'ipv6': '-6',
     }
     item_loaders = [FileSerializer(output_flag='--jsonfile')]
-    output_types = [Certificate, Vulnerability, Ip, Tag]
     proxy_http = True
     proxychains = False
     proxy_socks5 = False

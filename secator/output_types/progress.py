@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, format_object
 
 
 @dataclass
@@ -20,7 +20,7 @@ class Progress(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = ['percent', 'duration']
+	_table_fields = ['percent']
 	_sort_by = ('percent',)
 
 	def __post_init__(self):
@@ -32,9 +32,7 @@ class Progress(OutputType):
 		return f'{self.percent}%'
 
 	def __repr__(self) -> str:
-		s = f'[dim]⏳ {self.percent}% ' + '█' * (self.percent // 10) + '[/]'
-		if self.errors:
-			s += f' [dim red]errors={self.errors}[/]'
-		ed = ' '.join([f'{k}={v}' for k, v in self.extra_data.items() if k != 'startedAt' and v])
-		s += f' [dim yellow]{ed}[/]'
+		s = f'[dim]⏳ [bold]{self.percent}%[/] ' + '█' * (self.percent // 10) + '[/]'
+		ed = format_object(self.extra_data, color='yellow3', skip_keys=['startedAt'])
+		s += f'[dim]{ed}[/]'
 		return rich_to_ansi(s)

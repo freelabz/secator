@@ -24,6 +24,7 @@ from secator.definitions import OPT_NOT_SUPPORTED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
+from secator.utils import get_versions_from_string
 
 
 class InstallerStatus(Enum):
@@ -421,14 +422,11 @@ def get_version(version_cmd):
 		tuple[str]: Version string, return code.
 	"""
 	from secator.runners import Command
-	import re
-	regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
-	match = re.findall(regex, ret.output)
-	if not match:
-		console.print(Warning(message=f'Failed to find version in version command output. Command: {version_cmd}; Output: {ret.output}; Return code: {ret.return_code}'))  # noqa: E501
+	versions = get_versions_from_string(ret.output)
+	if not versions:
 		return None
-	return match[0]
+	return versions[0]
 
 
 def parse_version(ver):
@@ -566,6 +564,7 @@ def get_distro_config():
 
 	if system == "Linux":
 		distrib = distro.like() or distro.id()
+		distrib = distrib.split(' ')[0] if distrib else None
 
 		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
 			installer = "apt install -y --no-install-recommends"

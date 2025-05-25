@@ -3,9 +3,8 @@ import yaml
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (THREADS, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
-								DOCKER_IMAGE, PATH, GIT_REPOSITORY, PROXY, RATE_LIMIT, RETRIES, TIMEOUT,
-								USER_AGENT)
+from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
+								PATH, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT, STRING, URL)
 from secator.serializers.file import FileSerializer
 from secator.tasks._categories import Vuln
 from secator.output_types import Vulnerability, Tag
@@ -15,9 +14,10 @@ from secator.output_types import Vulnerability, Tag
 class trivy(Vuln):
 	"""Comprehensive and versatile security scanner."""
 	cmd = 'trivy'
+	input_types = [PATH, URL, STRING]
+	output_types = [Tag, Vulnerability]
 	tags = ['vuln', 'scan']
-	input_flag = None
-	input_types = [DOCKER_IMAGE, PATH, GIT_REPOSITORY]
+	input_chunk_size = 1
 	json_flag = '-f json'
 	version_flag = '--version'
 	opts = {
@@ -35,7 +35,6 @@ class trivy(Vuln):
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
 	item_loaders = [FileSerializer(output_flag='-o')]
-	output_types = [Tag, Vulnerability]
 	install_version = 'v0.61.1'
 	install_cmd = (
 		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'
