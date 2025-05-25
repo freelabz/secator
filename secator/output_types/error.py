@@ -22,7 +22,7 @@ class Error(OutputType):
 
 	def from_exception(e, **kwargs):
 		errtype = type(e).__name__
-		message = errtype
+		message = kwargs.pop('message', errtype)
 		if str(e):
 			message += f': {str(e)}'
 		traceback = traceback_as_string(e) if errtype not in ['KeyboardInterrupt', 'GreenletExit'] else ''
