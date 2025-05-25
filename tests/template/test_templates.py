@@ -1,6 +1,6 @@
 import io
 import unittest
-from secator.cli import ALL_SCANS, ALL_WORKFLOWS, ALL_TASKS
+from secator.loader import get_configs_by_type, discover_tasks
 from secator.runners import Workflow, Scan
 from secator.workflows import DYNAMIC_WORKFLOWS
 from secator.scans import DYNAMIC_SCANS
@@ -13,7 +13,7 @@ class TestTemplates(unittest.TestCase):
 
 	def test_tasks(self):
 		console.print('')
-		for task in ALL_TASKS:
+		for task in discover_tasks():
 			with self.subTest(name=task.__name__):
 				console.print(f'\tTesting task {task.__name__} ...', end='')
 				with io.StringIO() as buffer, redirect_stdout(buffer), redirect_stderr(buffer):
@@ -23,7 +23,7 @@ class TestTemplates(unittest.TestCase):
 
 	def test_workflows(self):
 		console.print('')
-		for workflow in ALL_WORKFLOWS:
+		for workflow in get_configs_by_type('workflow'):
 			with self.subTest(name=workflow.name):
 				console.print(f'\tTesting workflow {workflow.name} ...', end='')
 				with io.StringIO() as buffer, redirect_stdout(buffer), redirect_stderr(buffer):
@@ -33,7 +33,7 @@ class TestTemplates(unittest.TestCase):
 
 	def test_scans(self):
 		console.print('')
-		for scan in ALL_SCANS:
+		for scan in get_configs_by_type('scan'):
 			with self.subTest(name=scan.name):
 				console.print(f'\tTesting scan {scan.name} ...', end='')
 				with io.StringIO() as buffer, redirect_stdout(buffer), redirect_stderr(buffer):

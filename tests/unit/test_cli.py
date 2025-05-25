@@ -209,8 +209,9 @@ class TestCli(unittest.TestCase):
 				assert not result.exception
 				assert result.exit_code == 0
 
-	@mock.patch('secator.cli.ALL_TASKS', [])  # Mock empty tasks list to avoid actual tool installation
-	def test_install_tools_command(self):
+	@mock.patch('secator.loader.get_configs_by_type')
+	def test_install_tools_command(self, mock_get_configs_by_type):
+		mock_get_configs_by_type.return_value = []
 		result = self.runner.invoke(cli, ['install', 'tools'])
 		assert result.exit_code == 1
 		assert 'Cannot run this command in offline mode' in result.output
