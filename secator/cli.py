@@ -141,10 +141,11 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 	# Check broken / backend addon is installed
 	broker_protocol = CONFIG.celery.broker_url.split('://')[0]
 	backend_protocol = CONFIG.celery.result_backend.split('://')[0]
-	if CONFIG.celery.broker_url:
-		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
-			console.print(Error(message='Missing redis addon: please run "secator install addons redis".'))
-			sys.exit(1)
+	if CONFIG.celery.broker_url and \
+	   (broker_protocol == 'redis' or backend_protocol == 'redis') and \
+	   not ADDONS_ENABLED['redis']:
+		console.print(Error(message='Missing redis addon: please run "secator install addons redis".'))
+		sys.exit(1)
 
 	# Debug Celery config
 	from secator.celery import app, is_celery_worker_alive

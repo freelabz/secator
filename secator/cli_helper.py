@@ -128,7 +128,7 @@ def get_command_options(config):
 		# TODO: rework this as this ignores subsequent tasks of the same task class
 		task_config_opts = {}
 		if config.type != 'task':
-			for k, v in tasks.items():
+			for _, v in tasks.items():
 				if v['class'] == cls:
 					task_config_opts = v['opts']
 
@@ -280,7 +280,7 @@ def register_runner(cli_endpoint, config):
 	# 		for i in range(0, len(ctx.args), 2)
 	# 	}
 
-	@click.argument(input_types_str, required=input_required)
+	@click.argument('inputs', metavar=input_types_str, required=input_required)
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, **opts):
@@ -297,7 +297,7 @@ def register_runner(cli_endpoint, config):
 		ctx.obj['dry_run'] = dry_run
 
 		# Show version
-		if version:
+		if version and cli_endpoint.name == 'task':
 			data = task_cls.get_version_info()
 			current = data['version']
 			latest = data['latest_version']
@@ -324,14 +324,13 @@ def register_runner(cli_endpoint, config):
 		# opts.update(unknown_opts)
 
 		# Expand input
-		inputs = opts.pop(input_types_str)
+		inputs = opts.pop('inputs')
 		inputs = expand_input(inputs, ctx)
 
 		# Build hooks from driver name
 		hooks = []
 		drivers = driver.split(',') if driver else []
 		supported_drivers = ['mongodb', 'gcs']
-		actual_drivers = []
 		for driver in drivers:
 			if driver in supported_drivers:
 				if not ADDONS_ENABLED[driver]:
@@ -343,7 +342,6 @@ def register_runner(cli_endpoint, config):
 					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
 					sys.exit(1)
 				hooks.append(driver_hooks)
-				actual_drivers.append(driver)
 			else:
 				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
 				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
@@ -365,10 +363,11 @@ def register_runner(cli_endpoint, config):
 				sync = False
 				broker_protocol = CONFIG.celery.broker_url.split('://')[0]
 				backend_protocol = CONFIG.celery.result_backend.split('://')[0]
-				if CONFIG.celery.broker_url:
-					if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
-						_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
-						sys.exit(1)
+				if CONFIG.celery.broker_url and \
+				   (broker_protocol == 'redis' or backend_protocol == 'redis') \
+				   and not ADDONS_ENABLED['redis']:
+					_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
+					sys.exit(1)
 
 		from secator.utils import debug
 		debug('Run options', obj=opts, sub='cli')

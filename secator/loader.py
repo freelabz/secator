@@ -82,6 +82,7 @@ def discover_internal_tasks():
 def discover_external_tasks():
 	"""Find external secator tasks."""
 	output = []
+	prev_state = sys.dont_write_bytecode
 	sys.dont_write_bytecode = True
 	for path in CONFIG.dirs.templates.glob('**/*.py'):
 		try:
@@ -91,6 +92,9 @@ def discover_external_tasks():
 			# console.print(f'Importing module {module_name} from {path}')
 			spec = importlib.util.spec_from_file_location(module_name, path)
 			module = importlib.util.module_from_spec(spec)
+			if not spec:
+				console.print(f'[bold red]Could not load external module {path.name}: invalid import spec.[/] ({path})')
+				continue
 			# console.print(f'Adding module "{module_name}" to sys path')
 			sys.modules[module_name] = module
 
@@ -106,5 +110,5 @@ def discover_external_tasks():
 			output.append(cls)
 		except Exception as e:
 			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
-	sys.dont_write_bytecode = False
+	sys.dont_write_bytecode = prev_state
 	return output

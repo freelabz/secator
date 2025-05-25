@@ -7,7 +7,6 @@ from pathlib import Path
 TABLE_START_MARKER = "<!-- START_TOOLS_TABLE -->"
 TABLE_END_MARKER = "<!-- END_TOOLS_TABLE -->"
 README_FILENAME = "README.md"
-TASKS = discover_tasks()
 
 
 def get_tools_data():
@@ -26,7 +25,7 @@ def get_tools_data():
         'msfconsole': 'https://docs.rapid7.com/metasploit/msf-overview/',
         'searchsploit': 'https://gitlab.com/exploit-database/exploitdb'
     }
-    for task in TASKS:
+    for task in discover_tasks():
         url = task.install_github_handle
         if url:
             url = f'https://github.com/{url}'

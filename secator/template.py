@@ -13,14 +13,17 @@ class TemplateLoader(DotMap):
 
 	def __init__(self, input={}, name=None, **kwargs):
 		if name:
-			if '/' not in name:
+			split = name.split('/')
+			if len(split) != 2:
 				console.print(Error(message=f'Cannot load {name}: you should specify a type for the template when loading by name (e.g. workflow/<workflow_name>)'))  # noqa: E501
 				return
-			_type, name = name.split('/')
+			_type, _name = tuple(split)
+			if _type.endswith('s'):
+				_type = _type[:-1]
 			from secator.loader import find_templates
-			config = next((p for p in find_templates() if p['type'] == _type and p['name'] == name in str(p)), None)
+			config = next((p for p in find_templates() if p['type'] == _type and p['name'] == _name), None)
 			if not config:
-				console.print(Error(message=f'Template {name} not found in loaded templates'))
+				console.print(Error(message=f'Template {_type}/{_name} not found in loaded templates'))
 				config = {}
 		elif isinstance(input, dict):
 			config = input

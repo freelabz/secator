@@ -2,9 +2,6 @@ from secator.loader import get_configs_by_type
 from secator.runners import Workflow
 
 
-WORKFLOWS = get_configs_by_type('workflow')
-
-
 class DynamicWorkflow(Workflow):
 	def __init__(self, config):
 		self.config = config
@@ -24,7 +21,7 @@ class DynamicWorkflow(Workflow):
 
 
 DYNAMIC_WORKFLOWS = {}
-for workflow in WORKFLOWS:
+for workflow in get_configs_by_type('workflow'):
 	instance = DynamicWorkflow(workflow)
 	DYNAMIC_WORKFLOWS[workflow.name] = instance
 
