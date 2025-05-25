@@ -10,20 +10,25 @@ default_options:
   match_codes: 200,204,301,302,307,401,403,405,500
 
 options:
-  crawl_directories:
-    is_flag: True
-    help: Crawl found directories
-    default: False
-    short: cdir
+  fuzzers:
+    type: list
+    required: True
+    help: Fuzzers to use (dirsearch, feroxbuster, ffuf)
+    default: ['ffuf']
 
 tasks:
   _group:
-    # dirsearch:
-    #   description: Fuzz URLs
-    # feroxbuster:
-    #   description: Fuzz URLs
+    dirsearch:
+      description: Fuzz URLs
+      if: "'dirsearch' in opts.fuzzers"
+
+    feroxbuster:
+      description: Fuzz URLs
+      if: "'feroxbuster' in opts.fuzzers"
+
     ffuf:
       description: Fuzz URLs
+      if: "'ffuf' in opts.fuzzers"
       targets_:
         - type: target
           field: '{name}/FUZZ'
@@ -33,11 +38,5 @@ tasks:
     targets_:
       type: url
       field: url
-
-  katana:
-    description: Run crawler on found directories
-    targets_:
-      type: url
-      field: url
-      condition: "'Index of' in item.title"
-    if: opts.crawl_directories
+      condition: url.status_code != 0 or opts.screenshot or opts.headless
+    # enrich: true  # TODO: add enrich capabilities
