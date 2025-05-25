@@ -1,4 +1,4 @@
-from secator.utils import discover_tasks
+from secator.loader import discover_tasks
 TASKS = discover_tasks()
 __all__ = [
     cls.__name__
