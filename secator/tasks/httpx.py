@@ -85,7 +85,7 @@ class httpx(Http):
 			opts,
 			'screenshot',
 			opts_conf=dict(httpx.opts, **httpx.meta_opts),
-			opt_prefix='httpx'
+			opt_aliases=opts.get('aliases', [])
 		)
 		return 'cpu' if screenshot is True else 'io'
 

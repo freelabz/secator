@@ -39,7 +39,6 @@ tasks:
     - type: port
       field: port
       condition: item.host in targets
-    ports: "-"  # default if no port found by naabu
 
   _group/1:
     httpx:
@@ -59,6 +58,7 @@ tasks:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
+      exclude_tags: []
       if: opts.nuclei
 
     nuclei/url:
