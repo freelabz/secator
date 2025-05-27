@@ -38,10 +38,10 @@ class FileSerializer:
 			self.output_path = matches
 
 		output_paths = self.output_path if isinstance(self.output_path, list) else [self.output_path]
-		for output_path in output_paths:
-			if not os.path.exists(output_path):
-				runner.add_result(Warning(message=f'Could not find output file {output_path}'), print=True)
-				return
+	for output_path in output_paths:
+		if not os.path.exists(output_path):
+			runner.add_result(Warning(message=f'Could not find output file {output_path}'), print=True)
+			continue
 
 			# Read the output file
 			runner.add_result(Info(message=f'Output file saved to {output_path}'), print=True)
