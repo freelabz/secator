@@ -55,9 +55,6 @@ class cariddi(HttpCrawler):
 		'juicy_endpoints': 'e',
 		'juicy_extensions': 'ext'
 	}
-	opt_value_map = {
-		HEADER: lambda headers: headers
-	}
 	item_loaders = [JSONSerializer()]
 	install_version = 'v1.3.6'
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@[install_version]'
