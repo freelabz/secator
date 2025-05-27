@@ -134,7 +134,9 @@ class Runner:
 		self.print_json = self.run_opts.get('print_json', False)
 		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
 		self.print_fmt = self.run_opts.get('fmt', '')
-		self.print_stat = self.run_opts.get('print_stat', False)
+		self.print_progress = self.run_opts.get('print_progress', False) and not self.print_raw
+		self.print_target = self.run_opts.get('print_target', False) and not self.quiet and not self.print_raw
+		self.print_stat = self.run_opts.get('print_stat', False) and not self.quiet and not self.print_raw
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 		self.print_profiles = self.run_opts.get('print_profiles', False)
 
@@ -373,8 +375,6 @@ class Runner:
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
 			error = Error.from_exception(e)
-			error._source = self.unique_name
-			error._uuid = str(uuid.uuid4())
 			self.add_result(error, print=True)
 			self.stop_celery_tasks()
 			if not self.sync:
@@ -404,8 +404,6 @@ class Runner:
 		for thread in self.threads:
 			error = thread.join()
 			if error:
-				error._source = self.unique_name
-				error._uuid = str(uuid.uuid4())
 				self.add_result(error, print=True)
 				yield error
 
@@ -731,11 +729,7 @@ class Runner:
 					message = 'Validator failed'
 					if doc:
 						message += f': {doc}'
-					error = Error(
-						message=message,
-						_source=self.unique_name,
-						_uuid=str(uuid.uuid4())
-					)
+					error = Error(message=message)
 					self.add_result(error, print=True)
 				return False
 			self.debug('validator success', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
@@ -881,8 +875,9 @@ class Runner:
 
 		# Init the new item and the list of output types to load from
 		new_item = None
-		output_types = getattr(self, 'output_types', [])
-		self.debug(f'input item: {item}', sub='item.convert', verbose=True)
+		output_types = getattr(self, 'output_types', []) + list(getattr(self, 'output_map', {}).keys())
+		output_types = set(output_types)
+		self.debug(f'Input item: {item}', sub='klass.load', verbose=True)
 
 		# Use a function to pick proper output types
 		output_discriminator = getattr(self, 'output_discriminator', None)

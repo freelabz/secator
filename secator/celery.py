@@ -336,7 +336,7 @@ def break_task(task, task_opts, results=[]):
 		sig = type(task).si(chunk, **opts).set(task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
-		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
+		info = Info(message=f'Celery chunked task created: {task_id}')
 		task.add_result(info)
 		sigs.append(sig)
 

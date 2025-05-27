@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 
 import xmltodict
@@ -9,14 +8,14 @@ from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
-								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
+								 OPT_NOT_SUPPORTED, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
 								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
 								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability, Info, Error
+from secator.output_types import Exploit, Port, Vulnerability, Error
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug, traceback_as_string
-
+from secator.serializers import FileSerializer
 logger = logging.getLogger(__name__)
 
 
@@ -30,6 +29,7 @@ class nmap(VulnMulti):
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
+	item_loaders = [FileSerializer(output_flag='-oX', output_ext='xml')]
 	opts = {
 		# Port specification and scan order
 		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (- to scan all)'},
@@ -149,11 +149,6 @@ class nmap(VulnMulti):
 
 	@staticmethod
 	def on_cmd(self):
-		output_path = self.get_opt_value(OUTPUT_PATH)
-		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
-		self.output_path = output_path
-		self.cmd += f' -oX {self.output_path}'
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
 		tcp_connect = self.cmd_options.get('tcp_connect')
 		if tcp_connect and tcp_syn_stealth:
@@ -163,25 +158,15 @@ class nmap(VulnMulti):
 			self.cmd = self.cmd.replace('-sT ', '')
 
 	@staticmethod
-	def on_cmd_done(self):
-		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find XML results in {self.output_path}')
-			return
-		yield Info(message=f'XML results saved to {self.output_path}')
-		yield from self.xml_to_json()
-
-	def xml_to_json(self):
-		results = []
-		with open(self.output_path, 'r') as f:
-			content = f.read()
-			try:
-				results = xmltodict.parse(content)  # parse XML to dict
-			except Exception as exc:
-				yield Error(
-					message=f'Cannot parse XML output {self.output_path} to valid JSON.',
-					traceback=traceback_as_string(exc)
-				)
-		yield from nmapData(results)
+	def on_file_loaded(self, content):
+		try:
+			results = xmltodict.parse(content)  # parse XML to dict
+			yield from nmapData(results)
+		except Exception as exc:
+			yield Error(
+				message='Cannot parse XML output to valid JSON.',
+				traceback=traceback_as_string(exc) + f'\nXML content:\n{content}'
+			)
 
 
 class nmapData(dict):

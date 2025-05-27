@@ -1,13 +1,13 @@
 import click
-import os
 import yaml
 
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
 								PATH, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT, STRING, URL)
+from secator.serializers.file import FileSerializer
 from secator.tasks._categories import Vuln
-from secator.output_types import Vulnerability, Tag, Info, Error
+from secator.output_types import Vulnerability, Tag
 
 
 @task()
@@ -34,6 +34,7 @@ class trivy(Vuln):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
+	item_loaders = [FileSerializer(output_flag='-o')]
 	install_version = 'v0.61.1'
 	install_cmd = (
 		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'
@@ -44,22 +45,11 @@ class trivy(Vuln):
 	@staticmethod
 	def on_cmd(self):
 		mode = self.get_opt_value('mode')
-		output_path = self.get_opt_value(OUTPUT_PATH)
-		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.output_path = output_path
 		self.cmd = self.cmd.replace(f' -mode {mode}', '').replace('trivy', f'trivy {mode}')
-		self.cmd += f' -o {self.output_path}'
 
 	@staticmethod
-	def on_cmd_done(self):
-		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find JSON results in {self.output_path}')
-			return
-
-		yield Info(message=f'JSON results saved to {self.output_path}')
-		with open(self.output_path, 'r') as f:
-			results = yaml.safe_load(f.read()).get('Results', [])
+	def on_file_loaded(self, content):
+		results = yaml.safe_load(content).get('Results', [])
 		for item in results:
 			for vuln in item.get('Vulnerabilities', []):
 				vuln_id = vuln['VulnerabilityID']
