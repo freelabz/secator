@@ -78,6 +78,7 @@ INPUTS_TASKS = {
 FIXTURES_TASKS = {
 	Task.get_task_class(task.name): load_fixture(f'{task.name}_output', FIXTURES_DIR)
 	for task in TASKS
+	if task.name in [t.name for t in TEST_TASKS]
 }
 
 #-----------#
