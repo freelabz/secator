@@ -68,6 +68,7 @@ def discover_internal_tasks():
 			if inspect.isclass(attribute):
 				bases = inspect.getmro(attribute)
 				if Runner in bases and hasattr(attribute, '__task__'):
+					attribute.__external__ = False
 					task_classes.append(attribute)
 
 	# Sort task_classes by category
@@ -107,6 +108,7 @@ def discover_external_tasks():
 				continue
 			cls = getattr(module, task_name)
 			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
+			cls.__external__ = True
 			output.append(cls)
 		except Exception as e:
 			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')

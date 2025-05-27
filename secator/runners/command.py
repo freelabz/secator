@@ -135,6 +135,12 @@ class Command(Runner):
 		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
+		node_id = context.get('node_id', None)
+		node_name = context.get('node_name', None)
+		if node_id:
+			config.node_id = node_id
+		if node_name:
+			config.node_name = context.get('node_name')
 		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
 
 		# Prepare validators
@@ -243,9 +249,12 @@ class Command(Runner):
 
 	def get_opt_value(self, opt_name, preprocess=False, process=False):
 		"""Get option value as inputed by the user.
+
 		Args:
 			opt_name (str): Option name.
+			preprocess (bool): Preprocess the value with the option preprocessor function if it exists.
 			process (bool): Process the value with the option processor function if it exists.
+
 		Returns:
 			Any: Option value.
 		"""
@@ -253,7 +262,7 @@ class Command(Runner):
 			self.run_opts,
 			opt_name,
 			dict(self.opts, **self.meta_opts),
-			opt_prefix=self.config.name,
+			opt_aliases=self.opt_aliases,
 			preprocess=preprocess,
 			process=process)
 
@@ -727,7 +736,7 @@ class Command(Runner):
 			opt_key_map={},
 			opt_value_map={},
 			opt_prefix='-',
-			command_name=None,
+			opt_aliases=None,
 			preprocess=False,
 			process=True):
 		"""Process a dict of options using a config, option key map / value map and option character like '-' or '--'.
@@ -738,7 +747,7 @@ class Command(Runner):
 			opt_key_map (dict[str, str | Callable]): A dict to map option key with their actual values.
 			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
 			opt_prefix (str, default: '-'): Option prefix.
-			command_name (str | None, default: None): Command name.
+			opt_aliases (str | None, default: None): Aliases to try.
 			preprocess (bool, default: True): Preprocess the value with the option preprocessor function if it exists.
 			process (bool, default: True): Process the value with the option processor function if it exists.
 
@@ -761,7 +770,7 @@ class Command(Runner):
 				opts,
 				opt_name,
 				opts_conf,
-				opt_prefix=command_name,
+				opt_aliases=opt_aliases,
 				default=default_val,
 				preprocess=preprocess,
 				process=process)
@@ -834,19 +843,61 @@ class Command(Runner):
 
 	@staticmethod
 	def _get_opt_default(opt_name, opts_conf):
+		"""Get the default value of an option.
+
+		Args:
+			opt_name (str): The name of the option to get the default value of (no aliases allowed).
+			opts_conf (dict): The options configuration, indexed by option name.
+
+		Returns:
+			any: The default value of the option.
+		"""
 		for k, v in opts_conf.items():
 			if k == opt_name:
 				return v.get('default', None)
 		return None
 
 	@staticmethod
-	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None, preprocess=False, process=False):
+	def _get_opt_value(opts, opt_name, opts_conf={}, opt_aliases=None, default=None, preprocess=False, process=False):
+		"""Get the value of an option.
+
+		Args:
+			opts (dict): The options dict to search (input opts).
+			opt_name (str): The name of the option to get the value of.
+			opts_conf (dict): The options configuration, indexed by option name.
+			opt_aliases (list): The aliases to try.
+			default (any): The default value to return if the option is not found.
+			preprocess (bool): Whether to preprocess the value using the option preprocessor function.
+			process (bool): Whether to process the value using the option processor function.
+
+		Returns:
+			any: The value of the option.
+
+		Example:
+			opts = {'target': 'example.com'}
+			opts_conf = {'target': {'type': 'str', 'short': 't', 'default': 'example.com', 'pre_process': lambda x: x.upper()}}  # noqa: E501
+			opt_aliases = ['prefix_target', 'target']
+
+			# Example 1:
+			opt_name = 'target'
+			opt_value = Command._get_opt_value(opts, opt_name, opts_conf, opt_aliases, preprocess=True)  # noqa: E501
+			print(opt_value)
+			# Output: EXAMPLE.COM
+
+			# Example 2:
+			opt_name = 'prefix_target'
+			opt_value = Command._get_opt_value(opts, opt_name, opts_conf, opt_aliases)
+			print(opt_value)
+			# Output: example.com
+		"""
 		default = default or Command._get_opt_default(opt_name, opts_conf)
-		opt_names = [
-			f'{opt_prefix}.{opt_name}',
-			f'{opt_prefix}_{opt_name}',
-			opt_name,
-		]
+		opt_aliases = opt_aliases or []
+		opt_names = []
+		for prefix in opt_aliases:
+			opt_names.extend([f'{prefix}.{opt_name}', f'{prefix}_{opt_name}'])
+		opt_names.append(opt_name)
+		opt_names = list(set(opt_names))
+		debug(f'opt names to try: {opt_names}', sub='init.options')
 		opt_values = [opts.get(o) for o in opt_names]
 		opt_conf = [conf for _, conf in opts_conf.items() if _ == opt_name]
 		if opt_conf:
@@ -886,7 +937,7 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name,
+			opt_aliases=self.opt_aliases,
 			preprocess=False,
 			process=False)
 
@@ -897,7 +948,7 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name,
+			opt_aliases=self.opt_aliases,
 			preprocess=False,
 			process=False)
 

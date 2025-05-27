@@ -109,13 +109,13 @@ class Runner:
 		self.celery_ids_map = {}
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
-		self.no_poll = self.run_opts.get('no_poll', False)
 		self.quiet = self.run_opts.get('quiet', False)
 		self.started = False
 		self.enable_reports = self.run_opts.get('enable_reports', not self.sync)
 		self._reports_folder = self.run_opts.get('reports_folder', None)
 
 		# Runner process options
+		self.no_poll = self.run_opts.get('no_poll', False)
 		self.no_process = not self.run_opts.get('process', True)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
@@ -143,6 +143,14 @@ class Runner:
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
+
+		# Opt aliases
+		self.opt_aliases = []
+		if self.config.node_id:
+			self.opt_aliases.append(self.config.node_id.replace('.', '_').replace('/', '_'))
+		if self.config.node_name:
+			self.opt_aliases.append(self.config.node_name.replace('/', '_'))
+		self.opt_aliases.append(self.config.name)
 
 		# Begin initialization
 		self.debug('begin initialization', sub='init')
@@ -412,7 +420,7 @@ class Runner:
 			dry_run=self.dry_run)
 		for error in errors:
 			self.add_result(error, print=True)
-		self.inputs = list(set(inputs))
+		self.inputs = sorted(list(set(inputs)))
 		self.run_opts = run_opts
 
 	def add_result(self, item, print=False, output=True):
