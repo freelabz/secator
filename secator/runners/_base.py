@@ -411,6 +411,7 @@ class Runner:
 
 	def _run_extractors(self, results):
 		"""Run extractors on results and targets."""
+		self.debug('running extractors', sub='init')
 		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs}
 		inputs, run_opts, errors = run_extractors(
 			results,
@@ -421,6 +422,7 @@ class Runner:
 		for error in errors:
 			self.add_result(error, print=True)
 		self.inputs = sorted(list(set(inputs)))
+		self.debug(f'extracted {len(self.inputs)} inputs', sub='init')
 		self.run_opts = run_opts
 
 	def add_result(self, item, print=False, output=True):

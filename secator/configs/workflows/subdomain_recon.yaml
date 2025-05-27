@@ -63,6 +63,7 @@ tasks:
       auto_calibration: True
       wordlist: combined_subdomains
       stop_on_error: True
+      chunk_by: url.url
       targets_:
       - type: url
         field: url
