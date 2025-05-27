@@ -896,7 +896,8 @@ class Command(Runner):
 		for prefix in opt_aliases:
 			opt_names.extend([f'{prefix}.{opt_name}', f'{prefix}_{opt_name}'])
 		opt_names.append(opt_name)
-		opt_names = list(set(opt_names))
+		# preserve first-seen order while de-duplicating
+		opt_names = list(dict.fromkeys(opt_names))
 		debug(f'opt names to try: {opt_names}', sub='init.options')
 		opt_values = [opts.get(o) for o in opt_names]
 		opt_conf = [conf for _, conf in opts_conf.items() if _ == opt_name]
