@@ -3,15 +3,17 @@ import unittest
 import warnings
 from time import sleep
 
+from secator.loader import discover_tasks
 from secator.rich import console
 from secator.runners import Command
 from secator.utils import merge_opts
 from secator.utils_test import (META_OPTS, TEST_TASKS, CommandOutputTester,
                               load_fixture)
 from tests.integration.inputs import INPUTS_TASKS
-from tests.integration.outputs import OUTPUTS_TASKS
+from tests.integration.outputs import OUTPUTS_TASKS, OUTPUTS_CHECKS
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
+NO_CLEANUP = bool(os.environ.get('TEST_NO_CLEANUP', '0'))
 
 
 class TestTasks(unittest.TestCase, CommandOutputTester):
@@ -20,15 +22,15 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		warnings.simplefilter('ignore', category=DeprecationWarning)
 		Command.execute(
 			f'sh {INTEGRATION_DIR}/setup.sh',
-			quiet=True,
+			quiet=False,
 			cwd=INTEGRATION_DIR
 		)
-		sleep(15)
+		sleep(5)
 
 	def tearDown(self):
 		Command.execute(
 			f'sh {INTEGRATION_DIR}/teardown.sh',
-			quiet=True,
+			quiet=False,
 			cwd=INTEGRATION_DIR
 		)
 
@@ -36,7 +38,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		opts = META_OPTS.copy()
 		extra_opts = {
 			'dirsearch.filter_size': 1987,
-			'dnsxbrute.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
+			'dnsx.wordlist': load_fixture('wordlist_dns', INTEGRATION_DIR, only_path=True),
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
 			'arjun.wordlist': False,
@@ -70,7 +72,13 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['testssl.output_path']
 		del opts['timeout']
 
-		for cls in TEST_TASKS:
+		failures = []
+
+		tasks = discover_tasks()
+		test_tasks_names = [t.name for t in TEST_TASKS]
+		TASKS = [t for t in tasks if t.__name__ in test_tasks_names]
+
+		for cls in TASKS:
 			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
 				continue
 			with self.subTest(name=cls.__name__):
@@ -82,8 +90,16 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 					continue
 				outputs = OUTPUTS_TASKS.get(cls.__name__, [])
 				task = cls(input, **opts)
-				self._test_runner_output(
-					task,
-					expected_output_types=cls.output_types,
-					expected_results=outputs,
-					empty_results_allowed=False)
+				try:
+					self._test_runner_output(
+						task,
+						expected_output_types=cls.output_types,
+						expected_results=outputs,
+						empty_results_allowed=False,
+						additional_checks=OUTPUTS_CHECKS
+					)
+				except AssertionError as e:
+					failures.append(f'ERROR ({cls.__name__}): {e}')
+
+		if failures:
+			raise AssertionError("\n\n" + "\n\n".join(failures))

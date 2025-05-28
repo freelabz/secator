@@ -16,7 +16,7 @@ from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
 from secator.config import CONFIG
-from secator.output_types import Info, Warning, Error, Target, Stat
+from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s
@@ -95,6 +95,7 @@ class Command(Runner):
 	# Hooks
 	hooks = [
 		'on_cmd',
+		'on_cmd_opts',
 		'on_cmd_done',
 		'on_line'
 	]
@@ -104,6 +105,9 @@ class Command(Runner):
 
 	# Return code
 	return_code = -1
+
+	# Exit ok
+	exit_ok = False
 
 	# Output
 	output = ''
@@ -122,6 +126,7 @@ class Command(Runner):
 		config = TemplateLoader(input={
 			'name': self.__class__.__name__,
 			'type': 'task',
+			'input_types': self.input_types,
 			'description': run_opts.get('description', None)
 		})
 
@@ -130,6 +135,12 @@ class Command(Runner):
 		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
+		node_id = context.get('node_id', None)
+		node_name = context.get('node_name', None)
+		if node_id:
+			config.node_id = node_id
+		if node_name:
+			config.node_name = context.get('node_name')
 		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
 
 		# Prepare validators
@@ -182,7 +193,7 @@ class Command(Runner):
 		self._build_cmd()
 
 		# Run on_cmd hook
-		self.run_hooks('on_cmd')
+		self.run_hooks('on_cmd', sub='init')
 
 		# Add sudo to command if it is required
 		if self.requires_sudo:
@@ -208,7 +219,8 @@ class Command(Runner):
 		many_targets = len(self.inputs) > 1
 		targets_over_chunk_size = self.input_chunk_size and len(self.inputs) > self.input_chunk_size
 		has_file_flag = self.file_flag is not None
-		chunk_it = (sync and many_targets and not has_file_flag) or (not sync and many_targets and targets_over_chunk_size)
+		is_chunk = self.chunk
+		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
 		return chunk_it
 
 	@classmethod
@@ -218,26 +230,41 @@ class Command(Runner):
 		results = kwargs.get('results', [])
 		kwargs['sync'] = False
 		name = cls.__name__
-		return run_command.apply_async(args=[results, name] + list(args), kwargs={'opts': kwargs}, queue=cls.profile)
+		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
+		return run_command.apply_async(args=[results, name] + list(args), kwargs={'opts': kwargs}, queue=profile)
 
 	@classmethod
 	def s(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
+		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
+		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=profile)
 
 	@classmethod
-	def si(cls, *args, results=[], **kwargs):
+	def si(cls, *args, results=None, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
+		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
+		return run_command.si(results or [], cls.__name__, *args, opts=kwargs).set(queue=profile)
 
-	def get_opt_value(self, opt_name):
+	def get_opt_value(self, opt_name, preprocess=False, process=False):
+		"""Get option value as inputed by the user.
+
+		Args:
+			opt_name (str): Option name.
+			preprocess (bool): Preprocess the value with the option preprocessor function if it exists.
+			process (bool): Process the value with the option processor function if it exists.
+
+		Returns:
+			Any: Option value.
+		"""
 		return Command._get_opt_value(
 			self.run_opts,
 			opt_name,
 			dict(self.opts, **self.meta_opts),
-			opt_prefix=self.config.name)
+			opt_aliases=self.opt_aliases,
+			preprocess=preprocess,
+			process=process)
 
 	@classmethod
 	def get_version_flag(cls):
@@ -246,13 +273,15 @@ class Command(Runner):
 		return cls.version_flag or f'{cls.opt_prefix}version'
 
 	@classmethod
-	def get_version_info(cls):
+	def get_version_info(cls, bleeding=False):
 		from secator.installer import get_version_info
 		return get_version_info(
 			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
 			cls.install_github_handle,
-			cls.install_cmd
+			cls.install_cmd,
+			cls.install_version,
+			bleeding=bleeding
 		)
 
 	@classmethod
@@ -305,7 +334,7 @@ class Command(Runner):
 		name = name or cmd.split(' ')[0]
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
-		kwargs['no_process'] = kwargs.get('no_process', True)
+		kwargs['process'] = kwargs.get('process', False)
 		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
@@ -375,21 +404,18 @@ class Command(Runner):
 
 			# Abort if dry run
 			if self.dry_run:
-				self._print('')
+				self.print_description()
 				self.print_command()
 				return
-
-			# Print task description
-			self.print_description()
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
 				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
 				return
 
-			# Yield targets
-			for input in self.inputs:
-				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			# Print command
+			self.print_description()
+			self.print_command()
 
 			# Check for sudo requirements and prepare the password if needed
 			sudo_password, error = self._prompt_sudo(self.cmd)
@@ -437,7 +463,6 @@ class Command(Runner):
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
-			self.print_command()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
@@ -452,7 +477,7 @@ class Command(Runner):
 				yield from self.process_line(line)
 
 			# Run hooks after cmd has completed successfully
-			result = self.run_hooks('on_cmd_done')
+			result = self.run_hooks('on_cmd_done', sub='end')
 			if result:
 				yield from result
 
@@ -460,7 +485,7 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='error')
+			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
 			self.stop_process()
 			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
 
@@ -493,7 +518,7 @@ class Command(Runner):
 			line = line.replace('\\x0d\\x0a', '\n')
 
 		# Run on_line hooks
-		line = self.run_hooks('on_line', line)
+		line = self.run_hooks('on_line', line, sub='line.process')
 		if line is None:
 			return
 
@@ -524,12 +549,12 @@ class Command(Runner):
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = _s(self.cmd)
+			cmd_str = f':zap: {_s(self.cmd)}'
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
-			self._print(cmd_str, color='bold cyan', rich=True)
-		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
-		self.debug('Options', obj={'opts': self.cmd_options}, sub='init')
+			self._print(cmd_str, color='bold green', rich=True)
+		self.debug('command', obj={'cmd': self.cmd}, sub='start')
+		self.debug('options', obj=self.cmd_options, sub='start')
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
@@ -540,6 +565,7 @@ class Command(Runner):
 		Yields:
 			secator.output_types.Error: the error.
 		"""
+		self.debug('command not found', sub='end')
 		self.return_code = 127
 		if self.config.name in str(exc):
 			message = 'Executable not found.'
@@ -552,12 +578,14 @@ class Command(Runner):
 		error._uuid = str(uuid.uuid4())
 		yield error
 
-	def stop_process(self):
+	def stop_process(self, exit_ok=False):
 		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
 		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
 		self.process.send_signal(signal.SIGINT)
+		if exit_ok:
+			self.exit_ok = True
 
 	def stats(self):
 		"""Gather stats about the current running process, if any."""
@@ -673,12 +701,12 @@ class Command(Runner):
 		for line in self.process.stdout.readlines():
 			yield from self.process_line(line)
 		self.process.wait()
-		self.return_code = self.process.returncode
+		self.return_code = 0 if self.exit_ok else self.process.returncode
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
 		self.output = self.output.strip()
 		self.killed = self.return_code == -2 or self.killed
-		self.debug(f'Command {self.cmd} finished with return code {self.return_code}', sub='command')
+		self.debug(f'return code: {self.return_code}', sub='end')
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
@@ -708,7 +736,9 @@ class Command(Runner):
 			opt_key_map={},
 			opt_value_map={},
 			opt_prefix='-',
-			command_name=None):
+			opt_aliases=None,
+			preprocess=False,
+			process=True):
 		"""Process a dict of options using a config, option key map / value map and option character like '-' or '--'.
 
 		Args:
@@ -717,56 +747,62 @@ class Command(Runner):
 			opt_key_map (dict[str, str | Callable]): A dict to map option key with their actual values.
 			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
 			opt_prefix (str, default: '-'): Option prefix.
-			command_name (str | None, default: None): Command name.
+			opt_aliases (str | None, default: None): Aliases to try.
+			preprocess (bool, default: True): Preprocess the value with the option preprocessor function if it exists.
+			process (bool, default: True): Process the value with the option processor function if it exists.
 
 		Returns:
 			dict: Processed options dict.
 		"""
 		opts_dict = {}
 		for opt_name, opt_conf in opts_conf.items():
-			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 
 			# Save original opt name
 			original_opt_name = opt_name
 
+			# Copy opt conf
+			conf = opt_conf.copy()
+
 			# Get opt value
-			default_val = opt_conf.get('default')
+			default_val = conf.get('default')
 			opt_val = Command._get_opt_value(
 				opts,
 				opt_name,
 				opts_conf,
-				opt_prefix=command_name,
-				default=default_val)
+				opt_aliases=opt_aliases,
+				default=default_val,
+				preprocess=preprocess,
+				process=process)
 
-			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': conf}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 
 			# Skip option if value is falsy
 			if opt_val in [None, False, []]:
-				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 				continue
-
-			# Apply process function on opt value
-			if 'process' in opt_conf:
-				func = opt_conf['process']
-				opt_val = func(opt_val)
 
 			# Convert opt value to expected command opt value
 			mapped_opt_val = opt_value_map.get(opt_name)
 			if mapped_opt_val:
+				conf.pop('pre_process', None)
+				conf.pop('process', None)
 				if callable(mapped_opt_val):
 					opt_val = mapped_opt_val(opt_val)
 				else:
 					opt_val = mapped_opt_val
+			elif 'pre_process' in conf:
+				opt_val = conf['pre_process'](opt_val)
 
 			# Convert opt name to expected command opt name
 			mapped_opt_name = opt_key_map.get(opt_name)
 			if mapped_opt_name is not None:
 				if mapped_opt_name == OPT_NOT_SUPPORTED:
-					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='command.options', verbose=True)  # noqa: E501
+					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='init.options', verbose=True)  # noqa: E501
 					continue
 				else:
 					opt_name = mapped_opt_name
-			debug('mapped key / value', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+			debug('mapped key / value', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 
 			# Avoid shell injections and detect opt prefix
 			opt_name = str(opt_name).split(' ')[0]  # avoid cmd injection
@@ -780,14 +816,14 @@ class Command(Runner):
 
 			# Append opt name + opt value to option string.
 			# Note: does not append opt value if value is True (flag)
-			opts_dict[original_opt_name] = {'name': opt_name, 'value': opt_val, 'conf': opt_conf}
-			debug('final', obj={'name': original_opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)  # noqa: E501
+			opts_dict[original_opt_name] = {'name': opt_name, 'value': opt_val, 'conf': conf}
+			debug('final', obj={'name': original_opt_name, 'value': opt_val}, sub='init.options', obj_after=False, verbose=True)  # noqa: E501
 
 		return opts_dict
 
 	@staticmethod
 	def _validate_chunked_input(self, inputs):
-		"""Command does not suport multiple inputs in non-worker mode. Consider running with a remote worker instead."""
+		"""Command does not support multiple inputs in non-worker mode. Consider running with a remote worker instead."""
 		if len(inputs) > 1 and self.sync and self.file_flag is None:
 			return False
 		return True
@@ -807,28 +843,81 @@ class Command(Runner):
 
 	@staticmethod
 	def _get_opt_default(opt_name, opts_conf):
+		"""Get the default value of an option.
+
+		Args:
+			opt_name (str): The name of the option to get the default value of (no aliases allowed).
+			opts_conf (dict): The options configuration, indexed by option name.
+
+		Returns:
+			any: The default value of the option.
+		"""
 		for k, v in opts_conf.items():
 			if k == opt_name:
 				return v.get('default', None)
 		return None
 
 	@staticmethod
-	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
+	def _get_opt_value(opts, opt_name, opts_conf={}, opt_aliases=None, default=None, preprocess=False, process=False):
+		"""Get the value of an option.
+
+		Args:
+			opts (dict): The options dict to search (input opts).
+			opt_name (str): The name of the option to get the value of.
+			opts_conf (dict): The options configuration, indexed by option name.
+			opt_aliases (list): The aliases to try.
+			default (any): The default value to return if the option is not found.
+			preprocess (bool): Whether to preprocess the value using the option preprocessor function.
+			process (bool): Whether to process the value using the option processor function.
+
+		Returns:
+			any: The value of the option.
+
+		Example:
+			opts = {'target': 'example.com'}
+			opts_conf = {'target': {'type': 'str', 'short': 't', 'default': 'example.com', 'pre_process': lambda x: x.upper()}}  # noqa: E501
+			opt_aliases = ['prefix_target', 'target']
+
+			# Example 1:
+			opt_name = 'target'
+			opt_value = Command._get_opt_value(opts, opt_name, opts_conf, opt_aliases, preprocess=True)  # noqa: E501
+			print(opt_value)
+			# Output: EXAMPLE.COM
+
+			# Example 2:
+			opt_name = 'prefix_target'
+			opt_value = Command._get_opt_value(opts, opt_name, opts_conf, opt_aliases)
+			print(opt_value)
+			# Output: example.com
+		"""
 		default = default or Command._get_opt_default(opt_name, opts_conf)
-		opt_names = [
-			f'{opt_prefix}.{opt_name}',
-			f'{opt_prefix}_{opt_name}',
-			opt_name,
-		]
+		opt_aliases = opt_aliases or []
+		opt_names = []
+		for prefix in opt_aliases:
+			opt_names.extend([f'{prefix}.{opt_name}', f'{prefix}_{opt_name}'])
+		opt_names.append(opt_name)
+		# preserve first-seen order while de-duplicating
+		opt_names = list(dict.fromkeys(opt_names))
+		debug(f'opt names to try: {opt_names}', sub='init.options')
 		opt_values = [opts.get(o) for o in opt_names]
-		alias = [conf.get('short') for _, conf in opts_conf.items() if conf.get('short') in opts and _ == opt_name]
-		if alias:
-			opt_values.append(opts.get(alias[0]))
+		opt_conf = [conf for _, conf in opts_conf.items() if _ == opt_name]
+		if opt_conf:
+			opt_conf = opt_conf[0]
+			alias = opt_conf.get('short')
+			if alias:
+				opt_values.append(opts.get(alias))
 		if OPT_NOT_SUPPORTED in opt_values:
-			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='command.options', verbose=True)
+			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='init.options', verbose=True)
 			return None
 		value = next((v for v in opt_values if v is not None), default)
-		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+		if opt_conf:
+			preprocessor = opt_conf.get('pre_process')
+			processor = opt_conf.get('process')
+			if preprocess and preprocessor:
+				value = preprocessor(value)
+			if process and processor:
+				value = processor(value)
+		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 		return value
 
 	def _build_cmd(self):
@@ -849,7 +938,9 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name)
+			opt_aliases=self.opt_aliases,
+			preprocess=False,
+			process=False)
 
 		# Add meta options to cmd
 		meta_opts_dict = Command._process_opts(
@@ -858,22 +949,31 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name)
+			opt_aliases=self.opt_aliases,
+			preprocess=False,
+			process=False)
 
 		if opts_dict:
 			opts.update(opts_dict)
 		if meta_opts_dict:
 			opts.update(meta_opts_dict)
 
+		opts = self.run_hooks('on_cmd_opts', opts, sub='init')
+
 		if opts:
 			for opt_conf in opts.values():
 				conf = opt_conf['conf']
+				process = conf.get('process')
+				if process:
+					opt_conf['value'] = process(opt_conf['value'])
 				internal = conf.get('internal', False)
 				if internal:
 					continue
 				if conf.get('requires_sudo', False):
 					self.requires_sudo = True
 				opts_str += ' ' + Command._build_opt_str(opt_conf)
+				if '{target}' in opts_str:
+					opts_str = opts_str.replace('{target}', self.inputs[0])
 		self.cmd_options = opts
 		self.cmd += opts_str
 
@@ -881,14 +981,19 @@ class Command(Runner):
 	def _build_opt_str(opt):
 		"""Build option string."""
 		conf = opt['conf']
-		opts_str = f'{opt["name"]}'
 		shlex_quote = conf.get('shlex', True)
 		value = opt['value']
-		if value is not True:
-			if shlex_quote:
-				value = shlex.quote(str(value))
-			opts_str += f' {value}'
-		return opts_str
+		opt_name = opt['name']
+		opts_str = ''
+		value = [value] if not isinstance(value, list) else value
+		for val in value:
+			if val is True:
+				opts_str += f'{opt_name}'
+			else:
+				if shlex_quote:
+					val = shlex.quote(str(val))
+				opts_str += f'{opt_name} {val} '
+		return opts_str.strip()
 
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a

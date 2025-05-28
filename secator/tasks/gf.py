@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import OPT_PIPE_INPUT, OPT_NOT_SUPPORTED, URL
+from secator.definitions import OPT_PIPE_INPUT, OPT_NOT_SUPPORTED
 from secator.output_types import Tag
 from secator.tasks._categories import Tagger
 
@@ -8,6 +8,8 @@ from secator.tasks._categories import Tagger
 class gf(Tagger):
 	"""Wrapper around grep, to help you grep for things."""
 	cmd = 'gf'
+	input_types = None  # anything
+	output_types = [Tag]
 	tags = ['pattern', 'scan']
 	file_flag = OPT_PIPE_INPUT
 	input_flag = OPT_PIPE_INPUT
@@ -18,12 +20,10 @@ class gf(Tagger):
 	opt_key_map = {
 		'pattern': ''
 	}
-	input_types = [URL]
 	install_cmd = (
 		'go install -v github.com/tomnomnom/gf@latest && '
 		'git clone https://github.com/1ndianl33t/Gf-Patterns $HOME/.gf || true'
 	)
-	output_types = [Tag]
 
 	@staticmethod
 	def item_loader(self, line):
@@ -31,5 +31,6 @@ class gf(Tagger):
 
 	@staticmethod
 	def on_item(self, item):
-		item.extra_data = {'source': 'url'}
+		if isinstance(item, Tag):
+			item.extra_data = {'source': 'url'}
 		return item

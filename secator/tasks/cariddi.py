@@ -14,10 +14,10 @@ from secator.tasks._categories import HttpCrawler
 class cariddi(HttpCrawler):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
 	cmd = 'cariddi'
-	tags = ['url', 'crawl']
 	input_types = [URL]
-	input_flag = OPT_PIPE_INPUT
 	output_types = [Url, Tag]
+	tags = ['url', 'crawl']
+	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '-json'
 	opts = {
@@ -26,6 +26,9 @@ class cariddi(HttpCrawler):
 		'errors': {'is_flag': True, 'short': 'err', 'help': 'Hunt for errors in websites.'},
 		'juicy_extensions': {'type': int, 'short': 'jext', 'help': 'Hunt for juicy file extensions. Integer from 1(juicy) to 7(not juicy)'},  # noqa: E501
 		'juicy_endpoints': {'is_flag': True, 'short': 'jep', 'help': 'Hunt for juicy endpoints.'}
+	}
+	opt_value_map = {
+		HEADER: lambda headers: headers
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -65,7 +68,10 @@ class cariddi(HttpCrawler):
 	@staticmethod
 	def on_json_loaded(self, item):
 		url_item = {k: v for k, v in item.items() if k != 'matches'}
+		url_item['request_headers'] = self.get_opt_value(HEADER, preprocess=True)
 		yield Url(**url_item)
+
+		# Get matches, params, errors, secrets, infos
 		url = url_item[URL]
 		matches = item.get('matches', {})
 		params = matches.get('parameters', [])

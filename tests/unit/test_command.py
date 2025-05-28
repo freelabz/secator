@@ -11,7 +11,7 @@ from secator.utils import setup_logging
 from secator.utils_test import (FIXTURES_TASKS, FIXTURES_DIR, INPUTS_TASKS,
 							  TEST_TASKS, load_fixture, mock_subprocess_popen)
 
-level = logging.DEBUG if DEBUG > 0 else logging.ERROR
+level = logging.DEBUG if DEBUG == ["1"] else logging.ERROR
 setup_logging(level)
 
 
@@ -74,7 +74,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
-			command_name='fakecmd')
+			opt_aliases=['fakecmd'])
 		opts_str = ' '.join([FakeCmd._build_opt_str(v) for k, v in opts.items()])
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3')
 
@@ -91,7 +91,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
-			command_name='fakecmd')
+			opt_aliases=['fakecmd'])
 		opts_str = ' '.join([FakeCmd._build_opt_str(v) for k, v in opts.items()])
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3')
 
@@ -109,7 +109,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 			FakeCmd.opts,
 			FakeCmd.opt_key_map,
 			FakeCmd.opt_value_map,
-			command_name='fakecmd')
+			opt_aliases=['fakecmd'])
 		opts_str = ' '.join([FakeCmd._build_opt_str(v) for k, v in opts.items()])
 		self.assertEqual(opts_str, '-opt1 41.0 --opt3 -opt-with-underscore test')
 
@@ -121,7 +121,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		opt_value = FakeCmd._get_opt_value(
 			run_opts,
 			opt_name='opt1',
-			opt_prefix='fakecmd',
+			opt_aliases=['fakecmd'],
 			default=10)
 		self.assertEqual(opt_value, 41)
 
@@ -133,7 +133,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		opt_value = FakeCmd._get_opt_value(
 			run_opts,
 			opt_name='opt1',
-			opt_prefix='fakecmd',
+			opt_aliases=['fakecmd'],
 			default=10)
 		self.assertEqual(opt_value, False)
 
@@ -146,7 +146,7 @@ class TestCommandProcessOpts(unittest.TestCase):
 		opt_value = FakeCmd._get_opt_value(
 			run_opts,
 			opt_name='opt4',
-			opt_prefix='fakecmd',
+			opt_aliases=['fakecmd'],
 			default=10)
 		self.assertEqual(opt_value, None)
 

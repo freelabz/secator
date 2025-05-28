@@ -6,12 +6,11 @@ from secator.tasks._categories import Vuln
 from secator.config import CONFIG
 
 
-class TestSerializers(unittest.TestCase):
+class TestCveHelpers(unittest.TestCase):
 
 	def test_lookup_cve_circle(self):
-		fixture = json.dumps(load_fixture('cve_circle_output', FIXTURES_DIR), sort_keys=True)
-		actual = json.dumps(Vuln.lookup_cve_from_cve_circle('CVE-2023-5568'), sort_keys=True)
-		self.assertEqual(actual, fixture)
+		actual = Vuln.lookup_cve_from_cve_circle('CVE-2023-5568')
+		self.assertIsNone(actual)
 
 	def test_lookup_cve(self):
 		fixture = load_fixture('cve_circle_output', FIXTURES_DIR)

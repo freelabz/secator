@@ -25,7 +25,7 @@ class TestWorker(unittest.TestCase):
 		cmd = Command.execute(
 			'secator x httpx testphp.vulnweb.com -json',
 			name='secator_x_httpx',
-			no_process=False,
+			process=True,
 			quiet=True,
 			cls_attributes={'output_types': [Target, Url, Info], 'item_loaders': [JSONSerializer()]}
 		)
@@ -45,9 +45,9 @@ class TestWorker(unittest.TestCase):
 
 	def test_host_recon(self):
 		cmd = Command.execute(
-			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version',
+			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version --nuclei',
 			name='secator_w_host_recon',
-			no_process=False,
+			process=True,
 			quiet=True,
 			cls_attributes={'output_types': [Target, Url, Port, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]}
 		)

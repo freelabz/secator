@@ -7,6 +7,7 @@ from unittest.mock import patch
 from secator.config import CONFIG
 from secator.output_types import Vulnerability
 from secator.utils_test import FIXTURES_DIR, clear_modules
+from secator.loader import get_configs_by_type, find_templates, discover_tasks
 
 
 class TestTemplate(unittest.TestCase):
@@ -16,8 +17,8 @@ class TestTemplate(unittest.TestCase):
 		self.custom_task_path = self.template_dir / 'ls.py'
 		self.writeable_file = self.template_dir / 'test.txt'
 		self.custom_workflow_path = self.template_dir / 'ls.yml'
-		shutil.copy(f'{FIXTURES_DIR}/ls.py', self.custom_task_path)
-		shutil.copy(f'{FIXTURES_DIR}/ls.yml', self.custom_workflow_path)
+		shutil.copyfile(f'{FIXTURES_DIR}/ls.py', self.custom_task_path)
+		shutil.copyfile(f'{FIXTURES_DIR}/ls.yml', self.custom_workflow_path)
 		self.writeable_file.touch()
 		os.chmod(self.writeable_file, 0o007)
 		self.expected_vuln = Vulnerability(
@@ -45,9 +46,11 @@ class TestTemplate(unittest.TestCase):
 		self.assertTrue(self.expected_vuln == Vulnerability.load(findings[0].toDict()))
 
 	def test_external_workflow(self):
-		from secator.cli import ALL_WORKFLOWS
+		find_templates.cache_clear()
+		get_configs_by_type.cache_clear()
+		discover_tasks.cache_clear()
 		from secator.runners import Workflow
-		ls_workflow = [w for w in ALL_WORKFLOWS if w.name == 'ls'][0]
+		ls_workflow = [w for w in get_configs_by_type('workflow') if w.name == 'ls'][0]
 		self.assertIsNotNone(ls_workflow)
 		workflow = Workflow(ls_workflow, inputs=[str(self.template_dir)])
 		workflow.run()
@@ -113,13 +116,16 @@ class TestTemplateLoader(unittest.TestCase):
 
 	@patch('secator.template.TemplateLoader._load')
 	def test_extract_tasks_and_supported_opts_scan(self, mock_load):
-		from secator.template import TemplateLoader, TEMPLATES
+		from secator.template import TemplateLoader
+		from secator.loader import find_templates
+
+		templates = find_templates()
 		mock_load.return_value = self.workflow_config
 
 		# Check if the loader is added to the TEMPLATES list correctly
 		loader_wf = TemplateLoader(input=self.workflow_config)
-		loader_wf.add_to_templates()
-		self.assertIn(loader_wf, TEMPLATES)
+		templates.append(loader_wf)
+		self.assertIn(loader_wf, templates)
 
 		# Check if loading workflow by name gives the same object
 		loader_wf_by_name = TemplateLoader(name='workflow/test')
@@ -128,8 +134,8 @@ class TestTemplateLoader(unittest.TestCase):
 		# Check if the tasks are extracted correctly
 		wf_tasks = loader_wf._extract_tasks()
 		loader_scan = TemplateLoader(input=self.scan_config)
-		loader_scan.add_to_templates()
-		self.assertIn(loader_scan, TEMPLATES)
+		templates.append(loader_scan)
+		self.assertIn(loader_scan, templates)
 
 		# Check if loading scan by name gives the same object
 		loader_scan_by_name = TemplateLoader(name='scan/test')

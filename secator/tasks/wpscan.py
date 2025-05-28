@@ -17,10 +17,11 @@ from secator.tasks._categories import VulnHttp
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
 	cmd = 'wpscan --force --verbose'
-	tags = ['vuln', 'scan', 'wordpress']
-	file_flag = None
-	input_flag = '--url'
 	input_types = [URL]
+	output_types = [Vulnerability, Tag]
+	tags = ['vuln', 'scan', 'wordpress']
+	input_flag = '--url'
+	input_chunk_size = 1
 	json_flag = '-f json'
 	opt_prefix = '--'
 	opts = {
@@ -69,14 +70,14 @@ class wpscan(VulnHttp):
 			PROVIDER: 'wpscan',
 		},
 	}
-	output_types = [Vulnerability, Tag]
 	install_pre = {
 		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
 		'pacman': ['make', 'ruby-erb'],
 		'*': ['make']
 	}
-	install_version = '3.8.28'
-	install_cmd = f'gem install wpscan -v [install_version] --user-install -n {CONFIG.dirs.bin}'
+	install_github_handle = 'wpscanteam/wpscan'
+	install_version = 'v3.8.28'
+	install_cmd = f'gem install wpscan -v [install_version_strip] --user-install -n {CONFIG.dirs.bin}'
 	install_post = {
 		'kali': (
 			f'gem uninstall nokogiri --user-install -n {CONFIG.dirs.bin} --force --executables && '

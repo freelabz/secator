@@ -2,6 +2,32 @@ from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
                                 Vulnerability, Record, Certificate)
 
+
+OUTPUTS_CHECKS = {
+    'output_types': {
+        Url: {
+            'checks': [
+                {
+                    'info': 'should have request header "Hello"',
+                    'error': 'Request header "Hello" not present in URL object',
+                    'function': lambda item: 'Hello' in item.request_headers,
+                },
+                {
+                    'info': 'should have request header "Hello" set to "World"',
+                    'error': 'Request header "Hello" not set to "World"',
+                    'function': lambda item: item.request_headers['Hello'] == 'World',
+                }
+            ],
+            'runner': '^(?!gau$).*',
+        }
+    },
+    # 'runner': {
+    #     Command: {
+
+    #     }
+    # }
+}
+
 OUTPUTS_TASKS = {
     'arjun': [
         Url(
@@ -57,40 +83,38 @@ OUTPUTS_TASKS = {
     ],
     'dnsx': [
         Record(
-            name='ns0.wikimedia.org',
-            type='NS',
-            host='wikipedia.org',
-            _source='dnsx'
-		),
-        Record(
-            name='host',
-            type='AXFR',
-            host='wikipedia.org',
-            _source='dnsx'
-		),
-        Record(
-            name= "wikipedia.org",
-            type= "SOA",
-            host= "wikipedia.org",
+            name= "dyna.wikimedia.org",
+            type= "CNAME",
+            host= "be.wikipedia.org",
             _source= "dnsx"
 		),
         Record(
-            name='digicert.com',
-            type='CAA',
-            host='wikipedia.org',
-            _source='dnsx'
+            name= "be.wikipedia.org",
+            type= "AXFR",
+            host= "be.wikipedia.org",
+            _source= "dnsx"
 		),
         Record(
-            name='v=spf1 include:_cidrs.wikimedia.org ~all',
-            type='TXT',
-            host='wikipedia.org',
-            _source='dnsx'
+            name= "wikimedia.org",
+            type= "SOA",
+            host= "be.wikipedia.org",
+            _source= "dnsx"
 		),
-	],
-    'dnsxbrute': [
-        Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
-        Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
-		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsxbrute"),
+        # Record(
+        #     name='digicert.com',
+        #     type='CAA',
+        #     host='wikipedia.org',
+        #     _source='dnsx'
+		# ),
+        # Record(
+        #     name='v=spf1 include:_cidrs.wikimedia.org ~all',
+        #     type='TXT',
+        #     host='wikipedia.org',
+        #     _source='dnsx'
+		# ),
+        Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
+        Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
+		# Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
 	],
     'dalfox': [
         Vulnerability(

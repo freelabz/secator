@@ -1,8 +1,12 @@
 import uuid
 
+from dotmap import DotMap
+
 from secator.config import CONFIG
+from secator.output_types import Info
 from secator.runners._base import Runner
 from secator.runners.task import Task
+from secator.tree import build_runner_tree, walk_runner_tree
 from secator.utils import merge_opts
 
 
@@ -36,10 +40,11 @@ class Workflow(Runner):
 		opts = self.run_opts.copy()
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
+		opts.pop('print_profiles', False)
 
 		# Set hooks and reports
-		self.enable_reports = True  # Workflow will handle reports
 		self.enable_hooks = False   # Celery will handle hooks
+		self.enable_reports = True  # Workflow will handle reports
 
 		# Get hooks
 		hooks = self._hooks.get(Task, {})
@@ -54,22 +59,69 @@ class Workflow(Runner):
 
 		forwarded_opts = {}
 		if chain_previous_results:
-			forwarded_opts = {k: v for k, v in self.run_opts.items() if k.endswith('_')}
+			forwarded_opts = self.dynamic_opts
 
-		# Build task signatures
-		sigs = self.get_tasks(
-			self.config.tasks.toDict(),
-			self.inputs,
-			self.config.options,
-			opts,
-			forwarded_opts=forwarded_opts
-		)
+		tree = build_runner_tree(self.config)
+		global ix
+		ix = 0
+		sigs = []
 
+		def process_task(node, force=False):
+			from celery import chain, group
+			global ix
+			sig = None
+
+			if node.id is None:
+				return
+
+			if node.type == 'task':
+				if node.parent.type == 'group' and not force:
+					return
+
+				# Skip task if condition is not met
+				condition = node.opts.pop('if', None)
+				local_ns = {'opts': DotMap(opts)}
+				if condition and not eval(condition, {"__builtins__": {}}, local_ns):
+					self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] because condition is not met: [bold green]{condition}[/]'), print=True)  # noqa: E501
+					return
+
+				# Get task class
+				task = Task.get_task_class(node.name)
+
+				# Merge task options (order of priority with overrides)
+				resolved_opts = merge_opts(self.config.default_options.toDict(), node.opts, opts)
+				if ix == 0 and forwarded_opts:
+					resolved_opts.update(forwarded_opts)
+				resolved_opts['name'] = node.name
+
+				# Create task signature
+				task_id = str(uuid.uuid4())
+				resolved_opts['context'] = self.context.copy()
+				resolved_opts['context']['node_id'] = node.id
+				resolved_opts['aliases'] = [node.id, node.name]
+				if task.__name__ != node.name:
+					resolved_opts['aliases'].append(task.__name__)
+				profile = task.profile(resolved_opts) if callable(task.profile) else task.profile
+				sig = task.s(self.inputs, **resolved_opts).set(queue=profile, task_id=task_id)
+				self.add_subtask(task_id, node.name, resolved_opts.get('description', ''))
+				self.output_types.extend(task.output_types)
+				ix += 1
+			elif node.type == 'group' and node.children:
+				tasks = [process_task(child, force=True) for child in node.children]
+				sig = group(*[sig for sig in tasks if sig]) if tasks else None
+			elif node.type == 'chain' and node.children:
+				tasks = [process_task(child, force=True) for child in node.children]
+				sig = chain(*[sig for sig in tasks if sig]) if tasks else None
+
+			if sig and node.parent.type != 'group':
+				sigs.append(sig)
+			return sig
+		walk_runner_tree(tree, process_task)
+
+		# Build workflow chain with lifecycle management
 		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue='results')
 		if chain_previous_results:
 			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue='results')
-
-		# Build workflow chain with lifecycle management
 		return chain(
 			start_sig,
 			*sigs,
@@ -92,6 +144,7 @@ class Workflow(Runner):
 		"""
 		from celery import chain, group
 		sigs = []
+		sig = None
 		ix = 0
 		for task_name, task_opts in config.items():
 			# Task opts can be None
@@ -115,6 +168,13 @@ class Workflow(Runner):
 				)
 				sig = chain(*tasks)
 			else:
+				# Skip task if condition is not met
+				condition = task_opts.pop('if', None)
+				local_ns = {'opts': DotMap(run_opts)}
+				if condition and not eval(condition, {"__builtins__": {}}, local_ns):
+					self.add_result(Info(message=f'Skipped task [bold gold3]{task_name}[/] because condition is not met: [bold green]{condition}[/]'), print=True)  # noqa: E501
+					continue
+
 				# Get task class
 				task = Task.get_task_class(task_name)
 
@@ -127,9 +187,11 @@ class Workflow(Runner):
 				# Create task signature
 				task_id = str(uuid.uuid4())
 				opts['context'] = self.context.copy()
-				sig = task.s(inputs, **opts).set(queue=task.profile, task_id=task_id)
+				profile = task.profile(opts) if callable(task.profile) else task.profile
+				sig = task.s(inputs, **opts).set(queue=profile, task_id=task_id)
 				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
 				ix += 1
-			sigs.append(sig)
+			if sig:
+				sigs.append(sig)
 		return sigs

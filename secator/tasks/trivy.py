@@ -5,8 +5,7 @@ import yaml
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
-								DOCKER_IMAGE, PATH, GIT_REPOSITORY, PROXY, RATE_LIMIT, RETRIES, TIMEOUT,
-								USER_AGENT)
+								PATH, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT, STRING, URL)
 from secator.tasks._categories import Vuln
 from secator.output_types import Vulnerability, Tag, Info, Error
 
@@ -15,10 +14,12 @@ from secator.output_types import Vulnerability, Tag, Info, Error
 class trivy(Vuln):
 	"""Comprehensive and versatile security scanner."""
 	cmd = 'trivy'
+	input_types = [PATH, URL, STRING]
+	output_types = [Tag, Vulnerability]
 	tags = ['vuln', 'scan']
-	input_flag = None
-	input_types = [DOCKER_IMAGE, PATH, GIT_REPOSITORY]
+	input_chunk_size = 1
 	json_flag = '-f json'
+	version_flag = '--version'
 	opts = {
 		"mode": {"type": click.Choice(['image', 'fs', 'repo']), 'default': 'image', 'help': 'Trivy mode', 'required': True}  # noqa: E501
 	}
@@ -33,7 +34,6 @@ class trivy(Vuln):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
-	output_types = [Tag, Vulnerability]
 	install_version = 'v0.61.1'
 	install_cmd = (
 		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'

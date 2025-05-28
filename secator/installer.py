@@ -24,6 +24,7 @@ from secator.definitions import OPT_NOT_SUPPORTED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
+from secator.utils import get_versions_from_string
 
 
 class InstallerStatus(Enum):
@@ -90,11 +91,14 @@ class ToolInstaller:
 			status = gh_status
 
 		# Install from source
-		if tool_cls.install_cmd and not gh_status.is_ok():
-			status = SourceInstaller.install(tool_cls.install_cmd, tool_cls.install_version)
-			if not status.is_ok():
-				cls.print_status(status, name)
-				return status
+		if not gh_status.is_ok():
+			if not tool_cls.install_cmd:
+				status = InstallerStatus.INSTALL_SKIPPED_OK
+			else:
+				status = SourceInstaller.install(tool_cls.install_cmd, tool_cls.install_version)
+				if not status.is_ok():
+					cls.print_status(status, name)
+					return status
 
 		# Install post commands
 		if tool_cls.install_post:
@@ -215,6 +219,9 @@ class SourceInstaller:
 		if '[install_version]' in install_cmd:
 			version = version or 'latest'
 			install_cmd = install_cmd.replace('[install_version]', version)
+		elif '[install_version_strip]' in install_cmd:
+			version = version or 'latest'
+			install_cmd = install_cmd.replace('[install_version_strip]', version.lstrip('v'))
 
 		# Run command
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
@@ -243,7 +250,7 @@ class GithubInstaller:
 		system, arch, os_identifiers, arch_identifiers = cls._get_platform_identifier()
 		download_url = cls._find_matching_asset(release['assets'], os_identifiers, arch_identifiers)
 		if not download_url:
-			console.print(Error(message=f'Could not find a GitHub release matching distribution (system: {system}, arch: {arch}).'))  # noqa: E501
+			console.print(Warning(message=f'Could not find a GitHub release matching distribution (system: {system}, arch: {arch}).'))  # noqa: E501
 			return InstallerStatus.GITHUB_RELEASE_UNMATCHED_DISTRIBUTION
 
 		# Download and unpack asset
@@ -415,14 +422,11 @@ def get_version(version_cmd):
 		tuple[str]: Version string, return code.
 	"""
 	from secator.runners import Command
-	import re
-	regex = r'[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
-	match = re.findall(regex, ret.output)
-	if not match:
-		console.print(Warning(message=f'Failed to find version in version command output. Command: {version_cmd}; Output: {ret.output}; Return code: {ret.return_code}'))  # noqa: E501
+	versions = get_versions_from_string(ret.output)
+	if not versions:
 		return None
-	return match[0]
+	return versions[0]
 
 
 def parse_version(ver):
@@ -437,7 +441,7 @@ def parse_version(ver):
 		return None
 
 
-def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, version=None):
+def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, install_version=None, version=None, bleeding=False):  # noqa: E501
 	"""Get version info for a command.
 
 	Args:
@@ -445,7 +449,9 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		version_flag (str): Version flag.
 		install_github_handle (str): Github handle.
 		install_cmd (str): Install command.
+		install_version (str): Install version.
 		version (str): Existing version.
+		bleeding (bool): Bleeding edge.
 
 	Return:
 		dict: Version info.
@@ -457,10 +463,13 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		'version': version,
 		'version_cmd': None,
 		'latest_version': None,
+		'install_version': None,
 		'location': None,
 		'status': '',
 		'outdated': False,
-		'errors': []
+		'bleeding': False,
+		'source': None,
+		'errors': [],
 	}
 
 	# Get binary path
@@ -472,41 +481,40 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 	info['location'] = location
 	info['installed'] = True
 
-	# Get latest version
+	# Get latest / recommanded version
 	latest_version = None
-	if not CONFIG.offline_mode:
-		if install_github_handle:
-			latest_version = GithubInstaller.get_latest_version(install_github_handle)
-			info['latest_version'] = latest_version
-		elif install_cmd and install_cmd.startswith('pip'):
-			req = requests.get(f'https://pypi.python.org/pypi/{name}/json')
-			version = parse_version('0')
-			if req.status_code == requests.codes.ok:
-				j = json.loads(req.text.encode(req.encoding))
-				releases = j.get('releases', [])
-				for release in releases:
-					ver = parse_version(release)
-					if ver and not ver.is_prerelease:
-						version = max(version, ver)
-						latest_version = str(version)
-						info['latest_version'] = latest_version
-		elif install_cmd and install_cmd.startswith('sudo apt install'):
-			ret = Command.execute(f'apt-cache madison {name}', quiet=True)
-			if ret.return_code == 0:
-				output = ret.output.split(' | ')
-				if len(output) > 1:
-					ver = parse_version(output[1].strip())
-					if ver:
-						latest_version = str(ver)
-						info['latest_version'] = latest_version
+	if install_version and not bleeding:
+		ver = parse_version(install_version)
+		info['latest_version'] = str(ver)
+		info['install_version'] = str(ver)
+		info['source'] = 'supported'
+		latest_version = str(ver)
+	else:
+		latest_version = None
+		if not CONFIG.offline_mode:
+			if install_github_handle:
+				latest_version = GithubInstaller.get_latest_version(install_github_handle)
+				info['latest_version'] = latest_version
+				info['source'] = 'github'
+			elif install_cmd and install_cmd.startswith('pip'):
+				req = requests.get(f'https://pypi.python.org/pypi/{name}/json')
+				version = parse_version('0')
+				if req.status_code == requests.codes.ok:
+					j = json.loads(req.text.encode(req.encoding))
+					releases = j.get('releases', [])
+					for release in releases:
+						ver = parse_version(release)
+						if ver and not ver.is_prerelease and not ver.is_postrelease and not ver.is_devrelease:
+							version = max(version, ver)
+							latest_version = str(version)
+							info['source'] = 'pypi'
 			else:
-				error = f'Failed to get latest version for {name}. Command: apt-cache madison {name}'
-				info['errors'].append(error)
-				console.print(Warning(message=error))
+				info['errors'].append('Cannot get latest version for query method (github, pip) is available')
+	info['latest_version'] = f'v{latest_version}' if install_version and install_version.startswith('v') else latest_version  # noqa: E501
 
 	# Get current version
 	version_flag = None if version_flag == OPT_NOT_SUPPORTED else version_flag
-	if version_flag:
+	if version_flag and not version:
 		version_cmd = f'{name} {version_flag}'
 		info['version_cmd'] = version_cmd
 		version = get_version(version_cmd)
@@ -518,11 +526,20 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 
 	# Check if up-to-date
 	if version and latest_version:
-		if parse_version(version) < parse_version(latest_version):
+		outdated = parse_version(version) < parse_version(latest_version)
+		equal = parse_version(version) == parse_version(latest_version)
+		if outdated:
 			info['status'] = 'outdated'
 			info['outdated'] = True
-		else:
+		elif equal:
 			info['status'] = 'latest'
+		else:
+			info['status'] = 'bleeding'
+			info['bleeding'] = True
+			if install_version:
+				info['errors'].append(f'Version {version} is greather than the recommended version {latest_version}')
+			else:
+				info['errors'].append(f'Version {version} is greather than the latest version {latest_version}')
 	elif not version:
 		info['status'] = 'current unknown'
 	elif not latest_version:
@@ -547,6 +564,7 @@ def get_distro_config():
 
 	if system == "Linux":
 		distrib = distro.like() or distro.id()
+		distrib = distrib.split(' ')[0] if distrib else None
 
 		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
 			installer = "apt install -y --no-install-recommends"
@@ -593,22 +611,32 @@ def get_distro_config():
 def fmt_health_table_row(version_info, category=None):
 	name = version_info['name']
 	version = version_info['version']
+	if version:
+		version = version.lstrip('v')
 	status = version_info['status']
 	installed = version_info['installed']
 	latest_version = version_info['latest_version']
+	if latest_version:
+		latest_version = latest_version.lstrip('v')
+	source = version_info.get('source')
 	name_str = f'[magenta]{name:<13}[/]'
 
 	# Format version row
 	_version = version or ''
 	_version = f'[bold green]{_version:<10}[/]'
 	if status == 'latest':
-		_version += ' [bold green](latest)[/]'
+		_version += f' [bold green](latest {source})[/]'
+	elif status == 'bleeding':
+		msg = f'bleeding >{latest_version} {source}' if source else f'bleeding >{latest_version}'
+		_version += f' [bold orange1]({msg})[/]'
 	elif status == 'outdated':
 		_version += ' [bold red](outdated)[/]'
 		if latest_version:
-			_version += f' [dim](<{latest_version})'
+			_version += f' [dim](<{latest_version} {source})[/]'
 	elif status == 'missing':
 		_version = '[bold red]missing[/]'
+	elif status == 'missing_ok':
+		_version = '[dim green]not installed        [/]'
 	elif status == 'ok':
 		_version = '[bold green]ok        [/]'
 	elif status == 'version fetch error':

@@ -11,9 +11,10 @@ from secator.tasks._categories import ReconPort
 class naabu(ReconPort):
 	"""Port scanning tool written in Go."""
 	cmd = 'naabu'
+	input_types = [HOST, IP]
+	output_types = [Port]
 	tags = ['port', 'scan']
 	input_flag = '-host'
-	input_types = [HOST, IP]
 	file_flag = '-list'
 	json_flag = '-json'
 	opts = {
@@ -49,7 +50,6 @@ class naabu(ReconPort):
 			STATE: lambda x: 'open'
 		}
 	}
-	output_types = [Port]
 	install_version = 'v2.3.3'
 	install_cmd = 'go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@[install_version]'
 	install_github_handle = 'projectdiscovery/naabu'
@@ -74,6 +74,7 @@ class naabu(ReconPort):
 
 	@staticmethod
 	def on_item(self, item):
-		if item.host == '127.0.0.1':
-			item.host = 'localhost'
+		if isinstance(item, Port):
+			if item.host == '127.0.0.1':
+				item.host = 'localhost'
 		return item

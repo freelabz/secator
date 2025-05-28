@@ -1,4 +1,4 @@
-name: Tasks
+name: Test tasks
 
 on:
   push:
@@ -18,6 +18,8 @@ concurrency:
 jobs:
   test-tasks:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

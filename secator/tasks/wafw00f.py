@@ -1,4 +1,5 @@
 import os
+import tempfile
 import yaml
 
 from secator.decorators import task
@@ -12,8 +13,9 @@ from secator.tasks._categories import OPTS
 class wafw00f(Command):
 	"""Web Application Firewall Fingerprinting tool."""
 	cmd = 'wafw00f'
-	tags = ['waf', 'scan']
 	input_types = [URL]
+	output_types = [Tag]
+	tags = ['waf', 'scan']
 	input_flag = None
 	file_flag = '-i'
 	json_flag = '-f json'
@@ -30,6 +32,9 @@ class wafw00f(Command):
 		'find_all': {'is_flag': True, 'short': 'ta', 'default': False, 'help': 'Find all WAFs which match the signatures, do not stop testing on the first one'},  # noqa: E501
 		'no_follow_redirects': {'is_flag': True, 'short': 'nfr', 'default': False, 'help': 'Do not follow redirections given by 3xx responses'},  # noqa: E501
 	}
+	opt_value_map = {
+		HEADER: lambda x: wafw00f.headers_to_file(x)
+	}
 	opt_key_map = {
 		HEADER: 'headers',
 		PROXY: 'proxy',
@@ -37,7 +42,6 @@ class wafw00f(Command):
 		'find_all': 'findall',
 		'no_follow_redirects': 'noredirect',
 	}
-	output_types = [Tag]
 	install_version = 'v2.3.1'
 	install_cmd = 'pipx install git+https://github.com/EnableSecurity/wafw00f.git@[install_version] --force'
 	install_github_handle = 'EnableSecurity/wafw00f'
@@ -81,5 +85,19 @@ class wafw00f(Command):
 			yield Tag(
 				name=waf_name + ' WAF',
 				match=url,
-				extra_data={'waf_name': waf_name, 'manufacter': manufacter, 'trigger_url': match}
+				extra_data={
+					'waf_name': waf_name,
+					'manufacter': manufacter,
+					'trigger_url': match,
+					'headers': self.get_opt_value('header', preprocess=True)
+				}
 			)
+
+	@staticmethod
+	def headers_to_file(headers):
+		temp_dir = tempfile.gettempdir()
+		header_file = f'{temp_dir}/headers.txt'
+		with open(header_file, 'w') as f:
+			for header in headers.split(';;'):
+				f.write(f'{header}\n')
+		return header_file

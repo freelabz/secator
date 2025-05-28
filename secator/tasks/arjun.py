@@ -14,9 +14,10 @@ from secator.utils import process_wordlist
 class arjun(Command):
 	"""HTTP Parameter Discovery Suite."""
 	cmd = 'arjun'
+	input_types = [URL]
+	output_types = [Url]
 	tags = ['url', 'fuzz', 'params']
 	input_flag = '-u'
-	input_types = [URL]
 	version_flag = ' '
 	opts = {
 		'chunk_size': {'type': int, 'help': 'Control query/chunk size'},
@@ -49,7 +50,9 @@ class arjun(Command):
 		'casing': '--casing',
 		'follow_redirect': '--follow-redirect',
 	}
-	output_types = [Url]
+	opt_value_map = {
+		HEADER: lambda headers: "\\n".join(c.strip() for c in headers.split(";;"))
+	}
 	install_version = '2.2.7'
 	install_cmd = 'pipx install arjun==[install_version] --force'
 	install_github_handle = 's0md3v/Arjun'
@@ -87,6 +90,6 @@ class arjun(Command):
 			for param in values['params']:
 				yield Url(
 					url=url + '?' + param + '=' + 'FUZZ',
-					headers=values['headers'],
+					request_headers=values['headers'],
 					method=values['method'],
 				)
