@@ -17,7 +17,7 @@ class trivy(Vuln):
 	input_types = [PATH, URL, STRING]
 	output_types = [Tag, Vulnerability]
 	tags = ['vuln', 'scan']
-	input_flag = None
+	input_chunk_size = 1
 	json_flag = '-f json'
 	version_flag = '--version'
 	opts = {

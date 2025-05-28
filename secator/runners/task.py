@@ -1,7 +1,7 @@
 import uuid
 from secator.config import CONFIG
 from secator.runners import Runner
-from secator.utils import discover_tasks
+from secator.loader import discover_tasks
 from celery import chain
 
 
@@ -62,7 +62,7 @@ class Task(Runner):
 		task_id = str(uuid.uuid4())
 		profile = task_cls.profile(opts) if callable(task_cls.profile) else task_cls.profile
 		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=profile, task_id=task_id)
-		self.add_subtask(task_id, self.config.name, self.config.description or '')
+		self.add_subtask(task_id, self.config.name, self.description)
 		return chain(sig)
 
 	@staticmethod

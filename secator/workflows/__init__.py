@@ -1,4 +1,4 @@
-from secator.cli import ALL_WORKFLOWS
+from secator.loader import get_configs_by_type
 from secator.runners import Workflow
 
 
@@ -21,7 +21,7 @@ class DynamicWorkflow(Workflow):
 
 
 DYNAMIC_WORKFLOWS = {}
-for workflow in ALL_WORKFLOWS:
+for workflow in get_configs_by_type('workflow'):
 	instance = DynamicWorkflow(workflow)
 	DYNAMIC_WORKFLOWS[workflow.name] = instance
 

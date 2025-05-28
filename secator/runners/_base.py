@@ -19,6 +19,7 @@ from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
 from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update, autodetect_type)
 from secator.tree import build_runner_tree
+from secator.loader import get_configs_by_type
 
 
 logger = logging.getLogger(__name__)
@@ -87,9 +88,9 @@ class Runner:
 		self.output = ''
 
 		# Runner config
-		self.config = config
+		self.config = DotMap(config.toDict())
 		self.name = run_opts.get('name', config.name)
-		self.description = run_opts.get('description', config.description)
+		self.description = run_opts.get('description', config.description or '')
 		self.workspace_name = context.get('workspace_name', 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
@@ -108,13 +109,13 @@ class Runner:
 		self.celery_ids_map = {}
 		self.caller = self.run_opts.get('caller', None)
 		self.threads = []
-		self.no_poll = self.run_opts.get('no_poll', False)
 		self.quiet = self.run_opts.get('quiet', False)
 		self.started = False
 		self.enable_reports = self.run_opts.get('enable_reports', not self.sync)
 		self._reports_folder = self.run_opts.get('reports_folder', None)
 
 		# Runner process options
+		self.no_poll = self.run_opts.get('no_poll', False)
 		self.no_process = not self.run_opts.get('process', True)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
@@ -142,6 +143,14 @@ class Runner:
 		self.chunk_count = self.run_opts.get('chunk_count', None)
 		self.unique_name = self.name.replace('/', '_')
 		self.unique_name = f'{self.unique_name}_{self.chunk}' if self.chunk else self.unique_name
+
+		# Opt aliases
+		self.opt_aliases = []
+		if self.config.node_id:
+			self.opt_aliases.append(self.config.node_id.replace('.', '_').replace('/', '_'))
+		if self.config.node_name:
+			self.opt_aliases.append(self.config.node_name.replace('/', '_'))
+		self.opt_aliases.append(self.config.name)
 
 		# Begin initialization
 		self.debug('begin initialization', sub='init')
@@ -301,7 +310,7 @@ class Runner:
 			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
 			'celery_id': self.context['celery_id'],
 			'count': self.self_findings_count,
-			'descr': self.config.description or '',
+			'descr': self.description
 		}
 
 	@property
@@ -402,6 +411,7 @@ class Runner:
 
 	def _run_extractors(self, results):
 		"""Run extractors on results and targets."""
+		self.debug('running extractors', sub='init')
 		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs}
 		inputs, run_opts, errors = run_extractors(
 			results,
@@ -411,7 +421,8 @@ class Runner:
 			dry_run=self.dry_run)
 		for error in errors:
 			self.add_result(error, print=True)
-		self.inputs = list(set(inputs))
+		self.inputs = sorted(list(set(inputs)))
+		self.debug(f'extracted {len(self.inputs)} inputs', sub='init')
 		self.run_opts = run_opts
 
 	def add_result(self, item, print=False, output=True):
@@ -809,8 +820,8 @@ class Runner:
 			self._print(info, rich=True)
 		remote_str = 'started' if self.sync else 'sent to Celery worker'
 		msg = f'{self.config.type.capitalize()} {format_runner_name(self)}'
-		if self.config.description:
-			msg += f' ([dim]{self.config.description}[/])'
+		if self.description:
+			msg += f' ([dim]{self.description}[/])'
 		info = Info(message=f'{msg} {remote_str}', _source=self.unique_name)
 		self._print(info, rich=True)
 
@@ -1087,12 +1098,11 @@ class Runner:
 		Returns:
 			list: List of profiles.
 		"""
-		from secator.cli import ALL_PROFILES
 		if isinstance(profiles, str):
 			profiles = profiles.split(',')
 		templates = []
 		for pname in profiles:
-			matches = [p for p in ALL_PROFILES if p.name == pname]
+			matches = [p for p in get_configs_by_type('profile') if p.name == pname]
 			if not matches:
 				self._print(Warning(message=f'Profile "{pname}" was not found'), rich=True)
 			else:
@@ -1100,7 +1110,10 @@ class Runner:
 		opts = {}
 		for profile in templates:
 			if self.print_profiles:
-				self._print(Info(message=f'Loaded profile [bold pink3]{profile.name}[/] ([dim]{profile.description}[/])'), rich=True)  # noqa: E501
+				msg = f'Loaded profile [bold pink3]{profile.name}[/]'
+				if profile.description:
+					msg += f' ([dim]{profile.description}[/])'
+				self._print(Info(message=msg), rich=True)
 			opts.update(profile.opts)
 		opts = {k: v for k, v in opts.items() if k not in self.run_opts}
 		self.run_opts.update(opts)

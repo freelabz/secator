@@ -15,7 +15,8 @@ class grype(VulnCode):
 	output_types = [Vulnerability]
 	tags = ['vuln', 'scan']
 	input_flag = ''
-	file_flag = OPT_NOT_SUPPORTED
+	input_chunk_size = 1
+	file_flag = None
 	json_flag = None
 	opt_prefix = '--'
 	opt_key_map = {

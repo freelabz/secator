@@ -96,7 +96,7 @@ class katana(HttpCrawler):
 			opts,
 			'headless',
 			opts_conf=dict(katana.opts, **katana.meta_opts),
-			opt_prefix='katana'
+			opt_aliases=opts.get('aliases', [])
 		)
 		return 'cpu' if headless is True else 'io'
 

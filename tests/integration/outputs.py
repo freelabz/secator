@@ -114,7 +114,7 @@ OUTPUTS_TASKS = {
 		# ),
         Subdomain(host="be.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
         Subdomain(host="commons.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
-		Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
+		# Subdomain(host="de.wikipedia.org", domain="wikipedia.org", _source="dnsx"),
 	],
     'dalfox': [
         Vulnerability(

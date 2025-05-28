@@ -20,8 +20,8 @@ class wpscan(VulnHttp):
 	input_types = [URL]
 	output_types = [Vulnerability, Tag]
 	tags = ['vuln', 'scan', 'wordpress']
-	file_flag = None
 	input_flag = '--url'
+	input_chunk_size = 1
 	json_flag = '-f json'
 	opt_prefix = '--'
 	opts = {

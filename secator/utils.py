@@ -1,5 +1,4 @@
 import fnmatch
-import inspect
 import importlib
 import ipaddress
 import itertools
@@ -16,9 +15,7 @@ import warnings
 
 from datetime import datetime, timedelta
 from functools import reduce
-from inspect import isclass
 from pathlib import Path
-from pkgutil import iter_modules
 from time import time
 import traceback
 from urllib.parse import urlparse, quote
@@ -148,75 +145,6 @@ def deduplicate(array, attr=None):
 	return sorted(list(dict.fromkeys(array)))
 
 
-def discover_internal_tasks():
-	"""Find internal secator tasks."""
-	from secator.runners import Runner
-	package_dir = Path(__file__).resolve().parent / 'tasks'
-	task_classes = []
-	for (_, module_name, _) in iter_modules([str(package_dir)]):
-		if module_name.startswith('_'):
-			continue
-		try:
-			module = importlib.import_module(f'secator.tasks.{module_name}')
-		except ImportError as e:
-			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
-			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
-			continue
-		for attribute_name in dir(module):
-			attribute = getattr(module, attribute_name)
-			if isclass(attribute):
-				bases = inspect.getmro(attribute)
-				if Runner in bases and hasattr(attribute, '__task__'):
-					task_classes.append(attribute)
-
-	# Sort task_classes by category
-	task_classes = sorted(
-		task_classes,
-		# key=lambda x: (get_command_category(x), x.__name__)
-		key=lambda x: x.__name__)
-
-	return task_classes
-
-
-def discover_external_tasks():
-	"""Find external secator tasks."""
-	output = []
-	sys.dont_write_bytecode = True
-	for path in CONFIG.dirs.templates.glob('**/*.py'):
-		try:
-			task_name = path.stem
-			module_name = f'secator.tasks.{task_name}'
-
-			# console.print(f'Importing module {module_name} from {path}')
-			spec = importlib.util.spec_from_file_location(module_name, path)
-			module = importlib.util.module_from_spec(spec)
-			# console.print(f'Adding module "{module_name}" to sys path')
-			sys.modules[module_name] = module
-
-			# console.print(f'Executing module "{module}"')
-			spec.loader.exec_module(module)
-
-			# console.print(f'Checking that {module} contains task {task_name}')
-			if not hasattr(module, task_name):
-				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
-				continue
-			cls = getattr(module, task_name)
-			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
-			output.append(cls)
-		except Exception as e:
-			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
-	sys.dont_write_bytecode = False
-	return output
-
-
-def discover_tasks():
-	"""Find all secator tasks (internal + external)."""
-	global _tasks
-	if not _tasks:
-		_tasks = discover_internal_tasks() + discover_external_tasks()
-	return _tasks
-
-
 def import_dynamic(path, name=None):
 	"""Import class or module dynamically from path.
 
@@ -244,22 +172,6 @@ def import_dynamic(path, name=None):
 			path += f'.{name}'
 		warnings.warn(f'"{path}" not found.', category=UserWarning, stacklevel=2)
 		return None
-
-
-def get_command_cls(cls_name):
-	"""Get secator command by class name.
-
-	Args:
-		cls_name (str): Class name to load.
-
-	Returns:
-		cls: Class.
-	"""
-	tasks_classes = discover_tasks()
-	for task_cls in tasks_classes:
-		if task_cls.__name__ == cls_name:
-			return task_cls
-	return None
 
 
 def get_command_category(command):
