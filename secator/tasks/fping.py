@@ -34,7 +34,7 @@ class fping(ReconIp):
 		TIMEOUT: lambda x: x * 1000  # convert s to ms
 	}
 	install_github_handle = 'schweikert/fping'
-	install_version = 'v5.1'
+	install_version = 'v5.3'
 	install_pre = {'*': ['fping']}
 	ignore_return_code = True
 

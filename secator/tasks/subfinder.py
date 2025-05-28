@@ -33,7 +33,7 @@ class subfinder(ReconDns):
 			DOMAIN: 'input',
 		}
 	}
-	install_version = 'v2.7.0'
+	install_version = 'v2.7.1'
 	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@[install_version]'
 	install_github_handle = 'projectdiscovery/subfinder'
 	proxychains = False
