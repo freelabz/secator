@@ -1,7 +1,6 @@
 import time
 from datetime import datetime
 from dataclasses import dataclass, field
-from enum import Enum
 
 from secator.definitions import ALIVE, DOMAIN
 from secator.output_types import OutputType
