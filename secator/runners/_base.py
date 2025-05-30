@@ -147,10 +147,10 @@ class Runner:
 		# Opt aliases
 		self.opt_aliases = []
 		if self.config.node_id:
-			self.opt_aliases.append(self.config.node_id.replace('.', '_').replace('/', '_'))
+			self.opt_aliases.append(self.config.node_id.replace('.', '_'))
 		if self.config.node_name:
-			self.opt_aliases.append(self.config.node_name.replace('/', '_'))
-		self.opt_aliases.append(self.config.name)
+			self.opt_aliases.append(self.config.node_name)
+		self.opt_aliases.append(self.unique_name)
 
 		# Begin initialization
 		self.debug('begin initialization', sub='init')
