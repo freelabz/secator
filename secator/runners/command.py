@@ -406,11 +406,12 @@ class Command(Runner):
 			if self.dry_run:
 				self.print_description()
 				self.print_command()
+				yield Info(message=self.cmd)
 				return
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				yield Warning(message=f'{self.unique_name} skipped (no inputs)')
 				return
 
 			# Print command
@@ -420,11 +421,7 @@ class Command(Runner):
 			# Check for sudo requirements and prepare the password if needed
 			sudo_password, error = self._prompt_sudo(self.cmd)
 			if error:
-				yield Error(
-					message=error,
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
+				yield Error(message=error)
 				return
 
 			# Prepare cmds
@@ -434,18 +431,10 @@ class Command(Runner):
 			if not self.no_process and not self.is_installed():
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
-					yield Info(
-						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noqa: E501
-						_source=self.unique_name,
-						_uuid=str(uuid.uuid4())
-					)
+					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
 					status = ToolInstaller.install(self.__class__)
 					if not status.is_ok():
-						yield Error(
-							message=f'Failed installing {self.cmd_name}',
-							_source=self.unique_name,
-							_uuid=str(uuid.uuid4())
-						)
+						yield Error(message=f'Failed installing {self.cmd_name}')
 						return
 
 			# Output and results
@@ -487,7 +476,7 @@ class Command(Runner):
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
 			self.stop_process()
-			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error.from_exception(e)
 
 		finally:
 			yield from self._wait_for_end()
@@ -543,7 +532,7 @@ class Command(Runner):
 
 	def print_description(self):
 		"""Print description"""
-		if self.sync and not self.has_children and self.caller and self.description:
+		if self.sync and not self.has_children and self.caller and self.description and self.print_cmd:
 			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
 
 	def print_command(self):
@@ -710,24 +699,14 @@ class Command(Runner):
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			yield Error(message=error)
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
 			last_lines = [line for line in last_lines if line != '']
-			yield Error(
-				message=error,
-				traceback='\n'.join(last_lines),
-				traceback_title='Last stdout lines',
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			yield Error(message=error, traceback='\n'.join(last_lines), traceback_title='Last stdout lines')
 
 	@staticmethod
 	def _process_opts(

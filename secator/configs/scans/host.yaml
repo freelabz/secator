@@ -6,9 +6,9 @@ input_types:
   - host
 workflows:
   host_recon:
-  url_crawl:
-    targets_:
-    - url.url
+  # url_crawl:
+  #   targets_:
+  #   - url.url
   url_vuln:
     targets_:
     - url.url

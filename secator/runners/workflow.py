@@ -34,13 +34,15 @@ class Workflow(Runner):
 			celery.Signature: Celery task signature.
 		"""
 		from celery import chain
-		from secator.celery import mark_runner_started, mark_runner_completed
+		from secator.celery import mark_runner_started, mark_runner_completed, forward_results
 
 		# Prepare run options
 		opts = self.run_opts.copy()
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
 		opts.pop('print_profiles', False)
+		# import json
+		# print(json.dumps(opts, indent=4))
 
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
@@ -57,6 +59,12 @@ class Workflow(Runner):
 		opts['skip_if_no_inputs'] = True
 		opts['caller'] = 'Workflow'
 
+		# Remove workflow config prefix from opts
+		for k, v in opts.copy().items():
+			if k.startswith(self.config.name + '_'):
+				opts[k.replace(self.config.name + '_', '')] = v
+				opts.pop(k)
+
 		forwarded_opts = {}
 		if chain_previous_results:
 			forwarded_opts = self.dynamic_opts
@@ -68,6 +76,7 @@ class Workflow(Runner):
 
 		def process_task(node, force=False):
 			from celery import chain, group
+			from secator.utils import debug
 			global ix
 			sig = None
 
@@ -82,6 +91,7 @@ class Workflow(Runner):
 				condition = node.opts.pop('if', None)
 				local_ns = {'opts': DotMap(opts)}
 				if condition and not eval(condition, {"__builtins__": {}}, local_ns):
+					debug(f'{node.id} skipped task because condition is not met: {condition}', sub=self.config.name)
 					self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] because condition is not met: [bold green]{condition}[/]'), print=True)  # noqa: E501
 					return
 
@@ -103,17 +113,30 @@ class Workflow(Runner):
 					resolved_opts['aliases'].append(task.__name__)
 				profile = task.profile(resolved_opts) if callable(task.profile) else task.profile
 				sig = task.s(self.inputs, **resolved_opts).set(queue=profile, task_id=task_id)
+				debug(f'{node.id} sig built', sub=f'workflow.{self.config.name}')
 				self.add_subtask(task_id, node.name, resolved_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
 				ix += 1
 			elif node.type == 'group' and node.children:
-				tasks = [process_task(child, force=True) for child in node.children]
-				sig = group(*[sig for sig in tasks if sig]) if tasks else None
+				tasks = [sig for sig in [process_task(child, force=True) for child in node.children] if sig]
+				debug(f'{node.id} group built with {len(tasks)} tasks', sub=self.config.name)
+				if len(tasks) == 1:
+					debug(f'{node.id} downgraded group to task', sub=self.config.name)
+					sig = tasks[0]
+				elif len(tasks) > 1:
+					sig = group(*tasks)
+					last_sig = sigs[-1] if sigs else None
+					if sig and isinstance(last_sig, group):  # cannot chain 2 groups without bridge task
+						debug(f'{node.id} previous is group, adding bridge task forward_results', sub=self.config.name)
+						sigs.append(forward_results.s())
+				else:
+					debug(f'{node.id} group built with 0 tasks', sub=f'workflow.{self.config.name}')
 			elif node.type == 'chain' and node.children:
-				tasks = [process_task(child, force=True) for child in node.children]
-				sig = chain(*[sig for sig in tasks if sig]) if tasks else None
-
+				tasks = [sig for sig in [process_task(child, force=True) for child in node.children] if sig]
+				sig = chain(*tasks) if tasks else None
+				debug(f'{node.id} chain built with {len(tasks)} tasks', sub=self.config.name)
 			if sig and node.parent.type != 'group':
+				debug(f'{node.id} added to workflow', sub=self.config.name)
 				sigs.append(sig)
 			return sig
 		walk_runner_tree(tree, process_task)

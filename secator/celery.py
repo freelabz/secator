@@ -248,8 +248,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if results:
 		runner.results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if not runner.dry_run:
-		runner.mark_started()
+	runner.mark_started()
 	return runner.results
 
 
@@ -268,9 +267,8 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if not runner.dry_run:
-		[runner.add_result(item) for item in results]
-		runner.mark_completed()
+	[runner.add_result(item) for item in results]
+	runner.mark_completed()
 	return runner.results
 
 
@@ -336,7 +334,7 @@ def break_task(task, task_opts, results=[]):
 		sig = type(task).si(chunk, **opts).set(task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
-		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
+		info = Info(message=f'Celery chunked task created: {task_id}')
 		task.add_result(info)
 		sigs.append(sig)
 

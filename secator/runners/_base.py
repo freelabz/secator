@@ -125,7 +125,7 @@ class Runner:
 		self.has_children = self.run_opts.get('has_children', False)
 
 		# Runner print opts
-		self.print_item = self.run_opts.get('print_item', False)
+		self.print_item = self.run_opts.get('print_item', False) and not self.dry_run
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
 		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
 		self.print_start = self.run_opts.get('print_start', False) and not self.dry_run  # noqa: E501
@@ -389,8 +389,6 @@ class Runner:
 
 	def _finalize(self):
 		"""Finalize the runner."""
-		if self.dry_run:
-			return
 		if self.sync:
 			self.mark_completed()
 		if self.enable_reports:
@@ -731,11 +729,7 @@ class Runner:
 					message = 'Validator failed'
 					if doc:
 						message += f': {doc}'
-					error = Error(
-						message=message,
-						_source=self.unique_name,
-						_uuid=str(uuid.uuid4())
-					)
+					error = Error(message=message)
 					self.add_result(error, print=True)
 				return False
 			self.debug('validator success', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501

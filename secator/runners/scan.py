@@ -44,6 +44,8 @@ class Scan(Runner):
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			name = name.split('/')[0]
 			config = TemplateLoader(name=f'workflow/{name}')
+			if not config:
+				raise ValueError(f'Workflow {name} not found')
 
 			# Skip workflow if condition is not met
 			condition = workflow_opts.pop('if', None) if workflow_opts else None
