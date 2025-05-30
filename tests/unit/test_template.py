@@ -10,7 +10,7 @@ from secator.runners.scan import Scan
 from secator.utils_test import FIXTURES_DIR, clear_modules
 from secator.loader import get_configs_by_type, find_templates, discover_tasks
 from secator.tree import build_runner_tree
-from secator.template import get_command_options
+from secator.template import get_config_options
 
 class TestTemplate(unittest.TestCase):
 
@@ -152,20 +152,20 @@ class TestTree(unittest.TestCase):
 		self.assertEqual(root_node.children[3].children[0].name, 'nuclei/network')
 		self.assertEqual(root_node.children[3].children[1].name, 'httpx/network')
 
-	def test_get_command_options_workflow_1(self):
+	def test_get_config_options_workflow_1(self):
 		from secator.template import TemplateLoader
 		config = TemplateLoader(input=self.workflow_config_1)
-		opts = get_command_options(config)
+		opts = get_config_options(config)
 		self.assertEqual(opts['ports']['default'], '80,443')
 		self.assertEqual(opts['ports']['default_from'], 'test1')
-		self.assertEqual(opts['ports']['prefix'], 'Workflow overrides')
+		self.assertEqual(opts['ports']['prefix'], 'Config overrides')
 		self.assertEqual(opts['nuclei']['default'], False)
-		self.assertEqual(opts['nuclei']['prefix'], 'workflow')
+		self.assertEqual(opts['nuclei']['prefix'], 'workflow test1')
 
-	def test_get_command_options_scan(self):
+	def test_get_config_options_scan(self):
 		from secator.template import TemplateLoader
 		config = TemplateLoader(input=self.scan_config)
-		opts = get_command_options(config)
+		opts = get_config_options(config)
 		# import json
 		# print(json.dumps(opts, indent=4, default=str))
 		self.assertEqual(opts['test1-nuclei']['default'], False)

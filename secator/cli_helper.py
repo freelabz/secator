@@ -9,7 +9,7 @@ from secator.config import CONFIG
 from secator.click import CLICK_LIST
 from secator.definitions import ADDONS_ENABLED
 from secator.runners import Scan, Task, Workflow
-from secator.template import get_command_options
+from secator.template import get_config_options
 from secator.tree import build_runner_tree
 from secator.utils import (deduplicate, expand_input, get_command_category)
 from secator.loader import get_configs_by_type
@@ -98,9 +98,9 @@ def decorate_command_options(opts):
 					short += f'/-n{short_opt}' if short_opt else f'/-n{opt_name}'
 			if applies_to:
 				applies_to_str = ", ".join(f'[dim yellow3]{_}[/]' for _ in applies_to)
-				conf['help'] += f' \[[dim]applies to: {applies_to_str}[/]]'
+				conf['help'] += rf' \[[dim]applies to: {applies_to_str}[/]]'
 			if default_from:
-				conf['help'] += f' \[[dim]default from: [dim yellow3]{default_from}[/][/]]'
+				conf['help'] += rf' \[[dim]default from: [dim yellow3]{default_from}[/][/]]'
 			f = click.option(long, short, **conf)(f)
 		return f
 	return decorator
@@ -161,7 +161,7 @@ def register_runner(cli_endpoint, config):
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
-	options = get_command_options(config, exec_opts=CLI_EXEC_OPTS, output_opts=CLI_OUTPUT_OPTS, type_mapping=CLI_TYPE_MAPPING)  # noqa: E501
+	options = get_config_options(config, exec_opts=CLI_EXEC_OPTS, output_opts=CLI_OUTPUT_OPTS, type_mapping=CLI_TYPE_MAPPING)  # noqa: E501
 
 	# TODO: maybe allow this in the future
 	# def get_unknown_opts(ctx):

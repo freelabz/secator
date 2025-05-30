@@ -55,17 +55,20 @@ class TemplateLoader(DotMap):
 		console.print(yaml_highlight)
 
 
-def get_command_options(config, exec_opts=None, output_opts=None, type_mapping=None):
+def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=None):
 	from secator.tree import build_runner_tree, walk_runner_tree, get_flat_node_list
 	from secator.utils import debug
 	from secator.runners.task import Task
+
+	# Task config created on-the-fly
 	if config.type == 'task':
-		fake_config = TemplateLoader({
+		config = TemplateLoader({
 			'name': config.name,
 			'type': 'workflow',
 			'tasks': {config.name: {}}
 		})
-		config = fake_config
+
+	# Get main info
 	tree = build_runner_tree(config)
 	nodes = get_flat_node_list(tree)
 	exec_opts = exec_opts or {}
@@ -73,25 +76,31 @@ def get_command_options(config, exec_opts=None, output_opts=None, type_mapping=N
 	type_mapping = type_mapping or {}
 	all_opts = OrderedDict({})
 
-	# Gather config defaults
-	# a.k.a default YAML config options, defined in default_options: key in the runner YAML config
-	default_opts = config.default_options.toDict()
-
-	# Gather global runner options
+	# Log current config and tree
 	debug(f'[magenta]{config.name}[/]', sub=f'cli.{config.name}')
 	debug(f'{tree.render_tree()}', sub=f'cli.{config.name}')
 
-	# Add global execution options
+	# Process global execution options
 	for opt in exec_opts:
 		opt_conf = exec_opts[opt].copy()
 		opt_conf['prefix'] = 'Execution'
 		all_opts[opt] = opt_conf
 
-	# Add global output options
+	# Process global output options
 	for opt in output_opts:
 		opt_conf = output_opts[opt].copy()
 		opt_conf['prefix'] = 'Output'
 		all_opts[opt] = opt_conf
+
+	# Process config options
+	# a.k.a:
+	# - default YAML config options, defined in default_options: key in the runner YAML config
+	# - new options defined in options: key in the runner YAML config
+	config_opts_defaults = config.default_options.toDict()
+	config_opts = config.options.toDict()
+	for k, v in config_opts.items():
+		all_opts[k] = v
+		all_opts[k]['prefix'] = f'{config.type}'
 
 	def find_same_opts(node, nodes, opt_name, check_class_opts=False):
 		"""Find options with the same name that are defined in other nodes of the same type."""
@@ -137,9 +146,7 @@ def get_command_options(config, exec_opts=None, output_opts=None, type_mapping=N
 			return
 
 		# Process workflow options
-		# a.k.a:
-		# - new options defined in options: key in the workflow YAML config;
-		# - default options defined in default_options: key in the workflow YAML config
+		# a.k.a the new options defined in options: key in the workflow YAML config;
 		if node.type == 'workflow':
 			for k, v in node.opts.items():
 				same_opts = find_same_opts(node, nodes, k)
@@ -156,67 +163,60 @@ def get_command_options(config, exec_opts=None, output_opts=None, type_mapping=N
 		# a.k.a task options defined in their respective task classes
 		cls = Task.get_task_class(node.name)
 		task_opts = cls.opts.copy()
-		task_meta_opts = cls.meta_opts.copy()
-		task_opts_all = {**task_opts, **task_meta_opts}
+		task_opts_meta = cls.meta_opts.copy()
+		task_opts_all = {**task_opts, **task_opts_meta}
 		node_opts = node.opts or {}
-		# same_task_name = any(_.name == node.name and _.id != node.id and _.type == node.type for _ in nodes)
+		ancestor_opts_defaults = node.ancestor.default_opts or {}
 		for k, v in task_opts_all.items():
 			conf = v.copy()
 			conf['prefix'] = cls.__name__
-			config_default = node_opts.get(k) or default_opts.get(k)
+			default_from_config = node_opts.get(k) or ancestor_opts_defaults.get(k) or config_opts_defaults.get(k)
 			opt_name = k
 			same_opts = find_same_opts(node, nodes, k)
-			if config_default:
+
+			# Found a default in YAML config, either in task options, or workflow options, or config options
+			if default_from_config:
 				conf['required'] = False
-				conf['default'] = config_default
+				conf['default'] = default_from_config
+				conf['default_from'] = node.id
 				if node_opts.get(k):
 					conf['default_from'] = node.id
-				elif default_opts.get(k):
+				elif ancestor_opts_defaults.get(k):
+					conf['default_from'] = node.ancestor.id
+					conf['prefix'] = 'Config overrides'
+				elif config_opts_defaults.get(k):
 					conf['default_from'] = config.name
-					conf['prefix'] = f'{config.type.capitalize()} overrides'
+					conf['prefix'] = 'Config overrides'
 				mapped_value = cls.opt_value_map.get(opt_name)
 				if mapped_value:
 					if callable(mapped_value):
-						config_default = mapped_value(config_default)
+						default_from_config = mapped_value(default_from_config)
 					else:
-						config_default = mapped_value
-				conf['default'] = config_default
+						default_from_config = mapped_value
+				conf['default'] = default_from_config
 				if len(same_opts) > 0:  # change opt name to avoid conflict
-					default_from = node.id if node.ancestor.name != config.name else node.name
 					conf['prefix'] = 'Config overrides'
-					conf['default_from'] = default_from
-					opt_name = f'{default_from}.{k}'
+					opt_name = f'{conf["default_from"]}.{k}'
 					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] renamed to [bold green]{opt_name}[/] [dim red](default set in config)[/]', sub=f'cli.{config.name}')  # noqa: E501
+
+			# Standard meta options like rate_limit, delay, proxy, etc...
+			elif k in task_opts_meta:
+				conf['prefix'] = 'Meta'
+				debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Meta[/]', sub=f'cli.{config.name}')  # noqa: E501
+
+			# Task-specific options
+			elif k in task_opts:
+				same_opts = find_same_opts(node, nodes, k, check_class_opts=True)
+				if len(same_opts) > 0:
+					applies_to = set([_['id'] for _ in same_opts] + [node.id])
+					conf['applies_to'] = applies_to
+					conf['prefix'] = 'Shared task'
+					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Common[/] [dim red](duplicated {len(same_opts)} times)[/]', sub=f'cli.{config.name}')  # noqa: E501
 			else:
-				ancestor_defaults = node.ancestor.default_opts
-				if k in ancestor_defaults:
-					conf['default'] = ancestor_defaults[k]
-					conf['default_from'] = node.ancestor.id
-					conf['prefix'] = 'Config overrides'
-					opt_name = f'{node.ancestor.id}.{k}'
-				elif k in task_meta_opts:
-					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Meta[/]', sub=f'cli.{config.name}')  # noqa: E501
-					conf['prefix'] = 'Meta'
-				elif k in task_opts:
-					conf['prefix'] = cls.__name__
-					same_opts = find_same_opts(node, nodes, k, check_class_opts=True)
-					if len(same_opts) > 0:
-						debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Common[/] [dim red](duplicated {len(same_opts)} times)[/]', sub=f'cli.{config.name}')  # noqa: E501
-						conf['prefix'] = 'Shared task'
-						applies_to = set([_['id'] for _ in same_opts] + [node.id])
-						conf['applies_to'] = applies_to
-				else:
-					raise ValueError(f'Unknown option {k} for task {node.id}')
+				raise ValueError(f'Unknown option {k} for task {node.id}')
 			all_opts[opt_name] = conf
 
 	walk_runner_tree(tree, process_node)
-
-	# Process config options
-	# a.k.a new options defined in options: key in the runner YAML config
-	runner_opts = config.options.toDict()
-	for k, v in runner_opts.items():
-		all_opts[k] = v
-		all_opts[k]['prefix'] = f'{config.type}'
 
 	# Normalize all options
 	debug('[bold yellow3]All opts processed. Showing defaults:[/]', sub=f'cli.{config.name}')
