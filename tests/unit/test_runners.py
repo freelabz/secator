@@ -177,6 +177,10 @@ class TestCommandRunner(unittest.TestCase):
 			results = command.run()
 			errors = [e.message for e in results if e._type == 'error']
 			self.assertIn('Exception: Loader failed', errors)
+			for result in command.results:
+				print(repr(result))
+				print(result.toDict()['_source'])
+				print(result.toDict()['_uuid'])
 			self.assertEqual(len(command.results), 2)
 			self.assertEqual(command.status, 'FAILURE')
 

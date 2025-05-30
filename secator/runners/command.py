@@ -481,7 +481,7 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
+			self.debug(f'{self.unique_name}: {type(e).__name__}: {str(e)}.', sub='error')
 			self.stop_process()
 			yield Error.from_exception(e)
 
@@ -569,8 +569,6 @@ class Command(Runner):
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)
-		error._source = self.unique_name
-		error._uuid = str(uuid.uuid4())
 		yield error
 
 	def stop_process(self, exit_ok=False):
