@@ -433,6 +433,8 @@ class Runner:
 		"""
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
+		if item._uuid in self.uuids:
+			return
 		if not item._source:
 			item._source = self.unique_name
 		self.uuids.append(item._uuid)
@@ -691,15 +693,11 @@ class Runner:
 				result = hook(self, *args)
 				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)  # noqa: E501
 				if isinstance(result, Error):
-					result._source = self.unique_name
-					result._uuid = str(uuid.uuid4())
 					self.add_result(result, print=True)
 			except Exception as e:
 				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
 				error = Error.from_exception(e)
 				error.message = f'Hook "{fun}" execution failed.'
-				error._source = self.unique_name
-				error._uuid = str(uuid.uuid4())
 				self.add_result(error, print=True)
 				if self.raise_on_error:
 					raise e
