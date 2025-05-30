@@ -105,35 +105,27 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 	def find_same_opts(node, nodes, opt_name, check_class_opts=False):
 		"""Find options with the same name that are defined in other nodes of the same type."""
 		same_opts = []
-		task_cls = None
-		opts_to_check = node.opts.keys()
-		if check_class_opts:
-			task_cls = Task.get_task_class(node.name)
-			opts_to_check = task_cls.opts.keys()
-		for k in opts_to_check:
-			for _ in nodes:
-				if _.id == node.id or _.type != node.type:
+		for _ in nodes:
+			if _.id == node.id or _.type != node.type:
+				continue
+			node_task = None
+			if check_class_opts:
+				node_task = Task.get_task_class(_.name)
+				if opt_name not in node_task.opts.keys():
 					continue
-				if k != opt_name:
+				opts_value = node_task.opts[opt_name]
+			else:
+				if opt_name not in _.opts.keys():
 					continue
-				node_task = None
-				if task_cls:
-					node_task = Task.get_task_class(_.name)
-					if k not in node_task.opts.keys():
-						continue
-					opts_value = node_task.opts[k]
-				else:
-					if k not in _.opts.keys():
-						continue
-					opts_value = _.opts[k]
-				name_str = 'nodes' if not check_class_opts else 'tasks'
-				debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{opt_name}[/] found in other {name_str} [bold blue]{_.id}[/]', sub=f'cli.{config.name}.same', verbose=True)  # noqa: E501
-				same_opts.append({
-					'id': _.id,
-					'task_name': node_task.__name__ if check_class_opts else None,
-					'name': _.name,
-					'value': opts_value,
-				})
+				opts_value = _.opts[opt_name]
+			name_str = 'nodes' if not check_class_opts else 'tasks'
+			debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{opt_name}[/] found in other {name_str} [bold blue]{_.id}[/]', sub=f'cli.{config.name}.same', verbose=True)  # noqa: E501
+			same_opts.append({
+				'id': _.id,
+				'task_name': node_task.__name__ if node_task else None,
+				'name': _.name,
+				'value': opts_value,
+			})
 		if same_opts:
 			other_tasks = ", ".join([f'[bold yellow]{_["id"]}[/]' for _ in same_opts])
 			debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{opt_name}[/] found in {len(same_opts)} other {name_str}: {other_tasks}', sub=f'cli.{config.name}.same', verbose=True)  # noqa: E501

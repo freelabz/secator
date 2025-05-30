@@ -295,9 +295,20 @@ def generate_rich_click_opt_groups(cli_endpoint, name, input_types, options):
 		'Execution': 0,
 		'Output': 1,
 		'Meta': 2,
+		'Config.*': 4,
+		'workflow.*': 5,
+		'scan.*': 6,
 	}
+
+	def match_sort_order(prefix):
+		import re
+		for k, v in sortorder.items():
+			if re.match(k, prefix):
+				return v
+		return 3
+
 	prefixes = deduplicate([opt['prefix'] for opt in options.values()])
-	prefixes = sorted(prefixes, key=lambda x: sortorder.get(x, 3))
+	prefixes = sorted(prefixes, key=match_sort_order)
 	opt_group = [
 		{
 			'name': 'Targets',
