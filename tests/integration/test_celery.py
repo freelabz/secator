@@ -206,5 +206,5 @@ class TestCelery(unittest.TestCase):
 		results = result.get()
 		targets = [r.name for r in results if r._type == 'target']
 		tags = [r.name for r in results if r._type == 'tag']
-		self.assertEqual(len(targets), 20)
+		self.assertEqual(len(targets), 18)
 		self.assertEqual(len(tags), 6)

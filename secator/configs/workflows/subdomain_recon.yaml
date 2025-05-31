@@ -43,7 +43,7 @@ tasks:
       if: opts.probe or opts.brute_http
 
   _group/2:
-    dnsx:
+    dnsx/probe:
       description: Check if subdomains actually exist (DNS)
       subdomains_only: True
       targets_:

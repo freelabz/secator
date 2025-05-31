@@ -21,7 +21,7 @@ options:
 tasks:
   naabu:
     description: Find open ports
-    if: not opts.full
+    if: opts.ports or not opts.full
 
   naabu/full:
     description: Find open ports

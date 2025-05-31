@@ -105,7 +105,7 @@ class ffuf(HttpFuzzer):
 		data = self.get_opt_value('data') or ''
 		headers = self.get_opt_value('header')
 		if not len(self.inputs) > 1 and 'FUZZ' not in self.inputs[0] and 'FUZZ' not in headers and 'FUZZ' not in data:
-			self.add_result(Warning(message='Keyword FUZZ is not present in the URL, header or body'), print=True, output=True)
+			self.add_result(Warning(message='Keyword FUZZ is not present in the URL, header or body'))
 
 		return opts
 

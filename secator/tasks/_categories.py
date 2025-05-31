@@ -44,7 +44,7 @@ OPTS = {
 	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'frd', 'help': 'Follow HTTP redirects'},
 	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
 	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
-	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match respones with size'},
+	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match responses with size'},
 	MATCH_WORDS: {'type': str, 'short': 'mw', 'help': 'Match responses with word count'},
 	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
