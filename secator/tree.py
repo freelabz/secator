@@ -30,6 +30,11 @@ class TaskNode:
         """Add a child node to this node."""
         self.children.append(child)
 
+    def remove(self):
+        """Remove this node from its parent."""
+        if self.parent:
+            self.parent.children.remove(self)
+
     def __str__(self) -> str:
         """String representation with condition if present."""
         if self.condition:
@@ -110,6 +115,7 @@ def build_runner_tree(config: DotMap, condition: Optional[str] = None, parent: O
                 group_node = TaskNode(task_name, 'group', id, parent=root_node, ancestor=root_node)
                 root_node.add_child(group_node)
                 for subtask_name, subtask_details in task_details.items():
+                    subtask_details = subtask_details or {}
                     id = f'{config.name}.{subtask_name}'
                     condition = subtask_details.get('if')
                     description = subtask_details.get('description')

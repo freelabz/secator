@@ -2,15 +2,14 @@ import os
 import shutil
 import unittest
 import yaml
-from unittest.mock import patch
 
 from secator.config import CONFIG
-from secator.output_types import Vulnerability, Info
-from secator.runners.scan import Scan
+from secator.output_types import Vulnerability
 from secator.utils_test import FIXTURES_DIR, clear_modules
 from secator.loader import get_configs_by_type, find_templates, discover_tasks
 from secator.tree import build_runner_tree
-from secator.template import get_config_options
+from secator.template import TemplateLoader, get_config_options
+
 
 class TestTemplate(unittest.TestCase):
 
@@ -79,10 +78,10 @@ class TestTree(unittest.TestCase):
 				'nuclei': {'is_flag': True, 'default': False}
 			},
 			'tasks': {
-				'nuclei': {'opt_1': 'test1', 'if': 'opts.nuclei'},
+				'nuclei/first': {'opt_1': 'test1', 'if': 'opts.nuclei'},
 				'nmap': {'opt_2': 'test2'},
 				'_group/1': {
-					'httpx': {'opt_3': 'test3'},
+					'httpx/first': {'opt_3': 'test3'},
 					'nuclei/host': {'opt_4': 'test4', 'if': 'opts.nuclei'}
 				},
 				'_group/2': {
@@ -98,9 +97,9 @@ class TestTree(unittest.TestCase):
 				'nuclei': {'is_flag': True, 'default': False}
 			},
 			'tasks': {
-				'nuclei': {'opt_1': 'test1', 'if': 'opts.nuclei'},
+				'nuclei/second': {'opt_1': 'test1', 'if': 'opts.nuclei'},
 				'_group/1': {
-					'httpx': {'opt_3': 'test3'},
+					'httpx/second': {'opt_3': 'test3'},
 					'dnsx/host': {'opt_4': 'test4', 'if': 'opts.nuclei'}
 				},
 				'_group/2': {
@@ -118,26 +117,21 @@ class TestTree(unittest.TestCase):
 			}
 		}
 		self.template_dir = CONFIG.dirs.templates
-		self.custom_task_path = self.template_dir / 'test.py'
 		self.custom_workflow_path_1 = self.template_dir / 'test.yml'
 		self.custom_workflow_path_2 = self.template_dir / 'test2.yml'
-		with open(self.custom_task_path, 'w') as f:
-			f.write(yaml.dump(self.task_config))
 		with open(self.custom_workflow_path_1, 'w') as f:
-			f.write(yaml.dump(self.workflow_config_1))
+			f.write(yaml.dump(self.workflow_config_1, sort_keys=False))
 		with open(self.custom_workflow_path_2, 'w') as f:
-			f.write(yaml.dump(self.workflow_config_2))
+			f.write(yaml.dump(self.workflow_config_2, sort_keys=False))
 
 	def test_tree_task(self):
-		from secator.template import TemplateLoader
 		config = TemplateLoader(input=self.task_config)
 		tree = build_runner_tree(config)
 		root_node = tree.root_nodes[0]
 		self.assertEqual(root_node.name, 'nuclei')
 		self.assertEqual(root_node.type, 'task')
 
-	def test_tree_workflow(self):
-		from secator.template import TemplateLoader
+	def test_tree_workflow_1(self):
 		config = TemplateLoader(input=self.workflow_config_1)
 		tree = build_runner_tree(config)
 		root_node = tree.root_nodes[0]
@@ -145,15 +139,14 @@ class TestTree(unittest.TestCase):
 		self.assertEqual(root_node.type, 'workflow')
 		self.assertEqual(root_node.default_opts.toDict(), {'ports': '80,443'})
 		self.assertEqual(len(root_node.children), 4)
-		self.assertEqual(root_node.children[0].name, 'nuclei')
+		self.assertEqual(root_node.children[0].name, 'nuclei/first')
 		self.assertEqual(root_node.children[1].name, 'nmap')
-		self.assertEqual(root_node.children[2].children[0].name, 'httpx')
+		self.assertEqual(root_node.children[2].children[0].name, 'httpx/first')
 		self.assertEqual(root_node.children[2].children[1].name, 'nuclei/host')
 		self.assertEqual(root_node.children[3].children[0].name, 'nuclei/network')
 		self.assertEqual(root_node.children[3].children[1].name, 'httpx/network')
 
 	def test_get_config_options_workflow_1(self):
-		from secator.template import TemplateLoader
 		config = TemplateLoader(input=self.workflow_config_1)
 		opts = get_config_options(config)
 		self.assertEqual(opts['ports']['default'], '80,443')
@@ -163,7 +156,6 @@ class TestTree(unittest.TestCase):
 		self.assertEqual(opts['nuclei']['prefix'], 'workflow test1')
 
 	def test_get_config_options_scan(self):
-		from secator.template import TemplateLoader
 		config = TemplateLoader(input=self.scan_config)
 		opts = get_config_options(config)
 		# import json
@@ -174,27 +166,34 @@ class TestTree(unittest.TestCase):
 		self.assertEqual(opts['test2-nuclei']['prefix'], 'workflow test2')
 
 	def test_dry_run(self):
-		from secator.scans import Scan
-		from secator.template import TemplateLoader
+		from secator.runners import Scan
 		find_templates.cache_clear()
 		config = TemplateLoader(input=self.scan_config)
 		scan = Scan(config, run_opts={'dry_run': True})
 		scan.run()
-		print(scan.results)
-		self.assertEqual(len(scan.infos), 8)
+		self.assertEqual(scan.status, 'SUCCESS')
+		self.assertEqual(len(scan.errors), 0)
+		from secator.rich import console
+		tree = build_runner_tree(config)
+		console.print(tree.render_tree())
+		console.print('')
 		messages = [r.message for r in scan.infos]
-		self.assertIn('Skipped task [bold gold3]nuclei[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
+		self.assertIn('Skipped task [bold gold3]nuclei/first[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
+		self.assertIn('Skipped task [bold gold3]nuclei/second[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
 		self.assertIn('Skipped task [bold gold3]nuclei/host[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
 		self.assertIn('Skipped task [bold gold3]nuclei/network[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
 
-	# TODO: fix this test
-	# def test_dry_run_with_condition_enabled(self):
-	# 	from secator.template import TemplateLoader
-	# 	config = TemplateLoader(input=self.scan_config)
-	# 	scan = Scan(config, run_opts={'dry_run': True, 'test1_nuclei': True, 'test2_nuclei': True})
-	# 	scan.run()
-	# 	self.assertEqual(len(scan.infos), 8)
-	# 	messages = [r.message for r in scan.infos]
-	# 	self.assertNotIn('Skipped task nuclei because condition is not met: opts.nuclei', messages)
-	# 	self.assertNotIn('Skipped task nuclei/host because condition is not met: opts.nuclei', messages)
-	# 	self.assertNotIn('Skipped task nuclei/network because condition is not met: opts.nuclei', messages)
+	def test_dry_run_with_condition_enabled(self):
+		from secator.runners import Scan
+		find_templates.cache_clear()
+		from secator.template import TemplateLoader
+		config = TemplateLoader(input=self.scan_config)
+		scan = Scan(config, run_opts={'dry_run': True, 'test1_nuclei': True})
+		scan.run()
+		self.assertEqual(scan.status, 'SUCCESS')
+		self.assertEqual(len(scan.infos), 11)
+		self.assertEqual(len(scan.errors), 0)
+		messages = [r.message for r in scan.infos]
+		self.assertNotIn('Skipped task nuclei/first because condition is not met: opts.nuclei', messages)
+		self.assertNotIn('Skipped task nuclei/network because condition is not met: opts.nuclei', messages)
+		self.assertNotIn('Skipped task nuclei/host because condition is not met: opts.nuclei', messages)

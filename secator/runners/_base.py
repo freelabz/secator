@@ -111,6 +111,7 @@ class Runner:
 		self.threads = []
 		self.quiet = self.run_opts.get('quiet', False)
 		self.started = False
+		self.yield_later = []
 		self.enable_reports = self.run_opts.get('enable_reports', not self.sync)
 		self._reports_folder = self.run_opts.get('reports_folder', None)
 
@@ -132,7 +133,7 @@ class Runner:
 		self.print_end = self.run_opts.get('print_end', False) and not self.dry_run  # noqa: E501
 		self.print_target = self.run_opts.get('print_target', False) and not self.dry_run and not self.has_parent
 		self.print_json = self.run_opts.get('print_json', False)
-		self.print_raw = self.run_opts.get('print_raw', False) or self.piped_output
+		self.print_raw = self.run_opts.get('print_raw', False) or (self.piped_output and not self.print_json)
 		self.print_fmt = self.run_opts.get('fmt', '')
 		self.print_stat = self.run_opts.get('print_stat', False)
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
@@ -155,15 +156,26 @@ class Runner:
 		# Begin initialization
 		self.debug('begin initialization', sub='init')
 
+		# Hooks
+		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
+		self.debug('registering hooks', obj=list(self.resolved_hooks.keys()), sub='init')
+		self.register_hooks(hooks)
+
+		# Validators
+		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
+		self.debug('registering validators', obj={'validators': list(self.resolved_validators.keys())}, sub='init')
+		self.resolved_validators['validate_input'].append(self._validate_inputs)
+		self.register_validators(validators)
+
 		# Add prior results to runner results
 		self.debug(f'adding {len(results)} prior results to runner', sub='init')
-		[self.add_result(result, print=False, output=False) for result in results]
+		[self.add_result(result, print=False, output=False, hooks=False, yield_later=not self.has_parent) for result in results]  # noqa: E501
 
 		# Determine inputs
 		self.debug('resolving inputs', obj={'extractors': [i for i in self.run_opts if i.endswith('_')], 'result_count': len(results)}, sub='init')  # noqa: E501
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		targets = [Target(name=target) for target in self.inputs]
-		[self.add_result(target, print=False, output=True) for target in targets]
+		[self.add_result(target, print=False, output=False, yield_later=False) for target in targets]
 
 		# Run extractors on results and targets
 		self._run_extractors(results + targets)
@@ -192,18 +204,6 @@ class Runner:
 			except RuntimeError:
 				self.enable_profiler = False
 				pass
-
-		# Hooks
-		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
-		self.debug('registering hooks', obj=list(self.resolved_hooks.keys()), sub='init')
-		self.register_hooks(hooks)
-
-		# Validators
-		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
-		self.debug('registering validators', obj={'validators': list(self.resolved_validators.keys())}, sub='init')
-		if not self.dry_run:
-			self.resolved_validators['validate_input'].append(self._validate_inputs)
-		self.register_validators(validators)
 
 		# Input post-process
 		self.run_hooks('before_init', sub='init')
@@ -355,7 +355,6 @@ class Runner:
 
 			# If any errors happened during validation, exit
 			if self.errors:
-				yield from self.errors
 				self._finalize()
 				return
 
@@ -367,28 +366,24 @@ class Runner:
 				yield from self._process_item(item)
 				self.run_hooks('on_interval', sub='item')
 
-			# Wait for threads to finish
-			yield from self.join_threads()
-
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
 			error = Error.from_exception(e)
-			error._source = self.unique_name
-			error._uuid = str(uuid.uuid4())
-			self.add_result(error, print=True)
+			self.add_result(error)
 			self.stop_celery_tasks()
-			if not self.sync:
+			if not self.sync:  # yield remaining Celery data
 				for item in self.yielder():
 					yield self._process_item(item)
-			yield from self.join_threads()
-			yield error
-			self._finalize()
 
 		finally:
+			for item in self.yield_later:
+				self._print_item(item)
+				yield item
 			self._finalize()
 
 	def _finalize(self):
 		"""Finalize the runner."""
+		self.join_threads()
 		if self.sync:
 			self.mark_completed()
 		if self.enable_reports:
@@ -402,10 +397,7 @@ class Runner:
 		for thread in self.threads:
 			error = thread.join()
 			if error:
-				error._source = self.unique_name
-				error._uuid = str(uuid.uuid4())
-				self.add_result(error, print=True)
-				yield error
+				self.add_result(error)
 
 	def _run_extractors(self, results):
 		"""Run extractors on results and targets."""
@@ -418,29 +410,78 @@ class Runner:
 			ctx=ctx,
 			dry_run=self.dry_run)
 		for error in errors:
-			self.add_result(error, print=True)
+			self.add_result(error)
 		self.inputs = sorted(list(set(inputs)))
 		self.debug(f'extracted {len(self.inputs)} inputs', sub='init')
 		self.run_opts = run_opts
 
-	def add_result(self, item, print=False, output=True):
+	def add_result(self, item, print=True, output=True, hooks=True, yield_later=True):
 		"""Add item to runner results.
 
 		Args:
 			item (OutputType): Item.
 			print (bool): Whether to print it or not.
 			output (bool): Whether to add it to the output or not.
+			hooks (bool): Whether to run hooks on the item.
+			yield_later (bool): Whether to yield the item later.
 		"""
+		if item._uuid and item._uuid in self.uuids:
+			return
+
+		# Set context
+		item._context.update(self.context)
+
+		# Set uuid
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
+
+		# Set source
 		if not item._source:
 			item._source = self.unique_name
+
+		# Check for state updates
+		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
+			self.debug(f'update runner state from remote state: {item.state}', sub='item')
+			if item.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
+				self.started = True
+				self.done = True
+				self.progress = 100
+				self.end_time = datetime.fromtimestamp(time())
+			elif item.state in ['RUNNING']:
+				self.started = True
+				self.start_time = datetime.fromtimestamp(time())
+				self.end_time = None
+			self.last_updated_celery = item._timestamp
+			return
+
+		# If progress item, update runner progress
+		elif isinstance(item, Progress) and item._source == self.unique_name:
+			self.debug(f'update runner progress: {item.percent}', sub='item', verbose=True)
+			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
+				return
+			self.progress = item.percent
+			self.last_updated_progress = item._timestamp
+
+		# If info item and task_id is defined, update runner celery_ids
+		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
+			self.debug(f'update runner celery_ids from remote: {item.task_id}', sub='item')
+			self.celery_ids.append(item.task_id)
+
+		# If output type, run on_item hooks
+		elif isinstance(item, tuple(OUTPUT_TYPES)) and hooks:
+			item = self.run_hooks('on_item', item, sub='item')
+			if not item:
+				return
+
+		# Add item to results
 		self.uuids.append(item._uuid)
 		self.results.append(item)
 		if output:
 			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
+		if yield_later:
+			self.yield_later.append(item)
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes.
@@ -596,6 +637,12 @@ class Runner:
 		# Build Celery workflow
 		self.debug('building celery workflow', sub='start')
 		workflow = self.build_celery_workflow()
+		self.print_target = False
+
+		# Yield init results
+		for item in self.yield_later:
+			yield item
+		self.yield_later = []
 
 		# Run workflow and get results
 		if self.sync:
@@ -679,6 +726,12 @@ class Runner:
 			any: Hook return value.
 		"""
 		result = args[0] if len(args) > 0 else None
+		if self.no_process:
+			self.debug('hook skipped (no_process)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
+			return result
+		if self.dry_run:
+			self.debug('hook skipped (dry_run)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
+			return result
 		for hook in self.resolved_hooks[hook_type]:
 			fun = self.get_func_path(hook)
 			try:
@@ -691,18 +744,13 @@ class Runner:
 				result = hook(self, *args)
 				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)  # noqa: E501
 				if isinstance(result, Error):
-					result._source = self.unique_name
-					result._uuid = str(uuid.uuid4())
-					self.add_result(result, print=True)
+					self.add_result(result, hooks=False)
 			except Exception as e:
 				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
-				error = Error.from_exception(e)
-				error.message = f'Hook "{fun}" execution failed.'
-				error._source = self.unique_name
-				error._uuid = str(uuid.uuid4())
-				self.add_result(error, print=True)
+				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
 				if self.raise_on_error:
 					raise e
+				self.add_result(error, hooks=False)
 		return result
 
 	def run_validators(self, validator_type, *args, error=True, sub='validators'):
@@ -720,6 +768,9 @@ class Runner:
 		if self.no_process:
 			self.debug('validator skipped (no_process)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
 			return True
+		if self.dry_run:
+			self.debug('validator skipped (dry_run)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
+			return True
 		for validator in self.resolved_validators[validator_type]:
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
@@ -729,8 +780,8 @@ class Runner:
 					message = 'Validator failed'
 					if doc:
 						message += f': {doc}'
-					error = Error(message=message)
-					self.add_result(error, print=True)
+					err = Error(message=message)
+					self.add_result(err)
 				return False
 			self.debug('validator success', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
 		return True
@@ -986,58 +1037,8 @@ class Runner:
 				return
 			item = self._convert_item_schema(item)
 
-		# Update item context
-		item._context.update(self.context)
-
-		# Add uuid to item
-		if not item._uuid:
-			item._uuid = str(uuid.uuid4())
-
-		# Return if already seen
-		if item._uuid in self.uuids:
-			return
-
-		# Add source to item
-		if not item._source:
-			item._source = self.unique_name
-
-		# Check for state updates
-		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
-			self.debug(f'update runner state from remote state: {item.state}', sub='item')
-			if item.state in ['FAILURE', 'SUCCESS', 'REVOKED']:
-				self.started = True
-				self.done = True
-				self.progress = 100
-				self.end_time = datetime.fromtimestamp(time())
-			elif item.state in ['RUNNING']:
-				self.started = True
-				self.start_time = datetime.fromtimestamp(time())
-				self.end_time = None
-			self.last_updated_celery = item._timestamp
-			return
-
-		# If progress item, update runner progress
-		elif isinstance(item, Progress) and item._source == self.unique_name:
-			self.debug(f'update runner progress: {item.percent}', sub='item', verbose=True)
-			self.progress = item.percent
-			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
-				return
-			else:
-				self.last_updated_progress = item._timestamp
-
-		# If info item and task_id is defined, update runner celery_ids
-		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
-			self.debug(f'update runner celery_ids from remote: {item.task_id}', sub='item')
-			self.celery_ids.append(item.task_id)
-
-		# If output type, run on_item hooks
-		elif isinstance(item, tuple(OUTPUT_TYPES)):
-			item = self.run_hooks('on_item', item, sub='item')
-			if not item:
-				return
-
 		# Add item to results
-		self.add_result(item, print=print)
+		self.add_result(item, print=print, yield_later=False)
 
 		# Yield item
 		yield item
@@ -1055,9 +1056,7 @@ class Runner:
 							f'Validator failed: target [bold blue]{input}[/] of type [bold green]{input_type}[/] '
 							f'is not supported by [bold gold3]{self.config.name}[/]. Supported types: [bold green]{supported_types}'
 						)
-					),
-					print=True,
-					output=True
+					)
 				)
 				return False
 		return True

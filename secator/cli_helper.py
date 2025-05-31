@@ -1,5 +1,7 @@
 import os
+import re
 import sys
+
 from collections import OrderedDict
 
 import rich_click as click
@@ -161,7 +163,12 @@ def register_runner(cli_endpoint, config):
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
-	options = get_config_options(config, exec_opts=CLI_EXEC_OPTS, output_opts=CLI_OUTPUT_OPTS, type_mapping=CLI_TYPE_MAPPING)  # noqa: E501
+	options = get_config_options(
+		config,
+		exec_opts=CLI_EXEC_OPTS,
+		output_opts=CLI_OUTPUT_OPTS,
+		type_mapping=CLI_TYPE_MAPPING
+	)
 
 	# TODO: maybe allow this in the future
 	# def get_unknown_opts(ctx):
@@ -301,7 +308,6 @@ def generate_rich_click_opt_groups(cli_endpoint, name, input_types, options):
 	}
 
 	def match_sort_order(prefix):
-		import re
 		for k, v in sortorder.items():
 			if re.match(k, prefix):
 				return v

@@ -267,7 +267,8 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	[runner.add_result(item) for item in results]
+	for item in results:
+		runner.add_result(item)
 	runner.mark_completed()
 	return runner.results
 

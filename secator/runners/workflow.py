@@ -41,8 +41,6 @@ class Workflow(Runner):
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
 		opts.pop('print_profiles', False)
-		# import json
-		# print(json.dumps(opts, indent=4))
 
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
@@ -63,12 +61,13 @@ class Workflow(Runner):
 		for k, v in opts.copy().items():
 			if k.startswith(self.config.name + '_'):
 				opts[k.replace(self.config.name + '_', '')] = v
-				opts.pop(k)
 
+		# Forward workflow opts to first task if needed
 		forwarded_opts = {}
 		if chain_previous_results:
 			forwarded_opts = self.dynamic_opts
 
+		# Build workflow tree
 		tree = build_runner_tree(self.config)
 		global ix
 		ix = 0
@@ -90,10 +89,13 @@ class Workflow(Runner):
 				# Skip task if condition is not met
 				condition = node.opts.pop('if', None)
 				local_ns = {'opts': DotMap(opts)}
-				if condition and not eval(condition, {"__builtins__": {}}, local_ns):
-					debug(f'{node.id} skipped task because condition is not met: {condition}', sub=self.config.name)
-					self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] because condition is not met: [bold green]{condition}[/]'), print=True)  # noqa: E501
-					return
+				if condition:
+					debug(f'{node.id} evaluating {condition} with opts {opts}', sub=self.config.name)
+					result = eval(condition, {"__builtins__": {}}, local_ns)
+					if not result:
+						debug(f'{node.id} skipped task because condition is not met: {condition}', sub=self.config.name)
+						self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] because condition is not met: [bold green]{condition}[/]'))  # noqa: E501
+						return
 
 				# Get task class
 				task = Task.get_task_class(node.name)
@@ -195,7 +197,7 @@ class Workflow(Runner):
 				condition = task_opts.pop('if', None)
 				local_ns = {'opts': DotMap(run_opts)}
 				if condition and not eval(condition, {"__builtins__": {}}, local_ns):
-					self.add_result(Info(message=f'Skipped task [bold gold3]{task_name}[/] because condition is not met: [bold green]{condition}[/]'), print=True)  # noqa: E501
+					self.add_result(Info(message=f'Skipped task [bold gold3]{task_name}[/] because condition is not met: [bold green]{condition}[/]'))  # noqa: E501
 					continue
 
 				# Get task class

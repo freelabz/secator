@@ -56,6 +56,17 @@ class TemplateLoader(DotMap):
 
 
 def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=None):
+	"""Extract and normalize command-line options from configuration.
+
+	Args:
+		config: Configuration object (task, workflow, or scan)
+		exec_opts: Execution options dictionary (optional)
+		output_opts: Output options dictionary (optional)
+		type_mapping: Type mapping for option types (optional)
+
+	Returns:
+		OrderedDict: Normalized options with metadata
+	"""
 	from secator.tree import build_runner_tree, walk_runner_tree, get_flat_node_list
 	from secator.utils import debug
 	from secator.runners.task import Task
@@ -111,11 +122,11 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 			node_task = None
 			if check_class_opts:
 				node_task = Task.get_task_class(_.name)
-				if opt_name not in node_task.opts.keys():
+				if opt_name not in node_task.opts:
 					continue
 				opts_value = node_task.opts[opt_name]
 			else:
-				if opt_name not in _.opts.keys():
+				if opt_name not in _.opts:
 					continue
 				opts_value = _.opts[opt_name]
 			name_str = 'nodes' if not check_class_opts else 'tasks'

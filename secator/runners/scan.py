@@ -51,7 +51,7 @@ class Scan(Runner):
 			condition = workflow_opts.pop('if', None) if workflow_opts else None
 			local_ns = {'opts': DotMap(opts)}
 			if condition and not eval(condition, {"__builtins__": {}}, local_ns):
-				self.add_result(Info(message=f'Skipped workflow {name} because condition is not met: {condition}'), print=True)
+				self.add_result(Info(message=f'Skipped workflow {name} because condition is not met: {condition}'))
 				continue
 
 			# Build workflow
@@ -67,6 +67,10 @@ class Scan(Runner):
 			for task_id, task_info in workflow.celery_ids_map.items():
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
+
+			# Add init results
+			for result in workflow.results:
+				self.add_result(result, hooks=False)
 
 		if sigs:
 			sig = chain(

@@ -7,7 +7,6 @@ import shlex
 import signal
 import subprocess
 import sys
-import uuid
 
 from time import time
 
@@ -563,8 +562,6 @@ class Command(Runner):
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)
-		error._source = self.unique_name
-		error._uuid = str(uuid.uuid4())
 		yield error
 
 	def stop_process(self, exit_ok=False):
