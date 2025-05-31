@@ -69,14 +69,13 @@ class Workflow(Runner):
 
 		# Build workflow tree
 		tree = build_runner_tree(self.config)
-		global ix
 		ix = 0
 		sigs = []
 
 		def process_task(node, force=False):
 			from celery import chain, group
 			from secator.utils import debug
-			global ix
+			nonlocal ix
 			sig = None
 
 			if node.id is None:
