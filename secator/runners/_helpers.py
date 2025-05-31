@@ -22,24 +22,42 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	if ctx is None:
 		ctx = {}
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
+	if dry_run:
+		input_extractors = {k: v for k, v in extractors.items() if k.rstrip('_') == 'targets'}
+		opts_extractors = {k: v for k, v in extractors.items() if k.rstrip('_') != 'targets'}
+		if input_extractors:
+			dry_inputs = [" && ".join([fmt_extractor(v) for k, val in input_extractors.items() for v in val])]
+		else:
+			dry_inputs = inputs
+		if opts_extractors:
+			dry_opts = {k.rstrip('_'): [" && ".join([fmt_extractor(v) for v in val])] for k, val in opts_extractors.items()}
+		else:
+			dry_opts = {}
+		inputs = dry_inputs
+		opts.update(dry_opts)
+		return inputs, opts, []
+
 	errors = []
 	computed_inputs = []
+	input_extractors = False
 	computed_opts = {}
+
 	for key, val in extractors.items():
 		key = key.rstrip('_')
 		ctx['key'] = key
 		values, err = extract_from_results(results, val, ctx=ctx)
 		errors.extend(err)
 		if key == 'targets':
-			targets = [fmt_extractor(v) for v in val] if dry_run else deduplicate(values)
+			input_extractors = True
+			targets = deduplicate(values)
 			computed_inputs.extend(targets)
 			ctx['targets'] = computed_inputs
 		else:
-			computed_opt = [fmt_extractor(v) for v in val] if dry_run else deduplicate(values)
+			computed_opt = deduplicate(values)
 			if computed_opt:
 				computed_opts[key] = computed_opt
 				opts[key] = computed_opts[key]
-	if computed_inputs:
+	if input_extractors:
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
 	if computed_opts:

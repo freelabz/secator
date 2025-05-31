@@ -652,36 +652,41 @@ source {fpath}
 def list_aliases(silent):
 	"""List aliases"""
 	aliases = []
-	aliases.extend([
-		f'alias {task.name}="secator x {task.name}"'
-		for task in TASKS
-	])
-	aliases.extend([
-		f'alias {workflow.alias}="secator w {workflow.name}"'
-		for workflow in WORKFLOWS
-	])
-	aliases.extend([
-		f'alias {workflow.name}="secator w {workflow.name}"'
-		for workflow in WORKFLOWS
-	])
-	aliases.extend([
-		f'alias scan_{scan.name}="secator s {scan.name}"'
-		for scan in SCANS
-	])
-	aliases.append('alias listx="secator x"')
-	aliases.append('alias listw="secator w"')
-	aliases.append('alias lists="secator s"')
-	aliases.append('alias listws="secator ws"')
-	aliases.append('alias listr="secator r list"')
-	aliases.append('alias showr="secator r show"')
+	aliases.append('\n# Global commands')
+	aliases.append('alias x="secator tasks"')
+	aliases.append('alias w="secator workflows"')
+	aliases.append('alias s="secator scans"')
+	aliases.append('alias wk="secator worker"')
+	aliases.append('alias ut="secator util"')
+	aliases.append('alias c="secator config"')
+	aliases.append('alias ws="secator workspaces"')
+	aliases.append('alias p="secator profiles"')
+	aliases.append('alias a="secator alias"')
+	aliases.append('alias aliases="secator alias list"')
+	aliases.append('alias r="secator reports"')
+	aliases.append('alias h="secator health"')
+	aliases.append('alias i="secator install"')
+	aliases.append('alias u="secator update"')
+	aliases.append('alias t="secator test"')
+	aliases.append('\n# Tasks')
+	for task in [t for t in discover_tasks()]:
+		alias_str = f'alias {task.__name__}="secator task {task.__name__}"'
+		if task.__external__:
+			alias_str += ' # external'
+		aliases.append(alias_str)
 
 	if silent:
 		return aliases
-	console.print('Aliases:')
+	console.print('[bold gold3]:wrench: Aliases:[/]')
 	for alias in aliases:
 		alias_split = alias.split('=')
+		if len(alias_split) != 2:
+			console.print(f'[bold magenta]{alias}')
+			continue
 		alias_name, alias_cmd = alias_split[0].replace('alias ', ''), alias_split[1].replace('"', '')
-		console.print(f'[bold magenta]{alias_name:<15}-> {alias_cmd}')
+		if '# external' in alias_cmd:
+			alias_cmd = alias_cmd.replace('# external', ' [bold red]# external[/]')
+		console.print(f'[bold gold3]{alias_name:<15}[/] [dim]->[/] [bold green]{alias_cmd}[/]')
 
 	return aliases
 

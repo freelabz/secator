@@ -14,11 +14,15 @@ DEFAULT_RENDER_OPTS = {
 
 class TaskNode:
     """Represents a node in the workflow/scan task tree."""
-    def __init__(self, name: str, type_: str, condition: Optional[str] = None):
+    def __init__(self, name: str, type_: str, id: str, opts: Optional[dict] = None, condition: Optional[str] = None, description: Optional[str] = None, parent=None):  # noqa: E501
         self.name = name
         self.type = type_
+        self.id = id
+        self.opts = opts or {}
+        self.description = description
         self.condition = condition
         self.children: List[TaskNode] = []
+        self.parent = parent
 
     def add_child(self, child: 'TaskNode') -> None:
         """Add a child node to this node."""
@@ -64,15 +68,17 @@ class RunnerTree:
             child_str = self.render_opts.get(child.type, lambda x: str(x))
             condition_str = self.render_opts.get('condition', lambda x: str(x) if x else '')(child.condition)
             render_str = f"{prefix}{branch}{child_str(child)}"
+            if child.description:
+                render_str += f" - [dim]{child.description}[/]"
             if condition_str:
-                render_str = f"{render_str} {condition_str}"
+                render_str += f" {condition_str}"
             lines.append(render_str)
             if child.children:
                 new_prefix = prefix + ("   " if is_last else "│  ")
                 self._render_children(child, new_prefix, lines)
 
 
-def build_runner_tree(config: DotMap, condition: Optional[str] = None) -> Union[RunnerTree, str]:
+def build_runner_tree(config: DotMap, condition: Optional[str] = None, parent: Optional[TaskNode] = None) -> Union[RunnerTree, str]:  # noqa: E501
     """
     Build a tree representation from a runner config.
 
@@ -85,33 +91,83 @@ def build_runner_tree(config: DotMap, condition: Optional[str] = None) -> Union[
     tree = RunnerTree(config.name, config.type)
 
     if config.type == 'workflow':
-        root_node = TaskNode(config.name, 'workflow', condition)
+        root_node = TaskNode(config.name, 'workflow', config.name, opts=config.options, condition=condition, parent=parent)  # noqa: E501
         tree.add_root_node(root_node)
 
         # Add tasks to the tree
         for task_name, task_details in config.tasks.items():
+            id = f'{config.name}.{task_name}'
             if task_name.startswith('_group'):
-                group_node = TaskNode(task_name, 'group')
+                group_node = TaskNode(task_name, 'group', id, parent=root_node)
                 root_node.add_child(group_node)
                 for subtask_name, subtask_details in task_details.items():
+                    id = f'{config.name}.{subtask_name}'
                     condition = subtask_details.get('if')
-                    subtask_node = TaskNode(subtask_name, 'task', condition)
+                    description = subtask_details.get('description')
+                    subtask_node = TaskNode(subtask_name, 'task', id, opts=subtask_details, condition=condition, description=description, parent=group_node)  # noqa: E501
                     group_node.add_child(subtask_node)
             else:
                 condition = task_details.get('if') if task_details else None
-                task_node = TaskNode(task_name, 'task', condition)
+                description = task_details.get('description') if task_details else None
+                task_node = TaskNode(task_name, 'task', id, opts=task_details, condition=condition, description=description, parent=root_node)  # noqa: E501
                 root_node.add_child(task_node)
 
     elif config.type == 'scan':
-        root_node = TaskNode(config.name, 'scan')
+        id = f'{config.name}'
+        root_node = TaskNode(config.name, 'scan', id, opts=config.options, parent=parent)
         tree.add_root_node(root_node)
 
         # Add workflows to the tree
         for workflow_name, workflow_details in config.workflows.items():
+            id = f'{config.name}.{workflow_name}'
             condition = workflow_details.get('if') if isinstance(workflow_details, dict) else None
             wf_config = TemplateLoader(name=f'workflow/{workflow_name}')
-            wf_tree = build_runner_tree(wf_config, condition)
+            wf_tree = build_runner_tree(wf_config, condition, parent=root_node)
             if isinstance(wf_tree, RunnerTree):
                 for wf_root_node in wf_tree.root_nodes:
                     root_node.add_child(wf_root_node)
     return tree
+
+
+def walk_runner_tree(tree: RunnerTree, visit_func):
+    """
+    Walk the RunnerTree and visit each node.
+
+    Args:
+        tree (RunnerTree): The RunnerTree to walk.
+        visit_func (function): A function to call on each node.
+    """
+    for root_node in tree.root_nodes:
+        _walk_node(root_node, visit_func)
+
+
+def _walk_node(node: TaskNode, visit_func):
+    """
+    Recursively walk the node and its children.
+
+    Args:
+        node (TaskNode): The node to walk.
+        visit_func (function): A function to call on each node.
+    """
+    visit_func(node)
+    for child in node.children:
+        _walk_node(child, visit_func)
+
+
+def get_flat_node_list(tree: RunnerTree) -> List[TaskNode]:
+    """
+    Get the flat list of all nodes in the RunnerTree.
+
+    Args:
+        tree (RunnerTree): The RunnerTree to traverse.
+
+    Returns:
+        List[TaskNode]: The list of all nodes in the tree.
+    """
+    nodes = []
+
+    def collect_node(node: TaskNode):
+        nodes.append(node)
+
+    walk_runner_tree(tree, collect_node)
+    return nodes

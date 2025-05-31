@@ -9,7 +9,7 @@ input_types:
 options:
   crawlers:
     type: list
-    help: Crawlers to use (gospider, cariddi, katana)
+    help: Crawlers to use (katana, gospider)
     default: ['katana']
     internal: True
 
@@ -27,13 +27,13 @@ tasks:
     gau:
       description: Search for passive URLs
 
-    gospider:
-      description: Crawl URLs
-      if: "'gospider' in opts.crawlers"
-
     katana:
       description: Crawl URLs
       if: "'katana' in opts.crawlers"
+
+    gospider:
+      description: Crawl URLs
+      if: "'gospider' in opts.crawlers"
 
   cariddi:
     description: Hunt URLs patterns
