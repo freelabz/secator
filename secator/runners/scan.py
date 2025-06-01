@@ -68,10 +68,6 @@ class Scan(Runner):
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
 
-			# Add init results
-			for result in workflow.results:
-				self.add_result(result, hooks=False)
-
 		if sigs:
 			sig = chain(
 				mark_runner_started.si([], self).set(queue='results'),

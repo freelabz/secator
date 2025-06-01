@@ -51,7 +51,6 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 			input_extractors = True
 			targets = deduplicate(values)
 			computed_inputs.extend(targets)
-			ctx['targets'] = computed_inputs
 		else:
 			computed_opt = deduplicate(values)
 			if computed_opt:
@@ -99,15 +98,19 @@ def extract_from_results(results, extractors, ctx=None):
 		ctx = {}
 	all_results = []
 	errors = []
+	key = ctx.get('key', 'unknown')
 	if not isinstance(extractors, list):
 		extractors = [extractors]
 	for extractor in extractors:
 		try:
 			extractor_results = process_extractor(results, extractor, ctx=ctx)
+			debug(f'extracted {len(extractor_results)} / {len(results)} for key "{key}" with extractor "{fmt_extractor(extractor)}"', sub='extractors')  # noqa: E501
 			all_results.extend(extractor_results)
 		except Exception as e:
 			error = Error.from_exception(e)
 			errors.append(error)
+	if key == 'targets':
+		ctx['targets'] = all_results
 	return all_results, errors
 
 

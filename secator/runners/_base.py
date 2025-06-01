@@ -111,7 +111,7 @@ class Runner:
 		self.threads = []
 		self.quiet = self.run_opts.get('quiet', False)
 		self.started = False
-		self.yield_later = []
+		self.results_buffer = []
 		self.enable_reports = self.run_opts.get('enable_reports', not self.sync)
 		self._reports_folder = self.run_opts.get('reports_folder', None)
 
@@ -169,13 +169,13 @@ class Runner:
 
 		# Add prior results to runner results
 		self.debug(f'adding {len(results)} prior results to runner', sub='init')
-		[self.add_result(result, print=False, output=False, hooks=False, yield_later=not self.has_parent) for result in results]  # noqa: E501
+		[self.add_result(result, print=False, output=False, hooks=False, queue=not self.has_parent) for result in results]  # noqa: E501
 
 		# Determine inputs
 		self.debug('resolving inputs', obj={'extractors': [i for i in self.run_opts if i.endswith('_')], 'result_count': len(results)}, sub='init')  # noqa: E501
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		targets = [Target(name=target) for target in self.inputs]
-		[self.add_result(target, print=False, output=False, yield_later=False) for target in targets]
+		[self.add_result(target, print=False, output=False) for target in targets]
 
 		# Run extractors on results and targets
 		self._run_extractors(results + targets)
@@ -209,6 +209,7 @@ class Runner:
 		self.run_hooks('before_init', sub='init')
 
 		# Check if input is valid
+		debug(f'validating inputs. Inputs: {self.inputs}')
 		self.inputs_valid = self.run_validators('validate_input', self.inputs, sub='init')
 
 		# Print targets
@@ -353,13 +354,14 @@ class Runner:
 			if self.sync:
 				self.mark_started()
 
+			# Yield results buffer
+			yield from self.results_buffer
+			self.results_buffer = []
+
 			# If any errors happened during validation, exit
 			if self.errors:
 				self._finalize()
 				return
-
-			# Yield targets
-			yield from self.targets
 
 			# Loop and process items
 			for item in self.yielder():
@@ -376,9 +378,8 @@ class Runner:
 					yield self._process_item(item)
 
 		finally:
-			for item in self.yield_later:
-				self._print_item(item)
-				yield item
+			yield from self.results_buffer
+			self.results_buffer = []
 			self._finalize()
 
 	def _finalize(self):
@@ -415,7 +416,7 @@ class Runner:
 		self.debug(f'extracted {len(self.inputs)} inputs', sub='init')
 		self.run_opts = run_opts
 
-	def add_result(self, item, print=True, output=True, hooks=True, yield_later=True):
+	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
 		"""Add item to runner results.
 
 		Args:
@@ -423,7 +424,7 @@ class Runner:
 			print (bool): Whether to print it or not.
 			output (bool): Whether to add it to the output or not.
 			hooks (bool): Whether to run hooks on the item.
-			yield_later (bool): Whether to yield the item later.
+			queue (bool): Whether to queue the item for later processing.
 		"""
 		if item._uuid and item._uuid in self.uuids:
 			return
@@ -480,8 +481,8 @@ class Runner:
 			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
-		if yield_later:
-			self.yield_later.append(item)
+		if queue:
+			self.results_buffer.append(item)
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes.
@@ -550,6 +551,7 @@ class Runner:
 					item_repr = repr(item)
 					if self.print_remote_info and item._source:
 						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
+					# item_repr += f' ({self.__class__.__name__}) ({item._uuid})'  # for debugging
 					self._print(item_repr, out=item_out)
 
 		# Item is a line
@@ -638,11 +640,6 @@ class Runner:
 		self.debug('building celery workflow', sub='start')
 		workflow = self.build_celery_workflow()
 		self.print_target = False
-
-		# Yield init results
-		for item in self.yield_later:
-			yield item
-		self.yield_later = []
 
 		# Run workflow and get results
 		if self.sync:
@@ -876,13 +873,13 @@ class Runner:
 			return
 		if self.has_parent:
 			return
+		findings_count = len(self.self_findings) if not self.has_children else len(self.findings)
 		info = Info(
 			message=(
 				f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status '
 				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found '
-				f'[bold]{len(self.self_findings)}[/] findings'
-			),
-			_source=self.unique_name
+				f'[bold]{findings_count}[/] findings'
+			)
 		)
 		self._print(info, rich=True)
 
@@ -902,7 +899,7 @@ class Runner:
 			profile_path = Path(self.reports_folder) / f'{self.unique_name}_profile.html'
 			with profile_path.open('w', encoding='utf-8') as f_html:
 				f_html.write(self.profiler.output_html())
-			self._print_item(Info(message=f'Wrote profile to {str(profile_path)}', _source=self.unique_name), force=True)
+			self._print_item(Info(message=f'Wrote profile to {str(profile_path)}'), force=True)
 
 	def stop_celery_tasks(self):
 		"""Stop all tasks running in Celery worker."""
@@ -1038,7 +1035,7 @@ class Runner:
 			item = self._convert_item_schema(item)
 
 		# Add item to results
-		self.add_result(item, print=print, yield_later=False)
+		self.add_result(item, print=print, queue=False)
 
 		# Yield item
 		yield item
