@@ -48,7 +48,7 @@ class TestWorker(unittest.TestCase):
 			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version --nuclei',
 			name='secator_w_host_recon',
 			process=True,
-			quiet=True,
+			quiet=False,
 			cls_attributes={'output_types': [Target, Url, Port, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto

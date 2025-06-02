@@ -882,12 +882,11 @@ class Runner:
 			return
 		if self.has_parent:
 			return
-		findings_count = len(self.self_findings) if not self.has_children else len(self.findings)
 		info = Info(
 			message=(
 				f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status '
 				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found '
-				f'[bold]{findings_count}[/] findings'
+				f'[bold]{len(self.findings)}[/] findings'
 			)
 		)
 		self._print(info, rich=True)

@@ -32,7 +32,7 @@ class Scan(Runner):
 		from secator.template import TemplateLoader
 
 		scan_opts = self.config.options
-		self.print_item = False
+		self.print_item = not self.sync
 
 		# Build chain of workflows
 		sigs = []

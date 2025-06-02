@@ -45,7 +45,7 @@ class Workflow(Runner):
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
 		self.enable_reports = True  # Workflow will handle reports
-		self.print_item = False
+		self.print_item = not self.sync
 
 		# Get hooks
 		hooks = self._hooks.get(Task, {})
