@@ -860,7 +860,7 @@ class Runner:
 			tree = textwrap.indent(build_runner_tree(self.config).render_tree(), '      ')
 			info = Info(message=f'{self.config.type.capitalize()} built:\n{tree}', _source=self.unique_name)
 			self._print(info, rich=True)
-		remote_str = 'started' if self.sync else 'sent to Celery worker'
+		remote_str = 'started' if self.sync else 'started in worker'
 		msg = f'{self.config.type.capitalize()} {format_runner_name(self)}'
 		if self.description:
 			msg += f' ([dim]{self.description}[/])'
@@ -885,7 +885,7 @@ class Runner:
 
 	def export_reports(self):
 		"""Export reports."""
-		if self.enable_reports and self.exporters and not self.no_process:
+		if self.enable_reports and self.exporters and not self.no_process and not self.dry_run:
 			report = Report(self, exporters=self.exporters)
 			report.build()
 			report.send()
@@ -1105,8 +1105,13 @@ class Runner:
 					msg += f' ([dim]{profile.description}[/])'
 				self._print(Info(message=msg), rich=True)
 			opts.update(profile.opts)
+			self.debug(f'profile {profile.name} opts', obj=profile.opts, sub='init')
+		# self.debug('run opts', obj=self.run_opts, sub='init')
+		# self.debug('opts', obj=opts, sub='init')
 		opts = {k: v for k, v in opts.items() if k not in self.run_opts}
+		# self.debug('opts (after check)', obj=opts, sub='init')
 		self.run_opts.update(opts)
+		# self.debug('resolved opts', obj=self.run_opts, sub='init')
 		return templates
 
 	@classmethod
