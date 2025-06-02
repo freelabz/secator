@@ -183,8 +183,9 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
 
-	ret = Command.execute(cmd, name='secator_worker')
-	sys.exit(ret.return_code)
+	import os
+	ret = os.system(cmd)
+	sys.exit(ret)
 
 
 #-------#
@@ -588,7 +589,7 @@ def profile_list():
 	table.add_column("Description", overflow='fold')
 	table.add_column("Options", overflow='fold')
 	for profile in PROFILES:
-		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
+		opts_str = ', '.join(f'[yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
 		table.add_row(profile.name, profile.description or '', opts_str)
 	console.print(table)
 

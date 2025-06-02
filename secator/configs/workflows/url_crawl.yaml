@@ -10,7 +10,7 @@ options:
   crawlers:
     type: list
     help: Crawlers to use (katana, gospider)
-    default: ['katana']
+    default: ['gau', 'katana']
     internal: True
 
   hunt_patterns:
@@ -26,6 +26,7 @@ tasks:
   _group:
     gau:
       description: Search for passive URLs
+      if: "'gau' in opts.crawlers"
 
     katana:
       description: Crawl URLs
@@ -49,6 +50,7 @@ tasks:
 
   httpx:
     description: Run HTTP probes on crawled URLs
+    tech_detect: True
     targets_:
     - target.name
     - type: url

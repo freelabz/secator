@@ -10,9 +10,8 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
-								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES,
-								 RETRIES, SCRIPT, SERVICE_NAME, SEVERITY, STATE, TAGS,
-								 THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
+								 PROXY, RATE_LIMIT, REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
+								 SEVERITY, STATE, TAGS, THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability, Info, Error
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug, traceback_as_string
@@ -435,30 +434,30 @@ class nmapData(dict):
 			elems = tuple(line.split('\t'))
 
 			if len(elems) == 4:  # exploit
-				# TODO: Implement exploit processing
-				exploit_id, cvss_score, reference_url, _ = elems
-				name = exploit_id
-				# edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
-				exploit = {
-					ID: exploit_id,
-					NAME: name,
-					PROVIDER: provider_name,
-					REFERENCE: reference_url,
-					TAGS: [exploit_id, provider_name],
-					CVSS_SCORE: cvss_score,
-					CONFIDENCE: 'low',
-					'_type': 'exploit',
-				}
-				# TODO: lookup exploit in ExploitDB to find related CVEs
-				# if edb_id:
-				# 	print(edb_id)
-				# 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
-				vuln = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
-				if vuln:
-					yield vuln
-					exploit[TAGS].extend(vuln[TAGS])
-					exploit[CONFIDENCE] = vuln[CONFIDENCE]
-				yield exploit
+				# exploit_id, cvss_score, reference_url, _ = elems
+				# name = exploit_id
+				# # edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
+				# exploit = {
+				# 	ID: exploit_id,
+				# 	NAME: name,
+				# 	PROVIDER: provider_name,
+				# 	REFERENCE: reference_url,
+				# 	TAGS: [exploit_id, provider_name],
+				# 	CVSS_SCORE: cvss_score,
+				# 	CONFIDENCE: 'low',
+				# 	'_type': 'exploit',
+				# }
+				# # TODO: lookup exploit in ExploitDB to find related CVEs
+				# # if edb_id:
+				# # 	print(edb_id)
+				# # 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
+				# vuln = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
+				# if vuln:
+				# 	yield vuln
+				# 	exploit[TAGS].extend(vuln[TAGS])
+				# 	exploit[CONFIDENCE] = vuln[CONFIDENCE]
+				# yield exploit
+				continue
 
 			elif len(elems) == 3:  # vuln
 				vuln = {}

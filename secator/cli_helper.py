@@ -20,6 +20,7 @@ from secator.loader import get_configs_by_type
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
 
 WORKSPACES_STR = '|'.join([f'[dim yellow3]{_}[/]' for _ in WORKSPACES])
+PROFILES_STR = '|'.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_type('profile')])
 
 CLI_OUTPUT_OPTS = {
 	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
@@ -36,7 +37,7 @@ CLI_OUTPUT_OPTS = {
 
 CLI_EXEC_OPTS = {
 	'driver': {'type': click.Choice(['mongodb', 'gcs']), 'help': 'Drivers'},
-	'profiles': {'type': click.Choice([p.name for p in get_configs_by_type('profile')]), 'default': 'default', 'help': 'Profiles', 'short': 'pf'},  # noqa: E501
+	'profiles': {'type': str, 'help': f'Profiles ({PROFILES_STR})', 'short': 'pf'},
 	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace ({WORKSPACES_STR}|[dim yellow3]<new>[/])', 'short': 'ws'},  # noqa: E501
 	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},

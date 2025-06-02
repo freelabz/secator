@@ -38,6 +38,7 @@ tasks:
 
     httpx:
       description: Run HTTP probe on domain
+      tech_detect: True
       targets_:
       - target.name
       if: opts.probe or opts.brute_http
@@ -70,6 +71,7 @@ tasks:
 
     httpx:
       description: Run HTTP probes on subdomains
+      tech_detect: True
       targets_:
       - target.name
       - subdomain.host

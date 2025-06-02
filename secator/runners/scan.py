@@ -8,6 +8,7 @@ from secator.runners._base import Runner
 from secator.runners.workflow import Workflow
 from secator.utils import merge_opts
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +32,7 @@ class Scan(Runner):
 		from secator.template import TemplateLoader
 
 		scan_opts = self.config.options
+		self.print_item = False
 
 		# Build chain of workflows
 		sigs = []

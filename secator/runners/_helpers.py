@@ -99,12 +99,16 @@ def extract_from_results(results, extractors, ctx=None):
 	all_results = []
 	errors = []
 	key = ctx.get('key', 'unknown')
+	ancestor_id = ctx.get('ancestor_id', None)
 	if not isinstance(extractors, list):
 		extractors = [extractors]
 	for extractor in extractors:
 		try:
 			extractor_results = process_extractor(results, extractor, ctx=ctx)
-			debug(f'extracted {len(extractor_results)} / {len(results)} for key "{key}" with extractor "{fmt_extractor(extractor)}"', sub='extractors')  # noqa: E501
+			msg = f'extracted [bold]{len(extractor_results)}[/] / [bold]{len(results)}[/] for key [bold]{key}[/] with extractor [bold]{fmt_extractor(extractor)}[/]'  # noqa: E501
+			if ancestor_id:
+				msg = f'{msg} ([bold]ancestor_id[/]: {ancestor_id})'
+			debug(msg, sub='extractors')
 			all_results.extend(extractor_results)
 		except Exception as e:
 			error = Error.from_exception(e)
@@ -151,7 +155,8 @@ def process_extractor(results, extractor, ctx=None):
 	"""
 	if ctx is None:
 		ctx = {}
-	debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
+	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
+	ancestor_id = ctx.get('ancestor_id')
 
 	# Parse extractor, it can be a dict or a string (shortcut)
 	parsed_extractor = parse_extractor(extractor)
@@ -168,22 +173,24 @@ def process_extractor(results, extractor, ctx=None):
 			ctx['item'] = item
 			ctx[f'{_type}'] = item
 			safe_globals = {'__builtins__': {'len': len}}
+			if ancestor_id:
+				_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
 			eval_result = eval(_condition, safe_globals, ctx)
 			if eval_result:
 				tmp_results.append(item)
 			del ctx['item']
 			del ctx[f'{_type}']
-		debug(f'kept {len(tmp_results)} out of {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
+		# debug(f'kept {len(tmp_results)} / {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
 		results = tmp_results
 	else:
-		results = [item for item in results if item._type == _type]
+		results = [item for item in results if item._type == _type and item._context.get('ancestor_id') == ancestor_id]
 
 	# Format field if needed
 	if _field:
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
 		results = [_field.format(**item.toDict()) for item in results]
-	debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
+	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 
 

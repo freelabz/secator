@@ -154,7 +154,7 @@ class Runner:
 		self.opt_aliases.append(self.unique_name)
 
 		# Begin initialization
-		self.debug('begin initialization', sub='init')
+		self.debug(f'begin initialization of {self.unique_name}', sub='init')
 
 		# Hooks
 		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
@@ -181,10 +181,11 @@ class Runner:
 		self._run_extractors(results + targets)
 		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
 		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
+		self.debug(f'dynamic opts ({len(self.dynamic_opts)})', obj=self.dynamic_opts, sub='init')
 		self.debug(f'print opts ({len(self.resolved_print_opts)})', obj=self.resolved_print_opts, sub='init')
 
 		# Load profiles
-		profiles_str = run_opts.get('profiles', [])
+		profiles_str = run_opts.get('profiles') or ''
 		self.debug('resolving profiles', obj={'profiles': profiles_str}, sub='init')
 		self.profiles = self.resolve_profiles(profiles_str)
 
@@ -209,7 +210,6 @@ class Runner:
 		self.run_hooks('before_init', sub='init')
 
 		# Check if input is valid
-		debug(f'validating inputs. Inputs: {self.inputs}')
 		self.inputs_valid = self.run_validators('validate_input', self.inputs, sub='init')
 
 		# Print targets
@@ -335,6 +335,10 @@ class Runner:
 	def id(self):
 		return self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 
+	@property
+	def ancestor_id(self):
+		return self.context.get('ancestor_id')
+
 	def run(self):
 		"""Run method.
 
@@ -403,7 +407,7 @@ class Runner:
 	def _run_extractors(self, results):
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
-		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs}
+		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs, 'ancestor_id': self.ancestor_id}
 		inputs, run_opts, errors = run_extractors(
 			results,
 			self.run_opts,
@@ -431,6 +435,11 @@ class Runner:
 
 		# Set context
 		item._context.update(self.context)
+
+		# Set ancestor id in context
+		ancestor_id = item._context.get('ancestor_id', None)
+		if not ancestor_id:
+			item._context['ancestor_id'] = self.ancestor_id
 
 		# Set uuid
 		if not item._uuid:
@@ -551,7 +560,7 @@ class Runner:
 					item_repr = repr(item)
 					if self.print_remote_info and item._source:
 						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
-					# item_repr += f' ({self.__class__.__name__}) ({item._uuid})'  # for debugging
+					# item_repr += f' ({self.__class__.__name__}) ({item._uuid}) ({item._context.get("ancestor_id")})'  # for debugging
 					self._print(item_repr, out=item_out)
 
 		# Item is a line
@@ -1044,17 +1053,22 @@ class Runner:
 	def _validate_inputs(self, inputs):
 		"""Input type is not supported by runner"""
 		supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
-		for input in inputs:
-			input_type = autodetect_type(input)
+		for _input in inputs:
+			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
-				self.add_result(
-					Error(
-						message=(
-							f'Validator failed: target [bold blue]{input}[/] of type [bold green]{input_type}[/] '
-							f'is not supported by [bold gold3]{self.config.name}[/]. Supported types: [bold green]{supported_types}'
-						)
-					)
+				message = (
+					f'Validator failed: target [bold blue]{_input}[/] of type [bold green]{input_type}[/] '
+					f'is not supported by [bold gold3]{self.unique_name}[/]. Supported types: [bold green]{supported_types}[/]'
 				)
+				if self.has_parent:
+					message += '. Removing from current inputs (runner context)'
+					info = Info(message=message)
+					self.inputs.remove(_input)
+					self.add_result(info)
+					return True
+				else:
+					error = Error(message=message)
+					self.add_result(error)
 				return False
 		return True
 
@@ -1088,8 +1102,11 @@ class Runner:
 		Returns:
 			list: List of profiles.
 		"""
+		if not profiles:
+			return
 		if isinstance(profiles, str):
 			profiles = profiles.split(',')
+
 		templates = []
 		for pname in profiles:
 			matches = [p for p in get_configs_by_type('profile') if p.name == pname]
@@ -1097,21 +1114,33 @@ class Runner:
 				self._print(Warning(message=f'Profile "{pname}" was not found'), rich=True)
 			else:
 				templates.append(matches[0])
-		opts = {}
+
+		if not templates:
+			self.debug('no profiles loaded', sub='init')
+			return
+
+		# Put enforced profiles last
+		enforced_templates = [p for p in templates if p.enforce]
+		non_enforced_templates = [p for p in templates if not p.enforce]
+		templates = non_enforced_templates + enforced_templates
+
 		for profile in templates:
+			self.debug(f'profile {profile.name} opts (enforced: {profile.enforce}): {profile.opts}', sub='init')
+			enforced = profile.enforce or False
+			description = profile.description or ''
+			if enforced:
+				self.run_opts.update(profile.opts)
+			else:
+				self.run_opts.update({k: self.run_opts.get(k) or v for k, v in profile.opts.items()})
 			if self.print_profiles:
 				msg = f'Loaded profile [bold pink3]{profile.name}[/]'
-				if profile.description:
-					msg += f' ([dim]{profile.description}[/])'
+				if description:
+					msg += f' ([dim]{description}[/])'
+				if enforced:
+					msg += ' [bold red](enforced)[/]'
+				profile_opts_str = ", ".join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items()])
+				msg += f' \[[dim]{profile_opts_str}[/]]'
 				self._print(Info(message=msg), rich=True)
-			opts.update(profile.opts)
-			self.debug(f'profile {profile.name} opts', obj=profile.opts, sub='init')
-		# self.debug('run opts', obj=self.run_opts, sub='init')
-		# self.debug('opts', obj=opts, sub='init')
-		opts = {k: v for k, v in opts.items() if k not in self.run_opts}
-		# self.debug('opts (after check)', obj=opts, sub='init')
-		self.run_opts.update(opts)
-		# self.debug('resolved opts', obj=self.run_opts, sub='init')
 		return templates
 
 	@classmethod

@@ -20,6 +20,7 @@ class MockOutputType(OutputType):
     field1: str = field(default='value1')
     field2: int = field(default=42)
     nested: dict = field(default_factory=lambda: {'subfield': 'nested_value'})
+    _context: dict = field(default_factory=dict)
 
 
 class TestExtractorFunctions(unittest.TestCase):

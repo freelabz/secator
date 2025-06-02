@@ -42,6 +42,7 @@ tasks:
   _group/1:
     httpx:
       description: Probe HTTP services on open ports
+      tech_detect: True
       targets_:
         - type: port
           field: '{host}:{port}'

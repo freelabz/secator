@@ -373,7 +373,7 @@ class Command(Runner):
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
 			self._print(
-				f'[bold red]Ignoring proxy "{self.proxy}" for {self.cmd_name} (not supported).[/]', rich=True)
+				f'\n[bold red]\[{self.cmd_name}] ignoring proxy "{self.proxy}" (not supported).[/]', rich=True)
 
 	#----------#
 	# Internal #
