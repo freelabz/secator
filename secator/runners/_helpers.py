@@ -157,6 +157,7 @@ def process_extractor(results, extractor, ctx=None):
 		ctx = {}
 	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
 	ancestor_id = ctx.get('ancestor_id')
+	key = ctx.get('key')
 
 	# Parse extractor, it can be a dict or a string (shortcut)
 	parsed_extractor = parse_extractor(extractor)
@@ -183,7 +184,12 @@ def process_extractor(results, extractor, ctx=None):
 		# debug(f'kept {len(tmp_results)} / {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
 		results = tmp_results
 	else:
-		results = [item for item in results if item._type == _type and item._context.get('ancestor_id') == ancestor_id]
+		results = [item for item in results if item._type == _type]
+		if ancestor_id:
+			results = [item for item in results if item._context.get('ancestor_id') == ancestor_id]
+
+	results_str = "\n".join([f'{repr(item)} [{str(item._context.get("ancestor_id", ""))}]' for item in results])
+	debug(f'extracted results ([bold]ancestor_id[/]: {ancestor_id}, [bold]key[/]: {key}):\n{results_str}', sub='extractor')
 
 	# Format field if needed
 	if _field:

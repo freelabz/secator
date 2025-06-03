@@ -139,24 +139,8 @@ class CeleryData(object):
 		"""
 		while True:
 			try:
-				main_task = State(
-					task_id=result.id,
-					state=result.state,
-					_source='celery'
-				)
-				debug(f"Main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
-				yield {'id': result.id, 'state': result.state, 'results': [main_task]}
-				yield from CeleryData.get_all_data(result, ids_map)
-
 				if result.ready():
 					debug('result is ready', sub='celery.poll', id=result.id)
-					main_task = State(
-						task_id=result.id,
-						state=result.state,
-						_source='celery'
-					)
-					debug(f"Final main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
-					yield {'id': result.id, 'state': result.state, 'results': [main_task]}
 					yield from CeleryData.get_all_data(result, ids_map)
 					break
 			except (KeyboardInterrupt, GreenletExit):
@@ -168,9 +152,21 @@ class CeleryData(object):
 				pass
 			finally:
 				sleep(refresh_interval)
+				yield from CeleryData.get_all_data(result, ids_map)
 
 	@staticmethod
 	def get_all_data(result, ids_map):
+		main_task = State(
+			task_id=result.id,
+			state=result.state,
+			_source='celery'
+		)
+		debug(f"Main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
+		yield {'id': result.id, 'state': result.state, 'results': [main_task]}
+		yield from CeleryData.get_tasks_data(ids_map)
+
+	@staticmethod
+	def get_tasks_data(ids_map):
 		"""Get Celery results from main result object, AND all subtasks results.
 
 		Yields:

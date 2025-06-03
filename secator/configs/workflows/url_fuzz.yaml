@@ -17,7 +17,7 @@ options:
     default: ['ffuf']
 
 tasks:
-  _group:
+  _group/fuzz:
     dirsearch:
       description: Fuzz URLs
       if: "'dirsearch' in opts.fuzzers"

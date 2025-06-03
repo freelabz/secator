@@ -230,6 +230,7 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = []
 		drivers = driver.split(',') if driver else []
+		drivers = list(set(CONFIG.drivers.defaults + drivers))
 		supported_drivers = ['mongodb', 'gcs']
 		for driver in drivers:
 			if driver in supported_drivers:

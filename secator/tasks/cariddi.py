@@ -1,3 +1,4 @@
+import re
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
@@ -8,6 +9,19 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 from secator.output_types import Tag, Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
+
+CARIDDI_IGNORE_PATTERNS = re.compile(r"|".join([
+	r"<!--\s*Instance.*\s*-->",
+	r"<!--\s*(Styles|Scripts|Fonts|Images|Links|Forms|Inputs|Buttons|List|Next|Prev|Navigation dots)\s*-->",
+	r"<!--\s*end.*-->",
+	r"<!--\s*start.*-->",
+	r"<!--\s*begin.*-->",
+	r"<!--\s*here goes.*-->",
+	r"<!--\s*.*Yoast SEO.*\s*-->",
+	r"<!--\s*.*Google Analytics.*\s*-->",
+]), re.IGNORECASE)
+
+CARIDDI_IGNORE_LIST = ['BTC address']
 
 
 @task()
@@ -102,10 +116,11 @@ class cariddi(HttpCrawler):
 			yield Tag(**secret)
 
 		for info in infos:
-			CARIDDI_IGNORE_LIST = ['BTC address']  # TODO: make this a config option
 			if info['name'] in CARIDDI_IGNORE_LIST:
 				continue
 			match = info['match']
+			if CARIDDI_IGNORE_PATTERNS.match(match):
+				continue
 			info['extra_data'] = {'info': match, 'source': 'body'}
 			info['match'] = url
 			yield Tag(**info)

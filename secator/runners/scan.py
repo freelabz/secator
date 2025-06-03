@@ -32,6 +32,10 @@ class Scan(Runner):
 		from secator.template import TemplateLoader
 
 		scan_opts = self.config.options
+
+		# Set hooks and reports
+		self.enable_hooks = False   # Celery will handle hooks
+		self.enable_reports = True  # Workflow will handle reports
 		self.print_item = not self.sync
 
 		# Build chain of workflows
@@ -43,6 +47,7 @@ class Scan(Runner):
 			run_opts['no_poll'] = True
 			run_opts['caller'] = 'Scan'
 			run_opts['has_parent'] = True
+			run_opts['enable_reports'] = False
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			name = name.split('/')[0]
 			config = TemplateLoader(name=f'workflow/{name}')
@@ -71,7 +76,7 @@ class Scan(Runner):
 			sigs.append(celery_workflow)
 
 			for result in workflow.results:
-				self.add_result(result, hooks=False)
+				self.add_result(result, print=False, hooks=False)
 
 		if sigs:
 			sig = chain(

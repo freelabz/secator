@@ -13,7 +13,7 @@ options:
     help: Run nuclei on tagged URLs (slow)
 
 tasks:
-  _group/1:
+  _group/pattern_analysis:
     gf/xss:
       description: Hunt XSS params
       pattern: xss
@@ -42,7 +42,7 @@ tasks:
       description: Hunt debug params
       pattern: debug_logic
 
-  _group/2:
+  _group/vuln_scan:
     dalfox:
       description: Attack XSS vulnerabilities
       targets_:

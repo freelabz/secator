@@ -4,11 +4,11 @@ from dotmap import DotMap
 
 
 DEFAULT_RENDER_OPTS = {
-    'group': lambda x: f"[dim]{x.name}[/]",
+    'group': lambda x: f"[dim]group {x.name.split('/')[-1] if '/' in x.name else ''}[/]",
     'task': lambda x: f"[bold gold3]:wrench: {x.name}[/]",
-    'workflow': lambda x: f"[bold orange3]:gear: {x.name}[/]",
-    'scan': lambda x: f"[bold blue]:magnifying_glass_tilted_left: {x.name}[/]",
-    'condition': lambda x: f"[dim blue]# if {x}[/]" if x else ''
+    'workflow': lambda x: f"[bold dark_orange3]:gear: {x.name}[/]",
+    'scan': lambda x: f"[bold red]:magnifying_glass_tilted_left: {x.name}[/]",
+    'condition': lambda x: f"[dim cyan]# if {x}[/]" if x else ''
 }
 
 

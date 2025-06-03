@@ -285,6 +285,7 @@ class Command(Runner):
 
 	@classmethod
 	def get_supported_opts(cls):
+		# TODO: Replace this with get_command_options called on the command class
 		def convert(d):
 			for k, v in d.items():
 				if hasattr(v, '__name__') and v.__name__ in ['str', 'int', 'float']:

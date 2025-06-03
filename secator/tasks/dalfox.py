@@ -4,7 +4,7 @@ from secator.decorators import task
 from secator.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   HEADER, ID, MATCHED_AT, METHOD, NAME,
 							   OPT_NOT_SUPPORTED, PROVIDER, PROXY, RATE_LIMIT,
-							   SEVERITY, TAGS, THREADS, TIMEOUT, URL,
+							   RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL,
 							   USER_AGENT)
 from secator.output_types import Vulnerability, Url
 from secator.serializers import JSONSerializer
@@ -37,6 +37,7 @@ class dalfox(VulnHttp):
 		METHOD: 'method',
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: 'worker',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent'

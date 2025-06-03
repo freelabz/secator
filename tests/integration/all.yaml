@@ -1,0 +1,25 @@
+type: profile
+name: all
+description: "All options"
+opts:
+    header: 'test'
+    data: '{"test": "test"}'
+    delay: 0
+    depth: 1
+    filter_codes: '400,401,403'
+    filter_regex: 'test'
+    filter_size: 1000
+    filter_words: 'test'
+    # follow_redirect: True
+    match_codes: '200,300,301'
+    match_regex: 'test'
+    match_size: 1000
+    match_words: 'test'
+    method: 'GET'
+    proxy: 'http://127.0.0.1:9090'
+    rate_limit: 10000
+    retries: 1
+    threads: 1
+    timeout: 1
+    user_agent: 'test'
+    wordlist: 'combined_subdomains'

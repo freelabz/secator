@@ -1,7 +1,8 @@
 import validators
 
 from secator.decorators import task
-from secator.definitions import (HOST, CIDR_RANGE, IP, OPT_PIPE_INPUT, RATE_LIMIT, RETRIES, THREADS, WORDLIST)
+from secator.definitions import (HOST, CIDR_RANGE, DELAY, IP, OPT_PIPE_INPUT, PROXY,
+								 RATE_LIMIT, RETRIES, THREADS, TIMEOUT, WORDLIST, OPT_NOT_SUPPORTED)
 from secator.output_types import Record, Ip, Subdomain, Error, Warning
 from secator.output_types.ip import IpProtocol
 from secator.tasks._categories import ReconDns
@@ -23,6 +24,9 @@ class dnsx(ReconDns):
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retry',
 		THREADS: 'threads',
+		DELAY: OPT_NOT_SUPPORTED,
+		PROXY: OPT_NOT_SUPPORTED,
+		TIMEOUT: OPT_NOT_SUPPORTED,
 	}
 	opts = {
 		'trace': {'is_flag': True, 'default': False, 'help': 'Perform dns tracing'},

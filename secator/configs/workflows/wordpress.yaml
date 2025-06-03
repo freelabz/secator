@@ -7,7 +7,7 @@ input_types:
   - url
 
 tasks:
-  _group:
+  _group/hunt_wordpress:
     nuclei:
       description: Nuclei Wordpress scan
       tags: [wordpress]
