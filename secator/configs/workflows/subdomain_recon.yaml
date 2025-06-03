@@ -7,11 +7,15 @@ input_types:
   - host
 
 options:
-  probe:
+  probe_http:
     is_flag: True
     help: Probe domain and subdomains (HTTP)
     default: True
-    internal: True
+
+  probe_dns:
+    is_flag: True
+    help: Probe domain and subdomains (DNS)
+    default: False
 
   brute_http:
     is_flag: True
@@ -50,6 +54,7 @@ tasks:
       wordlist: False
       targets_:
       - subdomain.host
+      if: opts.probe_dns
 
     nuclei:
       description: Check for subdomain takeovers

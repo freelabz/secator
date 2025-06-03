@@ -24,8 +24,8 @@ class dnsx(ReconDns):
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retry',
 		THREADS: 'threads',
+		PROXY: 'proxy',
 		DELAY: OPT_NOT_SUPPORTED,
-		PROXY: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
 	}
 	opts = {

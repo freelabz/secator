@@ -127,8 +127,9 @@ class Runner:
 
 		# Runner toggles
 		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
-		self.enable_reports = self.run_opts.get('enable_reports', not self.sync)
 		self.enable_profiles = self.run_opts.get('enable_profiles', True)
+		self.enable_reports = self.run_opts.get('enable_reports', not self.sync) and not self.dry_run and not self.no_process and not self.no_poll  # noqa: E501
+		self.enable_hooks = self.run_opts.get('enable_hooks', True) and not self.dry_run and not self.no_process and not self.no_poll  # noqa: E501
 
 		# Runner print opts
 		self.print_item = self.run_opts.get('print_item', False) and not self.dry_run
@@ -678,7 +679,6 @@ class Runner:
 				task_id=self.celery_result.id
 			)
 			if self.no_poll:
-				self.enable_hooks = False
 				self.enable_reports = False
 				self.no_process = True
 				return
@@ -1152,15 +1152,15 @@ class Runner:
 		enforced_templates = [p for p in templates if p.enforce]
 		non_enforced_templates = [p for p in templates if not p.enforce]
 		templates = non_enforced_templates + enforced_templates
-
+		profile_opts = {}
 		for profile in templates:
 			self.debug(f'profile {profile.name} opts (enforced: {profile.enforce}): {profile.opts}', sub='init')
 			enforced = profile.enforce or False
 			description = profile.description or ''
 			if enforced:
-				self.run_opts.update(profile.opts)
+				profile_opts.update(profile.opts)
 			else:
-				self.run_opts.update({k: self.run_opts.get(k) or v for k, v in profile.opts.items()})
+				profile_opts.update({k: self.run_opts.get(k) or v for k, v in profile.opts.items()})
 			if self.print_profiles:
 				msg = f'Loaded profile [bold pink3]{profile.name}[/]'
 				if description:
@@ -1170,6 +1170,8 @@ class Runner:
 				profile_opts_str = ", ".join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items()])
 				msg += f' \[[dim]{profile_opts_str}[/]]'
 				self._print(Info(message=msg), rich=True)
+		if profile_opts:
+			self.run_opts.update(profile_opts)
 		return templates
 
 	@classmethod
