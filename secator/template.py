@@ -55,6 +55,12 @@ class TemplateLoader(DotMap):
 		console.print(yaml_highlight)
 
 
+def get_short_id(id_str, config_name):
+	if id_str.startswith(config_name):
+		return id_str.replace(config_name + '.', '')
+	return id_str
+
+
 def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=None):
 	"""Extract and normalize command-line options from configuration.
 
@@ -170,9 +176,11 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		task_opts_all = {**task_opts, **task_opts_meta}
 		node_opts = node.opts or {}
 		ancestor_opts_defaults = node.ancestor.default_opts or {}
+		node_id_str = get_short_id(node.id, config.name)
+
 		for k, v in task_opts_all.items():
 			conf = v.copy()
-			conf['prefix'] = cls.__name__
+			conf['prefix'] = f'Task {node.name}'
 			default_from_config = node_opts.get(k) or ancestor_opts_defaults.get(k) or config_opts_defaults.get(k)
 			opt_name = k
 			same_opts = find_same_opts(node, nodes, k)
@@ -181,15 +189,16 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 			if default_from_config:
 				conf['required'] = False
 				conf['default'] = default_from_config
-				conf['default_from'] = node.id
+				conf['default_from'] = node_id_str
 				if node_opts.get(k):
-					conf['default_from'] = node.id
+					conf['default_from'] = node_id_str
+					conf['prefix'] = 'Config'
 				elif ancestor_opts_defaults.get(k):
 					conf['default_from'] = node.ancestor.id
-					conf['prefix'] = 'Config overrides'
+					conf['prefix'] = f'{node.ancestor.type.capitalize()} {node.ancestor.name}'
 				elif config_opts_defaults.get(k):
 					conf['default_from'] = config.name
-					conf['prefix'] = 'Config overrides'
+					conf['prefix'] = 'Config'
 				mapped_value = cls.opt_value_map.get(opt_name)
 				if mapped_value:
 					if callable(mapped_value):
@@ -198,7 +207,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 						default_from_config = mapped_value
 				conf['default'] = default_from_config
 				if len(same_opts) > 0:  # change opt name to avoid conflict
-					conf['prefix'] = 'Config overrides'
+					conf['prefix'] = 'Config'
 					opt_name = f'{conf["default_from"]}.{k}'
 					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] renamed to [bold green]{opt_name}[/] [dim red](default set in config)[/]', sub=f'cli.{config.name}')  # noqa: E501
 
@@ -211,7 +220,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 			elif k in task_opts:
 				same_opts = find_same_opts(node, nodes, k, check_class_opts=True)
 				if len(same_opts) > 0:
-					applies_to = set([_['id'] for _ in same_opts] + [node.id])
+					applies_to = set([node.name] + [get_short_id(_['name'], config.name) for _ in same_opts])
 					conf['applies_to'] = applies_to
 					conf['prefix'] = 'Shared task'
 					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Common[/] [dim red](duplicated {len(same_opts)} times)[/]', sub=f'cli.{config.name}')  # noqa: E501

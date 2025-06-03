@@ -48,6 +48,7 @@ class Scan(Runner):
 			run_opts['caller'] = 'Scan'
 			run_opts['has_parent'] = True
 			run_opts['enable_reports'] = False
+			run_opts['print_profiles'] = False
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			name = name.split('/')[0]
 			config = TemplateLoader(name=f'workflow/{name}')

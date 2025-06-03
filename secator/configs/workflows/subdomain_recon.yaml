@@ -47,6 +47,7 @@ tasks:
     dnsx/probe:
       description: Check if subdomains actually exist (DNS)
       subdomains_only: True
+      wordlist: False
       targets_:
       - subdomain.host
 

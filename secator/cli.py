@@ -33,6 +33,9 @@ from secator.utils import (
 )
 from contextlib import nullcontext
 click.rich_click.USE_RICH_MARKUP = True
+click.rich_click.STYLE_ARGUMENT = ""
+click.rich_click.STYLE_OPTION_HELP = ""
+
 
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '-help', '--help'])

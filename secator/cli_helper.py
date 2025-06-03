@@ -29,17 +29,17 @@ CLI_OUTPUT_OPTS = {
 	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
 	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
 	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
-	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.cli.show_command_output, 'opposite': 'verbose', 'help': 'Enable quiet mode'},  # noqa: E501
+	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.cli.show_command_output, 'opposite': 'verbose', 'help': 'Hide or show original command output'},  # noqa: E501
 	'show': {'is_flag': True, 'short': 'yml', 'default': False, 'help': 'Show runner yaml'},
 	'tree': {'is_flag': True, 'short': 'tree', 'default': False, 'help': 'Show runner tree'},
-	'version': {'is_flag': True, 'help': 'Show version'},
+	'version': {'is_flag': True, 'help': 'Show runner version'},
 }
 
 CLI_EXEC_OPTS = {
 	'driver': {'type': click.Choice(['mongodb', 'gcs']), 'help': 'Drivers'},
 	'profiles': {'type': str, 'help': f'Profiles ({PROFILES_STR})', 'short': 'pf'},
 	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace ({WORKSPACES_STR}|[dim yellow3]<new>[/])', 'short': 'ws'},  # noqa: E501
-	'dry_run': {'is_flag': True, 'short': 'dr', 'default': False, 'help': 'Enable dry run'},
+	'dry_run': {'is_flag': True, 'short': 'dry', 'default': False, 'help': 'Enable dry run'},
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
 	'process': {'is_flag': True, 'short': 'ps', 'default': True, 'help': 'Enable secator processing', 'reverse': True},
@@ -100,8 +100,8 @@ def decorate_command_options(opts):
 					long += f'/--no-{opt_name}'
 					short += f'/-n{short_opt}' if short_opt else f'/-n{opt_name}'
 			if applies_to:
-				applies_to_str = ", ".join(f'[dim yellow3]{_}[/]' for _ in applies_to)
-				conf['help'] += rf' \[[dim]applies to: {applies_to_str}[/]]'
+				applies_to_str = ", ".join(f'[bold yellow3]{_}[/]' for _ in applies_to)
+				conf['help'] += rf' \[[dim]{applies_to_str}[/]]'
 			if default_from:
 				conf['help'] += rf' \[[dim]default from: [dim yellow3]{default_from}[/][/]]'
 			f = click.option(long, short, **conf)(f)
@@ -304,16 +304,18 @@ def generate_rich_click_opt_groups(cli_endpoint, name, input_types, options):
 		'Execution': 0,
 		'Output': 1,
 		'Meta': 2,
-		'Config.*': 4,
-		'workflow.*': 5,
-		'scan.*': 6,
+		'Config.*': 3,
+		'Shared task': 4,
+		'Task.*': 5,
+		'Workflow.*': 6,
+		'Scan.*': 7,
 	}
 
 	def match_sort_order(prefix):
 		for k, v in sortorder.items():
 			if re.match(k, prefix):
 				return v
-		return 3
+		return 8
 
 	prefixes = deduplicate([opt['prefix'] for opt in options.values()])
 	prefixes = sorted(prefixes, key=match_sort_order)
@@ -328,8 +330,10 @@ def generate_rich_click_opt_groups(cli_endpoint, name, input_types, options):
 			opt for opt, conf in options.items()
 			if conf['prefix'] == prefix
 		]
+		if prefix not in ['Execution', 'Output']:
+			prefix_opts = sorted(prefix_opts)
 		opt_names = [f'--{opt_name}' for opt_name in prefix_opts]
-		if prefix == 'Execution':
+		if prefix == 'Output':
 			opt_names.append('--help')
 		opt_group.append({
 			'name': prefix + ' options',

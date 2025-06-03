@@ -151,9 +151,9 @@ class TestTree(unittest.TestCase):
 		opts = get_config_options(config)
 		self.assertEqual(opts['ports']['default'], '80,443')
 		self.assertEqual(opts['ports']['default_from'], 'test1')
-		self.assertEqual(opts['ports']['prefix'], 'Config overrides')
+		self.assertEqual(opts['ports']['prefix'], 'Workflow test1')
 		self.assertEqual(opts['nuclei']['default'], False)
-		self.assertEqual(opts['nuclei']['prefix'], 'workflow test1')
+		self.assertEqual(opts['nuclei']['prefix'], 'Workflow test1')
 
 	def test_get_config_options_scan(self):
 		config = TemplateLoader(input=self.scan_config)
@@ -161,9 +161,9 @@ class TestTree(unittest.TestCase):
 		# import json
 		# print(json.dumps(opts, indent=4, default=str))
 		self.assertEqual(opts['test1-nuclei']['default'], False)
-		self.assertEqual(opts['test1-nuclei']['prefix'], 'workflow test1')
+		self.assertEqual(opts['test1-nuclei']['prefix'], 'Workflow test1')
 		self.assertEqual(opts['test2-nuclei']['default'], False)
-		self.assertEqual(opts['test2-nuclei']['prefix'], 'workflow test2')
+		self.assertEqual(opts['test2-nuclei']['prefix'], 'Workflow test2')
 
 	def test_dry_run(self):
 		from secator.runners import Scan
@@ -173,10 +173,10 @@ class TestTree(unittest.TestCase):
 		scan.run()
 		self.assertEqual(scan.status, 'SUCCESS')
 		self.assertEqual(len(scan.errors), 0)
-		from secator.rich import console
-		tree = build_runner_tree(config)
-		console.print(tree.render_tree())
-		console.print('')
+		# from secator.rich import console
+		# tree = build_runner_tree(config)
+		# console.print(tree.render_tree())
+		# console.print('')
 		messages = [r.message for r in scan.infos]
 		self.assertIn('Skipped task [bold gold3]nuclei/first[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
 		self.assertIn('Skipped task [bold gold3]nuclei/second[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
