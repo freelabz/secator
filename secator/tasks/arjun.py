@@ -4,7 +4,7 @@ import yaml
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
 								 HEADER, URL, FOLLOW_REDIRECT)
-from secator.output_types import Info, Url, Warning, Error
+from secator.output_types import Info, Url, Warning
 from secator.runners import Command
 from secator.tasks._categories import OPTS
 from secator.utils import process_wordlist
@@ -19,6 +19,7 @@ class arjun(Command):
 	tags = ['url', 'fuzz', 'params']
 	input_flag = '-u'
 	version_flag = ' '
+	input_chunk_size = 1
 	opts = {
 		'chunk_size': {'type': int, 'help': 'Control query/chunk size'},
 		'stable': {'is_flag': True, 'default': False, 'help': 'Use stable mode'},
@@ -78,7 +79,7 @@ class arjun(Command):
 	@staticmethod
 	def on_cmd_done(self):
 		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find JSON results in {self.output_path}')
+			# yield Error(message=f'Could not find JSON results in {self.output_path}')
 			return
 		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:

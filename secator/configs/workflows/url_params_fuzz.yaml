@@ -9,6 +9,10 @@ input_types:
 tasks:
   arjun:
     description: Extract parameters from URLs
+    targets_:
+    - type: target
+      field: name
+      condition: "'?' not in target.name"
 
   ffuf:
     description: Fuzz URL params
