@@ -168,14 +168,14 @@ def process_extractor(results, extractor, ctx=None):
 	# Evaluate condition for each result
 	if _condition:
 		tmp_results = []
+		if ancestor_id:
+			_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
 		for item in results:
 			if item._type != _type:
 				continue
 			ctx['item'] = item
 			ctx[f'{_type}'] = item
 			safe_globals = {'__builtins__': {'len': len}}
-			if ancestor_id:
-				_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
 			eval_result = eval(_condition, safe_globals, ctx)
 			if eval_result:
 				tmp_results.append(item)

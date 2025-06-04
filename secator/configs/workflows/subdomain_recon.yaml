@@ -45,11 +45,11 @@ tasks:
       tech_detect: True
       targets_:
       - target.name
-      if: opts.probe or opts.brute_http
+      if: opts.probe_http or opts.brute_http
 
   _group/2:
     dnsx/probe:
-      description: Probe DNS records for subdomains found
+      description: Probe DNS records on subdomains
       subdomains_only: True
       wordlist: False
       targets_:
@@ -81,4 +81,4 @@ tasks:
       targets_:
       - target.name
       - subdomain.host
-      if: opts.probe
+      if: opts.probe_http
