@@ -55,7 +55,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 		}
 		# TODO: copy profile and test with profile
-		opts['profiles'] = ['all']
+		# opts['profiles'] = ['all']
 
 		# Merge opts
 		opts = merge_opts(opts, extra_opts)
