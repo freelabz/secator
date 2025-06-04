@@ -754,12 +754,12 @@ def process_query(query, fields=None):
 	# Get operator
 	operator = '||'
 	if '&&' in query and '||' in query:
-	    console.print(Error(message='Cannot mix && and || in the same query'))
-	    sys.exit(1)
+		console.print(Error(message='Cannot mix && and || in the same query'))
+		sys.exit(1)
 	elif '&&' in query:
-	    operator = '&&'
+		operator = '&&'
 	elif '||' in query:
-	    operator = '||'
+		operator = '||'
 
 	# Process query
 	query = query.split(operator)

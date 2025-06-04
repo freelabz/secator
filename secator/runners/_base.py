@@ -174,13 +174,15 @@ class Runner:
 
 		# Add prior results to runner results
 		self.debug(f'adding {len(results)} prior results to runner', sub='init')
-		[self.add_result(result, print=False, output=False, hooks=False, queue=not self.has_parent) for result in results]  # noqa: E501
+		for result in results:
+			self.add_result(result, print=False, output=False, hooks=False, queue=not self.has_parent)
 
 		# Determine inputs
 		self.debug(f'resolving inputs with dynamic opts ({len(self.dynamic_opts)})', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		targets = [Target(name=target) for target in self.inputs]
-		[self.add_result(target, print=False, output=False) for target in targets]
+		for target in targets:
+			self.add_result(target, print=False, output=False)
 
 		# Run extractors on results and targets
 		self._run_extractors(results + targets)
@@ -337,10 +339,20 @@ class Runner:
 
 	@property
 	def id(self):
+		"""Get id from context.
+
+		Returns:
+			str: Id.
+		"""
 		return self.context.get('task_id', '') or self.context.get('workflow_id', '') or self.context.get('scan_id', '')
 
 	@property
 	def ancestor_id(self):
+		"""Get ancestor id from context.
+
+		Returns:
+			str: Ancestor id.
+		"""
 		return self.context.get('ancestor_id')
 
 	def run(self):
