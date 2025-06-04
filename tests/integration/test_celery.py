@@ -8,9 +8,9 @@ from threading import Thread
 
 from celery import chain, chord
 
-from secator.celery import app, forward_results
+from secator.celery import app, forward_results  # noqa: F401
 from secator.config import CONFIG
-from secator.utils_test import TEST_TASKS, TEST_WORKFLOWS,load_fixture
+from secator.utils_test import TEST_TASKS, load_fixture
 from secator.runners import Command
 from secator.output_types import Url
 from tests.integration.inputs import INPUTS_SCANS
@@ -157,8 +157,8 @@ class TestCelery(unittest.TestCase):
 		result = httpx.delay(targets)
 		results = result.get()
 		urls = [r.url for r in results if r._type == 'url']
-		infos = [r.message for r in results if r._type == 'info']
 		self.assertEqual(len(urls), size)  # same URL, but twice because 2 chunks and same input
+		# infos = [r.message for r in results if r._type == 'info']
 		# self.assertEqual(len(infos), 2) # one chunk message for each chunk
 		# for message in infos:
 			# self.assertIn('Celery chunked task created', message)
@@ -195,7 +195,7 @@ class TestCelery(unittest.TestCase):
 		results = result.get()
 		targets = [r.name for r in results if r._type == 'target']
 		urls = [r.url for r in results if r._type == 'url']
-		self.assertEqual(len(targets), len(URL_TARGETS))
+		self.assertEqual(len(targets), len(URL_TARGETS) * 2)
 		self.assertEqual(len(urls), sum(URL_RESULTS_COUNT))
 
 	def test_url_vuln_workflow(self):
@@ -206,5 +206,5 @@ class TestCelery(unittest.TestCase):
 		results = result.get()
 		targets = [r.name for r in results if r._type == 'target']
 		tags = [r.name for r in results if r._type == 'tag']
-		self.assertEqual(len(targets), 16)
+		self.assertEqual(len(targets), 18)
 		self.assertEqual(len(tags), 6)

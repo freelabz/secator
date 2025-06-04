@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
-								 TECH, TIME, TITLE, URL, WEBSERVER)
+								 TECH, TITLE, URL, WEBSERVER, METHOD)
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, trim_string, format_object, rich_escape as _s
 from secator.config import CONFIG
@@ -38,13 +38,15 @@ class Url(OutputType):
 
 	_table_fields = [
 		URL,
+		METHOD,
 		STATUS_CODE,
 		TITLE,
 		WEBSERVER,
 		TECH,
 		CONTENT_TYPE,
 		CONTENT_LENGTH,
-		TIME
+		'stored_response_path',
+		'screenshot_path',
 	]
 	_sort_by = (URL,)
 
@@ -81,10 +83,12 @@ class Url(OutputType):
 			cl = str(self.content_length)
 			cl += '[bold red]+[/]' if self.content_length == CONFIG.http.response_max_size_bytes else ''
 			s += rf' \[[magenta]{cl}[/]]'
-		if self.screenshot_path:
-			s += rf' \[[magenta]{_s(self.screenshot_path)}[/]]'
-		if self.response_headers and CONFIG.http.show_response_headers:
-			s += rf'{format_object(self.response_headers, "magenta", skip_keys=["content_type", "content_length", "date", "server", "x_powered_by"])}'  # noqa: E501
+		if self.response_headers and CONFIG.cli.show_http_response_headers:
+			s += rf'{format_object(self.response_headers, "magenta", skip_keys=CONFIG.cli.exclude_http_response_headers)}'  # noqa: E501
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
+		if self.screenshot_path:
+			s += rf' [link=file://{self.screenshot_path}]:camera:[/]'
+		if self.stored_response_path:
+			s += rf' [link=file://{self.stored_response_path}]:pencil:[/]'
 		return rich_to_ansi(s)

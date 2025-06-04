@@ -1,0 +1,6 @@
+type: profile
+name: http_record
+description: "Record HTTP requests / responses and take screenshots"
+opts:
+    screenshot: true
+    store_responses: true

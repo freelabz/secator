@@ -5,36 +5,61 @@ description: URL vulnerability scan (gf, dalfox)
 tags: [http, vulnerability]
 input_types:
   - url
+
+options:
+  nuclei:
+    is_flag: True
+    default: False
+    help: Run nuclei on tagged URLs (slow)
+
 tasks:
-  _group:
+  _group/pattern_analysis:
     gf/xss:
       description: Hunt XSS params
       pattern: xss
+
     gf/lfi:
       description: Hunt LFI params
       pattern: lfi
+
     gf/ssrf:
       description: Hunt SSRF params
       pattern: ssrf
+
     gf/rce:
       description: Hunt RCE params
       pattern: rce
+
     gf/interestingparams:
       description: Hunt interest params
       pattern: interestingparams
+
     gf/idor:
       description: Hunt Idor params
       pattern: idor
+
     gf/debug_logic:
       description: Hunt debug params
       pattern: debug_logic
 
-  dalfox:
-    description: Attack XSS vulnerabilities
-    targets_:
-      - type: tag
-        field: match
-        condition: item._source.startswith("gf")
+  _group/vuln_scan:
+    dalfox:
+      description: Attack XSS vulnerabilities
+      targets_:
+        - type: tag
+          field: match
+          condition: item._source.startswith("gf")
+
+    nuclei:
+      description: Search for HTTP vulns
+      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
+      targets_:
+        - type: target
+          field: name
+        - type: tag
+          field: match
+          condition: item._source.startswith("gf")
+      if: opts.nuclei
 
   # TODO: Add support for SQLMap
   # sqlmap:

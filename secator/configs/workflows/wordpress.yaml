@@ -5,13 +5,15 @@ description: Wordpress vulnerability scan
 tags: [http, wordpress, vulnerability]
 input_types:
   - url
+
 tasks:
-  _group:
+  _group/hunt_wordpress:
     nuclei:
       description: Nuclei Wordpress scan
-      tags: wordpress
+      tags: [wordpress]
+
     wpscan:
       description: WPScan
+
     wpprobe:
       description: WPProbe
-      tags: wordpress

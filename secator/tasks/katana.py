@@ -17,10 +17,11 @@ from secator.tasks._categories import HttpCrawler
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana'
+	input_types = [URL]
+	output_types = [Url]
 	tags = ['url', 'crawl']
 	file_flag = '-list'
 	input_flag = '-u'
-	input_types = [URL]
 	json_flag = '-jsonl'
 	opts = {
 		'headless': {'is_flag': True, 'short': 'hl', 'help': 'Headless mode'},
@@ -74,6 +75,7 @@ class katana(HttpCrawler):
 			WEBSERVER: lambda x: x['response'].get('headers', {}).get('server', ''),
 			TECH: lambda x: x['response'].get('technologies', []),
 			STORED_RESPONSE_PATH: lambda x: x['response'].get('stored_response_path', ''),
+			'response_headers': lambda x: x['response'].get('headers', {}),
 			# TAGS: lambda x: x['response'].get('server')
 		}
 	}
@@ -86,12 +88,31 @@ class katana(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
+	profile = lambda opts: katana.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def dynamic_profile(opts):
+		headless = katana._get_opt_value(
+			opts,
+			'headless',
+			opts_conf=dict(katana.opts, **katana.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		return 'cpu' if headless is True else 'io'
+
+	@staticmethod
+	def on_init(self):
+		form_fill = self.get_opt_value('form_fill')
+		form_extraction = self.get_opt_value('form_extraction')
+		store_responses = self.get_opt_value('store_responses')
+		if form_fill or form_extraction or store_responses:
+			self.cmd += f' -srd {self.reports_folder}/.outputs'
 
 	@staticmethod
 	def on_json_loaded(self, item):
 		# form detection
-		forms = item.get('response', {}).get('forms', [])
+		response = item.get('response', {})
+		forms = response.get('forms', [])
 		if forms:
 			for form in forms:
 				method = form['method']
@@ -99,11 +120,13 @@ class katana(HttpCrawler):
 					form['action'],
 					host=urlparse(item['request']['endpoint']).netloc,
 					method=method,
+					stored_response_path=response["stored_response_path"],
 					request_headers=self.get_opt_value('header', preprocess=True)
 				)
 				yield Tag(
 					name='form',
 					match=form['action'],
+					stored_response_path=response["stored_response_path"],
 					extra_data={
 						'method': form['method'],
 						'enctype': form.get('enctype', ''),
@@ -114,17 +137,8 @@ class katana(HttpCrawler):
 		yield item
 
 	@staticmethod
-	def on_init(self):
-		debug_resp = self.get_opt_value('debug_resp')
-		if debug_resp:
-			self.cmd = self.cmd.replace('-silent', '')
-		store_responses = self.get_opt_value('store_responses')
-		if store_responses:
-			self.cmd += f' -srd {self.reports_folder}/.outputs'
-
-	@staticmethod
 	def on_item(self, item):
-		if not isinstance(item, Url):
+		if not isinstance(item, (Url, Tag)):
 			return item
 		store_responses = self.get_opt_value('store_responses')
 		if store_responses and os.path.exists(item.stored_response_path):

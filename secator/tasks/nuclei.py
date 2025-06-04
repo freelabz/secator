@@ -14,8 +14,9 @@ from secator.tasks._categories import VulnMulti
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
 	cmd = 'nuclei'
-	tags = ['vuln', 'scan']
 	input_types = [HOST, IP, URL]
+	output_types = [Vulnerability, Progress]
+	tags = ['vuln', 'scan']
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-jsonl'
@@ -59,7 +60,6 @@ class nuclei(VulnMulti):
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
 	item_loaders = [JSONSerializer()]
-	output_types = [Vulnerability, Progress]
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: nuclei.id_extractor(x),
@@ -77,7 +77,7 @@ class nuclei(VulnMulti):
 		},
 		Progress: {
 			PERCENT: lambda x: int(x['percent']),
-			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['duration', 'errors', 'percent']}
+			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['percent']}
 		}
 	}
 	install_pre = {

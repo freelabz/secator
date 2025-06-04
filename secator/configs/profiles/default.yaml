@@ -1,8 +1,0 @@
-type: profile
-name: default
-description: "General scanning"
-opts:
-    rate_limit: 1000
-    delay: 0
-    timeout: 5
-    retries: 3

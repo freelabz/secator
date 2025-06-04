@@ -1,8 +1,9 @@
-from secator.exporters._base import Exporter
-from secator.utils import pluralize
-from secator.rich import build_table, console
 from rich.markdown import Markdown
+
+from secator.exporters._base import Exporter
 from secator.output_types import OutputType
+from secator.rich import build_table, console
+from secator.utils import pluralize
 
 
 class TableExporter(Exporter):

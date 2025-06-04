@@ -2,4 +2,4 @@ type: profile
 name: tor
 description: "Anonymous scan using Tor network"
 opts:
-  proxy: tor
+  proxy: auto

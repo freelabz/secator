@@ -45,7 +45,7 @@ jobs:
     - name: Detect changed or all tasks
       run: |
         if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
-          TASKS=$(secator x --list)
+          TASKS=$(secator x | tail -n+10 | head -n-1 | awk '{print $2}')
           echo "Running all tasks"
         else
           TASKS=$(git diff --name-only --diff-filter=AMR origin/main HEAD | grep '^secator/tasks/.*\.py$' | grep -v '_.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')

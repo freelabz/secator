@@ -4,7 +4,9 @@ from subprocess import call, DEVNULL
 from typing import Dict, List
 from typing_extensions import Annotated, Self
 
+import validators
 import requests
+import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
@@ -52,11 +54,6 @@ class Directories(StrictModel):
 		return self
 
 
-class Debug(StrictModel):
-	level: int = 0
-	component: str = ''
-
-
 class Celery(StrictModel):
 	broker_url: str = 'filesystem://'
 	broker_pool_limit: int = 10
@@ -75,12 +72,16 @@ class Celery(StrictModel):
 	worker_send_task_events: bool = False
 	worker_kill_after_task: bool = False
 	worker_kill_after_idle_seconds: int = -1
+	worker_command_verbose: bool = False
 
 
 class Cli(StrictModel):
 	github_token: str = os.environ.get('GITHUB_TOKEN', '')
 	record: bool = False
 	stdin_timeout: int = 1000
+	show_http_response_headers: bool = False
+	show_command_output: bool = False
+	exclude_http_response_headers: List[str] = ["connection", "content_type", "content_length", "date", "server"]
 
 
 class Runners(StrictModel):
@@ -93,8 +94,6 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
-	show_chunk_progress: bool = False
-	show_command_output: bool = False
 
 
 class Security(StrictModel):
@@ -122,6 +121,14 @@ class Workflows(StrictModel):
 
 class Scans(StrictModel):
 	exporters: List[str] = ['json', 'csv', 'txt']
+
+
+class Profiles(StrictModel):
+	defaults: List[str] = []
+
+
+class Drivers(StrictModel):
+	defaults: List[str] = []
 
 
 class Payloads(StrictModel):
@@ -174,8 +181,8 @@ class Addons(StrictModel):
 
 
 class SecatorConfig(StrictModel):
+	debug: str = ''
 	dirs: Directories = Directories()
-	debug: Debug = Debug()
 	celery: Celery = Celery()
 	cli: Cli = Cli()
 	runners: Runners = Runners()
@@ -185,6 +192,8 @@ class SecatorConfig(StrictModel):
 	scans: Scans = Scans()
 	payloads: Payloads = Payloads()
 	wordlists: Wordlists = Wordlists()
+	profiles: Profiles = Profiles()
+	drivers: Drivers = Drivers()
 	addons: Addons = Addons()
 	security: Security = Security()
 	offline_mode: bool = False
@@ -288,13 +297,25 @@ class Config(DotMap):
 			elif isinstance(existing_value, Path):
 				value = Path(value)
 		except ValueError:
-			# from secator.utils import debug
-			# debug(f'Could not cast value {value} to expected type {type(existing_value).__name__}: {str(e)}', sub='config')
 			pass
 		finally:
-			target[final_key] = value
 			if set_partial:
-				partial[final_key] = value
+				if value is None or value == target[final_key]:
+					if final_key in partial:
+						del partial[final_key]
+					return
+				else:
+					partial[final_key] = value
+			target[final_key] = value
+
+	def unset(self, key, set_partial=True):
+		"""Unset a value in the configuration using a dotted path.
+
+		Args:
+			key (str): Dotted key path.
+			set_partial (bool): Set in partial config.
+		"""
+		self.set(key, None, set_partial=set_partial)
 
 	def save(self, target_path: Path = None, partial=True):
 		"""Save config as YAML on disk.
@@ -535,6 +556,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 	Returns:
 		path (Path): Path to downloaded file / folder.
 	"""
+	from secator.output_types import Info, Error
 	if url_or_path.startswith('git+'):
 		# Clone Git repository
 		git_url = url_or_path[4:]  # remove 'git+' prefix
@@ -543,7 +565,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 			repo_name = repo_name[:-4]
 		target_path = target_folder / repo_name
 		if not target_path.exists():
-			console.print(f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ', end='')
+			console.print(repr(Info(message=f'[bold turquoise4]Cloning git {type} [bold magenta]{repo_name}[/] ...[/] ')), highlight=False, end='')  # noqa: E501
 			if offline_mode:
 				console.print('[bold orange1]skipped [dim][offline[/].[/]')
 				return
@@ -551,47 +573,53 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 				call(['git', 'clone', git_url, str(target_path)], stderr=DEVNULL, stdout=DEVNULL)
 				console.print('[bold green]ok.[/]')
 			except Exception as e:
+				error = Error.from_exception(e)
 				console.print(f'[bold red]failed ({str(e)}).[/]')
+				console.print(error)
 		return target_path.resolve()
 	elif Path(url_or_path).exists():
-		# Create a symbolic link for a local file
+		# Move local file to target folder
 		local_path = Path(url_or_path)
 		target_path = target_folder / local_path.name
 		if not name:
 			name = url_or_path.split('/')[-1]
-		if not CONFIG.security.allow_local_file_access:
-			console.print(f'[bold red]Cannot reference local file {url_or_path}(disabled for security reasons)[/]')
-			return
-		if not target_path.exists():
-			console.print(f'[bold turquoise4]Symlinking {type} [bold magenta]{name}[/] ...[/] ', end='')
-			try:
-				target_path.symlink_to(local_path)
-				console.print('[bold green]ok.[/]')
-			except Exception as e:
-				console.print(f'[bold red]failed ({str(e)}).[/]')
+		try:
+			local_path.resolve().relative_to(CONFIG.dirs.data.resolve())
+		except ValueError:
+			if not CONFIG.security.allow_local_file_access:
+				console.print(Error(message=f'File {local_path.resolve()} is not in {CONFIG.dirs.data} and security.allow_local_file_access is disabled.'))  # noqa: E501
+				return None
+			from secator.output_types import Info
+			console.print(repr(Info(message=f'[bold turquoise4]Copying {type} [bold magenta]{name}[/] to {target_folder} ...[/] ')), highlight=False, end='')  # noqa: E501
+			shutil.copyfile(local_path, target_folder / name)
+			target_path = target_folder / local_path.name
+			console.print('[bold green]ok.[/]')
 		return target_path.resolve()
-	else:
+	elif validators.url(url_or_path):
 		# Download file from URL
 		ext = url_or_path.split('.')[-1]
 		if not name:
 			name = url_or_path.split('/')[-1]
 		filename = f'{name}.{ext}' if not name.endswith(ext) else name
 		target_path = target_folder / filename
-		if not target_path.exists():
-			try:
-				console.print(f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ', end='')
-				if offline_mode:
-					console.print('[bold orange1]skipped [dim](offline)[/].[/]')
-					return
-				resp = requests.get(url_or_path, timeout=3)
-				resp.raise_for_status()
-				with open(target_path, 'wb') as f:
-					f.write(resp.content)
-				console.print('[bold green]ok.[/]')
-			except requests.RequestException as e:
-				console.print(f'[bold red]failed ({str(e)}).[/]')
+		try:
+			if offline_mode:
 				return
+			if target_path.exists():
+				return target_path.resolve()
+			console.print(repr(Info(message=f'[bold turquoise4]Downloading {type} [bold magenta]{filename}[/] ...[/] ')), highlight=False, end='')  # noqa: E501
+			resp = requests.get(url_or_path, timeout=3)
+			resp.raise_for_status()
+			with open(target_path, 'wb') as f:
+				f.write(resp.content)
+			console.print('[bold green]ok.[/]')
+		except requests.RequestException as e:
+			console.print(f'[bold red]failed ({str(e)}).[/]')
+			return
 		return target_path.resolve()
+	else:
+		console.print(Error(message=f'Invalid {type} [bold magenta]{url_or_path}[/]: not a valid git repository, URL or local path.'))  # noqa: E501
+		return None
 
 
 # Load default_config
@@ -628,5 +656,5 @@ for name, dir in CONFIG.dirs.items():
 # download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
 
 # Print config
-if CONFIG.debug.component == 'config':
+if 'config' in CONFIG.debug:
 	CONFIG.print()

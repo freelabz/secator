@@ -33,7 +33,7 @@ logging.basicConfig(
 	handlers=[rich_handler],
 	force=True)
 logging.getLogger('kombu').setLevel(logging.ERROR)
-logging.getLogger('celery').setLevel(logging.INFO if CONFIG.debug.level > 6 else logging.WARNING)
+logging.getLogger('celery').setLevel(logging.DEBUG if 'celery.debug' in CONFIG.debug or 'celery.*' in CONFIG.debug else logging.WARNING)  # noqa: E501
 logger = logging.getLogger(__name__)
 trace.LOG_SUCCESS = "Task %(name)s[%(id)s] succeeded in %(runtime)ss"
 
@@ -169,9 +169,17 @@ def run_scan(self, args=[], kwargs={}):
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
 	if IN_CELERY_WORKER_PROCESS:
-		opts.update({'print_item': True, 'print_line': True, 'print_cmd': True})
-		# routing_key = self.request.delivery_info['routing_key']
-		# console.print(Info(message=f'Task "{name}" running with routing key "{routing_key}"'))
+		quiet = not CONFIG.cli.worker_command_verbose
+		opts.update({
+			'print_item': True,
+			'print_line': True,
+			'print_cmd': True,
+			'print_target': True,
+			'print_profiles': True,
+			'quiet': quiet
+		})
+		routing_key = self.request.delivery_info['routing_key']
+		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 
 	# Flatten + dedupe + filter results
 	results = forward_results(results)
@@ -188,11 +196,13 @@ def run_command(self, results, name, targets, opts={}):
 	sync = not IN_CELERY_WORKER_PROCESS
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
+	chunk_it = task.needs_chunking(sync)
+	task.has_children = chunk_it
 	task.mark_started()
 	update_state(self, task, force=True)
 
 	# Chunk task if needed
-	if task.needs_chunking(sync):
+	if chunk_it:
 		if IN_CELERY_WORKER_PROCESS:
 			console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
 		tasks = break_task(task, opts, results=results)
@@ -238,8 +248,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if results:
 		runner.results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if not runner.dry_run:
-		runner.mark_started()
+	runner.mark_started()
 	return runner.results
 
 
@@ -258,9 +267,9 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if not runner.dry_run:
-		[runner.add_result(item) for item in results]
-		runner.mark_completed()
+	for item in results:
+		runner.add_result(item)
+	runner.mark_completed()
 	return runner.results
 
 
@@ -294,7 +303,7 @@ def break_task(task, task_opts, results=[]):
 	)
 
 	# Clone opts
-	opts = task_opts.copy()
+	base_opts = task_opts.copy()
 
 	# Build signatures
 	sigs = []
@@ -302,17 +311,28 @@ def break_task(task, task_opts, results=[]):
 	for ix, chunk in enumerate(chunks):
 		if not isinstance(chunk, list):
 			chunk = [chunk]
-		if len(chunks) > 0:  # add chunk to task opts for tracking chunks exec
-			opts['chunk'] = ix + 1
-			opts['chunk_count'] = len(chunks)
+
+		# Add chunk info to opts
+		opts = base_opts.copy()
+		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
+		debug('', obj={
+			task.unique_name: 'CHUNK',
+			'chunk': f'{ix + 1} / {len(chunks)}',
+			'target_count': len(chunk),
+			'targets': chunk
+		}, sub='celery.state')  # noqa: E501
+
+		# Construct chunked signature
 		task_id = str(uuid.uuid4())
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
 		opts['results'] = results
-		sig = type(task).si(chunk, **opts).set(queue=type(task).profile, task_id=task_id)
+		if 'targets_' in opts:
+			del opts['targets_']
+		sig = type(task).si(chunk, **opts).set(task_id=task_id)
 		full_name = f'{task.name}_{ix + 1}'
-		task.add_subtask(task_id, task.name, f'{task.name}_{ix + 1}')
-		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
+		task.add_subtask(task_id, task.name, full_name)
+		info = Info(message=f'Celery chunked task created: {task_id}')
 		task.add_result(info)
 		sigs.append(sig)
 

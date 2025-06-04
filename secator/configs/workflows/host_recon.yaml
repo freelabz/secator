@@ -6,36 +6,61 @@ tags: [recon, network, http]
 input_types:
   - host
   - cidr_range
+
+options:
+  nuclei:
+    is_flag: True
+    default: False
+    help: Run nuclei scans (slow)
+
+  full:
+    is_flag: True
+    default: False
+    help: "Run full port scan (default: top 100 ports)"
+
 tasks:
   naabu:
     description: Find open ports
+    if: opts.ports or not opts.full
+
+  naabu/full:
+    description: Find open ports
     ports: "-"  # scan all ports
+    if: opts.full and not opts.ports
+
   nmap:
     description: Search for vulnerabilities on open ports
     version_detection: True
     script: vulners
     targets_:
     - port.host
-    - target.name
     ports_:
-    - port.port
-    ports: "-"  # default if no port found by naabu
+    - type: port
+      field: port
+      condition: port.host in targets
+
   _group/1:
     httpx:
       description: Probe HTTP services on open ports
+      tech_detect: True
       targets_:
         - type: port
           field: '{host}:{port}'
+
     searchsploit:
       description: Search for related exploits
       targets_:
         - type: port
           field: service_name
           condition: len(item.service_name.split('/')) > 1
+
   _group/2:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
+      exclude_tags: []
+      if: opts.nuclei
+
     nuclei/url:
       description: Search for vulnerabilities on alive HTTP services
       exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
@@ -43,3 +68,4 @@ tasks:
         - type: url
           field: url
           condition: item.status_code != 0
+      if: opts.nuclei

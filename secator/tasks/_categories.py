@@ -39,13 +39,13 @@ OPTS = {
 	DEPTH: {'type': int, 'help': 'Scan depth'},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
-	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
-	FILTER_WORDS: {'type': str, 'short': 'fw', 'help': 'Filter out responses with word count'},
+	FILTER_SIZE: {'type': int, 'short': 'fs', 'help': 'Filter out responses with size'},
+	FILTER_WORDS: {'type': int, 'short': 'fw', 'help': 'Filter out responses with word count'},
 	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'frd', 'help': 'Follow HTTP redirects'},
 	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
 	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
-	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match respones with size'},
-	MATCH_WORDS: {'type': str, 'short': 'mw', 'help': 'Match responses with word count'},
+	MATCH_SIZE: {'type': int, 'short': 'ms', 'help': 'Match responses with size'},
+	MATCH_WORDS: {'type': int, 'short': 'mw', 'help': 'Match responses with word count'},
 	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
@@ -141,7 +141,7 @@ class Vuln(Command):
 		if os.path.exists(cve_path):
 			with open(cve_path, 'r') as f:
 				return json.load(f)
-		debug(f'CVE {cve_id} not found in cache', sub='cve')
+		debug(f'{cve_id}: not found in cache', sub='cve')
 		return None
 
 	# @staticmethod
@@ -224,10 +224,10 @@ class Vuln(Command):
 			dict: vulnerability data.
 		"""
 		if CONFIG.runners.skip_exploit_search:
-			debug(f'Skip remote query for {exploit_id} since config.runners.skip_exploit_search is set.', sub='cve')
+			debug(f'{exploit_id}: skipped remote query since config.runners.skip_exploit_search is set.', sub='cve.vulners')
 			return None
 		if CONFIG.offline_mode:
-			debug(f'Skip remote query for {exploit_id} since config.offline_mode is set.', sub='cve')
+			debug(f'{exploit_id}: skipped remote query since config.offline_mode is set.', sub='cve.vulners')
 			return None
 		try:
 			resp = requests.get(f'https://vulners.com/githubexploit/{exploit_id}', timeout=5)
@@ -243,7 +243,7 @@ class Vuln(Command):
 			cve_regex = re.compile(r'(CVE(?:-|_)\d{4}(?:-|_)\d{4,7})', re.IGNORECASE)
 			matches = cve_regex.findall(str(content))
 			if not matches:
-				debug(f'{exploit_id}: No CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve')
+				debug(f'{exploit_id}: no matching CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve.vulners')
 				return None
 			cve_id = matches[0].replace('_', '-').upper()
 			cve_data = Vuln.lookup_cve(cve_id, *cpes)
@@ -251,7 +251,7 @@ class Vuln(Command):
 				return cve_data
 
 		except requests.RequestException as e:
-			debug(f'Failed remote query for {exploit_id} ({str(e)}).', sub='cve')
+			debug(f'{exploit_id}: failed remote query ({str(e)}).', sub='cve.vulners')
 			return None
 
 	@cache
@@ -265,20 +265,26 @@ class Vuln(Command):
 		Returns:
 			dict | None: CVE data, None if no response or empty response.
 		"""
+		if CONFIG.runners.skip_cve_search:
+			debug(f'{cve_id}: skipped remote query since config.runners.skip_cve_search is set.', sub='cve.circl')
+			return None
+		if CONFIG.offline_mode:
+			debug(f'{cve_id}: skipped remote query since config.offline_mode is set.', sub='cve.circl')
+			return None
 		try:
 			resp = requests.get(f'https://vulnerability.circl.lu/api/cve/{cve_id}', timeout=5)
 			resp.raise_for_status()
 			cve_info = resp.json()
 			if not cve_info:
-				debug(f'Empty response from https://vulnerability.circl.lu/api/cve/{cve_id}', sub='cve')
+				debug(f'{cve_id}: empty response from https://vulnerability.circl.lu/api/cve/{cve_id}', sub='cve.circl')
 				return None
 			cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
 			with open(cve_path, 'w') as f:
 				f.write(json.dumps(cve_info, indent=2))
-			debug(f'Downloaded {cve_id} to {cve_path}', sub='cve')
+			debug(f'{cve_id}: downloaded to {cve_path}', sub='cve.circl')
 			return cve_info
 		except requests.RequestException as e:
-			debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
+			debug(f'{cve_id}: failed remote query ({str(e)}).', sub='cve.circl')
 			return None
 
 	@cache
@@ -297,12 +303,6 @@ class Vuln(Command):
 
 		# Online CVE lookup
 		if not cve_info:
-			if CONFIG.runners.skip_cve_search:
-				debug(f'Skip remote query for {cve_id} since config.runners.skip_cve_search is set.', sub='cve')
-				return None
-			if CONFIG.offline_mode:
-				debug(f'Skip remote query for {cve_id} since config.offline_mode is set.', sub='cve')
-				return None
 			cve_info = Vuln.lookup_cve_from_cve_circle(cve_id)
 			if not cve_info:
 				return None
@@ -330,6 +330,10 @@ class Vuln(Command):
 			'cpes': cpes_affected,
 			'references': references
 		}
+		if not cpes_affected:
+			debug(f'{cve_id}: no CPEs found in CVE data', sub='cve.circl', verbose=True)
+		else:
+			debug(f'{cve_id}: {len(cpes_affected)} CPEs found in CVE data', sub='cve.circl', verbose=True)
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.
 		# This allow to limit the number of False positives (high) that we get from nmap NSE vuln scripts like vulscan
@@ -337,15 +341,14 @@ class Vuln(Command):
 		# The check is not executed if no CPE was passed (sometimes nmap cannot properly detect a CPE) or if the CPE
 		# version cannot be determined.
 		cpe_match = False
-		tags = [cve_id]
-		if cpes:
+		tags = []
+		if cpes and cpes_affected:
 			for cpe in cpes:
 				cpe_fs = Vuln.get_cpe_fs(cpe)
 				if not cpe_fs:
 					debug(f'{cve_id}: Failed to parse CPE {cpe} with CPE parser', sub='cve.match', verbose=True)
 					tags.append('cpe-invalid')
 					continue
-				# cpe_version = cpe_obj.get_version()[0]
 				for cpe_affected in cpes_affected:
 					cpe_affected_fs = Vuln.get_cpe_fs(cpe_affected)
 					if not cpe_affected_fs:
@@ -354,12 +357,12 @@ class Vuln(Command):
 					debug(f'{cve_id}: Testing {cpe_fs} against {cpe_affected_fs}', sub='cve.match', verbose=True)
 					cpe_match = Vuln.match_cpes(cpe_fs, cpe_affected_fs)
 					if cpe_match:
-						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
+						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve.match')
 						tags.append('cpe-match')
 						break
 
 				if not cpe_match:
-					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve')
+					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve.match')
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
