@@ -61,7 +61,6 @@ and it is designed to improve productivity for pentesters and security researche
 | [dalfox](https://github.com/hahwul/dalfox)                                                          | Powerful open source XSS scanning tool.                                          | `url/fuzz`        |
 | [dirsearch](https://github.com/maurosoria/dirsearch)                                                       | Advanced web path brute-forcer.                                                  | `url/fuzz`        |
 | [dnsx](https://github.com/projectdiscovery/dnsx)                                                            | dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library. | `dns/fuzz`        |
-| [dnsxbrute](https://github.com/projectdiscovery/dnsx)                                                       | dnsx is a fast and multi-purpose DNS toolkit designed for running various library. | `dns/fuzz`        |
 | [feroxbuster](https://github.com/epi052/feroxbuster)                                                     | Simple, fast, recursive content discovery tool written in Rust                   | `url/fuzz`        |
 | [ffuf](https://github.com/ffuf/ffuf)                                                            | Fast web fuzzer written in Go.                                                   | `url/fuzz`        |
 | [fping](https://github.com/schweikert/fping)                                                           | Send ICMP echo probes to network hosts, similar to ping, but much better.        | `ip/recon`        |

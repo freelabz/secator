@@ -180,6 +180,7 @@ class Runner:
 		# Determine inputs
 		self.debug(f'resolving inputs with dynamic opts ({len(self.dynamic_opts)})', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
+		self.inputs = list(set(self.inputs))
 		targets = [Target(name=target) for target in self.inputs]
 		for target in targets:
 			self.add_result(target, print=False, output=False)
