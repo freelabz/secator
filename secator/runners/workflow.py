@@ -135,7 +135,7 @@ class Workflow(Runner):
 					debug(f'{node.id} downgraded group to task', sub=self.config.name)
 					sig = tasks[0]
 				elif len(tasks) > 1:
-					sig = group(*tasks).on_error(forward_results.s())
+					sig = group(*tasks)
 					last_sig = sigs[-1] if sigs else None
 					if sig and isinstance(last_sig, group):  # cannot chain 2 groups without bridge task
 						debug(f'{node.id} previous is group, adding bridge task forward_results', sub=self.config.name)
