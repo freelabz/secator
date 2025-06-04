@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.16.0](https://github.com/freelabz/secator/compare/v0.15.1...v0.16.0) (2025-06-04)
+
+
+### Features
+
+* **`dnsx`:** merge `dnsxbrute` into `dnsx` ([#571](https://github.com/freelabz/secator/issues/571)) ([d30a497](https://github.com/freelabz/secator/commit/d30a4974cafba8c5a88afbe41b46f230e0667624))
+* add task revoke state and perf improvements ([#678](https://github.com/freelabz/secator/issues/678)) ([2a3bf08](https://github.com/freelabz/secator/commit/2a3bf089a643f889417da447047a6d45818dbb24))
+* allow returning errors in hooks ([#632](https://github.com/freelabz/secator/issues/632)) ([39a56bd](https://github.com/freelabz/secator/commit/39a56bdb3d7e3cc91db28f227ee3c8d517319ba2))
+* improve bbot output types ([#627](https://github.com/freelabz/secator/issues/627)) ([3b0aa5d](https://github.com/freelabz/secator/commit/3b0aa5de419cdabb4e450373d98942b32f52565d))
+* improve runner logic, workflow building, results filtering logic; and add config defaults for profiles & drivers ([#673](https://github.com/freelabz/secator/issues/673)) ([df94657](https://github.com/freelabz/secator/commit/df94657836baf380b0a00bb02467a04bbbb6ea39))
+* improve template loading flow ([#667](https://github.com/freelabz/secator/issues/667)) ([f223120](https://github.com/freelabz/secator/commit/f2231200917a2eff1fb35f782739a4ae52b2382b))
+* **misc:** condition-based runs, chunked_by opts, dynamic task profiles, cli improvements ([#659](https://github.com/freelabz/secator/issues/659)) ([e8225cd](https://github.com/freelabz/secator/commit/e8225cd1b434569ecdb6b99f48821bc7c581896e))
+* **runner:** add input validation to all tasks and workflows ([#663](https://github.com/freelabz/secator/issues/663)) ([8392551](https://github.com/freelabz/secator/commit/839255108d5a688cad96940bc44f86ff5ae66ba3))
+* **runner:** improve option handling ([#670](https://github.com/freelabz/secator/issues/670)) ([59b1c68](https://github.com/freelabz/secator/commit/59b1c68abe90a738dff04ee7a1ef68078ff7fa21))
+* **scans:** improve scans ([#660](https://github.com/freelabz/secator/issues/660)) ([bdd38ec](https://github.com/freelabz/secator/commit/bdd38ecbf1f1479dee5f1f39583047f8a6abccd8))
+* **workflow:** improve subdomain_recon workflow ([#657](https://github.com/freelabz/secator/issues/657)) ([bc65092](https://github.com/freelabz/secator/commit/bc6509270031d422ceb0007be415d9cb8066534c))
+
+
+### Bug Fixes
+
+* allow dry-run mode to work without targets ([#624](https://github.com/freelabz/secator/issues/624)) ([cccffb9](https://github.com/freelabz/secator/commit/cccffb93ba4537887bed656319d47351ba5f8618))
+* formatting for dynamic opts ([#628](https://github.com/freelabz/secator/issues/628)) ([dcbbfe9](https://github.com/freelabz/secator/commit/dcbbfe9d7f0acf95c8a5a0ccf787d5c9abcfbcef))
+* header options conversion ([#633](https://github.com/freelabz/secator/issues/633)) ([6ae8423](https://github.com/freelabz/secator/commit/6ae8423a75e2cab31ebc90b6b0fdaba44eba430f))
+* header parsing ([#629](https://github.com/freelabz/secator/issues/629)) ([db2f028](https://github.com/freelabz/secator/commit/db2f028a40fed0188855299f413b9e12f3dae8cf))
+* **installer:** compound distro.like() on distribs like popos ([#653](https://github.com/freelabz/secator/issues/653)) ([3687e1d](https://github.com/freelabz/secator/commit/3687e1d54ab5065286952b71c624b2eda276ed50))
+* **installer:** ignore dev/post release from PyPI ([#634](https://github.com/freelabz/secator/issues/634)) ([614c3e2](https://github.com/freelabz/secator/commit/614c3e2c20566c7a608816ad504128a10b1923d1))
+* **installer:** secator update with correct package version ([#648](https://github.com/freelabz/secator/issues/648)) ([a9cf189](https://github.com/freelabz/secator/commit/a9cf1899cade5d34f25c002eac9feeabbdc6353e))
+* progress type fields ([#652](https://github.com/freelabz/secator/issues/652)) ([f146914](https://github.com/freelabz/secator/commit/f146914f3d947a536ada03201e8f3fdf08615a54))
+* remove duplicates from txt exporter ([#630](https://github.com/freelabz/secator/issues/630)) ([88ba5c5](https://github.com/freelabz/secator/commit/88ba5c5c339f91da32b72f17bed54a65988b2d8b))
+* remove fping -r flag by default, show alive hosts better ([#665](https://github.com/freelabz/secator/issues/665)) ([5c945fd](https://github.com/freelabz/secator/commit/5c945fdcf1ad7422698fe5519bc5abddcc0473ca))
+* short opt incorrectly named ([#631](https://github.com/freelabz/secator/issues/631)) ([0c73c60](https://github.com/freelabz/secator/commit/0c73c60380616dfab268d2541f83bf9cf4518098))
+* tasks with no file flag need input_chunk_size=1 ([#668](https://github.com/freelabz/secator/issues/668)) ([a088c94](https://github.com/freelabz/secator/commit/a088c949219718757fd1611acf8ddb8167b0deb8))
+* tools table generator update ([9420f14](https://github.com/freelabz/secator/commit/9420f1426d722079d9058c7b37e4118119dc9542))
+* update ci workflow ([f4c2b13](https://github.com/freelabz/secator/commit/f4c2b1300fc7d4417704eee7e9917bf184039feb))
+* update generate table workflow ([ff62702](https://github.com/freelabz/secator/commit/ff627029120a146e55e5dbc6b95d1d9adf9cb8fa))
+* vulnerability output reference when unset ([#625](https://github.com/freelabz/secator/issues/625)) ([a656fbf](https://github.com/freelabz/secator/commit/a656fbfd306b334fdca72cdc04321cd2e8c749bb))
+
+
+### Documentation
+
+* generate tools table md ([#610](https://github.com/freelabz/secator/issues/610)) ([d60f11e](https://github.com/freelabz/secator/commit/d60f11ea72999b163e55634c8bdabaf134e3b368))
+
 ## [0.15.0](https://github.com/freelabz/secator/compare/v0.14.0...v0.15.0) (2025-05-04)
 
 
