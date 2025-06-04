@@ -93,7 +93,7 @@ class Runner:
 		self.context = context
 
 		# Runner state
-		self.uuids = []
+		self.uuids = set()
 		self.results = []
 		self.threads = []
 		self.output = ''
@@ -300,6 +300,8 @@ class Runner:
 	def status(self):
 		if not self.started:
 			return 'PENDING'
+		if self.revoked:
+			return 'REVOKED'
 		if not self.done:
 			return 'RUNNING'
 		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
@@ -393,6 +395,7 @@ class Runner:
 			error = Error.from_exception(e)
 			self.add_result(error)
 			self.stop_celery_tasks()
+			self.revoked = True
 			if not self.sync:  # yield latest results from Celery
 				for item in self.yielder():
 					yield from self._process_item(item)
@@ -500,7 +503,7 @@ class Runner:
 				return
 
 		# Add item to results
-		self.uuids.append(item._uuid)
+		self.uuids.add(item._uuid)
 		self.results.append(item)
 		if output:
 			self.output += repr(item) + '\n'
@@ -667,6 +670,7 @@ class Runner:
 				self.celery_result,
 				ids_map=self.celery_ids_map,
 				description=True,
+				revoked=self.revoked,
 				print_remote_info=self.print_remote_info,
 				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
 			)
@@ -1129,7 +1133,7 @@ class Runner:
 		"""
 		# Return if profiles are disabled
 		if not self.enable_profiles:
-			return
+			return []
 
 		# Split profiles if comma separated
 		if isinstance(profiles, str):
@@ -1144,7 +1148,7 @@ class Runner:
 
 		# Abort if no profiles
 		if not profiles:
-			return
+			return []
 
 		# Get profile configs
 		templates = []

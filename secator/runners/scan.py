@@ -1,5 +1,4 @@
 import logging
-
 from dotmap import DotMap
 
 from secator.config import CONFIG

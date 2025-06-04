@@ -25,6 +25,7 @@ class CeleryData(object):
 			result,
 			ids_map={},
 			description=True,
+			revoked=False,
 			refresh_interval=CONFIG.runners.poll_frequency,
 			print_remote_info=True,
 			print_remote_title='Results'
@@ -34,6 +35,7 @@ class CeleryData(object):
 		Args:
 			result (Union[AsyncResult, GroupResult]): Celery result.
 			description (bool): Whether to show task description.
+			revoked (bool): Whether the task was revoked.
 			refresh_interval (int): Refresh interval.
 			print_remote_info (bool): Whether to display live results.
 			print_remote_title (str): Title for the progress panel.
@@ -76,7 +78,7 @@ class CeleryData(object):
 				progress_cache = CeleryData.init_progress(progress, ids_map)
 
 			# Get live results and print progress
-			for data in CeleryData.poll(result, ids_map, refresh_interval):
+			for data in CeleryData.poll(result, ids_map, refresh_interval, revoked):
 				for result in data['results']:
 
 					# Add dynamic subtask to ids_map
@@ -131,7 +133,7 @@ class CeleryData(object):
 		progress.update(progress_id, **pdata)
 
 	@staticmethod
-	def poll(result, ids_map, refresh_interval):
+	def poll(result, ids_map, refresh_interval, revoked=False):
 		"""Poll Celery subtasks results in real-time. Fetch task metadata and partial results from each task that runs.
 
 		Yields:
@@ -139,9 +141,9 @@ class CeleryData(object):
 		"""
 		while True:
 			try:
-				if result.ready():
+				if result.ready() or revoked:
 					debug('result is ready', sub='celery.poll', id=result.id)
-					yield from CeleryData.get_all_data(result, ids_map)
+					yield from CeleryData.get_all_data(result, ids_map, revoked=revoked)
 					break
 			except (KeyboardInterrupt, GreenletExit):
 				debug('encounted KeyboardInterrupt or GreenletExit', sub='celery.poll')
@@ -152,21 +154,21 @@ class CeleryData(object):
 				pass
 			finally:
 				sleep(refresh_interval)
-				yield from CeleryData.get_all_data(result, ids_map)
+				yield from CeleryData.get_all_data(result, ids_map, revoked=revoked)
 
 	@staticmethod
-	def get_all_data(result, ids_map):
+	def get_all_data(result, ids_map, revoked=False):
 		main_task = State(
 			task_id=result.id,
-			state=result.state,
+			state='REVOKED' if revoked and result.state == 'PENDING' else result.state,
 			_source='celery'
 		)
 		debug(f"Main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
 		yield {'id': result.id, 'state': result.state, 'results': [main_task]}
-		yield from CeleryData.get_tasks_data(ids_map)
+		yield from CeleryData.get_tasks_data(ids_map, revoked=revoked)
 
 	@staticmethod
-	def get_tasks_data(ids_map):
+	def get_tasks_data(ids_map, revoked=False):
 		"""Get Celery results from main result object, AND all subtasks results.
 
 		Yields:
@@ -177,6 +179,8 @@ class CeleryData(object):
 			data = CeleryData.get_task_data(task_id, ids_map)
 			if not data:
 				continue
+			if revoked and data['state'] == 'PENDING':
+				data['state'] = 'REVOKED'
 			debug(
 				'POLL',
 				sub='celery.poll',
