@@ -18,31 +18,34 @@ from secator.loader import get_configs_by_type
 
 
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
-
 WORKSPACES_STR = '|'.join([f'[dim yellow3]{_}[/]' for _ in WORKSPACES])
-PROFILES_STR = '|'.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_type('profile')])
+PROFILES_STR = ','.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_type('profile')])
+DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['mongodb', 'gcs']])
+DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
+PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
+EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['csv', 'gdrive', 'json', 'table', 'txt']])
 
 CLI_OUTPUT_OPTS = {
-	'output': {'type': str, 'default': None, 'help': 'Output options (-o table,json,csv,gdrive)', 'short': 'o'},
-	'print_json': {'is_flag': True, 'short': 'json', 'default': False, 'help': 'Print items as JSON lines'},
-	'print_raw': {'is_flag': True, 'short': 'raw', 'default': False, 'help': 'Print items in raw format'},
-	'print_stat': {'is_flag': True, 'short': 'stat', 'default': False, 'help': 'Print runtime statistics'},
-	'print_format': {'default': '', 'short': 'fmt', 'help': 'Output formatting string'},
-	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
+	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o'},  # noqa: E501
+	'fmt': {'default': '', 'short': 'fmt', 'internal_name': 'print_format', 'help': 'Output formatting string'},
+	'json': {'is_flag': True, 'short': 'json', 'internal_name': 'print_json', 'default': False, 'help': 'Print items as JSON lines'},  # noqa: E501
+	'raw': {'is_flag': True, 'short': 'raw', 'internal_name': 'print_raw', 'default': False, 'help': 'Print items in raw format'},  # noqa: E501
+	'stat': {'is_flag': True, 'short': 'stat', 'internal_name': 'print_stat', 'default': False, 'help': 'Print runtime statistics'},  # noqa: E501
 	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.cli.show_command_output, 'opposite': 'verbose', 'help': 'Hide or show original command output'},  # noqa: E501
-	'show': {'is_flag': True, 'short': 'yml', 'default': False, 'help': 'Show runner yaml'},
+	'yaml': {'is_flag': True, 'short': 'yaml', 'default': False, 'help': 'Show runner yaml'},
 	'tree': {'is_flag': True, 'short': 'tree', 'default': False, 'help': 'Show runner tree'},
+	'dry_run': {'is_flag': True, 'short': 'dry', 'default': False, 'help': 'Show dry run'},
+	'process': {'is_flag': True, 'short': 'ps', 'default': True, 'help': 'Enable / disable secator processing', 'reverse': True},  # noqa: E501
 	'version': {'is_flag': True, 'help': 'Show runner version'},
 }
 
 CLI_EXEC_OPTS = {
-	'driver': {'type': click.Choice(['mongodb', 'gcs']), 'help': 'Drivers'},
-	'profiles': {'type': str, 'help': f'Profiles ({PROFILES_STR})', 'short': 'pf'},
-	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace ({WORKSPACES_STR}|[dim yellow3]<new>[/])', 'short': 'ws'},  # noqa: E501
-	'dry_run': {'is_flag': True, 'short': 'dry', 'default': False, 'help': 'Enable dry run'},
+	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws'},  # noqa: E501
+	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf'},  # noqa: E501
+	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR},  # noqa: E501
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
-	'process': {'is_flag': True, 'short': 'ps', 'default': True, 'help': 'Enable secator processing', 'reverse': True},
+	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
 }
 
 CLI_TYPE_MAPPING = {
@@ -76,6 +79,7 @@ def decorate_command_options(opts):
 			short_opt = conf.pop('short', None)
 			internal = conf.pop('internal', False)
 			display = conf.pop('display', True)
+			internal_name = conf.pop('internal_name', None)
 			if internal and not display:
 				continue
 			conf.pop('shlex', None)
@@ -104,7 +108,10 @@ def decorate_command_options(opts):
 				conf['help'] += rf' \[[dim]{applies_to_str}[/]]'
 			if default_from:
 				conf['help'] += rf' \[[dim]default from: [dim yellow3]{default_from}[/][/]]'
-			f = click.option(long, short, **conf)(f)
+			args = [long, short]
+			if internal_name:
+				args.append(internal_name)
+			f = click.option(*args, **conf)(f)
 		return f
 	return decorator
 
@@ -191,13 +198,16 @@ def register_runner(cli_endpoint, config):
 		driver = opts.pop('driver', '')
 		quiet = opts['quiet']
 		dry_run = opts['dry_run']
-		show = opts['show']
+		yaml = opts['yaml']
 		tree = opts['tree']
 		context = {'workspace_name': ws}
 		ctx.obj['dry_run'] = dry_run
 
 		# Show version
-		if version and cli_endpoint.name == 'task':
+		if version:
+			if not cli_endpoint.name == 'task':
+				console.print(f'[bold red]Version information is not available for {cli_endpoint.name}.[/]')
+				sys.exit(1)
 			data = task_cls.get_version_info()
 			current = data['version']
 			latest = data['latest_version']
@@ -209,7 +219,7 @@ def register_runner(cli_endpoint, config):
 			sys.exit(0)
 
 		# Show runner yaml
-		if show:
+		if yaml:
 			config.print()
 			sys.exit(0)
 

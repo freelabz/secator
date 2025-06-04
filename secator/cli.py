@@ -105,7 +105,7 @@ for config in WORKFLOWS:
 # SCAN #
 #------#
 
-@cli.group(cls=OrderedGroup, aliases=['s'], invoke_without_command=True)
+@cli.group(cls=OrderedGroup, aliases=['s', 'scans'], invoke_without_command=True)
 @click.pass_context
 def scan(ctx):
 	"""Run a scan."""
@@ -476,7 +476,7 @@ def config():
 def config_get(user, key=None):
 	"""Get config value."""
 	if key is None:
-		partial = user and CONFIG != default_config
+		partial = user and default_config != CONFIG
 		CONFIG.print(partial=partial)
 		return
 	CONFIG.get(key)
@@ -506,7 +506,6 @@ def config_unset(key):
 	CONFIG.unset(key)
 	config = CONFIG.validate()
 	if config:
-		CONFIG.get(key)
 		saved = CONFIG.save()
 		if not saved:
 			return
@@ -1481,9 +1480,13 @@ def run_test(cmd, name=None, exit=True, verbose=False):
 
 
 @test.command()
-def lint():
+@click.option('--linter', '-l', type=click.Choice(['flake8', 'black', 'isort', 'pylint']), default='flake8', help='Linter to use')  # noqa: E501
+def lint(linter):
 	"""Run lint tests."""
-	cmd = f'{sys.executable} -m flake8 secator/'
+	opts = ''
+	if linter == 'pylint':
+		opts = '--indent-string "\t" --max-line-length 160 --disable=R0401,R0801,R0914,W0212,C0415,C0103'
+	cmd = f'{sys.executable} -m {linter} {opts} secator/'
 	run_test(cmd, 'lint', verbose=True)
 
 

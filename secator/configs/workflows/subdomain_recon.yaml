@@ -49,7 +49,7 @@ tasks:
 
   _group/2:
     dnsx/probe:
-      description: Check if subdomains actually exist (DNS)
+      description: Probe DNS records for subdomains found
       subdomains_only: True
       wordlist: False
       targets_:
@@ -61,7 +61,7 @@ tasks:
       targets_:
       - target.name
       - subdomain.host
-      tags: [takeover, dns]
+      tags: [takeover]
 
     ffuf:
       description: Bruteforce subdomains (Host header)

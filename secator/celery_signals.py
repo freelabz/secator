@@ -127,10 +127,11 @@ def setup_handlers():
 	if CONFIG.celery.override_default_logging:
 		signals.setup_logging.connect(setup_logging)
 
-	if CONFIG.celery.worker_kill_after_idle_seconds != -1:
+	# Register common handlers when either task‐ or idle‐based termination is enabled
+	if CONFIG.celery.worker_kill_after_task or CONFIG.celery.worker_kill_after_idle_seconds != -1:
 		signals.celeryd_after_setup.connect(capture_worker_name)
-		signals.task_prerun.connect(task_prerun_handler)
 		signals.task_postrun.connect(task_postrun_handler)
+		signals.task_prerun.connect(task_prerun_handler)
 		signals.task_revoked.connect(task_revoked_handler)
 		signals.worker_ready.connect(worker_init_handler)
 		signals.worker_shutdown.connect(worker_shutdown_handler)

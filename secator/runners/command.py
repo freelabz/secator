@@ -373,7 +373,7 @@ class Command(Runner):
 			self.run_opts['proxy'] = proxy
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
-			warning = Warning(message=f'Ignoring proxy "{self.proxy}" (reason: not supported). \[[bold yellow3]{self.unique_name}[/]]')  # noqa: E501
+			warning = Warning(message=rf'Ignoring proxy "{self.proxy}" (reason: not supported) \[[bold yellow3]{self.unique_name}[/]]')  # noqa: E501
 			self._print(repr(warning))
 
 	#----------#
