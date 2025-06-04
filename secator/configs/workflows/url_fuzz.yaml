@@ -17,7 +17,7 @@ options:
     default: ['ffuf']
 
 tasks:
-  _group:
+  _group/fuzz:
     dirsearch:
       description: Fuzz URLs
       if: "'dirsearch' in opts.fuzzers"
@@ -35,6 +35,7 @@ tasks:
 
   httpx:
     description: Run HTTP probes on crawled URLs
+    tech_detect: True
     targets_:
       type: url
       field: url

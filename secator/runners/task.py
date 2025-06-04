@@ -50,6 +50,7 @@ class Task(Runner):
 
 		# Task class will handle those
 		opts['enable_reports'] = False
+		opts['enable_profiles'] = False
 		opts['enable_duplicate_check'] = False
 		opts['print_start'] = False
 		opts['print_end'] = False

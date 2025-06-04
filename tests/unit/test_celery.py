@@ -1,5 +1,5 @@
 import unittest
-from secator.celery import app, forward_results
+from secator.celery import app, forward_results  # noqa: F401
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS, FIXTURES_DIR, load_fixture
 from secator.output_types import Url
 from celery import chain, chord

@@ -1,3 +1,3 @@
 class Exporter:
-    def __init__(self, report):
-        self.report = report
+	def __init__(self, report):
+		self.report = report

@@ -1,13 +1,14 @@
 import os
 import shutil
 import unittest
-
-from unittest.mock import patch
+import yaml
 
 from secator.config import CONFIG
 from secator.output_types import Vulnerability
 from secator.utils_test import FIXTURES_DIR, clear_modules
 from secator.loader import get_configs_by_type, find_templates, discover_tasks
+from secator.tree import build_runner_tree
+from secator.template import TemplateLoader, get_config_options
 
 
 class TestTemplate(unittest.TestCase):
@@ -60,91 +61,139 @@ class TestTemplate(unittest.TestCase):
 		self.assertTrue(self.expected_vuln == Vulnerability.load(vuln.toDict()))
 
 
-class TestTemplateLoader(unittest.TestCase):
+class TestTree(unittest.TestCase):
 
 	def setUp(self):
 		self.task_config = {
 			'type': 'task',
 			'name': 'nuclei'
 		}
-		self.workflow_config = {
+		self.workflow_config_1 = {
 			'type': 'workflow',
-			'name': 'test',
+			'name': 'test1',
+			'default_options': {
+				'ports': '80,443'
+			},
+			'options': {
+				'nuclei': {'is_flag': True, 'default': False}
+			},
 			'tasks': {
-				'nuclei': {'opt_1': 'test1'},
+				'nuclei/first': {'opt_1': 'test1', 'if': 'opts.nuclei'},
 				'nmap': {'opt_2': 'test2'},
-				'_group': {
-					'httpx': {'opt_3': 'test3'},
-					'nuclei/host': {'opt_4': 'test4'}
+				'_group/1': {
+					'httpx/first': {'opt_3': 'test3'},
+					'nuclei/host': {'opt_4': 'test4', 'if': 'opts.nuclei'}
 				},
-				'nuclei/network': {'opt_4': 'test4_new', 'opt_5': 'test5'}
+				'_group/2': {
+					'nuclei/network': {'opt_4': 'test4_new', 'opt_5': 'test5', 'if': 'opts.nuclei'},
+					'httpx/network': {'opt_6': 'test6'}
+				}
+			}
+		}
+		self.workflow_config_2 = {
+			'type': 'workflow',
+			'name': 'test2',
+			'options': {
+				'nuclei': {'is_flag': True, 'default': False}
+			},
+			'tasks': {
+				'nuclei/second': {'opt_1': 'test1', 'if': 'opts.nuclei'},
+				'_group/1': {
+					'httpx/second': {'opt_3': 'test3'},
+					'dnsx/host': {'opt_4': 'test4', 'if': 'opts.nuclei'}
+				},
+				'_group/2': {
+					'arjun': {'opt_4': 'test4_new', 'opt_5': 'test5', 'if': 'opts.nuclei'},
+					'dnsx/network': {'opt_6': 'test6'}
+				}
 			}
 		}
 		self.scan_config = {
 			'type': 'scan',
 			'name': 'test',
 			'workflows': {
-				'test/1': {},
-				'test/2': {}
+				'test1': {},
+				'test2': {}
 			}
 		}
+		self.template_dir = CONFIG.dirs.templates
+		self.custom_workflow_path_1 = self.template_dir / 'test.yml'
+		self.custom_workflow_path_2 = self.template_dir / 'test2.yml'
+		with open(self.custom_workflow_path_1, 'w') as f:
+			f.write(yaml.dump(self.workflow_config_1, sort_keys=False))
+		with open(self.custom_workflow_path_2, 'w') as f:
+			f.write(yaml.dump(self.workflow_config_2, sort_keys=False))
 
-	def test_extract_tasks_and_supported_opts_task(self):
-		# Test different configurations
-		from secator.tasks import nuclei
+	def test_tree_task(self):
+		config = TemplateLoader(input=self.task_config)
+		tree = build_runner_tree(config)
+		root_node = tree.root_nodes[0]
+		self.assertEqual(root_node.name, 'nuclei')
+		self.assertEqual(root_node.type, 'task')
+
+	def test_tree_workflow_1(self):
+		config = TemplateLoader(input=self.workflow_config_1)
+		tree = build_runner_tree(config)
+		root_node = tree.root_nodes[0]
+		self.assertEqual(root_node.name, 'test1')
+		self.assertEqual(root_node.type, 'workflow')
+		self.assertEqual(root_node.default_opts.toDict(), {'ports': '80,443'})
+		self.assertEqual(len(root_node.children), 4)
+		self.assertEqual(root_node.children[0].name, 'nuclei/first')
+		self.assertEqual(root_node.children[1].name, 'nmap')
+		self.assertEqual(root_node.children[2].children[0].name, 'httpx/first')
+		self.assertEqual(root_node.children[2].children[1].name, 'nuclei/host')
+		self.assertEqual(root_node.children[3].children[0].name, 'nuclei/network')
+		self.assertEqual(root_node.children[3].children[1].name, 'httpx/network')
+
+	def test_get_config_options_workflow_1(self):
+		config = TemplateLoader(input=self.workflow_config_1)
+		opts = get_config_options(config)
+		self.assertEqual(opts['ports']['default'], '80,443')
+		self.assertEqual(opts['ports']['default_from'], 'test1')
+		self.assertEqual(opts['ports']['prefix'], 'Workflow test1')
+		self.assertEqual(opts['nuclei']['default'], False)
+		self.assertEqual(opts['nuclei']['prefix'], 'Workflow test1')
+
+	def test_get_config_options_scan(self):
+		config = TemplateLoader(input=self.scan_config)
+		opts = get_config_options(config)
+		# import json
+		# print(json.dumps(opts, indent=4, default=str))
+		self.assertEqual(opts['test1-nuclei']['default'], False)
+		self.assertEqual(opts['test1-nuclei']['prefix'], 'Workflow test1')
+		self.assertEqual(opts['test2-nuclei']['default'], False)
+		self.assertEqual(opts['test2-nuclei']['prefix'], 'Workflow test2')
+
+	def test_dry_run(self):
+		from secator.runners import Scan
+		find_templates.cache_clear()
+		config = TemplateLoader(input=self.scan_config)
+		scan = Scan(config, run_opts={'dry_run': True})
+		scan.run()
+		self.assertEqual(scan.status, 'SUCCESS')
+		self.assertEqual(len(scan.errors), 0)
+		# from secator.rich import console
+		# tree = build_runner_tree(config)
+		# console.print(tree.render_tree())
+		# console.print('')
+		messages = [r.message for r in scan.infos]
+		self.assertIn('Skipped task [bold gold3]nuclei/first[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
+		self.assertIn('Skipped task [bold gold3]nuclei/second[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
+		self.assertIn('Skipped task [bold gold3]nuclei/host[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
+		self.assertIn('Skipped task [bold gold3]nuclei/network[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
+
+	def test_dry_run_with_condition_enabled(self):
+		from secator.runners import Scan
+		find_templates.cache_clear()
 		from secator.template import TemplateLoader
-		loader = TemplateLoader(input=self.task_config)
-		tasks = loader._extract_tasks()
-		self.assertEqual(list(tasks.keys()), ['nuclei'])
-		self.assertEqual(tasks['nuclei']['class'], nuclei)
-
-	def test_extract_tasks_and_supported_opts_workflow(self):
-		# Test different configurations
-		from secator.runners import Task
-		from secator.template import TemplateLoader
-		loader = TemplateLoader(input=self.workflow_config)
-		tasks = loader._extract_tasks()
-		self.assertEqual(list(tasks.keys()), ['nuclei', 'nmap', 'httpx', 'nuclei/host', 'nuclei/network'])
-		for task, task_config in tasks.items():
-			self.assertEqual(task.split('/')[0], task_config['name'])
-			self.assertEqual(task_config['class'], Task.get_task_class(task_config['name']))
-		self.assertEqual(tasks['nuclei']['opts'], {'opt_1': 'test1'})
-		self.assertEqual(tasks['nmap']['opts'], {'opt_2': 'test2'})
-		self.assertEqual(tasks['httpx']['opts'], {'opt_3': 'test3'})
-		self.assertEqual(tasks['nuclei/host']['opts'], {'opt_4': 'test4'})
-		self.assertEqual(tasks['nuclei/network']['opts'], {'opt_4': 'test4_new', 'opt_5': 'test5'})
-
-	@patch('secator.template.TemplateLoader._load')
-	def test_extract_tasks_and_supported_opts_scan(self, mock_load):
-		from secator.template import TemplateLoader
-		from secator.loader import find_templates
-
-		templates = find_templates()
-		mock_load.return_value = self.workflow_config
-
-		# Check if the loader is added to the TEMPLATES list correctly
-		loader_wf = TemplateLoader(input=self.workflow_config)
-		templates.append(loader_wf)
-		self.assertIn(loader_wf, templates)
-
-		# Check if loading workflow by name gives the same object
-		loader_wf_by_name = TemplateLoader(name='workflow/test')
-		self.assertEqual(loader_wf, loader_wf_by_name)
-
-		# Check if the tasks are extracted correctly
-		wf_tasks = loader_wf._extract_tasks()
-		loader_scan = TemplateLoader(input=self.scan_config)
-		templates.append(loader_scan)
-		self.assertIn(loader_scan, templates)
-
-		# Check if loading scan by name gives the same object
-		loader_scan_by_name = TemplateLoader(name='scan/test')
-		self.assertEqual(loader_scan, loader_scan_by_name)
-
-		# Check if the tasks are extracted correctly
-		scan_tasks = loader_scan._extract_tasks()
-		expected_scan_tasks = {}
-		for workflow in ['test/1', 'test/2']:
-			for task, task_conf in wf_tasks.items():
-				expected_scan_tasks[f'{workflow}/{task}'] = task_conf
-		self.assertEqual(scan_tasks, expected_scan_tasks)
+		config = TemplateLoader(input=self.scan_config)
+		scan = Scan(config, run_opts={'dry_run': True, 'test1_nuclei': True})
+		scan.run()
+		self.assertEqual(scan.status, 'SUCCESS')
+		self.assertEqual(len(scan.infos), 11)
+		self.assertEqual(len(scan.errors), 0)
+		messages = [r.message for r in scan.infos]
+		self.assertNotIn('Skipped task nuclei/first because condition is not met: opts.nuclei', messages)
+		self.assertNotIn('Skipped task nuclei/network because condition is not met: opts.nuclei', messages)
+		self.assertNotIn('Skipped task nuclei/host because condition is not met: opts.nuclei', messages)

@@ -21,7 +21,7 @@ options:
 tasks:
   naabu:
     description: Find open ports
-    if: not opts.full
+    if: opts.ports or not opts.full
 
   naabu/full:
     description: Find open ports
@@ -32,17 +32,17 @@ tasks:
     description: Search for vulnerabilities on open ports
     version_detection: True
     script: vulners
-    chunk_by: port.host
     targets_:
     - port.host
     ports_:
     - type: port
       field: port
-      condition: item.host in targets
+      condition: port.host in targets
 
   _group/1:
     httpx:
       description: Probe HTTP services on open ports
+      tech_detect: True
       targets_:
         - type: port
           field: '{host}:{port}'

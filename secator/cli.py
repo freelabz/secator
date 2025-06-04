@@ -33,6 +33,9 @@ from secator.utils import (
 )
 from contextlib import nullcontext
 click.rich_click.USE_RICH_MARKUP = True
+click.rich_click.STYLE_ARGUMENT = ""
+click.rich_click.STYLE_OPTION_HELP = ""
+
 
 FINDING_TYPES_LOWER = [c.__name__.lower() for c in FINDING_TYPES]
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '-help', '--help'])
@@ -102,7 +105,7 @@ for config in WORKFLOWS:
 # SCAN #
 #------#
 
-@cli.group(cls=OrderedGroup, aliases=['s'], invoke_without_command=True)
+@cli.group(cls=OrderedGroup, aliases=['s', 'scans'], invoke_without_command=True)
 @click.pass_context
 def scan(ctx):
 	"""Run a scan."""
@@ -468,12 +471,12 @@ def config():
 
 
 @config.command('get')
-@click.option('--full', is_flag=True, help='Show full config (with defaults)')
+@click.option('--user/--full', is_flag=True, help='Show config (user/full)')
 @click.argument('key', required=False)
-def config_get(full, key=None):
+def config_get(user, key=None):
 	"""Get config value."""
 	if key is None:
-		partial = not full and CONFIG != default_config
+		partial = user and default_config != CONFIG
 		CONFIG.print(partial=partial)
 		return
 	CONFIG.get(key)
@@ -488,6 +491,21 @@ def config_set(key, value):
 	config = CONFIG.validate()
 	if config:
 		CONFIG.get(key)
+		saved = CONFIG.save()
+		if not saved:
+			return
+		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
+	else:
+		console.print(Error(message='Invalid config, not saving it.'))
+
+
+@config.command('unset')
+@click.argument('key')
+def config_unset(key):
+	"""Unset a config value."""
+	CONFIG.unset(key)
+	config = CONFIG.validate()
+	if config:
 		saved = CONFIG.save()
 		if not saved:
 			return
@@ -588,7 +606,7 @@ def profile_list():
 	table.add_column("Description", overflow='fold')
 	table.add_column("Options", overflow='fold')
 	for profile in PROFILES:
-		opts_str = ','.join(f'{k}={v}' for k, v in profile.opts.items())
+		opts_str = ', '.join(f'[yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
 		table.add_row(profile.name, profile.description or '', opts_str)
 	console.print(table)
 
@@ -633,7 +651,10 @@ def disable_aliases(ctx):
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = ''
 	for alias in aliases:
-		aliases_str += alias.split('=')[0].replace('alias', 'unalias') + '\n'
+		alias_name = alias.split('=')[0]
+		if alias.strip().startswith('alias'):
+			alias_name = 'un' + alias_name
+			aliases_str += alias_name + '\n'
 	console.print(f':file_cabinet: Unalias file written to {fpath}', style='bold green')
 	console.print('To unload the aliases, run:')
 	with open(fpath, 'w') as f:
@@ -732,12 +753,12 @@ def process_query(query, fields=None):
 	# Get operator
 	operator = '||'
 	if '&&' in query and '||' in query:
-	    console.print(Error(message='Cannot mix && and || in the same query'))
-	    sys.exit(1)
+		console.print(Error(message='Cannot mix && and || in the same query'))
+		sys.exit(1)
 	elif '&&' in query:
-	    operator = '&&'
+		operator = '&&'
 	elif '||' in query:
-	    operator = '||'
+		operator = '||'
 
 	# Process query
 	query = query.split(operator)
@@ -768,12 +789,12 @@ def process_query(query, fields=None):
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('-f', '--filter', "_filter", type=str, default='', help=f'Filter by output type. Choices: {FINDING_TYPES_LOWER}')  # noqa: E501
+@click.option('-f', '--format', "_format", type=str, default='', help=f'Format output, comma-separated of: <output_type> or <output_type>.<field>. [bold]Allowed output types[/]: {", ".join(FINDING_TYPES_LOWER)}')  # noqa: E501
 @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
 @click.pass_context
-def report_show(ctx, report_query, output, runner_type, time_delta, _filter, query, workspace, unified):
+def report_show(ctx, report_query, output, runner_type, time_delta, _format, query, workspace, unified):
 	"""Show report results and filter on them."""
 
 	# Get report query from piped input
@@ -782,7 +803,7 @@ def report_show(ctx, report_query, output, runner_type, time_delta, _filter, que
 		unified = True
 
 	# Get extractors
-	extractors = process_query(query, fields=_filter.split(',') if _filter else [])
+	extractors = process_query(query, fields=_format.split(',') if _format else [])
 	if extractors:
 		console.print(':wrench: [bold gold3]Showing query summary[/]')
 		op = extractors[0]['op']
@@ -1459,9 +1480,13 @@ def run_test(cmd, name=None, exit=True, verbose=False):
 
 
 @test.command()
-def lint():
+@click.option('--linter', '-l', type=click.Choice(['flake8', 'black', 'isort', 'pylint']), default='flake8', help='Linter to use')  # noqa: E501
+def lint(linter):
 	"""Run lint tests."""
-	cmd = f'{sys.executable} -m flake8 secator/'
+	opts = ''
+	if linter == 'pylint':
+		opts = '--indent-string "\t" --max-line-length 160 --disable=R0401,R0801,R0914,W0212,C0415,C0103'
+	cmd = f'{sys.executable} -m {linter} {opts} secator/'
 	run_test(cmd, 'lint', verbose=True)
 
 
