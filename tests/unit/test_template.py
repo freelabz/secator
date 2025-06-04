@@ -125,6 +125,7 @@ class TestTree(unittest.TestCase):
 			f.write(yaml.dump(self.workflow_config_2, sort_keys=False))
 
 	def test_tree_task(self):
+		find_templates.cache_clear()
 		config = TemplateLoader(input=self.task_config)
 		tree = build_runner_tree(config)
 		root_node = tree.root_nodes[0]
@@ -132,6 +133,7 @@ class TestTree(unittest.TestCase):
 		self.assertEqual(root_node.type, 'task')
 
 	def test_tree_workflow_1(self):
+		find_templates.cache_clear()
 		config = TemplateLoader(input=self.workflow_config_1)
 		tree = build_runner_tree(config)
 		root_node = tree.root_nodes[0]
@@ -147,6 +149,7 @@ class TestTree(unittest.TestCase):
 		self.assertEqual(root_node.children[3].children[1].name, 'httpx/network')
 
 	def test_get_config_options_workflow_1(self):
+		find_templates.cache_clear()
 		config = TemplateLoader(input=self.workflow_config_1)
 		opts = get_config_options(config)
 		self.assertEqual(opts['ports']['default'], '80,443')
@@ -156,6 +159,7 @@ class TestTree(unittest.TestCase):
 		self.assertEqual(opts['nuclei']['prefix'], 'Workflow test1')
 
 	def test_get_config_options_scan(self):
+		find_templates.cache_clear()
 		config = TemplateLoader(input=self.scan_config)
 		opts = get_config_options(config)
 		# import json
