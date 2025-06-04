@@ -162,8 +162,9 @@ class Workflow(Runner):
 		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue='results')
 		if chain_previous_results:
 			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue='results')
-		return chain(
+		sig = chain(
 			start_sig,
 			*sigs,
 			mark_runner_completed.s(self, enable_hooks=True).set(queue='results'),
 		)
+		return sig
