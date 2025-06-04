@@ -1184,7 +1184,7 @@ class Runner:
 				if enforced:
 					msg += ' [bold red](enforced)[/]'
 				profile_opts_str = ", ".join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items()])
-				msg += f' \[[dim]{profile_opts_str}[/]]'
+				msg += rf' \[[dim]{profile_opts_str}[/]]'
 				self._print(Info(message=msg), rich=True)
 		if profile_opts:
 			self.run_opts.update(profile_opts)
