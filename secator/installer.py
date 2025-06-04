@@ -73,7 +73,7 @@ class ToolInstaller:
 
 		# Check PATH
 		path_var = os.environ.get('PATH', '')
-		if not str(CONFIG.dirs.bin) in path_var:
+		if str(CONFIG.dirs.bin) not in path_var:
 			console.print(Warning(message=f'Bin directory {CONFIG.dirs.bin} not found in PATH ! Binaries installed by secator will not work'))  # noqa: E501
 			console.print(Warning(message=f'Run "export PATH=$PATH:{CONFIG.dirs.bin}" to add the binaries to your PATH'))
 

@@ -8,9 +8,9 @@ from threading import Thread
 
 from celery import chain, chord
 
-from secator.celery import app, forward_results
+from secator.celery import app, forward_results  # noqa: F401
 from secator.config import CONFIG
-from secator.utils_test import TEST_TASKS, TEST_WORKFLOWS,load_fixture
+from secator.utils_test import TEST_TASKS, load_fixture
 from secator.runners import Command
 from secator.output_types import Url
 from tests.integration.inputs import INPUTS_SCANS

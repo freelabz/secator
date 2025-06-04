@@ -56,6 +56,15 @@ class TemplateLoader(DotMap):
 
 
 def get_short_id(id_str, config_name):
+	"""Remove config name prefix from ID string if present.
+
+	Args:
+		id_str: The ID string to process
+		config_name: The config name prefix to remove
+
+	Returns:
+		str: ID string with prefix removed, or original string if no prefix found
+	"""
 	if id_str.startswith(config_name):
 		return id_str.replace(config_name + '.', '')
 	return id_str
@@ -194,7 +203,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 					conf['default_from'] = node_id_str
 					conf['prefix'] = 'Config'
 				elif ancestor_opts_defaults.get(k):
-					conf['default_from'] = node.ancestor.id
+					conf['default_from'] = get_short_id(node.ancestor.id, config.name)
 					conf['prefix'] = f'{node.ancestor.type.capitalize()} {node.ancestor.name}'
 				elif config_opts_defaults.get(k):
 					conf['default_from'] = config.name
@@ -220,7 +229,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 			elif k in task_opts:
 				same_opts = find_same_opts(node, nodes, k, check_class_opts=True)
 				if len(same_opts) > 0:
-					applies_to = set([node.name] + [get_short_id(_['name'], config.name) for _ in same_opts])
+					applies_to = set([node.name] + [_['name'] for _ in same_opts])
 					conf['applies_to'] = applies_to
 					conf['prefix'] = 'Shared task'
 					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Common[/] [dim red](duplicated {len(same_opts)} times)[/]', sub=f'cli.{config.name}')  # noqa: E501
