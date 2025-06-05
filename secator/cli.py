@@ -1616,12 +1616,21 @@ def performance(tasks, workflows, scans, test):
 def task(name, verbose, check):
 	"""Test a single task for semantics errors, and run unit + integration tests."""
 	console.print(f'[bold gold3]:wrench: Testing task {name} ...[/]')
-	task = [task for task in discover_tasks() if task.__name__ == name]
+	task = [task for task in discover_tasks() if task.__name__ == name.strip()]
 	warnings = []
 	errors = []
 	exit_code = 0
 
 	# Check if task is correctly registered
+	check_test(
+		len(task) == 1,
+		'Check task is registered',
+		'Task is not registered. Please check your task name.',
+		errors
+	)
+	if errors:
+		sys.exit(0)
+
 	task = task[0]
 	task_name = task.__name__
 
