@@ -1,5 +1,3 @@
-import uuid
-
 from dotmap import DotMap
 
 from secator.config import CONFIG
@@ -110,7 +108,6 @@ class Workflow(Runner):
 					task_opts.update(forwarded_opts)
 
 				# Create task signature
-				task_id = str(uuid.uuid4())
 				task_opts['name'] = node.name
 				task_opts['context'] = self.context.copy()
 				task_opts['context']['node_id'] = node.id
@@ -119,7 +116,8 @@ class Workflow(Runner):
 				if task.__name__ != node.name:
 					task_opts['aliases'].append(task.__name__)
 				profile = task.profile(task_opts) if callable(task.profile) else task.profile
-				sig = task.s(self.inputs, **task_opts).set(queue=profile, task_id=task_id)
+				sig = task.s(self.inputs, **task_opts).set(queue=profile)
+				task_id = sig.freeze().task_id
 				debug(f'{node.id} sig built ix: {ix}, parent_ix: {parent_ix}', sub=self.config.name)
 				# debug(f'{node.id} opts', obj=task_opts, sub=f'workflow.{self.config.name}')
 				debug(f'{node.id} ancestor id: {task_opts.get("context", {}).get("ancestor_id")}', sub=self.config.name)
