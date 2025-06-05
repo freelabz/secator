@@ -13,5 +13,7 @@ fi
 
 if [ "$TEST_NO_CLEANUP" != "1" ]; then
 	$BIN_NAME pull
+	$BIN_NAME up -d --wait
+else
+	$BIN_NAME up -d --wait --no-recreate
 fi
-$BIN_NAME up -d --wait --no-recreate
