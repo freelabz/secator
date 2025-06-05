@@ -1,8 +1,6 @@
-import gc
 import json
 import logging
 import os
-import uuid
 
 from time import time
 
@@ -210,11 +208,9 @@ def run_command(self, results, name, targets, opts={}):
 		return self.replace(tasks)
 
 	# Update state live
-	[update_state(self, task) for _ in task]
+	for _ in task:
+		update_state(self, task)
 	update_state(self, task, force=True)
-
-	# Garbage collection to save RAM
-	gc.collect()
 
 	return task.results
 
@@ -268,7 +264,7 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
 	for item in results:
-		runner.add_result(item)
+		runner.add_result(item, print=False)
 	runner.mark_completed()
 	return runner.results
 
@@ -323,13 +319,13 @@ def break_task(task, task_opts, results=[]):
 		}, sub='celery.state')  # noqa: E501
 
 		# Construct chunked signature
-		task_id = str(uuid.uuid4())
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
 		opts['results'] = results
 		if 'targets_' in opts:
 			del opts['targets_']
-		sig = type(task).si(chunk, **opts).set(task_id=task_id)
+		sig = type(task).si(chunk, **opts)
+		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
 		info = Info(message=f'Celery chunked task created: {task_id}')

@@ -1,8 +1,10 @@
+import gc
 import json
 import logging
 import sys
 import textwrap
 import uuid
+
 from datetime import datetime
 from pathlib import Path
 from time import time
@@ -95,6 +97,7 @@ class Runner:
 		# Runner state
 		self.uuids = set()
 		self.results = []
+		self.results_count = 0
 		self.threads = []
 		self.output = ''
 		self.started = False
@@ -202,15 +205,15 @@ class Runner:
 		self.exporters = self.resolve_exporters(exporters_str)
 
 		# Profiler
-		self.enable_profiler = self.run_opts.get('enable_profiler', False) and ADDONS_ENABLED['trace']
-		if self.enable_profiler:
+		self.enable_pyinstrument = self.run_opts.get('enable_pyinstrument', False) and ADDONS_ENABLED['trace']
+		if self.enable_pyinstrument:
 			self.debug('enabling profiler', sub='init')
 			from pyinstrument import Profiler
 			self.profiler = Profiler(async_mode=False, interval=0.0001)
 			try:
 				self.profiler.start()
 			except RuntimeError:
-				self.enable_profiler = False
+				self.enable_pyinstrument = False
 				pass
 
 		# Input post-process
@@ -395,9 +398,9 @@ class Runner:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
 			error = Error.from_exception(e)
 			self.add_result(error)
-			self.stop_celery_tasks()
 			self.revoked = True
 			if not self.sync:  # yield latest results from Celery
+				self.stop_celery_tasks()
 				for item in self.yielder():
 					yield from self._process_item(item)
 					self.run_hooks('on_interval', sub='item')
@@ -410,6 +413,7 @@ class Runner:
 	def _finalize(self):
 		"""Finalize the runner."""
 		self.join_threads()
+		gc.collect()
 		if self.sync:
 			self.mark_completed()
 		if self.enable_reports:
@@ -506,6 +510,7 @@ class Runner:
 		# Add item to results
 		self.uuids.add(item._uuid)
 		self.results.append(item)
+		self.results_count += 1
 		if output:
 			self.output += repr(item) + '\n'
 		if print:
@@ -933,7 +938,7 @@ class Runner:
 
 	def export_profiler(self):
 		"""Export profiler."""
-		if self.enable_profiler:
+		if self.enable_pyinstrument:
 			self.debug('stopping profiler', sub='end')
 			self.profiler.stop()
 			profile_path = Path(self.reports_folder) / f'{self.unique_name}_profile.html'

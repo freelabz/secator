@@ -1480,12 +1480,14 @@ def run_test(cmd, name=None, exit=True, verbose=False):
 
 
 @test.command()
-@click.option('--linter', '-l', type=click.Choice(['flake8', 'black', 'isort', 'pylint']), default='flake8', help='Linter to use')  # noqa: E501
+@click.option('--linter', '-l', type=click.Choice(['flake8', 'ruff', 'isort', 'pylint']), default='flake8', help='Linter to use')  # noqa: E501
 def lint(linter):
 	"""Run lint tests."""
 	opts = ''
 	if linter == 'pylint':
-		opts = '--indent-string "\t" --max-line-length 160 --disable=R0401,R0801,R0914,W0212,C0415,C0103'
+		opts = '--indent-string "\t" --max-line-length 160 --disable=R,C,W'
+	elif linter == 'ruff':
+		opts = ' check'
 	cmd = f'{sys.executable} -m {linter} {opts} secator/'
 	run_test(cmd, 'lint', verbose=True)
 

@@ -1,3 +1,5 @@
+import gc
+
 from contextlib import nullcontext
 from time import sleep
 
@@ -62,7 +64,7 @@ class CeleryData(object):
 				TextColumn('{task.fields[count]}'),
 				TextColumn('{task.fields[progress]}%'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
-				refresh_per_second=1,
+				auto_refresh=False,
 				transient=False,
 				console=console,
 				# redirect_stderr=True,
@@ -96,6 +98,7 @@ class CeleryData(object):
 								'progress': 0
 							}
 					yield result
+					del result
 
 				if print_remote_info:
 					task_id = data['id']
@@ -106,11 +109,17 @@ class CeleryData(object):
 							continue
 					progress_id = progress_cache[task_id]
 					CeleryData.update_progress(progress, progress_id, data)
+					progress.refresh()
+
+				# Garbage collect between polls
+				del data
+				gc.collect()
 
 			# Update all tasks to 100 %
 			if print_remote_info:
 				for progress_id in progress_cache.values():
 					progress.update(progress_id, advance=100)
+				progress.refresh()
 
 	@staticmethod
 	def init_progress(progress, ids_map):
@@ -139,14 +148,16 @@ class CeleryData(object):
 		Yields:
 			dict: Subtasks state and results.
 		"""
-		while True:
+		exit_loop = False
+		while not exit_loop:
 			try:
+				yield from CeleryData.get_all_data(result, ids_map, revoked=revoked)
 				if result.ready() or revoked:
 					debug('result is ready', sub='celery.poll', id=result.id)
-					yield from CeleryData.get_all_data(result, ids_map, revoked=revoked)
-					break
+					exit_loop = True
 			except (KeyboardInterrupt, GreenletExit):
 				debug('encounted KeyboardInterrupt or GreenletExit', sub='celery.poll')
+				yield from CeleryData.get_all_data(result, ids_map, revoked=revoked)
 				raise
 			except Exception as e:
 				error = Error.from_exception(e)
@@ -154,7 +165,6 @@ class CeleryData(object):
 				pass
 			finally:
 				sleep(refresh_interval)
-				yield from CeleryData.get_all_data(result, ids_map, revoked=revoked)
 
 	@staticmethod
 	def get_all_data(result, ids_map, revoked=False):
