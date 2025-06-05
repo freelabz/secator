@@ -11,5 +11,7 @@ if ! command -v $BIN_NAME 2>&1 > /dev/null; then
 	exit 1
 fi
 
-$BIN_NAME pull
-$BIN_NAME up -d
+if [ "$TEST_NO_CLEANUP" != "1" ]; then
+	$BIN_NAME pull
+fi
+$BIN_NAME up -d --wait --no-recreate

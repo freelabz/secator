@@ -133,7 +133,8 @@ for config in SCANS:
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
-def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show):
+@click.option('--use-command-runner', is_flag=True, default=False, help='Use command runner to run the command.')
+def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner):
 	"""Run a worker."""
 
 	# Check Celery addon is installed
@@ -186,8 +187,13 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
 
-	ret = Command.execute(cmd, name='secator_worker')
-	sys.exit(ret.return_code)
+	if use_command_runner:
+		ret = Command.execute(cmd, name='secator_worker')
+		sys.exit(ret.return_code)
+	else:
+		console.print(f'[bold red]{cmd}[/]')
+		ret = os.system(cmd)
+		sys.exit(ret)
 
 
 #-------#
@@ -1455,7 +1461,7 @@ def test():
 	pass
 
 
-def run_test(cmd, name=None, exit=True, verbose=False):
+def run_test(cmd, name=None, exit=True, verbose=False, use_os_system=False):
 	"""Run a test and return the result.
 
 	Args:
@@ -1463,20 +1469,30 @@ def run_test(cmd, name=None, exit=True, verbose=False):
 		name (str, optional): Name of the test.
 		exit (bool, optional): Exit after running the test with the return code.
 		verbose (bool, optional): Print verbose output.
+		use_os_system (bool, optional): Use os.system to run the command.
 
 	Returns:
 		Return code of the test.
 	"""
 	cmd_name = name + ' tests' if name else 'tests'
-	result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
-	if name:
-		if result.return_code == 0:
-			console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
-		else:
-			console.print(f':x: {name.capitalize()} tests failed !', style='bold red')
-	if exit:
-		sys.exit(result.return_code)
-	return result.return_code
+	if use_os_system:
+		console.print(f'[bold red]{cmd}[/]')
+		if not verbose:
+			cmd += ' >/dev/null 2>&1'
+		ret = os.system(cmd)
+		if exit:
+			sys.exit(ret)
+		return ret
+	else:
+		result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
+		if name:
+			if result.return_code == 0:
+				console.print(f':tada: {name.capitalize()} tests passed !', style='bold green')
+			else:
+				console.print(f':x: {name.capitalize()} tests failed !', style='bold red')
+		if exit:
+			sys.exit(result.return_code)
+		return result.return_code
 
 
 @test.command()
@@ -1489,7 +1505,7 @@ def lint(linter):
 	elif linter == 'ruff':
 		opts = ' check'
 	cmd = f'{sys.executable} -m {linter} {opts} secator/'
-	run_test(cmd, 'lint', verbose=True)
+	run_test(cmd, 'lint', verbose=True, use_os_system=True)
 
 
 @test.command()
@@ -1521,7 +1537,7 @@ def unit(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'unit', verbose=True)
+	run_test(cmd, 'unit', verbose=True, use_os_system=True)
 
 
 @test.command()
@@ -1529,13 +1545,15 @@ def unit(tasks, workflows, scans, test):
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
-def integration(tasks, workflows, scans, test):
+@click.option('--no-cleanup', '-nc', is_flag=True, help='Do not perform cleanup (keep lab running, faster for relaunching tests)')  # noqa: E501
+def integration(tasks, workflows, scans, test, no_cleanup):
 	"""Run integration tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
 	os.environ['SECATOR_DIRS_DATA'] = '/tmp/.secator'
 	os.environ['SECATOR_RUNNERS_SKIP_CVE_SEARCH'] = '1'
+	os.environ['TEST_NO_CLEANUP'] = '1' if no_cleanup else '0'
 
 	if not test:
 		if tasks:
@@ -1552,7 +1570,7 @@ def integration(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'integration', verbose=True)
+	run_test(cmd, 'integration', verbose=True, use_os_system=True)
 
 
 @test.command()
@@ -1606,7 +1624,7 @@ def performance(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'performance', verbose=True)
+	run_test(cmd, 'performance', verbose=True, use_os_system=True)
 
 
 @test.command()
@@ -1786,4 +1804,5 @@ def coverage(unit_only, integration_only, template_only):
 		cmd += ' --data-file=.coverage.template'
 	else:
 		Command.execute(f'{sys.executable} -m coverage combine --keep', name='coverage combine', cwd=ROOT_FOLDER)
-	run_test(cmd, 'coverage', verbose=True)
+	run_test(cmd, 'coverage', use_os_system=True)
+
