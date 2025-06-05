@@ -7,7 +7,6 @@ import shlex
 import signal
 import subprocess
 import sys
-import uuid
 
 from time import time
 
@@ -135,6 +134,12 @@ class Command(Runner):
 		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
+		node_id = context.get('node_id', None)
+		node_name = context.get('node_name', None)
+		if node_id:
+			config.node_id = node_id
+		if node_name:
+			config.node_name = context.get('node_name')
 		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
 
 		# Prepare validators
@@ -243,9 +248,12 @@ class Command(Runner):
 
 	def get_opt_value(self, opt_name, preprocess=False, process=False):
 		"""Get option value as inputed by the user.
+
 		Args:
 			opt_name (str): Option name.
+			preprocess (bool): Preprocess the value with the option preprocessor function if it exists.
 			process (bool): Process the value with the option processor function if it exists.
+
 		Returns:
 			Any: Option value.
 		"""
@@ -253,7 +261,7 @@ class Command(Runner):
 			self.run_opts,
 			opt_name,
 			dict(self.opts, **self.meta_opts),
-			opt_prefix=self.config.name,
+			opt_aliases=self.opt_aliases,
 			preprocess=preprocess,
 			process=process)
 
@@ -277,6 +285,7 @@ class Command(Runner):
 
 	@classmethod
 	def get_supported_opts(cls):
+		# TODO: Replace this with get_command_options called on the command class
 		def convert(d):
 			for k, v in d.items():
 				if hasattr(v, '__name__') and v.__name__ in ['str', 'int', 'float']:
@@ -364,8 +373,8 @@ class Command(Runner):
 			self.run_opts['proxy'] = proxy
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
-			self._print(
-				f'[bold red]Ignoring proxy "{self.proxy}" for {self.cmd_name} (not supported).[/]', rich=True)
+			warning = Warning(message=rf'Ignoring proxy "{self.proxy}" (reason: not supported) \[[bold yellow3]{self.unique_name}[/]]')  # noqa: E501
+			self._print(repr(warning))
 
 	#----------#
 	# Internal #
@@ -397,11 +406,12 @@ class Command(Runner):
 			if self.dry_run:
 				self.print_description()
 				self.print_command()
+				yield Info(message=self.cmd)
 				return
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				yield Warning(message=f'{self.unique_name} skipped (no inputs)')
 				return
 
 			# Print command
@@ -411,11 +421,7 @@ class Command(Runner):
 			# Check for sudo requirements and prepare the password if needed
 			sudo_password, error = self._prompt_sudo(self.cmd)
 			if error:
-				yield Error(
-					message=error,
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
+				yield Error(message=error)
 				return
 
 			# Prepare cmds
@@ -425,18 +431,10 @@ class Command(Runner):
 			if not self.no_process and not self.is_installed():
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
-					yield Info(
-						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noqa: E501
-						_source=self.unique_name,
-						_uuid=str(uuid.uuid4())
-					)
+					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
 					status = ToolInstaller.install(self.__class__)
 					if not status.is_ok():
-						yield Error(
-							message=f'Failed installing {self.cmd_name}',
-							_source=self.unique_name,
-							_uuid=str(uuid.uuid4())
-						)
+						yield Error(message=f'Failed installing {self.cmd_name}')
 						return
 
 			# Output and results
@@ -478,7 +476,7 @@ class Command(Runner):
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
 			self.stop_process()
-			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error.from_exception(e)
 
 		finally:
 			yield from self._wait_for_end()
@@ -534,7 +532,7 @@ class Command(Runner):
 
 	def print_description(self):
 		"""Print description"""
-		if self.sync and not self.has_children and self.caller and self.description:
+		if self.sync and not self.has_children and self.caller and self.description and self.print_cmd:
 			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
 
 	def print_command(self):
@@ -565,8 +563,6 @@ class Command(Runner):
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)
-		error._source = self.unique_name
-		error._uuid = str(uuid.uuid4())
 		yield error
 
 	def stop_process(self, exit_ok=False):
@@ -704,24 +700,14 @@ class Command(Runner):
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			yield Error(message=error)
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
 			last_lines = [line for line in last_lines if line != '']
-			yield Error(
-				message=error,
-				traceback='\n'.join(last_lines),
-				traceback_title='Last stdout lines',
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			yield Error(message=error, traceback='\n'.join(last_lines), traceback_title='Last stdout lines')
 
 	@staticmethod
 	def _process_opts(
@@ -730,7 +716,7 @@ class Command(Runner):
 			opt_key_map={},
 			opt_value_map={},
 			opt_prefix='-',
-			command_name=None,
+			opt_aliases=None,
 			preprocess=False,
 			process=True):
 		"""Process a dict of options using a config, option key map / value map and option character like '-' or '--'.
@@ -741,7 +727,7 @@ class Command(Runner):
 			opt_key_map (dict[str, str | Callable]): A dict to map option key with their actual values.
 			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
 			opt_prefix (str, default: '-'): Option prefix.
-			command_name (str | None, default: None): Command name.
+			opt_aliases (str | None, default: None): Aliases to try.
 			preprocess (bool, default: True): Preprocess the value with the option preprocessor function if it exists.
 			process (bool, default: True): Process the value with the option processor function if it exists.
 
@@ -764,7 +750,7 @@ class Command(Runner):
 				opts,
 				opt_name,
 				opts_conf,
-				opt_prefix=command_name,
+				opt_aliases=opt_aliases,
 				default=default_val,
 				preprocess=preprocess,
 				process=process)
@@ -837,19 +823,60 @@ class Command(Runner):
 
 	@staticmethod
 	def _get_opt_default(opt_name, opts_conf):
+		"""Get the default value of an option.
+
+		Args:
+			opt_name (str): The name of the option to get the default value of (no aliases allowed).
+			opts_conf (dict): The options configuration, indexed by option name.
+
+		Returns:
+			any: The default value of the option.
+		"""
 		for k, v in opts_conf.items():
 			if k == opt_name:
 				return v.get('default', None)
 		return None
 
 	@staticmethod
-	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None, preprocess=False, process=False):
+	def _get_opt_value(opts, opt_name, opts_conf={}, opt_aliases=None, default=None, preprocess=False, process=False):
+		"""Get the value of an option.
+
+		Args:
+			opts (dict): The options dict to search (input opts).
+			opt_name (str): The name of the option to get the value of.
+			opts_conf (dict): The options configuration, indexed by option name.
+			opt_aliases (list): The aliases to try.
+			default (any): The default value to return if the option is not found.
+			preprocess (bool): Whether to preprocess the value using the option preprocessor function.
+			process (bool): Whether to process the value using the option processor function.
+
+		Returns:
+			any: The value of the option.
+
+		Example:
+			opts = {'target': 'example.com'}
+			opts_conf = {'target': {'type': 'str', 'short': 't', 'default': 'example.com', 'pre_process': lambda x: x.upper()}}  # noqa: E501
+			opt_aliases = ['prefix_target', 'target']
+
+			# Example 1:
+			opt_name = 'target'
+			opt_value = Command._get_opt_value(opts, opt_name, opts_conf, opt_aliases, preprocess=True)  # noqa: E501
+			print(opt_value)
+			# Output: EXAMPLE.COM
+
+			# Example 2:
+			opt_name = 'prefix_target'
+			opt_value = Command._get_opt_value(opts, opt_name, opts_conf, opt_aliases)
+			print(opt_value)
+			# Output: example.com
+		"""
 		default = default or Command._get_opt_default(opt_name, opts_conf)
-		opt_names = [
-			f'{opt_prefix}.{opt_name}',
-			f'{opt_prefix}_{opt_name}',
-			opt_name,
-		]
+		opt_aliases = opt_aliases or []
+		opt_names = []
+		for prefix in opt_aliases:
+			opt_names.extend([f'{prefix}.{opt_name}', f'{prefix}_{opt_name}'])
+		opt_names.append(opt_name)
+		opt_names = list(dict.fromkeys(opt_names))
 		opt_values = [opts.get(o) for o in opt_names]
 		opt_conf = [conf for _, conf in opts_conf.items() if _ == opt_name]
 		if opt_conf:
@@ -889,7 +916,7 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name,
+			opt_aliases=self.opt_aliases,
 			preprocess=False,
 			process=False)
 
@@ -900,7 +927,7 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name,
+			opt_aliases=self.opt_aliases,
 			preprocess=False,
 			process=False)
 

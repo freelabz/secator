@@ -8,7 +8,9 @@ workflows:
   subdomain_recon:
   host_recon:
     targets_:
-    - target.name
+    - type: target
+      field: name
+      condition: target.type == 'host'
     - subdomain.host
   url_crawl:
     targets_:

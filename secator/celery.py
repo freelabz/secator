@@ -1,8 +1,6 @@
-import gc
 import json
 import logging
 import os
-import uuid
 
 from time import time
 
@@ -210,11 +208,9 @@ def run_command(self, results, name, targets, opts={}):
 		return self.replace(tasks)
 
 	# Update state live
-	[update_state(self, task) for _ in task]
+	for _ in task:
+		update_state(self, task)
 	update_state(self, task, force=True)
-
-	# Garbage collection to save RAM
-	gc.collect()
 
 	return task.results
 
@@ -248,8 +244,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if results:
 		runner.results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if not runner.dry_run:
-		runner.mark_started()
+	runner.mark_started()
 	return runner.results
 
 
@@ -268,9 +263,9 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if not runner.dry_run:
-		[runner.add_result(item) for item in results]
-		runner.mark_completed()
+	for item in results:
+		runner.add_result(item, print=False)
+	runner.mark_completed()
 	return runner.results
 
 
@@ -316,27 +311,24 @@ def break_task(task, task_opts, results=[]):
 		# Add chunk info to opts
 		opts = base_opts.copy()
 		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
-
-		# Chunk results if needed for extractors to work
-		if opts.get('chunk_by'):  # remove results that have a different chunk_by value
-			_type, attr = opts['chunk_by'].split('.')
-			chunked_results = [
-				r for r in results
-				if not (r._type == _type and getattr(r, attr) not in chunk)
-			]
-		else:
-			chunked_results = results
-		debug('', obj={task.unique_name: 'CHUNKED', 'chunked_targets': chunk, 'chunked_results': chunked_results}, sub='celery.state')  # noqa: E501
+		debug('', obj={
+			task.unique_name: 'CHUNK',
+			'chunk': f'{ix + 1} / {len(chunks)}',
+			'target_count': len(chunk),
+			'targets': chunk
+		}, sub='celery.state')  # noqa: E501
 
 		# Construct chunked signature
-		task_id = str(uuid.uuid4())
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
-		opts['results'] = chunked_results
-		sig = type(task).si(chunk, **opts).set(task_id=task_id)
+		opts['results'] = results
+		if 'targets_' in opts:
+			del opts['targets_']
+		sig = type(task).si(chunk, **opts)
+		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
-		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
+		info = Info(message=f'Celery chunked task created: {task_id}')
 		task.add_result(info)
 		sigs.append(sig)
 

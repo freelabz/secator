@@ -19,7 +19,7 @@ class searchsploit(Command):
 	input_types = [STRING]
 	output_types = [Exploit]
 	tags = ['exploit', 'recon']
-	input_flag = None
+	input_chunk_size = 1
 	json_flag = '--json'
 	version_flag = OPT_NOT_SUPPORTED
 	opts = {
@@ -51,7 +51,6 @@ class searchsploit(Command):
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
-	input_chunk_size = 1
 	profile = 'io'
 
 	@staticmethod

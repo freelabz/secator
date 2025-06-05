@@ -37,7 +37,7 @@ def find_templates():
 def get_configs_by_type(type):
 	if type == 'task':
 		tasks = discover_tasks()
-		task_config = [TemplateLoader({'name': cls.__name__, 'type': 'task', 'input_types': cls.input_types, 'output_types': cls.output_types}) for cls in tasks]  # noqa: E501
+		task_config = [TemplateLoader({'name': cls.__name__, 'type': 'task', 'input_types': cls.input_types, 'output_types': [t.get_name() for t in cls.output_types]}) for cls in tasks]  # noqa: E501
 		return sorted(task_config, key=lambda x: x['name'])
 	return sorted([t for t in find_templates() if t.type == type], key=lambda x: x.name)
 
@@ -68,6 +68,7 @@ def discover_internal_tasks():
 			if inspect.isclass(attribute):
 				bases = inspect.getmro(attribute)
 				if Runner in bases and hasattr(attribute, '__task__'):
+					attribute.__external__ = False
 					task_classes.append(attribute)
 
 	# Sort task_classes by category
@@ -107,6 +108,7 @@ def discover_external_tasks():
 				continue
 			cls = getattr(module, task_name)
 			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
+			cls.__external__ = True
 			output.append(cls)
 		except Exception as e:
 			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')

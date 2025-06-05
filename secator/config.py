@@ -123,6 +123,14 @@ class Scans(StrictModel):
 	exporters: List[str] = ['json', 'csv', 'txt']
 
 
+class Profiles(StrictModel):
+	defaults: List[str] = []
+
+
+class Drivers(StrictModel):
+	defaults: List[str] = []
+
+
 class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
@@ -184,6 +192,8 @@ class SecatorConfig(StrictModel):
 	scans: Scans = Scans()
 	payloads: Payloads = Payloads()
 	wordlists: Wordlists = Wordlists()
+	profiles: Profiles = Profiles()
+	drivers: Drivers = Drivers()
 	addons: Addons = Addons()
 	security: Security = Security()
 	offline_mode: bool = False
@@ -287,13 +297,25 @@ class Config(DotMap):
 			elif isinstance(existing_value, Path):
 				value = Path(value)
 		except ValueError:
-			# from secator.utils import debug
-			# debug(f'Could not cast value {value} to expected type {type(existing_value).__name__}: {str(e)}', sub='config')
 			pass
 		finally:
-			target[final_key] = value
 			if set_partial:
-				partial[final_key] = value
+				if value is None or value == target[final_key]:
+					if final_key in partial:
+						del partial[final_key]
+					return
+				else:
+					partial[final_key] = value
+			target[final_key] = value
+
+	def unset(self, key, set_partial=True):
+		"""Unset a value in the configuration using a dotted path.
+
+		Args:
+			key (str): Dotted key path.
+			set_partial (bool): Set in partial config.
+		"""
+		self.set(key, None, set_partial=set_partial)
 
 	def save(self, target_path: Path = None, partial=True):
 		"""Save config as YAML on disk.

@@ -7,11 +7,15 @@ input_types:
   - host
 
 options:
-  probe:
+  probe_http:
     is_flag: True
     help: Probe domain and subdomains (HTTP)
     default: True
-    internal: True
+
+  probe_dns:
+    is_flag: True
+    help: Probe domain and subdomains (DNS)
+    default: False
 
   brute_http:
     is_flag: True
@@ -30,7 +34,7 @@ tasks:
     subfinder:
       description: List subdomains (passive)
 
-    dnsx:
+    dnsx/brute:
       description: Bruteforce subdomains (DNS)
       subdomains_only: True
       wordlist: combined_subdomains
@@ -38,39 +42,43 @@ tasks:
 
     httpx:
       description: Run HTTP probe on domain
+      tech_detect: True
       targets_:
       - target.name
-      if: opts.probe or opts.brute_http
-
-  ffuf:
-    description: Bruteforce subdomains (Host header)
-    header: "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
-    fuzz_host_header: True
-    auto_calibration: True
-    wordlist: combined_subdomains
-    stop_on_error: True
-    targets_:
-    - type: url
-      field: url
-    if: opts.brute_http
+      if: opts.probe_http or opts.brute_http
 
   _group/2:
-    dnsx:
-      description: Check if subdomains actually exist (DNS)
+    dnsx/probe:
+      description: Probe DNS records on subdomains
       subdomains_only: True
+      wordlist: False
       targets_:
       - subdomain.host
+      if: opts.probe_dns
 
     nuclei:
       description: Check for subdomain takeovers
       targets_:
       - target.name
       - subdomain.host
-      tags: [takeover, dns]
+      tags: [takeover]
+
+    ffuf:
+      description: Bruteforce subdomains (Host header)
+      header: "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
+      fuzz_host_header: True
+      auto_calibration: True
+      wordlist: combined_subdomains
+      stop_on_error: True
+      targets_:
+      - type: url
+        field: url
+      if: opts.brute_http
 
     httpx:
       description: Run HTTP probes on subdomains
+      tech_detect: True
       targets_:
       - target.name
       - subdomain.host
-      if: opts.probe
+      if: opts.probe_http

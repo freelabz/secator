@@ -8,9 +8,9 @@ from threading import Thread
 
 from celery import chain, chord
 
-from secator.celery import app, forward_results
+from secator.celery import app, forward_results  # noqa: F401
 from secator.config import CONFIG
-from secator.utils_test import TEST_TASKS, TEST_WORKFLOWS,load_fixture
+from secator.utils_test import TEST_TASKS, load_fixture
 from secator.runners import Command
 from secator.output_types import Url
 from tests.integration.inputs import INPUTS_SCANS
@@ -41,7 +41,7 @@ class TestCelery(unittest.TestCase):
 			cwd=INTEGRATION_DIR
 		)
 		cls.queue = queue.Queue()
-		cls.cmd = Command.execute('secator worker', quiet=True, run=False)
+		cls.cmd = Command.execute('secator worker --use-command-runner', quiet=True, run=False)
 		cls.thread = Thread(target=cls.cmd.run)
 		cls.thread.start()
 		sleep(5)
@@ -206,5 +206,5 @@ class TestCelery(unittest.TestCase):
 		results = result.get()
 		targets = [r.name for r in results if r._type == 'target']
 		tags = [r.name for r in results if r._type == 'tag']
-		self.assertEqual(len(targets), 20)
+		self.assertEqual(len(targets), 18)
 		self.assertEqual(len(tags), 6)

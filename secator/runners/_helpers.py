@@ -22,24 +22,41 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	if ctx is None:
 		ctx = {}
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
+	if dry_run:
+		input_extractors = {k: v for k, v in extractors.items() if k.rstrip('_') == 'targets'}
+		opts_extractors = {k: v for k, v in extractors.items() if k.rstrip('_') != 'targets'}
+		if input_extractors:
+			dry_inputs = [" && ".join([fmt_extractor(v) for k, val in input_extractors.items() for v in val])]
+		else:
+			dry_inputs = inputs
+		if opts_extractors:
+			dry_opts = {k.rstrip('_'): [" && ".join([fmt_extractor(v) for v in val])] for k, val in opts_extractors.items()}
+		else:
+			dry_opts = {}
+		inputs = dry_inputs
+		opts.update(dry_opts)
+		return inputs, opts, []
+
 	errors = []
 	computed_inputs = []
+	input_extractors = False
 	computed_opts = {}
+
 	for key, val in extractors.items():
 		key = key.rstrip('_')
 		ctx['key'] = key
 		values, err = extract_from_results(results, val, ctx=ctx)
 		errors.extend(err)
 		if key == 'targets':
-			targets = [fmt_extractor(v) for v in val] if dry_run else deduplicate(values)
+			input_extractors = True
+			targets = deduplicate(values)
 			computed_inputs.extend(targets)
-			ctx['targets'] = computed_inputs
 		else:
-			computed_opt = [fmt_extractor(v) for v in val] if dry_run else deduplicate(values)
+			computed_opt = deduplicate(values)
 			if computed_opt:
 				computed_opts[key] = computed_opt
 				opts[key] = computed_opts[key]
-	if computed_inputs:
+	if input_extractors:
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
 	if computed_opts:
@@ -81,15 +98,23 @@ def extract_from_results(results, extractors, ctx=None):
 		ctx = {}
 	all_results = []
 	errors = []
+	key = ctx.get('key', 'unknown')
+	ancestor_id = ctx.get('ancestor_id', None)
 	if not isinstance(extractors, list):
 		extractors = [extractors]
 	for extractor in extractors:
 		try:
 			extractor_results = process_extractor(results, extractor, ctx=ctx)
+			msg = f'extracted [bold]{len(extractor_results)}[/] / [bold]{len(results)}[/] for key [bold]{key}[/] with extractor [bold]{fmt_extractor(extractor)}[/]'  # noqa: E501
+			if ancestor_id:
+				msg = f'{msg} ([bold]ancestor_id[/]: {ancestor_id})'
+			debug(msg, sub='extractors')
 			all_results.extend(extractor_results)
 		except Exception as e:
 			error = Error.from_exception(e)
 			errors.append(error)
+	if key == 'targets':
+		ctx['targets'] = all_results
 	return all_results, errors
 
 
@@ -130,7 +155,9 @@ def process_extractor(results, extractor, ctx=None):
 	"""
 	if ctx is None:
 		ctx = {}
-	debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
+	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
+	ancestor_id = ctx.get('ancestor_id')
+	key = ctx.get('key')
 
 	# Parse extractor, it can be a dict or a string (shortcut)
 	parsed_extractor = parse_extractor(extractor)
@@ -141,6 +168,8 @@ def process_extractor(results, extractor, ctx=None):
 	# Evaluate condition for each result
 	if _condition:
 		tmp_results = []
+		if ancestor_id:
+			_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
 		for item in results:
 			if item._type != _type:
 				continue
@@ -152,17 +181,22 @@ def process_extractor(results, extractor, ctx=None):
 				tmp_results.append(item)
 			del ctx['item']
 			del ctx[f'{_type}']
-		debug(f'kept {len(tmp_results)} out of {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
+		# debug(f'kept {len(tmp_results)} / {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
 		results = tmp_results
 	else:
 		results = [item for item in results if item._type == _type]
+		if ancestor_id:
+			results = [item for item in results if item._context.get('ancestor_id') == ancestor_id]
+
+	results_str = "\n".join([f'{repr(item)} [{str(item._context.get("ancestor_id", ""))}]' for item in results])
+	debug(f'extracted results ([bold]ancestor_id[/]: {ancestor_id}, [bold]key[/]: {key}):\n{results_str}', sub='extractor')
 
 	# Format field if needed
 	if _field:
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
 		results = [_field.format(**item.toDict()) for item in results]
-	debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
+	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 
 

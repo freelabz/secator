@@ -96,17 +96,16 @@ class ffuf(HttpFuzzer):
 	@staticmethod
 	def on_cmd_opts(self, opts):
 		# Fuzz host header
-		if self.get_opt_value('fuzz_host_header') and 'http://' in self.inputs[0]:
+		if self.get_opt_value('fuzz_host_header') and len(self.inputs) > 0:
 			host = self.inputs[0].split('://')[1].split('/')[0]
 			opts['header']['value']['Host'] = f'FUZZ.{host}'
 		self.headers = opts['header']['value'].copy()
 
 		# Check FUZZ keyword
 		data = self.get_opt_value('data') or ''
-		headers = self.get_opt_value('header')
-		if not len(self.inputs) > 1 and 'FUZZ' not in self.inputs[0] and 'FUZZ' not in headers and 'FUZZ' not in data:
-			self.add_result(Warning(message='Keyword FUZZ is not present in the URL, header or body'), print=True, output=True)
-
+		fuzz_in_headers = any('FUZZ' in v for v in self.headers.values())
+		if len(self.inputs) > 0 and 'FUZZ' not in self.inputs[0] and not fuzz_in_headers and 'FUZZ' not in data:
+			self.add_result(Warning(message='Keyword FUZZ is not present in the URL, header or body'))
 		return opts
 
 	@staticmethod

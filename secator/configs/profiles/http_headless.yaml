@@ -1,0 +1,6 @@
+type: profile
+name: http_headless
+description: "Headless HTTP requests"
+opts:
+    headless: true
+    system_chrome: true
