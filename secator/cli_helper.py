@@ -1,9 +1,12 @@
+import datetime
 import os
 import re
 import sys
 
 from collections import OrderedDict
+from contextlib import nullcontext
 
+import psutil
 import rich_click as click
 from rich_click.rich_click import _get_rich_console
 
@@ -45,7 +48,8 @@ CLI_EXEC_OPTS = {
 	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR},  # noqa: E501
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
-	'enable_profiler': {'is_flag': True, 'short': 'prof', 'default': False, 'help': 'Enable runner profiling'},
+	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
+	'enable_memray': {'is_flag': True, 'short': 'memray', 'default': False, 'help': 'Enable memray profiling'},
 }
 
 CLI_TYPE_MAPPING = {
@@ -201,6 +205,12 @@ def register_runner(cli_endpoint, config):
 		yaml = opts['yaml']
 		tree = opts['tree']
 		context = {'workspace_name': ws}
+		enable_pyinstrument = opts['enable_pyinstrument']
+		enable_memray = opts['enable_memray']
+		contextmanager = nullcontext()
+		process = None
+
+		# Set dry run
 		ctx.obj['dry_run'] = dry_run
 
 		# Show version
@@ -259,6 +269,16 @@ def register_runner(cli_endpoint, config):
 				console.print(f'Supported drivers: {supported_drivers_str}')
 				sys.exit(1)
 
+		if enable_pyinstrument or enable_memray:
+			if not ADDONS_ENABLED["trace"]:
+				console.print(
+					'[bold red]Missing "trace" addon: please run `secator install addons trace`[/].'
+				)
+				sys.exit(1)
+			import memray
+			output_file = f'trace_memray_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.bin'
+			contextmanager = memray.Tracker(output_file)
+
 		from secator.utils import deep_merge_dicts
 		hooks = deep_merge_dicts(*hooks)
 
@@ -302,8 +322,27 @@ def register_runner(cli_endpoint, config):
 		})
 
 		# Start runner
-		runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
-		runner.run()
+		with contextmanager:
+			if enable_memray:
+				process = psutil.Process()
+				console.print(
+					f"[bold yellow3]Initial RAM Usage: {process.memory_info().rss / 1024 ** 2} MB[/]"
+				)
+			item_count = 0
+			runner = runner_cls(
+				config, inputs, run_opts=opts, hooks=hooks, context=context
+			)
+			for item in runner:
+				del item
+				item_count += 1
+				if process and item_count % 100 == 0:
+					console.print(
+						f"[bold yellow3]RAM Usage: {process.memory_info().rss / 1024 ** 2} MB[/]"
+					)
+
+		if enable_memray:
+			console.print(f"[bold green]Memray output file: {output_file}[/]")
+			os.system(f"memray flamegraph {output_file}")
 
 	generate_cli_subcommand(cli_endpoint, func, **command_opts)
 	generate_rich_click_opt_groups(cli_endpoint, name, input_types, options)
