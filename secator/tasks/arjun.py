@@ -18,8 +18,8 @@ class arjun(Command):
 	output_types = [Url]
 	tags = ['url', 'fuzz', 'params']
 	input_flag = '-u'
-	version_flag = ' '
 	input_chunk_size = 1
+	version_flag = ' '
 	opts = {
 		'chunk_size': {'type': int, 'help': 'Control query/chunk size'},
 		'stable': {'is_flag': True, 'default': False, 'help': 'Use stable mode'},
