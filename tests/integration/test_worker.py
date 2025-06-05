@@ -11,7 +11,7 @@ class TestWorker(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
 		cls.queue = queue.Queue()
-		cls.cmd = Command.execute('secator worker', name='secator_worker', quiet=True, run=False)
+		cls.cmd = Command.execute('secator worker --use-command-runner', name='secator_worker', quiet=True, run=False)
 		cls.thread = Thread(target=cls.cmd.run)
 		cls.thread.start()
 		sleep(3)
