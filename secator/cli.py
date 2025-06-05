@@ -1631,7 +1631,8 @@ def performance(tasks, workflows, scans, test):
 @click.argument('name', type=str)
 @click.option('--verbose', '-v', is_flag=True, default=False, help='Print verbose output')
 @click.option('--check', '-c', is_flag=True, default=False, help='Check task semantics only (no unit + integration tests)')  # noqa: E501
-def task(name, verbose, check):
+@click.option('--system-exit', '-e', is_flag=True, default=True, help='Exit with system exit code')
+def task(name, verbose, check, system_exit):
 	"""Test a single task for semantics errors, and run unit + integration tests."""
 	console.print(f'[bold gold3]:wrench: Testing task {name} ...[/]')
 	task = [task for task in discover_tasks() if task.__name__ == name.strip()]
@@ -1647,7 +1648,10 @@ def task(name, verbose, check):
 		errors
 	)
 	if errors:
-		sys.exit(0)
+		if system_exit:
+			sys.exit(1)
+		else:
+			return False
 
 	task = task[0]
 	task_name = task.__name__
@@ -1660,7 +1664,10 @@ def task(name, verbose, check):
 		errors
 	)
 	if errors:
-		sys.exit(0)
+		if system_exit:
+			sys.exit(1)
+		else:
+			return False
 
 	# Run install
 	cmd = f'secator install tools {task_name}'
@@ -1770,7 +1777,28 @@ def task(name, verbose, check):
 			console.print(warning)
 
 	console.print("\n")
-	sys.exit(exit_code)
+	if system_exit:
+		sys.exit(exit_code)
+	else:
+		return True if exit_code == 0 else False
+
+
+@test.command()
+@click.pass_context
+@click.option('--check', '-c', is_flag=True, default=False, help='Check task semantics only (no unit + integration tests)')  # noqa: E501
+@click.option('--verbose', '-v', is_flag=True, default=False, help='Print verbose output')
+def tasks(ctx, check, verbose):
+	"""Test all tasks for semantics errors, and run unit + integration tests."""
+	results = []
+	for cls in discover_tasks():
+		success = ctx.invoke(task, name=cls.__name__, verbose=verbose, check=check, system_exit=False)
+		results.append(success)
+
+	if any(not success for success in results):
+		console.print(Error(message='Tasks checks failed. Please check the output for more details.'))
+		sys.exit(1)
+	console.print(Info(message='All tasks checks passed.'))
+	sys.exit(0)
 
 
 def check_test(condition, message, fail_message, results=[], warn=False):
@@ -1805,4 +1833,3 @@ def coverage(unit_only, integration_only, template_only):
 	else:
 		Command.execute(f'{sys.executable} -m coverage combine --keep', name='coverage combine', cwd=ROOT_FOLDER)
 	run_test(cmd, 'coverage', use_os_system=True)
-
