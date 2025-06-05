@@ -193,7 +193,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 	else:
 		console.print(f'[bold red]{cmd}[/]')
 		ret = os.system(cmd)
-		sys.exit(ret)
+		sys.exit(os.waitstatus_to_exitcode(ret))
 
 
 #-------#
@@ -1481,7 +1481,7 @@ def run_test(cmd, name=None, exit=True, verbose=False, use_os_system=False):
 			cmd += ' >/dev/null 2>&1'
 		ret = os.system(cmd)
 		if exit:
-			sys.exit(ret)
+			sys.exit(os.waitstatus_to_exitcode(ret))
 		return ret
 	else:
 		result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
