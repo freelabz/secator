@@ -6,7 +6,7 @@ import re
 from secator.decorators import task
 from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
-								 TIMEOUT, URL, STRING)
+								 TIMEOUT, URL, STRING, SLUG)
 from secator.output_types import UserAccount, Info, Error
 from secator.tasks._categories import ReconUser
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class maigret(ReconUser):
 	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
-	input_types = [STRING]
+	input_types = [SLUG, STRING]
 	output_types = [UserAccount]
 	tags = ['user', 'recon', 'username']
 	file_flag = None
