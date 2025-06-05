@@ -4,7 +4,8 @@ alias: userhunt
 description: User account search
 tags: [user_account]
 input_types:
-  - username
+  - slug
+  - string
 
 tasks:
   maigret:
