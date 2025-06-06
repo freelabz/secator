@@ -132,7 +132,7 @@ class Runner:
 		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
 		self.enable_profiles = self.run_opts.get('enable_profiles', True)
 		self.enable_reports = self.run_opts.get('enable_reports', not self.sync) and not self.dry_run and not self.no_process and not self.no_poll  # noqa: E501
-		self.enable_hooks = self.run_opts.get('enable_hooks', True) and not self.dry_run and not self.no_process and not self.no_poll  # noqa: E501
+		self.enable_hooks = self.run_opts.get('enable_hooks', True) and not self.dry_run and not self.no_process  # noqa: E501
 
 		# Runner print opts
 		self.print_item = self.run_opts.get('print_item', False) and not self.dry_run
