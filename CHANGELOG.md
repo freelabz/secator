@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/freelabz/secator/compare/v0.16.1...v0.16.2) (2025-06-06)
+
+
+### Bug Fixes
+
+* run hooks when no_poll is True ([#686](https://github.com/freelabz/secator/issues/686)) ([32e8dba](https://github.com/freelabz/secator/commit/32e8dba71f153a70583855b5401595cedd66b49c))
+
 ## [0.16.1](https://github.com/freelabz/secator/compare/v0.16.0...v0.16.1) (2025-06-05)
 
 
