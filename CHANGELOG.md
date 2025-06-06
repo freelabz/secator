@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/freelabz/secator/compare/v0.16.0...v0.16.1) (2025-06-05)
+
+
+### Bug Fixes
+
+* maigret output types ([#683](https://github.com/freelabz/secator/issues/683)) ([c3d9193](https://github.com/freelabz/secator/commit/c3d9193662a4272084fa636ad5ac815eddb6afc3))
+
 ## [0.16.0](https://github.com/freelabz/secator/compare/v0.15.1...v0.16.0) (2025-06-05)
 
 
