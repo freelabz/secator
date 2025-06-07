@@ -20,6 +20,7 @@ class bup(Http):
 	output_types = [Url, Progress]
 	tags = ['url', 'bypass']
 	input_flag = '-u'
+	file_flag = '-R'
 	json_flag = '--jsonl'
 	opt_prefix = '--'
 	opts = {
