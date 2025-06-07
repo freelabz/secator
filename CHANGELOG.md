@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/freelabz/secator/compare/v0.16.2...v0.16.3) (2025-06-07)
+
+
+### Bug Fixes
+
+* bup file flag ([#690](https://github.com/freelabz/secator/issues/690)) ([83d83d7](https://github.com/freelabz/secator/commit/83d83d72c5c523ea44dcc3cb78f478c935ed4127))
+
 ## [0.16.2](https://github.com/freelabz/secator/compare/v0.16.1...v0.16.2) (2025-06-06)
 
 
