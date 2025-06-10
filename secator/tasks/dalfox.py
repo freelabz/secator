@@ -27,7 +27,7 @@ class dalfox(VulnHttp):
 	input_flag = 'url'
 	file_flag = 'file'
 	# input_chunk_size = 1
-	json_flag = '--format json'
+	json_flag = '--format jsonl'
 	version_flag = 'version'
 	opt_prefix = '--'
 	opt_key_map = {
@@ -64,11 +64,6 @@ class dalfox(VulnHttp):
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'cpu'
-
-	@staticmethod
-	def on_line(self, line):
-		line = line.rstrip(',')
-		return line
 
 	@staticmethod
 	def on_json_loaded(self, item):
