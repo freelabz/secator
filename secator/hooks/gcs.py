@@ -11,7 +11,7 @@ from secator.utils import debug
 
 GCS_BUCKET_NAME = CONFIG.addons.gcs.bucket_name
 ITEMS_TO_SEND = {
-	'url': ['screenshot_path']
+	'url': ['screenshot_path', 'stored_response_path']
 }
 
 
