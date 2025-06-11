@@ -240,6 +240,8 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	Returns:
 		list: Runner results
 	"""
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
 	if results:
 		runner.results = forward_results(results)
@@ -260,6 +262,8 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	Returns:
 		list: Final results
 	"""
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Runner {runner.unique_name} has finished, running mark_completed'))
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
