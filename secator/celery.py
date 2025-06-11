@@ -101,7 +101,6 @@ def update_state(celery_task, task, force=False):
 	if not IN_CELERY_WORKER_PROCESS:
 		return
 	if task.no_live_updates:
-		console.print('aborted update_state because no_live_updates is True')
 		return
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
