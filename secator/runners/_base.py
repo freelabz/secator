@@ -117,6 +117,7 @@ class Runner:
 
 		# Runner process options
 		self.no_poll = self.run_opts.get('no_poll', False)
+		self.no_live_updates = self.run_opts.get('no_live_updates', False)
 		self.no_process = not self.run_opts.get('process', True)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
