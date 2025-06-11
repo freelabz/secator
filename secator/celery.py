@@ -100,6 +100,8 @@ def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
 	if not IN_CELERY_WORKER_PROCESS:
 		return
+	if task.no_live_updates:
+		return
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
 	task.last_updated_celery = time()
