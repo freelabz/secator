@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.3](https://github.com/freelabz/secator/compare/v0.16.2...v0.16.3) (2025-06-11)
+
+
+### Bug Fixes
+
+* bup file flag ([#690](https://github.com/freelabz/secator/issues/690)) ([83d83d7](https://github.com/freelabz/secator/commit/83d83d72c5c523ea44dcc3cb78f478c935ed4127))
+* **celery:** add no_live_updates to skip backend updates ([#695](https://github.com/freelabz/secator/issues/695)) ([c99599c](https://github.com/freelabz/secator/commit/c99599caa219312e8ca2e190d8353960ca4f2633))
+* **dalfox:** use jsonl option instead of json ([#692](https://github.com/freelabz/secator/issues/692)) ([c406e34](https://github.com/freelabz/secator/commit/c406e346a4011b0c57efd7b6d5e518ee6d7953e6))
+* **mongodb:** add all output types ([#696](https://github.com/freelabz/secator/issues/696)) ([af98935](https://github.com/freelabz/secator/commit/af989352662f53903768c268347e6046db9dd8fd))
+* show info message for mark_runner_started / mark_runner_completed ([#694](https://github.com/freelabz/secator/issues/694)) ([ed0f6cb](https://github.com/freelabz/secator/commit/ed0f6cb1464c962fc6f65381762fd23330f9aa85))
+* **workflow:** put cariddi in crawlers group ([#693](https://github.com/freelabz/secator/issues/693)) ([a9e1afd](https://github.com/freelabz/secator/commit/a9e1afd97256aefc33d179d9e3d4091f24b332b2))
+
 ## [0.16.2](https://github.com/freelabz/secator/compare/v0.16.1...v0.16.2) (2025-06-06)
 
 
