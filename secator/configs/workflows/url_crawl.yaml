@@ -9,7 +9,7 @@ input_types:
 options:
   crawlers:
     type: list
-    help: Crawlers to use (katana, gospider)
+    help: Crawlers to use
     default: ['gau', 'katana']
     internal: True
 
@@ -36,17 +36,14 @@ tasks:
       description: Crawl URLs
       if: "'gospider' in opts.crawlers"
 
-  cariddi:
-    description: Hunt URLs patterns
-    info: True
-    secrets: True
-    errors: True
-    juicy_extensions: 1
-    juicy_endpoints: True
-    targets_:
-    - target.name
-    - url.url
-    if: opts.hunt_patterns
+    cariddi:
+      description: Hunt URLs patterns
+      info: True
+      secrets: True
+      errors: True
+      juicy_extensions: 1
+      juicy_endpoints: True
+      if: opts.hunt_patterns
 
   httpx:
     description: Run HTTP probes on crawled URLs

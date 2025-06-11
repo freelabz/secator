@@ -223,8 +223,16 @@ def forward_results(results):
 				results[ix] = item['results']
 	elif 'results' in results:
 		results = results['results']
+
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Forwarding {len(results)} results'))
+
 	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
+
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Forwarded {len(results)} flattened and deduplicated results'))
+
 	return results
 
 
