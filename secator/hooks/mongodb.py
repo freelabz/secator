@@ -47,6 +47,14 @@ def get_runner_dbg(runner):
 
 
 def get_results(uuids):
+	"""Get results from MongoDB based on a list of uuids.
+
+	Args:
+		uuids (list[str | Output]): List of uuids, but can also be a mix of uuids and output types.
+
+	Returns:
+		Generator of findings.
+	"""
 	client = get_mongodb_client()
 	db = client.main
 	del_uuids = []
@@ -54,9 +62,10 @@ def get_results(uuids):
 		if isinstance(r, tuple(OUTPUT_TYPES)):
 			yield r
 			del_uuids.append(r)
-	uuids = [u for u in uuids if u not in del_uuids]
-	for r in db.findings.find({'_uuid': {'$in': uuids}}):
-		yield load_finding(r)
+	uuids = [ObjectId(u) for u in uuids if u not in del_uuids and ObjectId.is_valid(u)]
+	for r in db.findings.find({'_id': {'$in': uuids}}):
+		finding = load_finding(r)
+		yield finding
 
 
 def update_runner(self):

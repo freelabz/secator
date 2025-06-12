@@ -182,6 +182,7 @@ def run_command(self, results, name, targets, opts={}):
 		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 
 	# Flatten + dedupe + filter results
+	print('results before dedupe', results)
 	results = forward_results(results)
 
 	# Set Celery request id in context

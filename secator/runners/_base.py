@@ -193,8 +193,8 @@ class Runner:
 		for target in targets:
 			self.add_result(target, print=False, output=False)
 
-		# Run extractors on results and targets
-		self._run_extractors(list(results) + targets)
+		# Run extractors on results
+		self._run_extractors()
 		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
 		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
 		self.debug(f'print opts ({len(self.resolved_print_opts)})', obj=self.resolved_print_opts, sub='init')
@@ -434,12 +434,12 @@ class Runner:
 			if error:
 				self.add_result(error)
 
-	def _run_extractors(self, results):
+	def _run_extractors(self):
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
 		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs, 'ancestor_id': self.ancestor_id}
 		inputs, run_opts, errors = run_extractors(
-			results,
+			self.results,
 			self.run_opts,
 			self.inputs,
 			ctx=ctx,
