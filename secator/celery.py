@@ -240,12 +240,12 @@ def forward_results(results):
 	if IN_CELERY_WORKER_PROCESS:
 		console.print(Info(message=f'Forwarding {len(results)} results'))
 
+	results = flatten(results)
 	if CONFIG.addons.mongodb.enabled:
 		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
 		uuids.extend([r for r in results if isinstance(r, str)])
 		return list(set(uuids))
 
-	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
 
 	if IN_CELERY_WORKER_PROCESS:
