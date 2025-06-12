@@ -182,7 +182,6 @@ def run_command(self, results, name, targets, opts={}):
 		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 
 	# Flatten + dedupe + filter results
-	print('results before dedupe', results)
 	results = forward_results(results)
 
 	# Set Celery request id in context
@@ -238,15 +237,15 @@ def forward_results(results):
 		results = results['results']
 
 	if IN_CELERY_WORKER_PROCESS:
-		console.print(Info(message=f'Forwarding {len(results)} results'))
+		console.print(Info(message=f'Deduplicating {len(results)} results'))
 
 	results = flatten(results)
 	if CONFIG.addons.mongodb.enabled:
 		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
 		uuids.extend([r for r in results if isinstance(r, str)])
-		return list(set(uuids))
-
-	results = deduplicate(results, attr='_uuid')
+		results = list(set(uuids))
+	else:
+		results = deduplicate(results, attr='_uuid')
 
 	if IN_CELERY_WORKER_PROCESS:
 		console.print(Info(message=f'Forwarded {len(results)} flattened and deduplicated results'))
