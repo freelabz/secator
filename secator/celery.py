@@ -222,6 +222,14 @@ def run_command(self, results, name, targets, opts={}):
 
 @app.task
 def forward_results(results):
+	"""Forward results to the next task (bridge task).
+
+	Args:
+		results (list): Results to forward.
+
+	Returns:
+		list: List of uuids.
+	"""
 	if isinstance(results, list):
 		for ix, item in enumerate(results):
 			if isinstance(item, dict) and 'results' in item:
@@ -231,6 +239,11 @@ def forward_results(results):
 
 	if IN_CELERY_WORKER_PROCESS:
 		console.print(Info(message=f'Forwarding {len(results)} results'))
+
+	if CONFIG.addons.mongodb.enabled:
+		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
+		uuids.extend([r for r in results if isinstance(r, str)])
+		return list(set(uuids))
 
 	results = flatten(results)
 	results = deduplicate(results, attr='_uuid')
