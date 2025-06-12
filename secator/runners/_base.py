@@ -178,6 +178,10 @@ class Runner:
 
 		# Add prior results to runner results
 		self.debug(f'adding {len(results)} prior results to runner', sub='init')
+		if CONFIG.addons.mongodb.enabled:
+			self.debug('adding prior results from MongoDB', sub='init')
+			from secator.hooks.mongodb import get_results
+			results = get_results(results)
 		for result in results:
 			self.add_result(result, print=False, output=False, hooks=False, queue=not self.has_parent)
 
@@ -190,7 +194,7 @@ class Runner:
 			self.add_result(target, print=False, output=False)
 
 		# Run extractors on results and targets
-		self._run_extractors(results + targets)
+		self._run_extractors(list(results) + targets)
 		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
 		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
 		self.debug(f'print opts ({len(self.resolved_print_opts)})', obj=self.resolved_print_opts, sub='init')

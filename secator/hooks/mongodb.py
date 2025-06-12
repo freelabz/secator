@@ -46,6 +46,19 @@ def get_runner_dbg(runner):
 	}
 
 
+def get_results(uuids):
+	client = get_mongodb_client()
+	db = client.main
+	del_uuids = []
+	for r in uuids:
+		if isinstance(r, tuple(OUTPUT_TYPES)):
+			yield r
+			del_uuids.append(r)
+	uuids = [u for u in uuids if u not in del_uuids]
+	for r in db.findings.find({'_uuid': {'$in': uuids}}):
+		yield load_finding(r)
+
+
 def update_runner(self):
 	client = get_mongodb_client()
 	db = client.main
