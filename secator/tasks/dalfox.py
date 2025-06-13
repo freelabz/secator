@@ -25,6 +25,7 @@ class dalfox(VulnHttp):
 	output_types = [Vulnerability, Url]
 	tags = ['url', 'fuzz']
 	input_flag = 'url'
+	input_chunk_size = 20
 	file_flag = 'file'
 	# input_chunk_size = 1
 	json_flag = '--format jsonl'
