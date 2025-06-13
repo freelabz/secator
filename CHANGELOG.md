@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.4](https://github.com/freelabz/secator/compare/v0.16.3...v0.16.4) (2025-06-13)
+
+
+### Bug Fixes
+
+* **dalfox:** reduce chunk size for dalfox ([#700](https://github.com/freelabz/secator/issues/700)) ([c14be68](https://github.com/freelabz/secator/commit/c14be68427d18072cf75c61fb6ae966f97515d15))
+* **gcs:** add stored_response_path to sent items ([#697](https://github.com/freelabz/secator/issues/697)) ([7c6f992](https://github.com/freelabz/secator/commit/7c6f992b6c7898e956436e169b64af1d9f1d8934))
+* mongodb optimizations ([#699](https://github.com/freelabz/secator/issues/699)) ([c0497a6](https://github.com/freelabz/secator/commit/c0497a67c293680dafdc052eff510ffd17edafe6))
+
 ## [0.16.3](https://github.com/freelabz/secator/compare/v0.16.2...v0.16.3) (2025-06-11)
 
 
