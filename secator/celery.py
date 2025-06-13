@@ -214,11 +214,21 @@ def run_command(self, results, name, targets, opts={}):
 		update_state(self, task)
 	update_state(self, task, force=True)
 
+	if CONFIG.addons.mongodb.enabled:
+		return [r._uuid for r in task.results]
 	return task.results
 
 
 @app.task
 def forward_results(results):
+	"""Forward results to the next task (bridge task).
+
+	Args:
+		results (list): Results to forward.
+
+	Returns:
+		list: List of uuids.
+	"""
 	if isinstance(results, list):
 		for ix, item in enumerate(results):
 			if isinstance(item, dict) and 'results' in item:
@@ -227,10 +237,15 @@ def forward_results(results):
 		results = results['results']
 
 	if IN_CELERY_WORKER_PROCESS:
-		console.print(Info(message=f'Forwarding {len(results)} results'))
+		console.print(Info(message=f'Deduplicating {len(results)} results'))
 
 	results = flatten(results)
-	results = deduplicate(results, attr='_uuid')
+	if CONFIG.addons.mongodb.enabled:
+		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
+		uuids.extend([r for r in results if isinstance(r, str)])
+		results = list(set(uuids))
+	else:
+		results = deduplicate(results, attr='_uuid')
 
 	if IN_CELERY_WORKER_PROCESS:
 		console.print(Info(message=f'Forwarded {len(results)} flattened and deduplicated results'))
@@ -254,8 +269,13 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
 	if results:
-		runner.results = forward_results(results)
+		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
+	if CONFIG.addons.mongodb.enabled:
+		from secator.hooks.mongodb import get_results
+		results = get_results(results)
+	for item in results:
+		runner.add_result(item, print=False)
 	runner.mark_started()
 	return runner.results
 
@@ -277,6 +297,9 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
+	if CONFIG.addons.mongodb.enabled:
+		from secator.hooks.mongodb import get_results
+		results = get_results(results)
 	for item in results:
 		runner.add_result(item, print=False)
 	runner.mark_completed()
