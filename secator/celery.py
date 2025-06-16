@@ -241,6 +241,7 @@ def forward_results(results):
 
 	results = flatten(results)
 	if CONFIG.addons.mongodb.enabled:
+		console.print(Info(message=f'Extracting uuids from {len(results)} results'))
 		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
 		uuids.extend([r for r in results if isinstance(r, str)])
 		results = list(set(uuids))
@@ -277,6 +278,8 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 	runner.mark_started()
+	if CONFIG.addons.mongodb.enabled:
+		return [r._uuid for r in runner.results]
 	return runner.results
 
 
@@ -303,6 +306,8 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 	runner.mark_completed()
+	if CONFIG.addons.mongodb.enabled:
+		return [r._uuid for r in runner.results]
 	return runner.results
 
 
