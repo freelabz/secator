@@ -30,7 +30,8 @@ def get_mongodb_client():
 		_mongodb_client = pymongo.MongoClient(
 			escape_mongodb_url(MONGODB_URL),
 			maxPoolSize=MONGODB_MAX_POOL_SIZE,
-			serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT
+			serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT,
+			connect=False
 		)
 	return _mongodb_client
 
