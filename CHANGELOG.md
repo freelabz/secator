@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.5](https://github.com/freelabz/secator/compare/v0.16.4...v0.16.5) (2025-06-20)
+
+
+### Bug Fixes
+
+* **celery:** pass mongodb uuids when enabled ([#701](https://github.com/freelabz/secator/issues/701)) ([64b43e8](https://github.com/freelabz/secator/commit/64b43e88659c963a0c526829a2f72ee75348edef))
+
 ## [0.16.4](https://github.com/freelabz/secator/compare/v0.16.3...v0.16.4) (2025-06-13)
 
 
