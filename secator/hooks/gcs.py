@@ -42,10 +42,12 @@ def upload_blob(bucket_name, source_file_name, destination_blob_name):
 	storage_client = storage.Client()
 	bucket = storage_client.bucket(bucket_name)
 	blob = bucket.blob(destination_blob_name)
-	blob.upload_from_filename(source_file_name)
+	with open(source_file_name, 'rb') as f:
+		f.seek(0)
+		blob.upload_from_file(f)
 	end_time = time()
 	elapsed = end_time - start_time
-	debug(f'in {elapsed:.4f}s', obj={'blob': 'CREATED', 'blob_name': destination_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs', verbose=True)  # noqa: E501
+	debug(f'in {elapsed:.4f}s', obj={'blob': 'UPLOADED', 'blob_name': destination_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs', verbose=True)  # noqa: E501
 
 
 HOOKS = {

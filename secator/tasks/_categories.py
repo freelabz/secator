@@ -96,6 +96,20 @@ class HttpFuzzer(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
 	input_types = [URL]
 	output_types = [Url]
+	profile = lambda opts: HttpFuzzer.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def dynamic_profile(opts):
+		wordlist = HttpFuzzer._get_opt_value(
+			opts,
+			'wordlist',
+			opts_conf=dict(HttpFuzzer.opts, **HttpFuzzer.meta_opts),
+			opt_aliases=opts.get('aliases', []),
+			preprocess=True,
+			process=True,
+		)
+		wordlist_size_mb = os.path.getsize(wordlist) / (1024 * 1024)
+		return 'cpu' if wordlist_size_mb > 5 else 'io'
 
 
 #----------------#

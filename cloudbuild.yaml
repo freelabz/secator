@@ -4,11 +4,12 @@ steps:
   args: ['-c', 'docker pull ${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator:${_VERSION} || exit 0']
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '-t', '${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator:${_VERSION}', '--build-arg', 'flavor=${_FLAVOR}', '--cache-from', '${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator:${_VERSION}', '.']
+
 substitutions:
   _REPOSITORY: secator
   _LOCATION: europe-west1
-  _VERSION: latest
-  _FLAVOR: lite
+  _VERSION: dev
+  _FLAVOR: full
 
 images:
 - '${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator:${_VERSION}'

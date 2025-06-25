@@ -158,19 +158,23 @@ def load_findings(objs):
 
 
 @shared_task
-def tag_duplicates(ws_id: str = None):
+def tag_duplicates(ws_id: str = None, full_scan: bool = False):
 	"""Tag duplicates in workspace.
 
 	Args:
 		ws_id (str): Workspace id.
+		full_scan (bool): If True, scan all findings, otherwise only untagged findings.
 	"""
 	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
 	client = get_mongodb_client()
 	db = client.main
 	workspace_query = list(
 		db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': True}).sort('_timestamp', -1))
+	untagged_query = {'_context.workspace_id': str(ws_id)}
+	if not full_scan:
+		untagged_query['_tagged'] = {'$ne': True}
 	untagged_query = list(
-		db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': {'$ne': True}}).sort('_timestamp', -1))
+		db.findings.find(untagged_query).sort('_timestamp', -1))
 	if not untagged_query:
 		debug('no untagged findings. Skipping.', id=ws_id, sub='hooks.mongodb')
 		return
