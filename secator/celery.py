@@ -240,7 +240,7 @@ def forward_results(results):
 		console.print(Info(message=f'Deduplicating {len(results)} results'))
 
 	results = flatten(results)
-	if CONFIG.addons.mongodb.enabled:
+	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		console.print(Info(message=f'Extracting uuids from {len(results)} results'))
 		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
 		uuids.extend([r for r in results if isinstance(r, str)])
@@ -272,13 +272,13 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if results:
 		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if CONFIG.addons.mongodb.enabled:
+	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
 		results = get_results(results)
 	for item in results:
 		runner.add_result(item, print=False)
 	runner.mark_started()
-	if CONFIG.addons.mongodb.enabled:
+	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
 	return runner.results
 
@@ -300,13 +300,13 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if CONFIG.addons.mongodb.enabled:
+	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
 		results = get_results(results)
 	for item in results:
 		runner.add_result(item, print=False)
 	runner.mark_completed()
-	if CONFIG.addons.mongodb.enabled:
+	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
 	return runner.results
 
