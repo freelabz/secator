@@ -42,6 +42,9 @@ jobs:
     - name: Add GOPATH to PATH
       run: echo "${HOME}/go/bin" >> $GITHUB_PATH
 
+    - name: Run apt update
+      run: sudo apt update
+
     - name: Detect changed or all tasks
       run: |
         if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
