@@ -75,7 +75,6 @@ class feroxbuster(HttpFuzzer):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
 
 	@staticmethod
 	def on_start(self):

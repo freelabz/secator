@@ -84,7 +84,6 @@ class ffuf(HttpFuzzer):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
 
 	@staticmethod
 	def before_init(self):
