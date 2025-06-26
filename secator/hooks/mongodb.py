@@ -166,6 +166,74 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False):
 		full_scan (bool): If True, scan all findings, otherwise only untagged findings.
 	"""
 	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
+	init_time = time.time()
+	client = get_mongodb_client()
+	db = client.main
+	start_time = time.time()
+	workspace_query = {'_context.workspace_id': str(ws_id), '_context.workspace_duplicate': False, '_tagged': True}
+	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$ne': True}}
+	if full_scan:
+		del untagged_query['_tagged']
+	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)))
+	untagged_findings = load_findings(list(db.findings.find(untagged_query).sort('_timestamp', -1)))
+	print(f'Workspace non-duplicates findings: {len(workspace_findings)}, Untagged findings: {len(untagged_findings)}. Query time: {time.time() - start_time}s')
+	start_time = time.time()
+	seen = []
+	db_updates = {}
+	for item in untagged_findings:
+		if item._uuid in seen:
+			continue
+		print('--' * 10)
+		print(repr(item) + f' ({item._timestamp}) [{item._uuid}]')
+		duplicate_ids = [_._uuid for _ in untagged_findings if _ == item and _._uuid != item._uuid]
+		seen.extend(duplicate_ids)
+		print(f' --> Found {len(duplicate_ids)} duplicates for item')
+		duplicate_ws = [_ for _ in workspace_findings if _ == item and _._uuid != item._uuid]
+		print(f' --> Found {len(duplicate_ws)} workspace duplicates for item')
+		related_ids = []
+		if duplicate_ws:
+			duplicate_ws_ids = [_._uuid for _ in duplicate_ws]
+			duplicate_ids.extend(duplicate_ws_ids)
+			for item in duplicate_ws:
+				related_ids.extend(item._related)
+		print(f' --> Found {len(duplicate_ids)} total duplicates for item')
+		db_updates[item._uuid] = {
+			'_related': duplicate_ids + related_ids,
+			'_context.workspace_duplicate': False,
+			'_tagged': True
+		}
+		for uuid in duplicate_ids:
+			db_updates[uuid] = {
+				'_context.workspace_duplicate': True,
+				'_tagged': True
+			}
+	print(f'Finished processing untagged findings in {time.time() - start_time}s')
+	start_time = time.time()
+
+	import json
+	print('db updates:')
+	print(json.dumps(db_updates, indent=2))
+	from pymongo import UpdateOne
+	if not db_updates:
+		print('no db updates to execute')
+		return
+	result = db.findings.bulk_write(
+		[UpdateOne({'_id': ObjectId(uuid)}, {'$set': update}) for uuid, update in db_updates.items()]
+	)
+	print(result)
+	print(f'Finished running db update in {time.time() - start_time}s')
+	print(f'Finished running tag duplicates in {time.time() - init_time}s')
+
+
+@shared_task
+def tag_duplicates_old(ws_id: str = None, full_scan: bool = False):
+	"""Tag duplicates in workspace.
+
+	Args:
+		ws_id (str): Workspace id.
+		full_scan (bool): If True, scan all findings, otherwise only untagged findings.
+	"""
+	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
 	client = get_mongodb_client()
 	db = client.main
 	workspace_query = list(
