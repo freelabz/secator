@@ -176,7 +176,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False):
 		del untagged_query['_tagged']
 	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)))
 	untagged_findings = load_findings(list(db.findings.find(untagged_query).sort('_timestamp', -1)))
-	print(f'Workspace non-duplicates findings: {len(workspace_findings)}, Untagged findings: {len(untagged_findings)}. Query time: {time.time() - start_time}s')
+	print(f'Workspace non-duplicates findings: {len(workspace_findings)}, Untagged findings: {len(untagged_findings)}. Query time: {time.time() - start_time}s')  # noqa: E501
 	start_time = time.time()
 	seen = []
 	db_updates = {}

@@ -1,4 +1,3 @@
-from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID, IP,
