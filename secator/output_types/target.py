@@ -9,7 +9,7 @@ from secator.utils import autodetect_type, rich_to_ansi, rich_escape as _s
 class Target(OutputType):
 	name: str
 	type: str = ''
-	_source: str = field(default='', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='target', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)

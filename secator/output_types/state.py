@@ -12,7 +12,7 @@ class State(OutputType):
 	task_id: str
 	state: str
 	_type: str = field(default='state', repr=True)
-	_source: str = field(default='', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
 	_context: dict = field(default_factory=dict, repr=True, compare=False)

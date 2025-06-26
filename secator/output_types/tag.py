@@ -11,7 +11,7 @@ class Tag(OutputType):
 	match: str
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	stored_response_path: str = field(default='', compare=False)
-	_source: str = field(default='', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='tag', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)

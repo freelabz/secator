@@ -27,7 +27,6 @@ class dalfox(VulnHttp):
 	input_flag = 'url'
 	input_chunk_size = 20
 	file_flag = 'file'
-	# input_chunk_size = 1
 	json_flag = '--format jsonl'
 	version_flag = 'version'
 	opt_prefix = '--'
@@ -57,7 +56,7 @@ class dalfox(VulnHttp):
 		}
 	}
 	install_version = 'v2.11.0'
-	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
+	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@main'
 	install_github_handle = 'hahwul/dalfox'
 	encoding = 'ansi'
 	proxychains = False
