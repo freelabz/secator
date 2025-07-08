@@ -8,7 +8,8 @@ from contextlib import nullcontext
 
 import psutil
 import rich_click as click
-from rich_click.rich_click import _get_rich_console
+from rich_click.rich_help_configuration import RichHelpConfiguration
+from rich_click.rich_help_formatter import RichHelpFormatter
 
 from secator.config import CONFIG
 from secator.click import CLICK_LIST
@@ -195,7 +196,7 @@ def register_runner(cli_endpoint, config):
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, **opts):
-		console = _get_rich_console()
+		console = RichHelpFormatter(RichHelpConfiguration.load_from_globals)
 		version = opts['version']
 		sync = opts['sync']
 		ws = opts.pop('workspace')
@@ -297,7 +298,8 @@ def register_runner(cli_endpoint, config):
 				if CONFIG.celery.broker_url and \
 				   (broker_protocol == 'redis' or backend_protocol == 'redis') \
 				   and not ADDONS_ENABLED['redis']:
-					_get_rich_console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
+					RichHelpFormatter(RichHelpConfiguration.load_from_globals).print(
+                            '[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 					sys.exit(1)
 
 		from secator.utils import debug
