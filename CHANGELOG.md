@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.5](https://github.com/freelabz/secator/compare/v0.16.4...v0.16.5) (2025-06-25)
+
+
+### Bug Fixes
+
+* **celery:** pass mongodb uuids when enabled ([#701](https://github.com/freelabz/secator/issues/701)) ([64b43e8](https://github.com/freelabz/secator/commit/64b43e88659c963a0c526829a2f72ee75348edef))
+* **ci:** add apt update in ci ([261d1e8](https://github.com/freelabz/secator/commit/261d1e8bdbca06e85adf3df7a9489bff7ba445ab))
+* prod optimizations (GCS ValueError, dynamic profile for fuzzers with big wordlists) ([#707](https://github.com/freelabz/secator/issues/707)) ([bcd6024](https://github.com/freelabz/secator/commit/bcd6024d91362ca141b71a49c4f80c759e1801ca))
+
 ## [0.16.4](https://github.com/freelabz/secator/compare/v0.16.3...v0.16.4) (2025-06-13)
 
 
