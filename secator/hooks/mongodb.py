@@ -251,6 +251,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False):
 	print(f'Finished running db update in {time.time() - start_time}s')
 	print(f'Finished running tag duplicates in {time.time() - init_time}s')
 
+
 @shared_task
 def tag_duplicates_old(ws_id: str = None, full_scan: bool = False):
 	"""Tag duplicates in workspace.
