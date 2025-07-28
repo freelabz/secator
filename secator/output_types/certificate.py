@@ -26,7 +26,7 @@ class Certificate(OutputType):
 	serial_number: str = field(default='', compare=False)
 	ciphers: list[str] = field(default_factory=list, compare=False)
 	# parent_certificate: 'Certificate' = None  # noqa: F821
-	_source: str = field(default='', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='certificate', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
