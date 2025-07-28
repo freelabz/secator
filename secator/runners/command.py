@@ -3,6 +3,7 @@ import getpass
 import logging
 import os
 import re
+import resource
 import shlex
 import signal
 import subprocess
@@ -440,6 +441,7 @@ class Command(Runner):
 			# Output and results
 			self.return_code = 0
 			self.killed = False
+			self.memory_limit_mb = CONFIG.security.memory_limit_mb
 
 			# Run the command using subprocess
 			env = os.environ
@@ -472,6 +474,11 @@ class Command(Runner):
 
 		except FileNotFoundError as e:
 			yield from self.handle_file_not_found(e)
+
+		except MemoryError as e:
+			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
+			self.stop_process()
+			yield Warning(message=f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
 
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
@@ -527,7 +534,7 @@ class Command(Runner):
 		if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
 			return
 
-		yield from self.stats()
+		yield from self.stats(self.memory_limit_mb)
 		self.last_updated_stat = time()
 
 	def print_description(self):
@@ -574,17 +581,22 @@ class Command(Runner):
 		if exit_ok:
 			self.exit_ok = True
 
-	def stats(self):
+	def stats(self, memory_limit_mb=None):
 		"""Gather stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
 		stats = Command.get_process_info(proc, children=True)
+		limit_reached = False
 		for info in stats:
 			name = info['name']
 			pid = info['pid']
 			cpu_percent = info['cpu_percent']
 			mem_percent = info['memory_percent']
+			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			print(f'{name} {pid} {mem_rss}MB/{memory_limit_mb}MB')
+			if memory_limit_mb and mem_rss > memory_limit_mb:
+				limit_reached = True
 			net_conns = info.get('net_connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
@@ -595,6 +607,9 @@ class Command(Runner):
 				net_conns=len(net_conns),
 				extra_data=extra_data
 			)
+		if limit_reached:
+			self.stop_process(exit_ok=True)
+			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
 	@staticmethod
 	def get_process_info(process, children=False):
