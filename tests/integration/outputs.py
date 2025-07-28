@@ -285,7 +285,7 @@ OUTPUTS_TASKS = {
             _source='wafw00f')
     ],
     'testssl': [
-        Certificate(host='free.fr', fingerprint_sha256='EBC7C611F9A4161B123D3DF03E852BD69DFFDC447D223AE9478D434D55DFAD9B', _source='testssl')
+        Certificate(host='free.fr', fingerprint_sha256='17E97A0F31326220AC99341A4225E7376750D2A2CA9617EA75EEF2ACC4F52328', _source='testssl')
     ],
     'wpscan': [
         Tag(
