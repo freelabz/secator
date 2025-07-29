@@ -100,7 +100,7 @@ class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
 	force_source_install: bool = False
-	memory_limit_mb: int = None
+	memory_limit_mb: int = 0
 
 
 class HTTP(StrictModel):
