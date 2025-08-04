@@ -595,7 +595,7 @@ class Command(Runner):
 			mem_percent = info['memory_percent']
 			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
 			print(f'{name} {pid} {mem_rss}MB/{memory_limit_mb}MB')
-			if memory_limit_mb and memory_limit_mb > 0 and mem_rss > memory_limit_mb:
+			if memory_limit_mb and memory_limit_mb != -1 and mem_rss > memory_limit_mb:
 				limit_reached = True
 			net_conns = info.get('net_connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
