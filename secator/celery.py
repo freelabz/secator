@@ -168,6 +168,12 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
+	# Set Celery request id in context
+	context = opts.get('context', {})
+	context['celery_id'] = self.request.id
+	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
+
+	# Set routing key in context
 	if IN_CELERY_WORKER_PROCESS:
 		quiet = not CONFIG.cli.worker_command_verbose
 		opts.update({
@@ -179,15 +185,13 @@ def run_command(self, results, name, targets, opts={}):
 			'quiet': quiet
 		})
 		routing_key = self.request.delivery_info['routing_key']
+		context['routing_key'] = routing_key
 		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 
 	# Flatten + dedupe + filter results
 	results = forward_results(results)
 
-	# Set Celery request id in context
-	context = opts.get('context', {})
-	context['celery_id'] = self.request.id
-	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
+	# Set task opts
 	opts['context'] = context
 	opts['results'] = results
 	opts['sync'] = True
