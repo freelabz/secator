@@ -477,7 +477,7 @@ class Command(Runner):
 
 		except MemoryError as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
-			self.stop_process()
+			self.stop_process(exit_ok=True, sig=signal.SIGTERM)
 			yield Warning(message=f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
 
 		except BaseException as e:
@@ -572,12 +572,12 @@ class Command(Runner):
 			error = Error.from_exception(exc)
 		yield error
 
-	def stop_process(self, exit_ok=False):
+	def stop_process(self, exit_ok=False, sig=signal.SIGINT):
 		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
 		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
-		self.process.send_signal(signal.SIGINT)
+		self.process.send_signal(sig)
 		if exit_ok:
 			self.exit_ok = True
 
@@ -587,16 +587,15 @@ class Command(Runner):
 			return
 		proc = psutil.Process(self.process.pid)
 		stats = Command.get_process_info(proc, children=True)
-		limit_reached = False
+		total_mem = 0
 		for info in stats:
 			name = info['name']
 			pid = info['pid']
 			cpu_percent = info['cpu_percent']
 			mem_percent = info['memory_percent']
 			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			print(f'{name} {pid} {mem_rss}MB/{memory_limit_mb}MB')
-			if memory_limit_mb and memory_limit_mb != -1 and mem_rss > memory_limit_mb:
-				limit_reached = True
+			total_mem += mem_rss
+			print(f'{name} {pid} {mem_rss}MB')
 			net_conns = info.get('net_connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
@@ -607,8 +606,8 @@ class Command(Runner):
 				net_conns=len(net_conns),
 				extra_data=extra_data
 			)
-		if limit_reached:
-			self.stop_process(exit_ok=True)
+		print(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}')
+		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
 			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
 	@staticmethod
