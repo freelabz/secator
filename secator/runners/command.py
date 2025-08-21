@@ -3,7 +3,6 @@ import getpass
 import logging
 import os
 import re
-import resource
 import shlex
 import signal
 import subprocess
@@ -19,7 +18,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug, rich_escape as _s
+from secator.utils import debug, rich_escape as _s, signal_to_name
 
 
 logger = logging.getLogger(__name__)
@@ -451,6 +450,7 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
+				preexec_fn=os.setsid,
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
@@ -576,8 +576,8 @@ class Command(Runner):
 		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
-		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
-		self.process.send_signal(sig)
+		self.debug(f'Sending signal {signal_to_name(sig)} to process {self.process.pid}.', sub='error')
+		os.killpg(os.getpgid(self.process.pid), sig)
 		if exit_ok:
 			self.exit_ok = True
 

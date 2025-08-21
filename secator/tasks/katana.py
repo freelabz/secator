@@ -145,6 +145,8 @@ class katana(HttpCrawler):
 		if store_responses and os.path.exists(item.stored_response_path):
 			with open(item.stored_response_path, 'r', encoding='latin-1') as fin:
 				data = fin.read().splitlines(True)
+				if not data:
+					return item
 				first_line = data[0]
 			with open(item.stored_response_path, 'w', encoding='latin-1') as fout:
 				fout.writelines(data[1:])
