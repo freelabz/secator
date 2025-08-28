@@ -577,7 +577,8 @@ class Command(Runner):
 		if not self.process:
 			return
 		self.debug(f'Sending signal {signal_to_name(sig)} to process {self.process.pid}.', sub='error')
-		os.killpg(os.getpgid(self.process.pid), sig)
+		if self.process and self.process.pid:
+			os.killpg(os.getpgid(self.process.pid), sig)
 		if exit_ok:
 			self.exit_ok = True
 
