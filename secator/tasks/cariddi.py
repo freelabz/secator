@@ -31,7 +31,7 @@ class cariddi(HttpCrawler):
 	input_types = [URL]
 	output_types = [Url, Tag]
 	tags = ['url', 'crawl']
-	input_chunk_size =  1
+	input_chunk_size = 1
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '-json'

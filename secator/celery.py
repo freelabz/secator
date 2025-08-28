@@ -159,7 +159,7 @@ def run_workflow(self, args=[], kwargs={}):
 	console.print(Info(message=f'Running workflow {self.request.id}'))
 	if 'context' not in kwargs:
 		kwargs['context'] = {}
-	kwargs['context']['celery_id'] = self.request.idresultrepr_maxsize 
+	kwargs['context']['celery_id'] = self.request.id
 	workflow = Workflow(*args, **kwargs)
 	workflow.run()
 
