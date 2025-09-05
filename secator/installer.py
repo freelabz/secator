@@ -395,7 +395,7 @@ class GithubInstaller:
 		for root, _, files in os.walk(directory):
 			for file in files:
 				# Match the file name exactly with the repository name
-				if file == binary_name:
+				if file.startswith(binary_name):
 					return os.path.join(root, file)
 		return None
 

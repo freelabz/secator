@@ -92,8 +92,9 @@ def task_postrun_handler(**kwargs):
 
 	# Get sender name from kwargs
 	sender_name = kwargs['sender'].name
+	# console.print(Info(message=f'Task postrun handler --> Sender name: {sender_name}'))
 
-	if CONFIG.celery.worker_kill_after_task and sender_name.startswith('secator.'):
+	if CONFIG.celery.worker_kill_after_task and (sender_name.startswith('secator.') or sender_name.startswith('api.')):
 		worker_name = os.environ.get('WORKER_NAME', 'unknown')
 		console.print(Info(message=f'Shutdown worker {worker_name} since config celery.worker_kill_after_task is set.'))
 		kill_worker(parent=True)
