@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/freelabz/secator/compare/v0.16.5...v0.17.0) (2025-09-06)
+
+
+### Features
+
+* enforceable memory limits ([#710](https://github.com/freelabz/secator/issues/710)) ([eaefa1f](https://github.com/freelabz/secator/commit/eaefa1f5497af4d6a6020e09d5f954ae4639f20c))
+
+
+### Bug Fixes
+
+* prod optimizations ([#708](https://github.com/freelabz/secator/issues/708)) ([efb5d3c](https://github.com/freelabz/secator/commit/efb5d3ce637a5de6e23ed157fd85d2a39bef360d))
+
 ## [0.16.5](https://github.com/freelabz/secator/compare/v0.16.4...v0.16.5) (2025-06-25)
 
 
