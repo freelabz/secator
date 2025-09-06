@@ -18,7 +18,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug, rich_escape as _s
+from secator.utils import debug, rich_escape as _s, signal_to_name
 
 
 logger = logging.getLogger(__name__)
@@ -440,6 +440,7 @@ class Command(Runner):
 			# Output and results
 			self.return_code = 0
 			self.killed = False
+			self.memory_limit_mb = CONFIG.security.memory_limit_mb
 
 			# Run the command using subprocess
 			env = os.environ
@@ -449,6 +450,7 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
+				preexec_fn=os.setsid,
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
@@ -472,6 +474,11 @@ class Command(Runner):
 
 		except FileNotFoundError as e:
 			yield from self.handle_file_not_found(e)
+
+		except MemoryError as e:
+			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
+			self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+			yield Warning(message=f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
 
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
@@ -527,7 +534,7 @@ class Command(Runner):
 		if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
 			return
 
-		yield from self.stats()
+		yield from self.stats(self.memory_limit_mb)
 		self.last_updated_stat = time()
 
 	def print_description(self):
@@ -565,26 +572,31 @@ class Command(Runner):
 			error = Error.from_exception(exc)
 		yield error
 
-	def stop_process(self, exit_ok=False):
+	def stop_process(self, exit_ok=False, sig=signal.SIGINT):
 		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
-		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
-		self.process.send_signal(signal.SIGINT)
+		self.debug(f'Sending signal {signal_to_name(sig)} to process {self.process.pid}.', sub='error')
+		if self.process and self.process.pid:
+			os.killpg(os.getpgid(self.process.pid), sig)
 		if exit_ok:
 			self.exit_ok = True
 
-	def stats(self):
+	def stats(self, memory_limit_mb=None):
 		"""Gather stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
 		stats = Command.get_process_info(proc, children=True)
+		total_mem = 0
 		for info in stats:
 			name = info['name']
 			pid = info['pid']
 			cpu_percent = info['cpu_percent']
 			mem_percent = info['memory_percent']
+			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			total_mem += mem_rss
+			self.debug(f'{name} {pid} {mem_rss}MB', sub='stats')
 			net_conns = info.get('net_connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
@@ -595,6 +607,9 @@ class Command(Runner):
 				net_conns=len(net_conns),
 				extra_data=extra_data
 			)
+		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
+		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
+			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
 	@staticmethod
 	def get_process_info(process, children=False):

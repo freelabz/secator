@@ -31,6 +31,7 @@ class cariddi(HttpCrawler):
 	input_types = [URL]
 	output_types = [Url, Tag]
 	tags = ['url', 'crawl']
+	input_chunk_size = 1
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '-json'
@@ -77,7 +78,42 @@ class cariddi(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
 	proxy_http = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
-	profile = 'cpu'
+	profile = lambda opts: cariddi.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def dynamic_profile(opts):
+		juicy_endpoints = cariddi._get_opt_value(
+			opts,
+			'juicy_endpoints',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		juicy_extensions = cariddi._get_opt_value(
+			opts,
+			'juicy_extensions',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		info = cariddi._get_opt_value(
+			opts,
+			'info',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		secrets = cariddi._get_opt_value(
+			opts,
+			'secrets',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		errors = cariddi._get_opt_value(
+			opts,
+			'errors',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		hunt = juicy_endpoints or (juicy_extensions is not None) or info or secrets or errors
+		return 'cpu' if hunt is True else 'io'
 
 	@staticmethod
 	def on_json_loaded(self, item):

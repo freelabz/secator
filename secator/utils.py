@@ -6,6 +6,7 @@ import json
 import logging
 import operator
 import os
+import signal
 import tldextract
 import re
 import select
@@ -823,3 +824,11 @@ def get_versions_from_string(string):
 	if not matches:
 		return []
 	return matches
+
+
+def signal_to_name(signum):
+	"""Convert a signal number to its name"""
+	for name, value in vars(signal).items():
+		if name.startswith('SIG') and not name.startswith('SIG_') and value == signum:
+			return name
+	return str(signum)

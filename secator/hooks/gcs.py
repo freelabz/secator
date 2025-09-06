@@ -14,6 +14,16 @@ ITEMS_TO_SEND = {
 	'url': ['screenshot_path', 'stored_response_path']
 }
 
+_gcs_client = None
+
+
+def get_gcs_client():
+	"""Get or create GCS client"""
+	global _gcs_client
+	if _gcs_client is None:
+		_gcs_client = storage.Client()
+	return _gcs_client
+
 
 def process_item(self, item):
 	if item._type not in ITEMS_TO_SEND.keys():
@@ -39,7 +49,7 @@ def process_item(self, item):
 def upload_blob(bucket_name, source_file_name, destination_blob_name):
 	"""Uploads a file to the bucket."""
 	start_time = time()
-	storage_client = storage.Client()
+	storage_client = get_gcs_client()
 	bucket = storage_client.bucket(bucket_name)
 	blob = bucket.blob(destination_blob_name)
 	with open(source_file_name, 'rb') as f:

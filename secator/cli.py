@@ -134,7 +134,10 @@ for config in SCANS:
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 @click.option('--use-command-runner', is_flag=True, default=False, help='Use command runner to run the command.')
-def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner):
+@click.option('--without-gossip', is_flag=True)
+@click.option('--without-mingle', is_flag=True)
+@click.option('--without-heartbeat', is_flag=True)
+def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
 	"""Run a worker."""
 
 	# Check Celery addon is installed
@@ -182,6 +185,9 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 	cmd += f' -P {pool}' if pool else ''
 	cmd += f' -c {concurrency}' if concurrency else ''
 	cmd += f' -l {loglevel}' if loglevel else ''
+	cmd += ' --without-mingle' if without_mingle else ''
+	cmd += ' --without-gossip' if without_gossip else ''
+	cmd += ' --without-heartbeat' if without_heartbeat else ''
 
 	if reload:
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"

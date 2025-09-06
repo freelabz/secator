@@ -1,3 +1,4 @@
+import gc
 import json
 import logging
 import os
@@ -5,6 +6,7 @@ import os
 from time import time
 
 from celery import Celery, chord
+from celery.canvas import signature
 from celery.app import trace
 
 from rich.logging import RichHandler
@@ -61,9 +63,10 @@ app.conf.update({
 	'result_backend': CONFIG.celery.result_backend,
 	'result_expires': CONFIG.celery.result_expires,
 	'result_backend_transport_options': json.loads(CONFIG.celery.result_backend_transport_options) if CONFIG.celery.result_backend_transport_options else {},  # noqa: E501
-	'result_extended': True,
+	'result_extended': not CONFIG.addons.mongodb.enabled,
 	'result_backend_thread_safe': True,
 	'result_serializer': 'pickle',
+	'result_accept_content': ['application/x-python-serialize'],
 
 	# Task config
 	'task_acks_late': CONFIG.celery.task_acks_late,
@@ -81,6 +84,11 @@ app.conf.update({
 	'task_store_eager_result': True,
 	'task_send_sent_event': CONFIG.celery.task_send_sent_event,
 	'task_serializer': 'pickle',
+	'task_accept_content': ['application/x-python-serialize'],
+
+	# Event config
+	'event_serializer': 'pickle',
+	'event_accept_content': ['application/x-python-serialize'],
 
 	# Worker config
 	# 'worker_direct': True,  # TODO: consider enabling this to allow routing to specific workers
@@ -168,6 +176,12 @@ def run_scan(self, args=[], kwargs={}):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
+	# Set Celery request id in context
+	context = opts.get('context', {})
+	context['celery_id'] = self.request.id
+	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
+
+	# Set routing key in context
 	if IN_CELERY_WORKER_PROCESS:
 		quiet = not CONFIG.cli.worker_command_verbose
 		opts.update({
@@ -179,15 +193,13 @@ def run_command(self, results, name, targets, opts={}):
 			'quiet': quiet
 		})
 		routing_key = self.request.delivery_info['routing_key']
+		context['routing_key'] = routing_key
 		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 
 	# Flatten + dedupe + filter results
 	results = forward_results(results)
 
-	# Set Celery request id in context
-	context = opts.get('context', {})
-	context['celery_id'] = self.request.id
-	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
+	# Set task opts
 	opts['context'] = context
 	opts['results'] = results
 	opts['sync'] = True
@@ -204,10 +216,13 @@ def run_command(self, results, name, targets, opts={}):
 	# Chunk task if needed
 	if chunk_it:
 		if IN_CELERY_WORKER_PROCESS:
-			console.print(Info(message=f'Task {name} requires chunking, breaking into {len(targets)} tasks'))
-		tasks = break_task(task, opts, results=results)
+			console.print(Info(message=f'Task {name} requires chunking'))
+		workflow = break_task(task, opts, results=results)
+		if IN_CELERY_WORKER_PROCESS:
+			console.print(Info(message=f'Task {name} successfully broken into {len(workflow)} chunks'))
 		update_state(self, task, force=True)
-		return self.replace(tasks)
+		console.print(Info(message=f'Task {name} updated state, replacing task with Celery chord workflow'))
+		return replace(self, workflow)
 
 	# Update state live
 	for _ in task:
@@ -327,6 +342,52 @@ def is_celery_worker_alive():
 	return result
 
 
+def replace(task_instance, sig):
+	"""Replace this task, with a new task inheriting the task id.
+
+	Execution of the host task ends immediately and no subsequent statements
+	will be run.
+
+	.. versionadded:: 4.0
+
+	Arguments:
+		sig (Signature): signature to replace with.
+		visitor (StampingVisitor): Visitor API object.
+
+	Raises:
+		~@Ignore: This is always raised when called in asynchronous context.
+		It is best to always use ``return self.replace(...)`` to convey
+		to the reader that the task won't continue after being replaced.
+	"""
+	console.print('Replacing task')
+	chord = task_instance.request.chord
+	sig.freeze(task_instance.request.id)
+	replaced_task_nesting = task_instance.request.get('replaced_task_nesting', 0) + 1
+	sig.set(
+		chord=chord,
+		group_id=task_instance.request.group,
+		group_index=task_instance.request.group_index,
+		root_id=task_instance.request.root_id,
+		replaced_task_nesting=replaced_task_nesting
+	)
+	import psutil
+	import os
+	process = psutil.Process(os.getpid())
+	length = len(task_instance.request.chain) if task_instance.request.chain else 0
+	console.print(f'Adding {length} chain tasks from request chain')
+	for ix, t in enumerate(reversed(task_instance.request.chain or [])):
+		console.print(f'Adding chain task {t.name} from request chain ({ix + 1}/{length})')
+		chain_task = signature(t, app=task_instance.app)
+		chain_task.set(replaced_task_nesting=replaced_task_nesting)
+		sig |= chain_task
+		del chain_task
+		del t
+		memory_bytes = process.memory_info().rss
+		console.print(f'Memory usage: {memory_bytes / 1024 / 1024:.2f} MB (chain task {ix + 1}/{length})')
+	gc.collect()
+	return task_instance.on_replace(sig)
+
+
 def break_task(task, task_opts, results=[]):
 	"""Break a task into multiple of the same type."""
 	chunks = task.inputs
@@ -370,16 +431,21 @@ def break_task(task, task_opts, results=[]):
 		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
-		info = Info(message=f'Celery chunked task created: {task_id}')
+		info = Info(message=f'Celery chunked task created ({ix + 1} / {len(chunks)}): {task_id}')
 		task.add_result(info)
 		sigs.append(sig)
 
 	# Mark main task as async since it's being chunked
 	task.sync = False
+	task.results = []
+	task.uuids = set()
+	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with{len(sigs)} chunks'))
+	console.print(Info(message=f'Results: {results}'))
 
 	# Build Celery workflow
 	workflow = chord(
 		tuple(sigs),
 		mark_runner_completed.s(runner=task).set(queue='results')
 	)
+	console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))
 	return workflow

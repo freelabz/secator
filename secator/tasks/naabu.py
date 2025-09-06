@@ -38,8 +38,7 @@ class naabu(ReconPort):
 		# 'health_check': 'hc'
 	}
 	opt_value_map = {
-		TIMEOUT: lambda x: int(x*1000) if x and x > 0 else None,  # convert to milliseconds
-		RETRIES: lambda x: 1 if x == 0 else x,
+		TIMEOUT: lambda x: int(x)*1000 if x and int(x) > 0 else None,  # convert to milliseconds
 		PROXY: lambda x: x.replace('socks5://', '')
 	}
 	item_loaders = [JSONSerializer()]
