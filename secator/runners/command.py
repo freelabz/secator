@@ -596,7 +596,7 @@ class Command(Runner):
 			mem_percent = info['memory_percent']
 			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
 			total_mem += mem_rss
-			print(f'{name} {pid} {mem_rss}MB')
+			self.debug(f'{name} {pid} {mem_rss}MB', sub='stats')
 			net_conns = info.get('net_connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
@@ -607,7 +607,7 @@ class Command(Runner):
 				net_conns=len(net_conns),
 				extra_data=extra_data
 			)
-		print(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}')
+		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
 		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
 			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
