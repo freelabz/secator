@@ -756,6 +756,7 @@ class Runner:
 			'last_updated_db': self.last_updated_db,
 			'context': self.context,
 			'errors': [e.toDict() for e in self.errors],
+			'warnings': [w.toDict() for w in self.warnings],
 		})
 		return data
 
