@@ -14,6 +14,7 @@ secatorManager:
 secatorWorker:
   name: secator-worker
   image: "freelabz/secator"
+  replicas: 1
 
   # Empty if using default repository
   repository:

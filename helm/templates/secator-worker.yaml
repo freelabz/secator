@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   name: {{ .Values.secatorWorker.name }}
 spec:
+  replicas: {{ .Values.secatorWorker.replicas }}
   selector:
     matchLabels:
       app: secator-worker
