@@ -10,6 +10,7 @@ RUN apt update -y && \
 	git \
 	golang-go \
     jq \
+	libcairo2-dev \
     openssl \
 	pipx \
 	python3 \

@@ -1,4 +1,4 @@
-FROM kalilinux/kali-rolling:latest
+FROM kali-rolling:latest
 
 ENV PATH="${PATH}:/root/.local/bin"
 ENV GOBIN="/root/.local/bin"
@@ -10,6 +10,7 @@ RUN apt update -y && \
 	git \
 	golang-go \
     jq \
+	libcairo2-dev \
     openssl \
 	pipx \
 	python3 \
