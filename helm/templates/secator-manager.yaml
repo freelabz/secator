@@ -5,6 +5,7 @@ metadata:
   labels:
     name: secator-manager
 spec:
+  automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
   containers:
   - name: secator-manager
     image: {{ .Values.secatorManager.image }}

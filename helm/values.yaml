@@ -2,6 +2,11 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+# TODO: Create service accounts instead. Assess for RBAC. Add tooling for kubernetes to image, or side-car.
+# For instance, the secator Manager pod could have sufficient access to list/get/set worker replicas for scaling from
+# from the pod itself. Perhaps another add-on?
+automountServiceAccountToken: false
+
 secatorManager:
   name: secator-manager
   image: "freelabz/secator"

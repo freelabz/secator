@@ -12,6 +12,7 @@ spec:
       labels:
         app: secator-worker
     spec:
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
       containers:
       - name: {{ .Values.secatorWorker.name }}
         image: {{ .Values.secatorWorker.image }}

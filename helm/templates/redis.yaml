@@ -13,6 +13,7 @@ spec:
       labels:
         app: redis
     spec:
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
       containers:
       - name: {{ .Values.redis.name }}
         image: {{ .Values.redis.image }}
