@@ -10,6 +10,7 @@ automountServiceAccountToken: false
 secatorManager:
   name: secator-manager
   image: "freelabz/secator"
+  securityContext: {}
 
   # resources: cpu/memory requests and limits for managers
   resources: {}
@@ -22,6 +23,7 @@ secatorManager:
 secatorWorker:
   name: secator-worker
   image: "freelabz/secator"
+  securityContext: {}
 
   # resources: cpu/memory requests and limits for workers
   resources: {}
@@ -35,6 +37,16 @@ secatorWorker:
 redis:
   name: redis
   image: "redis:alpine"
+  # Run redis with least privilege.
+  securityContext:  
+    runAsUser: 999
+    runAsGroup: 1000
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
   # resources: cpu/memory requests and limits for redis
   resources: {}
 

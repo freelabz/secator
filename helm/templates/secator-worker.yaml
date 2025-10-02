@@ -16,6 +16,8 @@ spec:
       containers:
       - name: {{ .Values.secatorWorker.name }}
         image: {{ .Values.secatorWorker.image }}
+        securityContext:
+        {{- toYaml .Values.secatorWorker.securityContext | nindent 10 }}
         resources: 
         {{- toYaml .Values.secatorWorker.resources | nindent 10 }}
         command: ["secator"]

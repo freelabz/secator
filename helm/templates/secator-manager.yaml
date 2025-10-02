@@ -9,6 +9,8 @@ spec:
   containers:
   - name: secator-manager
     image: {{ .Values.secatorManager.image }}
+    securityContext:
+    {{- toYaml .Values.secatorManager.securityContext | nindent 6 }}
     resources: 
     {{- toYaml .Values.secatorManager.resources | nindent 6 }}
     command: ["sleep"]
