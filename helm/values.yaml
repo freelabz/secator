@@ -6,6 +6,9 @@ secatorManager:
   name: secator-manager
   image: "freelabz/secator"
 
+  # resources: cpu/memory requests and limits for managers
+  resources: {}
+
   # Empty if using default repository
   repository:
   # Empty if using tag "latest"
@@ -14,6 +17,9 @@ secatorManager:
 secatorWorker:
   name: secator-worker
   image: "freelabz/secator"
+
+  # resources: cpu/memory requests and limits for workers
+  resources: {}
   replicas: 1
 
   # Empty if using default repository
@@ -24,6 +30,8 @@ secatorWorker:
 redis:
   name: redis
   image: "redis:alpine"
+  # resources: cpu/memory requests and limits for redis
+  resources: {}
 
   # Empty if using default repository
   repository:

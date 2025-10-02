@@ -8,6 +8,8 @@ spec:
   containers:
   - name: secator-manager
     image: {{ .Values.secatorManager.image }}
+    resources: 
+    {{- toYaml .Values.secatorManager.resources | nindent 6 }}
     command: ["sleep"]
     args: ["infinity"]
     env:

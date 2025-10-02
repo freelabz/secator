@@ -16,6 +16,8 @@ spec:
       containers:
       - name: {{ .Values.redis.name }}
         image: {{ .Values.redis.image }}
+        resources:
+        {{- toYaml .Values.redis.resources | nindent 10 }}
         ports:
         - containerPort: {{ .Values.redis.port }}
           name: client

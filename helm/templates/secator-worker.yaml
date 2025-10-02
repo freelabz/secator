@@ -15,6 +15,8 @@ spec:
       containers:
       - name: {{ .Values.secatorWorker.name }}
         image: {{ .Values.secatorWorker.image }}
+        resources: 
+        {{- toYaml .Values.secatorWorker.resources | nindent 10 }}
         command: ["secator"]
         args: ["worker"]
         env:
