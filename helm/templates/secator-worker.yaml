@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Values.secatorWorker.name }}
-  namespace: {{ .Values.namespace }}
 spec:
   selector:
     matchLabels:
