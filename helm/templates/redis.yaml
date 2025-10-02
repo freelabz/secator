@@ -18,9 +18,9 @@ spec:
       - name: {{ .Values.redis.name }}
         image: {{ .Values.redis.image }}
         securityContext:
-        {{- toYaml .Values.redis.securityContext | nindent 10 }}
+{{- toYaml .Values.redis.securityContext | nindent 10 }}
         resources:
-        {{- toYaml .Values.redis.resources | nindent 10 }}
+{{- toYaml .Values.redis.resources | nindent 10 }}
         ports:
         - containerPort: {{ .Values.redis.port }}
           name: client
