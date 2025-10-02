@@ -22,7 +22,7 @@ secatorWorker:
 
 redis:
   name: redis
-  image: "redis"
+  image: "redis:alpine"
 
   # Empty if using default repository
   repository:
