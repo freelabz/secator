@@ -465,10 +465,22 @@ class Runner:
 
 		# Keep existing ancestor id in context
 		ancestor_id = item._context.get('ancestor_id', None)
+		task_id = item._context.get('task_id', None)
+		workflow_id = item._context.get('workflow_id', None)
+		scan_id = item._context.get('scan_id', None)
+		run_id = item._context.get('run_id', None)
 
 		# Set context
 		item._context.update(self.context)
 		item._context['ancestor_id'] = ancestor_id or self.ancestor_id
+		if task_id:
+			item._context['task_id'] = task_id
+		if workflow_id:
+			item._context['workflow_id'] = workflow_id
+		if scan_id:
+			item._context['scan_id'] = scan_id
+		if run_id:
+			item._context['run_id'] = run_id
 
 		# Set uuid
 		if not item._uuid:
