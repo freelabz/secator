@@ -56,7 +56,7 @@ class Task(Runner):
 		opts['print_target'] = False
 		opts['has_parent'] = False
 		opts['skip_if_no_inputs'] = False
-		opts['caller'] = 'Task'
+		opts['caller'] = self.caller or 'Task'
 
 		# Create task signature
 		profile = task_cls.profile(opts) if callable(task_cls.profile) else task_cls.profile

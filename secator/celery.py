@@ -63,7 +63,7 @@ app.conf.update({
 	'result_backend': CONFIG.celery.result_backend,
 	'result_expires': CONFIG.celery.result_expires,
 	'result_backend_transport_options': json.loads(CONFIG.celery.result_backend_transport_options) if CONFIG.celery.result_backend_transport_options else {},  # noqa: E501
-	'result_extended': not CONFIG.addons.mongodb.enabled,
+	'result_extended': CONFIG.celery.result_extended,
 	'result_backend_thread_safe': True,
 	'result_serializer': 'pickle',
 	'result_accept_content': ['application/x-python-serialize'],
@@ -229,7 +229,8 @@ def run_command(self, results, name, targets, opts={}):
 		update_state(self, task)
 	update_state(self, task, force=True)
 
-	if CONFIG.addons.mongodb.enabled:
+	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled and task.caller != 'cli':
+		console.print(Info(message=f'Compressing {len(task.results)} results to uuids \[mongodb]'))
 		return [r._uuid for r in task.results]
 	return task.results
 
@@ -256,7 +257,7 @@ def forward_results(results):
 
 	results = flatten(results)
 	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
-		console.print(Info(message=f'Extracting uuids from {len(results)} results'))
+		console.print(Info(message=f'Extracting uuids from {len(results)} results \[mongodb]'))
 		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
 		uuids.extend([r for r in results if isinstance(r, str)])
 		results = list(set(uuids))

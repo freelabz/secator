@@ -44,7 +44,7 @@ class Scan(Runner):
 			run_opts = self.run_opts.copy()
 			run_opts.pop('profiles', None)
 			run_opts['no_poll'] = True
-			run_opts['caller'] = 'Scan'
+			run_opts['caller'] = self.caller or 'Scan'
 			run_opts['has_parent'] = True
 			run_opts['enable_reports'] = False
 			run_opts['print_profiles'] = False

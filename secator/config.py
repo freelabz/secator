@@ -64,6 +64,7 @@ class Celery(StrictModel):
 	result_backend: StrExpandHome = ''
 	result_backend_transport_options: str = ""
 	result_expires: int = 86400  # 1 day
+	result_extended: bool = True
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
