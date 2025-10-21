@@ -230,6 +230,7 @@ def run_command(self, results, name, targets, opts={}):
 	update_state(self, task, force=True)
 
 	if CONFIG.addons.mongodb.enabled:
+		console.print(Info(message=f'Extracting uuids from {len(task.results)} results [mongodb]'))
 		return [r._uuid for r in task.results]
 	return task.results
 
@@ -255,8 +256,8 @@ def forward_results(results):
 		console.print(Info(message=f'Deduplicating {len(results)} results'))
 
 	results = flatten(results)
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
-		console.print(Info(message=f'Extracting uuids from {len(results)} results'))
+	if CONFIG.addons.mongodb.enabled:
+		console.print(Info(message=f'Extracting uuids from {len(results)} results [mongodb]'))
 		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
 		uuids.extend([r for r in results if isinstance(r, str)])
 		results = list(set(uuids))
@@ -287,13 +288,13 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if results:
 		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
 		results = get_results(results)
 	for item in results:
-		runner.add_result(item, print=False)
+		runner.add_result(item, print=False, hooks=False)
 	runner.mark_started()
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
 	return runner.results
 
@@ -315,13 +316,13 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
 		results = get_results(results)
 	for item in results:
-		runner.add_result(item, print=False)
+		runner.add_result(item, print=False, hooks=False)
 	runner.mark_completed()
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
 	return runner.results
 
@@ -439,7 +440,7 @@ def break_task(task, task_opts, results=[]):
 	task.sync = False
 	task.results = []
 	task.uuids = set()
-	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with{len(sigs)} chunks'))
+	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
 	console.print(Info(message=f'Results: {results}'))
 
 	# Build Celery workflow

@@ -4,8 +4,9 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, USER_AGENT, URL)
+							   THREADS, TIMEOUT, USER_AGENT, URL, HOST)
 from secator.output_types.url import Url
+from secator.output_types.subdomain import Subdomain
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
@@ -14,14 +15,15 @@ from secator.tasks._categories import HttpCrawler
 class gau(HttpCrawler):
 	"""Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan."""
 	cmd = 'gau'
-	input_types = [URL]
-	output_types = [Url]
+	input_types = [URL, HOST]
+	output_types = [Url, Subdomain]
 	tags = ['pattern', 'scan']
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
 	opts = {
-		'providers': {'type': str, 'default': None, 'help': 'List of providers to use (wayback,commoncrawl,otx,urlscan)'}
+		'providers': {'type': str, 'default': None, 'help': 'List of providers to use (wayback,commoncrawl,otx,urlscan)'},
+		'subdomains': {'is_flag': True, 'default': False, 'help': 'Fetch subdomains'}
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
@@ -43,6 +45,7 @@ class gau(HttpCrawler):
 		THREADS: 'threads',
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		'subdomains': 'subs'
 	}
 	item_loaders = [JSONSerializer()]
 	install_pre = {
@@ -55,3 +58,19 @@ class gau(HttpCrawler):
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'io'
+
+	@staticmethod
+	def on_init(self):
+		self.subdomains = []
+
+	@staticmethod
+	def on_json_loaded(self, item):
+		if self.get_opt_value('subdomains'):
+			subdomain = item['url'].split('://')[1].split('/')[0].split(':')[0]
+			host = '.'.join(subdomain.split('.')[1:])
+			subdomain = Subdomain(host=subdomain, domain=host)
+			if subdomain not in self.subdomains:
+				self.subdomains.append(subdomain)
+				yield subdomain
+		else:
+			yield Url(url=item['url'])
