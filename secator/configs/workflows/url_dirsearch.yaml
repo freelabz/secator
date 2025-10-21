@@ -7,6 +7,9 @@ input_types:
   - url
 
 tasks:
+  httpx:
+    description: Run HTTP probe on root URLs
+
   ffuf:
     description: Search for HTTP directories
     wordlist: directory_list_small

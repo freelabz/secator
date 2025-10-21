@@ -34,6 +34,10 @@ tasks:
     subfinder:
       description: List subdomains (passive)
 
+    gau:
+      description: List subdomains (passive)
+      subdomains: True
+
     dnsx/brute:
       description: Bruteforce subdomains (DNS)
       subdomains_only: True
