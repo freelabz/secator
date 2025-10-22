@@ -11,6 +11,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   URL, USER_AGENT)
 from secator.output_types import Tag, Vulnerability, Info, Error
 from secator.tasks._categories import VulnHttp
+from secator.installer import parse_version
 
 
 @task()
@@ -110,6 +111,12 @@ class wpscan(VulnHttp):
 		# Get URL
 		target = data.get('target_url', self.inputs[0])
 
+		# Get errors
+		scan_aborted = data.get('scan_aborted', False)
+		if scan_aborted:
+			yield Error(message=scan_aborted, traceback='\n'.join(data.get('trace', [])))
+			return
+
 		# Wordpress version
 		version = data.get('version', {})
 		if version:
@@ -133,7 +140,7 @@ class wpscan(VulnHttp):
 			location = main_theme['location']
 			if version:
 				number = version['number']
-				latest_version = main_theme.get('latest_version')
+				latest_version = main_theme.get('latest_version') or 'unknown'
 				yield Tag(
 					name=f'Wordpress theme - {slug} {number}',
 					match=target,
@@ -142,10 +149,12 @@ class wpscan(VulnHttp):
 						'latest_version': latest_version
 					}
 				)
-				if (latest_version and number < latest_version):
+				outdated = latest_version and parse_version(number) < parse_version(latest_version)
+				if outdated:
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress theme - {slug} {number} outdated',
+						description=f'The wordpress theme {slug} is outdated, consider updating to the latest version {latest_version}',
 						confidence='high',
 						severity='info'
 					)
@@ -163,7 +172,7 @@ class wpscan(VulnHttp):
 			location = data['location']
 			if version:
 				number = version['number']
-				latest_version = data.get('latest_version')
+				latest_version = data.get('latest_version') or 'unknown'
 				yield Tag(
 					name=f'Wordpress plugin - {slug} {number}',
 					match=target,
@@ -172,10 +181,12 @@ class wpscan(VulnHttp):
 						'latest_version': latest_version
 					}
 				)
-				if (latest_version and number < latest_version):
+				outdated = latest_version and parse_version(number) < parse_version(latest_version)
+				if outdated:
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress plugin - {slug} {number} outdated',
+						description=f'The wordpress plugin {slug} is outdated, consider updating to the latest version {latest_version}.',
 						confidence='high',
 						severity='info'
 					)
