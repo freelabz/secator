@@ -264,7 +264,7 @@ OUTPUTS_TASKS = {
             _source='nuclei')
     ],
     'subfinder': [
-        Subdomain(host='virusscan.api.github.com', domain='api.github.com', _source='subfinder')
+        Subdomain(host='support.github.com', domain='github.com', _source='subfinder')
     ],
     'trivy': [
         Vulnerability(

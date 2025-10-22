@@ -21,7 +21,7 @@ INPUTS_TASKS = {
 	'h8mail': 'test@test.com',
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
-	'subfinder': 'api.github.com',
+	'subfinder': 'github.com',
 	'testssl': 'free.fr',
 	'trivy': 'https://github.com/blacklanternsecurity/bbot',
 	'wpscan': 'http://localhost:8000/',
