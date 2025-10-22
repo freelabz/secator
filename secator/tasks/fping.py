@@ -19,7 +19,7 @@ class fping(ReconIp):
 	opts = {
 		'count': {'type': int, 'default': None, 'help': 'Number of request packets to send to each target'},
 		'show_name': {'is_flag': True, 'default': False, 'help': 'Show network addresses as well as hostnames'},
-		'use_dns': {'is_flag': True, 'default': False, 'help': 'Use DNS to lookup address of return packet (same as -n but will force reverse-DNS lookup for hostnames)'},
+		'use_dns': {'is_flag': True, 'default': False, 'help': 'Use DNS to lookup address of return packet (same as -n but will force reverse-DNS lookup for hostnames)'},  # noqa: E501
 		'summary': {'is_flag': True, 'default': False, 'help': 'Print cumulative statistics upon exit'},
 	}
 	opt_prefix = '--'
@@ -73,4 +73,3 @@ class fping(ReconIp):
 		if 'Unreachable' in line:
 			return ''  # discard line as it pollutes output
 		return line
-
