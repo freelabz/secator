@@ -22,7 +22,7 @@ class fping(ReconIp):
 		'use_dns': {'is_flag': True, 'default': False, 'help': 'Use DNS to lookup address of return packet (same as -n but will force reverse-DNS lookup for hostnames)'},
 		'summary': {'is_flag': True, 'default': False, 'help': 'Print cumulative statistics upon exit'},
 	}
-	opt_prefix = '-'
+	opt_prefix = '--'
 	opt_key_map = {
 		DELAY: 'period',
 		PROXY: OPT_NOT_SUPPORTED,
@@ -30,14 +30,14 @@ class fping(ReconIp):
 		RETRIES: 'retry',
 		TIMEOUT: 'timeout',
 		THREADS: OPT_NOT_SUPPORTED,
-		'count': 'c',
-		'show_name': 'n',
-		'use_dns': 'd',
-		'summary': 's',
+		'count': '-c',
+		'show_name': '-n',
+		'use_dns': '-d',
+		'summary': '-s',
 	}
 	opt_value_map = {
-		DELAY: lambda x: x * 1000,  # convert s to ms
-		TIMEOUT: lambda x: x * 1000  # convert s to ms
+		DELAY: lambda x: int(x) * 1000,  # convert s to ms
+		TIMEOUT: lambda x: int(x) * 1000  # convert s to ms
 	}
 	install_github_handle = 'schweikert/fping'
 	install_version = 'v5.1'
