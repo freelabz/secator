@@ -467,7 +467,7 @@ class Runner:
 		ctx = item._context.copy()
 		item._context = self.context.copy()
 		item._context.update(ctx)
-		item._context['ancestor_id'] = item._context.get('ancestor_id', self.ancestor_id)
+		item._context['ancestor_id'] = ctx.get('ancestor_id') or self.ancestor_id
 
 		# Set uuid
 		if not item._uuid:
