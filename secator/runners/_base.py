@@ -179,14 +179,14 @@ class Runner:
 		# Add prior results to runner results
 		self.debug(f'adding {len(results)} prior results to runner', sub='init')
 		if CONFIG.addons.mongodb.enabled:
-			self.debug('adding prior results from MongoDB', sub='init')
+			self.debug(f'loading {len(results)} results from MongoDB', sub='init')
 			from secator.hooks.mongodb import get_results
 			results = get_results(results)
 		for result in results:
 			self.add_result(result, print=False, output=False, hooks=False, queue=not self.has_parent)
 
 		# Determine inputs
-		self.debug(f'resolving inputs with dynamic opts ({len(self.dynamic_opts)})', obj=self.dynamic_opts, sub='init')
+		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		self.inputs = list(set(self.inputs))
 		targets = [Target(name=target) for target in self.inputs]
@@ -463,12 +463,11 @@ class Runner:
 		if item._uuid and item._uuid in self.uuids:
 			return
 
-		# Keep existing ancestor id in context
-		ancestor_id = item._context.get('ancestor_id', None)
-
-		# Set context
-		item._context.update(self.context)
-		item._context['ancestor_id'] = ancestor_id or self.ancestor_id
+		# Update context with runner info
+		ctx = item._context.copy()
+		item._context = self.context.copy()
+		item._context.update(ctx)
+		item._context['ancestor_id'] = item._context.get('ancestor_id', self.ancestor_id)
 
 		# Set uuid
 		if not item._uuid:
