@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.18.0](https://github.com/freelabz/secator/compare/v0.17.0...v0.18.0) (2025-10-22)
+
+
+### Features
+
+* **workflow:** update user hunt ([#688](https://github.com/freelabz/secator/issues/688)) ([e4f3e29](https://github.com/freelabz/secator/commit/e4f3e294c1668c66ed893305b0147df37cb4453a))
+
+
+### Bug Fixes
+
+* broken sudo prompt because of os.setsid ([#722](https://github.com/freelabz/secator/issues/722)) ([5c77957](https://github.com/freelabz/secator/commit/5c77957cb78533b7e819c01c19de6e46eae0d2af))
+* bugs and warnings in task data ([#714](https://github.com/freelabz/secator/issues/714)) ([845415b](https://github.com/freelabz/secator/commit/845415bb337f77867d49be66bbd23eaf307e5848))
+* bup file flag ([#725](https://github.com/freelabz/secator/issues/725)) ([0622ef5](https://github.com/freelabz/secator/commit/0622ef509b1dc33996dd5e89aea5cd802160744d))
+* context propagation for subtasks ([#720](https://github.com/freelabz/secator/issues/720)) ([d636aa6](https://github.com/freelabz/secator/commit/d636aa66562fd030299fce20f3abaeca283eaf74))
+* **fping:** remove bad options, add new ones ([#713](https://github.com/freelabz/secator/issues/713)) ([4356b4f](https://github.com/freelabz/secator/commit/4356b4f120043e2f94973a9c0061345a06efaeda))
+* maigret version pin ([#721](https://github.com/freelabz/secator/issues/721)) ([488b5a1](https://github.com/freelabz/secator/commit/488b5a1b994e6d3dfadc409d09aaaeb93ff60fb4))
+* subfinder integration tests ([#724](https://github.com/freelabz/secator/issues/724)) ([8163152](https://github.com/freelabz/secator/commit/8163152efb09f3854ec9fa7125b16084eda4c98f))
+* wpscan errors and wordpress workflow ([#723](https://github.com/freelabz/secator/issues/723)) ([8ee32aa](https://github.com/freelabz/secator/commit/8ee32aacb1310cfb833bdcf696477ae29eb271c7))
+
 ## [0.17.0](https://github.com/freelabz/secator/compare/v0.16.5...v0.17.0) (2025-09-06)
 
 
