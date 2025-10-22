@@ -27,7 +27,6 @@ ENV PATH="${PATH}:/root/.local/bin"
 ENV GOBIN="/root/.local/bin"
 COPY --from=builder /root/.local /root/.local
 RUN apk add --no-cache \
-	cairo-dev \
 	flock \
 	pipx \
 	sudo
