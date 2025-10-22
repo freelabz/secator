@@ -17,11 +17,10 @@ class fping(ReconIp):
 	file_flag = '-f'
 	input_flag = None
 	opts = {
-		'count': {'type': int, 'default': None, 'short': 'c', 'help': 'Number of request packets to send to each target'},
-		'show_name': {'is_flag': True, 'default': False, 'short': 'n', 'help': 'Show network addresses as well as hostnames'},
-		'use_dns': {'is_flag': True, 'default': False, 'short': 'd',
-			  'help': 'Use DNS to lookup address of return packet (same as -n but will force reverse-DNS lookup for hostnames)'},
-		'summary': {'is_flag': True, 'default': False, 'short': 's', 'help': 'Print cumulative statistics upon exit'},
+		'count': {'type': int, 'default': None, 'help': 'Number of request packets to send to each target'},
+		'show_name': {'is_flag': True, 'default': False, 'help': 'Show network addresses as well as hostnames'},
+		'use_dns': {'is_flag': True, 'default': False, 'help': 'Use DNS to lookup address of return packet (same as -n but will force reverse-DNS lookup for hostnames)'},
+		'summary': {'is_flag': True, 'default': False, 'help': 'Print cumulative statistics upon exit'},
 	}
 	opt_prefix = '-'
 	opt_key_map = {
