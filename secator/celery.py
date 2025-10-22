@@ -174,7 +174,7 @@ def run_scan(self, args=[], kwargs={}):
 	scan.run()
 
 
-@app.task(bind=True, max_retries=2, retry_backoff=True)
+@app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
 	# Set Celery request id in context
 	context = opts.get('context', {})
