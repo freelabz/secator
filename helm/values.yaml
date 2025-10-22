@@ -2,11 +2,18 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-namespace: secator
+# TODO: Create service accounts instead. Assess for RBAC. Add tooling for kubernetes to image, or side-car.
+# For instance, the secator Manager pod could have sufficient access to list/get/set worker replicas for scaling from
+# from the pod itself. Perhaps another add-on?
+automountServiceAccountToken: false
 
 secatorManager:
   name: secator-manager
   image: "freelabz/secator"
+  securityContext: {}
+
+  # resources: cpu/memory requests and limits for managers
+  resources: {}
 
   # Empty if using default repository
   repository:
@@ -16,6 +23,11 @@ secatorManager:
 secatorWorker:
   name: secator-worker
   image: "freelabz/secator"
+  securityContext: {}
+
+  # resources: cpu/memory requests and limits for workers
+  resources: {}
+  replicas: 1
 
   # Empty if using default repository
   repository:
@@ -24,7 +36,19 @@ secatorWorker:
 
 redis:
   name: redis
-  image: "redis"
+  image: "redis:alpine"
+  # Run redis with least privilege.
+  securityContext:  
+    runAsUser: 999
+    runAsGroup: 1000
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # resources: cpu/memory requests and limits for redis
+  resources: {}
 
   # Empty if using default repository
   repository:

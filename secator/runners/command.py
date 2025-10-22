@@ -419,10 +419,13 @@ class Command(Runner):
 			self.print_command()
 
 			# Check for sudo requirements and prepare the password if needed
-			sudo_password, error = self._prompt_sudo(self.cmd)
-			if error:
-				yield Error(message=error)
-				return
+			sudo_required = re.search(r'\bsudo\b', self.cmd)
+			sudo_password = None
+			if sudo_required:
+				sudo_password, error = self._prompt_sudo(self.cmd)
+				if error:
+					yield Error(message=error)
+					return
 
 			# Prepare cmds
 			command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -450,7 +453,7 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
-				preexec_fn=os.setsid,
+				preexec_fn=os.setsid if not sudo_required else None,
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
@@ -688,7 +691,7 @@ class Command(Runner):
 				['sudo', '-S', '-p', '', 'true'],
 				input=sudo_password + "\n",
 				text=True,
-				capture_output=True
+				capture_output=True,
 			)
 			if result.returncode == 0:
 				return sudo_password, None  # Password is correct
