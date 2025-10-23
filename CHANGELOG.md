@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/freelabz/secator/compare/v0.18.0...v0.19.0) (2025-10-23)
+
+
+### Features
+
+* add monitor thread ([#727](https://github.com/freelabz/secator/issues/727)) ([5377e77](https://github.com/freelabz/secator/commit/5377e77186c88b1331b7ddc4a5304a610ad3e253))
+
 ## [0.18.0](https://github.com/freelabz/secator/compare/v0.17.0...v0.18.0) (2025-10-22)
 
 
