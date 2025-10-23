@@ -13,7 +13,7 @@ from dotmap import DotMap
 import humanize
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
-from secator.celery_utils import CeleryData
+from secator.pollers import CeleryPoller
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
@@ -674,18 +674,6 @@ class Runner:
 		Yields:
 			secator.output_types.OutputType: Secator output type.
 		"""
-		# If existing celery result, yield from it
-		if self.celery_result:
-			yield from CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				revoked=self.revoked,
-				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
-			)
-			return
-
 		# Build Celery workflow
 		self.debug('building celery workflow', sub='start')
 		workflow = self.build_celery_workflow()
@@ -705,10 +693,8 @@ class Runner:
 				task_id=self.celery_result.id
 			)
 			if self.no_poll:
-				self.enable_reports = False
-				self.no_process = True
 				return
-			results = CeleryData.iter_results(
+			results = CeleryPoller.iter_results(
 				self.celery_result,
 				ids_map=self.celery_ids_map,
 				description=True,
