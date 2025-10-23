@@ -38,7 +38,8 @@ RUN adduser -D secator
 
 # Configure sudoers to allow 'secator' to run 'apk add' and 'nmap' without a password
 RUN echo "secator ALL=(ALL) NOPASSWD: /sbin/apk add *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/ln *" >> /etc/sudoers
 
 # Ensure proper permissions for sudoers
 RUN chmod 0440 /etc/sudoers
