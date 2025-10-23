@@ -26,6 +26,7 @@ FROM python:3.12-alpine3.21
 ARG flavor=full
 ARG build_from_source=false
 COPY --from=builder /home/secator/.local /home/secator/.local
+RUN chmod -R 500 /home/secator/.local/share/pipx/venvs/secator
 
 # Install sudo and nmap
 RUN apk add --no-cache \
