@@ -1,4 +1,3 @@
-from bson.objectid import ObjectId
 
 
 class MongoDBPoller(object):
@@ -29,6 +28,7 @@ class MongoDBPoller(object):
 			list: List of results.
 		"""
 		from secator.hooks.mongodb import get_mongodb_client, load_findings
+		from bson.objectid import ObjectId
 		client = get_mongodb_client()
 		db = client.main
 		runner = db.runners.find_one({

@@ -76,7 +76,7 @@ class Report:
 			del data['info']['results']
 		data['info']['title'] = self.title
 		data['info']['errors'] = self.runner.errors
-		data['info']['celery_id'] = self.runner.celery_result.id
+		data['info']['celery_id'] = self.runner.celery_result.id if self.runner.celery_result else None
 		data['info']['celery_ids'] = self.runner.celery_ids
 		ids_map = self.runner.celery_ids_map.copy()
 		for idx, val in ids_map.items():
