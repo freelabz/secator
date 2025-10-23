@@ -32,15 +32,15 @@ RUN chmod -R 500 /home/secator/.local/share/pipx/venvs/secator
 RUN apk add --no-cache \
     flock \
     pipx \
-    sudo \
-    nmap
+    sudo
 
 RUN adduser -D secator
 
 # Configure sudoers to allow 'secator' to run 'apk add' and 'nmap' without a password
 RUN echo "secator ALL=(ALL) NOPASSWD: /sbin/apk add *" >> /etc/sudoers && \
     echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers
+    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers
 
 # Ensure proper permissions for sudoers
 RUN chmod 0440 /etc/sudoers
