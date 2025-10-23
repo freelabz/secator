@@ -150,7 +150,7 @@ class PackageInstaller:
 
 		# Installer cmd
 		cmd = distribution.pm_installer
-		if CONFIG.security.autoinstall_commands and IN_CELERY_WORKER_PROCESS:
+		if CONFIG.security.auto_install_commands and IN_CELERY_WORKER_PROCESS:
 			cmd = f'flock /tmp/install.lock {cmd}'
 		if getpass.getuser() != 'root':
 			cmd = f'sudo {cmd}'

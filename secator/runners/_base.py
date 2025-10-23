@@ -788,8 +788,6 @@ class Runner:
 					continue
 				result = hook(self, *args)
 				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)  # noqa: E501
-				if isinstance(result, Error):
-					self.add_result(result, hooks=False)
 			except Exception as e:
 				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
 				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')

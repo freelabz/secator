@@ -2,11 +2,13 @@ import copy
 import getpass
 import logging
 import os
+import queue
 import re
 import shlex
 import signal
 import subprocess
 import sys
+import threading
 
 from time import time
 
@@ -178,6 +180,13 @@ class Command(Runner):
 		# Process
 		self.process = None
 
+		# Monitor thread (lazy initialization)
+		self.monitor_thread = None
+		self.monitor_stop_event = None
+		self.monitor_queue = None
+		self.process_start_time = None
+		# self.retry_count = 0  # TODO: remove this
+
 		# Sudo
 		self.requires_sudo = False
 
@@ -204,6 +213,13 @@ class Command(Runner):
 		if instance_func:
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
+
+	def _init_monitor_objects(self):
+		"""Initialize monitor thread objects when needed (lazy initialization)."""
+		if self.monitor_stop_event is None:
+			self.monitor_stop_event = threading.Event()
+		if self.monitor_queue is None:
+			self.monitor_queue = queue.Queue()
 
 	def toDict(self):
 		res = super().toDict()
@@ -443,7 +459,7 @@ class Command(Runner):
 			# Output and results
 			self.return_code = 0
 			self.killed = False
-			self.memory_limit_mb = CONFIG.security.memory_limit_mb
+			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
 
 			# Run the command using subprocess
 			env = os.environ
@@ -458,6 +474,13 @@ class Command(Runner):
 				env=env,
 				cwd=self.cwd)
 
+			# Initialize monitor objects and start monitor thread
+			self._init_monitor_objects()
+			self.process_start_time = time()
+			self.monitor_stop_event.clear()
+			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
+			self.monitor_thread.start()
+
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
 				self.process.stdin.write(f"{sudo_password}\n")
@@ -469,6 +492,7 @@ class Command(Runner):
 				if not line:
 					break
 				yield from self.process_line(line)
+				yield from self.process_monitor_queue()
 
 			# Run hooks after cmd has completed successfully
 			result = self.run_hooks('on_cmd_done', sub='end')
@@ -477,11 +501,6 @@ class Command(Runner):
 
 		except FileNotFoundError as e:
 			yield from self.handle_file_not_found(e)
-
-		except MemoryError as e:
-			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
-			self.stop_process(exit_ok=True, sig=signal.SIGTERM)
-			yield Warning(message=f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
 
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
@@ -532,13 +551,16 @@ class Command(Runner):
 		if self.no_process:
 			return
 
-		# Yield command stats (CPU, memory, conns ...)
-		# TODO: enable stats support with timer
-		if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
+	def process_monitor_queue(self):
+		"""Process and yield any queued items from monitor thread."""
+		if self.monitor_queue is None:
 			return
-
-		yield from self.stats(self.memory_limit_mb)
-		self.last_updated_stat = time()
+		while not self.monitor_queue.empty():
+			try:
+				monitor_item = self.monitor_queue.get_nowait()
+				yield monitor_item
+			except queue.Empty:
+				break
 
 	def print_description(self):
 		"""Print description"""
@@ -585,6 +607,100 @@ class Command(Runner):
 		if exit_ok:
 			self.exit_ok = True
 
+	def _stop_monitor_thread(self):
+		"""Stop monitor thread."""
+		if self.monitor_thread and self.monitor_thread.is_alive() and self.monitor_stop_event:
+			self.monitor_stop_event.set()
+			self.monitor_thread.join(timeout=2.0)
+
+	def _monitor_process(self):
+		"""Monitor thread that checks process health and kills if necessary."""
+		last_stats_time = 0
+
+		while not self.monitor_stop_event.is_set():
+			if not self.process or not self.process.pid:
+				break
+
+			try:
+				current_time = time()
+				self.debug('Collecting monitor items', sub='monitor')
+
+				# Collect and queue stats at regular intervals
+				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
+					stats_items = list(self._collect_stats())
+					for stat_item in stats_items:
+						if self.monitor_queue is not None:
+							self.monitor_queue.put(stat_item)
+					last_stats_time = current_time
+
+					# Check memory usage from collected stats
+					if self.memory_limit_mb and self.memory_limit_mb != -1:
+						total_mem = sum(stat_item.extra_data.get('memory_info', {}).get('rss', 0) / 1024 / 1024 for stat_item in stats_items)  # noqa: E501
+						if total_mem > self.memory_limit_mb:
+							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
+							if self.monitor_queue is not None:
+								self.monitor_queue.put(warning)
+							self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+							break
+
+				# Check execution time
+				if self.process_start_time and CONFIG.celery.task_max_timeout != -1:
+					elapsed_time = current_time - self.process_start_time
+					if elapsed_time > CONFIG.celery.task_max_timeout:
+						warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
+						if self.monitor_queue is not None:
+							self.monitor_queue.put(warning)
+						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+						break
+
+				# Check retry count
+				# TODO: remove this
+				# if CONFIG.celery.task_max_retries and self.retry_count >= CONFIG.celery.task_max_retries:
+				# 	warning = Warning(message=f'Max retries {CONFIG.celery.task_max_retries} exceeded (actual: {self.retry_count})')
+				# 	self.monitor_queue.put(warning)
+				# 	self.stop_process(exit_ok=False, sig=signal.SIGTERM)
+				# 	break
+
+			except Exception as e:
+				self.debug(f'Monitor thread error: {e}', sub='monitor')
+				warning = Warning(message=f'Monitor thread error: {e}')
+				if self.monitor_queue is not None:
+					self.monitor_queue.put(warning)
+				break
+
+			# Sleep for a short interval before next check (stat update frequency)
+			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
+
+	def _collect_stats(self):
+		"""Collect stats about the current running process, if any."""
+		if not self.process or not self.process.pid:
+			return
+		proc = psutil.Process(self.process.pid)
+		stats = Command.get_process_info(proc, children=True)
+		total_mem = 0
+		for info in stats:
+			name = info['name']
+			pid = info['pid']
+			cpu_percent = info['cpu_percent']
+			# mem_percent = info['memory_percent']
+			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			total_mem += mem_rss
+			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
+			net_conns = info.get('net_connections') or []
+			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+			yield Stat(
+				name=name,
+				pid=pid,
+				cpu=cpu_percent,
+				memory=mem_rss,
+				memory_limit=self.memory_limit_mb,
+				net_conns=len(net_conns),
+				extra_data=extra_data
+			)
+		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
+		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
+		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
+
 	def stats(self, memory_limit_mb=None):
 		"""Gather stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
@@ -599,7 +715,7 @@ class Command(Runner):
 			mem_percent = info['memory_percent']
 			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
 			total_mem += mem_rss
-			self.debug(f'{name} {pid} {mem_rss}MB', sub='stats')
+			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
 			net_conns = info.get('net_connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
@@ -701,6 +817,8 @@ class Command(Runner):
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
+		self._stop_monitor_thread()
+		yield from self.process_monitor_queue()
 		if not self.process:
 			return
 		for line in self.process.stdout.readlines():

@@ -67,6 +67,8 @@ class Celery(StrictModel):
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
+	task_max_timeout: int = -1
+	task_memory_limit_mb: int = -1
 	worker_max_tasks_per_child: int = 20
 	worker_prefetch_multiplier: int = 1
 	worker_send_task_events: bool = False
@@ -100,7 +102,6 @@ class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
 	force_source_install: bool = False
-	memory_limit_mb: int = -1
 
 
 class HTTP(StrictModel):
