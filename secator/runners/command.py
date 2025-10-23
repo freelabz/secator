@@ -180,10 +180,10 @@ class Command(Runner):
 		# Process
 		self.process = None
 
-		# Monitor thread
+		# Monitor thread (lazy initialization)
 		self.monitor_thread = None
-		self.monitor_stop_event = threading.Event()
-		self.monitor_queue = queue.Queue()
+		self.monitor_stop_event = None
+		self.monitor_queue = None
 		self.process_start_time = None
 		# self.retry_count = 0  # TODO: remove this
 
@@ -213,6 +213,13 @@ class Command(Runner):
 		if instance_func:
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
+
+	def _init_monitor_objects(self):
+		"""Initialize monitor thread objects when needed (lazy initialization)."""
+		if self.monitor_stop_event is None:
+			self.monitor_stop_event = threading.Event()
+		if self.monitor_queue is None:
+			self.monitor_queue = queue.Queue()
 
 	def toDict(self):
 		res = super().toDict()
@@ -467,7 +474,8 @@ class Command(Runner):
 				env=env,
 				cwd=self.cwd)
 
-			# Start monitor thread
+			# Initialize monitor objects and start monitor thread
+			self._init_monitor_objects()
 			self.process_start_time = time()
 			self.monitor_stop_event.clear()
 			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
@@ -545,6 +553,8 @@ class Command(Runner):
 
 	def process_monitor_queue(self):
 		"""Process and yield any queued items from monitor thread."""
+		if self.monitor_queue is None:
+			return
 		while not self.monitor_queue.empty():
 			try:
 				monitor_item = self.monitor_queue.get_nowait()
@@ -599,7 +609,7 @@ class Command(Runner):
 
 	def _stop_monitor_thread(self):
 		"""Stop monitor thread."""
-		if self.monitor_thread and self.monitor_thread.is_alive():
+		if self.monitor_thread and self.monitor_thread.is_alive() and self.monitor_stop_event:
 			self.monitor_stop_event.set()
 			self.monitor_thread.join(timeout=2.0)
 
@@ -619,7 +629,8 @@ class Command(Runner):
 				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
 					stats_items = list(self._collect_stats())
 					for stat_item in stats_items:
-						self.monitor_queue.put(stat_item)
+						if self.monitor_queue is not None:
+							self.monitor_queue.put(stat_item)
 					last_stats_time = current_time
 
 					# Check memory usage from collected stats
@@ -627,7 +638,8 @@ class Command(Runner):
 						total_mem = sum(stat_item.extra_data.get('memory_info', {}).get('rss', 0) / 1024 / 1024 for stat_item in stats_items)  # noqa: E501
 						if total_mem > self.memory_limit_mb:
 							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
-							self.monitor_queue.put(warning)
+							if self.monitor_queue is not None:
+								self.monitor_queue.put(warning)
 							self.stop_process(exit_ok=True, sig=signal.SIGTERM)
 							break
 
@@ -636,7 +648,8 @@ class Command(Runner):
 					elapsed_time = current_time - self.process_start_time
 					if elapsed_time > CONFIG.celery.task_max_timeout:
 						warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
-						self.monitor_queue.put(warning)
+						if self.monitor_queue is not None:
+							self.monitor_queue.put(warning)
 						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
 						break
 
@@ -651,7 +664,8 @@ class Command(Runner):
 			except Exception as e:
 				self.debug(f'Monitor thread error: {e}', sub='monitor')
 				warning = Warning(message=f'Monitor thread error: {e}')
-				self.monitor_queue.put(warning)
+				if self.monitor_queue is not None:
+					self.monitor_queue.put(warning)
 				break
 
 			# Sleep for a short interval before next check (stat update frequency)
