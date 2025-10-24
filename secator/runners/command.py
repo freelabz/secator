@@ -437,7 +437,7 @@ class Command(Runner):
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
-			if sudo_required:
+			if CONFIG.security.prompt_sudo_password and sudo_required:
 				sudo_password, error = self._prompt_sudo(self.cmd)
 				if error:
 					yield Error(message=error)
