@@ -36,11 +36,18 @@ RUN apk add --no-cache \
 
 RUN adduser -D secator
 
-# Configure sudoers to allow 'secator' to run 'apk add' and 'nmap' without a password
-RUN echo "secator ALL=(ALL) NOPASSWD: /sbin/apk add *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
+# Allow runing 'nmap' with sudo; for priviledged scans
+RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers
+
+# In lite mode, allow user to install commands
+RUN if [ "$flavor" == "lite" ]; then \
+	echo "secator ALL=(ALL) NOPASSWD: /sbin/apk add *" >> /etc/sudoers && \
     echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers
+    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers && \
+	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock apk add" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers; \
+	fi
 
 # Ensure proper permissions for sudoers
 RUN chmod 0440 /etc/sudoers
