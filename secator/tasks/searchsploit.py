@@ -3,7 +3,7 @@ import re
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
-								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED, STRING)
+								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED, STRING, SLUG)
 from secator.output_types import Exploit
 from secator.runners import Command
 from secator.serializers import JSONSerializer
@@ -16,7 +16,7 @@ SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*
 class searchsploit(Command):
 	"""Exploit searcher based on ExploitDB."""
 	cmd = 'searchsploit'
-	input_types = [STRING]
+	input_types = [STRING, SLUG]
 	output_types = [Exploit]
 	tags = ['exploit', 'recon']
 	input_chunk_size = 1
@@ -41,7 +41,8 @@ class searchsploit(Command):
 		}
 	}
 	install_pre = {
-		'apk': ['ncurses']
+		'apk': ['ncurses', 'bash'],
+		'*': ['bash']
 	}
 	install_version = '2025-04-23'
 	install_cmd = (

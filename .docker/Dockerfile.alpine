@@ -1,3 +1,6 @@
+# syntax=docker/dockerfile:1
+# check=skip=SecretsUsedInArgOrEnv
+
 FROM alpine:3.21 AS builder
 
 RUN apk add --no-cache \
@@ -22,7 +25,7 @@ RUN pipx install --pip-args="--no-cache-dir" . && \
     secator install addons dev
 
 
-FROM python:3.12-alpine3.21
+FROM python:3.14.0-alpine3.21
 ARG flavor=full
 ARG build_from_source=false
 COPY --from=builder /home/secator/.local /home/secator/.local
@@ -42,11 +45,11 @@ RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers
 # In lite mode, allow user to install commands
 RUN if [ "$flavor" == "lite" ]; then \
 	echo "secator ALL=(ALL) NOPASSWD: /sbin/apk add *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers && \
     echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers && \
-	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock apk add" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers; \
+    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers && \
+	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock apk add *" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers; \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers; \
 	fi
 
 # Ensure proper permissions for sudoers
@@ -57,7 +60,7 @@ USER secator
 ENV PATH="${PATH}:/home/secator/.local/bin"
 ENV GOBIN="/home/secator/.local/bin"
 ENV TERM="xterm-256color"
-RUN secator config set security.prompt_sudo_password false
+ENV SECATOR_SECURITY_PROMPT_SUDO_PASSWORD="0"
 RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi
 RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
 
