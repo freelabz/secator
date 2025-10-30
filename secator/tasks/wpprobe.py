@@ -34,7 +34,7 @@ class wpprobe(Command):
 	install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
 	install_github_handle = 'Chocapikk/wpprobe'
 	install_post = {
-		'*': 'wpprobe update && wpprobe update-db'
+		'*': 'wpprobe update-db'
 	}
 
 	@staticmethod
@@ -78,6 +78,16 @@ class wpprobe(Command):
 						}
 					)
 					severities = plugin_data_version.get('severities', {})
+
+					# Fix for https://github.com/Chocapikk/wpprobe/issues/17
+					if isinstance(severities, list):
+						tmp_severities = {}
+						for severity in severities:
+							for k, v in severity.items():
+								if k != 'n/a':
+									tmp_severities[k] = v
+						severities = tmp_severities
+
 					for severity, severity_data in severities.items():
 						if severity == 'None':
 							severity = 'unknown'
