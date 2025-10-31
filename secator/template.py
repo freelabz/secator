@@ -215,7 +215,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 					else:
 						default_from_config = mapped_value
 				conf['default'] = default_from_config
-				if len(same_opts) > 0:  # change opt name to avoid conflict
+				if len(same_opts) > 0 or k in task_opts_meta:  # change opt name to avoid conflict
 					conf['prefix'] = 'Config'
 					opt_name = f'{conf["default_from"]}.{k}'
 					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] renamed to [bold green]{opt_name}[/] [dim red](default set in config)[/]', sub=f'cli.{config.name}')  # noqa: E501

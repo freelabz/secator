@@ -149,7 +149,7 @@ class wpscan(VulnHttp):
 						'latest_version': latest_version
 					}
 				)
-				outdated = latest_version and parse_version(number) < parse_version(latest_version)
+				outdated = parse_version(number) < parse_version(latest_version) if latest_version != 'unknown' and number else False  # noqa: E501
 				if outdated:
 					yield Vulnerability(
 						matched_at=target,
@@ -181,7 +181,7 @@ class wpscan(VulnHttp):
 						'latest_version': latest_version
 					}
 				)
-				outdated = latest_version and parse_version(number) < parse_version(latest_version)
+				outdated = parse_version(number) < parse_version(latest_version) if latest_version != 'unknown' and number else False  # noqa: E501
 				if outdated:
 					yield Vulnerability(
 						matched_at=target,
