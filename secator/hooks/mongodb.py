@@ -140,11 +140,14 @@ def find_duplicates(self):
 		tag_duplicates.delay(ws_id)
 
 
-def load_finding(obj):
+def load_finding(obj, exclude_types=[]):
 	finding_type = obj['_type']
 	klass = None
 	for otype in OUTPUT_TYPES:
-		if finding_type == otype.get_name():
+		oname = otype.get_name()
+		if oname in exclude_types:
+			continue
+		if finding_type == oname:
 			klass = otype
 			item = klass.load(obj)
 			item._uuid = str(obj['_id'])
@@ -152,13 +155,13 @@ def load_finding(obj):
 	return None
 
 
-def load_findings(objs):
-	findings = [load_finding(obj) for obj in objs]
+def load_findings(objs, exclude_types=[]):
+	findings = [load_finding(obj, exclude_types) for obj in objs]
 	return [f for f in findings if f is not None]
 
 
 @shared_task
-def tag_duplicates(ws_id: str = None, full_scan: bool = False):
+def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[]):
 	"""Tag duplicates in workspace.
 
 	Args:
@@ -174,8 +177,8 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False):
 	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$ne': True}}
 	if full_scan:
 		del untagged_query['_tagged']
-	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)))
-	untagged_findings = load_findings(list(db.findings.find(untagged_query).sort('_timestamp', -1)))
+	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)), exclude_types)
+	untagged_findings = load_findings(list(db.findings.find(untagged_query).sort('_timestamp', -1)), exclude_types)
 	debug(
 		f'Workspace non-duplicates findings: {len(workspace_findings)}, '
 		f'Untagged findings: {len(untagged_findings)}. '
