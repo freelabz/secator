@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.1](https://github.com/freelabz/secator/compare/v0.19.0...v0.19.1) (2025-11-07)
+
+
+### Bug Fixes
+
+* **mongodb:** add flexible types to tag_duplicates ([#738](https://github.com/freelabz/secator/issues/738)) ([d9b0f5f](https://github.com/freelabz/secator/commit/d9b0f5f39fbd82ffcc211c7673fffa6ff9a1ec24))
+* wpscan and wpprobe issues ([#735](https://github.com/freelabz/secator/issues/735)) ([a51e351](https://github.com/freelabz/secator/commit/a51e351935b2c4849d181a986b0d77c954b8be2b))
+
 ## [0.19.0](https://github.com/freelabz/secator/compare/v0.18.0...v0.19.0) (2025-10-23)
 
 
