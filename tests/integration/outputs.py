@@ -177,7 +177,7 @@ OUTPUTS_TASKS = {
         Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
     ],
     'gf': [
-        Tag(name='xss pattern', match='http://localhost:3000?q=test', _source='gf')
+        Tag(name='xss pattern', type='pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
     'gitleaks': [
         # TODO: allow to test equality for this (dynamic path based on runner)
@@ -281,6 +281,7 @@ OUTPUTS_TASKS = {
     'wafw00f': [
         Tag(
             name='Envoy WAF',
+            type='waf',
             match='https://netflix.com',
             _source='wafw00f')
     ],
@@ -290,6 +291,7 @@ OUTPUTS_TASKS = {
     'wpscan': [
         Tag(
             name='Wordpress theme - twentytwentyfive 1.3',
+            type='wordpress_theme',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(
@@ -380,8 +382,8 @@ OUTPUTS_WORKFLOWS = {
 		Url(url='http://localhost:3000/video', host='127.0.0.1', status_code=200, title='', webserver='', tech=[], content_type='video/mp4', content_length=10075518, time=2.432185494, method='GET', words=50020, lines=49061, _source='httpx', _type='url', _uuid='c81c8a42-296d-461b-b1b7-c166e398e827'),
 	],
     'url_vuln': [
-		Tag(name='xss pattern', match='https://www.hahwul.com/?q=123', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='16b27b1e-adb0-48e9-a8f9-87a1f38dd3a6'),
-		Tag(name='lfi pattern', match='http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='cfcba271-eca6-455c-b426-cfd76bb92ebb'),
+		Tag(name='xss pattern', type='pattern', match='https://www.hahwul.com/?q=123', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='16b27b1e-adb0-48e9-a8f9-87a1f38dd3a6'),
+		Tag(name='lfi pattern', type='pattern', match='http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='cfcba271-eca6-455c-b426-cfd76bb92ebb'),
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Grep XSS', provider='', id='', confidence='high', severity='low', cvss_score=0, tags=[], extra_data={'inject_type': 'BUILTIN', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=%250d%250aDalfoxcrlf%3A+1234', 'param': '', 'payload': 'toGrepping', 'evidence': ''}, description='', references=[], reference='', confidence_nb=1, severity_nb=3, _source='dalfox', _type='vulnerability', _uuid='029214fe-21f7-40ed-b50a-b33772519ddc'),
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Verified XSS', provider='', id='', confidence='high', severity='high', cvss_score=0, tags=['CWE-79'], extra_data={'inject_type': 'inHTML-none(1)-URL', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%3Cdiv+contextmenu%3Dxss%3E%3Cp%3E1%3Cmenu+type%3Dcontext+class%3Ddalfox+id%3Dxss+onshow%3Dalert%281%29%3E%3C%2Fmenu%3E%3C%2Fdiv%3E', 'param': 'cat', 'payload': '<div contextmenu=xss><p>1<menu type=context class=dalfox id=xss onshow=alert(1)></menu></div>', 'evidence': ''}, description='', references=[], reference='', confidence_nb=1, severity_nb=1, _source='dalfox', _type='vulnerability', _uuid='640f5644-b0a0-4e46-a82f-121a8dde74b2'),
 	]
@@ -429,15 +431,15 @@ OUTPUTS_SCANS = {
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Grep XSS', provider='', id='', confidence='high', severity='low', cvss_score=0, tags=[], extra_data={'inject_type': 'BUILTIN', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?cat=%2F%2F%2F%2F%255cgoogle.com', 'param': '', 'payload': 'toOpenRedirecting', 'evidence': ''}, description='', references=[], reference='', confidence_nb=1, severity_nb=3, _source='dalfox', _type='vulnerability', _uuid='8e91089d-69dc-4d37-89f2-002b12a243f9'),
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Reflected XSS', provider='', id='', confidence='high', severity='medium', cvss_score=0, tags=['CWE-79'], extra_data={'inject_type': 'inHTML-URL', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?cat=3%27%3E%3Cimg%2Fsrc%2Fonerror%3D.1%7Calert%60%60%3E', 'param': 'cat', 'payload': "'><img/src/onerror=.1|alert``>", 'evidence': "48 line:  syntax to use near ''><img/src/onerror=.1|alert``>' at line 1"}, description='', references=[], reference='', confidence_nb=1, severity_nb=2, _source='dalfox', _type='vulnerability', _uuid='aced8ca6-773f-4382-b951-c75dce9b381e'),
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Verified XSS', provider='', id='', confidence='high', severity='high', cvss_score=0, tags=['CWE-79'], extra_data={'inject_type': 'inHTML-URL', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?cat=1%27%22%3E%3Cimg%2Fsrc%2Fonerror%3D.1%7Calert%60%60+class%3Ddalfox%3E', 'param': 'cat', 'payload': '\'"><img/src/onerror=.1|alert`` class=dalfox>', 'evidence': '48 line:  syntax to use near \'\'"><img/src/onerror=.1|alert`` class=dalfox>\' at line 1'}, description='', references=[], reference='', confidence_nb=1, severity_nb=1, _source='dalfox', _type='vulnerability', _uuid='f5941659-042e-428d-aef6-3ed22983a27f'),
-		Tag(name='lfi pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='7054229f-d877-4f9d-8811-329e682819c5'),
-		Tag(name='ssrf pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='d942d08a-b093-4db6-a4c9-d7b2fd13d5dc'),
-		Tag(name='interestingparams pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='114d1d0d-4c63-490f-86aa-356a7fb5dfd2'),
-		Tag(name='lfi pattern', match='http://testphp.vulnweb.com/listproducts.php?cat=1', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='9f58059f-c0a6-4fc8-8454-a15ca01a972c'),
-		Tag(name='xss pattern', match='http://testphp.vulnweb.com/hpp/?pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='0d506935-25b3-47de-ad96-e017323fe3e9'),
-		Tag(name='debug_logic pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='1b583218-4922-4489-acc5-1a7a754741f3'),
-		Tag(name='ssrf pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='a37fd037-e046-4dc7-b8e4-1da6a3b0af3b'),
-		Tag(name='interestingparams pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='08fab6ea-9907-434b-a4c4-ae4ba94eabb2'),
-		Tag(name='xss pattern', match='http://testphp.vulnweb.com/hpp/params.php?p=valid&pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='bbdcce78-c36a-43ef-8e34-f6e628455c6a'),
+		Tag(name='lfi pattern', type='pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='7054229f-d877-4f9d-8811-329e682819c5'),
+		Tag(name='ssrf pattern', type='pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='d942d08a-b093-4db6-a4c9-d7b2fd13d5dc'),
+		Tag(name='interestingparams pattern', type='pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='114d1d0d-4c63-490f-86aa-356a7fb5dfd2'),
+		Tag(name='lfi pattern', type='pattern', match='http://testphp.vulnweb.com/listproducts.php?cat=1', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='9f58059f-c0a6-4fc8-8454-a15ca01a972c'),
+		Tag(name='xss pattern', type='pattern', match='http://testphp.vulnweb.com/hpp/?pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='0d506935-25b3-47de-ad96-e017323fe3e9'),
+		Tag(name='debug_logic pattern', type='pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='1b583218-4922-4489-acc5-1a7a754741f3'),
+		Tag(name='ssrf pattern', type='pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='a37fd037-e046-4dc7-b8e4-1da6a3b0af3b'),
+		Tag(name='interestingparams pattern', type='pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='08fab6ea-9907-434b-a4c4-ae4ba94eabb2'),
+		Tag(name='xss pattern', type='pattern', match='http://testphp.vulnweb.com/hpp/params.php?p=valid&pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='bbdcce78-c36a-43ef-8e34-f6e628455c6a'),
 	],
     'host': [
 		Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', cpes=[], extra_data={'name': 'ppp', 'servicefp': 'SF-Port3000-TCP:V=7.80%I=7%D=4/13%Time=6438299D%P=x86_64-pc-linux-gnu%r(GetRequest,979,"HTTP/1\\.1\\x20200\\x20OK\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nX-Content-Type-Options:\\x20nosniff\\r\\nX-Frame-Options:\\x20SAMEORIGIN\\r\\nFeature-Policy:\\x20payment\\x20\'self\'\\r\\nX-Recruiting:\\x20/#/jobs\\r\\nAccept-Ranges:\\x20bytes\\r\\nCache-Control:\\x20public,\\x20max-age=0\\r\\nLast-Modified:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:09:42\\x20GMT\\r\\nETag:\\x20W/\\"7c3-1877b613b94\\"\\r\\nContent-Type:\\x20text/html;\\x20charset=UTF-8\\r\\nContent-Length:\\x201987\\r\\nVary:\\x20Accept-Encoding\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n<!--\\n\\x20\\x20~\\x20Copyright\\x20\\(c\\)\\x202014-2023\\x20Bjoern\\x20Kimminich\\x20&\\x20the\\x20OWASP\\x20Juice\\x20Shop\\x20contributors\\.\\n\\x20\\x20~\\x20SPDX-License-Identifier:\\x20MIT\\n\\x20\\x20--><!DOCTYPE\\x20html><html\\x20lang=\\"en\\"><head>\\n\\x20\\x20<meta\\x20charset=\\"utf-8\\">\\n\\x20\\x20<title>OWASP\\x20Juice\\x20Shop</title>\\n\\x20\\x20<meta\\x20name=\\"description\\"\\x20content=\\"Probably\\x20the\\x20most\\x20modern\\x20and\\x20sophisticated\\x20insecure\\x20web\\x20application\\">\\n\\x20\\x20<meta\\x20name=\\"viewport\\"\\x20content=\\"width=device-width,\\x20initial-scale=1\\">\\n\\x20\\x20<link\\x20id=\\"favicon\\"\\x20rel=\\"icon\\"\\x20type=\\"image/x-icon\\"\\x20href=\\"asset")%r(Help,2F,"HTTP/1\\.1\\x20400\\x20Bad\\x20Request\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(NCP,2F,"HTTP/1\\.1\\x20400\\x20Bad\\x20Request\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(HTTPOptions,EA,"HTTP/1\\.1\\x20204\\x20No\\x20Content\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nAccess-Control-Allow-Methods:\\x20GET,HEAD,PUT,PATCH,POST,DELETE\\r\\nVary:\\x20Access-Control-Request-Headers\\r\\nContent-Length:\\x200\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(RTSPRequest,EA,"HTTP/1\\.1\\x20204\\x20No\\x20Content\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nAccess-Control-Allow-Methods:\\x20GET,HEAD,PUT,PATCH,POST,DELETE\\r\\nVary:\\x20Access-Control-Request-Headers\\r\\nContent-Length:\\x200\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n");', 'method': 'table', 'conf': '3', 'nmap_script': 'fingerprint-strings'}, _source='nmap', _type='port', _uuid='7b2e6827-aea5-4e53-85e6-b7d6702ebdd9'),

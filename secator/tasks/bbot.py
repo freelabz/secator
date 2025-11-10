@@ -214,6 +214,7 @@ class bbot(Command):
 		},
 		Tag: {
 			'name': 'name',
+			'type': lambda x: x.get('type', 'bbot'),
 			'match': lambda x: x['data'].get('url') or x['data'].get('host') or '',
 			'extra_data': 'extra_data',
 			'_source': lambda x: 'bbot-' + x['module']

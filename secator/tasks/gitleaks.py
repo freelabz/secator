@@ -32,6 +32,7 @@ class gitleaks(Command):
 	output_map = {
 		Tag: {
 			'name': 'RuleID',
+			'type': lambda x: 'secret',
 			'match': lambda x: f'{x["File"]}:{x["StartLine"]}:{x["StartColumn"]}',
 			'extra_data': lambda x: {caml_to_snake(k): v for k, v in x.items() if k not in ['RuleID', 'File']}
 		}
