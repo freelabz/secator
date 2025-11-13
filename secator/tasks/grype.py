@@ -2,7 +2,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, USER_AGENT, PATH, STRING, URL)
+							   THREADS, TIMEOUT, USER_AGENT, PATH, STRING, SLUG, URL)
 from secator.output_types import Vulnerability
 from secator.tasks._categories import VulnCode
 
@@ -11,7 +11,7 @@ from secator.tasks._categories import VulnCode
 class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
 	cmd = 'grype --quiet'
-	input_types = [PATH, URL, STRING]
+	input_types = [PATH, URL, STRING, SLUG]
 	output_types = [Vulnerability]
 	tags = ['vuln', 'scan']
 	input_flag = ''
