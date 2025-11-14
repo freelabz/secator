@@ -380,6 +380,14 @@ class Vuln(Command):
 
 		# Parse CVE id and CVSS
 		name = id = cve_info['id']
+		cvss = cve_info.get('cvss') or 0
+		vuln = {
+			ID: id,
+			NAME: name,
+			PROVIDER: 'cve.circl.lu',
+			REFERENCES: [f'https://cve.circl.lu/cve/{id}'],
+		}
+
 		# exploit_ids = cve_info.get('refmap', {}).get('exploit-db', [])
 		# osvdb_ids = cve_info.get('refmap', {}).get('osvdb', [])
 
@@ -387,34 +395,45 @@ class Vuln(Command):
 		description = cve_info['description']
 		if description is not None:
 			description = description.replace(id, '').strip()
+			vuln[DESCRIPTION] = description
 
 		# Get references
 		references = cve_info.get(REFERENCES, [])
 		cve_ref_url = f'https://vulnerability.circl.lu/cve/{id}'
 		references.append(cve_ref_url)
+		if references:
+			vuln[REFERENCES].extend(references)
 
 		# Get CWE ID
-		cwe_id = cve_info['cwe_id']
-		if cwe_id is not None:
-			tags.append(cwe_id)
+		vuln_cwe_id = cve_info.get('cwe')
+		if vuln_cwe_id is not None:
+			tags.append(vuln_cwe_id)
+
+		# Parse capecs for a better vuln name / type
+		capecs = cve_info.get('capec', [])
+		if capecs and len(capecs) > 0:
+			name = capecs[0]['name']
+
+		# Parse ovals for a better vuln name / type
+		ovals = cve_info.get('oval', [])
+		if ovals:
+			if description == 'none':
+				description = ovals[0]['title']
+			family = ovals[0]['family']
+			tags.append(family)
 
 		# Set vulnerability severity based on CVSS score
 		severity = None
 		cvss = cve_info['cvss_score']
 		if cvss:
 			severity = Vuln.cvss_to_severity(cvss)
+			vuln[SEVERITY] = severity
+			vuln[CVSS_SCORE] = cvss
 
 		# Set confidence
-		vuln = {
-			ID: id,
-			NAME: name,
-			PROVIDER: 'vulnerability.circl.lu',
-			SEVERITY: severity,
-			CVSS_SCORE: cvss,
-			TAGS: tags,
-			REFERENCES: [f'https://vulnerability.circl.lu/cve/{id}'] + references,
-			DESCRIPTION: description,
-		}
+		if tags:
+			vuln[TAGS] = tags
+
 		return vuln
 
 	@cache
