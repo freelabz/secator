@@ -126,6 +126,7 @@ class katana(HttpCrawler):
 				)
 				yield Tag(
 					name='form',
+					category='form',
 					match=form['action'],
 					stored_response_path=response["stored_response_path"],
 					extra_data={
