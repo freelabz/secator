@@ -71,6 +71,7 @@ class wpprobe(Command):
 					plugin_version = plugin_data_version['version']
 					yield Tag(
 						name=f'Wordpress plugin - {plugin_name} {plugin_version}',
+						category='wordpress_plugin',
 						match=url,
 						extra_data={
 							'name': plugin_name,
