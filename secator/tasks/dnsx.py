@@ -60,7 +60,7 @@ class dnsx(ReconDns):
 
 	@staticmethod
 	def before_init(self):
-		self.wordlist = self.get_opt_value('wordlist', preprocess=True, process=True)
+		self.wordlist = self.get_opt_value('wordlist')
 		self.subdomains = []
 		if self.wordlist:
 			self.file_flag = '-d'
