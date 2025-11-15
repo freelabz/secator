@@ -135,7 +135,7 @@ class cariddi(HttpCrawler):
 				extra_data = {'param': param_name, 'source': 'url'}
 				yield Tag(
 					name=f'{attack} param',
-					type='pattern',
+					category='pattern',
 					match=url,
 					extra_data=extra_data
 				)
@@ -144,14 +144,14 @@ class cariddi(HttpCrawler):
 			match = error['match']
 			error['extra_data'] = {'error': match, 'source': 'body'}
 			error['match'] = url
-			error['type'] = 'error'
+			error['category'] = 'error'
 			yield Tag(**error)
 
 		for secret in secrets:
 			match = secret['match']
 			secret['extra_data'] = {'secret': match, 'source': 'body'}
 			secret['match'] = url
-			secret['type'] = 'secret'
+			secret['category'] = 'secret'
 			yield Tag(**secret)
 
 		for info in infos:
@@ -162,5 +162,5 @@ class cariddi(HttpCrawler):
 				continue
 			info['extra_data'] = {'info': match, 'source': 'body'}
 			info['match'] = url
-			info['type'] = 'info'
+			info['category'] = 'info'
 			yield Tag(**info)

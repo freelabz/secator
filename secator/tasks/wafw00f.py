@@ -84,7 +84,7 @@ class wafw00f(Command):
 			manufacter = results[0]['manufacturer']
 			yield Tag(
 				name=waf_name + ' WAF',
-				type='waf',
+				category='waf',
 				match=url,
 				extra_data={
 					'waf_name': waf_name,

@@ -8,7 +8,7 @@ from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 @dataclass
 class Tag(OutputType):
 	name: str
-	type: str
+	category: str
 	match: str
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	stored_response_path: str = field(default='', compare=False)

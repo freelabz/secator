@@ -143,7 +143,7 @@ class wpscan(VulnHttp):
 				latest_version = main_theme.get('latest_version') or 'unknown'
 				yield Tag(
 					name=f'Wordpress theme - {slug} {number}',
-					type='wordpress_theme',
+					category='wordpress_theme',
 					match=target,
 					extra_data={
 						'url': location,
@@ -176,7 +176,7 @@ class wpscan(VulnHttp):
 				latest_version = data.get('latest_version') or 'unknown'
 				yield Tag(
 					name=f'Wordpress plugin - {slug} {number}',
-					type='wordpress_plugin',
+					category='wordpress_plugin',
 					match=target,
 					extra_data={
 						'url': location,

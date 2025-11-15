@@ -93,7 +93,7 @@ class trivy(Vuln):
 			for secret in item.get('Secrets', []):
 				yield Tag(
 					name=secret['RuleID'],
-					type='secret',
+					category='secret',
 					match=secret['Match'],
 					extra_data={k: v for k, v in secret.items() if k not in ['RuleID', 'Match']}
 				)

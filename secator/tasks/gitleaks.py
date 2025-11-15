@@ -72,7 +72,7 @@ class gitleaks(Command):
 		for result in results:
 			yield Tag(
 				name=result['RuleID'],
-				type='secret',
+				category='secret',
 				match='{File}:{StartLine}:{StartColumn}'.format(**result),
 				extra_data={
 					caml_to_snake(k): v for k, v in result.items()

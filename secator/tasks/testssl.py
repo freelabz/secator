@@ -141,7 +141,7 @@ class testssl(Command):
 						continue
 					yield Tag(
 						name=f'SSL/TLS [{id}]',
-						type='info',
+						category='info',
 						match=host,
 						extra_data={
 							'type': id,
