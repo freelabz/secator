@@ -1,4 +1,5 @@
 import validators
+import dns.resolver
 
 from secator.decorators import task
 from secator.definitions import (HOST, CIDR_RANGE, DELAY, IP, OPT_PIPE_INPUT, PROXY,
@@ -15,6 +16,7 @@ class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -resp -recon'
 	tags = ['dns', 'fuzz']
+	input_chunk_size = 1
 	input_types = [HOST, CIDR_RANGE, IP]
 	output_types = [Record, Ip, Subdomain]
 	json_flag = '-json'
@@ -43,8 +45,24 @@ class dnsx(ReconDns):
 	profile = 'io'
 
 	@staticmethod
+	def validate_input(self, inputs):
+		"""All targets will return positive DNS queries. Aborting bruteforcing."""
+		if not self.get_opt_value('wordlist'):
+			return True
+		for target in self.inputs:
+			subdomain = f'xxxxxx.{target}'
+			if check_dns_response(subdomain, 'A'):
+				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'))  # noqa: E501
+				self.inputs = [t for t in self.inputs if t != target]
+				if len(self.inputs) == 0:
+					return False
+		return True
+
+	@staticmethod
 	def before_init(self):
-		if self.get_opt_value('wordlist'):
+		self.wordlist = self.get_opt_value('wordlist')
+		self.subdomains = []
+		if self.wordlist:
 			self.file_flag = '-d'
 			self.input_flag = '-d'
 			rc = self.get_opt_value('rc')
@@ -62,17 +80,19 @@ class dnsx(ReconDns):
 		record_types = ['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'srv', 'ptr', 'soa', 'axfr', 'caa']
 		host = item['host']
 		status_code = item.get('status_code')
-		if host.startswith('*'):
-			yield Warning(f'Wildcard domain detected: {host}. Ignore previous results.')
-			self.stop_process(exit_ok=True)
-			return
+		# if host.startswith('*'):
+		# 	yield Warning(f'Wildcard domain detected: {host}. Ignore previous results.')
+		# 	self.stop_process(exit_ok=True)
+		# 	return
 		is_ip = validators.ipv4(host) or validators.ipv6(host)
 		if status_code and status_code == 'NOERROR' and not is_ip:
-			yield Subdomain(
+			subdomain = Subdomain(
 				host=host,
 				domain=extract_domain_info(host, domain_only=True),
 				sources=['dns']
 			)
+			self.subdomains.append(subdomain)
+			yield subdomain
 		if self.get_opt_value('subdomains_only'):
 			return
 		for _type in record_types:
@@ -122,3 +142,42 @@ class dnsx(ReconDns):
 
 				if record not in self.results:
 					yield record
+
+
+def stream_file_up_to_line(file_path, max_lines=50):
+	"""
+	Streams a file line by line up to line 50.
+
+	Args:
+		file_path (str): Path to the file to be streamed.
+
+	Yields:
+		str: Each line from the file up to line 50.
+	"""
+	with open(file_path, 'r') as file:
+		for line_number, line in enumerate(file, start=1):
+			if line_number > max_lines:
+				break
+			yield line
+
+
+def check_dns_response(domain, record_type="A"):
+	try:
+		# Query DNS for the specified record type (A, MX, NS, etc.)
+		resolver = dns.resolver.Resolver()
+		resolver.timeout = 60
+		resolver.lifetime = 1
+		dns.resolver.resolve(domain, record_type)
+		return True
+	except dns.resolver.NXDOMAIN:
+		# print(f"❌ Domain '{domain}' does not exist (NXDOMAIN)")
+		return False
+	except dns.resolver.NoAnswer:
+		# print(f"⚠️ Domain '{domain}' exists but has no {record_type} record")
+		return False
+	except dns.resolver.Timeout:
+		# print(f"⏱️ DNS query timed out for '{domain}'")
+		return False
+	except Exception:
+		# print(f"❌ Error checking DNS for '{domain}': {e}")
+		return False
