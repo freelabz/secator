@@ -45,16 +45,16 @@ class dnsx(ReconDns):
 
 	@staticmethod
 	def validate_input(self, inputs):
-		"""Some domains do not respond well to DNS queries and always return positive matches. Cannot perform bruteforcing."""
+		"""All targets will return positive DNS queries. Aborting bruteforcing."""
 		if not self.get_opt_value('wordlist'):
 			return True
 		for target in self.inputs:
 			subdomain = f'xxxxxx.{target}'
-			self.debug(f'Checking DNS response for {subdomain}', sub='validate_input')
 			if check_dns_response(subdomain, 'A'):
+				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'))
 				self.inputs = [t for t in self.inputs if t != target]
-			if len(self.inputs) == 0:
-				return False
+				if len(self.inputs) == 0:
+					return False
 		return True
 
 	@staticmethod
@@ -167,19 +167,19 @@ def check_dns_response(domain, record_type="A"):
 		resolver.timeout = 60
 		resolver.lifetime = 1
 		answers = dns.resolver.resolve(domain, record_type)
-		print(f"✅ Domain '{domain}' responds to {record_type} queries:")
-		for rdata in answers:
-			print(f"  - {rdata}")
+		# print(f"✅ Domain '{domain}' responds to {record_type} queries:")
+		# for rdata in answers:
+			# print(f"  - {rdata}")
 		return True
 	except dns.resolver.NXDOMAIN:
-		print(f"❌ Domain '{domain}' does not exist (NXDOMAIN)")
+		# print(f"❌ Domain '{domain}' does not exist (NXDOMAIN)")
 		return False
 	except dns.resolver.NoAnswer:
-		print(f"⚠️ Domain '{domain}' exists but has no {record_type} record")
+		# print(f"⚠️ Domain '{domain}' exists but has no {record_type} record")
 		return False
 	except dns.resolver.Timeout:
-		print(f"⏱️ DNS query timed out for '{domain}'")
+		# print(f"⏱️ DNS query timed out for '{domain}'")
 		return False
 	except Exception as e:
-		print(f"❌ Error checking DNS for '{domain}': {e}")
+		# print(f"❌ Error checking DNS for '{domain}': {e}")
 		return False
