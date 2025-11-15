@@ -1,14 +1,7 @@
-import os
-
 from secator.decorators import task
-from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
-								 HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
-								 PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT, HOST, IP, HOST_PORT, SLUG, STRING, OPT_PIPE_INPUT)
-from secator.config import CONFIG
-from secator.output_types import Ip, Subdomain, Tag
-from secator.serializers import JSONSerializer
+from secator.definitions import (DELAY, OPT_PIPE_INPUT, IP, HOST)
+from secator.output_types import Tag
 from secator.tasks._categories import Command
-from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
 
 
 @task()
