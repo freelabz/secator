@@ -1,0 +1,22 @@
+name: domain_recon
+alias: domrec
+description: Basic domain recon (WHOIS, SSL Certificates, WAF detection...)
+input_types:
+- host
+
+steps:
+  _group:
+    httpx:
+      description: Probe root URL
+
+    getasn:
+      description: Get ASN from domain name
+
+    testssl:
+      description: Test SSL/TLS security
+
+  wafw00f:
+    description: Check WAF
+    targets_:
+      - url.url
+
