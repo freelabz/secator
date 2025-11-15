@@ -8,9 +8,10 @@ from secator.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH,
 								 PERCENT, PROXY, RATE_LIMIT, RETRIES,
 								 STATUS_CODE, THREADS, TIME, TIMEOUT,
 								 USER_AGENT, WORDLIST, URL)
-from secator.output_types import Progress, Url, Info, Warning
+from secator.output_types import Progress, Url, Subdomain, Info, Warning
 from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
+from secator.utils import extract_domain_info
 
 
 FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[\d/\d\] :: (?P<rps>\d+) req/sec :: Duration: \[(?P<duration>[\d:]+)\] :: Errors: (?P<errors>\d+) ::'  # noqa: E501
@@ -21,7 +22,7 @@ class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
 	cmd = 'ffuf -noninteractive'
 	input_types = [URL]
-	output_types = [Url, Progress]
+	output_types = [Url, Subdomain, Progress]
 	tags = ['url', 'fuzz']
 	input_flag = '-u'
 	input_chunk_size = 1
@@ -33,7 +34,7 @@ class ffuf(HttpFuzzer):
 		RegexSerializer(FFUF_PROGRESS_REGEX, fields=['count', 'total', 'rps', 'duration', 'errors'])
 	]
 	opts = {
-		AUTO_CALIBRATION: {'is_flag': True, 'short': 'ac', 'help': 'Auto-calibration'},
+		AUTO_CALIBRATION: {'is_flag': True, 'default': True, 'short': 'ac', 'help': 'Auto-calibration'},
 		'recursion': {'is_flag': True, 'default': False, 'short': 'recursion', 'help': 'Recursion'},
 		'stop_on_error': {'is_flag': True, 'default': False, 'short': 'soe', 'help': 'Stop on error'},
 		'fuzz_host_header': {'is_flag': True, 'default': False, 'internal': True, 'short': 'fhh', 'help': 'Fuzz host header'},
@@ -66,12 +67,6 @@ class ffuf(HttpFuzzer):
 		'stop_on_error': 'sa',
 	}
 	output_map = {
-		Url: {
-			STATUS_CODE: 'status',
-			CONTENT_LENGTH: 'length',
-			CONTENT_TYPE: 'content-type',
-			TIME: lambda x: x['duration'] * 10**-9
-		},
 		Progress: {
 			PERCENT: lambda x: int(int(x['count']) * 100 / int(x['total'])),
 			EXTRA_DATA: lambda x: x
@@ -112,6 +107,31 @@ class ffuf(HttpFuzzer):
 		if 'host' in item:
 			self.current_host = item['host']
 		return item
+
+	@staticmethod
+	def on_json_loaded(self, item):
+		if 'host' in item:
+			self.current_host = item['host']
+		if self.get_opt_value('fuzz_host_header'):
+			yield Subdomain(
+				host=item['host'],
+				domain=extract_domain_info(item['host'], domain_only=True),
+				sources=['http_host_header']
+			)
+		else:
+			headers = self.headers.copy()
+			if 'FUZZ' in headers.get('Host', ''):
+				headers['Host'] = self.current_host
+			yield Url(
+				url=item['url'],
+				host=item['host'],
+				status_code=item['status'],
+				content_length=item['length'],
+				content_type=item['content-type'],
+				time=item['duration'] * 10**-9,
+				method=self.get_opt_value(METHOD) or 'GET',
+				request_headers=headers,
+			)
 
 	@staticmethod
 	def on_item(self, item):
