@@ -1,13 +1,11 @@
 from secator.decorators import task
-from secator.definitions import (AUTO_CALIBRATION, CONTENT_LENGTH,
-								 CONTENT_TYPE, DATA, DELAY, DEPTH, EXTRA_DATA,
+from secator.definitions import (AUTO_CALIBRATION, DATA, DELAY, DEPTH, EXTRA_DATA,
 								 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 								 PERCENT, PROXY, RATE_LIMIT, RETRIES,
-								 STATUS_CODE, THREADS, TIME, TIMEOUT,
-								 USER_AGENT, WORDLIST, URL)
+								 THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL)
 from secator.output_types import Progress, Url, Subdomain, Info, Warning
 from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
