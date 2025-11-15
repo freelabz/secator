@@ -103,34 +103,27 @@ class ffuf(HttpFuzzer):
 		return opts
 
 	@staticmethod
-	def on_item_pre_convert(self, item):
-		if 'host' in item:
-			self.current_host = item['host']
-		return item
-
-	@staticmethod
 	def on_json_loaded(self, item):
 		if 'host' in item:
 			self.current_host = item['host']
+		headers = self.headers.copy()
+		if 'FUZZ' in headers.get('Host', ''):
+			headers['Host'] = self.current_host
+		yield Url(
+			url=item['url'],
+			host=item['host'],
+			status_code=item['status'],
+			content_length=item['length'],
+			content_type=item['content-type'],
+			time=item['duration'] * 10**-9,
+			method=self.get_opt_value(METHOD) or 'GET',
+			request_headers=headers,
+		)
 		if self.get_opt_value('fuzz_host_header'):
 			yield Subdomain(
 				host=item['host'],
 				domain=extract_domain_info(item['host'], domain_only=True),
 				sources=['http_host_header']
-			)
-		else:
-			headers = self.headers.copy()
-			if 'FUZZ' in headers.get('Host', ''):
-				headers['Host'] = self.current_host
-			yield Url(
-				url=item['url'],
-				host=item['host'],
-				status_code=item['status'],
-				content_length=item['length'],
-				content_type=item['content-type'],
-				time=item['duration'] * 10**-9,
-				method=self.get_opt_value(METHOD) or 'GET',
-				request_headers=headers,
 			)
 
 	@staticmethod

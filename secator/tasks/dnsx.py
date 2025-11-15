@@ -54,8 +54,8 @@ class dnsx(ReconDns):
 			if check_dns_response(subdomain, 'A'):
 				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'))  # noqa: E501
 				self.inputs = [t for t in self.inputs if t != target]
-				if len(self.inputs) == 0:
-					return False
+				# if len(self.inputs) == 0:
+				# 	return False
 		return True
 
 	@staticmethod
