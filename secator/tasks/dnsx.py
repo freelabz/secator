@@ -1,4 +1,5 @@
 import validators
+import dns.resolver
 
 from secator.decorators import task
 from secator.definitions import (HOST, CIDR_RANGE, DELAY, IP, OPT_PIPE_INPUT, PROXY,
@@ -51,7 +52,7 @@ class dnsx(ReconDns):
 		for target in self.inputs:
 			subdomain = f'xxxxxx.{target}'
 			if check_dns_response(subdomain, 'A'):
-				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'))
+				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'))  # noqa: E501
 				self.inputs = [t for t in self.inputs if t != target]
 				if len(self.inputs) == 0:
 					return False
@@ -142,6 +143,7 @@ class dnsx(ReconDns):
 				if record not in self.results:
 					yield record
 
+
 def stream_file_up_to_line(file_path, max_lines=50):
 	"""
 	Streams a file line by line up to line 50.
@@ -158,7 +160,6 @@ def stream_file_up_to_line(file_path, max_lines=50):
 				break
 			yield line
 
-import dns.resolver
 
 def check_dns_response(domain, record_type="A"):
 	try:
@@ -166,10 +167,7 @@ def check_dns_response(domain, record_type="A"):
 		resolver = dns.resolver.Resolver()
 		resolver.timeout = 60
 		resolver.lifetime = 1
-		answers = dns.resolver.resolve(domain, record_type)
-		# print(f"✅ Domain '{domain}' responds to {record_type} queries:")
-		# for rdata in answers:
-			# print(f"  - {rdata}")
+		dns.resolver.resolve(domain, record_type)
 		return True
 	except dns.resolver.NXDOMAIN:
 		# print(f"❌ Domain '{domain}' does not exist (NXDOMAIN)")
@@ -180,6 +178,6 @@ def check_dns_response(domain, record_type="A"):
 	except dns.resolver.Timeout:
 		# print(f"⏱️ DNS query timed out for '{domain}'")
 		return False
-	except Exception as e:
+	except Exception:
 		# print(f"❌ Error checking DNS for '{domain}': {e}")
 		return False
