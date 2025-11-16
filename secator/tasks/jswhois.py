@@ -1,13 +1,8 @@
-import os
-import tempfile
-import yaml
-
 from secator.decorators import task
 from secator.runners import Command
-from secator.definitions import (OUTPUT_PATH, HEADER, PROXY, HOST, TIMEOUT, OPT_PIPE_INPUT)
-from secator.output_types import Tag, Info, Error
+from secator.definitions import HOST
+from secator.output_types import Tag
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import OPTS
 
 
 @task()
