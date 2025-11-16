@@ -36,26 +36,19 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Add GOBIN to PATH
-      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
+    - name: Setup  GO
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.24.x
 
-    - name: Add GOPATH to PATH
-      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
+    - name: Add local bin to PATH
+      run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
 
     - name: Run apt update
       run: sudo apt update
 
-    - name: Set GOPATH
-      run: export GOPATH="${HOME}/go"
-
-    - name: Set GOBIN
-      run: export GOBIN="${HOME}/go/bin"
-
     - name: Detect changed or all tasks
       run: |
-        echo "GOBIN: $GOBIN"
-        echo "GOPATH: $GOPATH"
-        echo "PATH: $PATH"
         if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
           echo "Running all tasks"
           if ! secator test tasks -c; then
@@ -67,7 +60,6 @@ jobs:
           FAILED=0
           for task in $TASKS; do
             if ! secator test task -c $task --verbose; then
-              ls -la $GOBIN
               FAILED=1
             fi
             echo ""
