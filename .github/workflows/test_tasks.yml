@@ -56,6 +56,8 @@ jobs:
         if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
           echo "Running all tasks"
           if ! secator test tasks -c; then
+            ls -la $GOBIN
+            find . -name "getasn" | xargs -I {} echo {}
             exit 1
           fi
         else
