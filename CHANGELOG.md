@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/freelabz/secator/compare/v0.19.1...v0.20.0) (2025-11-16)
+
+
+### Features
+
+* add tag category field ([#741](https://github.com/freelabz/secator/issues/741)) ([92ec6b8](https://github.com/freelabz/secator/commit/92ec6b817b5921bde00c9bbbde6662273711efaf))
+* **tasks:** getasn integration ([#739](https://github.com/freelabz/secator/issues/739)) ([0bd2e61](https://github.com/freelabz/secator/commit/0bd2e61d841c5983c62cb64d13306a0cc4aa0284))
+
+
+### Bug Fixes
+
+* **dnsx:** basic dns query before bruteforce to check for false positives ([#744](https://github.com/freelabz/secator/issues/744)) ([eb45457](https://github.com/freelabz/secator/commit/eb4545734c5591154ce29253e9f5a906390369ed))
+* **ffuf:** bruteforce output subdomains ([#746](https://github.com/freelabz/secator/issues/746)) ([29eb9fb](https://github.com/freelabz/secator/commit/29eb9fb2b519548989f35217f441494f55d367fc))
+
 ## [0.19.1](https://github.com/freelabz/secator/compare/v0.19.0...v0.19.1) (2025-11-07)
 
 
