@@ -4,10 +4,11 @@ import yaml
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
 								 HEADER, URL, FOLLOW_REDIRECT)
-from secator.output_types import Info, Url, Warning
+from secator.output_types import Info, Url, Warning, Tag
 from secator.runners import Command
 from secator.tasks._categories import OPTS
 from secator.utils import process_wordlist
+from urllib.parse import urlparse, urlunparse
 
 
 @task()
@@ -15,7 +16,7 @@ class arjun(Command):
 	"""HTTP Parameter Discovery Suite."""
 	cmd = 'arjun'
 	input_types = [URL]
-	output_types = [Url]
+	output_types = [Url, Tag]
 	tags = ['url', 'fuzz', 'params']
 	input_flag = '-u'
 	input_chunk_size = 1
@@ -88,9 +89,8 @@ class arjun(Command):
 				yield Warning(message='No results found !')
 				return
 		for url, values in results.items():
+			url = urlparse(url)
+			url = urlunparse(url._replace(query=''))
+			yield Url(url=url, request_headers=values['headers'], method=values['method'])
 			for param in values['params']:
-				yield Url(
-					url=url + '?' + param + '=' + 'FUZZ',
-					request_headers=values['headers'],
-					method=values['method'],
-				)
+				yield Tag(name=param, category='url_param', match=url, extra_data={'content': param, 'subtype': 'param'})

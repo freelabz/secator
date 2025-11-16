@@ -31,7 +31,8 @@ class Tag(OutputType):
 		return self.match
 
 	def __repr__(self) -> str:
-		s = f'🏷️  [bold yellow]{self.category}[/] [bold magenta]{self.name}[/]'
+		long_category = self.category.replace('_', ' ').capitalize()
+		s = f'🏷️  [bold yellow]{long_category}[/] [bold magenta]{trim_string(self.name, max_length=100)}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:
