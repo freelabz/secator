@@ -25,5 +25,14 @@ class jswhois(Command):
 	# install_github_handle = 'jschauma/jswhois'
 
 	@staticmethod
-	def on_item(self, item):
-		print(item)
+	def on_json_loaded(self, item):
+		last_chain = item['chain'][-1]
+		last_elem = item[last_chain]
+		raw = last_elem.pop('raw')
+		tag = Tag(
+			name=f'{self.inputs[0]} WHOIS',
+			category='whois',
+			match=self.inputs[0],
+			extra_data={'info': raw, 'chain': last_chain}
+		)
+		yield tag
