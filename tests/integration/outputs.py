@@ -223,6 +223,9 @@ OUTPUTS_TASKS = {
             _source='httpx'
         )
     ],
+    'jswhois': [
+        Tag(name='wikipedia.org WHOIS', category='whois', match='wikipedia.org', extra_data={'info': 'wikipedia.org', 'chain': 'whois'}),
+    ],
     'katana': [
         Url(
             url='http://localhost:3000/vendor.js',
