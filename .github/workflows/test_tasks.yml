@@ -36,11 +36,8 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Add GOBIN to PATH
+    - name: Add local bin to PATH
       run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
-
-    - name: Add GOPATH to PATH
-      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
 
     - name: Run apt update
       run: sudo apt update
@@ -57,7 +54,7 @@ jobs:
           echo "Changed tasks: $TASKS"
           FAILED=0
           for task in $TASKS; do
-            if ! secator test task -c $task; then
+            if ! secator test task -c $task --verbose; then
               FAILED=1
             fi
             echo ""

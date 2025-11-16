@@ -176,6 +176,9 @@ OUTPUTS_TASKS = {
     'gau': [
         Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
     ],
+    'getasn': [
+        Tag(name='AS14907', category='asn', match='wikipedia.org', _source='getasn')
+    ],
     'gf': [
         Tag(name='xss pattern', category='pattern', match='http://localhost:3000?q=test', _source='gf')
     ],
