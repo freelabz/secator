@@ -36,11 +36,6 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Setup  GO
-      uses: actions/setup-go@v4
-      with:
-        go-version: 1.24.x
-
     - name: Add local bin to PATH
       run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
 
