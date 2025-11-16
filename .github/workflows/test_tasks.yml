@@ -57,7 +57,7 @@ jobs:
           echo "Changed tasks: $TASKS"
           FAILED=0
           for task in $TASKS; do
-            if ! secator test task -c $task; then
+            if ! secator test task -c $task --verbose; then
               FAILED=1
             fi
             echo ""
