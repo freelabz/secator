@@ -143,7 +143,7 @@ class cariddi(HttpCrawler):
 					if p_name == param_name:
 						p_value = p_value
 						break
-					yield Tag(name=p_name, category='url_param', match=url_without_param, extra_data={'content': p_value, 'subtype': 'param'})
+					yield Tag(name=p_name, category='url_param', match=url_without_param, extra_data={'content': p_value, 'subtype': 'param'})  # noqa: E501
 
 		for error in errors:
 			error['category'] = f'{error["name"]}'.lower()

@@ -2,11 +2,9 @@ import os
 from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
-from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-								 FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
-								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, STATUS_CODE,
-								 STORED_RESPONSE_PATH, TECH, THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER,
-								 CONTENT_LENGTH)
+from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+								 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
+								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer

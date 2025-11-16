@@ -1,26 +1,40 @@
 from secator.decorators import task
-from secator.definitions import (URL, HOST, IP, HOST_PORT, WORDLIST, OPT_NOT_SUPPORTED)
-from secator.output_types import Url, Subdomain, Tag
+from secator.definitions import (URL, WORDLIST, OPT_NOT_SUPPORTED, THREADS, DELAY, TIMEOUT, RATE_LIMIT, METHOD, HEADER, FOLLOW_REDIRECT)  # noqa: E501
+from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
-from secator.runners import Command
+from secator.tasks._categories import HttpFuzzer
 from secator.utils import process_wordlist
 from urllib.parse import urlparse, urlunparse
 
 
 @task()
-class x8(Command):
+class x8(HttpFuzzer):
 	"""Hidden parameters discovery suite written in Rust."""
 	cmd = 'x8'
-	input_types = [HOST, HOST_PORT, IP, URL]
-	output_types = [Url, Subdomain, Tag]
+	input_types = [URL]
+	output_types = [Url, Tag]
 	tags = ['url', 'fuzz', 'params']
 	file_flag = '-u'
 	input_flag = '-u'
 	json_flag = '-O json'
-	opt_prefix = '--'
-	version_flag = OPT_NOT_SUPPORTED
+	opt_prefix = '-'
+	version_flag = '-V'
 	opts = {
-		WORDLIST: {'type': str, 'short': 'w', 'default': None, 'process': process_wordlist, 'help': 'Wordlist to use'},  # noqa: E501
+		WORDLIST: {'type': str, 'short': 'w', 'default': None, 'process': process_wordlist, 'help': 'Wordlist to use'},
+	}
+	opt_key_map = {
+		THREADS: 'c',
+		DELAY: '--delay',
+		TIMEOUT: '--timeout',
+		METHOD: '--method',
+		WORDLIST: 'w',
+		HEADER: OPT_NOT_SUPPORTED,
+		# HEADER: 'H',
+		RATE_LIMIT: OPT_NOT_SUPPORTED,
+		FOLLOW_REDIRECT: '--follow-redirects',
+	}
+	opt_value_map = {
+		HEADER: lambda headers: ';'.join(headers.split(';;'))
 	}
 	item_loaders = [JSONSerializer()]
 	install_version = '4.3.0'
@@ -30,10 +44,6 @@ class x8(Command):
 	proxy_socks5 = False
 	proxy_http = False
 	profile = 'io'
-
-	example="""
-[{"method":"GET","url":"http://testphp.vulnweb.com/hpp/?pp=1","status":200,"size":602,"found_params":[{"name":"pp","value":null,"diffs":"","status":200,"size":617,"reason_kind":"Reflected"}],"injection_place":"Path"}]
-"""
 
 	@staticmethod
 	def on_init(self):
@@ -51,4 +61,4 @@ class x8(Command):
 			extra_data = {k: v for k, v in param.items() if k != 'name'}
 			extra_data['content'] = param['value']
 			extra_data['subtype'] = 'param'
-			yield Tag(name=param['name'], match=url_without_param, category=f'url_param', extra_data=extra_data)
+			yield Tag(name=param['name'], match=url_without_param, category='url_param', extra_data=extra_data)
