@@ -42,6 +42,11 @@ jobs:
     - name: Add GOPATH to PATH
       run: echo "${HOME}/go/bin" >> $GITHUB_PATH
 
+    - name: Uses Go action
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.22.x
+
     - name: Run apt update
       run: sudo apt update
 
