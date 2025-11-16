@@ -20,6 +20,7 @@ INPUTS_TASKS = {
 	'grype': 'redis:7.4.1',
     'httpx': 'http://localhost:3000/',
 	'h8mail': 'test@test.com',
+	'jswhois': 'wikipedia.org',
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
 	'subfinder': 'github.com',
