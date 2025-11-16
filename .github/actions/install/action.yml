@@ -20,3 +20,4 @@ runs:
   - name: Add secator to $PATH
     shell: bash
     run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
