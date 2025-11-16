@@ -13,6 +13,11 @@ runs:
     with:
       python-version: ${{ inputs.python-version }}
 
+  - name: Setup  GO
+    uses: actions/setup-go@v4
+    with:
+      go-version: 1.24.x
+
   - name: Install secator with pipx
     shell: bash
     run: pipx install -e .[dev]

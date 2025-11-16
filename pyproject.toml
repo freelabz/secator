@@ -35,6 +35,7 @@ dependencies = [
   'distro < 2',
   'cpe < 2',
   'dotmap < 2',
+  'dnspython < 3',
   'free-proxy < 2',
   'furl < 3',
   'greenlet < 4',
