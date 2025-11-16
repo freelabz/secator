@@ -45,6 +45,9 @@ jobs:
     - name: Run apt update
       run: sudo apt update
 
+    - name: Set GOPATH
+      run: export GOPATH="${HOME}/go"
+
     - name: Set GOBIN
       run: export GOBIN="${HOME}/go/bin"
 
@@ -65,7 +68,6 @@ jobs:
           for task in $TASKS; do
             if ! secator test task -c $task --verbose; then
               ls -la $GOBIN
-              find . -name "$task" | xargs -I {} echo {}
               FAILED=1
             fi
             echo ""
