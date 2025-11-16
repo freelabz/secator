@@ -324,7 +324,10 @@ OUTPUTS_TASKS = {
 			cvss_score=0,
 			tags=['readme'],
 			_source='wpscan'),
-	]
+	],
+    'x8': [
+        Tag(name='pp', category='url_param', match='http://testphp.vulnweb.com/hpp/', _source='x8'),
+    ]
 }
 
 OUTPUTS_WORKFLOWS = {
