@@ -31,7 +31,13 @@ OUTPUTS_CHECKS = {
 OUTPUTS_TASKS = {
     'arjun': [
         Url(
-            url='http://testphp.vulnweb.com/hpp?pp=FUZZ',
+            url='http://testphp.vulnweb.com/hpp',
+            _source='arjun'
+        ),
+        Tag(
+            name='pp', 
+            category='url_param',
+            match='http://testphp.vulneb.com/hpp',
             _source='arjun'
         )
     ],

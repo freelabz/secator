@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (URL, WORDLIST, OPT_NOT_SUPPORTED, USER_AGENT, THREADS, DELAY, TIMEOUT, RATE_LIMIT, METHOD, HEADER, FOLLOW_REDIRECT, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, DEPTH)  # noqa: E501
+from secator.definitions import (URL, WORDLIST, RETRIES, OPT_NOT_SUPPORTED, USER_AGENT, THREADS, DELAY, TIMEOUT, RATE_LIMIT, METHOD, HEADER, FOLLOW_REDIRECT, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, DEPTH)  # noqa: E501
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpFuzzer
@@ -39,6 +39,7 @@ class x8(HttpFuzzer):
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
 		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		HEADER: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
 		# HEADER: 'H',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: '--follow-redirects',
@@ -67,7 +68,7 @@ class x8(HttpFuzzer):
 		url = item['url']
 		if url not in self.urls:
 			self.urls.append(url)
-			yield Url(url=url, method=item['method'], status_code=item['status'], content_length=item['size'], request_headers=self.request_headers)
+			yield Url(url=url, method=item['method'], status_code=item['status'], content_length=item['size'], request_headers=self.request_headers)  # noqa: E501
 		for param in item.get('found_params', []):
 			parsed_url = urlparse(url)
 			url_without_param = urlunparse(parsed_url._replace(query=''))
