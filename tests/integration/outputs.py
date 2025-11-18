@@ -224,7 +224,7 @@ OUTPUTS_TASKS = {
         )
     ],
     'jswhois': [
-        Tag(name='wikipedia.org WHOIS', category='whois', match='wikipedia.org', extra_data={'info': 'wikipedia.org', 'chain': 'whois'}),
+        Tag(name='wikipedia.org WHOIS', category='whois', match='wikipedia.org', extra_data={'content': 'wikipedia.org', 'chain': 'whois'}),
     ],
     'katana': [
         Url(

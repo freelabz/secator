@@ -28,6 +28,6 @@ class jswhois(Command):
 			name=f'{self.inputs[0]} WHOIS',
 			category='whois',
 			match=self.inputs[0],
-			extra_data={'info': raw, 'chain': last_chain}
+			extra_data={'content': raw, 'chain': last_chain}
 		)
 		yield tag
