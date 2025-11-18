@@ -37,7 +37,7 @@ OUTPUTS_TASKS = {
         Tag(
             name='pp', 
             category='url_param',
-            match='http://testphp.vulneb.com/hpp',
+            match='http://testphp.vulnweb.com/hpp',
             _source='arjun'
         )
     ],
