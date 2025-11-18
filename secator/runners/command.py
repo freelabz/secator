@@ -15,7 +15,7 @@ from time import time
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
+from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
@@ -1142,6 +1142,8 @@ class Command(Runner):
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'
+			elif self.file_flag == OPT_SPACE_SEPARATED:
+				cmd += ' ' + ' '.join(inputs)
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
 			else:
