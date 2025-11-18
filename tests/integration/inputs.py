@@ -25,6 +25,7 @@ INPUTS_TASKS = {
 	'subfinder': 'github.com',
 	'testssl': 'free.fr',
 	'trivy': 'https://github.com/blacklanternsecurity/bbot',
+	'trufflehog': 'https://github.com/trufflesecurity/test_keys',
 	'wpscan': 'http://localhost:8000/',
 	'wafw00f': 'https://netflix.com'
 }
