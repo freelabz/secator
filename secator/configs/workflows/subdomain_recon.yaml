@@ -30,7 +30,14 @@ options:
     default: False
 
 tasks:
-  _group/1:
+  httpx:
+    description: Run HTTP probe on domain
+    tech_detect: True
+    targets_:
+    - target.name
+    if: opts.probe_http or opts.brute_http
+
+  _group/hunt_subdomains:
     subfinder:
       description: List subdomains (passive)
 
@@ -39,29 +46,6 @@ tasks:
       subdomains_only: True
       wordlist: combined_subdomains
       if: opts.brute_dns
-
-    httpx:
-      description: Run HTTP probe on domain
-      tech_detect: True
-      targets_:
-      - target.name
-      if: opts.probe_http or opts.brute_http
-
-  _group/2:
-    dnsx/probe:
-      description: Probe DNS records on subdomains
-      subdomains_only: True
-      wordlist: False
-      targets_:
-      - subdomain.host
-      if: opts.probe_dns
-
-    nuclei:
-      description: Check for subdomain takeovers
-      targets_:
-      - target.name
-      - subdomain.host
-      tags: [takeover]
 
     ffuf:
       description: Bruteforce subdomains (Host header)
@@ -75,6 +59,15 @@ tasks:
         field: url
       if: opts.brute_http
 
+  _group/2:
+    dnsx/probe:
+      description: Probe DNS records on subdomains
+      subdomains_only: True
+      wordlist: False
+      targets_:
+      - subdomain.host
+      if: opts.probe_dns
+
     httpx:
       description: Run HTTP probes on subdomains
       tech_detect: True
@@ -82,3 +75,10 @@ tasks:
       - target.name
       - subdomain.host
       if: opts.probe_http
+
+    nuclei:
+      description: Check for subdomain takeovers
+      targets_:
+      - target.name
+      - subdomain.host
+      tags: [takeover]
