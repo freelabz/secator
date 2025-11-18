@@ -22,6 +22,13 @@ CARIDDI_IGNORE_PATTERNS = re.compile(r"|".join([
 ]), re.IGNORECASE)
 
 CARIDDI_IGNORE_LIST = ['BTC address']
+CARIDDI_RENAME_LIST = {
+	'IPv4 address': 'IpV4 address',
+	'MySQL error': 'Mysql error',
+	'MariaDB error': 'Mariadb error',
+	'PostgreSQL error': 'Postgresql error',
+	'SQLite error': 'Sqlite error',
+}
 
 
 @task()
@@ -132,7 +139,7 @@ class cariddi(HttpCrawler):
 		for param in params:
 			param_name = param['name']
 			for attack in param['attacks']:
-				extra_data = {'param': param_name, 'source': 'url'}
+				extra_data = {'content': param_name, 'param': param_name, 'source': 'url'}
 				yield Tag(
 					name=f'{attack} param',
 					category='pattern',
@@ -141,15 +148,19 @@ class cariddi(HttpCrawler):
 				)
 
 		for error in errors:
+			if error['name'] in CARIDDI_RENAME_LIST:
+				error['name'] = CARIDDI_RENAME_LIST[error['name']]
 			match = error['match']
-			error['extra_data'] = {'error': match, 'source': 'body'}
+			error['extra_data'] = {'content': match, 'source': 'body'}
 			error['match'] = url
 			error['category'] = 'error'
 			yield Tag(**error)
 
 		for secret in secrets:
+			if secret['name'] in CARIDDI_RENAME_LIST:
+				secret['name'] = CARIDDI_RENAME_LIST[secret['name']]
 			match = secret['match']
-			secret['extra_data'] = {'secret': match, 'source': 'body'}
+			secret['extra_data'] = {'content': match, 'source': 'body'}
 			secret['match'] = url
 			secret['category'] = 'secret'
 			yield Tag(**secret)
@@ -157,10 +168,12 @@ class cariddi(HttpCrawler):
 		for info in infos:
 			if info['name'] in CARIDDI_IGNORE_LIST:
 				continue
+			if info['name'] in CARIDDI_RENAME_LIST:
+				info['name'] = CARIDDI_RENAME_LIST[info['name']]
 			match = info['match']
 			if CARIDDI_IGNORE_PATTERNS.match(match):
 				continue
-			info['extra_data'] = {'info': match, 'source': 'body'}
+			info['extra_data'] = {'content': match, 'source': 'body'}
 			info['match'] = url
 			info['category'] = 'info'
 			yield Tag(**info)

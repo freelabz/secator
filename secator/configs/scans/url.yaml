@@ -6,6 +6,12 @@ input_types:
   - url
 workflows:
   url_crawl:
+  file_secrets_hunt:
+    targets_:
+    - type: url
+      field: stored_response_path
+      condition: item.stored_response_path
+    if: opts.store_responses
   url_vuln:
     targets_:
     - url.url

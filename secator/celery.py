@@ -439,7 +439,7 @@ def break_task(task, task_opts, results=[]):
 	task.results = []
 	task.uuids = set()
 	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
-	console.print(Info(message=f'Results: {results}'))
+	# console.print(Info(message=f'Results: {results}'))
 
 	# Build Celery workflow
 	workflow = chord(

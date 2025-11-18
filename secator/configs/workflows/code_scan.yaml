@@ -2,10 +2,22 @@ type: workflow
 name: code_scan
 alias: codescan
 description: Code vulnerability scan
-tags: [vuln, code]
+tags: [vuln, secret, code]
 input_types:
   - path
-  - docker_image_name
+  - url
+  - string
+
 tasks:
-  grype:
-    description: Run code vulnerability scan
+  _group:
+    grype:
+      description: Find vulnerabilities in dependencies
+      if: not opts.mode or opts.mode in ['filesystem', 'git']
+    trivy:
+      description: Find vulnerabilities in codebase
+      if: not opts.mode or opts.mode in ['filesystem', 'git']
+    gitleaks:
+      description: Scan codebase for leaks
+      if: not opts.mode or opts.mode in ['filesystem', 'git']
+    trufflehog:
+      description: Scan codebase for secrets
