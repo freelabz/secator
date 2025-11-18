@@ -811,7 +811,7 @@ def autodetect_type(target):
 		return IBAN
 	elif validators.uuid(target):
 		return UUID
-	elif is_valid_path(target):
+	elif Path(target).exists():
 		return PATH
 	elif validators.slug(target):
 		return SLUG
