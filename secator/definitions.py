@@ -24,7 +24,8 @@ DEBUG = CONFIG.debug.split(',')
 
 # Constants
 OPT_NOT_SUPPORTED = -1
-OPT_PIPE_INPUT = -1
+OPT_PIPE_INPUT = -2
+OPT_SPACE_SEPARATED = -3
 STATE_COLORS = {
 	'PENDING': 'dim yellow3',
 	'RUNNING': 'bold yellow3',

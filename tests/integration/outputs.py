@@ -284,6 +284,14 @@ OUTPUTS_TASKS = {
             _source='trivy'
         ),
     ],
+    'trufflehog': [
+        Tag(
+            name='aws_access_key',
+            category='secret',
+            match='https://github.com/trufflesecurity/test_keys',
+            _source='trufflehog'
+        ),
+    ],
     'wafw00f': [
         Tag(
             name='Envoy WAF',
