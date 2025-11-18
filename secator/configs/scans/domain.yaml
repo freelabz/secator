@@ -5,6 +5,7 @@ profile: default
 input_types:
   - host
 workflows:
+  domain_recon:
   subdomain_recon:
   host_recon:
     targets_:

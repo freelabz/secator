@@ -1,22 +1,30 @@
+type: workflow
 name: domain_recon
 alias: domrec
 description: Basic domain recon (WHOIS, SSL Certificates, WAF detection...)
 input_types:
 - host
 
-steps:
+tasks:
   _group:
+    jswhois:
+      description: Get WHOIS information
+
     httpx:
-      description: Probe root URL
+      description: Run HTTP probe on domain
+      tech_detect: True
 
     getasn:
       description: Get ASN from domain name
 
     testssl:
       description: Test SSL/TLS security
+      server_defaults: True
+
+    dnsx:
+      description: Resolve DNS records
 
   wafw00f:
     description: Check WAF
     targets_:
       - url.url
-
