@@ -31,7 +31,13 @@ OUTPUTS_CHECKS = {
 OUTPUTS_TASKS = {
     'arjun': [
         Url(
-            url='http://testphp.vulnweb.com/hpp?pp=FUZZ',
+            url='http://testphp.vulnweb.com/hpp',
+            _source='arjun'
+        ),
+        Tag(
+            name='pp', 
+            category='url_param',
+            match='http://testphp.vulnweb.com/hpp',
             _source='arjun'
         )
     ],
@@ -223,6 +229,9 @@ OUTPUTS_TASKS = {
             _source='httpx'
         )
     ],
+    'jswhois': [
+        Tag(name='wikipedia.org WHOIS', category='whois', match='wikipedia.org', extra_data={'content': 'wikipedia.org', 'chain': 'whois'}),
+    ],
     'katana': [
         Url(
             url='http://localhost:3000/vendor.js',
@@ -281,6 +290,14 @@ OUTPUTS_TASKS = {
             _source='trivy'
         ),
     ],
+    'trufflehog': [
+        Tag(
+            name='aws_access_key',
+            category='secret',
+            match='https://github.com/trufflesecurity/test_keys',
+            _source='trufflehog'
+        ),
+    ],
     'wafw00f': [
         Tag(
             name='Envoy WAF',
@@ -324,7 +341,10 @@ OUTPUTS_TASKS = {
 			cvss_score=0,
 			tags=['readme'],
 			_source='wpscan'),
-	]
+	],
+    'x8': [
+        Tag(name='pp', category='url_param', match='http://testphp.vulnweb.com/hpp/', _source='x8'),
+    ]
 }
 
 OUTPUTS_WORKFLOWS = {

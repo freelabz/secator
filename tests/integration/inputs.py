@@ -20,13 +20,16 @@ INPUTS_TASKS = {
 	'grype': 'redis:7.4.1',
     'httpx': 'http://localhost:3000/',
 	'h8mail': 'test@test.com',
+	'jswhois': 'wikipedia.org',
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
 	'subfinder': 'github.com',
 	'testssl': 'free.fr',
 	'trivy': 'https://github.com/blacklanternsecurity/bbot',
+	'trufflehog': 'https://github.com/trufflesecurity/test_keys',
 	'wpscan': 'http://localhost:8000/',
-	'wafw00f': 'https://netflix.com'
+	'wafw00f': 'https://netflix.com',
+	'x8': 'http://testphp.vulnweb.com/hpp/?pp=1',
 }
 
 INPUTS_WORKFLOWS = {

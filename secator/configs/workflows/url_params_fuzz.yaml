@@ -7,22 +7,36 @@ input_types:
   - url
 
 tasks:
-  arjun:
-    description: Extract parameters from URLs
-    targets_:
-    - type: target
-      field: name
-      condition: "'?' not in target.name"
+  httpx/1:
+    description: Probe URLs
+    follow_redirect: True
+
+  _group/extract_params:
+    arjun:
+      description: Extract parameters from URLs
+      wordlist: http_params
+      targets_:
+      - type: url
+        field: '{url}/'
+        condition: "'?' not in url.url"
+
+    x8:
+      description: Bruteforce URL params
+      wordlist: http_params
+      targets_:
+      - type: url
+        field: '{url}/'
+        condition: "'?' not in url.url"
 
   ffuf:
     description: Fuzz URL params
-    wordlist: https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt
+    wordlist: https://raw.githubusercontent.com/trickest/wordlists/refs/heads/main/cloud/levels/level1.txt
     auto_calibration: true
     follow_redirect: true
     targets_:
-      - type: url
-        field: url
-        condition: item._source.startswith('arjun')
+      - type: tag
+        field: '{match}?{name}=FUZZ'
+        condition: item._source.startswith('arjun') or item._source.startswith('x8')
 
   httpx:
     description: Probe fuzzed URLs
