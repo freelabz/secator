@@ -1519,7 +1519,8 @@ def lint(linter):
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
-def unit(tasks, workflows, scans, test):
+@click.option('--no-coverage', is_flag=True, help='Disable coverage')
+def unit(tasks, workflows, scans, test, no_coverage):
 	"""Run unit tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
@@ -1539,7 +1540,10 @@ def unit(tasks, workflows, scans, test):
 
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=5'  # noqa: E501
+	if not no_coverage:
+		cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=5'  # noqa: E501
+	else:
+		cmd = f'{sys.executable} -m pytest -s -vv tests/unit --durations=5'
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
