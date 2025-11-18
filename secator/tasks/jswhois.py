@@ -15,7 +15,7 @@ class jswhois(Command):
 	tags = ['domain', 'info']
 	input_flag = None
 	file_flag = None
-	install_version = 'latest'
+	install_version = '69af013b99d49191c9674cde2e2b57986f6b6bf8'
 	install_cmd = 'go install -v github.com/jschauma/jswhois@[install_version]'
 	# install_github_handle = 'jschauma/jswhois'
 
