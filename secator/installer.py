@@ -214,6 +214,11 @@ class SourceInstaller:
 				status = PackageInstaller.install({'*': ['git']})
 				if not status.is_ok():
 					return status
+			if 'cargo ' in install_cmd:
+				rust_install_cmd = 'curl https://sh.rustup.rs -sSf | sh -s -- -y'
+				status = SourceInstaller.install(rust_install_cmd)
+				if not status.is_ok():
+					return status
 
 		# Handle version
 		if '[install_version]' in install_cmd:

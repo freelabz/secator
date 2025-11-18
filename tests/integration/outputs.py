@@ -31,7 +31,13 @@ OUTPUTS_CHECKS = {
 OUTPUTS_TASKS = {
     'arjun': [
         Url(
-            url='http://testphp.vulnweb.com/hpp?pp=FUZZ',
+            url='http://testphp.vulnweb.com/hpp',
+            _source='arjun'
+        ),
+        Tag(
+            name='pp', 
+            category='url_param',
+            match='http://testphp.vulnweb.com/hpp',
             _source='arjun'
         )
     ],
@@ -335,7 +341,10 @@ OUTPUTS_TASKS = {
 			cvss_score=0,
 			tags=['readme'],
 			_source='wpscan'),
-	]
+	],
+    'x8': [
+        Tag(name='pp', category='url_param', match='http://testphp.vulnweb.com/hpp/', _source='x8'),
+    ]
 }
 
 OUTPUTS_WORKFLOWS = {

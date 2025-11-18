@@ -28,7 +28,8 @@ INPUTS_TASKS = {
 	'trivy': 'https://github.com/blacklanternsecurity/bbot',
 	'trufflehog': 'https://github.com/trufflesecurity/test_keys',
 	'wpscan': 'http://localhost:8000/',
-	'wafw00f': 'https://netflix.com'
+	'wafw00f': 'https://netflix.com',
+	'x8': 'http://testphp.vulnweb.com/hpp/?pp=1',
 }
 
 INPUTS_WORKFLOWS = {
