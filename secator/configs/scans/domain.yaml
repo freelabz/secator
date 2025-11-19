@@ -4,6 +4,7 @@ description: Domain scan
 profile: default
 input_types:
   - host
+
 workflows:
   subdomain_recon:
   host_recon:
@@ -15,12 +16,6 @@ workflows:
   url_crawl:
     targets_:
     - url.url
-  file_secrets_hunt:
-    if: opts.store_responses
-    targets_:
-    - type: url
-      field: stored_response_path
-      condition: item.stored_response_path
   url_vuln:
     targets_:
     - url.url

@@ -1,7 +1,7 @@
 type: workflow
 name: code_scan
 alias: codescan
-description: Code vulnerability scan
+description: Code vulnerability scan and secret hunt
 tags: [vuln, secret, code]
 input_types:
   - path

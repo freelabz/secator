@@ -1,3 +1,5 @@
+import warnings
+
 from pathlib import Path
 from time import time
 
@@ -8,6 +10,7 @@ from secator.runners import Task
 from secator.thread import Thread
 from secator.utils import debug
 
+warnings.filterwarnings("ignore", "Your application has authenticated using end user credentials")
 
 GCS_BUCKET_NAME = CONFIG.addons.gcs.bucket_name
 ITEMS_TO_SEND = {

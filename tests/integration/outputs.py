@@ -18,7 +18,7 @@ OUTPUTS_CHECKS = {
                     'function': lambda item: item.request_headers['Hello'] == 'World',
                 }
             ],
-            'runner': '^(?!gau$).*',
+            'runner': '^(?!xurlfind3r$).*',
         }
     },
     # 'runner': {
@@ -178,9 +178,6 @@ OUTPUTS_TASKS = {
     ],
     'fping': [
         Ip(ip='127.0.0.1', alive=True, _source='fping')
-    ],
-    'gau': [
-        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
     ],
     'getasn': [
         Tag(name='AS14907', category='asn', match='wikipedia.org', _source='getasn')
@@ -354,7 +351,10 @@ OUTPUTS_TASKS = {
 	],
     'x8': [
         Tag(name='pp', category='url_param', match='http://testphp.vulnweb.com/hpp/', _source='x8'),
-    ]
+    ],
+    'xurlfind3r': [
+        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='xurlfind3r')
+    ],
 }
 
 OUTPUTS_WORKFLOWS = {
