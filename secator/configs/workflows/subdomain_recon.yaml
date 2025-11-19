@@ -29,6 +29,12 @@ options:
     short: bdns
     default: False
 
+  hunt_secrets:
+    is_flag: True
+    help: Hunt secrets in HTTP responses (trufflehog)
+    default: False
+    short: hs
+
 tasks:
   _group/1:
     subfinder:
@@ -82,3 +88,11 @@ tasks:
       - target.name
       - subdomain.host
       if: opts.probe_http
+
+  trufflehog:
+    description: Find secrets in HTTP responses
+    targets_:
+    - type: url
+      field: stored_response_path
+      condition: item.stored_response_path != ''
+    if: opts.hunt_secrets

@@ -4,6 +4,7 @@ description: Host scan
 profile: default
 input_types:
   - host
+
 workflows:
   host_recon:
   url_crawl:

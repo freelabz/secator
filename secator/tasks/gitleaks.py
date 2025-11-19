@@ -2,12 +2,21 @@ import click
 import os
 import yaml
 
+from pathlib import Path
+
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.runners import Command
 from secator.definitions import (OUTPUT_PATH, PATH)
 from secator.utils import caml_to_snake
 from secator.output_types import Tag, Info, Error
+from secator.rich import console
+
+GITLEAKS_MODES = ['git', 'dir']
+
+
+def convert_mode(mode):
+	return 'dir' if mode == 'filesystem' else 'git' if mode == 'git' else mode
 
 
 @task()
@@ -21,22 +30,17 @@ class gitleaks(Command):
 	opt_prefix = '--'
 	opts = {
 		'ignore_path': {'type': str, 'help': 'Path to .gitleaksignore file or folder containing one'},
-		'mode': {'type': click.Choice(['git', 'dir']), 'default': 'dir', 'help': 'Gitleaks mode', 'internal': True, 'display': True},  # noqa: E501
-		'config': {'type': str, 'short': 'config', 'help': 'Gitleaks config file path'}
+		'mode': {'type': click.Choice(GITLEAKS_MODES), 'help': f'Scan mode ({", ".join(GITLEAKS_MODES)})', 'internal': True},  # noqa: E501
+		'config': {'type': str, 'short': 'config', 'help': 'Config file path'}
 	}
 	opt_key_map = {
 		"ignore_path": "gitleaks-ignore-path"
 	}
+	opt_value_map = {
+		'mode': lambda x: convert_mode(x)
+	}
 	input_type = "folder"
 	output_types = [Tag]
-	output_map = {
-		Tag: {
-			'name': 'RuleID',
-			'type': lambda x: 'secret',
-			'match': lambda x: f'{x["File"]}:{x["StartLine"]}:{x["StartColumn"]}',
-			'extra_data': lambda x: {caml_to_snake(k): v for k, v in x.items() if k not in ['RuleID', 'File']}
-		}
-	}
 	install_pre = {'*': ['git', 'make']}
 	install_version = 'v8.24.3'
 	install_cmd = (
@@ -48,8 +52,16 @@ class gitleaks(Command):
 
 	@staticmethod
 	def on_cmd(self):
-		# replace fake -mode opt by subcommand
-		mode = self.get_opt_value('mode')
+		mode = self.cmd_options.get('mode', {}).get('value')
+		if mode and mode not in GITLEAKS_MODES:
+			raise Exception(f'Invalid mode: {mode}')
+		if not mode and len(self.inputs) > 0:
+			git_path = Path(self.inputs[0]).joinpath('.git')
+			if git_path.exists():
+				mode = 'git'
+			else:
+				mode = 'dir'
+			console.print(Info(message=f'Auto mode detected: {mode} for input: {self.inputs[0]}'))
 		self.cmd = self.cmd.replace(f'{gitleaks.cmd} ', f'{gitleaks.cmd} {mode} ')
 
 		# add output path
@@ -70,12 +82,14 @@ class gitleaks(Command):
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read())
 		for result in results:
+			extra_data = {'content': result.get('Secret')}
+			extra_data.update({
+				caml_to_snake(k): v for k, v in result.items()
+				if k not in ['RuleID', 'File', 'Secret']
+			})
 			yield Tag(
-				name=result['RuleID'],
+				name=result['RuleID'].replace('-', '_'),
 				category='secret',
 				match='{File}:{StartLine}:{StartColumn}'.format(**result),
-				extra_data={
-					caml_to_snake(k): v for k, v in result.items()
-					if k not in ['RuleID', 'File']
-				}
+				extra_data=extra_data
 			)

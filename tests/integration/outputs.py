@@ -18,7 +18,7 @@ OUTPUTS_CHECKS = {
                     'function': lambda item: item.request_headers['Hello'] == 'World',
                 }
             ],
-            'runner': '^(?!gau$).*',
+            'runner': '^(?!xurlfind3r$).*',
         }
     },
     # 'runner': {
@@ -179,11 +179,8 @@ OUTPUTS_TASKS = {
     'fping': [
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
-    'gau': [
-        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
-    ],
     'getasn': [
-        Tag(name='AS14907', category='asn', match='wikipedia.org', _source='getasn')
+        Tag(name='asn', category='info', match='wikipedia.org', _source='getasn')
     ],
     'gf': [
         Tag(name='xss pattern', category='pattern', match='http://localhost:3000?q=test', _source='gf')
@@ -294,7 +291,7 @@ OUTPUTS_TASKS = {
         Tag(
             name='aws_access_key',
             category='secret',
-            match='https://github.com/trufflesecurity/test_keys',
+            match='https://github.com/trufflesecurity/test_keys/blob/fbc14303ffbf8fb1c2c1914e8dda7d0121633aca/keys#L4',
             _source='trufflehog'
         ),
     ],
@@ -354,7 +351,10 @@ OUTPUTS_TASKS = {
 	],
     'x8': [
         Tag(name='pp', category='url_param', match='http://testphp.vulnweb.com/hpp/', _source='x8'),
-    ]
+    ],
+    'xurlfind3r': [
+        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='xurlfind3r')
+    ],
 }
 
 OUTPUTS_WORKFLOWS = {

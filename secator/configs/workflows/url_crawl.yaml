@@ -10,23 +10,23 @@ options:
   crawlers:
     type: list
     help: Crawlers to use
-    default: ['gau', 'katana']
+    default: ['xurlfind3r', 'katana']
     internal: True
 
-  hunt_patterns:
+  hunt_secrets:
     is_flag: True
-    help: Hunt patterns in HTTP responses (cariddi)
-    default: True
-    short: hp
+    help: Hunt secrets in HTTP responses (trufflehog)
+    default: False
+    short: hs
 
 default_options:
   match_codes: 200,204,301,302,307,401,403,405,500
 
 tasks:
   _group/crawl:
-    gau:
-      description: Search for passive URLs
-      if: "'gau' in opts.crawlers"
+    xurlfind3r:
+      description: Crawl URLs from passive sources
+      if: "'xurlfind3r' in opts.crawlers"
 
     katana:
       description: Crawl URLs
@@ -43,7 +43,7 @@ tasks:
       errors: True
       juicy_extensions: 1
       juicy_endpoints: True
-      if: opts.hunt_patterns
+      if: "'cariddi' in opts.crawlers"
 
   httpx:
     description: Run HTTP probes on crawled URLs
@@ -53,3 +53,11 @@ tasks:
     - type: url
       field: url
       condition: url.status_code != 0
+
+  trufflehog:
+    description: Find secrets in HTTP responses
+    targets_:
+    - type: url
+      field: stored_response_path
+      condition: item.stored_response_path != ''
+    if: opts.hunt_secrets

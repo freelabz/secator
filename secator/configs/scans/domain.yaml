@@ -4,6 +4,7 @@ description: Domain scan
 profile: default
 input_types:
   - host
+
 workflows:
   subdomain_recon:
   host_recon:

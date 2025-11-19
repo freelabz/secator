@@ -6,6 +6,7 @@ input_types:
   - url
 workflows:
   url_crawl:
+  url_fuzz:
   url_vuln:
     targets_:
     - url.url
