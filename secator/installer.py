@@ -86,7 +86,7 @@ class ToolInstaller:
 
 		# Install binaries from GH
 		gh_status = InstallerStatus.UNKNOWN
-		install_ignore_bin = get_distro_config().pm_name in tool_cls.install_ignore_bin
+		install_ignore_bin = get_distro_config().name in tool_cls.install_ignore_bin
 		if tool_cls.install_github_handle and not CONFIG.security.force_source_install and not install_ignore_bin:
 			gh_status = GithubInstaller.install(
 				tool_cls.install_github_handle,

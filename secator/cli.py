@@ -1390,7 +1390,6 @@ def install_tools(cmds, cleanup, fail_fast):
 			'pip cache purge',
 			'gem cleanup --user-install',
 			'gem clean --user-install',
-			'cargo clean',
 		]
 		if distro.pm_finalizer:
 			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')

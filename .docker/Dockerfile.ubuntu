@@ -27,6 +27,7 @@ RUN apt update -y && \
     wget
 COPY . /code
 WORKDIR /code
+RUN . scripts/install_go.sh
 RUN pipx install . && \
 	secator install addons worker && \
 	secator install addons gdrive && \
