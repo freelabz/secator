@@ -212,6 +212,7 @@ def register_runner(cli_endpoint, config):
 
 		# Set dry run
 		ctx.obj['dry_run'] = dry_run
+		ctx.obj['input_types'] = input_types
 
 		# Show version
 		if version:

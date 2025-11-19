@@ -1100,13 +1100,9 @@ class Runner:
 					f'is not supported by [bold gold3]{self.unique_name}[/]. Supported types: [bold green]{supported_types}[/]'
 				)
 				message += '. Removing from current inputs (runner context)'
-				info = Info(message=message)
+				warning = Warning(message=message)
 				self.inputs.remove(_input)
-				self.add_result(info)
-				if not self.inputs:
-					error = Error(message=message)
-					self.add_result(error)
-					return False
+				self.add_result(warning)
 		return True
 
 	@staticmethod

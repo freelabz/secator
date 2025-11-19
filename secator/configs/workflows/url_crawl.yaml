@@ -15,7 +15,7 @@ options:
 
   hunt_patterns:
     is_flag: True
-    help: Hunt patterns in HTTP responses (cariddi)
+    help: Hunt patterns in HTTP responses (cariddi, trufflehog)
     default: True
     short: hp
 
@@ -53,3 +53,11 @@ tasks:
     - type: url
       field: url
       condition: url.status_code != 0
+
+  trufflehog:
+    description: Find secrets in HTTP responses
+    targets_:
+    - type: url
+      field: stored_response_path
+      condition: item.stored_response_path != ''
+    if: opts.hunt_patterns

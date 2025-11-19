@@ -11,6 +11,7 @@ from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER
 from secator.output_types import Vulnerability, Tag, Info, Error
 from secator.tasks._categories import Vuln
 from secator.utils import caml_to_snake
+from secator.rich import console
 
 
 TRIVY_MODES = ['image', 'fs', 'repo']
@@ -44,7 +45,7 @@ class trivy(Vuln):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
-	opt_key_value = {
+	opt_value_map = {
 		'mode': lambda x: convert_mode(x)
 	}
 	install_version = 'v0.61.1'
@@ -56,7 +57,7 @@ class trivy(Vuln):
 
 	@staticmethod
 	def on_cmd(self):
-		mode = self.get_opt_value('mode')
+		mode = self.cmd_options.get('mode', {}).get('value')
 		if mode and mode not in TRIVY_MODES:
 			raise Exception(f'Invalid mode: {mode}')
 		if not mode and len(self.inputs) > 0:
@@ -67,6 +68,8 @@ class trivy(Vuln):
 				mode = 'fs'
 			else:
 				mode = 'image'
+			console.print(Info(message=f'Auto mode detected: {mode} for input: {self.inputs[0]}'))
+
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'

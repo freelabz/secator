@@ -10,6 +10,7 @@ from secator.runners import Command
 from secator.definitions import (OUTPUT_PATH, PATH)
 from secator.utils import caml_to_snake
 from secator.output_types import Tag, Info, Error
+from secator.rich import console
 
 GITLEAKS_MODES = ['git', 'dir']
 
@@ -35,7 +36,7 @@ class gitleaks(Command):
 	opt_key_map = {
 		"ignore_path": "gitleaks-ignore-path"
 	}
-	opt_key_value = {
+	opt_value_map = {
 		'mode': lambda x: convert_mode(x)
 	}
 	input_type = "folder"
@@ -51,7 +52,7 @@ class gitleaks(Command):
 
 	@staticmethod
 	def on_cmd(self):
-		mode = self.get_opt_value('mode')
+		mode = self.cmd_options.get('mode', {}).get('value')
 		if mode and mode not in GITLEAKS_MODES:
 			raise Exception(f'Invalid mode: {mode}')
 		if not mode and len(self.inputs) > 0:
@@ -60,6 +61,7 @@ class gitleaks(Command):
 				mode = 'git'
 			else:
 				mode = 'dir'
+			console.print(Info(message=f'Auto mode detected: {mode} for input: {self.inputs[0]}'))
 		self.cmd = self.cmd.replace(f'{gitleaks.cmd} ', f'{gitleaks.cmd} {mode} ')
 
 		# add output path

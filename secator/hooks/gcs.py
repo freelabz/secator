@@ -60,6 +60,18 @@ def upload_blob(bucket_name, source_file_name, destination_blob_name):
 	debug(f'in {elapsed:.4f}s', obj={'blob': 'UPLOADED', 'blob_name': destination_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs', verbose=True)  # noqa: E501
 
 
+def download_blob(bucket_name, source_blob_name, destination_file_name):
+	"""Downloads a file from the bucket."""
+	start_time = time()
+	storage_client = get_gcs_client()
+	bucket = storage_client.bucket(bucket_name)
+	blob = bucket.blob(source_blob_name)
+	blob.download_to_filename(destination_file_name)
+	end_time = time()
+	elapsed = end_time - start_time
+	debug(f'in {elapsed:.4f}s', obj={'blob': 'DOWNLOADED', 'blob_name': source_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs', verbose=True)  # noqa: E501
+
+
 HOOKS = {
 	Task: {'on_item': [process_item]}
 }
