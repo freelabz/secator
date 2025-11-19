@@ -1,6 +1,6 @@
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability, Record, Certificate)
+                                Vulnerability, Record, Certificate, Domain)
 
 
 OUTPUTS_CHECKS = {
@@ -304,6 +304,16 @@ OUTPUTS_TASKS = {
             category='waf',
             match='https://netflix.com',
             _source='wafw00f')
+    ],
+    'whois': [
+        Domain(
+            domain='wikipedia.org',
+            registrar='MarkMonitor Inc.',
+            creation_date='2001-01-13 00:12:14',
+            expiration_date='2026-01-13 00:12:14',
+            registrant='',
+            _source='whois'
+        )
     ],
     'testssl': [
         Certificate(host='free.fr', fingerprint_sha256='17E97A0F31326220AC99341A4225E7376750D2A2CA9617EA75EEF2ACC4F52328', _source='testssl')
