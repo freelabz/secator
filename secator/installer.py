@@ -212,6 +212,9 @@ class SourceInstaller:
 			for match in matches:
 				if match == 'cargo':
 					rust_install_cmd = 'curl https://sh.rustup.rs -sSf | sh -s -- -y'
+					distribution = get_distro_config()
+					if not distribution.pm_installer:
+						return InstallerStatus.UNKNOWN_DISTRIBUTION
 					if distribution.pm_name == 'apk':
 						install_cmd = install_cmd.replace('cargo ', 'RUSTFLAGS="-Ctarget-feature=-crt-static" cargo ')
 					status = SourceInstaller.install(rust_install_cmd)
