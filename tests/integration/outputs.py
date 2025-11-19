@@ -180,7 +180,7 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'getasn': [
-        Tag(name='AS14907', category='asn', match='wikipedia.org', _source='getasn')
+        Tag(name='asn', category='info', match='wikipedia.org', _source='getasn')
     ],
     'gf': [
         Tag(name='xss pattern', category='pattern', match='http://localhost:3000?q=test', _source='gf')
@@ -291,7 +291,7 @@ OUTPUTS_TASKS = {
         Tag(
             name='aws_access_key',
             category='secret',
-            match='https://github.com/trufflesecurity/test_keys',
+            match='https://github.com/trufflesecurity/test_keys/blob/fbc14303ffbf8fb1c2c1914e8dda7d0121633aca/keys#L4',
             _source='trufflehog'
         ),
     ],
