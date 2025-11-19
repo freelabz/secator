@@ -1390,6 +1390,7 @@ def install_tools(cmds, cleanup, fail_fast):
 			'pip cache purge',
 			'gem cleanup --user-install',
 			'gem clean --user-install',
+			'cargo clean',
 		]
 		if distro.pm_finalizer:
 			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
@@ -1441,7 +1442,7 @@ def update(all):
 		for cls in discover_tasks():
 			cmd = cls.cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
-			info = get_version_info(cmd, version_flag, cls.install_github_handle)
+			info = get_version_info(cmd, version_flag, cls.install_github_handle, cls.install_github_version_prefix)
 			if not info['installed'] or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
 				status = ToolInstaller.install(cls)

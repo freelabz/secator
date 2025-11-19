@@ -1,7 +1,9 @@
 FROM ubuntu:latest
-
+ARG flavor=full
+ARG build_from_source=true
 ENV PATH="${PATH}:/root/.local/bin"
 ENV GOBIN="/root/.local/bin"
+ENV CARGO_HOME="/root/.local"
 RUN apt update -y && \
     apt install -y \
 	bash \
