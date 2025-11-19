@@ -88,7 +88,11 @@ class ToolInstaller:
 		gh_status = InstallerStatus.UNKNOWN
 		install_ignore_bin = get_distro_config().pm_name in tool_cls.install_ignore_bin
 		if tool_cls.install_github_handle and not CONFIG.security.force_source_install and not install_ignore_bin:
-			gh_status = GithubInstaller.install(tool_cls.install_github_handle, version=tool_cls.install_version or 'latest', version_prefix=tool_cls.install_github_version_prefix)
+			gh_status = GithubInstaller.install(
+				tool_cls.install_github_handle,
+				version=tool_cls.install_version or 'latest',
+				version_prefix=tool_cls.install_github_version_prefix
+			)
 			status = gh_status
 
 		# Install from source
@@ -209,7 +213,7 @@ class SourceInstaller:
 				if match == 'cargo':
 					rust_install_cmd = 'curl https://sh.rustup.rs -sSf | sh -s -- -y'
 					if distribution.pm_name == 'apk':
-						install_cmd = install_cmd.replace('cargo ', f'RUSTFLAGS="-Ctarget-feature=-crt-static" cargo ')
+						install_cmd = install_cmd.replace('cargo ', 'RUSTFLAGS="-Ctarget-feature=-crt-static" cargo ')
 					status = SourceInstaller.install(rust_install_cmd)
 					if not status.is_ok():
 						return status
@@ -506,7 +510,10 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		latest_version = None
 		if not CONFIG.offline_mode:
 			if install_github_handle:
-				latest_version = GithubInstaller.get_latest_version(install_github_handle, version_prefix=install_github_version_prefix)
+				latest_version = GithubInstaller.get_latest_version(
+					install_github_handle,
+					version_prefix=install_github_version_prefix,
+				)
 				info['latest_version'] = latest_version
 				info['source'] = 'github'
 			elif install_cmd and install_cmd.startswith('pip'):

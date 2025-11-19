@@ -88,6 +88,7 @@ class Command(Runner):
 	install_cmd = None
 	install_github_handle = None
 	install_github_version_prefix = ''
+	install_ignore_bin = []
 	install_version = None
 
 	# Serializer
