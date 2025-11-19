@@ -9,9 +9,10 @@ from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 class Tag(OutputType):
 	name: str
 	match: str
+	category: str = field(default='general')
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	stored_response_path: str = field(default='', compare=False)
-	_source: str = field(default='', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='tag', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
@@ -20,7 +21,7 @@ class Tag(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = ['match', 'name', 'extra_data']
+	_table_fields = ['match', 'category', 'name', 'extra_data']
 	_sort_by = ('match', 'name')
 
 	def __post_init__(self):
@@ -30,7 +31,8 @@ class Tag(OutputType):
 		return self.match
 
 	def __repr__(self) -> str:
-		s = f'🏷️  [bold magenta]{self.name}[/]'
+		long_category = self.category.replace('_', ' ').capitalize()
+		s = f'🏷️  [bold yellow]{long_category}[/] [bold magenta]{trim_string(self.name, max_length=100)}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:

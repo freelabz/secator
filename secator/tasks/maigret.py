@@ -6,7 +6,7 @@ import re
 from secator.decorators import task
 from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
-								 TIMEOUT, URL, STRING)
+								 TIMEOUT, URL, STRING, SLUG)
 from secator.output_types import UserAccount, Info, Error
 from secator.tasks._categories import ReconUser
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class maigret(ReconUser):
 	"""Collect a dossier on a person by username."""
 	cmd = 'maigret'
-	input_types = [STRING]
+	input_types = [SLUG, STRING]
 	output_types = [UserAccount]
 	tags = ['user', 'recon', 'username']
 	file_flag = None
@@ -42,8 +42,13 @@ class maigret(ReconUser):
 			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
 	}
-	install_version = '0.5.0a'
-	install_cmd = 'pipx install git+https://github.com/soxoj/maigret --force'
+	install_version = '0.5.0'
+	# install_pre = {
+	# 	'apt': ['libcairo2-dev'],
+	# 	'yum|zypper': ['cairo-devel'],
+	# 	'*': ['cairo']
+	# }
+	install_cmd = 'pipx install maigret==[install_version] --force'
 	socks5_proxy = True
 	profile = 'io'
 

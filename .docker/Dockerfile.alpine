@@ -1,4 +1,4 @@
-FROM alpine:latest AS builder
+FROM alpine:3.21 AS builder
 
 ENV PATH="${PATH}:/root/.local/bin"
 RUN apk add --no-cache \
@@ -19,12 +19,13 @@ RUN pipx install --pip-args="--no-cache-dir" . && \
 	secator install addons redis && \
 	secator install addons dev
 
-FROM python:3.12-alpine
+FROM python:3.12-alpine3.22
 ARG flavor=full
 ARG build_from_source=false
 ENV TERM="xterm-256color"
 ENV PATH="${PATH}:/root/.local/bin"
 ENV GOBIN="/root/.local/bin"
+ENV GOPATH="/root/go"
 COPY --from=builder /root/.local /root/.local
 RUN apk add --no-cache \
 	flock \

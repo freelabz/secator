@@ -6,6 +6,7 @@ import json
 import logging
 import operator
 import os
+import signal
 import tldextract
 import re
 import select
@@ -15,7 +16,7 @@ import warnings
 
 from datetime import datetime, timedelta
 from functools import reduce
-from pathlib import Path
+from pathlib import Path, PurePath
 from time import time
 import traceback
 from urllib.parse import urlparse, quote
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 _tasks = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
+CAMEL_TO_SNAKE_REGEX = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 class TaskError(ValueError):
@@ -396,8 +398,26 @@ def escape_mongodb_url(url):
 	return url
 
 
-def caml_to_snake(s):
-	return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
+def caml_to_snake(name):
+	"""
+	Convert CamelCase string to snake_case, handling acronyms properly.
+
+	Examples:
+		>>> caml_to_snake("MongoDB")
+		'mongo_db'
+		>>> caml_to_snake("MONGODB")
+		'mongodb'
+		>>> caml_to_snake("getHTTPResponseCode")
+		'get_http_response_code'
+		>>> caml_to_snake("XMLHttpRequest")
+		'xml_http_request'
+		>>> caml_to_snake("HTMLElement")
+		'html_element'
+	"""
+	if not name:
+		return ""
+	name = CAMEL_TO_SNAKE_REGEX.sub(r'_', name)
+	return name.lower().replace('__', '_')
 
 
 def print_version():
@@ -823,3 +843,27 @@ def get_versions_from_string(string):
 	if not matches:
 		return []
 	return matches
+
+
+def signal_to_name(signum):
+	"""Convert a signal number to its name"""
+	for name, value in vars(signal).items():
+		if name.startswith('SIG') and not name.startswith('SIG_') and value == signum:
+			return name
+	return str(signum)
+
+
+def is_valid_path(path):
+	"""Check if a path is valid.
+
+	Args:
+		path (str): Path to check.
+
+	Returns:
+		bool: True if the path is valid, False otherwise.
+	"""
+	try:
+		PurePath(path)
+		return True
+	except (TypeError, ValueError):
+		return False

@@ -27,7 +27,7 @@ tasks:
 
   httpx:
     description: Run HTTP probes on crawled URLs
-    follow_redirects: True
+    tech_detect: True
     targets_:
       - type: url
         field: url

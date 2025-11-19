@@ -73,7 +73,7 @@ class ToolInstaller:
 
 		# Check PATH
 		path_var = os.environ.get('PATH', '')
-		if not str(CONFIG.dirs.bin) in path_var:
+		if str(CONFIG.dirs.bin) not in path_var:
 			console.print(Warning(message=f'Bin directory {CONFIG.dirs.bin} not found in PATH ! Binaries installed by secator will not work'))  # noqa: E501
 			console.print(Warning(message=f'Run "export PATH=$PATH:{CONFIG.dirs.bin}" to add the binaries to your PATH'))
 
@@ -150,7 +150,7 @@ class PackageInstaller:
 
 		# Installer cmd
 		cmd = distribution.pm_installer
-		if CONFIG.security.autoinstall_commands and IN_CELERY_WORKER_PROCESS:
+		if CONFIG.security.auto_install_commands and IN_CELERY_WORKER_PROCESS:
 			cmd = f'flock /tmp/install.lock {cmd}'
 		if getpass.getuser() != 'root':
 			cmd = f'sudo {cmd}'
@@ -212,6 +212,11 @@ class SourceInstaller:
 					return status
 			if 'git ' in install_cmd or 'git+' in install_cmd:
 				status = PackageInstaller.install({'*': ['git']})
+				if not status.is_ok():
+					return status
+			if 'cargo ' in install_cmd:
+				rust_install_cmd = 'curl https://sh.rustup.rs -sSf | sh -s -- -y'
+				status = SourceInstaller.install(rust_install_cmd)
 				if not status.is_ok():
 					return status
 
@@ -395,7 +400,7 @@ class GithubInstaller:
 		for root, _, files in os.walk(directory):
 			for file in files:
 				# Match the file name exactly with the repository name
-				if file == binary_name:
+				if file.startswith(binary_name):
 					return os.path.join(root, file)
 		return None
 

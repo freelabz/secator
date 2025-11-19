@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'secator'
-version = "0.15.0"
+version = "0.19.1"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -35,6 +35,7 @@ dependencies = [
   'distro < 2',
   'cpe < 2',
   'dotmap < 2',
+  'dnspython < 3',
   'free-proxy < 2',
   'furl < 3',
   'greenlet < 4',

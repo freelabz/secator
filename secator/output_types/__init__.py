@@ -11,6 +11,7 @@ __all__ = [
 	'State',
 	'Subdomain',
 	'Url',
+	'UrlParam',
 	'UserAccount',
 	'Vulnerability',
 	'Warning',

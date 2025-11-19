@@ -2,24 +2,25 @@ import copy
 import getpass
 import logging
 import os
+import queue
 import re
 import shlex
 import signal
 import subprocess
 import sys
-import uuid
+import threading
 
 from time import time
 
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
+from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug, rich_escape as _s
+from secator.utils import debug, rich_escape as _s, signal_to_name
 
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,13 @@ class Command(Runner):
 		# Process
 		self.process = None
 
+		# Monitor thread (lazy initialization)
+		self.monitor_thread = None
+		self.monitor_stop_event = None
+		self.monitor_queue = None
+		self.process_start_time = None
+		# self.retry_count = 0  # TODO: remove this
+
 		# Sudo
 		self.requires_sudo = False
 
@@ -205,6 +213,13 @@ class Command(Runner):
 		if instance_func:
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
+
+	def _init_monitor_objects(self):
+		"""Initialize monitor thread objects when needed (lazy initialization)."""
+		if self.monitor_stop_event is None:
+			self.monitor_stop_event = threading.Event()
+		if self.monitor_queue is None:
+			self.monitor_queue = queue.Queue()
 
 	def toDict(self):
 		res = super().toDict()
@@ -286,6 +301,7 @@ class Command(Runner):
 
 	@classmethod
 	def get_supported_opts(cls):
+		# TODO: Replace this with get_command_options called on the command class
 		def convert(d):
 			for k, v in d.items():
 				if hasattr(v, '__name__') and v.__name__ in ['str', 'int', 'float']:
@@ -373,8 +389,8 @@ class Command(Runner):
 			self.run_opts['proxy'] = proxy
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
-			self._print(
-				f'[bold red]Ignoring proxy "{self.proxy}" for {self.cmd_name} (not supported).[/]', rich=True)
+			warning = Warning(message=rf'Ignoring proxy "{self.proxy}" (reason: not supported) \[[bold yellow3]{self.unique_name}[/]]')  # noqa: E501
+			self._print(repr(warning))
 
 	#----------#
 	# Internal #
@@ -406,11 +422,12 @@ class Command(Runner):
 			if self.dry_run:
 				self.print_description()
 				self.print_command()
+				yield Info(message=self.cmd)
 				return
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+				yield Warning(message=f'{self.unique_name} skipped (no inputs)')
 				return
 
 			# Print command
@@ -418,14 +435,13 @@ class Command(Runner):
 			self.print_command()
 
 			# Check for sudo requirements and prepare the password if needed
-			sudo_password, error = self._prompt_sudo(self.cmd)
-			if error:
-				yield Error(
-					message=error,
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
-				return
+			sudo_required = re.search(r'\bsudo\b', self.cmd)
+			sudo_password = None
+			if sudo_required:
+				sudo_password, error = self._prompt_sudo(self.cmd)
+				if error:
+					yield Error(message=error)
+					return
 
 			# Prepare cmds
 			command = self.cmd if self.shell else shlex.split(self.cmd)
@@ -434,23 +450,16 @@ class Command(Runner):
 			if not self.no_process and not self.is_installed():
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
-					yield Info(
-						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noqa: E501
-						_source=self.unique_name,
-						_uuid=str(uuid.uuid4())
-					)
+					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
 					status = ToolInstaller.install(self.__class__)
 					if not status.is_ok():
-						yield Error(
-							message=f'Failed installing {self.cmd_name}',
-							_source=self.unique_name,
-							_uuid=str(uuid.uuid4())
-						)
+						yield Error(message=f'Failed installing {self.cmd_name}')
 						return
 
 			# Output and results
 			self.return_code = 0
 			self.killed = False
+			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
 
 			# Run the command using subprocess
 			env = os.environ
@@ -460,9 +469,17 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
+				preexec_fn=os.setsid if not sudo_required else None,
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
+
+			# Initialize monitor objects and start monitor thread
+			self._init_monitor_objects()
+			self.process_start_time = time()
+			self.monitor_stop_event.clear()
+			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
+			self.monitor_thread.start()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
@@ -475,6 +492,7 @@ class Command(Runner):
 				if not line:
 					break
 				yield from self.process_line(line)
+				yield from self.process_monitor_queue()
 
 			# Run hooks after cmd has completed successfully
 			result = self.run_hooks('on_cmd_done', sub='end')
@@ -487,7 +505,7 @@ class Command(Runner):
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
 			self.stop_process()
-			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error.from_exception(e)
 
 		finally:
 			yield from self._wait_for_end()
@@ -533,17 +551,20 @@ class Command(Runner):
 		if self.no_process:
 			return
 
-		# Yield command stats (CPU, memory, conns ...)
-		# TODO: enable stats support with timer
-		if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
+	def process_monitor_queue(self):
+		"""Process and yield any queued items from monitor thread."""
+		if self.monitor_queue is None:
 			return
-
-		yield from self.stats()
-		self.last_updated_stat = time()
+		while not self.monitor_queue.empty():
+			try:
+				monitor_item = self.monitor_queue.get_nowait()
+				yield monitor_item
+			except queue.Empty:
+				break
 
 	def print_description(self):
 		"""Print description"""
-		if self.sync and not self.has_children and self.caller and self.description:
+		if self.sync and not self.has_children and self.caller and self.description and self.print_cmd:
 			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
 
 	def print_command(self):
@@ -574,30 +595,127 @@ class Command(Runner):
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)
-		error._source = self.unique_name
-		error._uuid = str(uuid.uuid4())
 		yield error
 
-	def stop_process(self, exit_ok=False):
+	def stop_process(self, exit_ok=False, sig=signal.SIGINT):
 		"""Sends SIGINT to running process, if any."""
 		if not self.process:
 			return
-		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
-		self.process.send_signal(signal.SIGINT)
+		self.debug(f'Sending signal {signal_to_name(sig)} to process {self.process.pid}.', sub='error')
+		if self.process and self.process.pid:
+			os.killpg(os.getpgid(self.process.pid), sig)
 		if exit_ok:
 			self.exit_ok = True
 
-	def stats(self):
+	def _stop_monitor_thread(self):
+		"""Stop monitor thread."""
+		if self.monitor_thread and self.monitor_thread.is_alive() and self.monitor_stop_event:
+			self.monitor_stop_event.set()
+			self.monitor_thread.join(timeout=2.0)
+
+	def _monitor_process(self):
+		"""Monitor thread that checks process health and kills if necessary."""
+		last_stats_time = 0
+
+		while not self.monitor_stop_event.is_set():
+			if not self.process or not self.process.pid:
+				break
+
+			try:
+				current_time = time()
+				self.debug('Collecting monitor items', sub='monitor')
+
+				# Collect and queue stats at regular intervals
+				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
+					stats_items = list(self._collect_stats())
+					for stat_item in stats_items:
+						if self.monitor_queue is not None:
+							self.monitor_queue.put(stat_item)
+					last_stats_time = current_time
+
+					# Check memory usage from collected stats
+					if self.memory_limit_mb and self.memory_limit_mb != -1:
+						total_mem = sum(stat_item.extra_data.get('memory_info', {}).get('rss', 0) / 1024 / 1024 for stat_item in stats_items)  # noqa: E501
+						if total_mem > self.memory_limit_mb:
+							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
+							if self.monitor_queue is not None:
+								self.monitor_queue.put(warning)
+							self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+							break
+
+				# Check execution time
+				if self.process_start_time and CONFIG.celery.task_max_timeout != -1:
+					elapsed_time = current_time - self.process_start_time
+					if elapsed_time > CONFIG.celery.task_max_timeout:
+						warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
+						if self.monitor_queue is not None:
+							self.monitor_queue.put(warning)
+						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+						break
+
+				# Check retry count
+				# TODO: remove this
+				# if CONFIG.celery.task_max_retries and self.retry_count >= CONFIG.celery.task_max_retries:
+				# 	warning = Warning(message=f'Max retries {CONFIG.celery.task_max_retries} exceeded (actual: {self.retry_count})')
+				# 	self.monitor_queue.put(warning)
+				# 	self.stop_process(exit_ok=False, sig=signal.SIGTERM)
+				# 	break
+
+			except Exception as e:
+				self.debug(f'Monitor thread error: {e}', sub='monitor')
+				warning = Warning(message=f'Monitor thread error: {e}')
+				if self.monitor_queue is not None:
+					self.monitor_queue.put(warning)
+				break
+
+			# Sleep for a short interval before next check (stat update frequency)
+			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
+
+	def _collect_stats(self):
+		"""Collect stats about the current running process, if any."""
+		if not self.process or not self.process.pid:
+			return
+		proc = psutil.Process(self.process.pid)
+		stats = Command.get_process_info(proc, children=True)
+		total_mem = 0
+		for info in stats:
+			name = info['name']
+			pid = info['pid']
+			cpu_percent = info['cpu_percent']
+			# mem_percent = info['memory_percent']
+			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			total_mem += mem_rss
+			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
+			net_conns = info.get('net_connections') or []
+			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+			yield Stat(
+				name=name,
+				pid=pid,
+				cpu=cpu_percent,
+				memory=mem_rss,
+				memory_limit=self.memory_limit_mb,
+				net_conns=len(net_conns),
+				extra_data=extra_data
+			)
+		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
+		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
+		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
+
+	def stats(self, memory_limit_mb=None):
 		"""Gather stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
 		stats = Command.get_process_info(proc, children=True)
+		total_mem = 0
 		for info in stats:
 			name = info['name']
 			pid = info['pid']
 			cpu_percent = info['cpu_percent']
 			mem_percent = info['memory_percent']
+			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			total_mem += mem_rss
+			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
 			net_conns = info.get('net_connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
@@ -608,6 +726,9 @@ class Command(Runner):
 				net_conns=len(net_conns),
 				extra_data=extra_data
 			)
+		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
+		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
+			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
 	@staticmethod
 	def get_process_info(process, children=False):
@@ -686,7 +807,7 @@ class Command(Runner):
 				['sudo', '-S', '-p', '', 'true'],
 				input=sudo_password + "\n",
 				text=True,
-				capture_output=True
+				capture_output=True,
 			)
 			if result.returncode == 0:
 				return sudo_password, None  # Password is correct
@@ -696,6 +817,8 @@ class Command(Runner):
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
+		self._stop_monitor_thread()
+		yield from self.process_monitor_queue()
 		if not self.process:
 			return
 		for line in self.process.stdout.readlines():
@@ -710,24 +833,14 @@ class Command(Runner):
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			yield Error(message=error)
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
 			last_lines = last_lines[max(0, len(last_lines) - 2):]
 			last_lines = [line for line in last_lines if line != '']
-			yield Error(
-				message=error,
-				traceback='\n'.join(last_lines),
-				traceback_title='Last stdout lines',
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			yield Error(message=error, traceback='\n'.join(last_lines), traceback_title='Last stdout lines')
 
 	@staticmethod
 	def _process_opts(
@@ -896,9 +1009,7 @@ class Command(Runner):
 		for prefix in opt_aliases:
 			opt_names.extend([f'{prefix}.{opt_name}', f'{prefix}_{opt_name}'])
 		opt_names.append(opt_name)
-		# preserve first-seen order while de-duplicating
 		opt_names = list(dict.fromkeys(opt_names))
-		debug(f'opt names to try: {opt_names}', sub='init.options')
 		opt_values = [opts.get(o) for o in opt_names]
 		opt_conf = [conf for _, conf in opts_conf.items() if _ == opt_name]
 		if opt_conf:
@@ -1031,6 +1142,8 @@ class Command(Runner):
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'
+			elif self.file_flag == OPT_SPACE_SEPARATED:
+				cmd += ' ' + ' '.join(inputs)
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
 			else:

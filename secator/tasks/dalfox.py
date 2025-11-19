@@ -4,7 +4,7 @@ from secator.decorators import task
 from secator.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   HEADER, ID, MATCHED_AT, METHOD, NAME,
 							   OPT_NOT_SUPPORTED, PROVIDER, PROXY, RATE_LIMIT,
-							   SEVERITY, TAGS, THREADS, TIMEOUT, URL,
+							   RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL,
 							   USER_AGENT)
 from secator.output_types import Vulnerability, Url
 from secator.serializers import JSONSerializer
@@ -25,9 +25,10 @@ class dalfox(VulnHttp):
 	output_types = [Vulnerability, Url]
 	tags = ['url', 'fuzz']
 	input_flag = 'url'
+	input_chunk_size = 20
+	ignore_return_code = True
 	file_flag = 'file'
-	# input_chunk_size = 1
-	json_flag = '--format json'
+	json_flag = '--format jsonl'
 	version_flag = 'version'
 	opt_prefix = '--'
 	opt_key_map = {
@@ -37,6 +38,7 @@ class dalfox(VulnHttp):
 		METHOD: 'method',
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: 'worker',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent'
@@ -55,7 +57,7 @@ class dalfox(VulnHttp):
 		}
 	}
 	install_version = 'v2.11.0'
-	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
+	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@[install_version]'
 	install_github_handle = 'hahwul/dalfox'
 	encoding = 'ansi'
 	proxychains = False
@@ -63,11 +65,6 @@ class dalfox(VulnHttp):
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'cpu'
-
-	@staticmethod
-	def on_line(self, line):
-		line = line.rstrip(',')
-		return line
 
 	@staticmethod
 	def on_json_loaded(self, item):

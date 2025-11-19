@@ -36,29 +36,30 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Add GOBIN to PATH
+    - name: Add local bin to PATH
       run: echo "${HOME}/.local/bin" >> $GITHUB_PATH
 
-    - name: Add GOPATH to PATH
-      run: echo "${HOME}/go/bin" >> $GITHUB_PATH
+    - name: Run apt update
+      run: sudo apt update
 
     - name: Detect changed or all tasks
       run: |
         if [[ ${{ github.event_name }} == "push" && ${{ github.ref_name }} =~ ^release-please.* ]]; then
-          TASKS=$(secator x --list)
           echo "Running all tasks"
+          if ! secator test tasks -c; then
+            exit 1
+          fi
         else
           TASKS=$(git diff --name-only --diff-filter=AMR origin/main HEAD | grep '^secator/tasks/.*\.py$' | grep -v '_.*\.py$' | sed 's/\.py$//' | sed 's/^secator\/tasks\///')
           echo "Changed tasks: $TASKS"
-        fi
-
-        FAILED=0
-        for task in $TASKS; do
-          if ! secator test task -c $task; then
-            FAILED=1
+          FAILED=0
+          for task in $TASKS; do
+            if ! secator test task -c $task --verbose; then
+              FAILED=1
+            fi
+            echo ""
+          done
+          if [ $FAILED -eq 1 ]; then
+            exit 1
           fi
-          echo ""
-        done
-        if [ $FAILED -eq 1 ]; then
-          exit 1
         fi

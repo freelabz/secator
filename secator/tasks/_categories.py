@@ -39,13 +39,13 @@ OPTS = {
 	DEPTH: {'type': int, 'help': 'Scan depth'},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
-	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
-	FILTER_WORDS: {'type': str, 'short': 'fw', 'help': 'Filter out responses with word count'},
+	FILTER_SIZE: {'type': int, 'short': 'fs', 'help': 'Filter out responses with size'},
+	FILTER_WORDS: {'type': int, 'short': 'fw', 'help': 'Filter out responses with word count'},
 	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'frd', 'help': 'Follow HTTP redirects'},
 	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
 	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
-	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match respones with size'},
-	MATCH_WORDS: {'type': str, 'short': 'mw', 'help': 'Match responses with word count'},
+	MATCH_SIZE: {'type': int, 'short': 'ms', 'help': 'Match responses with size'},
+	MATCH_WORDS: {'type': int, 'short': 'mw', 'help': 'Match responses with word count'},
 	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
@@ -96,6 +96,20 @@ class HttpFuzzer(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
 	input_types = [URL]
 	output_types = [Url]
+	profile = lambda opts: HttpFuzzer.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def dynamic_profile(opts):
+		wordlist = HttpFuzzer._get_opt_value(
+			opts,
+			'wordlist',
+			opts_conf=dict(HttpFuzzer.opts, **HttpFuzzer.meta_opts),
+			opt_aliases=opts.get('aliases', []),
+			preprocess=True,
+			process=True,
+		)
+		wordlist_size_mb = os.path.getsize(wordlist) / (1024 * 1024)
+		return 'cpu' if wordlist_size_mb > 5 else 'io'
 
 
 #----------------#

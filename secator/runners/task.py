@@ -1,4 +1,3 @@
-import uuid
 from secator.config import CONFIG
 from secator.runners import Runner
 from secator.loader import discover_tasks
@@ -50,6 +49,7 @@ class Task(Runner):
 
 		# Task class will handle those
 		opts['enable_reports'] = False
+		opts['enable_profiles'] = False
 		opts['enable_duplicate_check'] = False
 		opts['print_start'] = False
 		opts['print_end'] = False
@@ -59,9 +59,9 @@ class Task(Runner):
 		opts['caller'] = 'Task'
 
 		# Create task signature
-		task_id = str(uuid.uuid4())
 		profile = task_cls.profile(opts) if callable(task_cls.profile) else task_cls.profile
-		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=profile, task_id=task_id)
+		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=profile)
+		task_id = sig.freeze().task_id
 		self.add_subtask(task_id, self.config.name, self.description)
 		return chain(sig)
 
