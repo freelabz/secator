@@ -6,6 +6,13 @@ tags: [http, fuzz]
 input_types:
   - url
 
+options:
+  hunt_secrets:
+    is_flag: True
+    help: Hunt secrets in HTTP responses (trufflehog)
+    default: False
+    short: hs
+
 tasks:
   httpx/1:
     description: Probe URLs
@@ -44,3 +51,11 @@ tasks:
       - type: url
         field: url
         condition: item._source.startswith('ffuf')
+
+  trufflehog:
+    description: Find secrets in HTTP responses
+    targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+    if: opts.hunt_secrets

@@ -1234,7 +1234,8 @@ def install_gcs():
 		cmd=f'{sys.executable} -m pip install secator[gcs]',
 		title='Google Cloud Storage addon',
 		next_steps=[
-			'Run [bold green4]secator config set addons.gcs.credentials_path <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gcs.bucket_name <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gcs.credentials_path <VALUE>[/]. [dim](optional if using default credentials)[/]',  # noqa: E501
 		]
 	)
 
