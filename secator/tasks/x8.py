@@ -49,11 +49,11 @@ class x8(HttpFuzzer):
 	}
 	item_loaders = [JSONSerializer()]
 	install_pre = {
-		'apk': ['curl', 'build-base', 'pkgconf', 'libssl3', 'libcrypto3', 'openssl-dev'],
-		'apt': ['curl', 'build-essential', 'pkg-config', 'libssl-dev'],
-		'pacman': ['curl', 'base-devel', 'pkg-config', 'openssl'],
-		'zypper': ['curl', 'gcc', 'pkg-config', 'libopenssl-devel'],
-		'*': ['curl', 'gcc', 'pkg-config', 'openssl-devel'],
+		'apk': ['build-base', 'pkgconf', 'libssl3', 'libcrypto3', 'openssl-dev'],
+		'apt': ['build-essential', 'pkg-config', 'libssl-dev'],
+		'pacman': ['base-devel', 'pkg-config', 'openssl'],
+		'zypper': ['gcc', 'pkg-config', 'libopenssl-devel'],
+		'*': ['gcc', 'pkg-config', 'openssl-devel'],
 	}
 	install_version = '4.3.0'
 	install_cmd = 'cargo install x8@[install_version] --force'

@@ -211,6 +211,9 @@ class SourceInstaller:
 			matches = regex.findall(install_cmd)
 			for match in matches:
 				if match == 'cargo':
+					status = PackageInstaller.install({'*': ['curl']})
+					if not status.is_ok():
+						return status
 					rust_install_cmd = 'curl https://sh.rustup.rs -sSf | sh -s -- -y'
 					distribution = get_distro_config()
 					if not distribution.pm_installer:
