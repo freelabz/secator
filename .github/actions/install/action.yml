@@ -13,7 +13,7 @@ runs:
     with:
       python-version: ${{ inputs.python-version }}
 
-  - name: Setup  GO
+  - name: Setup golang
     uses: actions/setup-go@v4
     with:
       go-version: 1.24.x
@@ -25,3 +25,7 @@ runs:
   - name: Add secator to $PATH
     shell: bash
     run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+  - name: Add cargo to $PATH
+    shell: bash
+    run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"

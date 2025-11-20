@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
+from secator.utils import caml_to_snake, rich_to_ansi, trim_string, rich_escape as _s
 
 
 @dataclass
@@ -25,20 +25,28 @@ class Tag(OutputType):
 	_sort_by = ('match', 'name')
 
 	def __post_init__(self):
+		self.name = caml_to_snake(self.name).replace(' ', '_')
 		super().__post_init__()
 
 	def __str__(self) -> str:
 		return self.match
 
 	def __repr__(self) -> str:
-		long_category = self.category.replace('_', ' ').capitalize()
-		s = f'🏷️  [bold yellow]{long_category}[/] [bold magenta]{trim_string(self.name, max_length=100)}[/]'
+		name = self.name.replace('_', ' ').capitalize()
+		content = self.extra_data.get('content')
+		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{name}[/]'
+		small_content = False
+		if content and len(content) < 50:
+			small_content = True
+			s += f' [bold orange4]{content}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:incoming_envelope:[/]'
 		if self.extra_data:
 			for k, v in self.extra_data.items():
+				if k == 'content' and small_content:
+					continue
 				sep = ' '
 				if not v:
 					continue
@@ -47,7 +55,10 @@ class Tag(OutputType):
 					if len(v) > 1000:
 						v = v.replace('\n', '\n' + sep)
 						sep = '\n    '
-				ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
+				if k == 'content' and not small_content:
+					ed += f'\n    [bold red]{_s(k)}[/]:{sep}[yellow]{_s(v)}[/]'
+				else:
+					ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
 		return rich_to_ansi(s)

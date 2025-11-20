@@ -87,6 +87,8 @@ class Command(Runner):
 	install_post = None
 	install_cmd = None
 	install_github_handle = None
+	install_github_version_prefix = ''
+	install_ignore_bin = []
 	install_version = None
 
 	# Serializer
@@ -294,6 +296,7 @@ class Command(Runner):
 			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
 			cls.install_github_handle,
+			cls.install_github_version_prefix,
 			cls.install_cmd,
 			cls.install_version,
 			bleeding=bleeding

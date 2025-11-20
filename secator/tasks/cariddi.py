@@ -23,6 +23,13 @@ CARIDDI_IGNORE_PATTERNS = re.compile(r"|".join([
 ]), re.IGNORECASE)
 
 CARIDDI_IGNORE_LIST = ['BTC address']
+CARIDDI_RENAME_LIST = {
+	'IPv4 address': 'IpV4 address',
+	'MySQL error': 'Mysql error',
+	'MariaDB error': 'Mariadb error',
+	'PostgreSQL error': 'Postgresql error',
+	'SQLite error': 'Sqlite error',
+}
 
 
 @task()
@@ -164,6 +171,8 @@ class cariddi(HttpCrawler):
 		for info in infos:
 			if info['name'] in CARIDDI_IGNORE_LIST:
 				continue
+			if info['name'] in CARIDDI_RENAME_LIST:
+				info['name'] = CARIDDI_RENAME_LIST[info['name']]
 			match = info['match']
 			parsed_url = urlparse(url)
 			url_without_param = urlunparse(parsed_url._replace(query=''))

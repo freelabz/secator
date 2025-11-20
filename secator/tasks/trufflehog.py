@@ -5,7 +5,7 @@ from pathlib import Path
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.runners import Command
-from secator.definitions import (PATH, URL, STRING, OPT_SPACE_SEPARATED)
+from secator.definitions import (PATH, URL, STRING, OPT_SPACE_SEPARATED, GCS_URL, ADDONS_ENABLED, SLUG)
 from secator.utils import caml_to_snake
 from secator.output_types import Tag, Info, Warning, Error
 from secator.rich import console
@@ -32,7 +32,7 @@ class trufflehog(Command):
     """Tool for finding secrets in git repositories and filesystems using TruffleHog."""
     cmd = 'trufflehog'
     tags = ['secret', 'scan']
-    input_types = [PATH, URL, STRING]  # support local files and git URLs
+    input_types = [PATH, URL, STRING, GCS_URL, SLUG]
     item_loaders = [JSONSerializer()]
     input_flag = None
     file_flag = OPT_SPACE_SEPARATED
@@ -44,7 +44,7 @@ class trufflehog(Command):
             'help': f'Scan mode ({", ".join(TRUFFLEHOG_MODES)})',
             'internal': True
         },
-        'only_verified': {'is_flag': True, 'help': 'Only output verified secrets'},
+        'status': {'type': str, 'help': 'Results status (verified, unknown, unverified, filtered_unverified)'},
         'concurrency': {'type': int, 'help': 'Number of concurrent workers'},
         'config': {'type': str, 'short': 'config', 'help': 'Config file path'},
         'git_branch': {'type': str, 'help': 'Branch to scan (git mode only)'},
@@ -54,7 +54,7 @@ class trufflehog(Command):
         'jenkins_username': {'type': str, 'help': 'Jenkins username to use when --mode jenkins'},
         'jenkins_password': {'type': str, 'help': 'Jenkins password to use when --mode jenkins'},
         'postman_collection_id': {'type': str, 'help': 'Postman collection ID to use when --mode postman'},
-        'postman_api_token': {'type': str, 'help': 'Postman API token to use when --mode postman'},
+        'postman_token': {'type': str, 'help': 'Postman API token to use when --mode postman'},
         'postman_workspace_id': {'type': str, 'help': 'Postman workspace ID to use when --mode postman'},
         'gitlab_token': {'type': str, 'help': 'Gitlab token to use when --mode gitlab'},
         'gitlab_endpoint': {'type': str, 'default': 'https://gitlab.com', 'help': 'Gitlab endpoint to use when --mode gitlab', 'internal': True},  # noqa: E501
@@ -67,7 +67,7 @@ class trufflehog(Command):
         'jenkins_username': '--username',
         'jenkins_password': '--password',
         'postman_collection_id': '--collection-id',
-        'postman_api_token': '--api-token',
+        'postman_token': '--token',
         'postman_workspace_id': '--workspace-id',
         'git_branch': '--branch',
         'git_depth': '--depth',
@@ -79,6 +79,7 @@ class trufflehog(Command):
         'elasticsearch_service_token': '--service-token',
         'elasticsearch_cloud_id': '--cloud-id',
         'elasticsearch_api_key': '--api-key',
+        'status': '--results',
     }
     output_types = [Tag, Info]
     ignore_return_code = True
@@ -96,6 +97,27 @@ class trufflehog(Command):
         f'mv {CONFIG.dirs.share}/trufflehog_[install_version]/trufflehog {CONFIG.dirs.bin}'
     )
     install_github_handle = 'trufflesecurity/trufflehog'
+
+    @staticmethod
+    def before_init(self):
+        blob_folder = f'{self.reports_folder}/.inputs'
+        del_indexes = []
+        gcs_objects = False
+        for i, input in enumerate(self.inputs):
+            if input.startswith('gs://'):
+                if not ADDONS_ENABLED['gcs']:
+                    raise Exception('GCS addon is not installed. Please install it using `secator install addons gcs`.')
+                gcs_objects = True
+                from secator.hooks.gcs import download_blob
+                split_input = input.split('/')
+                bucket_name, source_blob_name = split_input[2], '/'.join(split_input[3:])
+                destination_file_name = f'{blob_folder}/{source_blob_name}'
+                download_blob(bucket_name, source_blob_name, destination_file_name)
+                del_indexes.append(i)
+        for i in reversed(del_indexes):
+            del self.inputs[i]
+        if gcs_objects:
+            self.inputs.append(blob_folder)
 
     @staticmethod
     def on_cmd(self):
@@ -164,15 +186,12 @@ class trufflehog(Command):
     @staticmethod
     def on_json_loaded(self, item):
         level = item.get('level')
-        if level and level.startswith('info'):
-            yield Info(message=item.get('msg', '').capitalize())
-            return
-        elif level and level.startswith('error'):
-            errors = item.get('errors')
-            if errors:
-                yield Error(message=item.get('msg', '').capitalize(), traceback='\n'.join(errors))
+        if level:
+            msg = item.get('msg', '').capitalize()
+            if level.startswith('info'):
+                yield Info(message=msg)
             else:
-                yield Warning(message=item.get('msg', '').capitalize() + ': ' + item.get('error', ''))
+                yield Error(message=msg, traceback='\n'.join(item.get('errors', [])))
             return
 
         if 'SourceMetadata' not in item:
@@ -180,28 +199,36 @@ class trufflehog(Command):
 
         rule_id = caml_to_snake(item.get('DetectorName', 'Unknown'))
         source_metadata = item.get('SourceMetadata', {}).get('Data', {})
-
-        file_path = "unknown"
-        line_no = ""
-
-        if 'Filesystem' in source_metadata:
-            fs_data = source_metadata['Filesystem']
-            file_path = fs_data.get('file', 'unknown')
-            line_no = fs_data.get('line', '')
-        elif 'Git' in source_metadata:
-            git_data = source_metadata['Git']
-            file_path = git_data.get('file', 'unknown')
-            line_no = git_data.get('line', '')
-
-        match_str = f"{file_path}"
-        if line_no:
-            match_str += f":{line_no}"
-        if match_str == 'unknown':
-            match_str = self.inputs[0]
-
         raw = item.get('RawV2') or item.get('Raw')
         extra_data = {'content': raw}
-        extra_data.update({caml_to_snake(k): v for k, v in item.items() if k not in ['SourceMetadata', 'Raw', 'RawV2']})
+        detector_data = {caml_to_snake(k): v for k, v in item.items() if k not in ['SourceMetadata', 'Raw', 'RawV2']}
+        data = {caml_to_snake(k): v for k, v in source_metadata[list(source_metadata.keys())[0]].items()}
+        if 'timestamp' in data:
+            del data['timestamp']
+        subtype = list(source_metadata.keys())[0].lower()
+        extra_data['subtype'] = subtype
+        extra_data.update({caml_to_snake(k): v for k, v in data.items()})
+        extra_data['detector_data'] = {caml_to_snake(k): v for k, v in detector_data.items()}
+        match = ''
+        repo_path = data.get('repository', '')
+        if 'file://' in repo_path:
+            repo_path = repo_path.replace('file://', '')
+        file = data.get('file')
+        line_no = data.get('line')
+        link = data.get('link')
+        if file:
+            match += file
+        if line_no:
+            match += f":{line_no}"
+        if link:
+            match = link
+        if repo_path and subtype != 'github':
+            match = repo_path + '/' + match
+
+        if not match:
+            console.print(Warning(message=f'Could not determine match for subtype: {subtype}'))
+            match = self.inputs[0]
+
         item_extra_data = item.get('ExtraData') or {}
         rtype = item_extra_data.get('resource_type')
         name = rule_id.lower()
@@ -210,6 +237,6 @@ class trufflehog(Command):
         yield Tag(
             name=name,
             category='secret',
-            match=match_str,
+            match=match,
             extra_data=extra_data
         )

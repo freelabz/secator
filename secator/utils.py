@@ -26,7 +26,7 @@ import ifaddr
 import yaml
 
 from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE, IP, HOST, CIDR_RANGE,
-								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT)
+								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT, GCS_URL)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
@@ -90,7 +90,9 @@ def expand_input(input, ctx):
 				console.print('No input passed on stdin.', style='bold red')
 				sys.exit(1)
 	elif os.path.exists(input):
-		if os.path.isfile(input):
+		if 'path' in ctx.obj['input_types']:
+			return input
+		elif os.path.isfile(input):
 			with open(input, 'r') as f:
 				data = f.read().splitlines()
 			return data
@@ -795,6 +797,8 @@ def autodetect_type(target):
 	"""
 	if validators.url(target, simple_host=True):
 		return URL
+	elif target.startswith('gs://'):
+		return GCS_URL
 	elif validate_cidr_range(target):
 		return CIDR_RANGE
 	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
