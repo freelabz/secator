@@ -117,6 +117,54 @@ for config in SCANS:
 	register_runner(scan, config)
 
 
+#------#
+# POLL #
+#------#
+
+@cli.command(name='poll')
+@click.argument('report_path', type=str, required=True)
+def poll(report_path):
+	"""Poll a report for results."""
+	with open(report_path, 'r') as f:
+		data = json.load(f)
+	if data['info']['celery_id']:
+		from celery.result import AsyncResult
+		from secator.pollers.celery import CeleryPoller
+		from secator.output_types import State
+		import copy
+		celery_result = AsyncResult(data['info']['celery_id'])
+		state = None
+		results = []
+		results_uuids = []
+		celery_ids_map = copy.deepcopy(data['info']['celery_ids_map'])
+		for item in CeleryPoller.iter_results(
+			celery_result,
+			ids_map=celery_ids_map,
+			print_remote_info=True
+		):
+			if isinstance(item, State) and item.task_id == data['info']['celery_id']:
+				state = item.state
+			if item._uuid not in results_uuids:
+				results_uuids.append(item._uuid)
+				results.append(item)
+				console.print(item)
+		console.print(f'State: {state}')
+		console.print(Info(message=f'Writing results to report {report_path}'))
+		results, errors = Report.format_results(results)
+		data['results'] = results
+		data['info']['errors'] = errors
+		from secator.serializers.dataclass import dumps_dataclass
+		with open(report_path, 'w') as f:
+			f.write(dumps_dataclass(data, indent=2))
+		console.print(Info(message=f'Results written to report {report_path}'))
+	# elif data['info']['mongodb_result']:
+	# 	pass
+	# 	# scan_type = ''
+	# else:
+	# 	console.print(Error(message='No celery result found in report.'))
+	# 	sys.exit(1)
+
+
 #--------#
 # WORKER #
 #--------#
@@ -954,7 +1002,7 @@ def report_list(ctx, workspace, runner_type, time_delta):
 				data['date'],
 				f"[{status_color}]{data['status']}[/]"
 			)
-		except json.JSONDecodeError as e:
+		except (json.JSONDecodeError, ValueError, KeyError) as e:
 			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if len(paths) > 0:
