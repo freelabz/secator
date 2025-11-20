@@ -1092,7 +1092,8 @@ def health(json_, debug, strict, bleeding):
 			info = get_version_info(
 				tool.cmd.split(' ')[0],
 				tool.version_flag or f'{tool.opt_prefix}version',
-				tool.install_github_handle,
+				tool.github_handle,
+				tool.install_github_version_prefix,
 				tool.install_cmd,
 				tool.install_version,
 				bleeding=bleeding
@@ -1442,7 +1443,7 @@ def update(all):
 		for cls in discover_tasks():
 			cmd = cls.cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
-			info = get_version_info(cmd, version_flag, cls.install_github_handle, cls.install_github_version_prefix)
+			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
 			if not info['installed'] or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
 				status = ToolInstaller.install(cls)
@@ -1694,9 +1695,9 @@ def task(name, verbose, check, system_exit):
 		errors
 	)
 	check_test(
-		any(cmd for cmd in [task.install_pre, task.install_cmd, task.install_github_handle]),
+		any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
 		'Check task installation command is defined',
-		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `install_github_handle`.',  # noqa: E501
+		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `github_handle`.',  # noqa: E501
 		errors
 	)
 	check_test(

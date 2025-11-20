@@ -41,7 +41,7 @@ class dnsx(ReconDns):
 	item_loaders = [JSONSerializer()]
 	install_version = 'v1.2.2'
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
-	install_github_handle = 'projectdiscovery/dnsx'
+	github_handle = 'projectdiscovery/dnsx'
 	profile = 'io'
 
 	@staticmethod

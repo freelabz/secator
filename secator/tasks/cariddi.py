@@ -81,7 +81,7 @@ class cariddi(HttpCrawler):
 	item_loaders = [JSONSerializer()]
 	install_version = 'v1.3.6'
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@[install_version]'
-	install_github_handle = 'edoardottt/cariddi'
+	github_handle = 'edoardottt/cariddi'
 	encoding = 'ansi'
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122

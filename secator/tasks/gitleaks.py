@@ -41,14 +41,14 @@ class gitleaks(Command):
 	}
 	input_type = "folder"
 	output_types = [Tag]
-	install_pre = {'*': ['git', 'make']}
 	install_version = 'v8.24.3'
+	install_cmd_pre = {'*': ['git', 'make']}
 	install_cmd = (
 		f'git clone https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks_[install_version] || true &&'
 		f'cd {CONFIG.dirs.share}/gitleaks_[install_version] && make build &&'
 		f'mv {CONFIG.dirs.share}/gitleaks_[install_version]/gitleaks {CONFIG.dirs.bin}'
 	)
-	install_github_handle = 'gitleaks/gitleaks'
+	github_handle = 'gitleaks/gitleaks'
 
 	@staticmethod
 	def on_cmd(self):

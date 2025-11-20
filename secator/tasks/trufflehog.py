@@ -83,20 +83,15 @@ class trufflehog(Command):
     }
     output_types = [Tag, Info]
     ignore_return_code = True
-    install_pre = {
-        'apt': ['git', 'golang'],
-        'apk': ['git', 'go'],
-        'pacman': ['git', 'go'],
-        '*': ['git', 'go']
-    }
     install_version = 'v3.91.0'
+    install_pre_cmd = {'apt': ['git', 'golang'], '*': ['git', 'go']}
     install_cmd = (
         f'git clone https://github.com/trufflesecurity/trufflehog.git '
         f'{CONFIG.dirs.share}/trufflehog_[install_version] || true && '
         f'cd {CONFIG.dirs.share}/trufflehog_[install_version] && go build -o trufflehog . && '
         f'mv {CONFIG.dirs.share}/trufflehog_[install_version]/trufflehog {CONFIG.dirs.bin}'
     )
-    install_github_handle = 'trufflesecurity/trufflehog'
+    github_handle = 'trufflesecurity/trufflehog'
 
     @staticmethod
     def before_init(self):

@@ -22,7 +22,7 @@ class xurlfind3r(HttpCrawler):
 	json_flag = '--jsonl'
 	file_flag = '-l'
 	input_flag = '-d'
-	version_flag = OPT_NOT_SUPPORTED
+	version_flag = 'version'
 	opts = {
 		'sources': {'type': str, 'help': 'Sources to use (comma-delimited)', 'required': False},
 		'sources_to_exclude': {'type': str, 'help': 'Sources to exclude (comma-delimited)', 'required': False},
@@ -52,7 +52,7 @@ class xurlfind3r(HttpCrawler):
 	}
 	install_version = '1.3.0'
 	install_cmd = 'go install -v github.com/hueristiq/xurlfind3r/cmd/xurlfind3r@[install_version]'
-	install_github_handle = 'hueristiq/xurlfind3r'
+	github_handle = 'hueristiq/xurlfind3r'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True

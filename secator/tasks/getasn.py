@@ -42,7 +42,8 @@ class getasn(Command):
 	}
 	install_version = 'latest'
 	install_cmd = 'go install github.com/Vulnpire/getasn@[install_version]'
-	# install_github_handle = 'Vulnpire/getasn'
+	install_github_bin = False
+	# github_handle = 'Vulnpire/getasn'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = False

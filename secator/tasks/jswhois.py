@@ -15,9 +15,11 @@ class jswhois(Command):
 	tags = ['domain', 'info']
 	input_flag = None
 	file_flag = None
+	version_flag = '-V'
 	install_version = '69af013b99d49191c9674cde2e2b57986f6b6bf8'
 	install_cmd = 'go install -v github.com/jschauma/jswhois@[install_version]'
-	# install_github_handle = 'jschauma/jswhois'
+	install_github_bin = False
+	# github_handle = 'jschauma/jswhois'
 
 	@staticmethod
 	def on_json_loaded(self, item):

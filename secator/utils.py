@@ -426,7 +426,7 @@ def print_version():
 	"""Print secator version information."""
 	from secator.installer import get_version_info
 	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False, end='')
-	info = get_version_info('secator', install_github_handle='freelabz/secator', version=VERSION)
+	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
 	status = info['status']
 	location = info['location']

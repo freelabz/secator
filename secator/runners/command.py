@@ -85,8 +85,10 @@ class Command(Runner):
 	# Install
 	install_pre = None
 	install_post = None
+	install_cmd_pre = None
 	install_cmd = None
-	install_github_handle = None
+	install_github_bin = True
+	github_handle = None
 	install_github_version_prefix = ''
 	install_ignore_bin = []
 	install_version = None
@@ -295,7 +297,7 @@ class Command(Runner):
 		return get_version_info(
 			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
-			cls.install_github_handle,
+			cls.github_handle,
 			cls.install_github_version_prefix,
 			cls.install_cmd,
 			cls.install_version,

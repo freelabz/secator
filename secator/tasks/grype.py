@@ -57,14 +57,12 @@ class grype(VulnCode):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
-	install_pre = {
-		'*': ['curl']
-	}
 	install_version = 'v0.91.2'
+	install_cmd_pre = {'*': ['curl']}
 	install_cmd = (
 		f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'
 	)
-	install_github_handle = 'anchore/grype'
+	github_handle = 'anchore/grype'
 
 	@staticmethod
 	def item_loader(self, line):

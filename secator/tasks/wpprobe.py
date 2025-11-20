@@ -32,7 +32,7 @@ class wpprobe(Command):
 	}
 	install_version = 'v0.5.6'
 	install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
-	install_github_handle = 'Chocapikk/wpprobe'
+	github_handle = 'Chocapikk/wpprobe'
 	install_post = {
 		'*': 'wpprobe update-db'
 	}
