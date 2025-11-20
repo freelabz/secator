@@ -36,6 +36,7 @@ class urlfinder(HttpCrawler):
 		'version': {'type': bool, 'help': 'Version', 'required': False},
 		'verbose': {'type': bool, 'help': 'Verbose output', 'required': False},
 		'stats': {'type': bool, 'help': 'Display source statistics', 'required': False},
+		'max_param_occurrences': {'type': int, 'help': 'Max occurrences for the same parameter in the same URL before discarding next results', 'required': False, 'default': 10, 'internal': True},  # noqa: E501
 	}
 	opt_key_map = {
 		'sources': 's',
