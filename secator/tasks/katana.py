@@ -100,12 +100,15 @@ class katana(HttpCrawler):
 		# form detection
 		response = item.get('response', {})
 		forms = response.get('forms', [])
+		parsed_url = urlparse(item['request']['endpoint'])
+		url_without_params = urlunparse(parsed_url._replace(query=''))
+		params = parsed_url.query.split('&')
 		if forms:
 			for form in forms:
 				method = form['method']
 				url = Url(
 					form['action'],
-					host=urlparse(item['request']['endpoint']).netloc,
+					host=parsed_url.netloc,
 					method=method,
 					stored_response_path=response["stored_response_path"],
 					request_headers=self.get_opt_value('header', preprocess=True)
@@ -124,12 +127,9 @@ class katana(HttpCrawler):
 						'parameters': ','.join(form.get('parameters', []))
 					}
 				)
-		parsed_url = urlparse(item['request']['endpoint'])
-		url_without_params = urlunparse(parsed_url._replace(query=''))
-		params = parsed_url.query.split('&')
 		url = Url(
 			url=item['request']['endpoint'],
-			host=urlparse(item['request']['endpoint']).netloc,
+			host=parsed_url.netloc,
 			method=item['request']['method'],
 			request_headers=self.get_opt_value('header', preprocess=True),
 			time=item['timestamp'],

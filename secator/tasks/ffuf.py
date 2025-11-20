@@ -120,6 +120,7 @@ class ffuf(HttpFuzzer):
 		if self.get_opt_value('fuzz_host_header'):
 			yield Subdomain(
 				host=item['host'],
+				verified=False,
 				domain=extract_domain_info(item['host'], domain_only=True),
 				sources=['http_host_header']
 			)

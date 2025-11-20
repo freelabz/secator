@@ -7,9 +7,15 @@ input_types:
   - url
 
 options:
+  passive:
+    is_flag: True
+    help: Passive only (no requests to targets)
+    default: False
+    short: ps
+
   crawlers:
     type: list
-    help: Crawlers to use
+    help: "Crawlers to use (comma-separated) (passive: xurlfind3r, urlfinder, gau; active: katana, gospider, cariddi)"
     default: ['xurlfind3r', 'katana']
     internal: True
 
@@ -28,13 +34,21 @@ tasks:
       description: Crawl URLs from passive sources
       if: "'xurlfind3r' in opts.crawlers"
 
+    urlfinder:
+      description: Crawl URLs from passive sources
+      if: "'urlfinder' in opts.crawlers"
+
+    gau:
+      description: Crawl URLs from passive sources
+      if: "'gau' in opts.crawlers"
+
     katana:
       description: Crawl URLs
-      if: "'katana' in opts.crawlers"
+      if: "'katana' in opts.crawlers and not opts.passive"
 
     gospider:
       description: Crawl URLs
-      if: "'gospider' in opts.crawlers"
+      if: "'gospider' in opts.crawlers and not opts.passive"
 
     cariddi:
       description: Hunt URLs patterns
@@ -43,7 +57,7 @@ tasks:
       errors: True
       juicy_extensions: 1
       juicy_endpoints: True
-      if: "'cariddi' in opts.crawlers"
+      if: "'cariddi' in opts.crawlers and not opts.passive"
 
   httpx:
     description: Run HTTP probes on crawled URLs
@@ -53,6 +67,7 @@ tasks:
     - type: url
       field: url
       condition: url.status_code != 0
+    if: not opts.passive
 
   trufflehog:
     description: Find secrets in HTTP responses
@@ -60,4 +75,4 @@ tasks:
     - type: url
       field: stored_response_path
       condition: item.stored_response_path != ''
-    if: opts.hunt_secrets
+    if: opts.hunt_secrets and not opts.passive

@@ -161,5 +161,6 @@ class httpx(Http):
 		self.domains.append(domain)
 		return Subdomain(
 			host=domain,
-			domain=extract_domain_info(domain, domain_only=True)
+			domain=extract_domain_info(domain, domain_only=True),
+			verified=False,
 		)

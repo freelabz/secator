@@ -89,7 +89,8 @@ class dnsx(ReconDns):
 			subdomain = Subdomain(
 				host=host,
 				domain=extract_domain_info(host, domain_only=True),
-				sources=['dns']
+				verified=True,
+				sources=['dns'],
 			)
 			self.subdomains.append(subdomain)
 			yield subdomain

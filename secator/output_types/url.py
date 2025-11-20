@@ -1,5 +1,9 @@
 import time
+
 from dataclasses import dataclass, field
+from enum import Enum
+
+from urllib.parse import urlparse
 
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TITLE, URL, WEBSERVER, METHOD)
@@ -12,6 +16,7 @@ from secator.config import CONFIG
 class Url(OutputType):
 	url: str
 	host: str = field(default='', compare=False)
+	verified: bool = field(default=False, compare=False)
 	status_code: int = field(default=0, compare=False)
 	title: str = field(default='', compare=False)
 	webserver: str = field(default='', compare=False)
@@ -49,6 +54,13 @@ class Url(OutputType):
 		'screenshot_path',
 	]
 	_sort_by = (URL,)
+
+	def __post_init__(self):
+		super().__post_init__()
+		if not self.host:
+			self.host = urlparse(self.url).netloc
+		if not self.status_code != 0:
+			self.verified = True
 
 	def __gt__(self, other):
 		# favor httpx over other url info tools
