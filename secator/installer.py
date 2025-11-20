@@ -66,7 +66,7 @@ class ToolInstaller:
 		# Fail if not supported
 		if not any(_ for _ in [
 			tool_cls.install_pre,
-			tool_cls.install_github_handle,
+			tool_cls.github_handle,
 			tool_cls.install_cmd,
 			tool_cls.install_post]):
 			return InstallerStatus.INSTALL_NOT_SUPPORTED
@@ -87,9 +87,9 @@ class ToolInstaller:
 		# Install binaries from GH
 		gh_status = InstallerStatus.UNKNOWN
 		install_ignore_bin = get_distro_config().name in tool_cls.install_ignore_bin
-		if tool_cls.install_github_handle and not CONFIG.security.force_source_install and not install_ignore_bin:
+		if tool_cls.github_handle and tool_cls.install_github_bin and not CONFIG.security.force_source_install and not install_ignore_bin:  # noqa: E501
 			gh_status = GithubInstaller.install(
-				tool_cls.install_github_handle,
+				tool_cls.github_handle,
 				version=tool_cls.install_version or 'latest',
 				version_prefix=tool_cls.install_github_version_prefix
 			)
@@ -97,6 +97,12 @@ class ToolInstaller:
 
 		# Install from source
 		if not gh_status.is_ok():
+			# Install pre-required packages
+			if tool_cls.install_cmd_pre:
+				status = PackageInstaller.install(tool_cls.install_cmd_pre)
+				if not status.is_ok():
+					cls.print_status(status, name)
+					return status
 			if not tool_cls.install_cmd:
 				status = InstallerStatus.INSTALL_SKIPPED_OK
 			else:
@@ -207,9 +213,11 @@ class SourceInstaller:
 
 		# Install build dependencies if needed
 		if install_prereqs:
-			regex = re.compile(r'(cargo|go|gem|git)')
+			regex = re.compile(r'(cargo\s+|go\s+|gem\s+|git\s+)')
 			matches = regex.findall(install_cmd)
+			matches = list(set(matches))
 			for match in matches:
+				match = match.strip()
 				if match == 'cargo':
 					status = PackageInstaller.install({'*': ['curl']})
 					if not status.is_ok():
@@ -265,6 +273,7 @@ class GithubInstaller:
 		_, repo = tuple(github_handle.split('/'))
 		release = cls.get_release(github_handle, version=version, version_prefix=version_prefix)
 		if not release:
+			console.print(Warning(message=f'Could not find release {version} for {github_handle}.'))
 			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
 
 		# Find the right asset to download
@@ -463,13 +472,13 @@ def parse_version(ver):
 		return None
 
 
-def get_version_info(name, version_flag=None, install_github_handle=None, install_github_version_prefix=None, install_cmd=None, install_version=None, version=None, bleeding=False):  # noqa: E501
+def get_version_info(name, version_flag=None, github_handle=None, install_github_version_prefix=None, install_cmd=None, install_version=None, version=None, bleeding=False):  # noqa: E501
 	"""Get version info for a command.
 
 	Args:
 		name (str): Command name.
 		version_flag (str): Version flag.
-		install_github_handle (str): Github handle.
+		github_handle (str): Github handle.
 		install_github_version_prefix (str): Github version prefix.
 		install_cmd (str): Install command.
 		install_version (str): Install version.
@@ -511,13 +520,14 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		info['latest_version'] = str(ver)
 		info['install_version'] = str(ver)
 		info['source'] = 'supported'
-		latest_version = str(ver)
+		if ver:
+			latest_version = str(ver)
 	else:
 		latest_version = None
 		if not CONFIG.offline_mode:
-			if install_github_handle:
+			if github_handle:
 				latest_version = GithubInstaller.get_latest_version(
-					install_github_handle,
+					github_handle,
 					version_prefix=install_github_version_prefix,
 				)
 				info['latest_version'] = latest_version
@@ -534,6 +544,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 							version = max(version, ver)
 							latest_version = str(version)
 							info['source'] = 'pypi'
+				version = str(version) if version else None
 			else:
 				info['errors'].append('Cannot get latest version for query method (github, pip) is available')
 	info['latest_version'] = f'v{latest_version}' if install_version and install_version.startswith('v') else latest_version  # noqa: E501

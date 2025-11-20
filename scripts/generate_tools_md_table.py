@@ -26,7 +26,7 @@ def get_tools_data():
         'searchsploit': 'https://gitlab.com/exploit-database/exploitdb'
     }
     for task in discover_tasks():
-        url = task.install_github_handle
+        url = task.github_handle
         if url:
             url = f'https://github.com/{url}'
         else:

@@ -64,14 +64,14 @@ class feroxbuster(HttpFuzzer):
 			WORDS: 'word_count'
 		}
 	}
-	install_pre = {
+	install_cmd_pre = {
 		'*': ['curl', 'bash']
 	}
 	install_version = 'v2.11.0'
 	install_cmd = (
 		f'cd /tmp && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash -s {CONFIG.dirs.bin}'  # noqa: E501
 	)
-	install_github_handle = 'epi052/feroxbuster'
+	github_handle = 'epi052/feroxbuster'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True

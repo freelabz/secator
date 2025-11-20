@@ -57,7 +57,8 @@ class arjun(Command):
 	}
 	install_version = '2.2.7'
 	install_cmd = 'pipx install arjun==[install_version] --force'
-	# install_github_handle = 's0md3v/Arjun'
+	install_github_bin = False
+	github_handle = 's0md3v/Arjun'
 
 	@staticmethod
 	def on_line(self, line):

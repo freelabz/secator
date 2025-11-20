@@ -29,7 +29,7 @@ class urlfinder(HttpCrawler):
 	tags = ['pattern', 'scan']
 	file_flag = '-list'
 	input_flag = '-d'
-	version_flag = OPT_NOT_SUPPORTED
+	version_flag = '-version'
 	opts = {
 		'sources': {'type': str, 'help': f'Sources to use (comma-delimited) ({", ".join(URLFINDER_SOURCES)})', 'required': False},  # noqa: E501
 		'exclude_sources': {'type': str, 'help': 'Sources to exclude (comma-delimited)', 'required': False},
@@ -71,7 +71,7 @@ class urlfinder(HttpCrawler):
 	encoding = 'ansi'
 	install_version = 'v0.0.3'
 	install_cmd = 'go install -v github.com/projectdiscovery/urlfinder/cmd/urlfinder@[install_version]'
-	install_github_handle = 'projectdiscovery/urlfinder'
+	github_handle = 'projectdiscovery/urlfinder'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True

@@ -83,12 +83,10 @@ class nuclei(VulnMulti):
 			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['percent']}
 		}
 	}
-	install_pre = {
-		'*': ['git']
-	}
 	install_version = 'v3.4.2'
+	install_pre = {'*': ['git']}
 	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@[install_version]'
-	install_github_handle = 'projectdiscovery/nuclei'
+	github_handle = 'projectdiscovery/nuclei'
 	install_post = {
 		'*': 'nuclei -ut'
 	}

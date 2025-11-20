@@ -48,17 +48,18 @@ class testssl(Command):
 	proxychains = False
 	proxy_socks5 = False
 	profile = 'io'
-	install_pre = {
+	install_cmd_pre = {
 		'apk': ['hexdump', 'coreutils', 'procps'],
 		'pacman': ['util-linux'],
 		'*': ['bsdmainutils']
 	}
-	install_github_handle = 'testssl/testssl.sh'
 	install_version = 'v3.2.0'
 	install_cmd = (
 		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh_[install_version] || true && '  # noqa: E501
 		f'ln -sf {CONFIG.dirs.share}/testssl.sh_[install_version]/testssl.sh {CONFIG.dirs.bin}'
 	)
+	install_github_bin = False
+	github_handle = 'testssl/testssl.sh'
 
 	@staticmethod
 	def on_cmd(self):

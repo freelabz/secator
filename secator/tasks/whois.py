@@ -13,14 +13,12 @@ class whois(Command):
 	input_chunk_size = 1
 	output_types = [Domain]
 	item_loaders = [JSONSerializer()]
-
-	install_pre = {
-		'apt|pacman|brew': ['whois'],
-		'apk': ['whois'],
-	}
+	version_flag = '-V'
 	install_version = '1.20230906.1'
+	install_cmd_pre = {'*': ['whois']}
 	install_cmd = 'pipx install whoisdomain==[install_version] --force'
-	# install_github_handle = 'mboot-github/WhoisDomain'
+	install_github_bin = False
+	github_handle = 'mboot-github/WhoisDomain'
 
 	@staticmethod
 	def on_json_loaded(self, item):

@@ -53,7 +53,7 @@ class trivy(Vuln):
 		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'
 		f'sudo sh -s -- -b {CONFIG.dirs.bin} [install_version]'
 	)
-	install_github_handle = 'aquasecurity/trivy'
+	github_handle = 'aquasecurity/trivy'
 
 	@staticmethod
 	def on_cmd(self):
