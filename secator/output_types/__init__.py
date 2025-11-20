@@ -44,6 +44,6 @@ STAT_TYPES = [
 	Stat
 ]
 FINDING_TYPES = [
-	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Domain
+	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain
 ]
 OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES
