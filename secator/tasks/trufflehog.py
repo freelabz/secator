@@ -84,7 +84,6 @@ class trufflehog(Command):
     output_types = [Tag, Info]
     ignore_return_code = True
     install_version = 'v3.91.0'
-    install_pre_cmd = {'apt': ['git', 'golang'], '*': ['git', 'go']}
     install_cmd = (
         f'git clone https://github.com/trufflesecurity/trufflehog.git '
         f'{CONFIG.dirs.share}/trufflehog_[install_version] || true && '
