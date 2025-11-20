@@ -48,9 +48,18 @@ class x8(HttpFuzzer):
 		HEADER: lambda headers: ';'.join(headers.split(';;'))
 	}
 	item_loaders = [JSONSerializer()]
+	install_pre = {
+		'apk': ['build-base', 'pkgconf', 'libssl3', 'libcrypto3', 'openssl-dev'],
+		'apt': ['build-essential', 'pkg-config', 'libssl-dev'],
+		'pacman': ['base-devel', 'pkg-config', 'openssl'],
+		'zypper': ['gcc', 'pkg-config', 'libopenssl-devel'],
+		'*': ['gcc', 'pkg-config', 'openssl-devel'],
+	}
 	install_version = '4.3.0'
-	install_cmd = 'cargo install x8@[install_version]'
-	install_github_handle = 'projectdiscovery/x8'
+	install_cmd = 'cargo install x8@[install_version] --force'
+	# install_github_handle = 'Sh1Yo/x8'
+	# install_github_version_prefix = 'v'
+	# install_ignore_bin = ['alpine', 'ubuntu']
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False

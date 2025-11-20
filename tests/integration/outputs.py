@@ -353,7 +353,7 @@ OUTPUTS_TASKS = {
         Tag(name='pp', category='url_param', match='http://testphp.vulnweb.com/hpp/', _source='x8'),
     ],
     'xurlfind3r': [
-        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='xurlfind3r')
+        Url(url='http://testphp.vulnweb.com/login.php', _source='xurlfind3r')
     ],
 }
 

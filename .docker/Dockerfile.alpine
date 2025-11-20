@@ -24,6 +24,7 @@ ARG flavor=full
 ARG build_from_source=false
 ENV TERM="xterm-256color"
 ENV PATH="${PATH}:/root/.local/bin"
+ENV CARGO_HOME="/root/.local"
 ENV GOBIN="/root/.local/bin"
 ENV GOPATH="/root/go"
 COPY --from=builder /root/.local /root/.local
