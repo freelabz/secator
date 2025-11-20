@@ -7,6 +7,12 @@ input_types:
   - host
 
 options:
+  passive:
+    is_flag: True
+    help: Passive only (no requests to targets)
+    default: False
+    short: ps
+
   probe_http:
     is_flag: True
     help: Probe domain and subdomains (HTTP)
@@ -46,18 +52,22 @@ tasks:
     subfinder:
       description: List subdomains (passive)
 
+    gau:
+      description: List subdomains (passive)
+      subs: True
+
     dnsx:
       description: Bruteforce subdomains (DNS)
       subdomains_only: True
       wordlist: combined_subdomains
-      if: opts.brute_dns
+      if: opts.brute_dns and not opts.passive
 
     httpx:
       description: Run HTTP probe on domain
       tech_detect: True
       targets_:
       - target.name
-      if: opts.probe_http or opts.brute_http
+      if: (opts.probe_http or opts.brute_http) and not opts.passive
 
   _group/2:
     testssl:
@@ -81,6 +91,7 @@ tasks:
       - target.name
       - subdomain.host
       tags: [takeover]
+      if: not opts.passive
 
     ffuf:
       description: Bruteforce subdomains (Host header)
@@ -92,7 +103,7 @@ tasks:
       targets_:
       - type: url
         field: url
-      if: opts.brute_http
+      if: opts.brute_http and not opts.passive
 
     httpx:
       description: Run HTTP probes on subdomains
@@ -100,7 +111,7 @@ tasks:
       targets_:
       - target.name
       - subdomain.host
-      if: opts.probe_http
+      if: opts.probe_http and not opts.passive
 
   trufflehog:
     description: Find secrets in HTTP responses
@@ -108,4 +119,4 @@ tasks:
     - type: url
       field: stored_response_path
       condition: item.stored_response_path != ''
-    if: opts.hunt_secrets
+    if: opts.hunt_secrets and not opts.passive

@@ -11,6 +11,7 @@ from secator.utils import rich_to_ansi
 class Subdomain(OutputType):
 	host: str
 	domain: str
+	verified: bool = field(default=False, compare=False)
 	sources: List[str] = field(default_factory=list, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True, compare=False)

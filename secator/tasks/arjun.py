@@ -89,8 +89,8 @@ class arjun(Command):
 				yield Warning(message='No results found !')
 				return
 		for url, values in results.items():
-			url = urlparse(url)
-			url = urlunparse(url._replace(query=''))
-			yield Url(url=url, request_headers=values['headers'], method=values['method'])
+			parsed_url = urlparse(url)
+			url = urlunparse(parsed_url._replace(query=''))
+			yield Url(url=url, host=parsed_url.netloc, request_headers=values['headers'], method=values['method'])
 			for param in values['params']:
 				yield Tag(name=param, category='url_param', match=url, extra_data={'content': param, 'subtype': 'param'})

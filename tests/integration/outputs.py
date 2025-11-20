@@ -18,7 +18,7 @@ OUTPUTS_CHECKS = {
                     'function': lambda item: item.request_headers['Hello'] == 'World',
                 }
             ],
-            'runner': '^(?!xurlfind3r$).*',
+            'runner': '^(?!urlfinder|xurlfind3r|gau$).*',
         }
     },
     # 'runner': {
@@ -179,6 +179,9 @@ OUTPUTS_TASKS = {
     'fping': [
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
+    'gau': [
+        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
+    ],
     'getasn': [
         Tag(name='asn', category='info', match='wikipedia.org', _source='getasn')
     ],
@@ -294,6 +297,13 @@ OUTPUTS_TASKS = {
             match='https://github.com/trufflesecurity/test_keys/blob/fbc14303ffbf8fb1c2c1914e8dda7d0121633aca/keys#L4',
             _source='trufflehog'
         ),
+    ],
+    'urlfinder': [
+        Url(
+            url='http://testphp.vulnweb.com/cvs/',
+            host='testphp.vulnweb.com',
+            _source='urlfinder'
+        )
     ],
     'wafw00f': [
         Tag(
