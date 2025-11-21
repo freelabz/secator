@@ -1,6 +1,8 @@
 import os
 import yaml
 
+from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
+
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
 								 HEADER, URL, FOLLOW_REDIRECT)
@@ -8,7 +10,6 @@ from secator.output_types import Info, Url, Warning, Tag
 from secator.runners import Command
 from secator.tasks._categories import OPTS
 from secator.utils import process_wordlist
-from urllib.parse import urlparse, urlunparse
 
 
 @task()
@@ -19,7 +20,7 @@ class arjun(Command):
 	output_types = [Url, Tag]
 	tags = ['url', 'fuzz', 'params']
 	input_flag = '-u'
-	input_chunk_size = 1
+	file_flag = '-i'
 	version_flag = ' '
 	opts = {
 		'chunk_size': {'type': int, 'help': 'Control query/chunk size'},
@@ -91,7 +92,20 @@ class arjun(Command):
 				return
 		for url, values in results.items():
 			parsed_url = urlparse(url)
-			url = urlunparse(parsed_url._replace(query=''))
-			yield Url(url=url, host=parsed_url.netloc, request_headers=values['headers'], method=values['method'])
+			yield Url(
+				url=url,
+				host=parsed_url.netloc,
+				request_headers=values['headers'],
+				method=values['method'],
+			)
 			for param in values['params']:
-				yield Tag(name=param, category='url_param', match=url, extra_data={'content': param, 'subtype': 'param'})
+				new_params = parse_qs(parsed_url.query).copy()
+				new_params[param] = 'FUZZ'
+				new_query = urlencode(new_params, doseq=True)
+				new_url = urlunparse(parsed_url._replace(query=new_query))
+				yield Tag(
+					category='info',
+					name='url_param',
+					match=url,
+					extra_data={'content': param, 'url': new_url}
+				)

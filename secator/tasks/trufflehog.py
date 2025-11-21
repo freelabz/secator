@@ -184,8 +184,10 @@ class trufflehog(Command):
             msg = item.get('msg', '').capitalize()
             if level.startswith('info'):
                 yield Info(message=msg)
-            else:
-                yield Error(message=msg, traceback='\n'.join(item.get('errors', [])))
+            elif msg == 'Error running scan':
+                error = item.get('error')
+                msg += ' - ' + error if error else ''
+                yield Error(message=msg)
             return
 
         if 'SourceMetadata' not in item:
@@ -229,8 +231,8 @@ class trufflehog(Command):
         if rtype:
             name = f"{name}_{rtype.lower().replace(' ', '_')}"
         yield Tag(
-            name=name,
             category='secret',
+            name=name,
             match=match,
             extra_data=extra_data
         )

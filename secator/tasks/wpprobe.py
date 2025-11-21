@@ -70,10 +70,11 @@ class wpprobe(Command):
 				for plugin_data_version in plugin_data:
 					plugin_version = plugin_data_version['version']
 					yield Tag(
-						name=f'Wordpress plugin - {plugin_name} {plugin_version}',
-						category='wordpress_plugin',
+						category='info',
+						name='wordpress_plugin',
 						match=url,
 						extra_data={
+							'content': plugin_name + ':' + plugin_version,
 							'name': plugin_name,
 							'version': plugin_version
 						}
@@ -106,7 +107,7 @@ class wpprobe(Command):
 									id=vuln['cve'],
 									severity=severity,
 									cvss_score=vuln['cvss_score'],
-									tags=[plugin_name],
+									tags=['wordpress', 'wordpress_plugin', plugin_name],
 									reference=vuln['cve_link'],
 									extra_data=extra_data,
 									matched_at=url,

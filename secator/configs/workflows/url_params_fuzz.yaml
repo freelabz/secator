@@ -42,7 +42,7 @@ tasks:
     follow_redirect: true
     targets_:
       - type: tag
-        field: '{match}?{name}=FUZZ'
+        field: '{match}?{value}=FUZZ'
         condition: item._source.startswith('arjun') or item._source.startswith('x8')
 
   httpx:

@@ -50,6 +50,11 @@ class getasn(Command):
 
 	@staticmethod
 	def item_loader(self, line):
-		tag = Tag(name='asn', category='info', match=self.inputs[0], extra_data={'content': line.strip()})
+		tag = Tag(
+			category='info',
+			name='asn',
+			match=self.inputs[0],
+			extra_data={'content': line.strip()}
+		)
 		if tag not in self.self_results:
 			yield tag

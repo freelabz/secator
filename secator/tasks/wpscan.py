@@ -143,10 +143,11 @@ class wpscan(VulnHttp):
 				number = version['number']
 				latest_version = main_theme.get('latest_version') or 'unknown'
 				yield Tag(
-					name=f'Wordpress theme - {slug} {number}',
-					category='wordpress_theme',
+					category='info',
+					name='wordpress_theme',
 					match=target,
 					extra_data={
+						'content': slug + ':' + number,
 						'url': location,
 						'latest_version': latest_version
 					}
@@ -158,7 +159,8 @@ class wpscan(VulnHttp):
 						name=f'Wordpress theme - {slug} {number} outdated',
 						description=f'The wordpress theme {slug} is outdated, consider updating to the latest version {latest_version}',
 						confidence='high',
-						severity='info'
+						severity='info',
+						tags=['wordpress', 'wordpress_theme']
 					)
 
 		# Interesting findings
@@ -176,11 +178,14 @@ class wpscan(VulnHttp):
 				number = version['number']
 				latest_version = data.get('latest_version') or 'unknown'
 				yield Tag(
-					name=f'Wordpress plugin - {slug} {number}',
-					category='wordpress_plugin',
+					category='info',
+					name='wordpress_plugin',
 					match=target,
 					extra_data={
+						'content': slug + ':' + number,
 						'url': location,
+						'name': slug,
+						'version': number,
 						'latest_version': latest_version
 					}
 				)
@@ -191,5 +196,6 @@ class wpscan(VulnHttp):
 						name=f'Wordpress plugin - {slug} {number} outdated',
 						description=f'The wordpress plugin {slug} is outdated, consider updating to the latest version {latest_version}.',
 						confidence='high',
-						severity='info'
+						severity='info',
+						tags=['wordpress', 'wordpress_plugin']
 					)

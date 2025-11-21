@@ -60,13 +60,13 @@ tasks:
       if: "'cariddi' in opts.crawlers and not opts.passive"
 
   httpx:
-    description: Run HTTP probes on crawled URLs
+    description: Run HTTP probes on passive URLs
     tech_detect: True
     targets_:
     - target.name
     - type: url
       field: url
-      condition: url.status_code != 0
+      condition: item.status_code == 0
     if: not opts.passive
 
   trufflehog:

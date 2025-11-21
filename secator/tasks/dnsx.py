@@ -16,7 +16,6 @@ class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -resp -recon'
 	tags = ['dns', 'fuzz']
-	input_chunk_size = 1
 	input_types = [HOST, CIDR_RANGE, IP]
 	output_types = [Record, Ip, Subdomain]
 	json_flag = '-json'
@@ -49,13 +48,16 @@ class dnsx(ReconDns):
 		"""All targets will return positive DNS queries. Aborting bruteforcing."""
 		if not self.get_opt_value('wordlist'):
 			return True
+		if self.get_opt_value('wildcard_domain'):
+			return True
 		for target in self.inputs:
 			subdomain = f'xxxxxx.{target}'
-			if check_dns_response(subdomain, 'A'):
+			if check_dns_response(subdomain):
 				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'))  # noqa: E501
 				self.inputs = [t for t in self.inputs if t != target]
-				# if len(self.inputs) == 0:
-				# 	return False
+				if len(self.inputs) == 0 and not self.has_parent:
+					self.add_result(Warning(message='Please specify the wildcard_domain option to get accurate results.'))  # noqa: E501
+					return False
 		return True
 
 	@staticmethod

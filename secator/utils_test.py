@@ -70,6 +70,9 @@ INPUTS_TASKS = {
 	PATH: '.',
 	DOCKER_IMAGE: 'redis:latest',
 	GIT_REPOSITORY: 'https://github.com/freelabz/secator',
+	'gf': 'http://testphp.vulnweb.com/hpp?pp=1',
+	'maigret': 'Linus__Torvalds',
+	'searchsploit': 'apache',
 }
 
 #---------------------#
@@ -143,12 +146,16 @@ def mock_command(cls, inputs=[], opts={}, fixture=None, method=''):
 		fixture = [fixture]
 
 	is_list = isinstance(fixture, list)
+	supports_list = next((loader for loader in cls.item_loaders if getattr(loader, 'list', False)), None)
 	if is_list:
-		for item in fixture:
-			if isinstance(item, dict):
-				mocks.append(json.dumps(item))
-			else:
-				mocks.append(item)
+		if supports_list:
+			mocks.append(json.dumps(fixture))
+		else:
+			for item in fixture:
+				if isinstance(item, dict):
+					mocks.append(json.dumps(item))
+				else:
+					mocks.append(item)
 	else:
 		mocks.append(fixture)
 

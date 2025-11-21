@@ -1,4 +1,5 @@
 from secator.decorators import task
+from secator.definitions import HOST
 from secator.output_types import Domain
 from secator.runners import Command
 from secator.serializers import JSONSerializer
@@ -11,6 +12,7 @@ class whois(Command):
 	input_flag = '-d'
 	json_flag = '--json'
 	input_chunk_size = 1
+	input_types = [HOST]
 	output_types = [Domain]
 	item_loaders = [JSONSerializer()]
 	version_flag = '-V'

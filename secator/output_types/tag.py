@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import caml_to_snake, rich_to_ansi, trim_string, rich_escape as _s
+from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 
 
 @dataclass
@@ -25,16 +25,14 @@ class Tag(OutputType):
 	_sort_by = ('match', 'name')
 
 	def __post_init__(self):
-		self.name = caml_to_snake(self.name).replace(' ', '_')
 		super().__post_init__()
 
 	def __str__(self) -> str:
 		return self.match
 
 	def __repr__(self) -> str:
-		name = self.name.replace('_', ' ').capitalize()
 		content = self.extra_data.get('content')
-		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{name}[/]'
+		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{self.name}[/]'
 		small_content = False
 		if content and len(content) < 50:
 			small_content = True

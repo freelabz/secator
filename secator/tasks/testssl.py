@@ -141,12 +141,12 @@ class testssl(Command):
 					if not verbose:
 						continue
 					yield Tag(
-						name=f'SSL/TLS [{id}]',
 						category='info',
+						name='ssl_tls',
 						match=host,
 						extra_data={
-							'type': id,
-							'finding': finding,
+							'subtype': id,
+							'content': finding,
 						}
 					)
 
@@ -155,7 +155,7 @@ class testssl(Command):
 					if id in ['TLS1', 'TLS1_1']:
 						human_name = f'SSL/TLS deprecated protocol offered: {id}'
 					else:
-						human_name = f'SSL/TLS {id}: {finding}'
+						human_name = f'SSL/TLS {id}'
 					yield Vulnerability(
 						name=human_name,
 						matched_at=host,

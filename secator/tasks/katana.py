@@ -17,7 +17,6 @@ EXCLUDED_PARAMS = ['v']
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana'
-	input_chunk_size = 1
 	input_types = [URL]
 	output_types = [Url, Tag]
 	tags = ['url', 'crawl']
@@ -114,17 +113,25 @@ class katana(HttpCrawler):
 				if url not in self.urls:
 					self.urls.append(url)
 					yield url
+				params = form.get('parameters', [])
 				yield Tag(
+					category='info',
 					name='form',
-					category='form',
 					match=form['action'],
 					stored_response_path=response["stored_response_path"],
 					extra_data={
 						'method': form['method'],
 						'enctype': form.get('enctype', ''),
-						'parameters': ','.join(form.get('parameters', []))
+						'parameters': params
 					}
 				)
+				for param in params:
+					yield Tag(
+						category='info',
+						name='url_param',
+						match=form['action'],
+						extra_data={'content': param, 'value': 'FUZZ'}
+					)
 		url = Url(
 			url=item['request']['endpoint'],
 			host=parsed_url.netloc,
@@ -153,10 +160,10 @@ class katana(HttpCrawler):
 			if param_name in EXCLUDED_PARAMS:
 				continue
 			tag = Tag(
-				name=param_name,
-				category='url_param',
+				category='info',
+				name='url_param',
 				match=url_without_params,
-				extra_data={'content': param_name if param_value is None else param_value, 'subtype': 'param'}
+				extra_data={'content': param_name, 'value': param_value}
 			)
 			if tag not in self.tags:
 				self.tags.append(tag)

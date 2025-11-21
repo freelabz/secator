@@ -83,6 +83,11 @@ class x8(HttpFuzzer):
 			parsed_url = urlparse(url)
 			url_without_param = urlunparse(parsed_url._replace(query=''))
 			extra_data = {k: v for k, v in param.items() if k != 'name'}
-			extra_data['content'] = param['value']
-			extra_data['subtype'] = 'param'
-			yield Tag(name=param['name'], match=url_without_param, category='url_param', extra_data=extra_data)
+			extra_data['content'] = param['name']
+			extra_data['value'] = param['value']
+			yield Tag(
+				category='info',
+				name='url_param',
+				match=url_without_param,
+				extra_data=extra_data
+			)

@@ -121,8 +121,8 @@ class trivy(Vuln):
 				extra_data = {'content': secret['Match'], 'code_context': code_context}
 				extra_data.update({caml_to_snake(k): v for k, v in secret.items() if k not in ['RuleID', 'Match', 'Code']})
 				yield Tag(
-					name=secret['RuleID'].replace('-', '_'),
 					category='secret',
+					name=secret['RuleID'].replace('-', '_'),
 					match=item['Target'],
 					extra_data=extra_data
 				)
