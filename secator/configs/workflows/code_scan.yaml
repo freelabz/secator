@@ -6,6 +6,7 @@ tags: [vuln, secret, code]
 input_types:
   - path
   - url
+  - gcs_url
   - string
 
 tasks:

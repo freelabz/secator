@@ -160,14 +160,14 @@ class cariddi(HttpCrawler):
 
 		for error in errors:
 			error['category'] = 'error'
-			error['name'] = f'{error["name"]}'.lower()
+			error['name'] = '_'.join(f'{error["name"]}'.lower().split())
 			error['extra_data'] = {'content': error['match'], 'url': url}
 			error['match'] = url_without_param
 			yield Tag(**error)
 
 		for secret in secrets:
 			secret['category'] = 'secret'
-			secret['name'] = f'{secret["name"]}'.lower()
+			secret['name'] = '_'.join(f'{secret["name"]}'.lower().split())
 			secret['extra_data'] = {'content': secret['match'], 'url': url}
 			secret['match'] = url_without_param
 			yield Tag(**secret)
@@ -181,7 +181,7 @@ class cariddi(HttpCrawler):
 			parsed_url = urlparse(url)
 			url_without_param = urlunparse(parsed_url._replace(query=''))
 			info['category'] = 'info'
-			info['name'] = f'{info["name"]}'.lower()
+			info['name'] = '_'.join(f'{info["name"]}'.lower().split())
 			info['match'] = url_without_param
 			if CARIDDI_IGNORE_PATTERNS.match(content):
 				continue

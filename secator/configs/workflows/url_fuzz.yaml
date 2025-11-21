@@ -51,7 +51,7 @@ tasks:
     targets_:
       type: url
       field: url
-      condition: url.status_code != 0 or opts.screenshot or opts.headless
+      condition: opts.screenshot or opts.headless
     # enrich: true  # TODO: add enrich capabilities
 
   trufflehog:
