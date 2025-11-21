@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/freelabz/secator/compare/v0.20.0...v0.20.1) (2025-11-21)
+
+
+### Bug Fixes
+
+* tag output, add fixtures for all tasks, improve test coverage ([#755](https://github.com/freelabz/secator/issues/755)) ([cd4c52c](https://github.com/freelabz/secator/commit/cd4c52ccdce3ce5058ef7cd2b1ea64d2401bb9cb))
+
 ## [0.20.0](https://github.com/freelabz/secator/compare/v0.19.1...v0.20.0) (2025-11-20)
 
 
