@@ -11,7 +11,7 @@ class jswhois(Command):
 	cmd = 'jswhois'
 	input_types = [HOST]
 	output_types = [Tag]
-	item_loaders = [JSONSerializer()]
+	item_loaders = [JSONSerializer(list=True)]
 	tags = ['domain', 'info']
 	input_flag = None
 	file_flag = None
@@ -27,8 +27,8 @@ class jswhois(Command):
 		last_elem = item[last_chain]
 		raw = last_elem.pop('raw')
 		tag = Tag(
-			name=f'{self.inputs[0]} WHOIS',
-			category='whois',
+			name='whois',
+			category='info',
 			match=self.inputs[0],
 			extra_data={'content': raw, 'chain': last_chain}
 		)

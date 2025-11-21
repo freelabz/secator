@@ -1,0 +1,25 @@
+{
+    "name": "wikipedia.org",
+    "tld": "org",
+    "registrar": "MarkMonitor Inc.",
+    "registrant_country": "",
+    "creation_date": "2001-01-13 00:12:14",
+    "expiration_date": "2026-01-13 00:12:14",
+    "last_updated": "None",
+    "dnssec": false,
+    "status": "clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited",
+    "statuses": [
+        "clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited",
+        "clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
+        "clientUpdateProhibited https://icann.org/epp#clientUpdateProhibited"
+    ],
+    "name_servers": [
+        "ns0.wikimedia.org",
+        "ns1.wikimedia.org",
+        "ns2.wikimedia.org"
+    ],
+    "registrant": "",
+    "emails": [
+        "abusecomplaints@markmonitor.com"
+    ]
+}

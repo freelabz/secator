@@ -1,14 +1,39 @@
 {
-    "timestamp": "2023-03-24T10:21:37.343309968Z",
+    "timestamp": "2025-11-21T06:04:19.393615446-05:00",
     "request": {
         "method": "GET",
-        "endpoint": "https://example.com/",
-        "tag": "file",
-        "attribute": "robotstxt",
-        "source": "https://example.com/robots.txt",
-        "raw": "GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36\r\nAccept-Encoding: gzip\r\n\r\n"
+        "endpoint": "http://testphp.vulnweb.com/login.php"
     },
     "response": {
-        "headers": {}
+        "status_code": 200,
+        "headers": {
+            "connection": "keep-alive",
+            "x-powered-by": "PHP/5.6.40-38+ubuntu20.04.1+deb.sury.org+1",
+            "server": "nginx/1.19.0",
+            "date": "Fri, 21 Nov 2025 11:04:19 GMT",
+            "content-type": "text/html; charset=UTF-8"
+        },
+        "content_length": 5523,
+        "forms": [
+            {
+                "method": "POST",
+                "action": "http://testphp.vulnweb.com/login.php/userinfo.php",
+                "enctype": "application/x-www-form-urlencoded",
+                "parameters": [
+                    "uname",
+                    "pass"
+                ]
+            },
+            {
+                "method": "POST",
+                "action": "http://testphp.vulnweb.com/login.php/search.php?test=query",
+                "enctype": "application/x-www-form-urlencoded",
+                "parameters": [
+                    "searchFor",
+                    "goButton"
+                ]
+            }
+        ],
+        "stored_response_path": "/home/osboxes/.secator/reports/default/tasks/815/.outputs/testphp.vulnweb.com/bcaee5fef2ed206c9bd814e1037415918ddaddf7.txt"
     }
 }

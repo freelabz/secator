@@ -88,8 +88,8 @@ class gitleaks(Command):
 				if k not in ['RuleID', 'File', 'Secret']
 			})
 			yield Tag(
-				name=result['RuleID'].replace('-', '_'),
 				category='secret',
+				name=result['RuleID'].replace('-', '_'),
 				match='{File}:{StartLine}:{StartColumn}'.format(**result),
 				extra_data=extra_data
 			)

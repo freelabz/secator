@@ -254,7 +254,7 @@ class TestCommandRunner(unittest.TestCase):
 			self.assertEqual(results[0].name, "host1")
 			self.assertEqual(results[1].url, "http://example.com")
 			self.assertEqual(results[2].id, "CVE-2021-1234")
-			self.assertEqual(results[3].name, "aws_key")
+			self.assertEqual(results[3].name, "AWS_KEY")
 
 	def test_jsonlines_output(self):
 		"""Test MyCommand with JSON-lines output."""

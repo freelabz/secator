@@ -44,7 +44,9 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 				# Run command
 				input_type = cls.input_types[0] if cls.input_types else 'fake'
-				targets = INPUTS_TASKS.get(input_type, [])
+				targets = INPUTS_TASKS.get(cls.__name__)
+				if not targets:
+					targets = INPUTS_TASKS.get(input_type, [])
 				with mock_command(cls, targets, META_OPTS, fixture) as runner:
 					try:
 						self._test_runner_output(

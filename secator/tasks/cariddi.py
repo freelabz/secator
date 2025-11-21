@@ -1,4 +1,7 @@
 import re
+
+from urllib.parse import urlparse, urlunparse
+
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
@@ -9,7 +12,6 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 from secator.output_types import Tag, Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
-from urllib.parse import urlparse, urlunparse
 
 CARIDDI_IGNORE_PATTERNS = re.compile(r"|".join([
 	r"<!--\s*Instance.*\s*-->",
@@ -39,7 +41,6 @@ class cariddi(HttpCrawler):
 	input_types = [URL]
 	output_types = [Url, Tag]
 	tags = ['url', 'crawl']
-	input_chunk_size = 1
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '-json'
@@ -150,22 +151,25 @@ class cariddi(HttpCrawler):
 					if p_name == param_name:
 						p_value = p_value
 						break
-					yield Tag(name=p_name, category='url_param', match=url_without_param, extra_data={'content': p_value, 'subtype': 'param'})  # noqa: E501
+					yield Tag(
+						category='info',
+						name='url_param',
+						match=url_without_param,
+						extra_data={'content': p_name, 'value': p_value, 'url': url}
+					)
 
 		for error in errors:
-			error['category'] = f'{error["name"]}'.lower()
-			match = error['match']
-			error['name'] = match
-			error['extra_data'] = {'content': match, 'subtype': 'error'}
-			error['match'] = url
+			error['category'] = 'error'
+			error['name'] = f'{error["name"]}'.lower()
+			error['extra_data'] = {'content': error['match'], 'url': url}
+			error['match'] = url_without_param
 			yield Tag(**error)
 
 		for secret in secrets:
-			secret['category'] = f'{secret["name"]}'.lower()
-			match = secret['match']
-			secret['extra_data'] = {'content': match, 'subtype': 'secret'}
-			secret['name'] = match
-			secret['match'] = url
+			secret['category'] = 'secret'
+			secret['name'] = f'{secret["name"]}'.lower()
+			secret['extra_data'] = {'content': secret['match'], 'url': url}
+			secret['match'] = url_without_param
 			yield Tag(**secret)
 
 		for info in infos:
@@ -173,13 +177,13 @@ class cariddi(HttpCrawler):
 				continue
 			if info['name'] in CARIDDI_RENAME_LIST:
 				info['name'] = CARIDDI_RENAME_LIST[info['name']]
-			match = info['match']
+			content = info['match']
 			parsed_url = urlparse(url)
 			url_without_param = urlunparse(parsed_url._replace(query=''))
-			info['category'] = f'{info["name"]}'.lower()
-			info['name'] = match
+			info['category'] = 'info'
+			info['name'] = f'{info["name"]}'.lower()
 			info['match'] = url_without_param
-			if CARIDDI_IGNORE_PATTERNS.match(match):
+			if CARIDDI_IGNORE_PATTERNS.match(content):
 				continue
-			info['extra_data'] = {'content': match, 'subtype': 'info'}
+			info['extra_data'] = {'content': content, 'url': url}
 			yield Tag(**info)

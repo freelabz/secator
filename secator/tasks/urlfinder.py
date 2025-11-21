@@ -34,7 +34,6 @@ class urlfinder(HttpCrawler):
 		'sources': {'type': str, 'help': f'Sources to use (comma-delimited) ({", ".join(URLFINDER_SOURCES)})', 'required': False},  # noqa: E501
 		'exclude_sources': {'type': str, 'help': 'Sources to exclude (comma-delimited)', 'required': False},
 		'version': {'type': bool, 'help': 'Version', 'required': False},
-		'verbose': {'type': bool, 'help': 'Verbose output', 'required': False},
 		'stats': {'type': bool, 'help': 'Display source statistics', 'required': False},
 		'max_param_occurrences': {'type': int, 'help': 'Max occurrences for the same parameter in the same URL before discarding next results', 'required': False, 'default': 10, 'internal': True},  # noqa: E501
 	}
