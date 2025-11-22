@@ -353,7 +353,12 @@ def register_runner(cli_endpoint, config):
 			# Pass results to runner if in pipe chain
 			results_to_pass = secator_piped_results if is_secator_pipe else []
 			runner = runner_cls(
-				config, inputs, results=results_to_pass, run_opts=opts, hooks=hooks, context=context
+				config,
+				inputs,
+				results=results_to_pass,
+				run_opts=opts,
+				hooks=hooks,
+				context=context
 			)
 			for item in runner:
 				del item

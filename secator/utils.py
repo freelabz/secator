@@ -64,12 +64,18 @@ def setup_logging(level):
 def detect_secator_piped_input(data):
 	"""Detect if piped input is from a secator command.
 	
+	Checks if input lines contain valid secator JSON output by looking for the presence
+	of '_type' and '_source' fields, which are standard in all secator output types.
+	
 	Args:
-		data (list): List of input lines.
+		data (list): List of input lines (JSON strings expected for secator output).
 		
 	Returns:
-		tuple: (is_secator_pipe, results) where is_secator_pipe is bool and results is list of OutputType objects.
+		tuple: (is_secator_pipe, results) where is_secator_pipe is bool indicating if
+			   secator output was detected, and results is a list of OutputType objects
+			   parsed from the JSON input.
 	"""
+	# Import here to avoid circular dependency
 	from secator.serializers.dataclass import loads_dataclass
 	
 	if not data or not isinstance(data, list):
