@@ -1,3 +1,7 @@
+"""Secator Cloud driver for sending scan status and findings to Secator Cloud API.
+
+Usage: First authenticate with `secator login`, then use `--driver cloud` with any runner.
+"""
 import logging
 import time
 import json
