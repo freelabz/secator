@@ -16,7 +16,7 @@ options:
   crawlers:
     type: list
     help: "Crawlers to use (comma-separated) (passive: xurlfind3r, urlfinder, gau; active: katana, gospider, cariddi)"
-    default: ['xurlfind3r', 'katana']
+    default: ['xurlfind3r', 'katana', 'gospider']
     internal: True
 
   hunt_secrets:
@@ -24,6 +24,12 @@ options:
     help: Hunt secrets in HTTP responses (trufflehog)
     default: False
     short: hs
+
+  hunt_js_secrets:
+    is_flag: True
+    help: Hunt secrets in JavaScript files (jsleak)
+    default: False
+    short: hjs
 
 default_options:
   match_codes: 200,204,301,302,307,401,403,405,500
@@ -76,3 +82,13 @@ tasks:
       field: stored_response_path
       condition: item.stored_response_path != ''
     if: opts.hunt_secrets and not opts.passive
+
+  jsleak:
+    description: Hunt secrets in JavaScript files
+    secrets: True
+    status_check: True
+    targets_:
+    - type: url
+      field: url
+      condition: "item.url.endswith('.js') or 'javascript' in item.content_type.lower()"
+    if: opts.hunt_js_secrets and not opts.passive
