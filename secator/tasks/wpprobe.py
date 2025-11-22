@@ -6,7 +6,7 @@ import yaml
 from secator.decorators import task
 from secator.runners import Command
 from secator.definitions import OUTPUT_PATH, THREADS, URL
-from secator.output_types import Vulnerability, Tag, Info, Warning, Error
+from secator.output_types import Vulnerability, Tag, Info, Warning, Error, File
 from secator.tasks._categories import OPTS
 
 
@@ -60,6 +60,16 @@ class wpprobe(Command):
 			return
 
 		yield Info(message=f'JSON results saved to {self.output_path}')
+		# Yield File output for the JSON file
+		file_size = os.path.getsize(self.output_path)
+		yield File(
+			path=self.output_path,
+			type='local',
+			category='wpprobe',
+			tags=['wordpress', 'scan-result', 'json'],
+			size=file_size,
+			mime_type='application/json'
+		)
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read())
 			if not results or 'url' not in results:
