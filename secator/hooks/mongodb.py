@@ -101,15 +101,40 @@ def update_runner(self):
 		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
 
 
+def _has_new_items(existing_list, new_list):
+	"""Check if new_list contains items not in existing_list.
+
+	Args:
+		existing_list: The existing list to check against
+		new_list: The new list to check
+
+	Returns:
+		bool: True if new_list has items not in existing_list
+	"""
+	try:
+		existing_set = set(existing_list)
+		for item_val in new_list:
+			if item_val not in existing_set:
+				return True
+	except TypeError:
+		# Items not hashable, use slower check
+		for item_val in new_list:
+			if item_val not in existing_list:
+				return True
+	return False
+
+
 def _merge_lists(existing_list, new_list):
 	"""Merge two lists, avoiding duplicates while preserving order.
 
+	Note: This function modifies existing_list in-place by appending new items from new_list.
+
 	Args:
-		existing_list: The existing list to merge into
+		existing_list: The existing list to merge into (modified in-place)
 		new_list: The new list to merge from
 
 	Returns:
-		The merged list
+		The merged list (same object as existing_list)
 	"""
 	# Try to use set for O(1) lookup if items are hashable
 	try:
@@ -187,22 +212,8 @@ def update_finding(self, item):
 						continue
 				# For lists, merge them (avoiding duplicates)
 				if isinstance(value, list) and isinstance(existing_value, list):
-					# Check if there are any new items to add
-					has_new_items = False
-					try:
-						existing_set = set(existing_value)
-						for item_val in value:
-							if item_val not in existing_set:
-								has_new_items = True
-								break
-					except TypeError:
-						# Items not hashable, use slower check
-						for item_val in value:
-							if item_val not in existing_value:
-								has_new_items = True
-								break
 					# Only merge and mark as changed if there are new items
-					if has_new_items:
+					if _has_new_items(existing_value, value):
 						merged_list = _merge_lists(existing_value.copy(), value)
 						changed_fields[key] = merged_list
 				# For dicts, merge them
