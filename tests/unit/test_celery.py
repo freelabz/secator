@@ -214,6 +214,12 @@ class TestCelery(unittest.TestCase):
 		"""Test run_workflow celery task."""
 		from secator.celery import run_workflow
 		from unittest.mock import patch, MagicMock
+		import os
+		from pathlib import Path
+		
+		# Ensure celery directories exist
+		celery_results_dir = Path('/tmp/.secator/celery/results')
+		celery_results_dir.mkdir(parents=True, exist_ok=True)
 		
 		# Mock the Workflow class
 		with patch('secator.celery.Workflow') as MockWorkflow:
@@ -233,6 +239,11 @@ class TestCelery(unittest.TestCase):
 		"""Test run_scan celery task."""
 		from secator.celery import run_scan
 		from unittest.mock import patch, MagicMock
+		from pathlib import Path
+		
+		# Ensure celery directories exist
+		celery_results_dir = Path('/tmp/.secator/celery/results')
+		celery_results_dir.mkdir(parents=True, exist_ok=True)
 		
 		# Mock the Scan class
 		with patch('secator.celery.Scan') as MockScan:
