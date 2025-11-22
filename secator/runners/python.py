@@ -84,7 +84,7 @@ class PythonRunner(Runner):
 		if node_id:
 			config.node_id = node_id
 		if node_name:
-			config.node_name = context.get('node_name')
+			config.node_name = node_name
 
 		# Call super().__init__
 		super().__init__(
