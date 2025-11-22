@@ -7,6 +7,7 @@ def test_file_creation():
 	"""Test basic File output type creation."""
 	f = File(
 		path='/tmp/test.txt',
+		type='local',
 		category='download',
 		tags=['web', 'js'],
 		size=1024,
@@ -15,6 +16,7 @@ def test_file_creation():
 	)
 
 	assert f.path == '/tmp/test.txt'
+	assert f.type == 'local'
 	assert f.category == 'download'
 	assert f.tags == ['web', 'js']
 	assert f.size == 1024
@@ -28,6 +30,7 @@ def test_file_defaults():
 	f = File(path='/tmp/test.txt')
 
 	assert f.path == '/tmp/test.txt'
+	assert f.type == 'local'  # Default type
 	assert f.category == 'general'
 	assert f.tags == []
 	assert f.size == 0
@@ -81,6 +84,7 @@ def test_file_get_name():
 def test_file_table_fields():
 	"""Test File has proper table fields."""
 	assert 'path' in File._table_fields
+	assert 'type' in File._table_fields
 	assert 'category' in File._table_fields
 	assert 'tags' in File._table_fields
 	assert 'size' in File._table_fields
@@ -100,6 +104,7 @@ def test_file_to_dict():
 	"""Test File conversion to dictionary."""
 	f = File(
 		path='/tmp/test.txt',
+		type='gcs',
 		category='download',
 		size=512,
 		mime_type='text/plain'
@@ -107,6 +112,21 @@ def test_file_to_dict():
 
 	data = f.toDict()
 	assert data['path'] == '/tmp/test.txt'
+	assert data['type'] == 'gcs'
 	assert data['category'] == 'download'
 	assert data['size'] == 512
 	assert data['_type'] == 'file'
+
+
+def test_file_type_gcs():
+	"""Test File with GCS type."""
+	f = File(
+		path='gs://my-bucket/data.txt',
+		type='gcs',
+		category='export'
+	)
+
+	assert f.type == 'gcs'
+	assert f.path.startswith('gs://')
+	# GCS files should use cloud icon in repr
+	assert '☁️' in repr(f) or 'gcs' in repr(f)

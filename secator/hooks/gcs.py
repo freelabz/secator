@@ -14,7 +14,8 @@ warnings.filterwarnings("ignore", "Your application has authenticated using end 
 
 GCS_BUCKET_NAME = CONFIG.addons.gcs.bucket_name
 ITEMS_TO_SEND = {
-	'url': ['screenshot_path', 'stored_response_path']
+	'url': ['screenshot_path', 'stored_response_path'],
+	'file': ['path']  # For File output type
 }
 
 _gcs_client = None
@@ -45,7 +46,11 @@ def process_item(self, item):
 			t = Thread(target=upload_blob, args=(GCS_BUCKET_NAME, v, blob_name))
 			t.start()
 			self.threads.append(t)
-			setattr(item, k, f'gs://{GCS_BUCKET_NAME}/{blob_name}')
+			gcs_path = f'gs://{GCS_BUCKET_NAME}/{blob_name}'
+			setattr(item, k, gcs_path)
+			# Update type field for File objects
+			if item._type == 'file':
+				setattr(item, 'type', 'gcs')
 	return item
 
 

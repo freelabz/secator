@@ -9,6 +9,7 @@ from secator.utils import rich_to_ansi, rich_escape as _s
 @dataclass
 class File(OutputType):
 	path: str
+	type: str = field(default='local')  # 'local' or 'gcs'
 	category: str = field(default='general')
 	tags: list = field(default_factory=list, compare=False)
 	size: int = field(default=0, compare=False)
@@ -24,7 +25,7 @@ class File(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = [PATH, 'category', 'tags', 'size', 'mime_type', 'hash']
+	_table_fields = [PATH, 'type', 'category', 'tags', 'size', 'mime_type', 'hash']
 	_sort_by = ('category', PATH)
 
 	def __post_init__(self):
@@ -34,9 +35,13 @@ class File(OutputType):
 		return self.path
 
 	def __repr__(self) -> str:
-		s = rf'📄 \[[bold white]{_s(self.path)}[/]]'
+		# Use cloud icon for GCS files
+		icon = '☁️' if self.type == 'gcs' else '📄'
+		s = rf'{icon} \[[bold white]{_s(self.path)}[/]]'
 		if self.category:
 			s += rf' \[[bold yellow]{self.category}[/]]'
+		if self.type != 'local':
+			s += rf' \[[dim cyan]{self.type}[/]]'
 		if self.mime_type:
 			s += rf' \[[magenta]{self.mime_type}[/]]'
 		if self.size:
