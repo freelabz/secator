@@ -137,8 +137,9 @@ class TestCelery(unittest.TestCase):
 			return
 		
 		# Create a test wordlist with more lines than chunk size
+		LINES_OVER_THRESHOLD = 100
 		wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
-		test_lines = wordlist_chunk_size + 100  # Slightly over the threshold
+		test_lines = wordlist_chunk_size + LINES_OVER_THRESHOLD  # Slightly over the threshold
 		
 		with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
 			for i in range(test_lines):
@@ -174,8 +175,9 @@ class TestCelery(unittest.TestCase):
 			return
 		
 		# Create a test wordlist with fewer lines than chunk size
+		LINES_UNDER_THRESHOLD = 100
 		wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
-		test_lines = wordlist_chunk_size - 100  # Below the threshold
+		test_lines = wordlist_chunk_size - LINES_UNDER_THRESHOLD  # Below the threshold
 		
 		with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
 			for i in range(test_lines):

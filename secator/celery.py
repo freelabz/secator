@@ -492,8 +492,11 @@ def break_task(task, task_opts, results=[]):
 	if task.input_chunk_size > 1:
 		chunks = list(chunker(task.inputs, task.input_chunk_size))
 	
+	# Check if no target chunking was applied (chunks still equal inputs)
+	no_target_chunking = len(chunks) == len(task.inputs)
+	
 	# If wordlist chunking is needed and no target chunking, use wordlist chunks with all targets
-	if wordlist_chunks and len(chunks) == len(task.inputs):
+	if wordlist_chunks and no_target_chunking:
 		# No target chunking, so we chunk by wordlist only
 		target_chunk = task.inputs
 		chunks = [target_chunk for _ in wordlist_chunks]

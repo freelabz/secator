@@ -259,6 +259,9 @@ class Command(Runner):
 		"""
 		import subprocess
 		
+		# Normalize path to prevent issues
+		wordlist = os.path.abspath(wordlist)
+		
 		# Try wc -l on Unix systems for better performance
 		if os.name != 'nt':  # Not Windows
 			try:
