@@ -143,6 +143,49 @@ OUTPUTS_TASKS = {
             _source='dalfox'
         ),
     ],
+    'dig': [
+        Record(
+            name='208.80.154.224',
+            type='A',
+            host='wikipedia.org',
+            _source='dig'
+        ),
+        Record(
+            name='208.80.153.224',
+            type='A',
+            host='wikipedia.org',
+            _source='dig'
+        ),
+        Record(
+            name='198.35.26.96',
+            type='A',
+            host='test.wikipedia.org',
+            _source='dig'
+        ),
+        Record(
+            name='10 mx1.wikimedia.org',
+            type='MX',
+            host='wikipedia.org',
+            _source='dig'
+        ),
+        Record(
+            name='ns0.wikimedia.org',
+            type='NS',
+            host='wikipedia.org',
+            _source='dig'
+        ),
+        Record(
+            name='v=spf1 include:wikimedia.org ~all',
+            type='TXT',
+            host='wikipedia.org',
+            _source='dig'
+        ),
+        Subdomain(host='wikipedia.org', domain='wikipedia.org', _source='dig'),
+        Subdomain(host='test.wikipedia.org', domain='wikipedia.org', _source='dig'),
+        Ip(ip='208.80.154.224', host='wikipedia.org', protocol='ipv4', _source='dig'),
+        Ip(ip='208.80.153.224', host='wikipedia.org', protocol='ipv4', _source='dig'),
+        Ip(ip='198.35.26.96', host='test.wikipedia.org', protocol='ipv4', _source='dig'),
+    ],
     'feroxbuster': [
         Url(
             url='http://localhost:3000/video/',
