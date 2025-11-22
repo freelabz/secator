@@ -88,11 +88,12 @@ Controls debug output during execution. Set to a comma-separated list of debug c
 - `unittest.item` - Item testing
 - `validators` - Validation operations
 
-**Wildcard Support**: You can use regex patterns with wildcards to match multiple components. When a debug component contains `*`, it's treated as a regex pattern (e.g., `'cve.*'` matches `cve.match`, `cve.circl`, etc.). The pattern matching is handled by Python's `re.match()` function, anchored at the end with `$`.
+**Wildcard Support**: You can use regex patterns with wildcards to match multiple components. When a debug component contains `*`, it's treated as a regex pattern (e.g., `'cve.*'` matches `cve.match`, `cve.circl`, etc.). The pattern matching is handled by Python's `re.match()` function with automatic end-anchoring.
 
 **Matching Behavior**:
-- Without wildcard: `sub.startswith()` is used (e.g., `'celery'` matches `celery.app`, `celery.data`, etc.)
-- With wildcard: `re.match(pattern + '$', sub)` is used (e.g., `'cve.*'` matches `cve.match` but not `celery.cve`)
+- **Without wildcard**: Uses `sub.startswith()` for prefix matching (e.g., `'celery'` matches `celery.app`, `celery.data`, etc.)
+- **With wildcard**: Uses `re.match(pattern + '$', sub)` for regex matching (e.g., `'cve.*'` matches `cve.match` but not `celery.cve`)
+  - Note: The `$` anchor is automatically added by Secator; users don't need to include it
 
 **Examples**:
 ```yaml

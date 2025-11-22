@@ -176,8 +176,9 @@ export SECATOR_DEBUG='cve.*'
 # Or in config file:
 # debug: cve.*
 
-# Note: When '*' is present, uses re.match(pattern + '$', component)
-# Without '*', uses component.startswith(pattern)
+# Matching behavior:
+# - With '*': re.match(pattern + '$', component) - regex matching with auto end-anchor
+# - Without '*': component.startswith(pattern) - simple prefix matching
 ```
 
 **Example 4: Debug workflow execution**
