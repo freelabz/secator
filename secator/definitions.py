@@ -153,6 +153,7 @@ for addon, module in [
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
 	('mongodb', 'pymongo'),
+	('mysql', 'mysql.connector'),
 	('redis', 'redis'),
 	('dev', 'flake8'),
 	('trace', 'memray'),

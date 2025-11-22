@@ -176,11 +176,22 @@ class MongodbAddon(StrictModel):
 	server_selection_timeout_ms: int = 5000
 
 
+class MysqlAddon(StrictModel):
+	enabled: bool = False
+	host: str = 'localhost'
+	port: int = 3306
+	user: str = 'root'
+	password: str = ''
+	database: str = 'secator'
+	update_frequency: int = 60
+
+
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	mysql: MysqlAddon = MysqlAddon()
 
 
 class SecatorConfig(StrictModel):
