@@ -6,7 +6,7 @@ import xmltodict
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
+from secator.definitions import (CONFIDENCE, CVES, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
@@ -451,11 +451,20 @@ class nmapData(dict):
 				# if edb_id:
 				# 	print(edb_id)
 				# 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
-				vuln = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
-				if vuln:
-					yield vuln
-					exploit[TAGS].extend(vuln[TAGS])
-					exploit[CONFIDENCE] = vuln[CONFIDENCE]
+				data = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
+				if data:
+					# Update exploit with metadata from vulners page (name, cves list)
+					if NAME in data:
+						exploit[NAME] = data[NAME]
+					if CVES in data and data[CVES]:
+						exploit[CVES] = data[CVES]
+					# If CVE vulnerability data is present, yield it and update exploit
+					if ID in data:
+						yield data
+						if TAGS in data:
+							exploit[TAGS].extend(data[TAGS])
+						if CONFIDENCE in data:
+							exploit[CONFIDENCE] = data[CONFIDENCE]
 				yield exploit
 				continue
 
