@@ -154,8 +154,11 @@ def update_finding(self, item):
 			if field.compare and not field.name.startswith('_'):
 				field_value = getattr(item, field.name)
 				# Include all non-None, non-empty values in query (including False and 0)
-				# Empty strings are excluded as they're not meaningful for duplicate detection
+				# Empty strings, lists, and dicts are excluded as they're not meaningful for duplicate detection
 				if field_value is not None and field_value != '':
+					# Skip empty lists and dicts
+					if isinstance(field_value, (list, dict)) and len(field_value) == 0:
+						continue
 					query[field.name] = field_value
 
 		# Look for existing finding with same identifying fields
@@ -174,22 +177,40 @@ def update_finding(self, item):
 				# Skip None values - keep existing value
 				if value is None:
 					continue
-				# Skip empty strings unless they override a non-empty value
-				if value == '' and existing.get(key):
+				# Skip empty strings if existing value is non-empty
+				existing_value = existing.get(key)
+				if value == '' and existing_value and existing_value != '':
 					continue
-				# Skip empty lists or dicts unless they override a non-empty value
-				if isinstance(value, (list, dict)) and len(value) == 0 and existing.get(key):
-					continue
+				# Skip empty lists or dicts if existing value is non-empty
+				if isinstance(value, (list, dict)) and len(value) == 0:
+					if isinstance(existing_value, (list, dict)) and len(existing_value) > 0:
+						continue
 				# For lists, merge them (avoiding duplicates)
-				if isinstance(value, list) and isinstance(existing.get(key), list):
-					merged_list = _merge_lists(existing[key].copy(), value)
-					if merged_list != existing[key]:
+				if isinstance(value, list) and isinstance(existing_value, list):
+					# Check if there are any new items to add
+					has_new_items = False
+					try:
+						existing_set = set(existing_value)
+						for item_val in value:
+							if item_val not in existing_set:
+								has_new_items = True
+								break
+					except TypeError:
+						# Items not hashable, use slower check
+						for item_val in value:
+							if item_val not in existing_value:
+								has_new_items = True
+								break
+					# Only merge and mark as changed if there are new items
+					if has_new_items:
+						merged_list = _merge_lists(existing_value.copy(), value)
 						changed_fields[key] = merged_list
 				# For dicts, merge them
-				elif isinstance(value, dict) and isinstance(existing.get(key), dict):
-					merged_dict = existing[key].copy()
+				elif isinstance(value, dict) and isinstance(existing_value, dict):
+					merged_dict = existing_value.copy()
 					merged_dict.update(value)
-					if merged_dict != existing[key]:
+					# Only mark as changed if dict actually changed
+					if merged_dict != existing_value:
 						changed_fields[key] = merged_dict
 				else:
 					# Only update if value is different
