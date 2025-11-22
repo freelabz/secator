@@ -321,6 +321,17 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 	runner.mark_completed()
+	
+	# Clean up temporary wordlist files if they exist
+	if hasattr(runner, '_wordlist_temp_files'):
+		for temp_file in runner._wordlist_temp_files:
+			try:
+				if os.path.exists(temp_file):
+					os.remove(temp_file)
+					debug(f'Cleaned up temporary wordlist file: {temp_file}', sub='celery.cleanup')
+			except Exception as e:
+				debug(f'Failed to clean up temporary wordlist file {temp_file}: {e}', sub='celery.cleanup')
+	
 	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
 	return runner.results
@@ -389,16 +400,131 @@ def replace(task_instance, sig):
 
 def break_task(task, task_opts, results=[]):
 	"""Break a task into multiple of the same type."""
+	from secator.definitions import WORDLIST
+	import tempfile
+	
+	# Check if we need to chunk by wordlist
+	wordlist_chunks = None
+	wordlist_opt = WORDLIST in dict(task.opts, **task.meta_opts)
+	if wordlist_opt:
+		wordlist = task.get_opt_value(WORDLIST, preprocess=True, process=True)
+		if wordlist and os.path.exists(wordlist):
+			try:
+				# Check if we need to chunk the wordlist
+				wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
+				
+				# Count lines efficiently using the helper method
+				from secator.runners import Command
+				line_count = Command._count_wordlist_lines(wordlist)
+				
+				if line_count > wordlist_chunk_size:
+					# Ensure wordlist directory exists
+					wordlist_dir = CONFIG.dirs.wordlists
+					if not os.path.exists(wordlist_dir):
+						os.makedirs(wordlist_dir, exist_ok=True)
+					
+					# Split wordlist into chunks
+					wordlist_chunks = []
+					chunk_num = 0
+					lines_written = 0
+					temp_wordlist = None
+					
+					# Process wordlist in chunks without loading entire file
+					try:
+						with open(wordlist, 'r', encoding='utf-8', errors='replace') as f:
+							for line in f:
+								if lines_written % wordlist_chunk_size == 0:
+									# Close previous chunk and create new one
+									if temp_wordlist:
+										temp_wordlist.close()
+										wordlist_chunks.append(temp_wordlist.name)
+									
+									# Create new temporary wordlist file for this chunk
+									temp_wordlist = tempfile.NamedTemporaryFile(
+										mode='w',
+										delete=False,
+										suffix='.txt',
+										dir=wordlist_dir,
+										prefix='wordlist_chunk_',
+										encoding='utf-8',
+										errors='replace'
+									)
+									chunk_num += 1
+								
+								temp_wordlist.write(line)
+								lines_written += 1
+							
+							# Close final chunk
+							if temp_wordlist:
+								temp_wordlist.close()
+								wordlist_chunks.append(temp_wordlist.name)
+					except (IOError, OSError) as e:
+						# Clean up any temp files created before the error
+						debug(f'Error while chunking wordlist: {e}', sub='celery.state')
+						if temp_wordlist and not temp_wordlist.closed:
+							temp_wordlist.close()
+						for temp_file in wordlist_chunks:
+							try:
+								if os.path.exists(temp_file):
+									os.remove(temp_file)
+							except (IOError, OSError) as cleanup_error:
+								debug(f'Failed to clean up temp file {temp_file}: {cleanup_error}', sub='celery.state')
+						raise e
+					
+					debug(
+						'',
+						obj={
+							task.unique_name: 'WORDLIST_CHUNKED',
+							'wordlist_chunk_size': wordlist_chunk_size,
+							'wordlist_lines': line_count,
+							'chunks': len(wordlist_chunks)
+						},
+						obj_after=False,
+						sub='celery.state',
+						verbose=True
+					)
+			except Exception as e:
+				debug(f'Failed to chunk wordlist: {e}', sub='celery.state')
+				wordlist_chunks = None
+	
+	# Determine target chunks
 	chunks = task.inputs
 	if task.input_chunk_size > 1:
 		chunks = list(chunker(task.inputs, task.input_chunk_size))
-	debug(
-		'',
-		obj={task.unique_name: 'CHUNKED', 'chunk_size': task.input_chunk_size, 'chunks': len(chunks), 'target_count': len(task.inputs)},  # noqa: E501
-		obj_after=False,
-		sub='celery.state',
-		verbose=True
-	)
+	
+	# Check if no target chunking was applied (chunks still equal inputs)
+	no_target_chunking = len(chunks) == len(task.inputs)
+	
+	# If wordlist chunking is needed and no target chunking, use wordlist chunks with all targets
+	if wordlist_chunks and no_target_chunking:
+		# No target chunking, so we chunk by wordlist only
+		target_chunk = task.inputs
+		chunks = [target_chunk for _ in wordlist_chunks]
+		debug(
+			'',
+			obj={
+				task.unique_name: 'CHUNKED_BY_WORDLIST',
+				'wordlist_chunk_size': CONFIG.runners.wordlist_chunk_size,
+				'chunks': len(chunks),
+				'target_count': len(task.inputs)
+			},
+			obj_after=False,
+			sub='celery.state',
+			verbose=True
+		)
+	else:
+		debug(
+			'',
+			obj={
+				task.unique_name: 'CHUNKED',
+				'chunk_size': task.input_chunk_size,
+				'chunks': len(chunks),
+				'target_count': len(task.inputs)
+			},
+			obj_after=False,
+			sub='celery.state',
+			verbose=True
+		)
 
 	# Clone opts
 	base_opts = task_opts.copy()
@@ -413,11 +539,17 @@ def break_task(task, task_opts, results=[]):
 		# Add chunk info to opts
 		opts = base_opts.copy()
 		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
+		
+		# If wordlist chunking is active, update wordlist option for this chunk
+		if wordlist_chunks and ix < len(wordlist_chunks):
+			opts[WORDLIST] = wordlist_chunks[ix]
+		
 		debug('', obj={
 			task.unique_name: 'CHUNK',
 			'chunk': f'{ix + 1} / {len(chunks)}',
 			'target_count': len(chunk),
-			'targets': chunk
+			'targets': chunk,
+			'wordlist_chunk': wordlist_chunks[ix] if wordlist_chunks and ix < len(wordlist_chunks) else None
 		}, sub='celery.state')  # noqa: E501
 
 		# Construct chunked signature
@@ -438,6 +570,11 @@ def break_task(task, task_opts, results=[]):
 	task.sync = False
 	task.results = []
 	task.uuids = set()
+	
+	# Store temporary wordlist files for cleanup
+	if wordlist_chunks:
+		task._wordlist_temp_files = wordlist_chunks
+	
 	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
 	# console.print(Info(message=f'Results: {results}'))
 

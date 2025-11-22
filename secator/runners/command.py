@@ -240,7 +240,74 @@ class Command(Runner):
 		has_file_flag = self.file_flag is not None
 		is_chunk = self.chunk
 		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
+		
+		# Check if wordlist chunking is needed
+		if not chunk_it and not is_chunk:
+			chunk_it = self.needs_wordlist_chunking(sync)
+		
 		return chunk_it
+
+	@staticmethod
+	def _count_wordlist_lines(wordlist):
+		"""Count lines in a wordlist file efficiently.
+		
+		Args:
+			wordlist (str): Path to wordlist file.
+		
+		Returns:
+			int: Number of lines in the wordlist.
+		"""
+		import subprocess
+		
+		# Normalize path to prevent issues
+		wordlist = os.path.abspath(wordlist)
+		
+		# Try wc -l on Unix systems for better performance
+		if os.name != 'nt':  # Not Windows
+			try:
+				# Use list form to avoid shell injection vulnerabilities
+				result = subprocess.run(['wc', '-l', wordlist], capture_output=True, text=True, timeout=5, shell=False)
+				if result.returncode == 0:
+					return int(result.stdout.split()[0])
+			except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+				pass  # Fall through to Python counting
+		
+		# Fallback to Python counting (also used on Windows)
+		with open(wordlist, 'rb') as f:
+			return sum(1 for _ in f)
+	
+	def needs_wordlist_chunking(self, sync):
+		"""Check if wordlist chunking is needed for fuzzing tasks.
+		
+		Args:
+			sync (bool): Whether the task is running in sync mode.
+		
+		Returns:
+			bool: True if wordlist chunking is needed, False otherwise.
+		"""
+		from secator.definitions import WORDLIST
+		
+		# Only chunk for fuzzing tasks that have a wordlist option
+		if WORDLIST not in dict(self.opts, **self.meta_opts):
+			return False
+		
+		# Get the wordlist value
+		wordlist = self.get_opt_value(WORDLIST, preprocess=True, process=True)
+		if not wordlist or not os.path.exists(wordlist):
+			return False
+		
+		# Count lines in wordlist efficiently
+		try:
+			wordlist_lines = self._count_wordlist_lines(wordlist)
+		except Exception:
+			return False
+		
+		# Check if wordlist exceeds chunk size threshold
+		wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
+		wordlist_over_chunk_size = wordlist_lines > wordlist_chunk_size
+		
+		# Chunk if wordlist is too large and not in sync mode
+		return not sync and wordlist_over_chunk_size
 
 	@classmethod
 	def delay(cls, *args, **kwargs):

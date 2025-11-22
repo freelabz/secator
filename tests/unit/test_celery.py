@@ -125,3 +125,75 @@ class TestCelery(unittest.TestCase):
 			targets = [r.name for r in results if r._type == 'target']
 			self.assertEqual(len(targets), len(HTTP_TARGETS) * 2)
 			self.assertEqual(len(urls), len(HTTP_TARGETS))
+
+	def test_wordlist_chunking(self):
+		"""Test that wordlist chunking works correctly."""
+		from secator.tasks import ffuf
+		from secator.config import CONFIG
+		import tempfile
+		import os
+		
+		if ffuf not in TEST_TASKS:
+			return
+		
+		# Create a test wordlist with more lines than chunk size
+		LINES_OVER_THRESHOLD = 100
+		wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
+		test_lines = wordlist_chunk_size + LINES_OVER_THRESHOLD  # Slightly over the threshold
+		
+		with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+			for i in range(test_lines):
+				f.write(f'word{i}\n')
+			wordlist_path = f.name
+		
+		try:
+			# Create a task with the large wordlist
+			target = 'https://example.com/FUZZ'
+			task = ffuf([target], wordlist=wordlist_path)
+			
+			# Check if wordlist chunking is needed
+			needs_chunk = task.needs_wordlist_chunking(sync=False)
+			self.assertTrue(needs_chunk, "Wordlist chunking should be needed for large wordlist")
+			
+			# Check that needs_chunking returns True
+			overall_needs_chunk = task.needs_chunking(sync=False)
+			self.assertTrue(overall_needs_chunk, "Overall chunking should be needed")
+			
+		finally:
+			# Clean up
+			if os.path.exists(wordlist_path):
+				os.remove(wordlist_path)
+	
+	def test_wordlist_no_chunking(self):
+		"""Test that small wordlists don't trigger chunking."""
+		from secator.tasks import ffuf
+		from secator.config import CONFIG
+		import tempfile
+		import os
+		
+		if ffuf not in TEST_TASKS:
+			return
+		
+		# Create a test wordlist with fewer lines than chunk size
+		LINES_UNDER_THRESHOLD = 100
+		wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
+		test_lines = wordlist_chunk_size - LINES_UNDER_THRESHOLD  # Below the threshold
+		
+		with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+			for i in range(test_lines):
+				f.write(f'word{i}\n')
+			wordlist_path = f.name
+		
+		try:
+			# Create a task with the small wordlist
+			target = 'https://example.com/FUZZ'
+			task = ffuf([target], wordlist=wordlist_path)
+			
+			# Check if wordlist chunking is needed
+			needs_chunk = task.needs_wordlist_chunking(sync=False)
+			self.assertFalse(needs_chunk, "Wordlist chunking should not be needed for small wordlist")
+			
+		finally:
+			# Clean up
+			if os.path.exists(wordlist_path):
+				os.remove(wordlist_path)
