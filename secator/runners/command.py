@@ -270,16 +270,22 @@ class Command(Runner):
 		
 		# Count lines in wordlist efficiently
 		try:
-			# Use wc -l on Unix systems for better performance
-			result = subprocess.run(['wc', '-l', wordlist], capture_output=True, text=True, timeout=5)
-			if result.returncode == 0:
-				wordlist_lines = int(result.stdout.split()[0])
+			# Try wc -l on Unix systems for better performance
+			if os.name != 'nt':  # Not Windows
+				try:
+					result = subprocess.run(['wc', '-l', wordlist], capture_output=True, text=True, timeout=5)
+					if result.returncode == 0:
+						wordlist_lines = int(result.stdout.split()[0])
+					else:
+						raise subprocess.SubprocessError("wc command failed")
+				except (subprocess.SubprocessError, FileNotFoundError):
+					# Fallback to Python counting if wc fails
+					with open(wordlist, 'rb') as f:
+						wordlist_lines = sum(1 for _ in f)
 			else:
-				# Fallback to counting lines in Python if wc fails
-				wordlist_lines = 0
+				# On Windows, use Python counting directly
 				with open(wordlist, 'rb') as f:
-					for _ in f:
-						wordlist_lines += 1
+					wordlist_lines = sum(1 for _ in f)
 		except Exception:
 			return False
 		

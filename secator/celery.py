@@ -414,44 +414,54 @@ def break_task(task, task_opts, results=[]):
 				wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
 				
 				# Count lines efficiently without loading entire file
-				line_count = 0
 				with open(wordlist, 'rb') as f:
-					for _ in f:
-						line_count += 1
+					line_count = sum(1 for _ in f)
 				
 				if line_count > wordlist_chunk_size:
 					# Split wordlist into chunks
 					wordlist_chunks = []
 					chunk_num = 0
 					lines_written = 0
+					temp_wordlist = None
 					
 					# Process wordlist in chunks without loading entire file
-					with open(wordlist, 'r') as f:
-						temp_wordlist = None
-						for line in f:
-							if lines_written % wordlist_chunk_size == 0:
-								# Close previous chunk and create new one
-								if temp_wordlist:
-									temp_wordlist.close()
-									wordlist_chunks.append(temp_wordlist.name)
+					try:
+						with open(wordlist, 'r') as f:
+							for line in f:
+								if lines_written % wordlist_chunk_size == 0:
+									# Close previous chunk and create new one
+									if temp_wordlist:
+										temp_wordlist.close()
+										wordlist_chunks.append(temp_wordlist.name)
+									
+									# Create new temporary wordlist file for this chunk
+									temp_wordlist = tempfile.NamedTemporaryFile(
+										mode='w',
+										delete=False,
+										suffix='.txt',
+										dir=CONFIG.dirs.wordlists,
+										prefix='wordlist_chunk_'
+									)
+									chunk_num += 1
 								
-								# Create new temporary wordlist file for this chunk
-								temp_wordlist = tempfile.NamedTemporaryFile(
-									mode='w',
-									delete=False,
-									suffix='.txt',
-									dir=CONFIG.dirs.wordlists,
-									prefix='wordlist_chunk_'
-								)
-								chunk_num += 1
+								temp_wordlist.write(line)
+								lines_written += 1
 							
-							temp_wordlist.write(line)
-							lines_written += 1
-						
-						# Close final chunk
-						if temp_wordlist:
+							# Close final chunk
+							if temp_wordlist:
+								temp_wordlist.close()
+								wordlist_chunks.append(temp_wordlist.name)
+					except Exception as e:
+						# Clean up any temp files created before the error
+						if temp_wordlist and not temp_wordlist.closed:
 							temp_wordlist.close()
-							wordlist_chunks.append(temp_wordlist.name)
+						for temp_file in wordlist_chunks:
+							try:
+								if os.path.exists(temp_file):
+									os.remove(temp_file)
+							except Exception:
+								pass
+						raise e
 					
 					debug(
 						'',
