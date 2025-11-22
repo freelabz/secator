@@ -128,7 +128,8 @@ def update_finding(self, item):
 		for field in dataclass_fields(item_class):
 			if field.compare and not field.name.startswith('_'):
 				field_value = getattr(item, field.name)
-				if field_value:  # Only add non-empty values to query
+				# Include all non-None values in query, including False and 0
+				if field_value is not None and field_value != '':
 					query[field.name] = field_value
 
 		# Look for existing finding with same identifying fields
@@ -137,35 +138,42 @@ def update_finding(self, item):
 		if existing:
 			# Update existing record instead of creating new one
 			_id = existing['_id']
-			# Merge data: keep existing values for empty fields, update with new values for non-empty fields
-			merged_update = existing.copy()
+			# Merge data: start with existing record and selectively update with new values
+			# Note: We update the existing document in-place to avoid copying large fields
 			for key, value in update.items():
-				# Skip if value is None or empty string (but not False or 0 which are valid)
-				if value is None or value == '':
+				# Always update special fields that may be modified
+				if key in ('_timestamp', '_tagged', '_duplicate', '_related', '_source'):
+					existing[key] = value
 					continue
-				# Skip empty lists or dicts
-				if isinstance(value, (list, dict)) and len(value) == 0:
+				# Skip None values - keep existing value
+				if value is None:
+					continue
+				# Skip empty strings unless they override a non-empty value
+				if value == '' and existing.get(key):
+					continue
+				# Skip empty lists or dicts unless they override a non-empty value
+				if isinstance(value, (list, dict)) and len(value) == 0 and existing.get(key):
 					continue
 				# For lists, merge them (avoiding duplicates)
-				if isinstance(value, list) and isinstance(merged_update.get(key), list):
+				if isinstance(value, list) and isinstance(existing.get(key), list):
 					# Try to use set for O(1) lookup if items are hashable
 					try:
-						existing_set = set(merged_update[key])
+						existing_set = set(existing[key])
 						for item_val in value:
 							if item_val not in existing_set:
-								merged_update[key].append(item_val)
+								existing[key].append(item_val)
 								existing_set.add(item_val)
 					except TypeError:
 						# Items are not hashable (e.g., dicts), fall back to O(n) check
 						for item_val in value:
-							if item_val not in merged_update[key]:
-								merged_update[key].append(item_val)
+							if item_val not in existing[key]:
+								existing[key].append(item_val)
 				# For dicts, merge them
-				elif isinstance(value, dict) and isinstance(merged_update.get(key), dict):
-					merged_update[key].update(value)
+				elif isinstance(value, dict) and isinstance(existing.get(key), dict):
+					existing[key].update(value)
 				else:
-					merged_update[key] = value
-			db['findings'].update_one({'_id': _id}, {'$set': merged_update})
+					existing[key] = value
+			db['findings'].update_one({'_id': _id}, {'$set': existing})
 			item._uuid = str(_id)
 			status = 'UPDATED'
 			debug('found existing finding in db, updating', sub='hooks.mongodb', id=str(_id), verbose=True)
