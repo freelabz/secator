@@ -42,57 +42,33 @@ class jsleak(HttpCrawler):
 
 	@staticmethod
 	def on_json_loaded(self, item):
-		"""Process JSON output from jsleak."""
-		# jsleak returns different types of data
-		item_type = item.get('type', '')
+		"""Process JSON output from jsleak.
+		
+		jsleak outputs JSON in format:
+		{
+			"url": "http://example.com/script.js",
+			"pattern": "api_key_regex",
+			"matches": ["secret1", "secret2"]
+		}
+		"""
 		url = item.get('url', '')
+		pattern = item.get('pattern', 'leaked_secret')
+		matches = item.get('matches', [])
 		
-		if item_type == 'secret':
-			# Secret found
-			name = item.get('name', 'unknown_secret')
-			match_value = item.get('match', '')
-			extra_data = {
-				'content': match_value,
-				'url': url,
-			}
+		# Create a Tag for each match found
+		for match in matches:
+			if not match:
+				continue
 			
-			# Add any additional fields from jsleak
-			for key in ['confidence', 'line', 'pattern']:
-				if key in item:
-					extra_data[key] = item[key]
+			# Clean up pattern name to use as tag name
+			name = pattern.lower().replace(' ', '_').replace('-', '_')
 			
 			yield Tag(
 				category='secret',
-				name=name.lower().replace(' ', '_').replace('-', '_'),
+				name=name,
 				match=url,
-				extra_data=extra_data
+				extra_data={
+					'content': match,
+					'pattern': pattern
+				}
 			)
-		
-		elif item_type == 'link' or item_type == 'endpoint':
-			# URL/endpoint found
-			found_url = item.get('link', item.get('endpoint', ''))
-			if found_url:
-				status_code = item.get('status', 0)
-				yield Url(
-					url=found_url,
-					status_code=status_code,
-					extra_data={'source_url': url}
-				)
-		
-		elif 'secret' in item or 'match' in item:
-			# Fallback for simple secret format
-			match_value = item.get('match', item.get('secret', ''))
-			name = item.get('name', item.get('type', 'leaked_secret'))
-			
-			yield Tag(
-				category='secret',
-				name=name.lower().replace(' ', '_').replace('-', '_'),
-				match=url or 'unknown',
-				extra_data={'content': match_value, 'url': url}
-			)
-		
-		elif 'url' in item or 'link' in item:
-			# Fallback for simple URL format
-			found_url = item.get('url', item.get('link', ''))
-			if found_url:
-				yield Url(url=found_url)
