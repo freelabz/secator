@@ -246,6 +246,12 @@ def register_runner(cli_endpoint, config):
 
 		# Expand input
 		inputs = opts.pop('inputs')
+		# Use default_inputs from config if no inputs provided
+		if inputs is None and hasattr(config, 'default_inputs') and config.default_inputs:
+			inputs = config.default_inputs
+			console.print(f'[bold yellow]No inputs provided, using default inputs:[/]')
+			for inp in inputs:
+				console.print(f'  • {inp}')
 		inputs = expand_input(inputs, ctx)
 
 		# Build hooks from driver name
