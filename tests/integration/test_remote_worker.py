@@ -225,7 +225,10 @@ services:
 
 	def test_redis_connectivity(self):
 		"""Test Redis connectivity for Celery broker."""
-		import redis
+		try:
+			import redis
+		except ImportError:
+			self.skipTest("redis package not installed")
 
 		# Connect to Redis
 		r = redis.Redis(host='localhost', port=6379, db=0)
