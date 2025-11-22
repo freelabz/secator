@@ -1,4 +1,3 @@
-import re
 import validators
 
 from secator.decorators import task
@@ -21,10 +20,22 @@ class dig(ReconDns):
 	file_flag = None
 	input_chunk_size = 1
 	opts = {
-		'record_type': {'type': str, 'short': 'rt', 'default': 'A', 'internal': True, 'help': 'DNS record type to query (A, AAAA, MX, NS, TXT, CNAME, SOA, AXFR, etc.)'},
-		'resolver': {'type': str, 'short': 'r', 'internal': True, 'help': 'DNS resolver to use (e.g., 8.8.8.8, 1.1.1.1)'},
-		'short': {'is_flag': True, 'default': False, 'internal': True, 'help': 'Display short form answer'},
-		'trace': {'is_flag': True, 'default': False, 'internal': True, 'help': 'Trace delegation path from root name servers'},
+		'record_type': {
+			'type': str, 'short': 'rt', 'default': 'A', 'internal': True,
+			'help': 'DNS record type to query (A, AAAA, MX, NS, TXT, CNAME, SOA, AXFR, etc.)'
+		},
+		'resolver': {
+			'type': str, 'short': 'r', 'internal': True,
+			'help': 'DNS resolver to use (e.g., 8.8.8.8, 1.1.1.1)'
+		},
+		'short': {
+			'is_flag': True, 'default': False, 'internal': True,
+			'help': 'Display short form answer'
+		},
+		'trace': {
+			'is_flag': True, 'default': False, 'internal': True,
+			'help': 'Trace delegation path from root name servers'
+		},
 	}
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,
@@ -50,7 +61,7 @@ class dig(ReconDns):
 		resolver = self.get_opt_value('resolver')
 		use_short = self.get_opt_value('short')
 		use_trace = self.get_opt_value('trace')
-		
+
 		# Build command: dig [options] [record_type] <domain> [@resolver]
 		# Use +short for brief output or +trace for full delegation path
 		# Otherwise, use +noall +answer to show only the answer section
@@ -60,12 +71,12 @@ class dig(ReconDns):
 			self.cmd += ' +trace'
 		else:
 			self.cmd += ' +noall +answer'
-		
+
 		# Add record type
 		self.cmd += f' {record_type}'
-		
+
 		# Input will be added automatically by the framework
-		
+
 		# Add resolver if specified
 		if resolver:
 			self.cmd += f' @{resolver}'
@@ -77,14 +88,14 @@ class dig(ReconDns):
 		line = line.strip()
 		if not line or line.startswith(';'):
 			return
-		
+
 		# Parse the dig output format
 		# Standard format: <name> <ttl> <class> <type> <rdata>
 		# Some formats may have fewer fields, so we need at least 4 parts
 		parts = line.split()
 		if len(parts) < 4:
 			return
-		
+
 		# Try to parse as standard dig output
 		# If parts[1] is not a digit (TTL), try alternative parsing
 		name = parts[0].rstrip('.')
@@ -103,25 +114,25 @@ class dig(ReconDns):
 			rdata = ' '.join(parts[rdata_start:])
 		else:
 			return
-		
+
 		# Clean up rdata (remove trailing dot from domain names in certain records)
 		if record_type in ['NS', 'CNAME', 'PTR']:
 			rdata = rdata.rstrip('.')
-		
+
 		# For MX records, the rdata already contains "priority server"
 		# Just clean up the server part
 		if record_type == 'MX':
 			mx_parts = rdata.split(None, 1)
 			if len(mx_parts) == 2:
 				rdata = f'{mx_parts[0]} {mx_parts[1].rstrip(".")}'
-		
+
 		# Check if the name is a valid domain/subdomain or IP
 		is_ip = validators.ipv4(name) or validators.ipv6(name)
 		is_valid_host = validators.domain(name) or is_ip
-		
+
 		# Create appropriate output objects
 		results = []
-		
+
 		# If it's a valid subdomain and not an IP
 		if is_valid_host and not is_ip and record_type in ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT']:
 			domain = extract_domain_info(name, domain_only=True)
@@ -134,7 +145,7 @@ class dig(ReconDns):
 					'sources': ['dns']
 				}
 				results.append(subdomain)
-		
+
 		# For A and AAAA records, also yield IP objects
 		if record_type == 'A':
 			ip_addr = rdata.strip()
@@ -158,7 +169,7 @@ class dig(ReconDns):
 					'alive': False
 				}
 				results.append(ip_obj)
-		
+
 		# Always create a Record object
 		record = {
 			'_type': 'record',
@@ -171,7 +182,7 @@ class dig(ReconDns):
 			}
 		}
 		results.append(record)
-		
+
 		# Yield all results
 		for result in results:
 			yield result
@@ -180,7 +191,7 @@ class dig(ReconDns):
 	def on_item_pre_convert(self, item):
 		"""Convert dict items to proper output types."""
 		item_type = item.get('_type')
-		
+
 		if item_type == 'subdomain':
 			return Subdomain(
 				host=item['host'],
@@ -204,5 +215,5 @@ class dig(ReconDns):
 				extra_data=item['extra_data'],
 				_source=self.unique_name
 			)
-		
+
 		return item
