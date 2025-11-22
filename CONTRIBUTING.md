@@ -214,9 +214,10 @@ The `debug()` function parameters:
 2. **Use hierarchy**: Use dot notation for sub-components (e.g., `cve.match`, `hooks.mongodb`)
 3. **Be consistent**: Use the same component names throughout related code
 4. **Avoid sensitive data**: Never log sensitive information like passwords, tokens, or PII
-5. **Use lazy evaluation**: For expensive operations, use the `lazy` parameter:
+5. **Use lazy evaluation**: For expensive operations, use the `lazy` parameter to modify the message:
    ```python
-   debug('Results', sub='task', lazy=lambda x: expensive_operation())
+   # lazy takes the message as parameter and returns modified message
+   debug('Results', sub='task', lazy=lambda msg: f"{msg}: {expensive_operation()}")
    ```
 
 #### Debugging Common Scenarios
