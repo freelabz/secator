@@ -128,6 +128,7 @@ def _merge_lists(existing_list, new_list):
 	"""Merge two lists, avoiding duplicates while preserving order.
 
 	Note: This function modifies existing_list in-place by appending new items from new_list.
+	Callers should pass a copy if they want to preserve the original list.
 
 	Args:
 		existing_list: The existing list to merge into (modified in-place)
@@ -169,7 +170,7 @@ def update_finding(self, item):
 		query = {'_type': _type}
 
 		# Add workspace_id to query if present to scope duplicates to workspace
-		workspace_id = item._context.get('workspace_id')
+		workspace_id = getattr(item, '_context', {}).get('workspace_id') if hasattr(item, '_context') else None
 		if workspace_id:
 			query['_context.workspace_id'] = workspace_id
 
