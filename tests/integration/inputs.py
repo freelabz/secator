@@ -11,6 +11,7 @@ INPUTS_TASKS = {
     'bbot': False, # disable bbot test
 	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
 	'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
+	'dig': 'wikipedia.org',
 	'dnsx': 'wikipedia.org',
 	'ffuf': 'http://localhost:3000/FUZZ',
 	'gau': 'http://testphp.vulnweb.com',

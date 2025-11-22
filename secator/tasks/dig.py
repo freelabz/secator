@@ -126,6 +126,10 @@ class dig(ReconDns):
 			if len(mx_parts) == 2:
 				rdata = f'{mx_parts[0]} {mx_parts[1].rstrip(".")}'
 
+		# For TXT records, remove surrounding quotes
+		if record_type == 'TXT':
+			rdata = rdata.strip('"')
+
 		# Check if the name is a valid domain/subdomain or IP
 		is_ip = validators.ipv4(name) or validators.ipv6(name)
 		is_valid_host = validators.domain(name) or is_ip

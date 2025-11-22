@@ -1,0 +1,6 @@
+wikipedia.org.		600	IN	A	208.80.154.224
+wikipedia.org.		600	IN	A	208.80.153.224
+test.wikipedia.org.	300	IN	A	198.35.26.96
+wikipedia.org.		3600	IN	MX	10	mx1.wikimedia.org.
+wikipedia.org.		3600	IN	NS	ns0.wikimedia.org.
+wikipedia.org.		3600	IN	TXT	"v=spf1 include:wikimedia.org ~all"
