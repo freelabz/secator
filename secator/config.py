@@ -182,6 +182,7 @@ class CloudAddon(StrictModel):
 	api_url: str = 'https://app.secator.cloud/api'
 	org_id: int = None
 	retries: int = 3
+	default_workspace: str = None
 
 
 class Addons(StrictModel):

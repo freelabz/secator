@@ -19,11 +19,13 @@ CLOUD_AUTH_URL = CONFIG.addons.cloud.auth_url
 CLOUD_API_URL = CONFIG.addons.cloud.api_url
 CLOUD_ORG_ID = CONFIG.addons.cloud.org_id
 CLOUD_RETRIES = CONFIG.addons.cloud.retries
+CLOUD_DEFAULT_WORKSPACE = CONFIG.addons.cloud.default_workspace
 TOKEN_FILE = Path(CONFIG.dirs.data) / 'cloud_token.json'
 
 logger = logging.getLogger(__name__)
 
 _session = None
+_workspace_cache = {}
 
 
 def get_session():
@@ -94,13 +96,112 @@ def check_authentication():
 		return False
 
 
+def list_workspaces():
+	"""List all workspaces from Secator Cloud."""
+	try:
+		response = _api_request('GET', f'{CLOUD_API_URL}/workspaces', timeout=10)
+		return response.json()
+	except Exception as e:
+		debug(f'Failed to list workspaces: {e}', sub='hooks.cloud')
+		return []
+
+
+def find_workspace_by_name(workspace_name):
+	"""Find workspace by name."""
+	# Check cache first
+	if workspace_name in _workspace_cache:
+		return _workspace_cache[workspace_name]
+
+	workspaces = list_workspaces()
+	for workspace in workspaces:
+		if workspace.get('name') == workspace_name:
+			_workspace_cache[workspace_name] = workspace
+			return workspace
+	return None
+
+
+def create_workspace(workspace_name, description=''):
+	"""Create a new workspace in Secator Cloud."""
+	try:
+		payload = {
+			'name': workspace_name,
+			'description': description
+		}
+		response = _api_request('POST', f'{CLOUD_API_URL}/workspaces', json=payload, timeout=10)
+		workspace = response.json()
+		# Cache the newly created workspace
+		_workspace_cache[workspace_name] = workspace
+		return workspace
+	except Exception as e:
+		debug(f'Failed to create workspace: {e}', sub='hooks.cloud')
+		return None
+
+
+def get_or_create_workspace(workspace_name):
+	"""Get workspace by name, or prompt user to create if it doesn't exist."""
+	workspace = find_workspace_by_name(workspace_name)
+
+	if workspace:
+		return workspace.get('id')
+
+	# Workspace doesn't exist, prompt user to create it
+	from secator.rich import console
+	console.print(f'[bold yellow]Workspace "{workspace_name}" not found in Secator Cloud.[/]')
+
+	# Ask user if they want to create it
+	try:
+		import click
+		if click.confirm(f'Do you want to create workspace "{workspace_name}"?', default=True):
+			description = click.prompt('Enter workspace description (optional)', default='', show_default=False)
+			workspace = create_workspace(workspace_name, description)
+			if workspace:
+				console.print(f'[bold green]✓ Workspace "{workspace_name}" created successfully.[/]')
+				return workspace.get('id')
+			else:
+				console.print(f'[bold red]✗ Failed to create workspace "{workspace_name}".[/]')
+				return None
+		else:
+			console.print('[bold red]Workspace is required when using cloud driver.[/]')
+			return None
+	except Exception as e:
+		debug(f'Failed to prompt for workspace creation: {e}', sub='hooks.cloud')
+		return None
+
+
 def validate_auth(self):
-	"""Validate authentication before running."""
+	"""Validate authentication and workspace before running."""
+	from secator.output_types import Error
+
+	# Check authentication
 	if not check_authentication():
-		from secator.output_types import Error
 		error = Error(message='Cloud driver requires authentication. Please run: secator login')
 		self.add_result(error, hooks=False)
 		raise Exception('Not authenticated with Secator Cloud')
+
+	# Get workspace name from context
+	workspace_name = self.context.get('workspace_name')
+
+	# If no workspace provided and no default workspace configured, error
+	if not workspace_name and not CLOUD_DEFAULT_WORKSPACE:
+		error = Error(message='Cloud driver requires --workspace argument or default_workspace in config')
+		self.add_result(error, hooks=False)
+		raise Exception('Workspace required for Secator Cloud')
+
+	# Use default workspace if none provided
+	if not workspace_name:
+		workspace_name = CLOUD_DEFAULT_WORKSPACE
+		self.context['workspace_name'] = workspace_name
+
+	# Get or create workspace and store ID in context
+	workspace_id = get_or_create_workspace(workspace_name)
+	if not workspace_id:
+		error = Error(message=f'Failed to get or create workspace: {workspace_name}')
+		self.add_result(error, hooks=False)
+		raise Exception('Failed to initialize workspace')
+
+	# Store workspace_id in context for use in update_runner and update_finding
+	self.context['workspace_id'] = workspace_id
+	debug(f'Using workspace: {workspace_name} (id: {workspace_id})', sub='hooks.cloud')
 
 
 def update_runner(self):
