@@ -1,7 +1,12 @@
-import unittest
-from unittest.mock import patch, MagicMock
-from io import StringIO
+import os
 import sys
+import tempfile
+import unittest
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+from secator.config import CONFIG
 from secator.runners import Command
 from secator.runners._base import HOOKS
 from secator.utils_test import mock_command
@@ -444,12 +449,6 @@ class TestBinaryPathResolution(unittest.TestCase):
 
 	def test_binary_path_resolution_from_local_bin(self):
 		"""Test that binary path is resolved from ~/.local/bin when it exists."""
-		import tempfile
-		import os
-		from pathlib import Path
-		from unittest.mock import patch, PropertyMock
-		from secator.config import CONFIG
-		
 		# Create a temporary directory to simulate ~/.local/bin
 		with tempfile.TemporaryDirectory() as tmpdir:
 			local_bin = Path(tmpdir)
@@ -459,7 +458,6 @@ class TestBinaryPathResolution(unittest.TestCase):
 			dummy_bin.touch(mode=0o755)
 			
 			# Patch CONFIG.dirs.bin to point to our temporary directory
-			# We need to patch the property on the Directories class
 			with patch('secator.config.CONFIG.dirs.bin', local_bin):
 				# Create a command instance
 				cmd = MyCommand(TARGETS)
@@ -469,11 +467,6 @@ class TestBinaryPathResolution(unittest.TestCase):
 	
 	def test_binary_path_resolution_fallback_to_system(self):
 		"""Test that binary path falls back to system PATH when not in ~/.local/bin."""
-		import tempfile
-		from pathlib import Path
-		from unittest.mock import patch
-		from secator.config import CONFIG
-		
 		# Create a temporary directory to simulate an empty ~/.local/bin
 		with tempfile.TemporaryDirectory() as tmpdir:
 			local_bin = Path(tmpdir)
@@ -488,11 +481,6 @@ class TestBinaryPathResolution(unittest.TestCase):
 	
 	def test_binary_path_resolution_skips_absolute_paths(self):
 		"""Test that binary path resolution is skipped for absolute paths."""
-		import tempfile
-		from pathlib import Path
-		from unittest.mock import patch
-		from secator.config import CONFIG
-		
 		# Create a temporary directory
 		with tempfile.TemporaryDirectory() as tmpdir:
 			local_bin = Path(tmpdir)

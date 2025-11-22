@@ -1098,9 +1098,6 @@ class Command(Runner):
 
 	def _resolve_binary_path(self):
 		"""Resolve the binary path, preferring ~/.local/bin over system PATH."""
-		import os
-		from pathlib import Path
-		
 		# Get the command name (first part of the command)
 		cmd_parts = self.cmd.split()
 		if not cmd_parts:
