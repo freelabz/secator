@@ -257,6 +257,7 @@ class Command(Runner):
 			bool: True if wordlist chunking is needed, False otherwise.
 		"""
 		from secator.definitions import WORDLIST
+		import subprocess
 		
 		# Only chunk for fuzzing tasks that have a wordlist option
 		if WORDLIST not in dict(self.opts, **self.meta_opts):
@@ -267,10 +268,18 @@ class Command(Runner):
 		if not wordlist or not os.path.exists(wordlist):
 			return False
 		
-		# Count lines in wordlist
+		# Count lines in wordlist efficiently
 		try:
-			with open(wordlist, 'r') as f:
-				wordlist_lines = sum(1 for _ in f)
+			# Use wc -l on Unix systems for better performance
+			result = subprocess.run(['wc', '-l', wordlist], capture_output=True, text=True, timeout=5)
+			if result.returncode == 0:
+				wordlist_lines = int(result.stdout.split()[0])
+			else:
+				# Fallback to counting lines in Python if wc fails
+				wordlist_lines = 0
+				with open(wordlist, 'rb') as f:
+					for _ in f:
+						wordlist_lines += 1
 		except Exception:
 			return False
 		

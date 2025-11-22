@@ -321,6 +321,17 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 	runner.mark_completed()
+	
+	# Clean up temporary wordlist files if they exist
+	if hasattr(runner, '_wordlist_temp_files'):
+		for temp_file in runner._wordlist_temp_files:
+			try:
+				if os.path.exists(temp_file):
+					os.remove(temp_file)
+					debug(f'Cleaned up temporary wordlist file: {temp_file}', sub='celery.cleanup')
+			except Exception as e:
+				debug(f'Failed to clean up temporary wordlist file {temp_file}: {e}', sub='celery.cleanup')
+	
 	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
 	return runner.results
@@ -399,33 +410,55 @@ def break_task(task, task_opts, results=[]):
 		wordlist = task.get_opt_value(WORDLIST, preprocess=True, process=True)
 		if wordlist and os.path.exists(wordlist):
 			try:
-				# Read wordlist lines
-				with open(wordlist, 'r') as f:
-					wordlist_lines = f.readlines()
-				
 				# Check if we need to chunk the wordlist
 				wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
-				if len(wordlist_lines) > wordlist_chunk_size:
+				
+				# Count lines efficiently without loading entire file
+				line_count = 0
+				with open(wordlist, 'rb') as f:
+					for _ in f:
+						line_count += 1
+				
+				if line_count > wordlist_chunk_size:
 					# Split wordlist into chunks
 					wordlist_chunks = []
-					for i in range(0, len(wordlist_lines), wordlist_chunk_size):
-						chunk_lines = wordlist_lines[i:i + wordlist_chunk_size]
-						# Create temporary wordlist file for this chunk
-						temp_wordlist = tempfile.NamedTemporaryFile(
-							mode='w',
-							delete=False,
-							suffix='.txt',
-							dir=CONFIG.dirs.wordlists
-						)
-						temp_wordlist.writelines(chunk_lines)
-						temp_wordlist.close()
-						wordlist_chunks.append(temp_wordlist.name)
+					chunk_num = 0
+					lines_written = 0
+					
+					# Process wordlist in chunks without loading entire file
+					with open(wordlist, 'r') as f:
+						temp_wordlist = None
+						for line in f:
+							if lines_written % wordlist_chunk_size == 0:
+								# Close previous chunk and create new one
+								if temp_wordlist:
+									temp_wordlist.close()
+									wordlist_chunks.append(temp_wordlist.name)
+								
+								# Create new temporary wordlist file for this chunk
+								temp_wordlist = tempfile.NamedTemporaryFile(
+									mode='w',
+									delete=False,
+									suffix='.txt',
+									dir=CONFIG.dirs.wordlists,
+									prefix='wordlist_chunk_'
+								)
+								chunk_num += 1
+							
+							temp_wordlist.write(line)
+							lines_written += 1
+						
+						# Close final chunk
+						if temp_wordlist:
+							temp_wordlist.close()
+							wordlist_chunks.append(temp_wordlist.name)
+					
 					debug(
 						'',
 						obj={
 							task.unique_name: 'WORDLIST_CHUNKED',
 							'wordlist_chunk_size': wordlist_chunk_size,
-							'wordlist_lines': len(wordlist_lines),
+							'wordlist_lines': line_count,
 							'chunks': len(wordlist_chunks)
 						},
 						obj_after=False,
@@ -516,6 +549,11 @@ def break_task(task, task_opts, results=[]):
 	task.sync = False
 	task.results = []
 	task.uuids = set()
+	
+	# Store temporary wordlist files for cleanup
+	if wordlist_chunks:
+		task._wordlist_temp_files = wordlist_chunks
+	
 	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
 	# console.print(Info(message=f'Results: {results}'))
 
