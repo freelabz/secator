@@ -171,7 +171,10 @@ debug: celery,hooks,cve
 
 **Example 3: Debug all CVE-related components using wildcards**
 ```bash
+# Note: Wildcard matching is handled by Secator's internal logic
 export SECATOR_DEBUG='cve.*'
+# Or in config file:
+# debug: cve.*
 ```
 
 **Example 4: Debug workflow execution**

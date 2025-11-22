@@ -88,13 +88,13 @@ Controls debug output during execution. Set to a comma-separated list of debug c
 - `unittest.item` - Item testing
 - `validators` - Validation operations
 
-You can also use wildcards, e.g., `'cve.*'` to match all CVE-related components.
+**Wildcard Support**: You can use wildcards (e.g., `'cve.*'`) to match all components with a given prefix. Wildcard matching is handled by Secator's internal logic, not shell globbing.
 
 **Examples**:
 ```yaml
 debug: all                    # Enable all debug output
 debug: celery,hooks          # Debug Celery and hooks only
-debug: cve.*                 # Debug all CVE components
+debug: cve.*                 # Debug all CVE components (using wildcard)
 ```
 
 ---
