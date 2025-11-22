@@ -46,7 +46,7 @@ def get_mysql_connection():
 def _init_tables(connection):
 	"""Initialize MySQL tables if they don't exist"""
 	cursor = connection.cursor()
-	
+
 	# Create runners table (for tasks, workflows, scans)
 	cursor.execute("""
 		CREATE TABLE IF NOT EXISTS runners (
@@ -61,7 +61,7 @@ def _init_tables(connection):
 			INDEX idx_name (name)
 		)
 	""")
-	
+
 	# Create findings table
 	cursor.execute("""
 		CREATE TABLE IF NOT EXISTS findings (
@@ -75,7 +75,7 @@ def _init_tables(connection):
 			INDEX idx_type (type)
 		)
 	""")
-	
+
 	cursor.close()
 
 
@@ -102,22 +102,22 @@ def get_results(uuids):
 	connection = get_mysql_connection()
 	cursor = connection.cursor(dictionary=True)
 	del_uuids = []
-	
+
 	for r in uuids:
 		if isinstance(r, tuple(OUTPUT_TYPES)):
 			yield r
 			del_uuids.append(r)
-	
+
 	uuids = [u for u in uuids if u not in del_uuids]
 	if uuids:
 		placeholders = ', '.join(['%s'] * len(uuids))
 		query = f"SELECT data FROM findings WHERE uuid IN ({placeholders})"
 		cursor.execute(query, uuids)
-		
+
 		for row in cursor.fetchall():
 			finding = load_finding(json.loads(row['data']))
 			yield finding
-	
+
 	cursor.close()
 
 
@@ -128,17 +128,18 @@ def update_runner(self):
 	update = self.toDict()
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
-	
-	debug('to_update', sub='hooks.mysql', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)
+
+	debug('to_update', sub='hooks.mysql', id=_id, obj=get_runner_dbg(self), obj_after=True,
+		  obj_breaklines=False, verbose=True)  # noqa: E501
 	start_time = time.time()
-	
+
 	try:
 		data_json = json.dumps(update)
-		
+
 		if _id:
 			# Update existing runner
 			query = """
-				UPDATE runners 
+				UPDATE runners
 				SET data = %s, status = %s, updated_at = CURRENT_TIMESTAMP
 				WHERE id = %s
 			"""
@@ -146,10 +147,10 @@ def update_runner(self):
 			end_time = time.time()
 			elapsed = end_time - start_time
 			debug(
-				f'[dim gold4]updated in {elapsed:.4f}s[/]', 
-				sub='hooks.mysql', 
-				id=_id, 
-				obj=get_runner_dbg(self), 
+				f'[dim gold4]updated in {elapsed:.4f}s[/]',
+				sub='hooks.mysql',
+				id=_id,
+				obj=get_runner_dbg(self),
 				obj_after=False
 			)
 			self.last_updated_db = start_time
@@ -161,16 +162,16 @@ def update_runner(self):
 			"""
 			cursor.execute(query, (type, self.name, self.status, data_json))
 			_id = cursor.lastrowid
-			
+
 			if chunk:
 				self.context[f'{type}_chunk_id'] = _id
 			else:
 				self.context[f'{type}_id'] = _id
-			
+
 			end_time = time.time()
 			elapsed = end_time - start_time
 			debug(f'in {elapsed:.4f}s', sub='hooks.mysql', id=_id, obj=get_runner_dbg(self), obj_after=False)
-	
+
 	except Error as e:
 		logger.error(f'Error updating runner: {e}')
 		raise
@@ -181,26 +182,26 @@ def update_runner(self):
 def update_finding(self, item):
 	if type(item) not in OUTPUT_TYPES:
 		return item
-	
+
 	start_time = time.time()
 	connection = get_mysql_connection()
 	cursor = connection.cursor()
-	
+
 	try:
 		update = item.toDict()
 		_type = item._type
 		_uuid = item._uuid
 		data_json = json.dumps(update)
-		
+
 		if _uuid:
 			# Try to update existing finding
 			query = """
-				UPDATE findings 
+				UPDATE findings
 				SET data = %s, updated_at = CURRENT_TIMESTAMP
 				WHERE uuid = %s
 			"""
 			cursor.execute(query, (data_json, _uuid))
-			
+
 			if cursor.rowcount > 0:
 				status = 'UPDATED'
 			else:
@@ -218,13 +219,13 @@ def update_finding(self, item):
 				VALUES (UUID(), %s, %s)
 			"""
 			cursor.execute(query, (_type, data_json))
-			
+
 			# Get the generated UUID
 			cursor.execute("SELECT uuid FROM findings WHERE id = LAST_INSERT_ID()")
 			result = cursor.fetchone()
 			item._uuid = result[0] if result else None
 			status = 'CREATED'
-		
+
 		end_time = time.time()
 		elapsed = end_time - start_time
 		debug_obj = {
@@ -235,13 +236,13 @@ def update_finding(self, item):
 			**self.context
 		}
 		debug(f'in {elapsed:.4f}s', sub='hooks.mysql', id=str(item._uuid), obj=debug_obj, obj_after=False)
-	
+
 	except Error as e:
 		logger.error(f'Error updating finding: {e}')
 		raise
 	finally:
 		cursor.close()
-	
+
 	return item
 
 
