@@ -1167,6 +1167,65 @@ def health(json_, debug, strict, bleeding):
 #---------#
 
 
+def _install_tools_helper(tool_names, cleanup, fail_fast, action='installing'):
+	"""Helper function to install/update tools.
+	
+	Args:
+		tool_names (str): Comma-separated tool names or None for all tools.
+		cleanup (bool): Whether to clean up after installation.
+		fail_fast (bool): Whether to fail fast on errors.
+		action (str): Action name for error messages ('installing' or 'updating').
+	
+	Returns:
+		int: Return code (0 for success, 1 for failure).
+	"""
+	tools = []
+	if tool_names is not None:
+		tool_names = tool_names.split(',')
+		for tool_name in tool_names:
+			if '==' in tool_name:
+				tool_name, version = tuple(tool_name.split('=='))
+			else:
+				tool_name, version = tool_name, None
+			cls = next((cls for cls in discover_tasks() if cls.__name__ == tool_name), None)
+			if cls:
+				if version:
+					if cls.install_version and cls.install_version.startswith('v') and not version.startswith('v'):
+						version = f'v{version}'
+					cls.install_version = version
+				tools.append(cls)
+			else:
+				console.print(Warning(message=f'Tool {tool_name} is not supported or inexistent.'))
+	else:
+		tools = discover_tasks()
+	tools.sort(key=lambda x: x.__name__)
+	return_code = 0
+	if not tools:
+		console.print(Error(message=f'No tools found for {action}.'))
+		return return_code
+	for ix, cls in enumerate(tools):
+		status = ToolInstaller.install(cls)
+		if not status.is_ok():
+			return_code = 1
+			if fail_fast:
+				return return_code
+		console.print()
+	if cleanup:
+		distro = get_distro_config()
+		cleanup_cmds = [
+			'go clean -cache',
+			'go clean -modcache',
+			'pip cache purge',
+			'gem cleanup --user-install',
+			'gem clean --user-install',
+		]
+		if distro.pm_finalizer:
+			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
+		cmd = ' && '.join(cleanup_cmds)
+		Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
+	return return_code
+
+
 def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
@@ -1348,60 +1407,16 @@ def install_ruby():
 
 
 @install.command('tools')
-@click.argument('cmds', required=False)
+@click.argument('tool_names', required=False)
 @click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
 @click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
-def install_tools(cmds, cleanup, fail_fast):
+def install_tools(tool_names, cleanup, fail_fast):
 	"""[deprecated] Install supported tools. Use 'secator update tools' instead."""
 	console.print(Warning(message='The "secator install tools" command is deprecated. Use "secator update tools" instead.'))
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
-	tools = []
-	if cmds is not None:
-		cmds = cmds.split(',')
-		for cmd in cmds:
-			if '==' in cmd:
-				cmd, version = tuple(cmd.split('=='))
-			else:
-				cmd, version = cmd, None
-			cls = next((cls for cls in discover_tasks() if cls.__name__ == cmd), None)
-			if cls:
-				if version:
-					if cls.install_version and cls.install_version.startswith('v') and not version.startswith('v'):
-						version = f'v{version}'
-					cls.install_version = version
-				tools.append(cls)
-			else:
-				console.print(Warning(message=f'Tool {cmd} is not supported or inexistent.'))
-	else:
-		tools = discover_tasks()
-	tools.sort(key=lambda x: x.__name__)
-	return_code = 0
-	if not tools:
-		console.print(Error(message='No tools found for installing.'))
-		return
-	for ix, cls in enumerate(tools):
-		# with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
-		status = ToolInstaller.install(cls)
-		if not status.is_ok():
-			return_code = 1
-			if fail_fast:
-				sys.exit(return_code)
-		console.print()
-	if cleanup:
-		distro = get_distro_config()
-		cleanup_cmds = [
-			'go clean -cache',
-			'go clean -modcache',
-			'pip cache purge',
-			'gem cleanup --user-install',
-			'gem clean --user-install',
-		]
-		if distro.pm_finalizer:
-			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
-		cmd = ' && '.join(cleanup_cmds)
-		Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
+	return_code = _install_tools_helper(tool_names, cleanup, fail_fast, action='installation')
 	sys.exit(return_code)
 
 
@@ -1413,7 +1428,7 @@ def install_tools(cmds, cleanup, fail_fast):
 @click.pass_context
 def update(ctx):
 	"""Update secator and its components."""
-	# If invoked without subcommand, show help
+	# If invoked without subcommand, update secator by default
 	if ctx.invoked_subcommand is None:
 		if CONFIG.offline_mode:
 			console.print(Error(message='Cannot run this command in offline mode.'))
@@ -1499,58 +1514,15 @@ def update_langs():
 
 
 @update.command('tools')
-@click.argument('cmds', required=False)
+@click.argument('tool_names', required=False)
 @click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
 @click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
-def update_tools(cmds, cleanup, fail_fast):
+def update_tools(tool_names, cleanup, fail_fast):
 	"""Update all tools or specific tools."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
-	tools = []
-	if cmds is not None:
-		cmds = cmds.split(',')
-		for cmd in cmds:
-			if '==' in cmd:
-				cmd, version = tuple(cmd.split('=='))
-			else:
-				cmd, version = cmd, None
-			cls = next((cls for cls in discover_tasks() if cls.__name__ == cmd), None)
-			if cls:
-				if version:
-					if cls.install_version and cls.install_version.startswith('v') and not version.startswith('v'):
-						version = f'v{version}'
-					cls.install_version = version
-				tools.append(cls)
-			else:
-				console.print(Warning(message=f'Tool {cmd} is not supported or inexistent.'))
-	else:
-		tools = discover_tasks()
-	tools.sort(key=lambda x: x.__name__)
-	return_code = 0
-	if not tools:
-		console.print(Error(message='No tools found for updating.'))
-		return
-	for ix, cls in enumerate(tools):
-		status = ToolInstaller.install(cls)
-		if not status.is_ok():
-			return_code = 1
-			if fail_fast:
-				sys.exit(return_code)
-		console.print()
-	if cleanup:
-		distro = get_distro_config()
-		cleanup_cmds = [
-			'go clean -cache',
-			'go clean -modcache',
-			'pip cache purge',
-			'gem cleanup --user-install',
-			'gem clean --user-install',
-		]
-		if distro.pm_finalizer:
-			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
-		cmd = ' && '.join(cleanup_cmds)
-		Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
+	return_code = _install_tools_helper(tool_names, cleanup, fail_fast, action='updating')
 	sys.exit(return_code)
 
 
