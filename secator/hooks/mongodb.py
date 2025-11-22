@@ -101,6 +101,31 @@ def update_runner(self):
 		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
 
 
+def _merge_lists(existing_list, new_list):
+	"""Merge two lists, avoiding duplicates while preserving order.
+
+	Args:
+		existing_list: The existing list to merge into
+		new_list: The new list to merge from
+
+	Returns:
+		The merged list
+	"""
+	# Try to use set for O(1) lookup if items are hashable
+	try:
+		existing_set = set(existing_list)
+		for item_val in new_list:
+			if item_val not in existing_set:
+				existing_list.append(item_val)
+				existing_set.add(item_val)
+	except TypeError:
+		# Items are not hashable (e.g., dicts), fall back to O(n) check
+		for item_val in new_list:
+			if item_val not in existing_list:
+				existing_list.append(item_val)
+	return existing_list
+
+
 def update_finding(self, item):
 	if type(item) not in OUTPUT_TYPES:
 		return item
@@ -128,7 +153,8 @@ def update_finding(self, item):
 		for field in dataclass_fields(item_class):
 			if field.compare and not field.name.startswith('_'):
 				field_value = getattr(item, field.name)
-				# Include all non-None values in query, including False and 0
+				# Include all non-None, non-empty values in query (including False and 0)
+				# Empty strings are excluded as they're not meaningful for duplicate detection
 				if field_value is not None and field_value != '':
 					query[field.name] = field_value
 
@@ -138,12 +164,12 @@ def update_finding(self, item):
 		if existing:
 			# Update existing record instead of creating new one
 			_id = existing['_id']
-			# Merge data: start with existing record and selectively update with new values
-			# Note: We update the existing document in-place to avoid copying large fields
+			# Track which fields actually changed
+			changed_fields = {}
 			for key, value in update.items():
 				# Always update special fields that may be modified
 				if key in ('_timestamp', '_tagged', '_duplicate', '_related', '_source'):
-					existing[key] = value
+					changed_fields[key] = value
 					continue
 				# Skip None values - keep existing value
 				if value is None:
@@ -156,24 +182,22 @@ def update_finding(self, item):
 					continue
 				# For lists, merge them (avoiding duplicates)
 				if isinstance(value, list) and isinstance(existing.get(key), list):
-					# Try to use set for O(1) lookup if items are hashable
-					try:
-						existing_set = set(existing[key])
-						for item_val in value:
-							if item_val not in existing_set:
-								existing[key].append(item_val)
-								existing_set.add(item_val)
-					except TypeError:
-						# Items are not hashable (e.g., dicts), fall back to O(n) check
-						for item_val in value:
-							if item_val not in existing[key]:
-								existing[key].append(item_val)
+					merged_list = _merge_lists(existing[key].copy(), value)
+					if merged_list != existing[key]:
+						changed_fields[key] = merged_list
 				# For dicts, merge them
 				elif isinstance(value, dict) and isinstance(existing.get(key), dict):
-					existing[key].update(value)
+					merged_dict = existing[key].copy()
+					merged_dict.update(value)
+					if merged_dict != existing[key]:
+						changed_fields[key] = merged_dict
 				else:
-					existing[key] = value
-			db['findings'].update_one({'_id': _id}, {'$set': existing})
+					# Only update if value is different
+					if existing.get(key) != value:
+						changed_fields[key] = value
+			# Only update if there are actual changes
+			if changed_fields:
+				db['findings'].update_one({'_id': _id}, {'$set': changed_fields})
 			item._uuid = str(_id)
 			status = 'UPDATED'
 			debug('found existing finding in db, updating', sub='hooks.mongodb', id=str(_id), verbose=True)
