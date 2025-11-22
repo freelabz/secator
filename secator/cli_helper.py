@@ -247,6 +247,10 @@ def register_runner(cli_endpoint, config):
 		# Expand input
 		inputs = opts.pop('inputs')
 		inputs = expand_input(inputs, ctx)
+		
+		# Check if we're in a secator pipe chain
+		is_secator_pipe = ctx.obj.get('is_secator_pipe', False)
+		secator_piped_results = ctx.obj.get('secator_piped_results', [])
 
 		# Build hooks from driver name
 		hooks = []
@@ -321,6 +325,22 @@ def register_runner(cli_endpoint, config):
 			'sync': sync,
 			'quiet': quiet
 		})
+		
+		# If we're in a secator pipe chain, adjust options
+		if is_secator_pipe:
+			# If output is also piped, disable reports (we're in the middle of a chain)
+			# If output is not piped, enable reports (we're at the end of the chain)
+			piped_output = ctx.obj['piped_output']
+			if piped_output:
+				opts['enable_reports'] = False
+			else:
+				# At the end of the pipe chain, enable reports
+				opts['enable_reports'] = True
+			# Print info about the pipe chain
+			if not quiet:
+				console.print(
+					f'[bold cyan]⛓ Detected secator pipe with {len(secator_piped_results)} results[/]'
+				)
 
 		# Start runner
 		with contextmanager:
@@ -330,8 +350,10 @@ def register_runner(cli_endpoint, config):
 					f"[bold yellow3]Initial RAM Usage: {process.memory_info().rss / 1024 ** 2} MB[/]"
 				)
 			item_count = 0
+			# Pass results to runner if in pipe chain
+			results_to_pass = secator_piped_results if is_secator_pipe else []
 			runner = runner_cls(
-				config, inputs, run_opts=opts, hooks=hooks, context=context
+				config, inputs, results=results_to_pass, run_opts=opts, hooks=hooks, context=context
 			)
 			for item in runner:
 				del item
