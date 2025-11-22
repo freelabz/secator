@@ -88,6 +88,23 @@ class Workflow(Runner):
 				if node.parent.type == 'group' and not force:
 					return
 
+				# Check for event trigger configuration
+				on_event = node.opts.pop('on_event', None)
+				if on_event:
+					# Register event trigger instead of building task signature
+					trigger_config = {
+						'type': on_event.get('type', 'url'),
+						'condition': on_event.get('condition'),
+						'batch_size': on_event.get('batch_size', 10),
+						'batch_timeout': on_event.get('batch_timeout', 30),
+						'task_name': node.name,
+						'task_opts': node.opts.copy()
+					}
+					self.register_event_trigger(node.id, trigger_config)
+					debug(f'{node.id} registered as event trigger', sub=self.config.name)
+					self.add_result(Info(message=f'Registered event trigger for [bold gold3]{node.name}[/]'))
+					return
+
 				# Skip task if condition is not met
 				condition = node.opts.pop('if', None)
 				local_ns = {'opts': DotMap(opts)}
