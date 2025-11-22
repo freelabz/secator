@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 
@@ -354,7 +355,6 @@ class bbot(Command):
 			shutil.copyfile(path, secator_path)
 			item['data']['path'] = secator_path
 			# Yield File output for the screenshot
-			import os
 			file_size = os.path.getsize(secator_path)
 			yield File(
 				path=secator_path,
