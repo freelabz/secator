@@ -18,13 +18,19 @@ from secator.hooks.mongodb import (
 class TestMongoDBClient(unittest.TestCase):
 	"""Test MongoDB client creation and management"""
 
-	@mock.patch('secator.hooks.mongodb.pymongo.MongoClient')
-	def test_get_mongodb_client_creates_client(self, mock_mongo_client):
-		"""Test that get_mongodb_client creates a MongoDB client with correct parameters"""
-		# Reset the global client
+	def setUp(self):
+		"""Reset global MongoDB client before each test"""
 		import secator.hooks.mongodb as mongodb_module
 		mongodb_module._mongodb_client = None
 
+	def tearDown(self):
+		"""Reset global MongoDB client after each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
+
+	@mock.patch('secator.hooks.mongodb.pymongo.MongoClient')
+	def test_get_mongodb_client_creates_client(self, mock_mongo_client):
+		"""Test that get_mongodb_client creates a MongoDB client with correct parameters"""
 		# Call get_mongodb_client
 		client = get_mongodb_client()
 
@@ -35,9 +41,6 @@ class TestMongoDBClient(unittest.TestCase):
 	@mock.patch('secator.hooks.mongodb.pymongo.MongoClient')
 	def test_get_mongodb_client_singleton(self, mock_mongo_client):
 		"""Test that get_mongodb_client returns the same client on subsequent calls"""
-		import secator.hooks.mongodb as mongodb_module
-		mongodb_module._mongodb_client = None
-
 		# Get client twice
 		client1 = get_mongodb_client()
 		client2 = get_mongodb_client()
@@ -76,6 +79,16 @@ class TestRunnerDebug(unittest.TestCase):
 class TestGetResults(unittest.TestCase):
 	"""Test get_results function"""
 
+	def setUp(self):
+		"""Reset global MongoDB client before each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
+
+	def tearDown(self):
+		"""Reset global MongoDB client after each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
+
 	@mock.patch('secator.hooks.mongodb.get_mongodb_client')
 	def test_get_results_with_valid_uuids(self, mock_get_client):
 		"""Test get_results with valid ObjectId UUIDs"""
@@ -105,6 +118,13 @@ class TestGetResults(unittest.TestCase):
 	def test_get_results_with_output_types(self, mock_get_client):
 		"""Test get_results with mixed output types and UUIDs"""
 		from secator.output_types import Url
+
+		# Setup mock MongoDB client
+		mock_client = mock.Mock()
+		mock_db = mock.Mock()
+		mock_client.main = mock_db
+		mock_get_client.return_value = mock_client
+		mock_db.findings.find.return_value = []
 
 		# Create a mock output object
 		mock_output = Url(url='https://example.com')
@@ -137,9 +157,20 @@ class TestGetResults(unittest.TestCase):
 class TestUpdateRunner(unittest.TestCase):
 	"""Test update_runner function"""
 
+	def setUp(self):
+		"""Reset global MongoDB client before each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
+
+	def tearDown(self):
+		"""Reset global MongoDB client after each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
+
 	@mock.patch('secator.hooks.mongodb.get_mongodb_client')
 	@mock.patch('secator.hooks.mongodb.debug')
-	def test_update_runner_new_runner(self, mock_debug, mock_get_client):
+	@mock.patch('secator.hooks.mongodb.get_runner_dbg')
+	def test_update_runner_new_runner(self, mock_get_runner_dbg, mock_debug, mock_get_client):
 		"""Test update_runner creates a new runner entry"""
 		# Setup mock MongoDB client
 		mock_client = mock.Mock()
@@ -170,7 +201,8 @@ class TestUpdateRunner(unittest.TestCase):
 
 	@mock.patch('secator.hooks.mongodb.get_mongodb_client')
 	@mock.patch('secator.hooks.mongodb.debug')
-	def test_update_runner_existing_runner(self, mock_debug, mock_get_client):
+	@mock.patch('secator.hooks.mongodb.get_runner_dbg')
+	def test_update_runner_existing_runner(self, mock_get_runner_dbg, mock_debug, mock_get_client):
 		"""Test update_runner updates an existing runner entry"""
 		# Setup mock MongoDB client
 		mock_client = mock.Mock()
@@ -203,6 +235,16 @@ class TestUpdateRunner(unittest.TestCase):
 
 class TestUpdateFinding(unittest.TestCase):
 	"""Test update_finding function"""
+
+	def setUp(self):
+		"""Reset global MongoDB client before each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
+
+	def tearDown(self):
+		"""Reset global MongoDB client after each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
 
 	@mock.patch('secator.hooks.mongodb.get_mongodb_client')
 	@mock.patch('secator.hooks.mongodb.debug')
@@ -272,8 +314,7 @@ class TestUpdateFinding(unittest.TestCase):
 		mock_collection.update_one.assert_called_once()
 		self.assertEqual(result, test_item)
 
-	@mock.patch('secator.hooks.mongodb.get_mongodb_client')
-	def test_update_finding_non_output_type(self, mock_get_client):
+	def test_update_finding_non_output_type(self):
 		"""Test update_finding returns non-output items unchanged"""
 		# Setup mock runner
 		mock_runner = mock.Mock()
@@ -408,6 +449,16 @@ class TestLoadFinding(unittest.TestCase):
 
 class TestTagDuplicates(unittest.TestCase):
 	"""Test tag_duplicates Celery task"""
+
+	def setUp(self):
+		"""Reset global MongoDB client before each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
+
+	def tearDown(self):
+		"""Reset global MongoDB client after each test"""
+		import secator.hooks.mongodb as mongodb_module
+		mongodb_module._mongodb_client = None
 
 	@mock.patch('secator.hooks.mongodb.get_mongodb_client')
 	@mock.patch('secator.hooks.mongodb.debug')
