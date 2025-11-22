@@ -413,11 +413,16 @@ def break_task(task, task_opts, results=[]):
 				# Check if we need to chunk the wordlist
 				wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
 				
-				# Count lines efficiently without loading entire file
-				with open(wordlist, 'rb') as f:
-					line_count = sum(1 for _ in f)
+				# Count lines efficiently using the helper method
+				from secator.runners import Command
+				line_count = Command._count_wordlist_lines(wordlist)
 				
 				if line_count > wordlist_chunk_size:
+					# Ensure wordlist directory exists
+					wordlist_dir = CONFIG.dirs.wordlists
+					if not os.path.exists(wordlist_dir):
+						os.makedirs(wordlist_dir, exist_ok=True)
+					
 					# Split wordlist into chunks
 					wordlist_chunks = []
 					chunk_num = 0
@@ -439,7 +444,7 @@ def break_task(task, task_opts, results=[]):
 										mode='w',
 										delete=False,
 										suffix='.txt',
-										dir=CONFIG.dirs.wordlists,
+										dir=wordlist_dir,
 										prefix='wordlist_chunk_'
 									)
 									chunk_num += 1

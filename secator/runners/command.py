@@ -247,6 +247,31 @@ class Command(Runner):
 		
 		return chunk_it
 
+	@staticmethod
+	def _count_wordlist_lines(wordlist):
+		"""Count lines in a wordlist file efficiently.
+		
+		Args:
+			wordlist (str): Path to wordlist file.
+		
+		Returns:
+			int: Number of lines in the wordlist.
+		"""
+		import subprocess
+		
+		# Try wc -l on Unix systems for better performance
+		if os.name != 'nt':  # Not Windows
+			try:
+				result = subprocess.run(['wc', '-l', wordlist], capture_output=True, text=True, timeout=5)
+				if result.returncode == 0:
+					return int(result.stdout.split()[0])
+			except (subprocess.SubprocessError, FileNotFoundError):
+				pass  # Fall through to Python counting
+		
+		# Fallback to Python counting (also used on Windows)
+		with open(wordlist, 'rb') as f:
+			return sum(1 for _ in f)
+	
 	def needs_wordlist_chunking(self, sync):
 		"""Check if wordlist chunking is needed for fuzzing tasks.
 		
@@ -257,7 +282,6 @@ class Command(Runner):
 			bool: True if wordlist chunking is needed, False otherwise.
 		"""
 		from secator.definitions import WORDLIST
-		import subprocess
 		
 		# Only chunk for fuzzing tasks that have a wordlist option
 		if WORDLIST not in dict(self.opts, **self.meta_opts):
@@ -270,22 +294,7 @@ class Command(Runner):
 		
 		# Count lines in wordlist efficiently
 		try:
-			# Try wc -l on Unix systems for better performance
-			if os.name != 'nt':  # Not Windows
-				try:
-					result = subprocess.run(['wc', '-l', wordlist], capture_output=True, text=True, timeout=5)
-					if result.returncode == 0:
-						wordlist_lines = int(result.stdout.split()[0])
-					else:
-						raise subprocess.SubprocessError("wc command failed")
-				except (subprocess.SubprocessError, FileNotFoundError):
-					# Fallback to Python counting if wc fails
-					with open(wordlist, 'rb') as f:
-						wordlist_lines = sum(1 for _ in f)
-			else:
-				# On Windows, use Python counting directly
-				with open(wordlist, 'rb') as f:
-					wordlist_lines = sum(1 for _ in f)
+			wordlist_lines = self._count_wordlist_lines(wordlist)
 		except Exception:
 			return False
 		
