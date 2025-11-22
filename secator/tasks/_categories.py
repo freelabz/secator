@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DATA, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+from secator.definitions import (CIDR_RANGE, CVES, CVSS_SCORE, DATA, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
 								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, IP,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
 								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
@@ -266,8 +266,8 @@ class Vuln(Command):
 
 			# Build exploit metadata dict with title and CVE IDs
 			exploit_data = {
-				'name': exploit_title,
-				'cves': []
+				NAME: exploit_title,
+				CVES: []
 			}
 
 			if matches:
@@ -275,7 +275,7 @@ class Vuln(Command):
 				cve_ids = [m.replace('_', '-').upper() for m in matches]
 				# Remove duplicates while preserving order
 				cve_ids = list(dict.fromkeys(cve_ids))
-				exploit_data['cves'] = cve_ids
+				exploit_data[CVES] = cve_ids
 
 				# Lookup the first CVE for vulnerability data
 				cve_id = cve_ids[0]

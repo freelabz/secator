@@ -454,10 +454,10 @@ class nmapData(dict):
 				data = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
 				if data:
 					# Update exploit with metadata from vulners page (name, cves list)
-					if 'name' in data:
-						exploit[NAME] = data['name']
-					if 'cves' in data and data['cves']:
-						exploit[CVES] = data['cves']
+					if NAME in data:
+						exploit[NAME] = data[NAME]
+					if CVES in data and data[CVES]:
+						exploit[CVES] = data[CVES]
 					# If CVE vulnerability data is present, yield it and update exploit
 					if ID in data:
 						yield data
