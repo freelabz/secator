@@ -235,14 +235,14 @@ class Vuln(Command):
 			cpes (tuple[str], Optional): CPEs to match for.
 
 		Returns:
-			tuple: (vulnerability data dict, exploit title string) or (None, None) if not found.
+			dict: vulnerability data with updated exploit metadata (name, cves list).
 		"""
 		if CONFIG.runners.skip_exploit_search:
 			debug(f'{exploit_id}: skipped remote query since config.runners.skip_exploit_search is set.', sub='cve.vulners')
-			return None, None
+			return None
 		if CONFIG.offline_mode:
 			debug(f'{exploit_id}: skipped remote query since config.offline_mode is set.', sub='cve.vulners')
-			return None, None
+			return None
 		try:
 			resp = requests.get(f'https://vulners.com/githubexploit/{exploit_id}', timeout=5)
 			resp.raise_for_status()
@@ -263,18 +263,36 @@ class Vuln(Command):
 			content = '\n'.join(elems)
 			cve_regex = re.compile(r'(CVE(?:-|_)\d{4}(?:-|_)\d{4,7})', re.IGNORECASE)
 			matches = cve_regex.findall(str(content))
+
+			# Build exploit metadata dict with title and CVE IDs
+			exploit_data = {
+				'name': exploit_title,
+				'cves': []
+			}
+
+			if matches:
+				# Normalize all CVE IDs found
+				cve_ids = [m.replace('_', '-').upper() for m in matches]
+				# Remove duplicates while preserving order
+				cve_ids = list(dict.fromkeys(cve_ids))
+				exploit_data['cves'] = cve_ids
+
+				# Lookup the first CVE for vulnerability data
+				cve_id = cve_ids[0]
+				cve_data = Vuln.lookup_cve(cve_id, *cpes)
+				if cve_data:
+					# Merge exploit metadata into vulnerability data
+					cve_data.update(exploit_data)
+					return cve_data
+
+			# Return exploit metadata even if no CVE data found
 			if not matches:
 				debug(f'{exploit_id}: no matching CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve.vulners')
-				return None, exploit_title
-			cve_id = matches[0].replace('_', '-').upper()
-			cve_data = Vuln.lookup_cve(cve_id, *cpes)
-			if cve_data:
-				return cve_data, exploit_title
-			return None, exploit_title
+			return exploit_data
 
 		except requests.RequestException as e:
 			debug(f'{exploit_id}: failed remote query ({str(e)}).', sub='cve.vulners')
-			return None, None
+			return None
 
 	@cache
 	@staticmethod
