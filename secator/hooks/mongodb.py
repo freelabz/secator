@@ -1,5 +1,6 @@
 import logging
 import time
+from dataclasses import fields as dataclass_fields
 
 import pymongo
 from bson.objectid import ObjectId
@@ -115,7 +116,6 @@ def update_finding(self, item):
 	else:
 		# Check if a duplicate already exists in MongoDB
 		# Build query based on fields that are used for comparison
-		from dataclasses import fields as dataclass_fields
 		query = {'_type': _type}
 
 		# Add workspace_id to query if present to scope duplicates to workspace
@@ -140,21 +140,31 @@ def update_finding(self, item):
 			# Merge data: keep existing values for empty fields, update with new values for non-empty fields
 			merged_update = existing.copy()
 			for key, value in update.items():
-				# Update field if new value is not empty or if it's a list/dict that's not empty
-				if value or (isinstance(value, (list, dict)) and len(value) > 0):
-					# For lists, merge them (avoiding duplicates)
-					if isinstance(value, list) and isinstance(merged_update.get(key), list):
-						# Merge lists, preserving order and removing duplicates
-						existing_list = merged_update[key]
+				# Skip if value is None or empty string (but not False or 0 which are valid)
+				if value is None or value == '':
+					continue
+				# Skip empty lists or dicts
+				if isinstance(value, (list, dict)) and len(value) == 0:
+					continue
+				# For lists, merge them (avoiding duplicates)
+				if isinstance(value, list) and isinstance(merged_update.get(key), list):
+					# Try to use set for O(1) lookup if items are hashable
+					try:
+						existing_set = set(merged_update[key])
 						for item_val in value:
-							if item_val not in existing_list:
-								existing_list.append(item_val)
-						merged_update[key] = existing_list
-					# For dicts, merge them
-					elif isinstance(value, dict) and isinstance(merged_update.get(key), dict):
-						merged_update[key].update(value)
-					else:
-						merged_update[key] = value
+							if item_val not in existing_set:
+								merged_update[key].append(item_val)
+								existing_set.add(item_val)
+					except TypeError:
+						# Items are not hashable (e.g., dicts), fall back to O(n) check
+						for item_val in value:
+							if item_val not in merged_update[key]:
+								merged_update[key].append(item_val)
+				# For dicts, merge them
+				elif isinstance(value, dict) and isinstance(merged_update.get(key), dict):
+					merged_update[key].update(value)
+				else:
+					merged_update[key] = value
 			db['findings'].update_one({'_id': _id}, {'$set': merged_update})
 			item._uuid = str(_id)
 			status = 'UPDATED'
