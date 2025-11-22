@@ -537,7 +537,7 @@ Whether to store HTTP responses to disk for later analysis.
 #### http.response_max_size_bytes
 
 **Type**: `integer`  
-**Default**: `100000` (100 KB)
+**Default**: `100000` (approx. 97.7 KB)
 
 Maximum size in bytes for storing HTTP response bodies. Larger responses are truncated.
 
