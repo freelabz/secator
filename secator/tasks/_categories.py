@@ -284,10 +284,10 @@ class Vuln(Command):
 					# Merge exploit metadata into vulnerability data
 					cve_data.update(exploit_data)
 					return cve_data
+			else:
+				debug(f'{exploit_id}: no matching CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve.vulners')
 
 			# Return exploit metadata even if no CVE data found
-			if not matches:
-				debug(f'{exploit_id}: no matching CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve.vulners')
 			return exploit_data
 
 		except requests.RequestException as e:
