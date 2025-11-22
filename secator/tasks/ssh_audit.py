@@ -3,7 +3,7 @@ import os
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Vulnerability, Info, Error, Tag
+from secator.output_types import Vulnerability, Error, Info, Tag
 from secator.definitions import HOST, IP, OUTPUT_PATH, TIMEOUT
 from secator.tasks._categories import Command
 
@@ -48,6 +48,7 @@ class ssh_audit(Command):
 		f'chmod +x {CONFIG.dirs.bin}/ssh-audit'
 	)
 	profile = 'io'
+	ignore_return_code = True
 
 	@staticmethod
 	def on_cmd(self):
