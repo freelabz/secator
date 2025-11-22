@@ -262,10 +262,11 @@ class Command(Runner):
 		# Try wc -l on Unix systems for better performance
 		if os.name != 'nt':  # Not Windows
 			try:
-				result = subprocess.run(['wc', '-l', wordlist], capture_output=True, text=True, timeout=5)
+				# Use list form to avoid shell injection vulnerabilities
+				result = subprocess.run(['wc', '-l', wordlist], capture_output=True, text=True, timeout=5, shell=False)
 				if result.returncode == 0:
 					return int(result.stdout.split()[0])
-			except (subprocess.SubprocessError, FileNotFoundError):
+			except (subprocess.SubprocessError, FileNotFoundError, ValueError):
 				pass  # Fall through to Python counting
 		
 		# Fallback to Python counting (also used on Windows)

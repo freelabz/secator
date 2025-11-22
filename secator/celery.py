@@ -431,7 +431,7 @@ def break_task(task, task_opts, results=[]):
 					
 					# Process wordlist in chunks without loading entire file
 					try:
-						with open(wordlist, 'r') as f:
+						with open(wordlist, 'r', encoding='utf-8', errors='replace') as f:
 							for line in f:
 								if lines_written % wordlist_chunk_size == 0:
 									# Close previous chunk and create new one
@@ -445,7 +445,9 @@ def break_task(task, task_opts, results=[]):
 										delete=False,
 										suffix='.txt',
 										dir=wordlist_dir,
-										prefix='wordlist_chunk_'
+										prefix='wordlist_chunk_',
+										encoding='utf-8',
+										errors='replace'
 									)
 									chunk_num += 1
 								
@@ -456,16 +458,17 @@ def break_task(task, task_opts, results=[]):
 							if temp_wordlist:
 								temp_wordlist.close()
 								wordlist_chunks.append(temp_wordlist.name)
-					except Exception as e:
+					except (IOError, OSError) as e:
 						# Clean up any temp files created before the error
+						debug(f'Error while chunking wordlist: {e}', sub='celery.state')
 						if temp_wordlist and not temp_wordlist.closed:
 							temp_wordlist.close()
 						for temp_file in wordlist_chunks:
 							try:
 								if os.path.exists(temp_file):
 									os.remove(temp_file)
-							except Exception:
-								pass
+							except (IOError, OSError) as cleanup_error:
+								debug(f'Failed to clean up temp file {temp_file}: {cleanup_error}', sub='celery.state')
 						raise e
 					
 					debug(
@@ -535,7 +538,7 @@ def break_task(task, task_opts, results=[]):
 		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
 		
 		# If wordlist chunking is active, update wordlist option for this chunk
-		if wordlist_chunks:
+		if wordlist_chunks and ix < len(wordlist_chunks):
 			opts[WORDLIST] = wordlist_chunks[ix]
 		
 		debug('', obj={
@@ -543,7 +546,7 @@ def break_task(task, task_opts, results=[]):
 			'chunk': f'{ix + 1} / {len(chunks)}',
 			'target_count': len(chunk),
 			'targets': chunk,
-			'wordlist_chunk': wordlist_chunks[ix] if wordlist_chunks else None
+			'wordlist_chunk': wordlist_chunks[ix] if wordlist_chunks and ix < len(wordlist_chunks) else None
 		}, sub='celery.state')  # noqa: E501
 
 		# Construct chunked signature
