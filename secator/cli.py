@@ -1410,26 +1410,16 @@ def install_tools(cmds, cleanup, fail_fast):
 #--------#
 
 @cli.group(aliases=['u'], invoke_without_command=True)
-@click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (langs, tools, wordlists, templates)')
 @click.pass_context
-def update(ctx, all):
+def update(ctx):
 	"""Update secator and its components."""
-	if CONFIG.offline_mode:
-		console.print(Error(message='Cannot run this command in offline mode.'))
-		sys.exit(1)
-
-	# If invoked without subcommand, update secator itself
+	# If invoked without subcommand, show help
 	if ctx.invoked_subcommand is None:
-		if all:
-			# Update everything
-			ctx.invoke(update_secator)
-			ctx.invoke(update_langs)
-			ctx.invoke(update_tools)
-			ctx.invoke(update_wordlists)
-			ctx.invoke(update_templates)
-		else:
-			# Just update secator
-			ctx.invoke(update_secator)
+		if CONFIG.offline_mode:
+			console.print(Error(message='Cannot run this command in offline mode.'))
+			sys.exit(1)
+		# Just update secator by default
+		ctx.invoke(update_secator)
 
 
 def _update_secator():
@@ -1461,12 +1451,23 @@ def _update_secator():
 
 
 @update.command('secator')
-def update_secator():
-	"""Update secator to latest version."""
+@click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (langs, tools, wordlists, templates)')
+@click.pass_context
+def update_secator(ctx, all):
+	"""Update secator to latest version, or everything with --all."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
-	_update_secator()
+	if all:
+		# Update everything
+		_update_secator()
+		ctx.invoke(update_langs)
+		ctx.invoke(update_tools)
+		ctx.invoke(update_wordlists)
+		ctx.invoke(update_templates)
+	else:
+		# Just update secator
+		_update_secator()
 
 
 @update.command('langs')
