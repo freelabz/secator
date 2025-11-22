@@ -20,12 +20,11 @@ class dig(ReconDns):
 	input_flag = None
 	file_flag = None
 	input_chunk_size = 1
-	opt_prefix = '+'
 	opts = {
-		'record_type': {'type': str, 'short': 'rt', 'default': 'A', 'help': 'DNS record type to query (A, AAAA, MX, NS, TXT, CNAME, SOA, AXFR, etc.)'},
-		'resolver': {'type': str, 'short': 'r', 'help': 'DNS resolver to use (e.g., 8.8.8.8, 1.1.1.1)'},
-		'short': {'is_flag': True, 'default': False, 'help': 'Display short form answer'},
-		'trace': {'is_flag': True, 'default': False, 'help': 'Trace delegation path from root name servers'},
+		'record_type': {'type': str, 'short': 'rt', 'default': 'A', 'internal': True, 'help': 'DNS record type to query (A, AAAA, MX, NS, TXT, CNAME, SOA, AXFR, etc.)'},
+		'resolver': {'type': str, 'short': 'r', 'internal': True, 'help': 'DNS resolver to use (e.g., 8.8.8.8, 1.1.1.1)'},
+		'short': {'is_flag': True, 'default': False, 'internal': True, 'help': 'Display short form answer'},
+		'trace': {'is_flag': True, 'default': False, 'internal': True, 'help': 'Trace delegation path from root name servers'},
 	}
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,
@@ -34,8 +33,6 @@ class dig(ReconDns):
 		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
-		'short': '+short',
-		'trace': '+trace',
 	}
 	install_cmd_pre = {
 		'apt': ['dnsutils'],
@@ -52,15 +49,19 @@ class dig(ReconDns):
 		record_type = self.get_opt_value('record_type', 'A').upper()
 		resolver = self.get_opt_value('resolver')
 		use_short = self.get_opt_value('short')
+		use_trace = self.get_opt_value('trace')
 		
 		# Build command: dig [options] [record_type] <domain> [@resolver]
-		self.cmd = 'dig'
-		
-		# Add short flag if needed
+		# Add short flag if needed, otherwise show only answer section
 		if use_short:
 			self.cmd += ' +short'
-		else:
+		elif not use_trace:
+			# Only add +noall +answer if not using trace (trace needs full output)
 			self.cmd += ' +noall +answer'
+		
+		# Add trace flag if needed
+		if use_trace:
+			self.cmd += ' +trace'
 		
 		# Add record type
 		self.cmd += f' {record_type}'
