@@ -7,22 +7,13 @@ import time
 from celery import chain, chord
 
 from secator.celery import app, forward_results  # noqa: F401
-from secator.config import CONFIG
-from secator.utils_test import TEST_TASKS, load_fixture
-from secator.runners import Command
+from secator.utils_test import TEST_TASKS
 from secator.output_types import Url
 from tests.integration.inputs import INPUTS_SCANS
 
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
-OPTS = {
-	'ffuf.filter_size': '3748,3106',
-	'ffuf.depth': 1,
-	'ffuf.follow_redirect': True,
-	'ffuf.wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
-}
 URL_TARGETS = INPUTS_SCANS['url']
-URL_RESULTS_COUNT = [14, 1]
 
 
 class TestRemoteWorker(unittest.TestCase):
