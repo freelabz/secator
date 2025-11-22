@@ -240,7 +240,46 @@ class Command(Runner):
 		has_file_flag = self.file_flag is not None
 		is_chunk = self.chunk
 		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
+		
+		# Check if wordlist chunking is needed
+		if not chunk_it and not is_chunk:
+			chunk_it = self.needs_wordlist_chunking(sync)
+		
 		return chunk_it
+
+	def needs_wordlist_chunking(self, sync):
+		"""Check if wordlist chunking is needed for fuzzing tasks.
+		
+		Args:
+			sync (bool): Whether the task is running in sync mode.
+		
+		Returns:
+			bool: True if wordlist chunking is needed, False otherwise.
+		"""
+		from secator.definitions import WORDLIST
+		
+		# Only chunk for fuzzing tasks that have a wordlist option
+		if WORDLIST not in dict(self.opts, **self.meta_opts):
+			return False
+		
+		# Get the wordlist value
+		wordlist = self.get_opt_value(WORDLIST, preprocess=True, process=True)
+		if not wordlist or not os.path.exists(wordlist):
+			return False
+		
+		# Count lines in wordlist
+		try:
+			with open(wordlist, 'r') as f:
+				wordlist_lines = sum(1 for _ in f)
+		except Exception:
+			return False
+		
+		# Check if wordlist exceeds chunk size threshold
+		wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
+		wordlist_over_chunk_size = wordlist_lines > wordlist_chunk_size
+		
+		# Chunk if wordlist is too large and not in sync mode
+		return not sync and wordlist_over_chunk_size
 
 	@classmethod
 	def delay(cls, *args, **kwargs):

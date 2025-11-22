@@ -389,16 +389,88 @@ def replace(task_instance, sig):
 
 def break_task(task, task_opts, results=[]):
 	"""Break a task into multiple of the same type."""
+	from secator.definitions import WORDLIST
+	import tempfile
+	
+	# Check if we need to chunk by wordlist
+	wordlist_chunks = None
+	wordlist_opt = WORDLIST in dict(task.opts, **task.meta_opts)
+	if wordlist_opt:
+		wordlist = task.get_opt_value(WORDLIST, preprocess=True, process=True)
+		if wordlist and os.path.exists(wordlist):
+			try:
+				# Read wordlist lines
+				with open(wordlist, 'r') as f:
+					wordlist_lines = f.readlines()
+				
+				# Check if we need to chunk the wordlist
+				wordlist_chunk_size = CONFIG.runners.wordlist_chunk_size
+				if len(wordlist_lines) > wordlist_chunk_size:
+					# Split wordlist into chunks
+					wordlist_chunks = []
+					for i in range(0, len(wordlist_lines), wordlist_chunk_size):
+						chunk_lines = wordlist_lines[i:i + wordlist_chunk_size]
+						# Create temporary wordlist file for this chunk
+						temp_wordlist = tempfile.NamedTemporaryFile(
+							mode='w',
+							delete=False,
+							suffix='.txt',
+							dir=CONFIG.dirs.wordlists
+						)
+						temp_wordlist.writelines(chunk_lines)
+						temp_wordlist.close()
+						wordlist_chunks.append(temp_wordlist.name)
+					debug(
+						'',
+						obj={
+							task.unique_name: 'WORDLIST_CHUNKED',
+							'wordlist_chunk_size': wordlist_chunk_size,
+							'wordlist_lines': len(wordlist_lines),
+							'chunks': len(wordlist_chunks)
+						},
+						obj_after=False,
+						sub='celery.state',
+						verbose=True
+					)
+			except Exception as e:
+				debug(f'Failed to chunk wordlist: {e}', sub='celery.state')
+				wordlist_chunks = None
+	
+	# Determine target chunks
 	chunks = task.inputs
 	if task.input_chunk_size > 1:
 		chunks = list(chunker(task.inputs, task.input_chunk_size))
-	debug(
-		'',
-		obj={task.unique_name: 'CHUNKED', 'chunk_size': task.input_chunk_size, 'chunks': len(chunks), 'target_count': len(task.inputs)},  # noqa: E501
-		obj_after=False,
-		sub='celery.state',
-		verbose=True
-	)
+	
+	# If wordlist chunking is needed and no target chunking, use wordlist chunks with all targets
+	if wordlist_chunks and len(chunks) == len(task.inputs):
+		# No target chunking, so we chunk by wordlist only
+		target_chunk = task.inputs
+		chunks = [target_chunk for _ in wordlist_chunks]
+		debug(
+			'',
+			obj={
+				task.unique_name: 'CHUNKED_BY_WORDLIST',
+				'wordlist_chunk_size': CONFIG.runners.wordlist_chunk_size,
+				'chunks': len(chunks),
+				'target_count': len(task.inputs)
+			},
+			obj_after=False,
+			sub='celery.state',
+			verbose=True
+		)
+	else:
+		debug(
+			'',
+			obj={
+				task.unique_name: 'CHUNKED',
+				'chunk_size': task.input_chunk_size,
+				'chunks': len(chunks),
+				'target_count': len(task.inputs)
+			},
+			obj_after=False,
+			sub='celery.state',
+			verbose=True
+		)
 
 	# Clone opts
 	base_opts = task_opts.copy()
@@ -413,11 +485,17 @@ def break_task(task, task_opts, results=[]):
 		# Add chunk info to opts
 		opts = base_opts.copy()
 		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
+		
+		# If wordlist chunking is active, update wordlist option for this chunk
+		if wordlist_chunks:
+			opts[WORDLIST] = wordlist_chunks[ix]
+		
 		debug('', obj={
 			task.unique_name: 'CHUNK',
 			'chunk': f'{ix + 1} / {len(chunks)}',
 			'target_count': len(chunk),
-			'targets': chunk
+			'targets': chunk,
+			'wordlist_chunk': wordlist_chunks[ix] if wordlist_chunks else None
 		}, sub='celery.state')  # noqa: E501
 
 		# Construct chunked signature
