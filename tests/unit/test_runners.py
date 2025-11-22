@@ -438,3 +438,76 @@ class TestCommandRunner(unittest.TestCase):
 					for k, v in expected_fields.items():
 						self.assertEqual(getattr(converted, k), v)
 		delattr(MyCommand, 'output_types')
+
+
+class TestBinaryPathResolution(unittest.TestCase):
+
+	def test_binary_path_resolution_from_local_bin(self):
+		"""Test that binary path is resolved from ~/.local/bin when it exists."""
+		import tempfile
+		import os
+		from pathlib import Path
+		from unittest.mock import patch, PropertyMock
+		from secator.config import CONFIG
+		
+		# Create a temporary directory to simulate ~/.local/bin
+		with tempfile.TemporaryDirectory() as tmpdir:
+			local_bin = Path(tmpdir)
+			
+			# Create a dummy executable in the temporary local bin
+			dummy_bin = local_bin / 'dummy'
+			dummy_bin.touch(mode=0o755)
+			
+			# Patch CONFIG.dirs.bin to point to our temporary directory
+			# We need to patch the property on the Directories class
+			with patch('secator.config.CONFIG.dirs.bin', local_bin):
+				# Create a command instance
+				cmd = MyCommand(TARGETS)
+				
+				# Check that the command uses the full path from local bin
+				self.assertEqual(cmd.cmd, f'{dummy_bin} -u host1')
+	
+	def test_binary_path_resolution_fallback_to_system(self):
+		"""Test that binary path falls back to system PATH when not in ~/.local/bin."""
+		import tempfile
+		from pathlib import Path
+		from unittest.mock import patch
+		from secator.config import CONFIG
+		
+		# Create a temporary directory to simulate an empty ~/.local/bin
+		with tempfile.TemporaryDirectory() as tmpdir:
+			local_bin = Path(tmpdir)
+			
+			# Patch CONFIG.dirs.bin to point to our temporary directory
+			with patch('secator.config.CONFIG.dirs.bin', local_bin):
+				# Create a command instance
+				cmd = MyCommand(TARGETS)
+				
+				# Check that the command uses the original command name (system PATH)
+				self.assertEqual(cmd.cmd, 'dummy -u host1')
+	
+	def test_binary_path_resolution_skips_absolute_paths(self):
+		"""Test that binary path resolution is skipped for absolute paths."""
+		import tempfile
+		from pathlib import Path
+		from unittest.mock import patch
+		from secator.config import CONFIG
+		
+		# Create a temporary directory
+		with tempfile.TemporaryDirectory() as tmpdir:
+			local_bin = Path(tmpdir)
+			
+			# Create a command with an absolute path
+			class AbsolutePathCommand(Command):
+				input_types = ['slug']
+				cmd = '/usr/bin/dummy'
+				input_flag = '-u'
+				file_flag = None
+			
+			# Patch CONFIG.dirs.bin
+			with patch('secator.config.CONFIG.dirs.bin', local_bin):
+				# Create a command instance
+				cmd = AbsolutePathCommand(TARGETS)
+				
+				# Check that the command remains unchanged
+				self.assertEqual(cmd.cmd, '/usr/bin/dummy -u host1')

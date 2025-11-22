@@ -204,6 +204,9 @@ class Command(Runner):
 		# Build command
 		self._build_cmd()
 
+		# Resolve binary path (prefer ~/.local/bin over system PATH)
+		self._resolve_binary_path()
+
 		# Run on_cmd hook
 		self.run_hooks('on_cmd', sub='init')
 
@@ -1092,6 +1095,30 @@ class Command(Runner):
 					opts_str = opts_str.replace('{target}', self.inputs[0])
 		self.cmd_options = opts
 		self.cmd += opts_str
+
+	def _resolve_binary_path(self):
+		"""Resolve the binary path, preferring ~/.local/bin over system PATH."""
+		import os
+		from pathlib import Path
+		
+		# Get the command name (first part of the command)
+		cmd_parts = self.cmd.split()
+		if not cmd_parts:
+			return
+		
+		cmd_name = cmd_parts[0]
+		
+		# Skip if command already has a path (contains '/')
+		if '/' in cmd_name:
+			return
+		
+		# Check if binary exists in ~/.local/bin
+		local_bin_path = CONFIG.dirs.bin / cmd_name
+		if local_bin_path.exists() and os.access(local_bin_path, os.X_OK):
+			# Replace the command name with the full path
+			cmd_parts[0] = str(local_bin_path)
+			self.cmd = ' '.join(cmd_parts)
+			self.debug(f'Using binary from {local_bin_path}', sub='init')
 
 	@staticmethod
 	def _build_opt_str(opt):
