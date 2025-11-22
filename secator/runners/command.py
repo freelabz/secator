@@ -596,7 +596,7 @@ class Command(Runner):
 		if self.config.name in str(exc):
 			message = 'Executable not found.'
 			if self.install_cmd:
-				message += f' Install it with "secator install tools {self.config.name}".'
+				message += f' Install it with "secator update tools {self.config.name}".'
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)

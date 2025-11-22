@@ -1149,7 +1149,7 @@ def health(json_, debug, strict, bleeding):
 			tool_cmd += f',{info["_name"]}=={info["next_version"]}'
 
 	if tool_cmd:
-		tool_cmd = f'secator install tools {tool_cmd.lstrip(",")}'
+		tool_cmd = f'secator update tools {tool_cmd.lstrip(",")}'
 		cmds.append(tool_cmd)
 	upgrade_cmd = ' && '.join(cmds)
 	console.print('') if not json_ else None
@@ -1190,7 +1190,8 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 
 @cli.group(aliases=['i'])
 def install():
-	"""Install langs, tools and addons."""
+	"""[deprecated] Install langs, tools and addons. Use 'secator update' instead."""
+	console.print(Warning(message='The "secator install" command is deprecated. Use "secator update" instead.'))
 	pass
 
 
@@ -1313,13 +1314,15 @@ def install_build():
 
 @install.group()
 def langs():
-	"Install languages."
+	"[deprecated] Install languages. Use 'secator update langs' instead."
+	console.print(Warning(message='The "secator install langs" command is deprecated. Use "secator update langs" instead.'))
 	pass
 
 
 @langs.command('go')
 def install_go():
-	"""Install Go."""
+	"""[deprecated] Install Go. Use 'secator update langs' instead."""
+	console.print(Warning(message='The "secator install langs go" command is deprecated. Use "secator update langs" instead.'))
 	run_install(
 		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
 		title='Go',
@@ -1331,7 +1334,8 @@ def install_go():
 
 @langs.command('ruby')
 def install_ruby():
-	"""Install Ruby."""
+	"""[deprecated] Install Ruby. Use 'secator update langs' instead."""
+	console.print(Warning(message='The "secator install langs ruby" command is deprecated. Use "secator update langs" instead.'))
 	run_install(
 		packages={
 			'apt': ['ruby-full', 'rubygems'],
@@ -1348,7 +1352,8 @@ def install_ruby():
 @click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
 @click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
 def install_tools(cmds, cleanup, fail_fast):
-	"""Install supported tools."""
+	"""[deprecated] Install supported tools. Use 'secator update tools' instead."""
+	console.print(Warning(message='The "secator install tools" command is deprecated. Use "secator update tools" instead.'))
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
@@ -1404,14 +1409,31 @@ def install_tools(cmds, cleanup, fail_fast):
 # UPDATE #
 #--------#
 
-@cli.command('update')
-@click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (addons, tools, ...)')
-def update(all):
-	"""Update to latest version."""
+@cli.group(aliases=['u'], invoke_without_command=True)
+@click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (langs, tools, wordlists, templates)')
+@click.pass_context
+def update(ctx, all):
+	"""Update secator and its components."""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 
+	# If invoked without subcommand, update secator itself
+	if ctx.invoked_subcommand is None:
+		if all:
+			# Update everything
+			ctx.invoke(update_secator)
+			ctx.invoke(update_langs)
+			ctx.invoke(update_tools)
+			ctx.invoke(update_wordlists)
+			ctx.invoke(update_templates)
+		else:
+			# Just update secator
+			ctx.invoke(update_secator)
+
+
+def _update_secator():
+	"""Internal function to update secator."""
 	# Check current and latest version
 	info = get_version_info('secator', '-version', 'freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
@@ -1437,19 +1459,120 @@ def update(all):
 		if not ret.return_code == 0:
 			sys.exit(1)
 
-	# Update tools
-	if all:
-		return_code = 0
-		for cls in discover_tasks():
-			cmd = cls.cmd.split(' ')[0]
-			version_flag = cls.get_version_flag()
-			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
-			if not info['installed'] or info['outdated'] or not info['latest_version']:
-				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
-				status = ToolInstaller.install(cls)
-				if not status.is_ok():
-					return_code = 1
-		sys.exit(return_code)
+
+@update.command('secator')
+def update_secator():
+	"""Update secator to latest version."""
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+	_update_secator()
+
+
+@update.command('langs')
+def update_langs():
+	"""Update all languages."""
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+	console.print('[bold gold3]:wrench: Updating languages ...[/]')
+	# Install Go
+	console.print('[bold magenta]Installing Go ...[/]')
+	run_install(
+		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
+		title='Go',
+		next_steps=[]
+	)
+	# Install Ruby
+	console.print('[bold magenta]Installing Ruby ...[/]')
+	run_install(
+		packages={
+			'apt': ['ruby-full', 'rubygems'],
+			'apk': ['ruby', 'ruby-dev'],
+			'pacman': ['ruby', 'ruby-dev'],
+			'brew': ['ruby']
+		},
+		title='Ruby',
+		next_steps=[]
+	)
+
+
+@update.command('tools')
+@click.argument('cmds', required=False)
+@click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
+@click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
+def update_tools(cmds, cleanup, fail_fast):
+	"""Update all tools or specific tools."""
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+	tools = []
+	if cmds is not None:
+		cmds = cmds.split(',')
+		for cmd in cmds:
+			if '==' in cmd:
+				cmd, version = tuple(cmd.split('=='))
+			else:
+				cmd, version = cmd, None
+			cls = next((cls for cls in discover_tasks() if cls.__name__ == cmd), None)
+			if cls:
+				if version:
+					if cls.install_version and cls.install_version.startswith('v') and not version.startswith('v'):
+						version = f'v{version}'
+					cls.install_version = version
+				tools.append(cls)
+			else:
+				console.print(Warning(message=f'Tool {cmd} is not supported or inexistent.'))
+	else:
+		tools = discover_tasks()
+	tools.sort(key=lambda x: x.__name__)
+	return_code = 0
+	if not tools:
+		console.print(Error(message='No tools found for updating.'))
+		return
+	for ix, cls in enumerate(tools):
+		status = ToolInstaller.install(cls)
+		if not status.is_ok():
+			return_code = 1
+			if fail_fast:
+				sys.exit(return_code)
+		console.print()
+	if cleanup:
+		distro = get_distro_config()
+		cleanup_cmds = [
+			'go clean -cache',
+			'go clean -modcache',
+			'pip cache purge',
+			'gem cleanup --user-install',
+			'gem clean --user-install',
+		]
+		if distro.pm_finalizer:
+			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
+		cmd = ' && '.join(cleanup_cmds)
+		Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
+	sys.exit(return_code)
+
+
+@update.command('wordlists')
+def update_wordlists():
+	"""Update all wordlists."""
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+	console.print('[bold gold3]:wrench: Updating wordlists ...[/]')
+	download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
+	console.print(Info(message='Wordlists updated successfully!'))
+
+
+@update.command('templates')
+def update_templates():
+	"""Update all templates (payloads)."""
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+	console.print('[bold gold3]:wrench: Updating templates ...[/]')
+	download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
+	console.print(Info(message='Templates updated successfully!'))
 
 
 #------#
@@ -1682,7 +1805,7 @@ def task(name, verbose, check, system_exit):
 			return False
 
 	# Run install
-	cmd = f'secator install tools {task_name}'
+	cmd = f'secator update tools {task_name}'
 	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
 	version_info = task.get_version_info()
 	if verbose:
