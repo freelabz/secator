@@ -451,7 +451,10 @@ class nmapData(dict):
 				# if edb_id:
 				# 	print(edb_id)
 				# 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
-				vuln = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
+				vuln, exploit_title = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
+				# Use the fetched exploit title if available, otherwise fall back to ID
+				if exploit_title:
+					exploit[NAME] = exploit_title
 				if vuln:
 					yield vuln
 					exploit[TAGS].extend(vuln[TAGS])

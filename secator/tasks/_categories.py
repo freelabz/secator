@@ -235,14 +235,14 @@ class Vuln(Command):
 			cpes (tuple[str], Optional): CPEs to match for.
 
 		Returns:
-			dict: vulnerability data.
+			tuple: (vulnerability data dict, exploit title string) or (None, None) if not found.
 		"""
 		if CONFIG.runners.skip_exploit_search:
 			debug(f'{exploit_id}: skipped remote query since config.runners.skip_exploit_search is set.', sub='cve.vulners')
-			return None
+			return None, None
 		if CONFIG.offline_mode:
 			debug(f'{exploit_id}: skipped remote query since config.offline_mode is set.', sub='cve.vulners')
-			return None
+			return None, None
 		try:
 			resp = requests.get(f'https://vulners.com/githubexploit/{exploit_id}', timeout=5)
 			resp.raise_for_status()
@@ -251,6 +251,13 @@ class Vuln(Command):
 			h1 = [h1.get_text(strip=True) for h1 in soup.find_all('h1')]
 			if '404' in h1:
 				raise requests.RequestException("404 [not found or rate limited]")
+
+			# Extract exploit title - use first h1 if available, otherwise use page title
+			exploit_title = h1[0] if h1 else title
+			# Clean up common suffixes in the title
+			if exploit_title.endswith(' - Vulners.com'):
+				exploit_title = exploit_title.replace(' - Vulners.com', '')
+
 			code = [code.get_text(strip=True) for code in soup.find_all('code')]
 			elems = [title] + h1 + code
 			content = '\n'.join(elems)
@@ -258,15 +265,16 @@ class Vuln(Command):
 			matches = cve_regex.findall(str(content))
 			if not matches:
 				debug(f'{exploit_id}: no matching CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve.vulners')
-				return None
+				return None, exploit_title
 			cve_id = matches[0].replace('_', '-').upper()
 			cve_data = Vuln.lookup_cve(cve_id, *cpes)
 			if cve_data:
-				return cve_data
+				return cve_data, exploit_title
+			return None, exploit_title
 
 		except requests.RequestException as e:
 			debug(f'{exploit_id}: failed remote query ({str(e)}).', sub='cve.vulners')
-			return None
+			return None, None
 
 	@cache
 	@staticmethod
