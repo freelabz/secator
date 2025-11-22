@@ -1502,7 +1502,11 @@ def login():
 	
 	# Start local server to receive callback
 	PORT = 8765
-	server = socketserver.TCPServer(('localhost', PORT), TokenHandler)
+	try:
+		server = socketserver.TCPServer(('localhost', PORT), TokenHandler)
+	except OSError:
+		console.print(f'[bold red]Port {PORT} is already in use. Please close the application using it and try again.[/]')
+		sys.exit(1)
 	server_thread = threading.Thread(target=server.handle_request)
 	server_thread.daemon = True
 	server_thread.start()

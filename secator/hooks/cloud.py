@@ -55,18 +55,6 @@ def save_token(token):
 		debug(f'Failed to save token: {e}', sub='hooks.cloud')
 
 
-def validate_token():
-	"""Validate that the current token is valid."""
-	session = get_session()
-	try:
-		# Try to make a simple authenticated request
-		response = session.get(f'{CLOUD_API_URL}/runners', timeout=5)
-		return response.status_code in [200, 401]  # 401 means endpoint exists but auth failed
-	except Exception as e:
-		debug(f'Token validation failed: {e}', sub='hooks.cloud')
-		return False
-
-
 def get_runner_dbg(runner):
 	"""Runner debug object."""
 	return {
