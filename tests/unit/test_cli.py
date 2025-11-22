@@ -281,5 +281,26 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 1
 		assert 'Cannot run this command in offline mode' in result.output
 
+	def test_workflow_default_inputs(self):
+		"""Test that workflows with default_inputs use them when no input is provided."""
+		result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '--dry-run'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert 'No inputs provided, using default inputs:' in result.output
+		# Check that default CIDR ranges are used
+		assert '127.0.0.1/24' in result.output
+		assert '192.168.0.0/24' in result.output
+		assert '10.0.0.0/24' in result.output
+
+	def test_workflow_explicit_input_overrides_default(self):
+		"""Test that explicit inputs override default_inputs."""
+		result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '10.10.10.0/24', '--dry-run'])
+		assert not result.exception
+		assert result.exit_code == 0
+		# Should NOT see the default inputs message
+		assert 'No inputs provided, using default inputs:' not in result.output
+		# Should see the workflow running with explicit input
+		assert 'mapcidr' in result.output
+
 if __name__ == '__main__':
 	unittest.main()

@@ -89,6 +89,9 @@ def expand_input(input, ctx):
 			else:
 				console.print('No input passed on stdin.', style='bold red')
 				sys.exit(1)
+	elif isinstance(input, list):
+		# Input is already a list (e.g., from default_inputs), return as-is
+		pass
 	elif os.path.exists(input):
 		if 'path' in ctx.obj['input_types']:
 			return input

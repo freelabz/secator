@@ -6,6 +6,13 @@ tags: [recon, cidr, network]
 input_types:
   - cidr_range
   - ip
+default_inputs:
+  - 127.0.0.1/24      # localhost
+  - 192.168.0.0/24    # local
+  - 192.168.1.0/24    # local
+  - 10.0.0.0/24       # standard subnet
+  - 172.16.0.0/24     # private network
+  - 172.17.0.0/16     # docker
 
 tasks:
   mapcidr:
