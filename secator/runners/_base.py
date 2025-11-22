@@ -4,6 +4,7 @@ import logging
 import sys
 import textwrap
 import uuid
+import threading
 
 from datetime import datetime
 from pathlib import Path
@@ -114,6 +115,12 @@ class Runner:
 		self.revoked = False
 		self.results_buffer = []
 		self._hooks = hooks
+
+		# Event trigger state
+		self.event_triggers = {}
+		self.event_batches = {}
+		self.event_timers = {}
+		self.event_lock = threading.Lock()
 
 		# Runner process options
 		self.no_poll = self.run_opts.get('no_poll', False)
