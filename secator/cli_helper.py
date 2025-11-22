@@ -23,7 +23,7 @@ from secator.loader import get_configs_by_type
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
 WORKSPACES_STR = '|'.join([f'[dim yellow3]{_}[/]' for _ in WORKSPACES])
 PROFILES_STR = ','.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_type('profile')])
-DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['mongodb', 'gcs']])
+DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['mongodb', 'mysql', 'gcs']])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
 EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['csv', 'gdrive', 'json', 'table', 'txt']])
@@ -252,7 +252,7 @@ def register_runner(cli_endpoint, config):
 		hooks = []
 		drivers = driver.split(',') if driver else []
 		drivers = list(set(CONFIG.drivers.defaults + drivers))
-		supported_drivers = ['mongodb', 'gcs']
+		supported_drivers = ['mongodb', 'mysql', 'gcs']
 		for driver in drivers:
 			if driver in supported_drivers:
 				if not ADDONS_ENABLED[driver]:

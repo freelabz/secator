@@ -236,6 +236,11 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 1
 		assert 'Cannot run this command in offline mode' in result.output
 
+	def test_install_addons_mysql_command(self):
+		result = self.runner.invoke(cli, ['install', 'addons', 'mysql'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
 	def test_install_addons_redis_command(self):
 		result = self.runner.invoke(cli, ['install', 'addons', 'redis'])
 		assert result.exit_code == 1
