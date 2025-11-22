@@ -113,9 +113,56 @@ def update_finding(self, item):
 		finding = db['findings'].update_one({'_id': _id}, {'$set': update})
 		status = 'UPDATED'
 	else:
-		finding = db['findings'].insert_one(update)
-		item._uuid = str(finding.inserted_id)
-		status = 'CREATED'
+		# Check if a duplicate already exists in MongoDB
+		# Build query based on fields that are used for comparison
+		from dataclasses import fields as dataclass_fields
+		query = {'_type': _type}
+
+		# Add workspace_id to query if present to scope duplicates to workspace
+		workspace_id = item._context.get('workspace_id')
+		if workspace_id:
+			query['_context.workspace_id'] = workspace_id
+
+		# Get fields that are used for comparison (compare != False)
+		item_class = type(item)
+		for field in dataclass_fields(item_class):
+			if field.compare and not field.name.startswith('_'):
+				field_value = getattr(item, field.name)
+				if field_value:  # Only add non-empty values to query
+					query[field.name] = field_value
+
+		# Look for existing finding with same identifying fields
+		existing = db['findings'].find_one(query)
+
+		if existing:
+			# Update existing record instead of creating new one
+			_id = existing['_id']
+			# Merge data: keep existing values for empty fields, update with new values for non-empty fields
+			merged_update = existing.copy()
+			for key, value in update.items():
+				# Update field if new value is not empty or if it's a list/dict that's not empty
+				if value or (isinstance(value, (list, dict)) and len(value) > 0):
+					# For lists, merge them (avoiding duplicates)
+					if isinstance(value, list) and isinstance(merged_update.get(key), list):
+						# Merge lists, preserving order and removing duplicates
+						existing_list = merged_update[key]
+						for item_val in value:
+							if item_val not in existing_list:
+								existing_list.append(item_val)
+						merged_update[key] = existing_list
+					# For dicts, merge them
+					elif isinstance(value, dict) and isinstance(merged_update.get(key), dict):
+						merged_update[key].update(value)
+					else:
+						merged_update[key] = value
+			db['findings'].update_one({'_id': _id}, {'$set': merged_update})
+			item._uuid = str(_id)
+			status = 'UPDATED'
+			debug('found existing finding in db, updating', sub='hooks.mongodb', id=str(_id), verbose=True)
+		else:
+			finding = db['findings'].insert_one(update)
+			item._uuid = str(finding.inserted_id)
+			status = 'CREATED'
 	end_time = time.time()
 	elapsed = end_time - start_time
 	debug_obj = {
