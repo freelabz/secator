@@ -183,3 +183,84 @@ class Workflow(Runner):
 			mark_runner_completed.s(self, enable_hooks=True).set(queue='results'),
 		)
 		return sig
+
+	def _trigger_event_task(self, trigger_id, trigger_config):
+		"""Override to actually spawn a task when event is triggered.
+
+		Args:
+			trigger_id (str): Trigger identifier.
+			trigger_config (dict): Trigger configuration.
+		"""
+		items = []
+		with self.event_lock:
+			# Get batched items
+			items = self.event_batches.get(trigger_id, [])
+			if not items:
+				return
+
+			# Clear batch
+			self.event_batches[trigger_id] = []
+
+			# Cancel timer if exists
+			if trigger_id in self.event_timers:
+				self.event_timers[trigger_id].cancel()
+				del self.event_timers[trigger_id]
+
+		task_name = trigger_config.get('task_name')
+		task_opts = trigger_config.get('task_opts', {}).copy()
+		
+		self.debug(f'triggering event task {task_name} with {len(items)} items', sub='event_trigger')
+		
+		# Extract inputs from items based on targets_ configuration
+		inputs = []
+		targets_config = task_opts.pop('targets_', None)
+		if targets_config:
+			from secator.runners._helpers import extract_from_results
+			ctx = {'key': 'targets', 'ancestor_id': self.ancestor_id}
+			inputs, errors = extract_from_results(items, targets_config, ctx=ctx)
+			for error in errors:
+				self.add_result(error, hooks=False)
+		else:
+			# Default: use the items themselves as inputs
+			inputs = [str(item) for item in items]
+
+		if not inputs:
+			self.debug(f'no inputs extracted for event task {task_name}, skipping', sub='event_trigger')
+			return
+
+		# Get task class
+		try:
+			task_cls = Task.get_task_class(task_name)
+		except ValueError as e:
+			from secator.output_types import Error
+			error = Error.from_exception(e, message=f'Event trigger {trigger_id}: task {task_name} not found')
+			self.add_result(error, hooks=False)
+			return
+
+		# Merge options
+		opts = merge_opts(self.config.default_options.toDict(), task_opts, self.run_opts)
+		opts['name'] = task_name
+		opts['context'] = self.context.copy()
+		opts['context']['triggered_by'] = trigger_id
+		opts['context']['ancestor_id'] = self.ancestor_id or self.id
+		opts['has_parent'] = True
+		opts['print_item'] = True
+		opts['print_start'] = True
+		opts['print_end'] = True
+
+		# Create and run task
+		info = Info(
+			message=f'Event trigger [bold magenta]{trigger_id}[/]: spawning task [bold gold3]{task_name}[/] with {len(inputs)} inputs',
+			_source=self.unique_name
+		)
+		self.add_result(info, hooks=False)
+
+		try:
+			# Run task synchronously in the current workflow
+			task = task_cls(task_cls.get_config(), inputs=inputs, run_opts=opts, context=opts['context'])
+			for result in task:
+				self.add_result(result, hooks=False)
+		except Exception as e:
+			from secator.output_types import Error
+			error = Error.from_exception(e, message=f'Event trigger {trigger_id}: task {task_name} failed')
+			self.add_result(error, hooks=False)
