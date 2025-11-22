@@ -403,6 +403,19 @@ def break_task(task, task_opts, results=[]):
 	# Clone opts
 	base_opts = task_opts.copy()
 
+	# Adjust rate_limit for chunked tasks
+	# Divide by chunk count but ensure it's at least 1
+	if 'rate_limit' in base_opts and base_opts['rate_limit']:
+		original_rate_limit = base_opts['rate_limit']
+		adjusted_rate_limit = max(1, original_rate_limit // len(chunks))
+		base_opts['rate_limit'] = adjusted_rate_limit
+		debug('', obj={
+			task.unique_name: 'RATE_LIMIT_ADJUSTED',
+			'original': original_rate_limit,
+			'adjusted': adjusted_rate_limit,
+			'chunks': len(chunks)
+		}, sub='celery.state')  # noqa: E501
+
 	# Build signatures
 	sigs = []
 	task.ids_map = {}
