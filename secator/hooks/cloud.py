@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 import json
 from pathlib import Path
@@ -88,11 +87,35 @@ def _api_request(method, url, **kwargs):
 	return response
 
 
+def check_authentication():
+	"""Check if user is authenticated with valid token."""
+	token = load_token()
+	if not token:
+		return False
+
+	# Validate the token by making a test request
+	session = get_session()
+	try:
+		response = session.get(f'{CLOUD_API_URL}/runners', timeout=5)
+		return response.status_code == 200
+	except Exception:
+		return False
+
+
+def validate_auth(self):
+	"""Validate authentication before running."""
+	if not check_authentication():
+		from secator.output_types import Error
+		error = Error(message='Cloud driver requires authentication. Please run: secator login')
+		self.add_result(error, hooks=False)
+		raise Exception('Not authenticated with Secator Cloud')
+
+
 def update_runner(self):
 	"""Update runner status in Secator Cloud."""
 	type_ = self.config.type
 	runner_data = self.toDict()
-	
+
 	# Prepare runner payload according to API spec
 	runner_payload = {
 		'config': runner_data.get('config', {}),
@@ -109,11 +132,14 @@ def update_runner(self):
 		'run_opts': runner_data.get('run_opts', {}),
 		'timestamp': int(time.time())
 	}
-	
+
 	runner_id = self.context.get(f'{type_}_id')
-	
-	debug('to_update', sub='hooks.cloud', id=runner_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)
-	
+
+	debug(
+		'to_update', sub='hooks.cloud', id=runner_id, obj=get_runner_dbg(self),
+		obj_after=True, obj_breaklines=False, verbose=True
+	)
+
 	start_time = time.time()
 	try:
 		if runner_id:
@@ -128,12 +154,12 @@ def update_runner(self):
 			runner_id = response.json().get('id')
 			self.context[f'{type_}_id'] = runner_id
 			status = 'CREATED'
-		
+
 		end_time = time.time()
 		elapsed = end_time - start_time
 		debug(f'{status} in {elapsed:.4f}s', sub='hooks.cloud', id=runner_id, obj=get_runner_dbg(self), obj_after=False)
 		self.last_updated_db = start_time
-		
+
 	except Exception as e:
 		debug(f'Failed to update runner: {e}', sub='hooks.cloud', obj=get_runner_dbg(self))
 
@@ -142,14 +168,14 @@ def update_finding(self, item):
 	"""Update finding in Secator Cloud."""
 	if type(item) not in OUTPUT_TYPES:
 		return item
-	
+
 	start_time = time.time()
 	finding_data = item.toDict()
 	finding_id = item._uuid if hasattr(item, '_uuid') and item._uuid else None
-	
+
 	# Prepare finding payload
 	finding_payload = finding_data
-	
+
 	try:
 		if finding_id:
 			# Update existing finding
@@ -162,7 +188,7 @@ def update_finding(self, item):
 			response = _api_request('POST', url, json=finding_payload, timeout=10)
 			item._uuid = response.json().get('id')
 			status = 'CREATED'
-		
+
 		end_time = time.time()
 		elapsed = end_time - start_time
 		debug_obj = {
@@ -173,15 +199,16 @@ def update_finding(self, item):
 			**self.context
 		}
 		debug(f'in {elapsed:.4f}s', sub='hooks.cloud', id=str(item._uuid), obj=debug_obj, obj_after=False)
-		
+
 	except Exception as e:
 		debug(f'Failed to update finding: {e}', sub='hooks.cloud')
-	
+
 	return item
 
 
 HOOKS = {
 	Scan: {
+		'before_init': [validate_auth],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_interval': [update_runner],
@@ -189,6 +216,7 @@ HOOKS = {
 		'on_end': [update_runner],
 	},
 	Workflow: {
+		'before_init': [validate_auth],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_interval': [update_runner],
@@ -196,6 +224,7 @@ HOOKS = {
 		'on_end': [update_runner],
 	},
 	Task: {
+		'before_init': [validate_auth],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
