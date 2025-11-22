@@ -1452,6 +1452,89 @@ def update(all):
 		sys.exit(return_code)
 
 
+#-------#
+# LOGIN #
+#-------#
+
+@cli.command('login')
+def login():
+	"""Authenticate with Secator Cloud."""
+	import webbrowser
+	import http.server
+	import socketserver
+	import threading
+	from urllib.parse import urlparse, parse_qs
+	
+	from secator.hooks.cloud import save_token, CLOUD_AUTH_URL
+	
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+	
+	# Token to be captured
+	captured_token = {'token': None, 'error': None}
+	
+	class TokenHandler(http.server.SimpleHTTPRequestHandler):
+		def do_GET(self):
+			"""Handle the callback from the authentication page."""
+			parsed_path = urlparse(self.path)
+			query_params = parse_qs(parsed_path.query)
+			
+			if 'token' in query_params:
+				captured_token['token'] = query_params['token'][0]
+				self.send_response(200)
+				self.send_header('Content-type', 'text/html')
+				self.end_headers()
+				self.wfile.write(b'<html><body><h1>Authentication successful!</h1><p>You can close this window.</p></body></html>')
+			elif 'error' in query_params:
+				captured_token['error'] = query_params['error'][0]
+				self.send_response(400)
+				self.send_header('Content-type', 'text/html')
+				self.end_headers()
+				self.wfile.write(b'<html><body><h1>Authentication failed!</h1><p>Please try again.</p></body></html>')
+			else:
+				self.send_response(404)
+				self.end_headers()
+		
+		def log_message(self, format, *args):
+			# Suppress logging
+			pass
+	
+	# Start local server to receive callback
+	PORT = 8765
+	server = socketserver.TCPServer(('localhost', PORT), TokenHandler)
+	server_thread = threading.Thread(target=server.handle_request)
+	server_thread.daemon = True
+	server_thread.start()
+	
+	# Build authentication URL
+	callback_url = f'http://localhost:{PORT}'
+	auth_url = f'{CLOUD_AUTH_URL}?callback={callback_url}'
+	
+	console.print(f'[bold yellow]Opening browser for authentication...[/]')
+	console.print(f'[dim]If the browser does not open, visit: {auth_url}[/]')
+	
+	# Open browser
+	webbrowser.open(auth_url)
+	
+	# Wait for token (with timeout)
+	console.print('[bold yellow]Waiting for authentication...[/]')
+	server_thread.join(timeout=120)  # 2 minutes timeout
+	
+	# Clean up
+	server.server_close()
+	
+	if captured_token['token']:
+		save_token(captured_token['token'])
+		console.print('[bold green]✓ Authentication successful! Token saved.[/]')
+	elif captured_token['error']:
+		console.print(f'[bold red]✗ Authentication failed: {captured_token["error"]}[/]')
+		sys.exit(1)
+	else:
+		console.print('[bold red]✗ Authentication timed out.[/]')
+		sys.exit(1)
+
+
 #------#
 # TEST #
 #------#

@@ -160,6 +160,9 @@ for addon, module in [
 ]:
 	ADDONS_ENABLED[addon] = is_importable(module)
 
+# Cloud addon is always enabled (no external dependencies required)
+ADDONS_ENABLED['cloud'] = True
+
 # Check dev package
 if os.path.exists(f'{ROOT_FOLDER}/pyproject.toml'):
 	DEV_PACKAGE = True
