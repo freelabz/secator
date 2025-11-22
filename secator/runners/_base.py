@@ -4,7 +4,6 @@ import logging
 import sys
 import textwrap
 import uuid
-import threading
 
 from datetime import datetime
 from pathlib import Path
@@ -116,11 +115,11 @@ class Runner:
 		self.results_buffer = []
 		self._hooks = hooks
 
-		# Event trigger state
+		# Event trigger state (lazy initialization for non-serializable objects)
 		self.event_triggers = {}
 		self.event_batches = {}
 		self.event_timers = {}
-		self.event_lock = threading.Lock()
+		self._event_lock = None
 
 		# Runner process options
 		self.no_poll = self.run_opts.get('no_poll', False)
@@ -243,6 +242,14 @@ class Runner:
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
+
+	@property
+	def event_lock(self):
+		"""Lazy initialization of event lock for thread safety (non-serializable)."""
+		if self._event_lock is None:
+			import threading
+			self._event_lock = threading.Lock()
+		return self._event_lock
 
 	@property
 	def resolved_opts(self):
