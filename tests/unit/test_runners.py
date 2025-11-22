@@ -455,7 +455,8 @@ class TestBinaryPathResolution(unittest.TestCase):
 			
 			# Create a dummy executable in the temporary local bin
 			dummy_bin = local_bin / 'dummy'
-			dummy_bin.touch(mode=0o755)
+			dummy_bin.touch()
+			dummy_bin.chmod(0o755)
 			
 			# Patch CONFIG.dirs.bin to point to our temporary directory
 			with patch('secator.config.CONFIG.dirs.bin', local_bin):
@@ -485,17 +486,18 @@ class TestBinaryPathResolution(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as tmpdir:
 			local_bin = Path(tmpdir)
 			
-			# Create a command with an absolute path
-			class AbsolutePathCommand(Command):
-				input_types = ['slug']
-				cmd = '/usr/bin/dummy'
-				input_flag = '-u'
-				file_flag = None
+			# Dynamically create a command with an absolute path
+			test_cmd = type('AbsolutePathCommand', (Command,), {
+				'input_types': ['slug'],
+				'cmd': '/usr/bin/dummy',
+				'input_flag': '-u',
+				'file_flag': None
+			})
 			
 			# Patch CONFIG.dirs.bin
 			with patch('secator.config.CONFIG.dirs.bin', local_bin):
 				# Create a command instance
-				cmd = AbsolutePathCommand(TARGETS)
+				cmd = test_cmd(TARGETS)
 				
 				# Check that the command remains unchanged
 				self.assertEqual(cmd.cmd, '/usr/bin/dummy -u host1')

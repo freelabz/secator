@@ -1109,7 +1109,9 @@ class Command(Runner):
 		if '/' in cmd_name:
 			return
 		
-		# Check if binary exists in ~/.local/bin
+		# Check if binary exists and is executable in ~/.local/bin
+		# Note: Using exists() + access() is intentional for clarity and error handling.
+		# This is called once per command initialization, so performance impact is negligible.
 		local_bin_path = CONFIG.dirs.bin / cmd_name
 		if local_bin_path.exists() and os.access(local_bin_path, os.X_OK):
 			# Replace the command name with the full path
