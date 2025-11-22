@@ -52,16 +52,14 @@ class dig(ReconDns):
 		use_trace = self.get_opt_value('trace')
 		
 		# Build command: dig [options] [record_type] <domain> [@resolver]
-		# Add short flag if needed, otherwise show only answer section
+		# Use +short for brief output or +trace for full delegation path
+		# Otherwise, use +noall +answer to show only the answer section
 		if use_short:
 			self.cmd += ' +short'
-		elif not use_trace:
-			# Only add +noall +answer if not using trace (trace needs full output)
-			self.cmd += ' +noall +answer'
-		
-		# Add trace flag if needed
-		if use_trace:
+		elif use_trace:
 			self.cmd += ' +trace'
+		else:
+			self.cmd += ' +noall +answer'
 		
 		# Add record type
 		self.cmd += f' {record_type}'
@@ -81,26 +79,41 @@ class dig(ReconDns):
 			return
 		
 		# Parse the dig output format
-		# Format: <name> <ttl> <class> <type> <rdata>
+		# Standard format: <name> <ttl> <class> <type> <rdata>
+		# Some formats may have fewer fields, so we need at least 4 parts
 		parts = line.split()
-		if len(parts) < 5:
+		if len(parts) < 4:
 			return
 		
+		# Try to parse as standard dig output
+		# If parts[1] is not a digit (TTL), try alternative parsing
 		name = parts[0].rstrip('.')
-		ttl = parts[1]
-		record_class = parts[2]
-		record_type = parts[3]
-		rdata = ' '.join(parts[4:])
+		if len(parts) >= 5 and parts[1].isdigit():
+			# Standard format with TTL
+			ttl = parts[1]
+			record_class = parts[2]
+			record_type = parts[3]
+			rdata = ' '.join(parts[4:])
+		elif len(parts) >= 4:
+			# Alternative format without TTL or simplified format
+			ttl = '0'
+			record_class = parts[1] if parts[1] in ['IN', 'CH', 'HS'] else 'IN'
+			record_type = parts[2] if len(parts) > 2 else 'A'
+			rdata_start = 3 if parts[1] in ['IN', 'CH', 'HS'] else 2
+			rdata = ' '.join(parts[rdata_start:])
+		else:
+			return
 		
 		# Clean up rdata (remove trailing dot from domain names in certain records)
-		if record_type in ['NS', 'CNAME', 'PTR', 'MX']:
+		if record_type in ['NS', 'CNAME', 'PTR']:
 			rdata = rdata.rstrip('.')
 		
-		# For MX records, split priority and server
-		if record_type == 'MX' and len(parts) >= 6:
-			priority = parts[4]
-			server = parts[5].rstrip('.')
-			rdata = f'{priority} {server}'
+		# For MX records, the rdata already contains "priority server"
+		# Just clean up the server part
+		if record_type == 'MX':
+			mx_parts = rdata.split(None, 1)
+			if len(mx_parts) == 2:
+				rdata = f'{mx_parts[0]} {mx_parts[1].rstrip(".")}'
 		
 		# Check if the name is a valid domain/subdomain or IP
 		is_ip = validators.ipv4(name) or validators.ipv6(name)
