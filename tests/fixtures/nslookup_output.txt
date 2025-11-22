@@ -1,0 +1,8 @@
+Server:		8.8.8.8
+Address:	8.8.8.8#53
+
+Non-authoritative answer:
+Name:	example.com
+Address: 93.184.216.34
+Name:	example.com
+Address: 2606:2800:220:1:248:1893:25c8:1946
