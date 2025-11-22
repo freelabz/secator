@@ -169,12 +169,15 @@ secator scan domain example.com
 debug: celery,hooks,cve
 ```
 
-**Example 3: Debug all CVE-related components using wildcards**
+**Example 3: Debug all CVE-related components using regex patterns**
 ```bash
-# Note: Wildcard matching is handled by Secator's internal logic
+# Regex pattern with wildcard (matches cve.match, cve.circl, etc.)
 export SECATOR_DEBUG='cve.*'
 # Or in config file:
 # debug: cve.*
+
+# Note: When '*' is present, uses re.match(pattern + '$', component)
+# Without '*', uses component.startswith(pattern)
 ```
 
 **Example 4: Debug workflow execution**
@@ -206,7 +209,7 @@ The `debug()` function parameters:
 - `id` (str): Optional identifier to append to the message
 - `obj_after` (bool): Whether to show object after the message (default: True)
 - `obj_breaklines` (bool): Whether to break lines for each item in object
-- `lazy` (callable): Lazy evaluation function for expensive operations
+- `lazy` (callable): Function that takes `msg` as parameter and returns modified message string (for expensive operations)
 
 #### Best Practices for Debug Output
 

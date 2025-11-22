@@ -88,13 +88,17 @@ Controls debug output during execution. Set to a comma-separated list of debug c
 - `unittest.item` - Item testing
 - `validators` - Validation operations
 
-**Wildcard Support**: You can use wildcards (e.g., `'cve.*'`) to match all components with a given prefix. Wildcard matching is handled by Secator's internal logic, not shell globbing.
+**Wildcard Support**: You can use regex patterns with wildcards to match multiple components. When a debug component contains `*`, it's treated as a regex pattern (e.g., `'cve.*'` matches `cve.match`, `cve.circl`, etc.). The pattern matching is handled by Python's `re.match()` function, anchored at the end with `$`.
+
+**Matching Behavior**:
+- Without wildcard: `sub.startswith()` is used (e.g., `'celery'` matches `celery.app`, `celery.data`, etc.)
+- With wildcard: `re.match(pattern + '$', sub)` is used (e.g., `'cve.*'` matches `cve.match` but not `celery.cve`)
 
 **Examples**:
 ```yaml
 debug: all                    # Enable all debug output
-debug: celery,hooks          # Debug Celery and hooks only
-debug: cve.*                 # Debug all CVE components (using wildcard)
+debug: celery,hooks          # Debug Celery and hooks only (prefix matching)
+debug: cve.*                 # Debug all CVE components (regex pattern)
 ```
 
 ---
