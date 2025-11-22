@@ -282,3 +282,181 @@ class TestCelery(unittest.TestCase):
 		self.assertIsNotNone(workflow)
 		# The workflow should be a chord with multiple chunks
 		# We expect 3 chunks for 5 targets with chunk size 2
+
+	def test_run_command_with_chunks(self):
+		"""Test run_command task with chunking."""
+		from secator.celery import run_command
+		from secator.tasks import httpx
+		from unittest.mock import patch, MagicMock
+		from pathlib import Path
+		
+		if httpx not in TEST_TASKS:
+			return
+		
+		# Ensure celery directories exist
+		celery_results_dir = Path('/tmp/.secator/celery/results')
+		celery_results_dir.mkdir(parents=True, exist_ok=True)
+		
+		# Create multiple targets to trigger chunking
+		targets = ['example1.com', 'example2.com', 'example3.com', 'example4.com', 'example5.com']
+		
+		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(targets)):
+			# Mock needs_chunking to return True
+			with patch('secator.runners.Task.needs_chunking', return_value=True):
+				with patch('secator.celery.break_task') as mock_break_task:
+					# Mock break_task to return a simple workflow
+					mock_workflow = MagicMock()
+					mock_break_task.return_value = mock_workflow
+					
+					# Mock replace function
+					with patch('secator.celery.replace') as mock_replace:
+						mock_replace.return_value = []
+						
+						# Call run_command
+						result = run_command.apply(args=([], httpx.__name__, targets, {}))
+						
+						# Verify break_task was called
+						mock_break_task.assert_called_once()
+						# Verify replace was called
+						mock_replace.assert_called_once()
+
+	def test_run_command_no_chunks(self):
+		"""Test run_command task without chunking."""
+		from secator.celery import run_command
+		from secator.tasks import httpx
+		from unittest.mock import patch
+		from pathlib import Path
+		
+		if httpx not in TEST_TASKS:
+			return
+		
+		# Ensure celery directories exist
+		celery_results_dir = Path('/tmp/.secator/celery/results')
+		celery_results_dir.mkdir(parents=True, exist_ok=True)
+		
+		targets = ['example.com']
+		
+		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]]):
+			# Mock needs_chunking to return False
+			with patch('secator.runners.Task.needs_chunking', return_value=False):
+				# Call run_command
+				result = run_command.apply(args=([], httpx.__name__, targets, {}))
+				
+				# Verify result is returned
+				self.assertIsNotNone(result)
+				# Results should be from the task execution
+				result_value = result.get()
+				self.assertIsInstance(result_value, list)
+
+	def test_forward_results_with_dict_results(self):
+		"""Test forward_results with dict containing results key."""
+		from secator.celery import forward_results
+		from secator.output_types import Url
+		from pathlib import Path
+		
+		# Ensure celery directories exist
+		celery_results_dir = Path('/tmp/.secator/celery/results')
+		celery_results_dir.mkdir(parents=True, exist_ok=True)
+		
+		# Test with dict containing 'results' key
+		test_url = Url(**{
+			"url": "https://example.com",
+			"method": "GET",
+			"status_code": 200,
+			"_source": "httpx",
+			"_type": "url"
+		})
+		
+		results_dict = {'results': [test_url]}
+		result = forward_results.apply(args=(results_dict,))
+		forwarded = result.get()
+		
+		self.assertIsInstance(forwarded, list)
+		self.assertEqual(len(forwarded), 1)
+		self.assertEqual(forwarded[0].url, "https://example.com")
+
+	def test_forward_results_with_list_of_dicts(self):
+		"""Test forward_results with list containing dicts with results key."""
+		from secator.celery import forward_results
+		from secator.output_types import Url
+		from pathlib import Path
+		
+		# Ensure celery directories exist
+		celery_results_dir = Path('/tmp/.secator/celery/results')
+		celery_results_dir.mkdir(parents=True, exist_ok=True)
+		
+		# Test with list of dicts
+		test_url1 = Url(**{
+			"url": "https://example1.com",
+			"method": "GET",
+			"status_code": 200,
+			"_source": "httpx",
+			"_type": "url"
+		})
+		test_url2 = Url(**{
+			"url": "https://example2.com",
+			"method": "GET",
+			"status_code": 200,
+			"_source": "httpx",
+			"_type": "url"
+		})
+		
+		results_list = [{'results': [test_url1]}, {'results': [test_url2]}]
+		result = forward_results.apply(args=(results_list,))
+		forwarded = result.get()
+		
+		self.assertIsInstance(forwarded, list)
+		# Results are deduplicated, so we may get fewer than 2
+		self.assertGreaterEqual(len(forwarded), 1)
+
+	def test_mark_runner_started(self):
+		"""Test mark_runner_started function."""
+		from secator.celery import mark_runner_started
+		from secator.runners import Task
+		from secator.tasks import httpx
+		from unittest.mock import MagicMock
+		
+		if httpx not in TEST_TASKS:
+			return
+		
+		# Create a mock runner
+		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]]):
+			runner = httpx(['example.com'])
+			
+			# Call mark_runner_started
+			result = mark_runner_started.apply(args=([], runner, True))
+			results = result.get()
+			
+			# Verify result
+			self.assertIsInstance(results, list)
+
+	def test_mark_runner_completed(self):
+		"""Test mark_runner_completed function."""
+		from secator.celery import mark_runner_completed
+		from secator.runners import Task
+		from secator.tasks import httpx
+		from secator.output_types import Url
+		
+		if httpx not in TEST_TASKS:
+			return
+		
+		# Create a mock runner
+		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]]):
+			runner = httpx(['example.com'])
+			runner.mark_started()
+			
+			# Create some results
+			test_url = Url(**{
+				"url": "https://example.com",
+				"method": "GET",
+				"status_code": 200,
+				"_source": "httpx",
+				"_type": "url"
+			})
+			
+			# Call mark_runner_completed
+			result = mark_runner_completed.apply(args=([test_url], runner, True))
+			results = result.get()
+			
+			# Verify result
+			self.assertIsInstance(results, list)
