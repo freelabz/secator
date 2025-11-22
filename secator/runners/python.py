@@ -1,82 +1,66 @@
 """Python runner for executing custom Python code."""
-import inspect
 import logging
-from typing import Callable, Any, Iterator
 
+from secator.config import CONFIG
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.output_types import Info, Error
 
 
 logger = logging.getLogger(__name__)
 
 
 class PythonRunner(Runner):
-	"""Runner class for executing custom Python code.
+	"""Base class for Python-based tasks.
 
-	This runner allows executing custom Python functions without requiring
-	external command-line tools. The function should be a generator that yields
-	secator output types.
-
-	Args:
-		func (Callable): Python function to execute. Should be a generator that yields OutputType objects.
-		inputs (list): List of inputs to pass to the function.
-		run_opts (dict): Runner options.
-		hooks (dict): User hooks to register.
-		validators (dict): User validators to register.
-		context (dict): Runner context.
+	This runner allows creating tasks that execute custom Python code without
+	requiring external command-line tools. Tasks should inherit from this class
+	and override the yielder() method.
 
 	Example:
+		>>> from secator.decorators import task
+		>>> from secator.definitions import HOST
+		>>> from secator.output_types import Tag, Url
 		>>> from secator.runners import PythonRunner
-		>>> from secator.output_types import Info
 		>>>
-		>>> def my_function(runner, inputs):
-		...     for input_item in inputs:
-		...         yield Info(message=f"Processing {input_item}")
-		>>>
-		>>> runner = PythonRunner(func=my_function, inputs=['target1', 'target2'])
-		>>> results = runner.run()
+		>>> @task()
+		>>> class mytask(PythonRunner):
+		...     input_types = [HOST]
+		...     output_types = [Tag, Url]
+		...     opts = {'option1': {'type': str, 'help': 'An option'}}
+		...
+		...     def yielder(self):
+		...         for target in self.inputs:
+		...             yield Url(url=f"http://{target}")
+		...             yield Tag(name="scanned", match=target)
 	"""
 
-	# Input field
-	input_types = []
-
-	# Output types
-	output_types = []
-
 	# Default exporters
-	default_exporters = []
+	default_exporters = CONFIG.tasks.exporters
 
-	# Profiles
-	profiles = []
+	# Tags
+	tags = []
 
-	def __init__(self, func: Callable = None, inputs=[], **run_opts):
+	# Additional task options
+	opts = {}
+
+	def __init__(self, inputs=[], **run_opts):
 		"""Initialize PythonRunner.
 
 		Args:
-			func (Callable): Python function to execute. Should be a generator.
-			inputs (list): List of inputs to pass to the function.
+			inputs (list): List of inputs to pass to the task.
 			**run_opts: Additional runner options.
 		"""
-		# Validate function
-		if func is None:
-			raise ValueError("PythonRunner requires a 'func' parameter")
-
-		if not callable(func):
-			raise ValueError("'func' must be a callable")
-
-		# Store the function
-		self.func = func
-
 		# Build runner config on-the-fly
 		config = TemplateLoader(input={
-			'name': run_opts.get('name', func.__name__ if hasattr(func, '__name__') else 'python'),
+			'name': self.__class__.__name__,
 			'type': 'task',
-			'description': run_opts.get('description', func.__doc__ or 'Custom Python runner')
+			'input_types': self.input_types,
+			'description': run_opts.get('description', None)
 		})
 
 		# Extract run opts
 		hooks = run_opts.pop('hooks', {})
+		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
 		node_id = context.get('node_id', None)
@@ -85,6 +69,15 @@ class PythonRunner(Runner):
 			config.node_id = node_id
 		if node_name:
 			config.node_name = node_name
+		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
+
+		# Prepare validators
+		input_validators = []
+		if not self.skip_if_no_inputs:
+			input_validators.append(self._validate_input_nonempty)
+		if not caller:
+			input_validators.append(self._validate_chunked_input)
+		validators = {'validate_input': input_validators}
 
 		# Call super().__init__
 		super().__init__(
@@ -93,41 +86,40 @@ class PythonRunner(Runner):
 			results=results,
 			run_opts=run_opts,
 			hooks=hooks,
-			validators={},
+			validators=validators,
 			context=context)
 
-	def yielder(self) -> Iterator[Any]:
-		"""Execute the Python function and yield its results.
+	@staticmethod
+	def _validate_input_nonempty(self, inputs):
+		"""Input is empty."""
+		if not inputs or len(inputs) == 0:
+			return False
+		return True
+
+	@staticmethod
+	def _validate_chunked_input(self, inputs):
+		"""Command does not support multiple inputs in non-worker mode. Consider running with a remote worker instead."""
+		if len(inputs) > 1:
+			return False
+		return True
+
+	def yielder(self):
+		"""Execute the Python task and yield its results.
+
+		This method should be overridden by subclasses to implement
+		the actual task logic.
 
 		Yields:
-			OutputType: Results from the Python function.
+			OutputType: Results from the Python task.
 		"""
-		try:
-			# Abort if dry run
-			if self.dry_run:
-				yield Info(message=f'Would execute: {self.func.__name__}')
-				return
+		raise NotImplementedError("Subclasses must implement yielder() method")
 
-			# Check if function is a generator
-			if inspect.isgeneratorfunction(self.func):
-				# Call as generator
-				yield from self.func(self, self.inputs)
-			else:
-				# Call as regular function and yield result
-				result = self.func(self, self.inputs)
-				if result is not None:
-					yield result
-
-		except Exception as e:
-			logger.exception(f"Error executing Python function: {e}")
-			yield Error.from_exception(e)
-
-	def build_celery_workflow(self):
-		"""Build Celery workflow for Python runner execution.
-
-		Returns:
-			celery.Signature: Celery task signature.
-		"""
-		# For now, PythonRunner doesn't support Celery execution
-		# This could be implemented in the future by pickling the function
-		raise NotImplementedError("PythonRunner does not support Celery execution yet")
+	@classmethod
+	def delay(cls, *args, **kwargs):
+		"""Submit task to Celery for async execution."""
+		from secator.celery import run_command
+		kwargs['sync'] = False
+		return run_command.apply_async(
+			kwargs={'args': args, 'kwargs': kwargs},
+			queue=cls.profile if not callable(cls.profile) else cls.profile(kwargs)
+		)
