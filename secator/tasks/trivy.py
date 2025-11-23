@@ -48,7 +48,7 @@ class trivy(Vuln):
 	opt_value_map = {
 		'mode': lambda x: convert_mode(x)
 	}
-	install_version = 'v0.61.1'
+	install_version = 'v0.67.2'
 	install_cmd = (
 		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'
 		f'sudo sh -s -- -b {CONFIG.dirs.bin} [install_version]'
