@@ -92,7 +92,7 @@ class nuclei(VulnMulti):
 		Tag: {
 			NAME: lambda x: nuclei.name_extractor(x),
 			'match': 'matched-at',
-			'category': lambda x: (tags := x['info'].get('tags', [])) and tags[0] or 'general',
+			'category': lambda x: (x['info'].get('tags') or ['general'])[0],
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 			'_source': 'nuclei',
 		},
