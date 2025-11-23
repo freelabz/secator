@@ -10,7 +10,7 @@ from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
 
 
-def output_discriminator(self, item):
+def output_discriminator(item):
 	"""Discriminate between Tag and Vulnerability based on severity."""
 	if 'percent' in item:
 		return Progress
@@ -92,7 +92,7 @@ class nuclei(VulnMulti):
 		Tag: {
 			NAME: lambda x: nuclei.name_extractor(x),
 			'match': 'matched-at',
-			'category': lambda x: x['info'].get('tags', [])[0] if x['info'].get('tags') else 'general',
+			'category': lambda x: x['info'].get('tags', [])[0] if x['info'].get('tags', []) else 'general',
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 			'_source': 'nuclei',
 		},
