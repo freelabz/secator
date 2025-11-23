@@ -1,0 +1,222 @@
+[
+  {
+    "chain": [
+      "whois.iana.org",
+      "whois.verisign-grs.com",
+      "whois.ovh.com"
+    ],
+    "query": "ovh.com",
+    "whois.iana.org": {
+      "contact": [
+        {
+          "address": [
+            "12061 Bluemont Way",
+            "Reston VA 20190",
+            "United States of America (the)"
+          ],
+          "contact": "administrative",
+          "e-mail": "info@verisign-grs.com",
+          "fax-no": "+1 703 948 3978",
+          "name": "Registry Customer Service",
+          "organisation": "VeriSign Global Registry Services",
+          "phone": "+1 703 925-6999"
+        },
+        {
+          "address": [
+            "12061 Bluemont Way",
+            "Reston VA 20190",
+            "United States of America (the)"
+          ],
+          "contact": "technical",
+          "e-mail": "info@verisign-grs.com",
+          "fax-no": "+1 703 948 3978",
+          "name": "Registry Customer Service",
+          "organisation": "VeriSign Global Registry Services",
+          "phone": "+1 703 925-6999"
+        }
+      ],
+      "created": {
+        "changed": "2023-12-07",
+        "created": "1985-01-01",
+        "source": "IANA"
+      },
+      "domain": "COM",
+      "nserver": {
+        "ds-rdata": "19718 13 2 8acbb0cd28f41250a80a491389424d341522d946b0da0c0291f2d3d771d7805a",
+        "nserver": {
+          "A.GTLD-SERVERS.NET": [
+            "192.5.6.30",
+            "2001:503:a83e:0:0:0:2:30"
+          ],
+          "B.GTLD-SERVERS.NET": [
+            "192.33.14.30",
+            "2001:503:231d:0:0:0:2:30"
+          ],
+          "C.GTLD-SERVERS.NET": [
+            "192.26.92.30",
+            "2001:503:83eb:0:0:0:0:30"
+          ],
+          "D.GTLD-SERVERS.NET": [
+            "192.31.80.30",
+            "2001:500:856e:0:0:0:0:30"
+          ],
+          "E.GTLD-SERVERS.NET": [
+            "192.12.94.30",
+            "2001:502:1ca1:0:0:0:0:30"
+          ],
+          "F.GTLD-SERVERS.NET": [
+            "192.35.51.30",
+            "2001:503:d414:0:0:0:0:30"
+          ],
+          "G.GTLD-SERVERS.NET": [
+            "192.42.93.30",
+            "2001:503:eea3:0:0:0:0:30"
+          ],
+          "H.GTLD-SERVERS.NET": [
+            "192.54.112.30",
+            "2001:502:8cc:0:0:0:0:30"
+          ],
+          "I.GTLD-SERVERS.NET": [
+            "192.43.172.30",
+            "2001:503:39c1:0:0:0:0:30"
+          ],
+          "J.GTLD-SERVERS.NET": [
+            "192.48.79.30",
+            "2001:502:7094:0:0:0:0:30"
+          ],
+          "K.GTLD-SERVERS.NET": [
+            "192.52.178.30",
+            "2001:503:d2d:0:0:0:0:30"
+          ],
+          "L.GTLD-SERVERS.NET": [
+            "192.41.162.30",
+            "2001:500:d937:0:0:0:0:30"
+          ],
+          "M.GTLD-SERVERS.NET": [
+            "192.55.83.30",
+            "2001:501:b1f9:0:0:0:0:30"
+          ]
+        }
+      },
+      "organisation": {
+        "address": [
+          "12061 Bluemont Way",
+          "Reston VA 20190",
+          "United States of America (the)"
+        ],
+        "organisation": "VeriSign Global Registry Services"
+      },
+      "raw": "% IANA WHOIS server\n% for more information on IANA, visit http://www.iana.org\n% This query returned 1 object\n\nrefer:        whois.verisign-grs.com\n\ndomain:       COM\n\norganisation: VeriSign Global Registry Services\naddress:      12061 Bluemont Way\naddress:      Reston VA 20190\naddress:      United States of America (the)\n\ncontact:      administrative\nname:         Registry Customer Service\norganisation: VeriSign Global Registry Services\naddress:      12061 Bluemont Way\naddress:      Reston VA 20190\naddress:      United States of America (the)\nphone:        +1 703 925-6999\nfax-no:       +1 703 948 3978\ne-mail:       info@verisign-grs.com\n\ncontact:      technical\nname:         Registry Customer Service\norganisation: VeriSign Global Registry Services\naddress:      12061 Bluemont Way\naddress:      Reston VA 20190\naddress:      United States of America (the)\nphone:        +1 703 925-6999\nfax-no:       +1 703 948 3978\ne-mail:       info@verisign-grs.com\n\nnserver:      A.GTLD-SERVERS.NET 192.5.6.30 2001:503:a83e:0:0:0:2:30\nnserver:      B.GTLD-SERVERS.NET 192.33.14.30 2001:503:231d:0:0:0:2:30\nnserver:      C.GTLD-SERVERS.NET 192.26.92.30 2001:503:83eb:0:0:0:0:30\nnserver:      D.GTLD-SERVERS.NET 192.31.80.30 2001:500:856e:0:0:0:0:30\nnserver:      E.GTLD-SERVERS.NET 192.12.94.30 2001:502:1ca1:0:0:0:0:30\nnserver:      F.GTLD-SERVERS.NET 192.35.51.30 2001:503:d414:0:0:0:0:30\nnserver:      G.GTLD-SERVERS.NET 192.42.93.30 2001:503:eea3:0:0:0:0:30\nnserver:      H.GTLD-SERVERS.NET 192.54.112.30 2001:502:8cc:0:0:0:0:30\nnserver:      I.GTLD-SERVERS.NET 192.43.172.30 2001:503:39c1:0:0:0:0:30\nnserver:      J.GTLD-SERVERS.NET 192.48.79.30 2001:502:7094:0:0:0:0:30\nnserver:      K.GTLD-SERVERS.NET 192.52.178.30 2001:503:d2d:0:0:0:0:30\nnserver:      L.GTLD-SERVERS.NET 192.41.162.30 2001:500:d937:0:0:0:0:30\nnserver:      M.GTLD-SERVERS.NET 192.55.83.30 2001:501:b1f9:0:0:0:0:30\nds-rdata:     19718 13 2 8acbb0cd28f41250a80a491389424d341522d946b0da0c0291f2d3d771d7805a\n\nwhois:        whois.verisign-grs.com\n\nstatus:       ACTIVE\nremarks:      Registration information: http://www.verisigninc.com\n\ncreated:      1985-01-01\nchanged:      2023-12-07\nsource:       IANA\n\n",
+      "refer": "whois.verisign-grs.com",
+      "status": {
+        "remarks": "Registration information: http://www.verisigninc.com",
+        "status": "ACTIVE"
+      },
+      "whois": "whois.verisign-grs.com"
+    },
+    "whois.ovh.com": {
+      "Admin City": "REDACTED FOR PRIVACY",
+      "Admin Country": "FR",
+      "Admin Email": "REDACTED FOR PRIVACY - Send message to contact by visiting https://ovhcloud.com/en/lp/request-ovhcloud-registered-domain/",
+      "Admin Fax": "REDACTED FOR PRIVACY",
+      "Admin Fax Ext": "REDACTED FOR PRIVACY",
+      "Admin Name": "REDACTED FOR PRIVACY",
+      "Admin Organization": "REDACTED FOR PRIVACY",
+      "Admin Phone": "REDACTED FOR PRIVACY",
+      "Admin Phone Ext": "REDACTED FOR PRIVACY",
+      "Admin Postal Code": "REDACTED FOR PRIVACY",
+      "Admin State/Province": "REDACTED FOR PRIVACY",
+      "Admin Street": "REDACTED FOR PRIVACY",
+      "Creation Date": "1997-02-07T05:00:00Z",
+      "DNSSEC": "unsigned",
+      "Domain Name": "ovh.com",
+      "Domain Status": {
+        "clientDeleteProhibited": [
+          "https://icann.org/epp#clientDeleteProhibited"
+        ],
+        "clientTransferProhibited": [
+          "https://icann.org/epp#clientTransferProhibited"
+        ]
+      },
+      "Name Server": [
+        "ns.ovh.net",
+        "ns10.ovh.net",
+        "dns.ovh.net",
+        "dns10.ovh.net",
+        "dns200.anycast.me",
+        "ns200.anycast.me"
+      ],
+      "Registrant City": "REDACTED FOR PRIVACY",
+      "Registrant Country": "FR",
+      "Registrant Email": "REDACTED FOR PRIVACY - Send message to contact by visiting https://ovhcloud.com/en/lp/request-ovhcloud-registered-domain/",
+      "Registrant Fax": "REDACTED FOR PRIVACY",
+      "Registrant Fax Ext": "REDACTED FOR PRIVACY",
+      "Registrant Name": "REDACTED FOR PRIVACY",
+      "Registrant Organization": "REDACTED FOR PRIVACY",
+      "Registrant Phone": "REDACTED FOR PRIVACY",
+      "Registrant Phone Ext": "REDACTED FOR PRIVACY",
+      "Registrant Postal Code": "REDACTED FOR PRIVACY",
+      "Registrant State/Province": "REDACTED FOR PRIVACY",
+      "Registrant Street": "REDACTED FOR PRIVACY",
+      "Registrar": "OVH, SAS",
+      "Registrar Abuse Contact Email": "abuse@ovh.net",
+      "Registrar Abuse Contact Phone": "+33.972101007",
+      "Registrar IANA ID": "433",
+      "Registrar Registration Expiration Date": "2033-02-08T05:00:00+01:00",
+      "Registrar URL": "https://ovh.com",
+      "Registrar WHOIS Server": "whois.ovh.com",
+      "Registry Admin ID": "REDACTED FOR PRIVACY",
+      "Registry Domain ID": "REDACTED FOR PRIVACY",
+      "Registry Registrant ID": "REDACTED FOR PRIVACY",
+      "Registry Tech ID": "REDACTED FOR PRIVACY",
+      "Tech City": "REDACTED FOR PRIVACY",
+      "Tech Country": "FR",
+      "Tech Email": "REDACTED FOR PRIVACY - Send message to contact by visiting https://ovhcloud.com/en/lp/request-ovhcloud-registered-domain/",
+      "Tech Fax": "REDACTED FOR PRIVACY",
+      "Tech Fax Ext": "REDACTED FOR PRIVACY",
+      "Tech Name": "REDACTED FOR PRIVACY",
+      "Tech Organization": "REDACTED FOR PRIVACY",
+      "Tech Phone": "REDACTED FOR PRIVACY",
+      "Tech Phone Ext": "REDACTED FOR PRIVACY",
+      "Tech Postal Code": "REDACTED FOR PRIVACY",
+      "Tech State/Province": "REDACTED FOR PRIVACY",
+      "Tech Street": "REDACTED FOR PRIVACY",
+      "Updated Date": "2024-11-25T14:32:20Z",
+      "comments": "URL of the ICANN WHOIS Data Problem Reporting System:",
+      "http://wdprs.internic.net/": "http://wdprs.internic.net/",
+      "raw": "Domain Name: ovh.com\nRegistry Domain ID: REDACTED FOR PRIVACY\nRegistrar WHOIS Server: whois.ovh.com\nRegistrar URL: https://ovh.com\nUpdated Date: 2024-11-25T14:32:20Z\nCreation Date: 1997-02-07T05:00:00Z\nRegistrar Registration Expiration Date: 2033-02-08T05:00:00+01:00\nRegistrar: OVH, SAS\nRegistrar IANA ID: 433\nRegistrar Abuse Contact Email: abuse@ovh.net\nRegistrar Abuse Contact Phone: +33.972101007\nDomain Status: clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited\nDomain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited\nRegistry Registrant ID: REDACTED FOR PRIVACY\nRegistrant Name: REDACTED FOR PRIVACY\nRegistrant Organization: REDACTED FOR PRIVACY\nRegistrant Street: REDACTED FOR PRIVACY\nRegistrant City: REDACTED FOR PRIVACY\nRegistrant State/Province: REDACTED FOR PRIVACY\nRegistrant Postal Code: REDACTED FOR PRIVACY\nRegistrant Country: FR\nRegistrant Phone: REDACTED FOR PRIVACY\nRegistrant Phone Ext: REDACTED FOR PRIVACY\nRegistrant Fax: REDACTED FOR PRIVACY\nRegistrant Fax Ext: REDACTED FOR PRIVACY\nRegistrant Email: REDACTED FOR PRIVACY - Send message to contact by visiting https://ovhcloud.com/en/lp/request-ovhcloud-registered-domain/\nRegistry Admin ID: REDACTED FOR PRIVACY\nAdmin Name: REDACTED FOR PRIVACY\nAdmin Organization: REDACTED FOR PRIVACY\nAdmin Street: REDACTED FOR PRIVACY\nAdmin City: REDACTED FOR PRIVACY\nAdmin State/Province: REDACTED FOR PRIVACY\nAdmin Postal Code: REDACTED FOR PRIVACY\nAdmin Country: FR\nAdmin Phone: REDACTED FOR PRIVACY\nAdmin Phone Ext: REDACTED FOR PRIVACY\nAdmin Fax: REDACTED FOR PRIVACY\nAdmin Fax Ext: REDACTED FOR PRIVACY\nAdmin Email: REDACTED FOR PRIVACY - Send message to contact by visiting https://ovhcloud.com/en/lp/request-ovhcloud-registered-domain/\nRegistry Tech ID: REDACTED FOR PRIVACY\nTech Name: REDACTED FOR PRIVACY\nTech Organization: REDACTED FOR PRIVACY\nTech Street: REDACTED FOR PRIVACY\nTech City: REDACTED FOR PRIVACY\nTech State/Province: REDACTED FOR PRIVACY\nTech Postal Code: REDACTED FOR PRIVACY\nTech Country: FR\nTech Phone: REDACTED FOR PRIVACY\nTech Phone Ext: REDACTED FOR PRIVACY\nTech Fax: REDACTED FOR PRIVACY\nTech Fax Ext: REDACTED FOR PRIVACY\nTech Email: REDACTED FOR PRIVACY - Send message to contact by visiting https://ovhcloud.com/en/lp/request-ovhcloud-registered-domain/\nName Server: ns.ovh.net\nName Server: ns10.ovh.net\nName Server: dns.ovh.net\nName Server: dns10.ovh.net\nName Server: dns200.anycast.me\nName Server: ns200.anycast.me\nDNSSEC: unsigned\nURL of the ICANN WHOIS Data Problem Reporting System:\nhttp://wdprs.internic.net/\n>>> Last update of WHOIS database: 2025-06-25T09:09:55Z <<<\n\nFor more information on Whois status codes, please visit https://icann.org/epp \n\n###############################################################################\n#\n# Welcome to the OVH WHOIS Server.\n#\n# whois server  : whois.ovh.com       check server  : check.ovh.com\n#\n# The data in this Whois is at your disposal  with the aim of supplying you the\n# information only,  that is helping you  in the obtaining  of  the information\n# about  or  related to a domain name registration record.   OVH Sas  make this\n# information available \"as is\", and  do not  guarantee its accuracy.  By using\n# Whois,  you agree that you will use these data  only for  legal  purposes and\n# that,  under no circumstances will you use this data to:  (1) Allow,  enable,\n# or  otherwise  support  the  transmission  of  mass  unsolicited,  commercial\n# advertisement  or  roughly  or  requests  via the  individual mail (courier),\n# the E-mail (SPAM), by telephone or by fax. (2) Enable high volume, automated,\n# electronic  processes  that  apply  to  OVH  Sas   (or its computer systems).\n# The copy,   the compilation,   the re-packaging,   the dissemination   or the\n# other  use  of  the Whois base  is  expressly  forbidden  without  the  prior\n# written consent of  OVH.  Domain  ownership  disputes should be settled using\n# ICANN's Uniform Dispute Resolution Policy: http://www.icann.org/udrp/udrp.htm\n# We reserve the right  to  modify  these  terms  at  any  time.  By submitting\n# this query,  you agree to  abide by these terms.  OVH Sas  reserves the right\n# to  terminate  your  access  to  the  OVH Sas  Whois  database  in  its  sole\n# discretion,   including   without   limitation,   for  excessive  querying of\n# the Whois database  or  for  failure  to  otherwise  abide  by  this  policy.\n#\n# L'outil du Whois  est  à  votre  disposition  dans  le  but  de  vous fournir\n# l'information  seulement,  c'est-à-dire  vous   aider   dans  l'obtention  de\n# l'information  sur ou lié à un  rapport  d'enregistrement  de nom de domaine.\n# OVH Sas rend  cette information disponible  \"comme est,\"  et  ne garanti pas\n# son exactitude. En utilisant  notre outil  Whois, vous  reconnaissez que vous\n# emploierez ces données seulement pour  des buts légaux et ne pas utiliser cet\n# outil dans les buts suivant: (1) la transmission de publicité non sollicitée,\n# commerciale massive ou en gros ou des sollicitations via courrier individuel,\n# le courrier électronique (c'est-à-dire SPAM),  par  téléphone ou par fax. (2)\n# l'utilisation d'un grand volume,  automatisé  des processus électroniques qui\n# soulignent ou chargent ce système de base de données  Whois  vous fournissant\n# cette  information.   La  copie   de  tout  ou  partie,   la compilation,  le\n# re-emballage,  la dissémination ou d'autre utilisation de la base Whois  sont\n# expressément interdits sans consentement écrit antérieur de OVH. Un désaccord\n# sur la possession d'un nom de domaine peut être résolu en suivant la  Uniform\n# Dispute  Resolution  Policy  de  l'ICANN:  http://www.icann.org/udrp/udrp.htm\n# Nous nous  réservons  le  droit  de  modifier  ces  termes  à tout moment. En\n# soumettant une requête au Whois vous consentez à vous soumettre à ces termes.\n\n# local time : 2025-11-16T01:46:32Z\n# gmt time : 2025-11-16T01:46:32Z\n# last modify : 2025-06-25T09:09:55Z\n\n"
+    },
+    "whois.verisign-grs.com": {
+      "Creation Date": "1997-02-07T05:00:00Z",
+      "DNSSEC": "unsigned",
+      "Domain Name": "OVH.COM",
+      "Domain Status": {
+        "clientDeleteProhibited": [
+          "https://icann.org/epp#clientDeleteProhibited"
+        ],
+        "clientTransferProhibited": [
+          "https://icann.org/epp#clientTransferProhibited"
+        ]
+      },
+      "Name Server": [
+        "DNS.OVH.NET",
+        "DNS10.OVH.NET",
+        "DNS200.ANYCAST.ME",
+        "NS.OVH.NET",
+        "NS10.OVH.NET",
+        "NS200.ANYCAST.ME"
+      ],
+      "Registrar": "OVH sas",
+      "Registrar Abuse Contact Email": "abuse@ovh.net",
+      "Registrar Abuse Contact Phone": "+33.972101007",
+      "Registrar IANA ID": "433",
+      "Registrar URL": "http://www.ovh.com",
+      "Registrar WHOIS Server": "whois.ovh.com",
+      "Registry Domain ID": "1938925_DOMAIN_COM-VRSN",
+      "Registry Expiry Date": "2033-02-08T05:00:00Z",
+      "URL of the ICANN Whois Inaccuracy Complaint Form": "https://www.icann.org/wicf/",
+      "Updated Date": "2024-11-25T14:32:20Z",
+      "raw": "   Domain Name: OVH.COM\n   Registry Domain ID: 1938925_DOMAIN_COM-VRSN\n   Registrar WHOIS Server: whois.ovh.com\n   Registrar URL: http://www.ovh.com\n   Updated Date: 2024-11-25T14:32:20Z\n   Creation Date: 1997-02-07T05:00:00Z\n   Registry Expiry Date: 2033-02-08T05:00:00Z\n   Registrar: OVH sas\n   Registrar IANA ID: 433\n   Registrar Abuse Contact Email: abuse@ovh.net\n   Registrar Abuse Contact Phone: +33.972101007\n   Domain Status: clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited\n   Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited\n   Name Server: DNS.OVH.NET\n   Name Server: DNS10.OVH.NET\n   Name Server: DNS200.ANYCAST.ME\n   Name Server: NS.OVH.NET\n   Name Server: NS10.OVH.NET\n   Name Server: NS200.ANYCAST.ME\n   DNSSEC: unsigned\n   URL of the ICANN Whois Inaccuracy Complaint Form: https://www.icann.org/wicf/\n>>> Last update of whois database: 2025-11-16T01:46:16Z <<<\n\nFor more information on Whois status codes, please visit https://icann.org/epp\n\nNOTICE: The expiration date displayed in this record is the date the\nregistrar's sponsorship of the domain name registration in the registry is\ncurrently set to expire. This date does not necessarily reflect the expiration\ndate of the domain name registrant's agreement with the sponsoring\nregistrar.  Users may consult the sponsoring registrar's Whois database to\nview the registrar's reported date of expiration for this registration.\n\nTERMS OF USE: You are not authorized to access or query our Whois\ndatabase through the use of electronic processes that are high-volume and\nautomated except as reasonably necessary to register domain names or\nmodify existing registrations; the Data in VeriSign Global Registry\nServices' (\"VeriSign\") Whois database is provided by VeriSign for\ninformation purposes only, and to assist persons in obtaining information\nabout or related to a domain name registration record. VeriSign does not\nguarantee its accuracy. By submitting a Whois query, you agree to abide\nby the following terms of use: You agree that you may use this Data only\nfor lawful purposes and that under no circumstances will you use this Data\nto: (1) allow, enable, or otherwise support the transmission of mass\nunsolicited, commercial advertising or solicitations via e-mail, telephone,\nor facsimile; or (2) enable high volume, automated, electronic processes\nthat apply to VeriSign (or its computer systems). The compilation,\nrepackaging, dissemination or other use of this Data is expressly\nprohibited without the prior written consent of VeriSign. You agree not to\nuse electronic processes that are automated and high-volume to access or\nquery the Whois database except as reasonably necessary to register\ndomain names or modify existing registrations. VeriSign reserves the right\nto restrict your access to the Whois database in its sole discretion to ensure\noperational stability.  VeriSign may restrict or terminate your access to the\nWhois database for failure to abide by these terms of use. VeriSign\nreserves the right to modify these terms at any time.\n\nThe Registry database contains ONLY .COM, .NET, .EDU domains and\nRegistrars.\n"
+    }
+  }
+]

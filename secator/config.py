@@ -107,7 +107,7 @@ class Security(StrictModel):
 class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
-	store_responses: bool = False
+	store_responses: bool = True
 	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
@@ -142,11 +142,12 @@ class Payloads(StrictModel):
 
 
 class Wordlists(StrictModel):
-	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains'}
+	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains', 'http_params': 'burp-parameter-names'}
 	templates: Dict[str, str] = {
 		'bo0m_fuzz': 'https://raw.githubusercontent.com/Bo0oM/fuzz.txt/master/fuzz.txt',
 		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt',  # noqa: E501
 		'directory_list_small': 'https://gist.githubusercontent.com/sl4v/c087e36164e74233514b/raw/c51a811c70bbdd87f4725521420cc30e7232b36d/directory-list-2.3-small.txt',  # noqa: E501
+		'burp-parameter-names': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt',  # noqa: E501
 	}
 	lists: Dict[str, List[str]] = {}
 

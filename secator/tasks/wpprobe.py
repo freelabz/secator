@@ -32,7 +32,7 @@ class wpprobe(Command):
 	}
 	install_version = 'v0.5.6'
 	install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
-	install_github_handle = 'Chocapikk/wpprobe'
+	github_handle = 'Chocapikk/wpprobe'
 	install_post = {
 		'*': 'wpprobe update-db'
 	}
@@ -70,10 +70,11 @@ class wpprobe(Command):
 				for plugin_data_version in plugin_data:
 					plugin_version = plugin_data_version['version']
 					yield Tag(
-						name=f'Wordpress plugin - {plugin_name} {plugin_version}',
-						category='wordpress_plugin',
+						category='info',
+						name='wordpress_plugin',
 						match=url,
 						extra_data={
+							'content': plugin_name + ':' + plugin_version,
 							'name': plugin_name,
 							'version': plugin_version
 						}
@@ -106,7 +107,7 @@ class wpprobe(Command):
 									id=vuln['cve'],
 									severity=severity,
 									cvss_score=vuln['cvss_score'],
-									tags=[plugin_name],
+									tags=['wordpress', 'wordpress_plugin', plugin_name],
 									reference=vuln['cve_link'],
 									extra_data=extra_data,
 									matched_at=url,

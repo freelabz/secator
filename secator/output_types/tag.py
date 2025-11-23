@@ -31,13 +31,20 @@ class Tag(OutputType):
 		return self.match
 
 	def __repr__(self) -> str:
-		s = f'🏷️  [bold yellow]{self.category}[/] [bold magenta]{self.name}[/]'
+		content = self.extra_data.get('content')
+		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{self.name}[/]'
+		small_content = False
+		if content and len(content) < 50:
+			small_content = True
+			s += f' [bold orange4]{content}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:incoming_envelope:[/]'
 		if self.extra_data:
 			for k, v in self.extra_data.items():
+				if k == 'content' and small_content:
+					continue
 				sep = ' '
 				if not v:
 					continue
@@ -46,7 +53,10 @@ class Tag(OutputType):
 					if len(v) > 1000:
 						v = v.replace('\n', '\n' + sep)
 						sep = '\n    '
-				ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
+				if k == 'content' and not small_content:
+					ed += f'\n    [bold red]{_s(k)}[/]:{sep}[yellow]{_s(v)}[/]'
+				else:
+					ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
 		return rich_to_ansi(s)

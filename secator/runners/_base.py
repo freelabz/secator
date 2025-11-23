@@ -1099,15 +1099,10 @@ class Runner:
 					f'Validator failed: target [bold blue]{_input}[/] of type [bold green]{input_type}[/] '
 					f'is not supported by [bold gold3]{self.unique_name}[/]. Supported types: [bold green]{supported_types}[/]'
 				)
-				if self.has_parent:
-					message += '. Removing from current inputs (runner context)'
-					info = Info(message=message)
-					self.inputs.remove(_input)
-					self.add_result(info)
-				else:
-					error = Error(message=message)
-					self.add_result(error)
-					return False
+				message += '. Removing from current inputs (runner context)'
+				warning = Warning(message=message)
+				self.inputs.remove(_input)
+				self.add_result(warning)
 		return True
 
 	@staticmethod

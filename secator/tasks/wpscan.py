@@ -71,13 +71,12 @@ class wpscan(VulnHttp):
 			PROVIDER: 'wpscan',
 		},
 	}
-	install_pre = {
+	install_version = 'v3.8.28'
+	install_pre_cmd = {
 		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
 		'pacman': ['make', 'ruby-erb'],
 		'*': ['make']
 	}
-	install_github_handle = 'wpscanteam/wpscan'
-	install_version = 'v3.8.28'
 	install_cmd = f'gem install wpscan -v [install_version_strip] --user-install -n {CONFIG.dirs.bin}'
 	install_post = {
 		'kali': (
@@ -85,6 +84,8 @@ class wpscan(VulnHttp):
 			f'gem install nokogiri --user-install -n {CONFIG.dirs.bin} --platform=ruby'
 		)
 	}
+	install_github_bin = False
+	github_handle = 'wpscanteam/wpscan'
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
@@ -142,10 +143,11 @@ class wpscan(VulnHttp):
 				number = version['number']
 				latest_version = main_theme.get('latest_version') or 'unknown'
 				yield Tag(
-					name=f'Wordpress theme - {slug} {number}',
-					category='wordpress_theme',
+					category='info',
+					name='wordpress_theme',
 					match=target,
 					extra_data={
+						'content': slug + ':' + number,
 						'url': location,
 						'latest_version': latest_version
 					}
@@ -157,7 +159,8 @@ class wpscan(VulnHttp):
 						name=f'Wordpress theme - {slug} {number} outdated',
 						description=f'The wordpress theme {slug} is outdated, consider updating to the latest version {latest_version}',
 						confidence='high',
-						severity='info'
+						severity='info',
+						tags=['wordpress', 'wordpress_theme']
 					)
 
 		# Interesting findings
@@ -175,11 +178,14 @@ class wpscan(VulnHttp):
 				number = version['number']
 				latest_version = data.get('latest_version') or 'unknown'
 				yield Tag(
-					name=f'Wordpress plugin - {slug} {number}',
-					category='wordpress_plugin',
+					category='info',
+					name='wordpress_plugin',
 					match=target,
 					extra_data={
+						'content': slug + ':' + number,
 						'url': location,
+						'name': slug,
+						'version': number,
 						'latest_version': latest_version
 					}
 				)
@@ -190,5 +196,6 @@ class wpscan(VulnHttp):
 						name=f'Wordpress plugin - {slug} {number} outdated',
 						description=f'The wordpress plugin {slug} is outdated, consider updating to the latest version {latest_version}.',
 						confidence='high',
-						severity='info'
+						severity='info',
+						tags=['wordpress', 'wordpress_plugin']
 					)

@@ -73,7 +73,7 @@ class ffuf(HttpFuzzer):
 	encoding = 'ansi'
 	install_version = 'v2.1.0'
 	install_cmd = 'go install -v github.com/ffuf/ffuf/v2@[install_version]'
-	install_github_handle = 'ffuf/ffuf'
+	github_handle = 'ffuf/ffuf'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
@@ -120,6 +120,7 @@ class ffuf(HttpFuzzer):
 		if self.get_opt_value('fuzz_host_header'):
 			yield Subdomain(
 				host=item['host'],
+				verified=False,
 				domain=extract_domain_info(item['host'], domain_only=True),
 				sources=['http_host_header']
 			)

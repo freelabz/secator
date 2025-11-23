@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.20.1](https://github.com/freelabz/secator/compare/v0.20.0...v0.20.1) (2025-11-21)
+
+
+### Bug Fixes
+
+* tag output, add fixtures for all tasks, improve test coverage ([#755](https://github.com/freelabz/secator/issues/755)) ([cd4c52c](https://github.com/freelabz/secator/commit/cd4c52ccdce3ce5058ef7cd2b1ea64d2401bb9cb))
+
+## [0.20.0](https://github.com/freelabz/secator/compare/v0.19.1...v0.20.0) (2025-11-20)
+
+
+### Features
+
+* add tag category field ([#741](https://github.com/freelabz/secator/issues/741)) ([92ec6b8](https://github.com/freelabz/secator/commit/92ec6b817b5921bde00c9bbbde6662273711efaf))
+* **core:** add 'verified' field for Url / Subdomain, add passive option and profile ([#753](https://github.com/freelabz/secator/issues/753)) ([9685b40](https://github.com/freelabz/secator/commit/9685b401a23afafa09df959e00bb2b8948fc9c29))
+* improve code_scan workflow, rework secret hunters, enhance tag formatting ([#750](https://github.com/freelabz/secator/issues/750)) ([e65c8a8](https://github.com/freelabz/secator/commit/e65c8a841b28fa9701685b41888e2e4c7d01e3f4))
+* **task:** jswhois integration ([#742](https://github.com/freelabz/secator/issues/742)) ([fa699e8](https://github.com/freelabz/secator/commit/fa699e8f7336a3579ff8d2054ea50223a6cf0cc9))
+* **tasks:** getasn integration ([#739](https://github.com/freelabz/secator/issues/739)) ([0bd2e61](https://github.com/freelabz/secator/commit/0bd2e61d841c5983c62cb64d13306a0cc4aa0284))
+* **tasks:** trufflehog integration ([#749](https://github.com/freelabz/secator/issues/749)) ([40cce2a](https://github.com/freelabz/secator/commit/40cce2a21d2e795babc1bfe2b4552d3505b834ab))
+* **tasks:** x8 integration and param fuzzers improvements ([#748](https://github.com/freelabz/secator/issues/748)) ([049c99a](https://github.com/freelabz/secator/commit/049c99ab9b24f06c9b5aec1f930df2d87eae5568))
+* **task:** whois integration ([#672](https://github.com/freelabz/secator/issues/672)) ([f5e3110](https://github.com/freelabz/secator/commit/f5e311054d5c7be89c4bf706298db07face2a36e))
+* **workflows:** add domain_recon workflow ([#743](https://github.com/freelabz/secator/issues/743)) ([4d052af](https://github.com/freelabz/secator/commit/4d052afc146a7ca77be56c3307ee6566269affe9))
+
+
+### Bug Fixes
+
+* **build:** add cargo install to list of supported builders ([#751](https://github.com/freelabz/secator/issues/751)) ([fa75727](https://github.com/freelabz/secator/commit/fa757278165c73dfb28eab97002e43fe1cff8c23))
+* **dnsx:** basic dns query before bruteforce to check for false positives ([#744](https://github.com/freelabz/secator/issues/744)) ([eb45457](https://github.com/freelabz/secator/commit/eb4545734c5591154ce29253e9f5a906390369ed))
+* **ffuf:** bruteforce output subdomains ([#746](https://github.com/freelabz/secator/issues/746)) ([29eb9fb](https://github.com/freelabz/secator/commit/29eb9fb2b519548989f35217f441494f55d367fc))
+* **installer:** issues with repeated package install and version parsing ([#754](https://github.com/freelabz/secator/issues/754)) ([2e4d0c7](https://github.com/freelabz/secator/commit/2e4d0c77364efed85647ecab7083cb87d98e6738))
+* remove github handles if no bin ([#752](https://github.com/freelabz/secator/issues/752)) ([896d399](https://github.com/freelabz/secator/commit/896d3995f22c2cd19b959041eba9a3f8b669e9dd))
+
 ## [0.19.1](https://github.com/freelabz/secator/compare/v0.19.0...v0.19.1) (2025-11-07)
 
 

@@ -48,17 +48,18 @@ class testssl(Command):
 	proxychains = False
 	proxy_socks5 = False
 	profile = 'io'
-	install_pre = {
+	install_cmd_pre = {
 		'apk': ['hexdump', 'coreutils', 'procps'],
 		'pacman': ['util-linux'],
 		'*': ['bsdmainutils']
 	}
-	install_github_handle = 'testssl/testssl.sh'
 	install_version = 'v3.2.0'
 	install_cmd = (
 		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh_[install_version] || true && '  # noqa: E501
 		f'ln -sf {CONFIG.dirs.share}/testssl.sh_[install_version]/testssl.sh {CONFIG.dirs.bin}'
 	)
+	install_github_bin = False
+	github_handle = 'testssl/testssl.sh'
 
 	@staticmethod
 	def on_cmd(self):
@@ -140,12 +141,12 @@ class testssl(Command):
 					if not verbose:
 						continue
 					yield Tag(
-						name=f'SSL/TLS [{id}]',
 						category='info',
+						name='ssl_tls',
 						match=host,
 						extra_data={
-							'type': id,
-							'finding': finding,
+							'subtype': id,
+							'content': finding,
 						}
 					)
 
@@ -154,7 +155,7 @@ class testssl(Command):
 					if id in ['TLS1', 'TLS1_1']:
 						human_name = f'SSL/TLS deprecated protocol offered: {id}'
 					else:
-						human_name = f'SSL/TLS {id}: {finding}'
+						human_name = f'SSL/TLS {id}'
 					yield Vulnerability(
 						name=human_name,
 						matched_at=host,
