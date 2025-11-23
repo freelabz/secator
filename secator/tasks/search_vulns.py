@@ -165,7 +165,7 @@ class search_vulns(Vuln):
 				'exploits': list(vuln_data.get('exploits', [])),
 				'aliases': vuln_data.get('aliases', {}),
 				'cisa_known_exploited': vuln_data.get('cisa_known_exploited', False),
-				'product_ids': list(product_ids.keys()),
+				'product_ids': product_ids,
 				'matched_at': matched_at,
 			}
 			yield vuln_dict
