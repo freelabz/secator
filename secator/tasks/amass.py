@@ -79,15 +79,12 @@ class amass(ReconDns):
 		if not line:
 			return
 
-		# Extract the subdomain (amass outputs simple text format)
-		subdomain = line
-
 		# Extract domain from subdomain
-		domain = extract_domain_info(subdomain, domain_only=True)
+		domain = extract_domain_info(line, domain_only=True)
 
 		if domain:
 			yield {
-				'host': subdomain,
+				'host': line,
 				'domain': domain,
 				'verified': False,
 				'sources': ['amass']
