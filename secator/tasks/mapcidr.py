@@ -16,7 +16,7 @@ class mapcidr(ReconIp):
 	tags = ['ip', 'recon']
 	input_flag = '-cidr'
 	file_flag = '-cl'
-	install_version = 'v1.1.34'
+	install_version = 'v1.1.97'
 	install_pre = {'apk': ['libc6-compat']}
 	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@[install_version]'
 	github_handle = 'projectdiscovery/mapcidr'

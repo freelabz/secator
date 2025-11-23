@@ -80,7 +80,7 @@ class cariddi(HttpCrawler):
 		'juicy_extensions': 'ext'
 	}
 	item_loaders = [JSONSerializer()]
-	install_version = 'v1.3.6'
+	install_version = 'v1.4.4'
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@[install_version]'
 	github_handle = 'edoardottt/cariddi'
 	encoding = 'ansi'
