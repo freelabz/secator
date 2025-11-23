@@ -3,7 +3,6 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DESCRIPTION, EXTRA_DATA
 								 ID, MATCHED_AT, NAME, PROVIDER, REFERENCES,
 								 SEVERITY, STRING, TAGS)
 from secator.output_types import Vulnerability
-from secator.serializers import JSONSerializer
 from secator.tasks._categories import Vuln
 
 
@@ -37,7 +36,6 @@ class search_vulns(Vuln):
 		'include_single_version_vulns': 'include-single-version-vulns',
 		'include_patched': 'include-patched',
 	}
-	item_loaders = [JSONSerializer()]
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: search_vulns.extract_id(x),
