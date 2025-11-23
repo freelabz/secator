@@ -1,20 +1,19 @@
 from secator.decorators import task
-from secator.definitions import HOST
-from secator.output_types import Tag
-from secator.serializers import JSONSerializer
+from secator.definitions import HOST, DOMAIN
+from secator.output_types import Subdomain
 from secator.tasks._categories import ReconDns
+from secator.utils import extract_domain_info
 
 
 @task()
 class amass(ReconDns):
 	"""Amass is a subdomain enumeration tool that can be used to find subdomains of a domain."""
-	cmd = 'amass enum -nocolor -v'
+	cmd = 'amass enum -nocolor'
 	input_types = [HOST]
-	output_types = [Tag]
+	output_types = [Subdomain]
 	tags = ['subdomain', 'enum']
 	file_flag = '-d'
 	input_flag = '-d'
-	json_flag = ''
 	opts = {
 		'active': {'is_flag': True, 'default': False, 'short': 'active', 'help': 'Attempt zone transfers and certificate name grabs'},  # noqa: E501
 		'asn': {'type': str, 'short': 'asn', 'help': 'ASN'},
@@ -61,9 +60,32 @@ class amass(ReconDns):
 		'min_for_recursive': 'min-for-recursive',
 		'no_recursive': 'norecursive',
 	}
-	item_loaders = [
-		JSONSerializer(),
-	]
+	output_map = {
+		Subdomain: {
+			DOMAIN: lambda x: extract_domain_info(
+				x['host'], domain_only=True
+			) if isinstance(x, dict) else extract_domain_info(x, domain_only=True)
+		}
+	}
 	install_version = 'v5.0.1'
 	install_cmd = 'go install -v github.com/owasp-amass/amass/v5/cmd/amass@[install_version]'
 	install_github_handle = 'owasp-amass/amass'
+
+	@staticmethod
+	def item_loader(self, line):
+		"""Parse amass text output line by line."""
+		# Amass v5 outputs one subdomain per line
+		line = line.strip()
+		if not line:
+			return
+
+		# Extract domain from subdomain
+		domain = extract_domain_info(line, domain_only=True)
+
+		if domain:
+			yield {
+				'host': line,
+				'domain': domain,
+				'verified': False,
+				'sources': ['amass']
+			}

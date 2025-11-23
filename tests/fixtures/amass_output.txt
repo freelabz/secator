@@ -1,0 +1,5 @@
+www.example.com
+mail.example.com
+ftp.example.com
+blog.example.com
+api.example.com
