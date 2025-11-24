@@ -61,7 +61,8 @@ class feroxbuster(HttpFuzzer):
 			STATUS_CODE: 'status',
 			CONTENT_TYPE: lambda x: x['headers'].get('content-type'),
 			LINES: 'line_count',
-			WORDS: 'word_count'
+			WORDS: 'word_count',
+			'response_headers': 'headers'
 		}
 	}
 	install_cmd_pre = {

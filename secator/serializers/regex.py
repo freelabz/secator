@@ -10,8 +10,9 @@ class RegexSerializer:
 
 	def run(self, line):
 		if self.findall:
-			match = self.regex.findall(line)
-			yield from match
+			matches = self.regex.finditer(line)
+			for match in matches:
+				yield match.groupdict()
 			return
 		output = {}
 		match = self.regex.match(line)

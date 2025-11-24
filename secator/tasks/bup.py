@@ -1,6 +1,5 @@
 import json
 import re
-
 from secator.decorators import task
 from secator.output_types import Url, Progress
 from secator.definitions import (
@@ -78,7 +77,7 @@ class bup(Http):
 		if 'Doing' in line:
 			progress_indicator = line.split(':')[-1]
 			current, total = tuple([int(c.strip()) for c in progress_indicator.split('/')])
-			return json.dumps({"duration": "unknown", "percent": int((current / total) * 100)})
+			return json.dumps({"percent": int((current / total) * 100)})
 		elif 'batcat' in line:  # ignore batcat lines as they're loaded as JSON
 			return None
 		return line

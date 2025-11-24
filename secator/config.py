@@ -88,7 +88,7 @@ class Cli(StrictModel):
 
 class Runners(StrictModel):
 	input_chunk_size: int = 100
-	progress_update_frequency: int = 20
+	progress_update_frequency: int = 10
 	stat_update_frequency: int = 20
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5

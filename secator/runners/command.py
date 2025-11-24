@@ -100,6 +100,7 @@ class Command(Runner):
 	# Hooks
 	hooks = [
 		'on_cmd',
+		'on_cmd_start',
 		'on_cmd_opts',
 		'on_cmd_done',
 		'on_line'
@@ -418,10 +419,17 @@ class Command(Runner):
 			dict: Serialized object.
 		"""
 		try:
-
 			# Abort if it has children tasks
 			if self.has_children:
 				return
+
+			# Run on_cmd_start hook
+			self.run_hooks('on_cmd_start')
+
+			# Run on_cmd_start hooks for item loaders
+			for item_loader in self.item_loaders:
+				if hasattr(item_loader, 'on_cmd_start'):
+					item_loader.on_cmd_start(self)
 
 			# Abort if dry run
 			if self.dry_run:
@@ -549,8 +557,7 @@ class Command(Runner):
 		yield line
 
 		# Run item_loader to try parsing as dict
-		for item in self.run_item_loaders(line):
-			yield item
+		yield from self.run_item_loaders('run', line)
 
 		# Skip rest of iteration (no process mode)
 		if self.no_process:
@@ -756,23 +763,26 @@ class Command(Runner):
 			for subproc in process.children(recursive=True):
 				yield from Command.get_process_info(subproc, children=False)
 
-	def run_item_loaders(self, line):
+	def run_item_loaders(self, func, *args):
 		"""Run item loaders against an output line.
 
 		Args:
-			line (str): Output line.
+			func (str): Function to call on item loaders.
+			*args: Additional arguments to pass to the function.
 		"""
 		if self.no_process:
 			return
 		for item_loader in self.item_loaders:
 			if (callable(item_loader)):
-				yield from item_loader(self, line)
+				yield from item_loader(self, *args)
 			elif item_loader:
 				name = item_loader.__class__.__name__.replace('Serializer', '').lower()
 				default_callback = lambda self, x: [(yield x)]  # noqa: E731
 				callback = getattr(self, f'on_{name}_loaded', None) or default_callback
-				for item in item_loader.run(line):
-					yield from callback(self, item)
+				fun = getattr(item_loader, func, None)
+				if fun:
+					for item in fun(*args):
+						yield from callback(self, item)
 
 	def _prompt_sudo(self, command):
 		"""
@@ -829,6 +839,17 @@ class Command(Runner):
 		for line in self.process.stdout.readlines():
 			yield from self.process_line(line)
 		self.process.wait()
+
+		# Run hooks after cmd has completed
+		result = self.run_hooks('on_cmd_done')
+		if result:
+			yield from result
+
+		# Run on_cmd_done hooks for item loaders
+		result = self.run_item_loaders('on_cmd_done', self)
+		if result:
+			yield from result
+
 		self.return_code = 0 if self.exit_ok else self.process.returncode
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code

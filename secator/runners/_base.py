@@ -971,8 +971,9 @@ class Runner:
 
 		# Init the new item and the list of output types to load from
 		new_item = None
-		output_types = getattr(self, 'output_types', [])
-		self.debug(f'input item: {item}', sub='item.convert', verbose=True)
+		output_types = getattr(self, 'output_types', []) + list(getattr(self, 'output_map', {}).keys())
+		output_types = set(output_types)
+		self.debug(f'Input item: {item}', sub='klass.load', verbose=True)
 
 		# Use a function to pick proper output types
 		output_discriminator = getattr(self, 'output_discriminator', None)

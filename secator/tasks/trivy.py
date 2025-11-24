@@ -1,5 +1,4 @@
 import click
-import os
 import yaml
 
 from pathlib import Path
@@ -12,6 +11,7 @@ from secator.output_types import Vulnerability, Tag, Info, Error
 from secator.tasks._categories import Vuln
 from secator.utils import caml_to_snake
 from secator.rich import console
+from secator.serializers import FileSerializer
 
 
 TRIVY_MODES = ['image', 'fs', 'repo']
@@ -45,6 +45,7 @@ class trivy(Vuln):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
+	item_loaders = [FileSerializer(output_flag='-o')]
 	opt_value_map = {
 		'mode': lambda x: convert_mode(x)
 	}
@@ -75,17 +76,10 @@ class trivy(Vuln):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
 		self.cmd = self.cmd.replace(f' -mode {mode}', '').replace('trivy', f'trivy {mode}')
-		self.cmd += f' -o {self.output_path}'
 
 	@staticmethod
-	def on_cmd_done(self):
-		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find JSON results in {self.output_path}')
-			return
-
-		yield Info(message=f'JSON results saved to {self.output_path}')
-		with open(self.output_path, 'r') as f:
-			results = yaml.safe_load(f.read()).get('Results', [])
+	def on_file_loaded(self, content):
+		results = yaml.safe_load(content).get('Results', [])
 		for item in results:
 			for vuln in item.get('Vulnerabilities', []):
 				vuln_id = vuln['VulnerabilityID']
