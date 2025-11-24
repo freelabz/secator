@@ -24,7 +24,8 @@ DEBUG = CONFIG.debug.split(',')
 
 # Constants
 OPT_NOT_SUPPORTED = -1
-OPT_PIPE_INPUT = -1
+OPT_PIPE_INPUT = -2
+OPT_SPACE_SEPARATED = -3
 STATE_COLORS = {
 	'PENDING': 'dim yellow3',
 	'RUNNING': 'bold yellow3',
@@ -60,6 +61,7 @@ FILTER_WORDS = 'filter_words'
 FOLLOW_REDIRECT = 'follow_redirect'
 FILTER_REGEX = 'filter_regex'
 FILTER_SIZE = 'filter_size'
+GCS_URL = 'gcs_url'
 GIT_REPOSITORY = 'git_repository'
 HEADER = 'header'
 HOST = 'host'

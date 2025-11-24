@@ -1,3 +1,7 @@
+import re
+
+from urllib.parse import urlparse, urlunparse
+
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
@@ -8,6 +12,26 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 from secator.output_types import Tag, Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
+
+CARIDDI_IGNORE_PATTERNS = re.compile(r"|".join([
+	r"<!--\s*Instance.*\s*-->",
+	r"<!--\s*(Styles|Scripts|Fonts|Images|Links|Forms|Inputs|Buttons|List|Next|Prev|Navigation dots)\s*-->",
+	r"<!--\s*end.*-->",
+	r"<!--\s*start.*-->",
+	r"<!--\s*begin.*-->",
+	r"<!--\s*here goes.*-->",
+	r"<!--\s*.*Yoast SEO.*\s*-->",
+	r"<!--\s*.*Google Analytics.*\s*-->",
+]), re.IGNORECASE)
+
+CARIDDI_IGNORE_LIST = ['BTC address']
+CARIDDI_RENAME_LIST = {
+	'IPv4 address': 'IpV4 address',
+	'MySQL error': 'Mysql error',
+	'MariaDB error': 'Mariadb error',
+	'PostgreSQL error': 'Postgresql error',
+	'SQLite error': 'Sqlite error',
+}
 
 
 @task()
@@ -58,12 +82,47 @@ class cariddi(HttpCrawler):
 	item_loaders = [JSONSerializer()]
 	install_version = 'v1.3.6'
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@[install_version]'
-	install_github_handle = 'edoardottt/cariddi'
+	github_handle = 'edoardottt/cariddi'
 	encoding = 'ansi'
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
 	proxy_http = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
-	profile = 'cpu'
+	profile = lambda opts: cariddi.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def dynamic_profile(opts):
+		juicy_endpoints = cariddi._get_opt_value(
+			opts,
+			'juicy_endpoints',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		juicy_extensions = cariddi._get_opt_value(
+			opts,
+			'juicy_extensions',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		info = cariddi._get_opt_value(
+			opts,
+			'info',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		secrets = cariddi._get_opt_value(
+			opts,
+			'secrets',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		errors = cariddi._get_opt_value(
+			opts,
+			'errors',
+			opts_conf=dict(cariddi.opts, **cariddi.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		hunt = juicy_endpoints or (juicy_extensions is not None) or info or secrets or errors
+		return 'cpu' if hunt is True else 'io'
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -82,30 +141,49 @@ class cariddi(HttpCrawler):
 		for param in params:
 			param_name = param['name']
 			for attack in param['attacks']:
-				extra_data = {'param': param_name, 'source': 'url'}
-				yield Tag(
-					name=f'{attack} param',
-					match=url,
-					extra_data=extra_data
-				)
+				extra_data = {k: v for k, v in param.items() if k not in ['name', 'attacks']}
+				extra_data['content'] = attack
+				parsed_url = urlparse(url)
+				params = parsed_url.query.split('&')
+				url_without_param = urlunparse(parsed_url._replace(query=''))
+				for p in params:
+					p_name, p_value = p.split('=')
+					if p_name == param_name:
+						p_value = p_value
+						break
+					yield Tag(
+						category='info',
+						name='url_param',
+						match=url_without_param,
+						extra_data={'content': p_name, 'value': p_value, 'url': url}
+					)
 
 		for error in errors:
-			match = error['match']
-			error['extra_data'] = {'error': match, 'source': 'body'}
-			error['match'] = url
+			error['category'] = 'error'
+			error['name'] = '_'.join(f'{error["name"]}'.lower().split())
+			error['extra_data'] = {'content': error['match'], 'url': url}
+			error['match'] = url_without_param
 			yield Tag(**error)
 
 		for secret in secrets:
-			match = secret['match']
-			secret['extra_data'] = {'secret': match, 'source': 'body'}
-			secret['match'] = url
+			secret['category'] = 'secret'
+			secret['name'] = '_'.join(f'{secret["name"]}'.lower().split())
+			secret['extra_data'] = {'content': secret['match'], 'url': url}
+			secret['match'] = url_without_param
 			yield Tag(**secret)
 
 		for info in infos:
-			CARIDDI_IGNORE_LIST = ['BTC address']  # TODO: make this a config option
 			if info['name'] in CARIDDI_IGNORE_LIST:
 				continue
-			match = info['match']
-			info['extra_data'] = {'info': match, 'source': 'body'}
-			info['match'] = url
+			if info['name'] in CARIDDI_RENAME_LIST:
+				info['name'] = CARIDDI_RENAME_LIST[info['name']]
+			content = info['match']
+			parsed_url = urlparse(url)
+			url_without_param = urlunparse(parsed_url._replace(query=''))
+			info['category'] = 'info'
+			info['name'] = '_'.join(f'{info["name"]}'.lower().split())
+			info['match'] = url_without_param
+			if CARIDDI_IGNORE_PATTERNS.match(content):
+				continue
+			info['extra_data'] = {'content': content, 'url': url}
 			yield Tag(**info)

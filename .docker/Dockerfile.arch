@@ -1,7 +1,9 @@
 FROM archlinux:latest
-
+ARG flavor=full
+ARG build_from_source=true
 ENV PATH="${PATH}:/root/.local/bin"
 ENV GOBIN="/root/.local/bin"
+ENV CARGO_HOME="/root/.local"
 RUN pacman -Syu --noconfirm && \
     pacman -S --noconfirm \
 	base-devel \

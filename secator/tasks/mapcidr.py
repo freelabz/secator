@@ -16,12 +16,10 @@ class mapcidr(ReconIp):
 	tags = ['ip', 'recon']
 	input_flag = '-cidr'
 	file_flag = '-cl'
-	install_pre = {
-		'apk': ['libc6-compat']
-	}
 	install_version = 'v1.1.34'
+	install_pre = {'apk': ['libc6-compat']}
 	install_cmd = 'go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@[install_version]'
-	install_github_handle = 'projectdiscovery/mapcidr'
+	github_handle = 'projectdiscovery/mapcidr'
 	opt_key_map = {
 		THREADS: OPT_NOT_SUPPORTED,
 		PROXY: OPT_NOT_SUPPORTED,

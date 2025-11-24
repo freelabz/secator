@@ -38,8 +38,7 @@ class naabu(ReconPort):
 		# 'health_check': 'hc'
 	}
 	opt_value_map = {
-		TIMEOUT: lambda x: int(x*1000) if x and x > 0 else None,  # convert to milliseconds
-		RETRIES: lambda x: 1 if x == 0 else x,
+		TIMEOUT: lambda x: int(x)*1000 if x and int(x) > 0 else None,  # convert to milliseconds
 		PROXY: lambda x: x.replace('socks5://', '')
 	}
 	item_loaders = [JSONSerializer()]
@@ -52,7 +51,7 @@ class naabu(ReconPort):
 	}
 	install_version = 'v2.3.3'
 	install_cmd = 'go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@[install_version]'
-	install_github_handle = 'projectdiscovery/naabu'
+	github_handle = 'projectdiscovery/naabu'
 	install_pre = {'apt': ['libpcap-dev'], 'apk': ['libpcap-dev', 'libc6-compat'], 'pacman|brew': ['libpcap']}
 	install_post = {'arch|alpine': 'sudo ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8'}
 	proxychains = False

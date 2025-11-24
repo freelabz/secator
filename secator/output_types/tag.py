@@ -9,9 +9,10 @@ from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 class Tag(OutputType):
 	name: str
 	match: str
+	category: str = field(default='general')
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	stored_response_path: str = field(default='', compare=False)
-	_source: str = field(default='', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='tag', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
@@ -20,7 +21,7 @@ class Tag(OutputType):
 	_duplicate: bool = field(default=False, repr=True, compare=False)
 	_related: list = field(default_factory=list, compare=False)
 
-	_table_fields = ['match', 'name', 'extra_data']
+	_table_fields = ['match', 'category', 'name', 'extra_data']
 	_sort_by = ('match', 'name')
 
 	def __post_init__(self):
@@ -30,13 +31,20 @@ class Tag(OutputType):
 		return self.match
 
 	def __repr__(self) -> str:
-		s = f'🏷️  [bold magenta]{self.name}[/]'
+		content = self.extra_data.get('content')
+		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{self.name}[/]'
+		small_content = False
+		if content and len(content) < 50:
+			small_content = True
+			s += f' [bold orange4]{content}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:incoming_envelope:[/]'
 		if self.extra_data:
 			for k, v in self.extra_data.items():
+				if k == 'content' and small_content:
+					continue
 				sep = ' '
 				if not v:
 					continue
@@ -45,7 +53,10 @@ class Tag(OutputType):
 					if len(v) > 1000:
 						v = v.replace('\n', '\n' + sep)
 						sep = '\n    '
-				ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
+				if k == 'content' and not small_content:
+					ed += f'\n    [bold red]{_s(k)}[/]:{sep}[yellow]{_s(v)}[/]'
+				else:
+					ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
 		return rich_to_ansi(s)

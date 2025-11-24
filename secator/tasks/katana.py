@@ -1,16 +1,16 @@
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
-from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-								 FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
-								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, STATUS_CODE,
-								 STORED_RESPONSE_PATH, TECH, THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER,
-								 CONTENT_LENGTH)
+from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+								 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
+								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
+
+EXCLUDED_PARAMS = ['v']
 
 
 @task()
@@ -18,7 +18,7 @@ class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana'
 	input_types = [URL]
-	output_types = [Url]
+	output_types = [Url, Tag]
 	tags = ['url', 'crawl']
 	file_flag = '-list'
 	input_flag = '-u'
@@ -63,28 +63,10 @@ class katana(HttpCrawler):
 		DELAY: lambda x: int(x) if isinstance(x, float) else x
 	}
 	item_loaders = [JSONSerializer()]
-	output_map = {
-		Url: {
-			URL: lambda x: x['request']['endpoint'],
-			HOST: lambda x: urlparse(x['request']['endpoint']).netloc,
-			TIME: 'timestamp',
-			METHOD: lambda x: x['request']['method'],
-			STATUS_CODE: lambda x: x['response'].get('status_code'),
-			CONTENT_TYPE: lambda x: x['response'].get('headers', {}).get('content_type', ';').split(';')[0],
-			CONTENT_LENGTH: lambda x: x['response'].get('headers', {}).get('content_length', 0),
-			WEBSERVER: lambda x: x['response'].get('headers', {}).get('server', ''),
-			TECH: lambda x: x['response'].get('technologies', []),
-			STORED_RESPONSE_PATH: lambda x: x['response'].get('stored_response_path', ''),
-			'response_headers': lambda x: x['response'].get('headers', {}),
-			# TAGS: lambda x: x['response'].get('server')
-		}
-	}
-	install_pre = {
-		'apk': ['libc6-compat']
-	}
+	install_pre = {'apk': ['libc6-compat']}
 	install_version = 'v1.1.3'
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@[install_version]'
-	install_github_handle = 'projectdiscovery/katana'
+	github_handle = 'projectdiscovery/katana'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
@@ -107,34 +89,85 @@ class katana(HttpCrawler):
 		store_responses = self.get_opt_value('store_responses')
 		if form_fill or form_extraction or store_responses:
 			self.cmd += f' -srd {self.reports_folder}/.outputs'
+		self.tags = []
+		self.urls = []
 
 	@staticmethod
 	def on_json_loaded(self, item):
 		# form detection
 		response = item.get('response', {})
 		forms = response.get('forms', [])
+		parsed_url = urlparse(item['request']['endpoint'])
+		url_without_params = urlunparse(parsed_url._replace(query=''))
+		params = parsed_url.query.split('&')
 		if forms:
 			for form in forms:
 				method = form['method']
-				yield Url(
+				url = Url(
 					form['action'],
-					host=urlparse(item['request']['endpoint']).netloc,
+					host=parsed_url.netloc,
 					method=method,
 					stored_response_path=response["stored_response_path"],
 					request_headers=self.get_opt_value('header', preprocess=True)
 				)
+				if url not in self.urls:
+					self.urls.append(url)
+					yield url
+				params = form.get('parameters', [])
 				yield Tag(
+					category='info',
 					name='form',
 					match=form['action'],
 					stored_response_path=response["stored_response_path"],
 					extra_data={
 						'method': form['method'],
 						'enctype': form.get('enctype', ''),
-						'parameters': ','.join(form.get('parameters', []))
+						'parameters': params
 					}
 				)
-		item['request_headers'] = self.get_opt_value('header', preprocess=True)
-		yield item
+				for param in params:
+					yield Tag(
+						category='info',
+						name='url_param',
+						match=form['action'],
+						extra_data={'content': param, 'value': 'FUZZ'}
+					)
+		url = Url(
+			url=item['request']['endpoint'],
+			host=parsed_url.netloc,
+			method=item['request']['method'],
+			request_headers=self.get_opt_value('header', preprocess=True),
+			time=item['timestamp'],
+			status_code=item['response'].get('status_code'),
+			content_type=item['response'].get('headers', {}).get('content_type', ';').split(';')[0],
+			content_length=item['response'].get('headers', {}).get('content_length', 0),
+			webserver=item['response'].get('headers', {}).get('server', ''),
+			tech=item['response'].get('technologies', []),
+			stored_response_path=item['response'].get('stored_response_path', ''),
+			response_headers=item['response'].get('headers', {}),
+		)
+		if url not in self.urls:
+			self.urls.append(url)
+			yield url
+		for param in params:
+			if not param:
+				continue
+			split_param = param.split('=')
+			param_name = split_param[0]
+			param_value = None
+			if len(split_param) > 1:
+				param_value = split_param[1]
+			if param_name in EXCLUDED_PARAMS:
+				continue
+			tag = Tag(
+				category='info',
+				name='url_param',
+				match=url_without_params,
+				extra_data={'content': param_name, 'value': param_value}
+			)
+			if tag not in self.tags:
+				self.tags.append(tag)
+				yield tag
 
 	@staticmethod
 	def on_item(self, item):
@@ -144,6 +177,8 @@ class katana(HttpCrawler):
 		if store_responses and os.path.exists(item.stored_response_path):
 			with open(item.stored_response_path, 'r', encoding='latin-1') as fin:
 				data = fin.read().splitlines(True)
+				if not data:
+					return item
 				first_line = data[0]
 			with open(item.stored_response_path, 'w', encoding='latin-1') as fout:
 				fout.writelines(data[1:])

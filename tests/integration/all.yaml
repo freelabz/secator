@@ -1,0 +1,17 @@
+type: profile
+name: all
+description: "All options"
+opts:
+    header: 'test'
+    data: '{"test": "test"}'
+    delay: 0
+    depth: 1
+    filter_codes: '400,401,403'
+    follow_redirect: True
+    match_codes: '200,300,301'
+    method: 'GET'
+    rate_limit: 10000
+    retries: 1
+    threads: 1
+    timeout: 1
+    user_agent: 'test'

@@ -11,4 +11,8 @@ if ! command -v $BIN_NAME 2>&1 > /dev/null; then
 	exit 1
 fi
 
+if [ "$TEST_NO_CLEANUP" = "1" ]; then
+	echo "Aborting cleanup since TEST_NO_CLEANUP is set"
+	exit 0
+fi
 $BIN_NAME down -v

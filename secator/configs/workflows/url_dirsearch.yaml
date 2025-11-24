@@ -6,29 +6,52 @@ tags: [http, dir]
 input_types:
   - url
 
+options:
+  hunt_secrets:
+    is_flag: True
+    help: Hunt secrets in HTTP responses (trufflehog)
+    default: False
+    short: hs
+
+  hunt_files:
+    is_flag: True
+    help: Hunt files in HTTP directories
+    default: False
+    short: cf
+
+  hunt_dirs:
+    is_flag: True
+    help: Hunt HTTP directories (ffuf)
+    default: False
+    short: fd
+
 tasks:
+  httpx:
+    description: Run HTTP probes on URLs
+    tech_detect: True
+
   ffuf:
     description: Search for HTTP directories
+    auto_calibration: True
     wordlist: directory_list_small
+    match_regex: '<title>Index of'
     targets_:
       - type: target
         field: '{name}/FUZZ'
+    if: opts.hunt_dirs
 
-  cariddi:
-    description: Crawl HTTP directories for content
-    info: True
-    secrets: True
-    errors: True
-    juicy_extensions: 1
-    juicy_endpoints: True
-    targets_:
-      - target.name
-      - url.url
-
-  httpx:
-    description: Run HTTP probes on crawled URLs
-    follow_redirects: True
+  katana:
+    description: Crawl files from HTTP directories
     targets_:
       - type: url
         field: url
-        condition: item.status_code == 0
+        condition: item.is_directory
+    if: opts.hunt_files
+
+  trufflehog:
+    description: Find secrets in HTTP responses
+    targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+    if: opts.hunt_files

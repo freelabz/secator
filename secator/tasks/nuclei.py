@@ -20,6 +20,7 @@ class nuclei(VulnMulti):
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-jsonl'
+	input_chunk_size = 20
 	opts = {
 		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
 		'debug': {'type': str, 'help': 'Debug mode'},
@@ -31,6 +32,7 @@ class nuclei(VulnMulti):
 		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
 		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
+		'response_size_read': {'type': int, 'help': 'Max body size to read (bytes)'},
 		'stats': {'is_flag': True, 'short': 'stats', 'default': True, 'help': 'Display statistics about the running scan'},
 		'stats_json': {'is_flag': True, 'short': 'sj', 'default': True, 'help': 'Display statistics in JSONL(ines) format'},
 		'stats_interval': {'type': str, 'short': 'si', 'help': 'Number of seconds to wait between showing a statistics update'},  # noqa: E501
@@ -52,7 +54,8 @@ class nuclei(VulnMulti):
 		# nuclei opts
 		'exclude_tags': 'exclude-tags',
 		'exclude_severity': 'exclude-severity',
-		'templates': 't'
+		'templates': 't',
+		'response_size_read': 'rsr'
 	}
 	opt_value_map = {
 		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,
@@ -80,12 +83,10 @@ class nuclei(VulnMulti):
 			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['percent']}
 		}
 	}
-	install_pre = {
-		'*': ['git']
-	}
 	install_version = 'v3.4.2'
+	install_pre = {'*': ['git']}
 	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@[install_version]'
-	install_github_handle = 'projectdiscovery/nuclei'
+	github_handle = 'projectdiscovery/nuclei'
 	install_post = {
 		'*': 'nuclei -ut'
 	}

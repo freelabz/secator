@@ -1,17 +1,38 @@
+import click
+
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, USER_AGENT, PATH, STRING, URL)
+							   THREADS, TIMEOUT, USER_AGENT, PATH, STRING)
 from secator.output_types import Vulnerability
 from secator.tasks._categories import VulnCode
+
+GRYPE_MODES = [
+    'git',
+    'github',
+    'gitlab',
+    's3',
+    'filesystem',
+    'gcs',
+    'docker',
+    'postman',
+    'jenkins',
+    'elasticsearch',
+    'huggingface',
+    'syslog',
+]
+
+
+def convert_mode(mode):
+	return 'fs' if mode == 'filesystem' else 'repo' if mode == 'git' else mode
 
 
 @task()
 class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
 	cmd = 'grype --quiet'
-	input_types = [PATH, URL, STRING]
+	input_types = [PATH, STRING]
 	output_types = [Vulnerability]
 	tags = ['vuln', 'scan']
 	input_flag = ''
@@ -19,6 +40,12 @@ class grype(VulnCode):
 	file_flag = None
 	json_flag = None
 	opt_prefix = '--'
+	opts = {
+		'mode': {'type': click.Choice(GRYPE_MODES), 'help': f'Scan mode ({", ".join(GRYPE_MODES)})', 'internal': True}
+	}
+	opt_key_value = {
+		'mode': lambda x: convert_mode(x)
+	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: OPT_NOT_SUPPORTED,
@@ -30,14 +57,12 @@ class grype(VulnCode):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED
 	}
-	install_pre = {
-		'*': ['curl']
-	}
 	install_version = 'v0.91.2'
+	install_cmd_pre = {'*': ['curl']}
 	install_cmd = (
 		f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'
 	)
-	install_github_handle = 'anchore/grype'
+	github_handle = 'anchore/grype'
 
 	@staticmethod
 	def item_loader(self, line):

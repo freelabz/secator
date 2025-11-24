@@ -7,13 +7,19 @@ input_types:
   - url
 
 options:
+  passive:
+    is_flag: True
+    help: Passive only (no requests to targets)
+    default: False
+    short: ps
+
   nuclei:
     is_flag: True
     default: False
     help: Run nuclei on tagged URLs (slow)
 
 tasks:
-  _group/1:
+  _group/pattern_analysis:
     gf/xss:
       description: Hunt XSS params
       pattern: xss
@@ -42,13 +48,14 @@ tasks:
       description: Hunt debug params
       pattern: debug_logic
 
-  _group/2:
+  _group/vuln_scan:
     dalfox:
       description: Attack XSS vulnerabilities
       targets_:
         - type: tag
           field: match
           condition: item._source.startswith("gf")
+      if: not opts.passive
 
     nuclei:
       description: Search for HTTP vulns
@@ -59,8 +66,7 @@ tasks:
         - type: tag
           field: match
           condition: item._source.startswith("gf")
-      if: opts.nuclei
-
+      if: opts.nuclei and not opts.passive
   # TODO: Add support for SQLMap
   # sqlmap:
   #   description: Attack SQLI vulnerabilities

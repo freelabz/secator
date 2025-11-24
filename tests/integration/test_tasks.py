@@ -42,7 +42,6 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
 			'arjun.wordlist': False,
-			'gau.providers': 'wayback',
 			'h8mail.local_breach': load_fixture('h8mail_breach', INTEGRATION_DIR, only_path=True),
 			'nmap.port': '3000,8080',
 			'nmap.tcp_connect': True,
@@ -54,6 +53,8 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'testssl.server_defaults': True,
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 		}
+		# TODO: copy profile and test with profile
+		# opts['profiles'] = ['all']
 
 		# Merge opts
 		opts = merge_opts(opts, extra_opts)

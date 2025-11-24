@@ -45,7 +45,8 @@ class wafw00f(Command):
 	item_loaders = [FileSerializer(output_flag='-o')]
 	install_version = 'v2.3.1'
 	install_cmd = 'pipx install git+https://github.com/EnableSecurity/wafw00f.git@[install_version] --force'
-	install_github_handle = 'EnableSecurity/wafw00f'
+	install_github_bin = False
+	github_handle = 'EnableSecurity/wafw00f'
 	proxy_http = True
 
 	@staticmethod
@@ -72,10 +73,11 @@ class wafw00f(Command):
 			match = results[0]['trigger_url']
 			manufacter = results[0]['manufacturer']
 			yield Tag(
-				name=waf_name + ' WAF',
+				category='info',
+				name='waf',
 				match=url,
 				extra_data={
-					'waf_name': waf_name,
+					'content': waf_name,
 					'manufacter': manufacter,
 					'trigger_url': match,
 					'headers': self.get_opt_value('header', preprocess=True)

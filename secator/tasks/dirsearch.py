@@ -72,7 +72,6 @@ class dirsearch(HttpFuzzer):
 	proxychains = True
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
 
 	@staticmethod
 	def on_file_loaded(self, content):

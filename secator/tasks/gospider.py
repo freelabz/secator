@@ -58,7 +58,7 @@ class gospider(HttpCrawler):
 	}
 	install_version = 'v1.1.6'
 	install_cmd = 'go install -v github.com/jaeles-project/gospider@[install_version]'
-	install_github_handle = 'jaeles-project/gospider'
+	github_handle = 'jaeles-project/gospider'
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61
 	proxy_http = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61

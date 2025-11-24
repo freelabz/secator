@@ -11,7 +11,7 @@ class Progress(OutputType):
 	errors: list = field(default_factory=list)
 	duration: str = field(default='', repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict)
-	_source: str = field(default='', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='progress', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)

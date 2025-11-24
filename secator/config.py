@@ -67,6 +67,8 @@ class Celery(StrictModel):
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
+	task_max_timeout: int = -1
+	task_memory_limit_mb: int = -1
 	worker_max_tasks_per_child: int = 20
 	worker_prefetch_multiplier: int = 1
 	worker_send_task_events: bool = False
@@ -105,8 +107,7 @@ class Security(StrictModel):
 class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
-	store_responses: bool = False
-	show_response_headers: bool = False
+	store_responses: bool = True
 	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
@@ -124,6 +125,14 @@ class Scans(StrictModel):
 	exporters: List[str] = ['json', 'csv', 'txt']
 
 
+class Profiles(StrictModel):
+	defaults: List[str] = []
+
+
+class Drivers(StrictModel):
+	defaults: List[str] = []
+
+
 class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
@@ -133,11 +142,12 @@ class Payloads(StrictModel):
 
 
 class Wordlists(StrictModel):
-	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains'}
+	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains', 'http_params': 'burp-parameter-names'}
 	templates: Dict[str, str] = {
 		'bo0m_fuzz': 'https://raw.githubusercontent.com/Bo0oM/fuzz.txt/master/fuzz.txt',
 		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt',  # noqa: E501
-		'directory_list_small': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/directory-list-2.3-small.txt',  # noqa: E501
+		'directory_list_small': 'https://gist.githubusercontent.com/sl4v/c087e36164e74233514b/raw/c51a811c70bbdd87f4725521420cc30e7232b36d/directory-list-2.3-small.txt',  # noqa: E501
+		'burp-parameter-names': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt',  # noqa: E501
 	}
 	lists: Dict[str, List[str]] = {}
 
@@ -185,6 +195,8 @@ class SecatorConfig(StrictModel):
 	scans: Scans = Scans()
 	payloads: Payloads = Payloads()
 	wordlists: Wordlists = Wordlists()
+	profiles: Profiles = Profiles()
+	drivers: Drivers = Drivers()
 	addons: Addons = Addons()
 	security: Security = Security()
 	offline_mode: bool = False
@@ -288,13 +300,25 @@ class Config(DotMap):
 			elif isinstance(existing_value, Path):
 				value = Path(value)
 		except ValueError:
-			# from secator.utils import debug
-			# debug(f'Could not cast value {value} to expected type {type(existing_value).__name__}: {str(e)}', sub='config')
 			pass
 		finally:
-			target[final_key] = value
 			if set_partial:
-				partial[final_key] = value
+				if value is None or value == target[final_key]:
+					if final_key in partial:
+						del partial[final_key]
+					return
+				else:
+					partial[final_key] = value
+			target[final_key] = value
+
+	def unset(self, key, set_partial=True):
+		"""Unset a value in the configuration using a dotted path.
+
+		Args:
+			key (str): Dotted key path.
+			set_partial (bool): Set in partial config.
+		"""
+		self.set(key, None, set_partial=set_partial)
 
 	def save(self, target_path: Path = None, partial=True):
 		"""Save config as YAML on disk.

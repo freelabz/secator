@@ -5,15 +5,29 @@ description: Wordpress vulnerability scan
 tags: [http, wordpress, vulnerability]
 input_types:
   - url
+  - ip
+  - host
+  - host:port
 
 tasks:
-  _group:
-    nuclei:
-      description: Nuclei Wordpress scan
-      tags: [wordpress]
+  httpx:
+    description: URL probe
+    tech_detect: True
+    follow_redirect: True
 
+  _group/hunt_wordpress:
     wpscan:
       description: WPScan
+      targets_:
+      - url.url
 
     wpprobe:
       description: WPProbe
+      targets_:
+      - url.url
+
+    nuclei:
+      description: Nuclei Wordpress scan
+      tags: [wordpress]
+      targets_:
+      - url.url

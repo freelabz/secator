@@ -1,10 +1,12 @@
 import os
 import yaml
 
+from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
+
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
 								 HEADER, URL, FOLLOW_REDIRECT)
-from secator.output_types import Info, Url, Warning, Error
+from secator.output_types import Info, Url, Warning, Tag
 from secator.runners import Command
 from secator.tasks._categories import OPTS
 from secator.utils import process_wordlist
@@ -15,9 +17,10 @@ class arjun(Command):
 	"""HTTP Parameter Discovery Suite."""
 	cmd = 'arjun'
 	input_types = [URL]
-	output_types = [Url]
+	output_types = [Url, Tag]
 	tags = ['url', 'fuzz', 'params']
 	input_flag = '-u'
+	file_flag = '-i'
 	version_flag = ' '
 	opts = {
 		'chunk_size': {'type': int, 'help': 'Control query/chunk size'},
@@ -25,7 +28,7 @@ class arjun(Command):
 		'include': {'type': str, 'help': 'Include persistent data (e.g: "api_key=xxxxx" or {"api_key": "xxxx"})'},
 		'passive': {'is_flag': True, 'default': False, 'help': 'Passive mode'},
 		'casing': {'type': str, 'help': 'Casing style for params e.g. like_this, likeThis, LIKE_THIS, like_this'},  # noqa: E501
-		WORDLIST: {'type': str, 'short': 'w', 'default': None, 'process': process_wordlist, 'help': 'Wordlist to use (default: arjun wordlist)'},  # noqa: E501
+		WORDLIST: {'type': str, 'short': 'w', 'default': 'burp-parameter-names', 'process': process_wordlist, 'help': 'Wordlist to use (default: arjun wordlist)'},  # noqa: E501
 	}
 	meta_opts = {
 		THREADS: OPTS[THREADS],
@@ -55,7 +58,8 @@ class arjun(Command):
 	}
 	install_version = '2.2.7'
 	install_cmd = 'pipx install arjun==[install_version] --force'
-	install_github_handle = 's0md3v/Arjun'
+	install_github_bin = False
+	github_handle = 's0md3v/Arjun'
 
 	@staticmethod
 	def on_line(self, line):
@@ -78,7 +82,7 @@ class arjun(Command):
 	@staticmethod
 	def on_cmd_done(self):
 		if not os.path.exists(self.output_path):
-			yield Error(message=f'Could not find JSON results in {self.output_path}')
+			# yield Error(message=f'Could not find JSON results in {self.output_path}')
 			return
 		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
@@ -87,9 +91,21 @@ class arjun(Command):
 				yield Warning(message='No results found !')
 				return
 		for url, values in results.items():
+			parsed_url = urlparse(url)
+			yield Url(
+				url=url,
+				host=parsed_url.netloc,
+				request_headers=values['headers'],
+				method=values['method'],
+			)
 			for param in values['params']:
-				yield Url(
-					url=url + '?' + param + '=' + 'FUZZ',
-					request_headers=values['headers'],
-					method=values['method'],
+				new_params = parse_qs(parsed_url.query).copy()
+				new_params[param] = 'FUZZ'
+				new_query = urlencode(new_params, doseq=True)
+				new_url = urlunparse(parsed_url._replace(query=new_query))
+				yield Tag(
+					category='info',
+					name='url_param',
+					match=url,
+					extra_data={'content': param, 'url': new_url}
 				)

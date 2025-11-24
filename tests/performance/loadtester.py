@@ -1,17 +1,15 @@
 import eventlet
 eventlet.monkey_patch()
-from secator.runners import Workflow, Task, Scan
-from secator.template import TemplateLoader
-from secator.rich import console
-from secator.celery import *
-import click
-import sys
-import json
-from time import sleep, time
+from secator.runners import Workflow, Task, Scan  # noqa: E402
+from secator.template import TemplateLoader  # noqa: E402
+from secator.celery import *  # noqa: E402,F403
+import click  # noqa: E402
+import json  # noqa: E402
+from time import sleep, time  # noqa: E402
 
 pool = eventlet.GreenPool(100)
 
-from kombu.serialization import register
+from kombu.serialization import register  # noqa: E402
 
 def create_runner(runner_type, targets, index, total):
 	register('json', json.dumps, json.loads, content_type='application/json', content_encoding='utf-8')
@@ -39,7 +37,7 @@ def create_runner(runner_type, targets, index, total):
 def start_worker():
 	from secator.runners import Command
 	from threading import Thread
-	cmd = f'pyinstrument -r html -o /tmp/test.html --from-path secator worker'
+	cmd = 'pyinstrument -r html -o /tmp/test.html --from-path secator worker'
 	process = Command.execute(cmd, run=False)
 	thread = Thread(target=process.run)
 	return thread, process
