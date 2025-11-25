@@ -74,6 +74,7 @@ class TestWorker(unittest.TestCase):
 			name='nginx-version',
 			match='http://vulnweb.com',
 			category='tech',
+			value='nginx/1.19.0',
 			_source='nuclei_url'
 		)
 		self.assertIn(port, cmd.findings)

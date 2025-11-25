@@ -105,7 +105,7 @@ class katana(HttpCrawler):
 				method = form['method']
 				url = Url(
 					form['action'],
-					host=parsed_url.netloc,
+					host=parsed_url.hostname,
 					method=method,
 					stored_response_path=response["stored_response_path"],
 					request_headers=self.get_opt_value('header', preprocess=True)
@@ -117,6 +117,7 @@ class katana(HttpCrawler):
 				yield Tag(
 					category='info',
 					name='form',
+					value=form['action'],
 					match=form['action'],
 					stored_response_path=response["stored_response_path"],
 					extra_data={
@@ -130,11 +131,12 @@ class katana(HttpCrawler):
 						category='info',
 						name='url_param',
 						match=form['action'],
-						extra_data={'content': param, 'value': 'FUZZ'}
+						value='FUZZ',
+						extra_data={'url': url}
 					)
 		url = Url(
 			url=item['request']['endpoint'],
-			host=parsed_url.netloc,
+			host=parsed_url.hostname,
 			method=item['request']['method'],
 			request_headers=self.get_opt_value('header', preprocess=True),
 			time=item['timestamp'],
@@ -162,8 +164,9 @@ class katana(HttpCrawler):
 			tag = Tag(
 				category='info',
 				name='url_param',
+				value=param_name,
 				match=url_without_params,
-				extra_data={'content': param_name, 'value': param_value}
+				extra_data={'value': param_value, 'url': item['request']['endpoint']}
 			)
 			if tag not in self.tags:
 				self.tags.append(tag)

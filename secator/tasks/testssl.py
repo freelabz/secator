@@ -144,9 +144,9 @@ class testssl(Command):
 						category='info',
 						name='ssl_tls',
 						match=host,
+						value=finding,
 						extra_data={
 							'subtype': id,
-							'content': finding,
 						}
 					)
 

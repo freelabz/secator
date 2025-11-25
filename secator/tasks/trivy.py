@@ -118,11 +118,12 @@ class trivy(Vuln):
 				yield Vulnerability(**data)
 			for secret in item.get('Secrets', []):
 				code_context = '\n'.join([line['Content'] for line in secret.get('Code', {}).get('Lines') or []])
-				extra_data = {'content': secret['Match'], 'code_context': code_context}
+				extra_data = {'code_context': code_context}
 				extra_data.update({caml_to_snake(k): v for k, v in secret.items() if k not in ['RuleID', 'Match', 'Code']})
 				yield Tag(
 					category='secret',
 					name=secret['RuleID'].replace('-', '_'),
+					value=secret['Match'],
 					match=item['Target'],
 					extra_data=extra_data
 				)

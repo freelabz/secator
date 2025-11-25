@@ -87,8 +87,8 @@ class wafw00f(Command):
 				category='info',
 				name='waf',
 				match=url,
+				value=waf_name,
 				extra_data={
-					'content': waf_name,
 					'manufacter': manufacter,
 					'trigger_url': match,
 					'headers': self.get_opt_value('header', preprocess=True)

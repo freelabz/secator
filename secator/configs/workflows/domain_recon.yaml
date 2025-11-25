@@ -20,6 +20,7 @@ tasks:
     httpx:
       description: Run HTTP probe on domain
       tech_detect: True
+      tls_grab: True
       if: not opts.passive
 
     getasn:

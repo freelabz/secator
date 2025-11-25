@@ -91,7 +91,7 @@ class gau(HttpCrawler):
 			if self.seen_params[base_url][param] > int(self.max_param_occurrences):
 				return
 		if self.get_opt_value('subs'):
-			domain = extract_domain_info(parsed_url.netloc, domain_only=True)
+			domain = extract_domain_info(parsed_url.hostname, domain_only=True)
 			if domain:
-				yield Subdomain(host=parsed_url.netloc, domain=domain)
-		yield Url(url=item['url'], host=parsed_url.netloc)
+				yield Subdomain(host=parsed_url.hostname, domain=domain)
+		yield Url(url=item['url'], host=parsed_url.hostname)
