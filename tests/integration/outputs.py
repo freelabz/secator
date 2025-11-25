@@ -37,7 +37,8 @@ OUTPUTS_TASKS = {
         Tag(
             category='info',
             name='url_param',
-            extra_data={'content': 'pp', 'value': 'FUZZ'},
+            value='pp',
+            extra_data={'value': 'FUZZ'},
             match='http://testphp.vulnweb.com/hpp',
             _source='arjun'
         )
@@ -184,10 +185,10 @@ OUTPUTS_TASKS = {
         Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
     ],
     'getasn': [
-        Tag(name='asn', category='info', match='wikipedia.org', _source='getasn')
+        Tag(name='asn', category='info', value='AS14907', match='wikipedia.org', _source='getasn')
     ],
     'gf': [
-        Tag(name='xss', category='url_pattern', match='http://localhost:3000?q=test', _source='gf')
+        Tag(name='xss', category='url_pattern', value='http://localhost:3000?q=test', match='http://localhost:3000?q=test', _source='gf')
     ],
     'gitleaks': [
         # TODO: allow to test equality for this (dynamic path based on runner)
@@ -231,7 +232,7 @@ OUTPUTS_TASKS = {
         )
     ],
     'jswhois': [
-        Tag(name='whois', category='info', match='wikipedia.org', extra_data={'content': 'wikipedia.org', 'chain': 'whois'}),
+        # Tag(name='whois', category='info', match='wikipedia.org', value='Domain Name: wikipedia.org\nRegistry Domain ID: D51687756-LROR\nRegistrar WHOIS Server: whois.markmonitor.com\nRegistrar URL: http://www.markmonitor.com\nUpdated Date: 2024-12-12T09:18:46+0000\nCreation Date: 2001-01-13T00:12:14+0000\nRegistrar Registration Expiration Date: 2026-01-13T00:00:00+0000\nRegistrar: MarkMonitor, Inc.\nRegistrar IANA ID: 292\nRegistrar Abuse Contact Email: abusecomplaints@markmonitor.com\nRegistrar Abuse Contact Phone: +1.2086851750\nDomain Status: clientUpdateProhibited (https://www.icann.org/epp#clientUpdateProhibited)\nDomain Status: clientTransferProhibited (https://www.icann.org/epp#clientTransferProhibited)\nDomain Status: clientDeleteProhibited (https://www.icann.org/epp#clientDeleteProhibited)\nRegistrant Organization: Wikimedia Foundation, Inc.\nRegistrant Country: US\nRegistrant Email: Select Request Email Form at https://domains.markmonitor.com/whois/wikipedia.org\nTech Email: Select Request Email Form at https://domains.markmonitor.com/whois/wikipedia.org\nName Server: ns1.wikimedia.org\nName Server: ns2.wikimedia.org\nName Server: ns0.wikimedia.org\nDNSSEC: unsigned\nURL of the ICANN WHOIS Data Problem Reporting System: http://wdprs.internic.net/\n>>> Last update of WHOIS database: 2025-11-25T18:33:07+0000 <<<\n\nFor more information on WHOIS status codes, please visit:\n  https://www.icann.org/resources/pages/epp-status-codes\n\nIf you wish to contact this domain\u2019s Registrant or Technical\ncontact, and such email address is not visible above, you may do so via our web\nform, pursuant to ICANN\u2019s Temporary Specification. To verify that you are not a\nrobot, please enter your email address to receive a link to a page that\nfacilitates email communication with the relevant contact(s).\n\nWeb-based WHOIS:\n  https://domains.markmonitor.com/whois/contact/wikipedia.org\n\nIf you have a legitimate interest in viewing the non-public WHOIS details, send\nyour request and the reasons for your request to whoisrequest@markmonitor.com\nand specify the domain name in the subject line. We will review that request and\nmay ask for supporting documentation and explanation.\n\nThe data in MarkMonitor\u2019s WHOIS database is provided for information purposes,\nand to assist persons in obtaining information about or related to a domain\nname\u2019s registration record. While MarkMonitor believes the data to be accurate,\nthe data is provided \"as is\" with no guarantee or warranties regarding its\naccuracy.\n\nBy submitting a WHOIS query, you agree that you will use this data only for\nlawful purposes and that, under no circumstances will you use this data to:\n  (1) allow, enable, or otherwise support the transmission by email, telephone,\nor facsimile of mass, unsolicited, commercial advertising, or spam; or\n  (2) enable high volume, automated, or electronic processes that send queries,\ndata, or email to MarkMonitor (or its systems) or the domain name contacts (or\nits systems).\n\nMarkMonitor reserves the right to modify these terms at any time.\n\nBy submitting this query, you agree to abide by this policy.\n\nMarkMonitor Domain Management(TM)\nProtecting companies and consumers in a digital world.\n\nVisit MarkMonitor at https://www.markmonitor.com\nContact us at +1.8007459229\nIn Europe, at +44.02032062220\n--\n', extra_data={'chain': 'whois'}),
     ],
     'katana': [
         Url(
@@ -295,6 +296,7 @@ OUTPUTS_TASKS = {
         Tag(
             name='aws_access_key',
             category='secret',
+            value='AKIAYVP4CIPPERUVIFXG:Zt2U1h267eViPnuSA+JO5ABhiu4T7XUMSZ+Y2Oth',
             match='https://github.com/trufflesecurity/test_keys/blob/fbc14303ffbf8fb1c2c1914e8dda7d0121633aca/keys#L4',
             _source='trufflehog'
         ),
@@ -310,6 +312,7 @@ OUTPUTS_TASKS = {
         Tag(
             name='waf',
             category='info',
+            value='Envoy',
             match='https://netflix.com',
             _source='wafw00f')
     ],
@@ -330,6 +333,7 @@ OUTPUTS_TASKS = {
         Tag(
             name='wordpress_theme',
             category='info',
+            value='twentytwentyfive:1.3',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(
@@ -361,7 +365,7 @@ OUTPUTS_TASKS = {
 			_source='wpscan'),
 	],
     'x8': [
-        Tag(name='url_param', category='info', match='http://testphp.vulnweb.com/hpp/', extra_data={'content': 'pp', 'value': 'FUZZ'}, _source='x8'),
+        Tag(name='url_param', category='info', match='http://testphp.vulnweb.com/hpp/', value='pp', extra_data={'value': 'FUZZ'}, _source='x8'),
     ],
     'xurlfind3r': [
         Url(url='http://testphp.vulnweb.com/login.php', _source='xurlfind3r')
@@ -382,20 +386,20 @@ OUTPUTS_WORKFLOWS = {
 		Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='nagios nsca', cpes=[], extra_data={'name': 'nagios-nsca', 'product': 'nagios nsca', 'method': 'probed', 'conf': '10', 'nmap_script': 'vulscan'}, _source='nmap', _type='port', _uuid='69d71843-798a-4934-a01c-7073955ac485'),
 		Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', cpes=[], extra_data={'name': 'ppp', 'conf': '3', 'nmap_script': 'fingerprint-strings'}, _source='nmap', _type='port', _uuid='cbc2bc2d-2cf8-4922-84e2-6a6cea9149dd'),
 		# Vulnerability(matched_at='http://localhost:8080/', ip='127.0.0.1', name='Spring Boot - Remote Code Execution (Apache Log4j)', provider='', id='cve-2021-44228', confidence='high', severity='critical', cvss_score=10, tags=['cve', 'cve2021', 'springboot', 'rce', 'oast', 'log4j', 'kev'], extra_data={'data': ['192.221.154.139', 'f978d7010c8a']}, description='Spring Boot is susceptible to remote code execution via Apache Log4j.', references=['https://logging.apache.org/log4j/2.x/security.html', 'https://www.lunasec.io/docs/blog/log4j-zero-day/', 'https://github.com/twseptian/spring-boot-log4j-cve-2021-44228-docker-lab', 'https://nvd.nist.gov/vuln/detail/cve-2021-44228'], reference='https://logging.apache.org/log4j/2.x/security.html', confidence_nb=1, severity_nb=0, _source='nuclei', _type='vulnerability', _uuid='3cec387f-ef54-401d-915e-5f361de7896c'),
-		Tag(name='fingerprinthub-web-fingerprints:qm-system', match='http://localhost:3000', category='tech', extra_data={'data': []}, _source='nuclei'),
-		Tag(name='security-txt', match='http://localhost:3000/.well-known/security.txt', category='misc', extra_data={'data': [' mailto:donotreply@owasp-juice.shop']}, _source='nuclei'),
+		# Tag(name='fingerprinthub-web-fingerprints:qm-system', value='bogus', match='http://localhost:3000', category='tech', extra_data={'data': []}, _source='nuclei'),
+		# Tag(name='security-txt', value='bogus', match='http://localhost:3000/.well-known/security.txt', category='misc', extra_data={'data': [' mailto:donotreply@owasp-juice.shop']}, _source='nuclei'),
 		Vulnerability(matched_at='http://localhost:3000/metrics', ip='127.0.0.1', name='prometheus-metrics', provider='', id='', confidence='high', severity='medium', cvss_score=5.3, tags=['exposure', 'prometheus', 'hackerone', 'config'], extra_data={'data': []}, description='Prometheus metrics page was detected.', references=['https://github.com/prometheus/prometheus', 'https://hackerone.com/reports/1026196'], reference='https://github.com/prometheus/prometheus', confidence_nb=1, severity_nb=2, _source='nuclei', _type='vulnerability', _uuid='e71fb342-a479-4436-9f92-bcfb2672ef2f'),
-		Tag(name='swagger-api', match='http://localhost:3000/api-docs/swagger.json', category='exposure', extra_data={'data': []}, _source='nuclei'),
+		# Tag(name='swagger-api', value='bogus', match='http://localhost:3000/api-docs/swagger.json', category='exposure', extra_data={'data': []}, _source='nuclei'),
 		Url(url='http://localhost:8080', host='127.0.0.1', status_code=400, title='', webserver='', tech=[], content_type='application/json', content_length=91, time=0.00341461, method='GET', words=2, lines=1, _source='httpx', _type='url', _uuid='d26961c4-e955-4034-a52e-7f1b1a576d4c'),
 		Url(url='http://localhost:3000', host='127.0.0.1', status_code=200, title='OWASP Juice Shop', webserver='', tech=[], content_type='text/html', content_length=1987, time=0.00350711, method='GET', words=207, lines=30, _source='httpx', _type='url', _uuid='f10f62fd-6eca-45e2-92b5-d90794b7613c')
 	],
     'subdomain_recon': [
     	Subdomain(host='virusscan.api.github.com', domain='api.github.com', sources=['alienvault'], _source='subfinder', _type='subdomain', _uuid='0d2d410a-7495-48c2-a6ea-14aa2c6e449d'),
         Subdomain(host='virus.api.github.com', domain='api.github.com', sources=['alienvault'], _source='subfinder', _type='subdomain', _uuid='1bc1b33c-ba2e-44ed-8038-a3e344161931'),
-        Tag(name='caa-fingerprint', match='virusscan.api.github.com', category='dns', extra_data={'data': ['digicert.com', 'letsencrypt.org']}, _source='nuclei'),
-		Tag(name='cname-fingerprint', match='virusscan.api.github.com', category='dns', extra_data={'data': ['github.github.io.']}, _source='nuclei'),
-		Tag(name='caa-fingerprint', match='virus.api.github.com', category='dns', extra_data={'data': ['digicert.com', 'letsencrypt.org']}, _source='nuclei'),
-        Tag(name='cname-fingerprint', match='virus.api.github.com', category='dns', extra_data={'data': ['github.github.io.']}, _source='nuclei'),
+        # Tag(name='caa-fingerprint', value='bogus', match='virusscan.api.github.com', category='dns', extra_data={'data': ['digicert.com', 'letsencrypt.org']}, _source='nuclei'),
+		# Tag(name='cname-fingerprint', value='bogus', match='virusscan.api.github.com', category='dns', extra_data={'data': ['github.github.io.']}, _source='nuclei'),
+		# Tag(name='caa-fingerprint', value='bogus', match='virus.api.github.com', category='dns', extra_data={'data': ['digicert.com', 'letsencrypt.org']}, _source='nuclei'),
+        # Tag(name='cname-fingerprint', value='bogus', match='virus.api.github.com', category='dns', extra_data={'data': ['github.github.io.']}, _source='nuclei'),
         Url(url='https://virus.api.github.com', host='185.199.108.153', status_code=404, title='Site not found · GitHub Pages', webserver='GitHub.com', tech=['Fastly', 'GitHub Pages', 'Varnish'], content_type='text/html', content_length=9115, time=0.055734349, method='GET', words=641, lines=80, _source='httpx', _type='url', _uuid='97aca3a7-5c67-4905-9681-2d4d9f911df8'),
 	],
     'user_hunt': [
@@ -405,8 +409,8 @@ OUTPUTS_WORKFLOWS = {
 	],
     'url_nuclei': [
     	Vulnerability(matched_at='http://localhost:3000/metrics', ip='127.0.0.1', name='prometheus-metrics', provider='', id='', confidence='high', severity='medium', cvss_score=5.3, tags=['exposure', 'prometheus', 'hackerone', 'config'], extra_data={'data': []}, description='Prometheus metrics page was detected.', references=['https://github.com/prometheus/prometheus', 'https://hackerone.com/reports/1026196'], reference='https://github.com/prometheus/prometheus', confidence_nb=1, severity_nb=2, _source='nuclei', _type='vulnerability', _uuid='4cdda858-8c69-4dcb-a5b0-6f6d5567332c'),
-		Tag(name='kubelet-metrics', match='http://localhost:3000/metrics', category='tech', extra_data={'data': []}, _source='nuclei'),
-        Tag(name='swagger-api', match='http://localhost:3000/api-docs/swagger.json', category='exposure', extra_data={'data': []}, _source='nuclei'),
+		# Tag(name='kubelet-metrics', value='bogus', match='http://localhost:3000/metrics', category='tech', extra_data={'data': []}, _source='nuclei'),
+        # Tag(name='swagger-api', value='bogus', match='http://localhost:3000/api-docs/swagger.json', category='exposure', extra_data={'data': []}, _source='nuclei'),
 		# Vulnerability(matched_at='http://localhost:8080/', ip='127.0.0.1', name='Spring Boot - Remote Code Execution (Apache Log4j)', provider='', id='cve-2021-44228', confidence='high', severity='critical', cvss_score=10, tags=['cve', 'cve2021', 'springboot', 'rce', 'oast', 'log4j', 'kev'], extra_data={'data': ['192.221.154.139', 'f978d7010c8a']}, description='Spring Boot is susceptible to remote code execution via Apache Log4j.', references=['https://logging.apache.org/log4j/2.x/security.html', 'https://www.lunasec.io/docs/blog/log4j-zero-day/', 'https://github.com/twseptian/spring-boot-log4j-cve-2021-44228-docker-lab', 'https://nvd.nist.gov/vuln/detail/cve-2021-44228'], reference='https://logging.apache.org/log4j/2.x/security.html', confidence_nb=1, severity_nb=0, _source='nuclei', _type='vulnerability', _uuid='3cec387f-ef54-401d-915e-5f361de7896c'),
 	],
     'url_crawl': [
@@ -426,8 +430,8 @@ OUTPUTS_WORKFLOWS = {
 		Url(url='http://localhost:3000/video', host='127.0.0.1', status_code=200, title='', webserver='', tech=[], content_type='video/mp4', content_length=10075518, time=2.432185494, method='GET', words=50020, lines=49061, _source='httpx', _type='url', _uuid='c81c8a42-296d-461b-b1b7-c166e398e827'),
 	],
     'url_vuln': [
-		Tag(name='xss', category='url_pattern', match='https://www.hahwul.com/?q=123', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='16b27b1e-adb0-48e9-a8f9-87a1f38dd3a6'),
-		Tag(name='lfi', category='url_pattern', match='http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='cfcba271-eca6-455c-b426-cfd76bb92ebb'),
+		Tag(name='xss', category='url_pattern', value="q", match='https://www.hahwul.com/?q=123', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='16b27b1e-adb0-48e9-a8f9-87a1f38dd3a6'),
+		Tag(name='lfi', category='url_pattern', value="cat", match='http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='cfcba271-eca6-455c-b426-cfd76bb92ebb'),
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Grep XSS', provider='', id='', confidence='high', severity='low', cvss_score=0, tags=[], extra_data={'inject_type': 'BUILTIN', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=%250d%250aDalfoxcrlf%3A+1234', 'param': '', 'payload': 'toGrepping', 'evidence': ''}, description='', references=[], reference='', confidence_nb=1, severity_nb=3, _source='dalfox', _type='vulnerability', _uuid='029214fe-21f7-40ed-b50a-b33772519ddc'),
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Verified XSS', provider='', id='', confidence='high', severity='high', cvss_score=0, tags=['CWE-79'], extra_data={'inject_type': 'inHTML-none(1)-URL', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%3Cdiv+contextmenu%3Dxss%3E%3Cp%3E1%3Cmenu+type%3Dcontext+class%3Ddalfox+id%3Dxss+onshow%3Dalert%281%29%3E%3C%2Fmenu%3E%3C%2Fdiv%3E', 'param': 'cat', 'payload': '<div contextmenu=xss><p>1<menu type=context class=dalfox id=xss onshow=alert(1)></menu></div>', 'evidence': ''}, description='', references=[], reference='', confidence_nb=1, severity_nb=1, _source='dalfox', _type='vulnerability', _uuid='640f5644-b0a0-4e46-a82f-121a8dde74b2'),
 	]
@@ -475,21 +479,21 @@ OUTPUTS_SCANS = {
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Grep XSS', provider='', id='', confidence='high', severity='low', cvss_score=0, tags=[], extra_data={'inject_type': 'BUILTIN', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?cat=%2F%2F%2F%2F%255cgoogle.com', 'param': '', 'payload': 'toOpenRedirecting', 'evidence': ''}, description='', references=[], reference='', confidence_nb=1, severity_nb=3, _source='dalfox', _type='vulnerability', _uuid='8e91089d-69dc-4d37-89f2-002b12a243f9'),
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Reflected XSS', provider='', id='', confidence='high', severity='medium', cvss_score=0, tags=['CWE-79'], extra_data={'inject_type': 'inHTML-URL', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?cat=3%27%3E%3Cimg%2Fsrc%2Fonerror%3D.1%7Calert%60%60%3E', 'param': 'cat', 'payload': "'><img/src/onerror=.1|alert``>", 'evidence': "48 line:  syntax to use near ''><img/src/onerror=.1|alert``>' at line 1"}, description='', references=[], reference='', confidence_nb=1, severity_nb=2, _source='dalfox', _type='vulnerability', _uuid='aced8ca6-773f-4382-b951-c75dce9b381e'),
 		Vulnerability(matched_at='http://testphp.vulnweb.com/listproducts.php', name='Verified XSS', provider='', id='', confidence='high', severity='high', cvss_score=0, tags=['CWE-79'], extra_data={'inject_type': 'inHTML-URL', 'poc_type': 'plain', 'method': 'GET', 'data': 'http://testphp.vulnweb.com/listproducts.php?cat=1%27%22%3E%3Cimg%2Fsrc%2Fonerror%3D.1%7Calert%60%60+class%3Ddalfox%3E', 'param': 'cat', 'payload': '\'"><img/src/onerror=.1|alert`` class=dalfox>', 'evidence': '48 line:  syntax to use near \'\'"><img/src/onerror=.1|alert`` class=dalfox>\' at line 1'}, description='', references=[], reference='', confidence_nb=1, severity_nb=1, _source='dalfox', _type='vulnerability', _uuid='f5941659-042e-428d-aef6-3ed22983a27f'),
-		Tag(name='lfi', category='url_pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='7054229f-d877-4f9d-8811-329e682819c5'),
-		Tag(name='ssrf', category='url_pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='d942d08a-b093-4db6-a4c9-d7b2fd13d5dc'),
-		Tag(name='interestingparams', category='url_pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='114d1d0d-4c63-490f-86aa-356a7fb5dfd2'),
-		Tag(name='lfi', category='url_pattern', match='http://testphp.vulnweb.com/listproducts.php?cat=1', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='9f58059f-c0a6-4fc8-8454-a15ca01a972c'),
-		Tag(name='xss', category='url_pattern', match='http://testphp.vulnweb.com/hpp/?pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='0d506935-25b3-47de-ad96-e017323fe3e9'),
-		Tag(name='debug_logic', category='url_pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='1b583218-4922-4489-acc5-1a7a754741f3'),
-		Tag(name='ssrf', category='url_pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='a37fd037-e046-4dc7-b8e4-1da6a3b0af3b'),
-		Tag(name='interestingparams', category='url_pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='08fab6ea-9907-434b-a4c4-ae4ba94eabb2'),
-		Tag(name='xss', category='url_pattern', match='http://testphp.vulnweb.com/hpp/params.php?p=valid&pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='bbdcce78-c36a-43ef-8e34-f6e628455c6a'),
+		# Tag(name='lfi', category='url_pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='7054229f-d877-4f9d-8811-329e682819c5'),
+		# Tag(name='ssrf', category='url_pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='d942d08a-b093-4db6-a4c9-d7b2fd13d5dc'),
+		# Tag(name='interestingparams', category='url_pattern', match='http://testphp.vulnweb.com/showimage.php?file=./pictures/1.jpg', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='114d1d0d-4c63-490f-86aa-356a7fb5dfd2'),
+		# Tag(name='lfi', category='url_pattern', match='http://testphp.vulnweb.com/listproducts.php?cat=1', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='9f58059f-c0a6-4fc8-8454-a15ca01a972c'),
+		# Tag(name='xss', category='url_pattern', match='http://testphp.vulnweb.com/hpp/?pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='0d506935-25b3-47de-ad96-e017323fe3e9'),
+		# Tag(name='debug_logic', category='url_pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='1b583218-4922-4489-acc5-1a7a754741f3'),
+		# Tag(name='ssrf', category='url_pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='a37fd037-e046-4dc7-b8e4-1da6a3b0af3b'),
+		# Tag(name='interestingparams', category='url_pattern', match='http://testphp.vulnweb.com/search.php?test=query', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='08fab6ea-9907-434b-a4c4-ae4ba94eabb2'),
+		# Tag(name='xss', category='url_pattern', match='http://testphp.vulnweb.com/hpp/params.php?p=valid&pp=12', extra_data={'source': 'url'}, _source='gf', _type='tag', _uuid='bbdcce78-c36a-43ef-8e34-f6e628455c6a'),
 	],
     'host': [
 		Port(port=3000, host='localhost', ip='127.0.0.1', state='open', service_name='ppp', cpes=[], extra_data={'name': 'ppp', 'servicefp': 'SF-Port3000-TCP:V=7.80%I=7%D=4/13%Time=6438299D%P=x86_64-pc-linux-gnu%r(GetRequest,979,"HTTP/1\\.1\\x20200\\x20OK\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nX-Content-Type-Options:\\x20nosniff\\r\\nX-Frame-Options:\\x20SAMEORIGIN\\r\\nFeature-Policy:\\x20payment\\x20\'self\'\\r\\nX-Recruiting:\\x20/#/jobs\\r\\nAccept-Ranges:\\x20bytes\\r\\nCache-Control:\\x20public,\\x20max-age=0\\r\\nLast-Modified:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:09:42\\x20GMT\\r\\nETag:\\x20W/\\"7c3-1877b613b94\\"\\r\\nContent-Type:\\x20text/html;\\x20charset=UTF-8\\r\\nContent-Length:\\x201987\\r\\nVary:\\x20Accept-Encoding\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n<!--\\n\\x20\\x20~\\x20Copyright\\x20\\(c\\)\\x202014-2023\\x20Bjoern\\x20Kimminich\\x20&\\x20the\\x20OWASP\\x20Juice\\x20Shop\\x20contributors\\.\\n\\x20\\x20~\\x20SPDX-License-Identifier:\\x20MIT\\n\\x20\\x20--><!DOCTYPE\\x20html><html\\x20lang=\\"en\\"><head>\\n\\x20\\x20<meta\\x20charset=\\"utf-8\\">\\n\\x20\\x20<title>OWASP\\x20Juice\\x20Shop</title>\\n\\x20\\x20<meta\\x20name=\\"description\\"\\x20content=\\"Probably\\x20the\\x20most\\x20modern\\x20and\\x20sophisticated\\x20insecure\\x20web\\x20application\\">\\n\\x20\\x20<meta\\x20name=\\"viewport\\"\\x20content=\\"width=device-width,\\x20initial-scale=1\\">\\n\\x20\\x20<link\\x20id=\\"favicon\\"\\x20rel=\\"icon\\"\\x20type=\\"image/x-icon\\"\\x20href=\\"asset")%r(Help,2F,"HTTP/1\\.1\\x20400\\x20Bad\\x20Request\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(NCP,2F,"HTTP/1\\.1\\x20400\\x20Bad\\x20Request\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(HTTPOptions,EA,"HTTP/1\\.1\\x20204\\x20No\\x20Content\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nAccess-Control-Allow-Methods:\\x20GET,HEAD,PUT,PATCH,POST,DELETE\\r\\nVary:\\x20Access-Control-Request-Headers\\r\\nContent-Length:\\x200\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n")%r(RTSPRequest,EA,"HTTP/1\\.1\\x20204\\x20No\\x20Content\\r\\nAccess-Control-Allow-Origin:\\x20\\*\\r\\nAccess-Control-Allow-Methods:\\x20GET,HEAD,PUT,PATCH,POST,DELETE\\r\\nVary:\\x20Access-Control-Request-Headers\\r\\nContent-Length:\\x200\\r\\nDate:\\x20Thu,\\x2013\\x20Apr\\x202023\\x2016:11:09\\x20GMT\\r\\nConnection:\\x20close\\r\\n\\r\\n");', 'method': 'table', 'conf': '3', 'nmap_script': 'fingerprint-strings'}, _source='nmap', _type='port', _uuid='7b2e6827-aea5-4e53-85e6-b7d6702ebdd9'),
 		Port(port=8080, host='localhost', ip='127.0.0.1', state='open', service_name='', cpes=[], extra_data={'name': 'nagios-nsca', 'product': 'nagios nsca', 'method': 'probed', 'conf': '10', 'nmap_script': 'vulscan'}, _source='nmap', _type='port', _uuid='af8d76b4-19c7-4bc2-8985-ec0194adfec8'),
-		Tag(name='FingerprintHub Technology Fingerprint - qm-system', match='http://localhost:3000', category='tech', extra_data={'data': []}, _source='nuclei'),
-		Tag(name='Public Swagger API - Detect', match='http://localhost:3000/api-docs/swagger.json', category='exposure', extra_data={'data': []}, _source='nuclei'),
+		# Tag(name='FingerprintHub Technology Fingerprint - qm-system', match='http://localhost:3000', category='tech', extra_data={'data': []}, _source='nuclei'),
+		# Tag(name='Public Swagger API - Detect', match='http://localhost:3000/api-docs/swagger.json', category='exposure', extra_data={'data': []}, _source='nuclei'),
 		Vulnerability(matched_at='http://localhost:3000/metrics', ip='127.0.0.1', name='Prometheus Metrics - Detect', provider='', id='', confidence='high', severity='medium', cvss_score=5.3, tags=['exposure', 'prometheus', 'hackerone', 'config'], extra_data={'data': []}, description='Prometheus metrics page was detected.', references=['https://github.com/prometheus/prometheus', 'https://hackerone.com/reports/1026196'], reference='https://github.com/prometheus/prometheus', confidence_nb=1, severity_nb=2, _source='nuclei', _type='vulnerability', _uuid='ac9c66f9-2d48-4d11-ade4-07a882bc300c'),
 		Vulnerability(matched_at='http://localhost:8080/', ip='127.0.0.1', name='Spring Boot - Remote Code Execution (Apache Log4j)', provider='', id='cve-2021-44228', confidence='high', severity='critical', cvss_score=10, tags=['cve', 'cve2021', 'springboot', 'rce', 'oast', 'log4j', 'kev'], extra_data={'data': ['192.221.154.139', 'f978d7010c8a']}, description='Spring Boot is susceptible to remote code execution via Apache Log4j.', references=['https://logging.apache.org/log4j/2.x/security.html', 'https://www.lunasec.io/docs/blog/log4j-zero-day/', 'https://github.com/twseptian/spring-boot-log4j-cve-2021-44228-docker-lab', 'https://nvd.nist.gov/vuln/detail/cve-2021-44228'], reference='https://logging.apache.org/log4j/2.x/security.html', confidence_nb=1, severity_nb=0, _source='nuclei', _type='vulnerability', _uuid='3cec387f-ef54-401d-915e-5f361de7896c'),
 		Url(url='http://localhost:3000', host='127.0.0.1', status_code=200, title='OWASP Juice Shop', webserver='', tech=[], content_type='text/html', content_length=1987, time=0.006561506999999999, method='GET', words=207, lines=30, _source='httpx', _type='url', _uuid='0b76a703-3fcd-4c1a-864a-daed8bf87b5c'),

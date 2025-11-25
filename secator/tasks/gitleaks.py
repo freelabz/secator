@@ -82,14 +82,14 @@ class gitleaks(Command):
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read())
 		for result in results:
-			extra_data = {'content': result.get('Secret')}
-			extra_data.update({
+			extra_data = {
 				caml_to_snake(k): v for k, v in result.items()
 				if k not in ['RuleID', 'File', 'Secret']
-			})
+			}
 			yield Tag(
 				category='secret',
 				name=result['RuleID'].replace('-', '_'),
+				value=result.get('Secret', ''),
 				match='{File}:{StartLine}:{StartColumn}'.format(**result),
 				extra_data=extra_data
 			)

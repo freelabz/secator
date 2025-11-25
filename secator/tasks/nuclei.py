@@ -10,7 +10,7 @@ from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
 
 
-def output_discriminator(item):
+def output_discriminator(self, item):
 	"""Discriminate between Tag and Vulnerability based on severity."""
 	if 'percent' in item:
 		return Progress
@@ -92,8 +92,9 @@ class nuclei(VulnMulti):
 		Tag: {
 			NAME: lambda x: nuclei.name_extractor(x),
 			'match': 'matched-at',
-			'category': lambda x: (x['info'].get('tags') or ['general'])[0],
-			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
+			'value': lambda x: nuclei.value_extractor(x),
+			'category': lambda x: 'info',
+			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x, with_tags=True),
 			'_source': 'nuclei',
 		},
 		Progress: {
@@ -121,7 +122,7 @@ class nuclei(VulnMulti):
 		return None
 
 	@staticmethod
-	def extra_data_extractor(item):
+	def extra_data_extractor(item, with_tags=False):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
 		data['type'] = item.get('type', '')
@@ -130,7 +131,16 @@ class nuclei(VulnMulti):
 		for k, v in item.get('meta', {}).items():
 			data['data'].append(f'{k}: {v}')
 		data['metadata'] = item.get('metadata', {})
+		if with_tags:
+			data['tags'] = item.get('info', {}).get('tags', [])
 		return data
+
+	@staticmethod
+	def value_extractor(item):
+		values = item.get('extracted-results', '')
+		if isinstance(values, list):
+			return '\n'.join(values)
+		return values
 
 	@staticmethod
 	def name_extractor(item):
