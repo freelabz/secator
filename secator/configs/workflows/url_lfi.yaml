@@ -25,7 +25,7 @@ tasks:
 
   ffuf:
     description: Fuzz URLs with lfi wordlist
-    wordlist: /home/nabot/.secator/wordlists/lfi.txt
+    wordlist: https://raw.githubusercontent.com/hussein98d/LFI-files/refs/heads/master/list.txt
     targets_:
       type: url
       field: '{url}FUZZ'
