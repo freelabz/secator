@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/freelabz/secator/compare/v0.20.1...v0.21.0) (2025-11-25)
+
+
+### Features
+
+* improve tag output type, improve workflows ([#791](https://github.com/freelabz/secator/issues/791)) ([0b4ab64](https://github.com/freelabz/secator/commit/0b4ab6481ed492188034a67a290d22b3eee5d5d4))
+
 ## [0.20.1](https://github.com/freelabz/secator/compare/v0.20.0...v0.20.1) (2025-11-21)
 
 
