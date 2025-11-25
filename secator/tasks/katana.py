@@ -131,8 +131,8 @@ class katana(HttpCrawler):
 						category='info',
 						name='url_param',
 						match=form['action'],
-						value='FUZZ',
-						extra_data={'url': url}
+						value=param,
+						extra_data={'url': url, 'value': 'FUZZ'}
 					)
 		url = Url(
 			url=item['request']['endpoint'],
