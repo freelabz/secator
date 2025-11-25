@@ -1,5 +1,5 @@
 import unittest
-from secator.output_types import Url, Target, Port, Vulnerability, Info, Warning, Error
+from secator.output_types import Url, Target, Port, Tag, Vulnerability, Info, Warning, Error
 from secator.runners import Command
 from secator.serializers import JSONSerializer
 from time import sleep
@@ -70,21 +70,15 @@ class TestWorker(unittest.TestCase):
 			content_length=4018,
 			_source='httpx'
 		)
-		vuln = Vulnerability(
+		tag = Tag(
 			name='nginx-version',
-			provider='',
-			id='',
-			matched_at='http://vulnweb.com',
-			confidence='high',
-			confidence_nb=4,
-			severity_nb=4,
-			severity='info',
-			tags=['tech', 'nginx'],
+			match='http://vulnweb.com',
+			category='tech',
 			_source='nuclei_url'
 		)
 		self.assertIn(port, cmd.findings)
 		self.assertIn(url, cmd.findings)
-		self.assertIn(vuln, cmd.findings)
+		self.assertIn(tag, cmd.findings)
 
 	# def test_pd_pipe(self):
 	# 	cmd = Command.execute(

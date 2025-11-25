@@ -5,9 +5,19 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 								 PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
 								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
 								 USER_AGENT, HOST, URL)
-from secator.output_types import Progress, Vulnerability
+from secator.output_types import Progress, Tag, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
+
+
+def output_discriminator(item):
+	"""Discriminate between Tag and Vulnerability based on severity."""
+	if 'percent' in item:
+		return Progress
+	severity = item.get('info', {}).get('severity', '').lower()
+	if severity == 'info':
+		return Tag
+	return Vulnerability
 
 
 @task()
@@ -15,7 +25,7 @@ class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
 	cmd = 'nuclei'
 	input_types = [HOST, IP, URL]
-	output_types = [Vulnerability, Progress]
+	output_types = [Vulnerability, Tag, Progress]
 	tags = ['vuln', 'scan']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -63,6 +73,7 @@ class nuclei(VulnMulti):
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
 	item_loaders = [JSONSerializer()]
+	output_discriminator = output_discriminator
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: nuclei.id_extractor(x),
@@ -77,6 +88,13 @@ class nuclei(VulnMulti):
 			REFERENCES: lambda x: x['info'].get('reference', []),
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 			PROVIDER: 'nuclei',
+		},
+		Tag: {
+			NAME: lambda x: nuclei.name_extractor(x),
+			'match': 'matched-at',
+			'category': lambda x: (x['info'].get('tags') or ['general'])[0],
+			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
+			'_source': 'nuclei',
 		},
 		Progress: {
 			PERCENT: lambda x: int(x['percent']),
