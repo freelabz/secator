@@ -49,7 +49,7 @@ class TestWorker(unittest.TestCase):
 			name='secator_w_host_recon',
 			process=True,
 			quiet=True,
-			cls_attributes={'output_types': [Target, Url, Port, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]}
+			cls_attributes={'output_types': [Target, Url, Port, Tag, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
 		self.assertGreater(len(cmd.results), 0)
@@ -73,7 +73,7 @@ class TestWorker(unittest.TestCase):
 		tag = Tag(
 			name='nginx-version',
 			match='http://vulnweb.com',
-			category='tech',
+			category='info',
 			value='nginx/1.19.0',
 			_source='nuclei_url'
 		)
