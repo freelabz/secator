@@ -37,7 +37,7 @@ class Tag(OutputType):
 		small_content = False
 		if len(content) < 50:
 			small_content = True
-		s += f' [bold orange4]{trim_string(content, max_length=50)}[/]'
+		s += f' [bold orange4]{trim_string(content.rstrip(), max_length=50)}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:
@@ -45,9 +45,8 @@ class Tag(OutputType):
 		if not small_content:
 			sep = ' '
 			content = trim_string(content, max_length=1000)
-			if len(content) > 1000:
-				content = content.replace('\n', '\n' + sep)
-				sep = '\n    '
+			content = content.replace('\n', '\n    ')
+			sep = '\n    '
 			ed += f'\n    [bold red]value[/]:{sep}[yellow]{_s(content)}[/]'
 		if self.extra_data:
 			for k, v in self.extra_data.items():
