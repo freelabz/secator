@@ -112,6 +112,7 @@ class Runner:
 		self.celery_ids = []
 		self.celery_ids_map = {}
 		self.revoked = False
+		self.skipped = False
 		self.results_buffer = []
 		self._hooks = hooks
 
@@ -269,14 +270,20 @@ class Runner:
 
 	@property
 	def infos(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Info) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Info)]
 
 	@property
 	def warnings(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Warning) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Warning)]
 
 	@property
 	def errors(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Error)]
 
 	@property
@@ -311,6 +318,8 @@ class Runner:
 			return 'PENDING'
 		if self.revoked:
 			return 'REVOKED'
+		if self.skipped:
+			return 'SKIPPED'
 		if not self.done:
 			return 'RUNNING'
 		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
@@ -1099,15 +1108,10 @@ class Runner:
 					f'Validator failed: target [bold blue]{_input}[/] of type [bold green]{input_type}[/] '
 					f'is not supported by [bold gold3]{self.unique_name}[/]. Supported types: [bold green]{supported_types}[/]'
 				)
-				if self.has_parent:
-					message += '. Removing from current inputs (runner context)'
-					info = Info(message=message)
-					self.inputs.remove(_input)
-					self.add_result(info)
-				else:
-					error = Error(message=message)
-					self.add_result(error)
-					return False
+				message += '. Removing from current inputs (runner context)'
+				warning = Warning(message=message)
+				self.inputs.remove(_input)
+				self.add_result(warning)
 		return True
 
 	@staticmethod

@@ -1092,7 +1092,8 @@ def health(json_, debug, strict, bleeding):
 			info = get_version_info(
 				tool.cmd.split(' ')[0],
 				tool.version_flag or f'{tool.opt_prefix}version',
-				tool.install_github_handle,
+				tool.github_handle,
+				tool.install_github_version_prefix,
 				tool.install_cmd,
 				tool.install_version,
 				bleeding=bleeding
@@ -1234,7 +1235,8 @@ def install_gcs():
 		cmd=f'{sys.executable} -m pip install secator[gcs]',
 		title='Google Cloud Storage addon',
 		next_steps=[
-			'Run [bold green4]secator config set addons.gcs.credentials_path <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gcs.bucket_name <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gcs.credentials_path <VALUE>[/]. [dim](optional if using default credentials)[/]',  # noqa: E501
 		]
 	)
 
@@ -1441,7 +1443,7 @@ def update(all):
 		for cls in discover_tasks():
 			cmd = cls.cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
-			info = get_version_info(cmd, version_flag, cls.install_github_handle)
+			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
 			if not info['installed'] or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
 				status = ToolInstaller.install(cls)
@@ -1519,7 +1521,8 @@ def lint(linter):
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
-def unit(tasks, workflows, scans, test):
+@click.option('--no-coverage', is_flag=True, help='Disable coverage')
+def unit(tasks, workflows, scans, test, no_coverage):
 	"""Run unit tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
@@ -1539,7 +1542,10 @@ def unit(tasks, workflows, scans, test):
 
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=5'  # noqa: E501
+	if not no_coverage:
+		cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=5'  # noqa: E501
+	else:
+		cmd = f'{sys.executable} -m pytest -s -vv tests/unit --durations=5'
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
@@ -1689,9 +1695,9 @@ def task(name, verbose, check, system_exit):
 		errors
 	)
 	check_test(
-		any(cmd for cmd in [task.install_pre, task.install_cmd, task.install_github_handle]),
+		any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
 		'Check task installation command is defined',
-		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `install_github_handle`.',  # noqa: E501
+		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `github_handle`.',  # noqa: E501
 		errors
 	)
 	check_test(

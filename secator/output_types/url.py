@@ -1,5 +1,8 @@
 import time
+
 from dataclasses import dataclass, field
+
+from urllib.parse import urlparse
 
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TITLE, URL, WEBSERVER, METHOD)
@@ -12,6 +15,7 @@ from secator.config import CONFIG
 class Url(OutputType):
 	url: str
 	host: str = field(default='', compare=False)
+	verified: bool = field(default=False, compare=False)
 	status_code: int = field(default=0, compare=False)
 	title: str = field(default='', compare=False)
 	webserver: str = field(default='', compare=False)
@@ -26,6 +30,7 @@ class Url(OutputType):
 	stored_response_path: str = field(default='', compare=False)
 	response_headers: dict = field(default_factory=dict, repr=True, compare=False)
 	request_headers: dict = field(default_factory=dict, repr=True, compare=False)
+	is_directory: dict = field(default='', compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='url', repr=True)
@@ -50,6 +55,15 @@ class Url(OutputType):
 	]
 	_sort_by = (URL,)
 
+	def __post_init__(self):
+		super().__post_init__()
+		if not self.host:
+			self.host = urlparse(self.url).hostname
+		if self.status_code != 0:
+			self.verified = True
+		if self.title and 'Index of' in self.title:
+			self.is_directory = True
+
 	def __gt__(self, other):
 		# favor httpx over other url info tools
 		if self._source == 'httpx' and other._source != 'httpx':
@@ -72,6 +86,8 @@ class Url(OutputType):
 				s += rf' \[[red]{self.status_code}[/]]'
 		if self.title:
 			s += rf' \[[spring_green3]{trim_string(self.title)}[/]]'
+		if self.is_directory:
+			s += r' \[[bold gold3]directory[/]]'
 		if self.webserver:
 			s += rf' \[[bold magenta]{_s(self.webserver)}[/]]'
 		if self.tech:

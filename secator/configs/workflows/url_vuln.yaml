@@ -7,6 +7,12 @@ input_types:
   - url
 
 options:
+  passive:
+    is_flag: True
+    help: Passive only (no requests to targets)
+    default: False
+    short: ps
+
   nuclei:
     is_flag: True
     default: False
@@ -49,6 +55,7 @@ tasks:
         - type: tag
           field: match
           condition: item._source.startswith("gf")
+      if: not opts.passive
 
     nuclei:
       description: Search for HTTP vulns
@@ -59,8 +66,7 @@ tasks:
         - type: tag
           field: match
           condition: item._source.startswith("gf")
-      if: opts.nuclei
-
+      if: opts.nuclei and not opts.passive
   # TODO: Add support for SQLMap
   # sqlmap:
   #   description: Attack SQLI vulnerabilities

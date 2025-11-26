@@ -1,12 +1,13 @@
 from dataclasses import dataclass, field
 import time
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import strip_rich_markup, rich_to_ansi
 
 
 @dataclass
 class Warning(OutputType):
 	message: str
+	message_color: str = field(default='', compare=False)
 	task_id: str = field(default='', compare=False)
 	_source: str = field(default='', repr=True)
 	_type: str = field(default='warning', repr=True)
@@ -19,6 +20,11 @@ class Warning(OutputType):
 	_table_fields = ['task_name', 'message']
 	_sort_by = ('_timestamp',)
 
+	def __post_init__(self):
+		super().__post_init__()
+		self.message_color = self.message
+		self.message = strip_rich_markup(self.message)
+
 	def __repr__(self):
-		s = rf"\[[yellow]WRN[/]] {self.message}"
+		s = rf"\[[yellow]WRN[/]] {self.message_color}"
 		return rich_to_ansi(s)

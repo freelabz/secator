@@ -6,19 +6,19 @@ import json
 import logging
 import operator
 import os
-import signal
-import tldextract
 import re
 import select
+import signal
 import sys
+import tldextract
+import traceback
 import validators
 import warnings
 
 from datetime import datetime, timedelta
 from functools import reduce
-from pathlib import Path
+from pathlib import Path, PurePath
 from time import time
-import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
@@ -26,7 +26,7 @@ import ifaddr
 import yaml
 
 from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE, IP, HOST, CIDR_RANGE,
-								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT)
+								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT, GCS_URL)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 _tasks = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
+CAMEL_TO_SNAKE_REGEX = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 class TaskError(ValueError):
@@ -89,7 +90,9 @@ def expand_input(input, ctx):
 				console.print('No input passed on stdin.', style='bold red')
 				sys.exit(1)
 	elif os.path.exists(input):
-		if os.path.isfile(input):
+		if 'path' in ctx.obj['input_types']:
+			return input
+		elif os.path.isfile(input):
 			with open(input, 'r') as f:
 				data = f.read().splitlines()
 			return data
@@ -308,6 +311,19 @@ def rich_to_ansi(text):
 		return text
 
 
+def strip_rich_markup(text):
+	"""Strip rich markup from text.
+
+	Args:
+		text (str): Text.
+
+	Returns:
+		str: Text without rich markup.
+	"""
+	from rich.text import Text
+	return Text.from_markup(text).plain
+
+
 def rich_escape(obj):
 	"""Escape object for rich printing.
 
@@ -397,15 +413,33 @@ def escape_mongodb_url(url):
 	return url
 
 
-def caml_to_snake(s):
-	return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
+def caml_to_snake(name):
+	"""
+	Convert CamelCase string to snake_case, handling acronyms properly.
+
+	Examples:
+		>>> caml_to_snake("MongoDB")
+		'mongo_db'
+		>>> caml_to_snake("MONGODB")
+		'mongodb'
+		>>> caml_to_snake("getHTTPResponseCode")
+		'get_http_response_code'
+		>>> caml_to_snake("XMLHttpRequest")
+		'xml_http_request'
+		>>> caml_to_snake("HTMLElement")
+		'html_element'
+	"""
+	if not name:
+		return ""
+	name = CAMEL_TO_SNAKE_REGEX.sub(r'_', name)
+	return name.lower().replace('__', '_')
 
 
 def print_version():
 	"""Print secator version information."""
 	from secator.installer import get_version_info
 	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False, end='')
-	info = get_version_info('secator', install_github_handle='freelabz/secator', version=VERSION)
+	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
 	status = info['status']
 	location = info['location']
@@ -776,6 +810,8 @@ def autodetect_type(target):
 	"""
 	if validators.url(target, simple_host=True):
 		return URL
+	elif target.startswith('gs://'):
+		return GCS_URL
 	elif validate_cidr_range(target):
 		return CIDR_RANGE
 	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
@@ -832,3 +868,19 @@ def signal_to_name(signum):
 		if name.startswith('SIG') and not name.startswith('SIG_') and value == signum:
 			return name
 	return str(signum)
+
+
+def is_valid_path(path):
+	"""Check if a path is valid.
+
+	Args:
+		path (str): Path to check.
+
+	Returns:
+		bool: True if the path is valid, False otherwise.
+	"""
+	try:
+		PurePath(path)
+		return True
+	except (TypeError, ValueError):
+		return False

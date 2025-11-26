@@ -359,7 +359,6 @@ def replace(task_instance, sig):
 		It is best to always use ``return self.replace(...)`` to convey
 		to the reader that the task won't continue after being replaced.
 	"""
-	console.print('Replacing task')
 	chord = task_instance.request.chord
 	sig.freeze(task_instance.request.id)
 	replaced_task_nesting = task_instance.request.get('replaced_task_nesting', 0) + 1
@@ -374,16 +373,16 @@ def replace(task_instance, sig):
 	import os
 	process = psutil.Process(os.getpid())
 	length = len(task_instance.request.chain) if task_instance.request.chain else 0
-	console.print(f'Adding {length} chain tasks from request chain')
+	# console.print(f'Adding {length} chain tasks from request chain')
 	for ix, t in enumerate(reversed(task_instance.request.chain or [])):
-		console.print(f'Adding chain task {t.name} from request chain ({ix + 1}/{length})')
+		console.print(Info(message=f'Adding chain task {t.name} from request chain ({ix + 1}/{length})'))
 		chain_task = signature(t, app=task_instance.app)
 		chain_task.set(replaced_task_nesting=replaced_task_nesting)
 		sig |= chain_task
 		del chain_task
 		del t
 		memory_bytes = process.memory_info().rss
-		console.print(f'Memory usage: {memory_bytes / 1024 / 1024:.2f} MB (chain task {ix + 1}/{length})')
+		console.print(Info(message=f'Memory usage: {memory_bytes / 1024 / 1024:.2f} MB (chain task {ix + 1}/{length})'))
 	gc.collect()
 	return task_instance.on_replace(sig)
 
@@ -439,8 +438,8 @@ def break_task(task, task_opts, results=[]):
 	task.sync = False
 	task.results = []
 	task.uuids = set()
-	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with{len(sigs)} chunks'))
-	console.print(Info(message=f'Results: {results}'))
+	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
+	# console.print(Info(message=f'Results: {results}'))
 
 	# Build Celery workflow
 	workflow = chord(

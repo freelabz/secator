@@ -58,7 +58,9 @@ RUN chmod 0440 /etc/sudoers
 # Set up the environment
 USER secator
 ENV PATH="${PATH}:/home/secator/.local/bin"
+ENV CARGO_HOME="/home/secator/.local"
 ENV GOBIN="/home/secator/.local/bin"
+ENV GOPATH="/home/secator/go"
 ENV TERM="xterm-256color"
 ENV SECATOR_SECURITY_PROMPT_SUDO_PASSWORD="0"
 RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi

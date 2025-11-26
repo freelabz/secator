@@ -15,7 +15,7 @@ from time import time
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
+from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
@@ -85,8 +85,12 @@ class Command(Runner):
 	# Install
 	install_pre = None
 	install_post = None
+	install_cmd_pre = None
 	install_cmd = None
-	install_github_handle = None
+	install_github_bin = True
+	github_handle = None
+	install_github_version_prefix = ''
+	install_ignore_bin = []
 	install_version = None
 
 	# Serializer
@@ -293,7 +297,8 @@ class Command(Runner):
 		return get_version_info(
 			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
-			cls.install_github_handle,
+			cls.github_handle,
+			cls.install_github_version_prefix,
 			cls.install_cmd,
 			cls.install_version,
 			bleeding=bleeding
@@ -428,6 +433,7 @@ class Command(Runner):
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
 				yield Warning(message=f'{self.unique_name} skipped (no inputs)')
+				self.skipped = True
 				return
 
 			# Print command
@@ -1142,6 +1148,8 @@ class Command(Runner):
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'
+			elif self.file_flag == OPT_SPACE_SEPARATED:
+				cmd += ' ' + ' '.join(inputs)
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
 			else:

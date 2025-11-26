@@ -1,4 +1,7 @@
 import re
+
+from urllib.parse import urlparse, urlunparse
+
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
@@ -22,6 +25,13 @@ CARIDDI_IGNORE_PATTERNS = re.compile(r"|".join([
 ]), re.IGNORECASE)
 
 CARIDDI_IGNORE_LIST = ['BTC address']
+CARIDDI_RENAME_LIST = {
+	'IPv4 address': 'IpV4 address',
+	'MySQL error': 'Mysql error',
+	'MariaDB error': 'Mariadb error',
+	'PostgreSQL error': 'Postgresql error',
+	'SQLite error': 'Sqlite error',
+}
 
 
 @task()
@@ -31,7 +41,6 @@ class cariddi(HttpCrawler):
 	input_types = [URL]
 	output_types = [Url, Tag]
 	tags = ['url', 'crawl']
-	input_chunk_size = 1
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '-json'
@@ -73,7 +82,7 @@ class cariddi(HttpCrawler):
 	item_loaders = [JSONSerializer()]
 	install_version = 'v1.3.6'
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@[install_version]'
-	install_github_handle = 'edoardottt/cariddi'
+	github_handle = 'edoardottt/cariddi'
 	encoding = 'ansi'
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/edoardottt/cariddi/issues/122
@@ -132,31 +141,53 @@ class cariddi(HttpCrawler):
 		for param in params:
 			param_name = param['name']
 			for attack in param['attacks']:
-				extra_data = {'param': param_name, 'source': 'url'}
-				yield Tag(
-					name=f'{attack} param',
-					match=url,
-					extra_data=extra_data
-				)
+				extra_data = {k: v for k, v in param.items() if k not in ['name', 'attacks']}
+				extra_data['content'] = attack
+				parsed_url = urlparse(url)
+				params = parsed_url.query.split('&')
+				url_without_param = urlunparse(parsed_url._replace(query=''))
+				for p in params:
+					p_name, p_value = p.split('=')
+					if p_name == param_name:
+						p_value = p_value
+						break
+					yield Tag(
+						category='info',
+						name='url_param',
+						value=p_name,
+						match=url_without_param,
+						extra_data={'value': p_value, 'url': url}
+					)
 
 		for error in errors:
-			match = error['match']
-			error['extra_data'] = {'error': match, 'source': 'body'}
-			error['match'] = url
+			error['category'] = 'error'
+			error['name'] = '_'.join(f'{error["name"]}'.lower().split())
+			error['value'] = error['match']
+			error['extra_data'] = {'url': url}
+			error['match'] = url_without_param
 			yield Tag(**error)
 
 		for secret in secrets:
-			match = secret['match']
-			secret['extra_data'] = {'secret': match, 'source': 'body'}
-			secret['match'] = url
+			secret['category'] = 'secret'
+			secret['name'] = '_'.join(f'{secret["name"]}'.lower().split())
+			secret['value'] = secret['match']
+			secret['extra_data'] = {'url': url}
+			secret['match'] = url_without_param
 			yield Tag(**secret)
 
 		for info in infos:
 			if info['name'] in CARIDDI_IGNORE_LIST:
 				continue
-			match = info['match']
-			if CARIDDI_IGNORE_PATTERNS.match(match):
+			if info['name'] in CARIDDI_RENAME_LIST:
+				info['name'] = CARIDDI_RENAME_LIST[info['name']]
+			content = info['match']
+			parsed_url = urlparse(url)
+			url_without_param = urlunparse(parsed_url._replace(query=''))
+			info['category'] = 'info'
+			info['name'] = '_'.join(f'{info["name"]}'.lower().split())
+			info['match'] = url_without_param
+			if CARIDDI_IGNORE_PATTERNS.match(content):
 				continue
-			info['extra_data'] = {'info': match, 'source': 'body'}
-			info['match'] = url
+			info['value'] = content
+			info['extra_data'] = {'url': url}
 			yield Tag(**info)

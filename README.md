@@ -65,12 +65,14 @@ and it is designed to improve productivity for pentesters and security researche
 | [ffuf](https://github.com/ffuf/ffuf)                                                            | Fast web fuzzer written in Go.                                                   | `url/fuzz`        |
 | [fping](https://github.com/schweikert/fping)                                                           | Send ICMP echo probes to network hosts, similar to ping, but much better.        | `ip/recon`        |
 | [gau](https://github.com/lc/gau)                                                             | Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan. | `pattern/scan`    |
+| [getasn](None)                                                          | Get ASN information from IP address.                                             | `ip/probe`        |
 | [gf](https://github.com/tomnomnom/gf)                                                              | Wrapper around grep, to help you grep for things.                                | `pattern/scan`    |
 | [gitleaks](https://github.com/gitleaks/gitleaks)                                                        | Tool for detecting secrets like passwords, API keys, and tokens in git repos, files, and stdin. | `secret/scan`     |
 | [gospider](https://github.com/jaeles-project/gospider)                                                        | Fast web spider written in Go.                                                   | `url/crawl`       |
 | [grype](https://github.com/anchore/grype)                                                           | Vulnerability scanner for container images and filesystems.                      | `vuln/scan`       |
 | [h8mail](https://github.com/khast3x/h8mail)                                                          | Email information and password lookup tool.                                      | `user/recon/email` |
 | [httpx](https://github.com/projectdiscovery/httpx)                                                           | Fast and multi-purpose HTTP toolkit.                                             | `url/probe`       |
+| [jswhois](None)                                                         | WHOIS in JSON format                                                             | `domain/info`     |
 | [katana](https://github.com/projectdiscovery/katana)                                                          | Next-generation crawling and spidering framework.                                | `url/crawl`       |
 | [maigret](https://github.com/soxoj/maigret)                                                         | Collect a dossier on a person by username.                                       | `user/recon/username` |
 | [mapcidr](https://github.com/projectdiscovery/mapcidr)                                                         | Utility program to perform multiple operations for a given subnet/cidr ranges.   | `ip/recon`        |
@@ -82,9 +84,14 @@ and it is designed to improve productivity for pentesters and security researche
 | [subfinder](https://github.com/projectdiscovery/subfinder)                                                       | Fast passive subdomain enumeration tool.                                         | `dns/recon`       |
 | [testssl](https://github.com/testssl/testssl.sh)                                                         | SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws.  | `dns/recon/tls`   |
 | [trivy](https://github.com/aquasecurity/trivy)                                                           | Comprehensive and versatile security scanner.                                    | `vuln/scan`       |
+| [trufflehog](https://github.com/trufflesecurity/trufflehog)                                                      | Tool for finding secrets in git repositories and filesystems using TruffleHog.   | `secret/scan`     |
+| [urlfinder](https://github.com/projectdiscovery/urlfinder)                                                       | Find URLs in text.                                                               | `pattern/scan`    |
 | [wafw00f](https://github.com/EnableSecurity/wafw00f)                                                         | Web Application Firewall Fingerprinting tool.                                    | `waf/scan`        |
+| [whois](https://github.com/mboot-github/WhoisDomain)                                                           | The whois tool retrieves registration information about domain names and IP addresses. |                   |
 | [wpprobe](https://github.com/Chocapikk/wpprobe)                                                         | Fast wordpress plugin enumeration tool.                                          | `vuln/scan/wordpress` |
 | [wpscan](https://github.com/wpscanteam/wpscan)                                                          | Wordpress security scanner.                                                      | `vuln/scan/wordpress` |
+| [x8](https://github.com/Sh1Yo/x8)                                                              | Hidden parameters discovery suite written in Rust.                               | `url/fuzz/params` |
+| [xurlfind3r](https://github.com/hueristiq/xurlfind3r)                                                      | Discover URLs for a given domain in a simple, passive and efficient way          | `url/recon`       |
 <!-- END_TOOLS_TABLE -->
 
 Feel free to request new tools to be added by opening an issue, but please 
