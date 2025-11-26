@@ -13,6 +13,7 @@ class jswhois(Command):
 	output_types = [Tag]
 	item_loaders = [JSONSerializer(list=True)]
 	tags = ['domain', 'info']
+	input_chunk_size = 1
 	input_flag = None
 	file_flag = None
 	version_flag = '-V'
