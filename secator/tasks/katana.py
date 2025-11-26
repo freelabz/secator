@@ -134,6 +134,9 @@ class katana(HttpCrawler):
 						value=param,
 						extra_data={'url': url, 'value': 'FUZZ'}
 					)
+		response = item.get('response')
+		if not response:
+			return item
 		url = Url(
 			url=item['request']['endpoint'],
 			host=parsed_url.hostname,
