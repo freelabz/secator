@@ -1222,7 +1222,7 @@ c set celery.broker_url redis://<remote_ip>:6379/0
 c edit
 
 
-[bold cyan]Fourre-tout ...[/]
+[bold cyan]Miscellaneous examples[/]
 
 nmap testphp.vulnweb.com -sV -p 80 --script vulners
 w subdomain_recon --dry-run
@@ -1271,7 +1271,7 @@ s domain <DOMAIN> -pf full                                              # all fe
 :two: URL fuzzing on a target
 
 w url_fuzz <URL>
-w url_fuzz --fuzzers feroxbuster,ffuf,dirsearch <URL> --wordlist https://raw.github.com/wordlist/test.txt  # choose fuzzers, use remote wordlist
+w url_fuzz --fuzzers feroxbuster,ffuf,dirsearch <URL> --wordlist https://example.com/wordlist.txt  # choose fuzzers, use remote wordlist
 
 
 :three: Vuln and secret scan on local or github repo:
