@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DATA, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
+from secator.definitions import (CIDR_RANGE, CVES, CVSS_SCORE, DATA, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
 								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, IP,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
 								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
@@ -235,7 +235,7 @@ class Vuln(Command):
 			cpes (tuple[str], Optional): CPEs to match for.
 
 		Returns:
-			dict: vulnerability data.
+			dict: vulnerability data with updated exploit metadata (name, cves list).
 		"""
 		if CONFIG.runners.skip_exploit_search:
 			debug(f'{exploit_id}: skipped remote query since config.runners.skip_exploit_search is set.', sub='cve.vulners')
@@ -251,18 +251,44 @@ class Vuln(Command):
 			h1 = [h1.get_text(strip=True) for h1 in soup.find_all('h1')]
 			if '404' in h1:
 				raise requests.RequestException("404 [not found or rate limited]")
+
+			# Extract exploit title - use first h1 if available, otherwise use page title
+			exploit_title = h1[0] if h1 else title
+			# Clean up common suffixes in the title
+			if exploit_title.endswith(' - Vulners.com'):
+				exploit_title = exploit_title.replace(' - Vulners.com', '')
+
 			code = [code.get_text(strip=True) for code in soup.find_all('code')]
 			elems = [title] + h1 + code
 			content = '\n'.join(elems)
 			cve_regex = re.compile(r'(CVE(?:-|_)\d{4}(?:-|_)\d{4,7})', re.IGNORECASE)
 			matches = cve_regex.findall(str(content))
-			if not matches:
+
+			# Build exploit metadata dict with title and CVE IDs
+			exploit_data = {
+				NAME: exploit_title,
+				CVES: []
+			}
+
+			if matches:
+				# Normalize all CVE IDs found
+				cve_ids = [m.replace('_', '-').upper() for m in matches]
+				# Remove duplicates while preserving order
+				cve_ids = list(dict.fromkeys(cve_ids))
+				exploit_data[CVES] = cve_ids
+
+				# Lookup the first CVE for vulnerability data
+				cve_id = cve_ids[0]
+				cve_data = Vuln.lookup_cve(cve_id, *cpes)
+				if cve_data:
+					# Merge exploit metadata into vulnerability data
+					cve_data.update(exploit_data)
+					return cve_data
+			else:
 				debug(f'{exploit_id}: no matching CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve.vulners')
-				return None
-			cve_id = matches[0].replace('_', '-').upper()
-			cve_data = Vuln.lookup_cve(cve_id, *cpes)
-			if cve_data:
-				return cve_data
+
+			# Return exploit metadata even if no CVE data found
+			return exploit_data
 
 		except requests.RequestException as e:
 			debug(f'{exploit_id}: failed remote query ({str(e)}).', sub='cve.vulners')
