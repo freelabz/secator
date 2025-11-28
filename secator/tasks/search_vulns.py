@@ -51,9 +51,10 @@ class search_vulns(Vuln):
 			PROVIDER: lambda x: 'search_vulns',
 		}
 	}
-	install_version = 'v1.6.0'
-	install_cmd = 'pip install search_vulns==[install_version]'
+	install_version = '0.8.2'
+	install_cmd = 'pipx install --force search_vulns==[install_version]'
 	github_handle = 'ra1nb0rn/search_vulns'
+	install_github_bin = False
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
