@@ -1162,6 +1162,133 @@ def health(json_, debug, strict, bleeding):
 	else:
 		console.print(Info(message='Everything is up to date !')) if not json_ else None
 
+
+#------------#
+# CHEATSHEET #
+#------------#
+
+@cli.command(name='cheatsheet', aliases=['cs'])
+def cheatsheet():
+	"""Display a cheatsheet of secator commands."""
+	cheatsheet_content = """
+[bold cyan]Some basics ...[/]
+
+secator x   # list all tasks 
+secator w  # list all workflows
+secator s  # list all scans
+
+secator s host --tree                        # show config tree
+secator s host --dry-run                     # dry run (show commands)
+secator s host --yaml                        # show yaml config
+secator s host --ws prod                     # use a workspace
+secator s host host1,host2,host3             # multiple hosts scan
+secator s host hosts.txt                     # multiple hosts scan (txt)
+cat hosts.txt | secator s host               # piped inputs
+cat hosts.txt | secator x subfinder | secator x naabu | secator x httpx | secator w url_crawl   # a secator pipe
+
+[dim]# and yes, the above work with all scans, workflows, and tasks !!![/]
+
+
+[bold cyan]Aliases[/]
+
+[dim]Secator aliases are useful to stop typing `secator <something>` and focus on what you want to run.[/]
+
+To enable aliases:
+
+secator alias enable
+source ~/.secator/.aliases
+
+Then, you can run:
+
+aliases             # list all aliases
+x list              # list all tasks
+w list              # list all workflows
+s list              # list all scans
+p list              # list all profiles
+httpx                                                                   # aliased httpx !
+nmap -sV -p --script vulners example.com                               # aliased nmap !
+w host_recon                                                            # aliased host_recon !
+s domain                                                                # aliased domain scan !
+cat hosts.txt | subfinder | naabu | httpx | w url_crawl                # aliased secator pipe !
+
+
+[bold cyan]Configuration[/]
+
+c get
+c get --user
+c set profiles.defaults aggressive
+c set celery.result_backend redis://<remote_ip>:6379/0
+c set celery.broker_url redis://<remote_ip>:6379/0
+c edit
+
+
+[bold cyan]Fourre-tout ...[/]
+
+nmap testphp.vulnweb.com -sV -p 80 --script vulners
+w subdomain_recon --dry-run
+w subdomain_recon --tree
+w subdomain_recon -ws php vulnweb.com                                  # subdomain recon 
+w host_recon -ws php testphp.vulnweb.com                               # host recon
+w url_crawl -ws php http://testphp.vulnweb.com/
+w user_hunt -ws perso ocervell
+
+
+[bold cyan]Too slow ? Use a worker[/]
+
+wk                                                                      # or `secator worker` if you still don't use aliases ...
+httpx testphp.vulnweb.com                                               # <-- runs in worker
+
+
+[bold cyan]Digging into reports[/]
+
+r list 
+r list -ws default
+r list -ws default -d
+r show tasks/15586,tasks/15585,tasks/15584 -q "tag.match and 'signup.php' in tag.match" --unified -o json
+r show -ws default                                                      # all workspace
+r show -q "url.status_code not in ['400', '401', '403', '500']"
+
+
+[bold cyan]Other things (utils, install, update)[/]
+
+ut                                                                      # update tools
+i install tool <task>
+i install addon <addon>
+
+
+[bold cyan]Quick wins[/]
+
+[dim]Some useful scans and workflows we use day-to-day[/]
+
+:one: Recon domain + subdomains with top 100 ports + URL crawl + URL vulns
+
+s domain <DOMAIN>                                                       # light
+s domain <DOMAIN> -pf passive                                           # passive (0 requests to targets)
+s domain <DOMAIN> -pf all_ports                                         # full port scan
+s domain <DOMAIN> -pf full                                              # all features
+
+
+:two: URL fuzzing on a target
+
+w url_fuzz <URL>
+w url_fuzz --fuzzers feroxbuster,ffuf,dirsearch <URL> --wordlist https://raw.github.com/wordlist/test.txt  # choose fuzzers, use remote wordlist
+
+
+:three: Vuln and secret scan on local or github repo:
+
+w code_scan <PATH>                                                      # on a local path or git repo
+w code_scan https://github.com/freelabz/secator                         # on a github repo
+w code_scan https://github.com/freelabz                                 # on a github org (all repos)
+
+
+:four: Hunt user accounts
+
+w user_hunt elonmusk                                                    # by username
+w user_hunt elonmusk@tesla.com                                          # by email
+"""
+	console.print(cheatsheet_content)
+
+
 #---------#
 # INSTALL #
 #---------#
