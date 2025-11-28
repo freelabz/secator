@@ -1173,7 +1173,7 @@ def cheatsheet():
 	cheatsheet_content = """
 [bold cyan]Some basics ...[/]
 
-secator x   # list all tasks 
+secator x  # list all tasks 
 secator w  # list all workflows
 secator s  # list all scans
 
