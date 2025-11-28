@@ -1170,123 +1170,134 @@ def health(json_, debug, strict, bleeding):
 @cli.command(name='cheatsheet', aliases=['cs'])
 def cheatsheet():
 	"""Display a cheatsheet of secator commands."""
-	cheatsheet_content = """
-[bold cyan]Some basics ...[/]
+	from rich.markup import escape
+	from rich.panel import Panel
+	from rich import box
+	kwargs = {
+		'box': box.ROUNDED,
+		'title_align': 'left',
+		# 'style': 'bold blue3',
+		'border_style': 'green',
+		'padding': (0, 1, 0, 1),
+		'highlight': False,
+		'expand': True,
+	}
+	title_style = 'bold green'
 
-secator x  # list all tasks 
-secator w  # list all workflows
-secator s  # list all scans
+	panel1 = Panel("""
+[dim]Secator basic commands to get you started...[/]
 
-secator s host --tree                        # show config tree
-secator s host --dry-run                     # dry run (show commands)
-secator s host --yaml                        # show yaml config
-secator s host --ws prod                     # use a workspace
-secator s host host1,host2,host3             # multiple hosts scan
-secator s host hosts.txt                     # multiple hosts scan (txt)
-cat hosts.txt | secator s host               # piped inputs
-cat hosts.txt | secator x subfinder | secator x naabu | secator x httpx | secator w url_crawl   # a secator pipe
+secator x  [dim]# list all tasks[/] 
+secator w  [dim]# list all workflows[/]
+secator s  [dim]# list all scans[/]
 
-[dim]# and yes, the above work with all scans, workflows, and tasks !!![/]
+secator s host -tree                        [dim]# show config tree[/]
+secator s host -dry                         [dim]# dry run (show commands)[/]
+secator s host -yaml                        [dim]# show yaml config[/]
+secator s host -ws prod example.com         [dim]# run in specific workspace[/]
+secator s host -driver mongodb example.com  [dim]# run with mongodb driver[/]
+secator s host host1,host2,host3            [dim]# multiple hosts scan (comma-separated)[/]
+secator s host hosts.txt                    [dim]# multiple hosts scan (txt file)[/]
+cat hosts.txt | secator s host              [dim]# piped inputs[/]
 
+[dim]... and YES, the above works with any scans (s), workflows (w), and tasks (x) !!![/]
+""", title=f":shield: [{title_style}]Some basics[/]", **kwargs)
 
-[bold cyan]Aliases[/]
+	panel2 = Panel("""
+[dim]Secator aliases are useful to stop typing [bold cyan]secator <something>[/] and focus on what you want to run.
+We strongly recommend to enable aliases to increase your productivity...[/]
 
-[dim]Secator aliases are useful to stop typing `secator <something>` and focus on what you want to run.[/]
+[bold]To enable aliases:[/]
 
-To enable aliases:
+secator alias enable       [dim]# enable aliases[/]
+source ~/.secator/.aliases [dim]# load aliases in current shell[/]
 
-secator alias enable
-source ~/.secator/.aliases
+[bold]Then, you can use:[/]
 
-Then, you can run:
+a list                                                   [dim]# list all aliases[/]
+p list                                                   [dim]# list all profiles[/]
+r list                                                   [dim]# list all reports[/]
+x                                                        [dim]# list all tasks[/]
+w                                                        [dim]# list all workflows[/]
+s                                                        [dim]# list all scans[/]
 
-aliases             # list all aliases
-x list              # list all tasks
-w list              # list all workflows
-s list              # list all scans
-p list              # list all profiles
-httpx                                                                   # aliased httpx !
-nmap -sV -p --script vulners example.com                               # aliased nmap !
-w host_recon                                                            # aliased host_recon !
-s domain                                                                # aliased domain scan !
-cat hosts.txt | subfinder | naabu | httpx | w url_crawl                # aliased secator pipe !
+httpx                                                    [dim]# aliased httpx ![/]
+nmap -sV -p 443 --script vulners example.com             [dim]# aliased nmap ![/]
+w host_recon                                             [dim]# aliased host_recon ![/]
+s domain                                                 [dim]# alias for domain scan ![/]
+cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain tasks ![/]
+""", title=f":shorts: [{title_style}]Aliases[/]", **kwargs)
 
+	panel3 = Panel("""
+[dim]Secator configuration is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/].
+You can edit it manually or use the following commands to get/set values...[/]
 
-[bold cyan]Configuration[/]
+c get         [dim]# get config value[/]
+c get --user  [dim]# get user config value[/]
+c edit        [dim]# edit user config in editor[/]
+c set profiles.defaults aggressive                              [dim]# set 'aggressive' profile as default[/]
+c set celery.result_backend redis://<remote_ip>:6379/0          [dim]# set redis backend[/]
+c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis broker[/]
+c set drivers.defaults mongodb                                  [dim]# set mongodb as default driver[/]
+c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set default wordlist for http fuzzing[/]
+""", title=f":gear: [{title_style}]Configuration[/]", **kwargs)
 
-c get
-c get --user
-c set profiles.defaults aggressive
-c set celery.result_backend redis://<remote_ip>:6379/0
-c set celery.broker_url redis://<remote_ip>:6379/0
-c edit
+	panel4 = Panel("""
+[dim]By default, tasks are run sequentially. But you can use a worker to run tasks in parallel and massively speed up your scans...[/]
 
+wk                         [dim]# or [bold cyan]secator worker[/] if you don't use aliases ...[/]
+httpx testphp.vulnweb.com  [dim]# <-- runs in worker[/]
+""", title=f":zap: [{title_style}]Too slow ? Use a worker[/]", **kwargs)
 
-[bold cyan]Miscellaneous examples[/]
+	panel5 = Panel("""
+[dim]Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, filter and export reports using the following commands...[/]
 
-nmap testphp.vulnweb.com -sV -p 80 --script vulners
-w subdomain_recon --dry-run
-w subdomain_recon --tree
-w subdomain_recon -ws php vulnweb.com                                  # subdomain recon 
-w host_recon -ws php testphp.vulnweb.com                               # host recon
-w url_crawl -ws php http://testphp.vulnweb.com/
-w user_hunt -ws perso ocervell
+r list                    [dim]# list all reports[/]
+r list -ws default        [dim]# list reports from the workspace 'default'[/]
+r list -d 1h              [dim]# list reports from the last hour[/]
+r show -ws default        [dim]# show results from the workspace 'default'[/]
+r show tasks/15586,tasks/15585,tasks/15584 -q "tag.match and 'signup.php' in tag.match" --unified -o json  [dim]# show tags matching 'signup.php' from tasks 15586, 15585 and 15584[/]
+r show -q "url.status_code not in ['400', '401', '403', '500']"                                            [dim]# show urls with status code not in 400, 401, 403 or 500[/]
+""", title=f":file_cabinet: [{title_style}]Digging into reports[/]", **kwargs)
 
+	panel6 = Panel("""
+[dim]Commands to update secator, install tools and addons...[/]
 
-[bold cyan]Too slow ? Use a worker[/]
+u                [dim]# update secator (or [bold cyan]secator update[/] if you don't use aliases)[/]
+i tools httpx    [dim]# install tool 'httpx'[/]
+i addon redis    [dim]# install addon 'redis'[/]
+""", title=f":wrench: [{title_style}]Updates[/]", **kwargs)
 
-wk                                                                      # or `secator worker` if you still don't use aliases ...
-httpx testphp.vulnweb.com                                               # <-- runs in worker
+	panel7 = Panel("""
+[dim]Some useful scans and workflows we use day-to-day for recon...[/]
 
+[bold gold3]:trophy: Recon domain + subdomains with top 100 ports + URL crawl + URL vulns[/]
+s domain <DOMAIN>                [dim]# light[/]
+s domain <DOMAIN> -pf passive    [dim]# passive (0 requests to targets)[/]
+s domain <DOMAIN> -pf all_ports  [dim]# full port scan[/]
+s domain <DOMAIN> -pf full       [dim]# all features[/]
 
-[bold cyan]Digging into reports[/]
-
-r list 
-r list -ws default
-r list -ws default -d
-r show tasks/15586,tasks/15585,tasks/15584 -q "tag.match and 'signup.php' in tag.match" --unified -o json
-r show -ws default                                                      # all workspace
-r show -q "url.status_code not in ['400', '401', '403', '500']"
-
-
-[bold cyan]Other things (utils, install, update)[/]
-
-ut                                                                      # update tools
-i install tool <task>
-i install addon <addon>
-
-
-[bold cyan]Quick wins[/]
-
-[dim]Some useful scans and workflows we use day-to-day[/]
-
-:one: Recon domain + subdomains with top 100 ports + URL crawl + URL vulns
-
-s domain <DOMAIN>                                                       # light
-s domain <DOMAIN> -pf passive                                           # passive (0 requests to targets)
-s domain <DOMAIN> -pf all_ports                                         # full port scan
-s domain <DOMAIN> -pf full                                              # all features
-
-
-:two: URL fuzzing on a target
-
+[bold gold3]:trophy: URL fuzzing on a target[/]
 w url_fuzz <URL>
-w url_fuzz --fuzzers feroxbuster,ffuf,dirsearch <URL> --wordlist https://example.com/wordlist.txt  # choose fuzzers, use remote wordlist
+w url_fuzz --fuzzers feroxbuster,ffuf,dirsearch <URL> --wordlist https://example.com/wordlist.txt  [dim]# choose fuzzers, use remote wordlist[/]
 
+[bold gold3]:trophy: Vuln and secret scan on local or github repo:[/]
+w code_scan <PATH>                               [dim]# on a local path or git repo[/]
+w code_scan https://github.com/freelabz/secator  [dim]# on a github repo[/]
+w code_scan https://github.com/freelabz          [dim]# on a github org (all repos)[/]
 
-:three: Vuln and secret scan on local or github repo:
+[bold gold3]:trophy: Hunt user accounts[/]
+w user_hunt elonmusk            [dim]# by username[/]
+w user_hunt elonmusk@tesla.com  [dim]# by email[/]
+""", title=f":trophy: [{title_style}]Quick wins[/]", **kwargs)
 
-w code_scan <PATH>                                                      # on a local path or git repo
-w code_scan https://github.com/freelabz/secator                         # on a github repo
-w code_scan https://github.com/freelabz                                 # on a github org (all repos)
-
-
-:four: Hunt user accounts
-
-w user_hunt elonmusk                                                    # by username
-w user_hunt elonmusk@tesla.com                                          # by email
-"""
-	console.print(cheatsheet_content)
+	console.print(panel1)
+	console.print(panel2)
+	console.print(panel3)
+	console.print(panel4)
+	console.print(panel5)
+	console.print(panel6)
+	console.print(panel7)
 
 
 #---------#

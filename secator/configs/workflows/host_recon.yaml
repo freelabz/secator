@@ -20,14 +20,14 @@ options:
     help: "Run full port scan (default: top 100 ports)"
 
 tasks:
-  naabu:
+  naabu/light:
     description: Find open ports
     if: opts.ports or not opts.full
 
   naabu/full:
-    description: Find open ports
+    description: Find all open ports
     ports: "-"  # scan all ports
-    if: opts.full and not opts.ports
+    if: opts.full
 
   nmap:
     description: Search for vulnerabilities on open ports
