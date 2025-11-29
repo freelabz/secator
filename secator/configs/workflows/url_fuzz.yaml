@@ -21,7 +21,7 @@ options:
     is_flag: True
     help: Hunt secrets in HTTP responses (trufflehog)
     default: False
-    short: hp
+    short: hs
 
 tasks:
   httpx/1:
