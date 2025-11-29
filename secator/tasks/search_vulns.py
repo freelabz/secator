@@ -1,9 +1,13 @@
+from urllib.parse import urlparse
+
+
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DESCRIPTION, EXTRA_DATA,
-								 ID, MATCHED_AT, NAME, PROVIDER, REFERENCES,
-								 SEVERITY, STRING, TAGS)
-from secator.output_types import Vulnerability
+from secator.definitions import (STRING, OPT_NOT_SUPPORTED, HEADER,
+								 DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES,
+								 THREADS, TIMEOUT, USER_AGENT)
+from secator.output_types import Vulnerability, Exploit, Warning
 from secator.tasks._categories import Vuln
+from secator.serializers import JSONSerializer
 
 
 @task()
@@ -11,10 +15,11 @@ class search_vulns(Vuln):
 	"""Search for known vulnerabilities in software by product name or CPE."""
 	cmd = 'search_vulns'
 	input_types = [STRING]
-	output_types = [Vulnerability]
+	output_types = [Vulnerability, Exploit]
 	tags = ['vuln', 'recon']
 	input_flag = '-q'
 	input_chunk_size = 1
+	item_loaders = [JSONSerializer()]
 	json_flag = '-f json'
 	version_flag = '-V'
 	opts = {
@@ -35,30 +40,113 @@ class search_vulns(Vuln):
 		'ignore_general_product_vulns': 'ignore-general-product-vulns',
 		'include_single_version_vulns': 'include-single-version-vulns',
 		'include_patched': 'include-patched',
+		HEADER: OPT_NOT_SUPPORTED,
+		DELAY: OPT_NOT_SUPPORTED,
+		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		PROXY: OPT_NOT_SUPPORTED,
+		RATE_LIMIT: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
+		THREADS: OPT_NOT_SUPPORTED,
+		TIMEOUT: OPT_NOT_SUPPORTED,
+		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
-	output_map = {
-		Vulnerability: {
-			ID: lambda x: search_vulns.extract_id(x),
-			NAME: lambda x: search_vulns.extract_id(x),
-			DESCRIPTION: lambda x: x.get('description', ''),
-			SEVERITY: lambda x: search_vulns.cvss_to_severity(x.get('cvss', 0)),
-			CONFIDENCE: lambda x: 'high',
-			CVSS_SCORE: lambda x: x.get('cvss', 0),
-			MATCHED_AT: lambda x: x.get('matched_at', ''),
-			TAGS: lambda x: search_vulns.extract_tags(x),
-			REFERENCES: lambda x: search_vulns.extract_references(x),
-			EXTRA_DATA: lambda x: search_vulns.extract_extra_data(x),
-			PROVIDER: lambda x: 'search_vulns',
-		}
-	}
-	install_version = '0.8.2'
+	install_version = '0.8.3'
 	install_cmd = 'pipx install --force search_vulns==[install_version]'
+	install_post = {'*': 'search_vulns -u'}
 	github_handle = 'ra1nb0rn/search_vulns'
 	install_github_bin = False
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
 	profile = 'io'
+
+	@staticmethod
+	def before_init(self):
+		if len(self.inputs) == 0:
+			return
+		_in = self.inputs[0]
+		self.matched_at = None
+		if '~' in _in:
+			split = _in.split('~')
+			self.matched_at = split[0]
+			self.inputs[0] = split[1]
+		self.inputs[0] = self.inputs[0].replace('httpd', '').replace('/', ' ')
+
+	@staticmethod
+	def on_json_loaded(self, item):
+		"""Load vulnerability items from search_vulns JSON output."""
+		matched_at = self.matched_at if self.matched_at else self.inputs[0] if self.inputs else ''
+
+		values = item.values()
+		if not values:
+			return None
+
+		data = list(values)[0]
+		if isinstance(data, str):
+			yield Warning(message=data)
+			return
+
+		vulns = data.get('vulns', {})
+		common_extra_data = {}
+		# product_ids = data.get('product_ids', {})
+		# cpes = product_ids.get('cpe', [])
+		# if cpes:
+		# 	common_extra_data.update({'cpes': cpes})
+
+		# Yield each vulnerability
+		for vuln_id, vuln_data in vulns.items():
+			cve_id = search_vulns.extract_id(vuln_data)
+			yield Vulnerability(
+				id=vuln_id,
+				name=search_vulns.extract_id(vuln_data),
+				description=vuln_data.get('description', ''),
+				severity=search_vulns.cvss_to_severity(vuln_data.get('cvss', 0)),
+				confidence='high',
+				cvss_score=float(vuln_data.get('cvss', 0)),
+				epss_score=vuln_data.get('epss', ''),
+				cvss_vec=vuln_data.get('cvss_vec', ''),
+				matched_at=matched_at,
+				references=search_vulns.extract_references(vuln_data),
+				extra_data=search_vulns.extract_extra_data(vuln_data),
+				provider='search_vulns',
+				tags=search_vulns.extract_tags(vuln_data),
+			)
+			exploits = vuln_data.get('exploits', [])
+			for exploit in exploits:
+				extra_data = common_extra_data.copy()
+				parts = exploit.replace('http://', '').replace('https://', '').replace('github.com', 'github').split('/')
+				hostname = urlparse(exploit).hostname
+				tags = [hostname]
+				provider = hostname.split('.')[-2]
+				is_github = 'github.com' in exploit
+				if is_github:
+					user = parts[1]
+					repo = parts[2]
+					name = 'Github'
+					extra_data.update({
+						'user': user,
+						'repo': repo,
+					})
+				else:
+					hostname = urlparse(exploit).hostname
+					name = provider.capitalize()
+				name = name + ' exploit'
+				last_part = exploit.split('/')[-1]
+				id = f'{cve_id}-exploit'
+				if last_part.isnumeric():
+					id = last_part
+					name += f' {id}'
+				yield Exploit(
+					name=name,
+					provider=provider,
+					id=id,
+					matched_at=matched_at,
+					confidence='high',
+					reference=exploit,
+					cves=[cve_id],
+					tags=tags,
+					extra_data=extra_data,
+				)
 
 	@staticmethod
 	def extract_id(item):
@@ -116,11 +204,16 @@ class search_vulns(Vuln):
 		if item.get('product_ids'):
 			extra['product_ids'] = item['product_ids']
 
+		# Add match reason
+		if item.get('match_reason'):
+			extra['match_reason'] = item['match_reason']
+
 		return extra
 
 	@staticmethod
 	def cvss_to_severity(cvss):
 		"""Convert CVSS score to severity level."""
+		cvss = float(cvss)
 		if not cvss or cvss < 0:
 			return None
 		if cvss < 4:
@@ -131,42 +224,3 @@ class search_vulns(Vuln):
 			return 'high'
 		else:
 			return 'critical'
-
-	@staticmethod
-	def item_loader(self, line):
-		"""Load vulnerability items from search_vulns JSON output."""
-		import json
-
-		try:
-			data = json.loads(line)
-		except json.JSONDecodeError:
-			return
-
-		# Get the matched_at value (the query string)
-		matched_at = self.inputs[0] if self.inputs else ''
-
-		# Extract product IDs from the result
-		product_ids = data.get('product_ids', {})
-
-		# Extract vulnerabilities
-		vulns = data.get('vulns', {})
-
-		if not vulns:
-			return
-
-		# Yield each vulnerability
-		for vuln_id, vuln_data in vulns.items():
-			vuln_dict = {
-				'id': vuln_id,
-				'description': vuln_data.get('description', ''),
-				'cvss': vuln_data.get('cvss', 0),
-				'cvss_ver': vuln_data.get('cvss_ver', ''),
-				'cwe_id': vuln_data.get('cwe_id', ''),
-				'published': vuln_data.get('published', ''),
-				'exploits': list(vuln_data.get('exploits', [])),
-				'aliases': vuln_data.get('aliases', {}),
-				'cisa_known_exploited': vuln_data.get('cisa_known_exploited', False),
-				'product_ids': product_ids,
-				'matched_at': matched_at,
-			}
-			yield vuln_dict

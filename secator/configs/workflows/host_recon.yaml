@@ -51,8 +51,17 @@ tasks:
       description: Search for related exploits
       targets_:
         - type: port
-          field: service_name
+          field: '{host}:{port}~{service_name}'
           condition: len(item.service_name.split('/')) > 1
+
+    search_vulns:
+      description: Search for related exploits
+      targets_:
+        - type: port
+          field: '{host}:{port}~{service_name}'
+          condition: len(item.service_name.split('/')) > 1
+        - type: vulnerability
+          field: '{matched_at}~{id}'
 
   _group/2:
     nuclei/network:
