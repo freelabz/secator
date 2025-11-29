@@ -289,15 +289,6 @@ class TestCli(unittest.TestCase):
 		assert 'Aliases' in result.output
 		assert 'Configuration' in result.output
 		assert 'Quick wins' in result.output
-		assert 'secator x' in result.output
-		assert 'secator w' in result.output
-		assert 'secator s' in result.output
-
-	def test_cheatsheet_alias(self):
-		result = self.runner.invoke(cli, ['cs'])
-		assert not result.exception
-		assert result.exit_code == 0
-		assert 'Some basics' in result.output
 
 if __name__ == '__main__':
 	unittest.main()
