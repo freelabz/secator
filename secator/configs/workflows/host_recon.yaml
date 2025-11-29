@@ -20,14 +20,29 @@ options:
     help: "Run full port scan (default: top 100 ports)"
 
 tasks:
-  naabu/light:
-    description: Find open ports
-    if: opts.ports or not opts.full
 
-  naabu/full:
-    description: Find all open ports
-    ports: "-"  # scan all ports
-    if: opts.full
+  _group:
+    naabu/light:
+      description: Find open ports
+      if: opts.ports or not opts.full
+
+    naabu/full:
+      description: Find all open ports
+      ports: "-"  # scan all ports
+      if: opts.full
+
+    nmap/light:
+      description: Find open ports
+      version_detection: False
+      script: null
+      if: opts.ports or not opts.full
+
+    nmap/full:
+      description: Find open ports
+      version_detection: False
+      script: null
+      ports: "-"  # scan all ports
+      if: opts.full
 
   nmap:
     description: Search for vulnerabilities on open ports
@@ -39,6 +54,13 @@ tasks:
     - type: port
       field: port
       condition: port.host in targets
+
+  sshaudit:
+    description: Audit SSH port
+    targets_:
+    - type: port
+      field: host
+      condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
 
   _group/1:
     httpx:

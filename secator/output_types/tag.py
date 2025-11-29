@@ -35,9 +35,11 @@ class Tag(OutputType):
 		content = self.value
 		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{self.name}[/]'
 		small_content = False
-		if len(content) < 50:
+		if len(content) < 100:
 			small_content = True
-		s += f' [bold orange4]{trim_string(content.rstrip(), max_length=50)}[/]'
+		# content_xs = trim_string(content, max_length=50).replace('\n', '/')
+		if small_content:
+			s += f' [bold orange4]{content}[/]'
 		s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:

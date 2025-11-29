@@ -1,10 +1,7 @@
-import json
-import os
-
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Vulnerability, Error, Info, Tag
-from secator.definitions import HOST, IP, OUTPUT_PATH, TIMEOUT
+from secator.output_types import Vulnerability, Tag
+from secator.definitions import HOST, IP, TIMEOUT
 from secator.tasks._categories import Command
 from secator.serializers import JSONSerializer
 
@@ -27,9 +24,8 @@ class sshaudit(Command):
 		'ipv4': {'is_flag': True, 'short': '4', 'default': False, 'help': 'Enable IPv4 (order of precedence)'},
 		'ipv6': {'is_flag': True, 'short': '6', 'default': False, 'help': 'Enable IPv6 (order of precedence)'},
 		'batch': {'is_flag': True, 'short': 'b', 'default': False, 'help': 'Enable batch output for automated processing'},
-		'client_audit': {'is_flag': True, 'short': 'c', 'default': False, 'help': 'Start a listening server for client auditing'},
+		'client_audit': {'is_flag': True, 'short': 'c', 'default': False, 'help': 'Start a listening server for client auditing'},  # noqa: E501
 		'level': {'type': str, 'short': 'l', 'default': None, 'help': 'Minimum output level (info, warn, fail)'},
-		'verbose': {'is_flag': True, 'short': 'v', 'default': False, 'help': 'Enable verbose output'},
 	}
 	opt_key_map = {
 		TIMEOUT: 'timeout',
@@ -61,11 +57,11 @@ class sshaudit(Command):
 		yield Tag(
 			category='info',
 			name='ssh_banner',
+			value=banner.get('raw', ''),
 			match=target,
 			extra_data={
 				'software': software,
 				'protocol': banner.get('protocol', ''),
-				'raw': banner.get('raw', '')
 			}
 		)
 
@@ -96,7 +92,7 @@ class sshaudit(Command):
 			# Create vulnerabilities for failures
 			for failure in failures:
 				yield Vulnerability(
-					name=f'SSH weak encryption algorithm: {algorithm}',
+					name='SSH weak encryption algorithm',
 					matched_at=target,
 					tags=['ssh', 'encryption', 'cipher'],
 					severity='high',
@@ -112,7 +108,7 @@ class sshaudit(Command):
 			# Create vulnerabilities for warnings
 			for warning in warnings:
 				yield Vulnerability(
-					name=f'SSH encryption algorithm warning: {algorithm}',
+					name='SSH encryption algorithm warning',
 					matched_at=target,
 					tags=['ssh', 'encryption', 'cipher'],
 					severity='medium',
@@ -127,17 +123,17 @@ class sshaudit(Command):
 
 			# Create info tags for successful algorithms if verbose
 			if not failures and not warnings:
-				info_notes = notes.get('info', [])
-				if info_notes:
-					yield Tag(
-						category='info',
-						name='ssh_encryption',
-						match=target,
-						extra_data={
-							'algorithm': algorithm,
-							'info': info_notes
-						}
-					)
+				info_notes = ', '.join(notes.get('info', []))
+				value = f'{algorithm} {info_notes}'
+				yield Tag(
+					category='info',
+					name='ssh_encryption',
+					value=value,
+					match=target,
+					extra_data={
+						'algorithm': algorithm,
+					}
+				)
 
 		# Process MAC algorithms
 		mac_list = item.get('mac', [])
@@ -150,7 +146,7 @@ class sshaudit(Command):
 			# Create vulnerabilities for failures
 			for failure in failures:
 				yield Vulnerability(
-					name=f'SSH weak MAC algorithm: {algorithm}',
+					name='SSH weak MAC algorithm',
 					matched_at=target,
 					tags=['ssh', 'mac', 'authentication'],
 					severity='high',
@@ -166,7 +162,7 @@ class sshaudit(Command):
 			# Create vulnerabilities for warnings
 			for warning in warnings:
 				yield Vulnerability(
-					name=f'SSH MAC algorithm warning: {algorithm}',
+					name='SSH MAC algorithm warning',
 					matched_at=target,
 					tags=['ssh', 'mac', 'authentication'],
 					severity='medium',
@@ -181,17 +177,17 @@ class sshaudit(Command):
 
 			# Create info tags for successful algorithms if verbose
 			if not failures and not warnings:
-				info_notes = notes.get('info', [])
-				if info_notes:
-					yield Tag(
-						category='info',
-						name='ssh_mac',
-						match=target,
-						extra_data={
-							'algorithm': algorithm,
-							'info': info_notes
-						}
-					)
+				info_notes = ', '.join(notes.get('info', []))
+				value = f'{algorithm} {info_notes}'
+				yield Tag(
+					category='info',
+					name='ssh_mac',
+					value=value,
+					match=target,
+					extra_data={
+						'algorithm': algorithm,
+					}
+				)
 
 		# Process key exchange algorithms
 		kex_list = item.get('kex', [])
@@ -204,7 +200,7 @@ class sshaudit(Command):
 			# Create vulnerabilities for failures
 			for failure in failures:
 				yield Vulnerability(
-					name=f'SSH weak key exchange algorithm: {algorithm}',
+					name='SSH weak key exchange algorithm',
 					matched_at=target,
 					tags=['ssh', 'kex', 'key-exchange'],
 					severity='high',
@@ -220,7 +216,7 @@ class sshaudit(Command):
 			# Create vulnerabilities for warnings
 			for warning in warnings:
 				yield Vulnerability(
-					name=f'SSH key exchange algorithm warning: {algorithm}',
+					name='SSH key exchange algorithm warning',
 					matched_at=target,
 					tags=['ssh', 'kex', 'key-exchange'],
 					severity='medium',
@@ -235,17 +231,17 @@ class sshaudit(Command):
 
 			# Create info tags for successful algorithms if verbose
 			if not failures and not warnings:
-				info_notes = notes.get('info', [])
-				if info_notes:
-					yield Tag(
-						category='info',
-						name='ssh_kex',
-						match=target,
-						extra_data={
-							'algorithm': algorithm,
-							'info': info_notes
-						}
-					)
+				info_notes = ', '.join(notes.get('info', []))
+				value = f'{algorithm} {info_notes}'
+				yield Tag(
+					category='info',
+					name='ssh_kex',
+					value=value,
+					match=target,
+					extra_data={
+						'algorithm': algorithm,
+					}
+				)
 
 		# Process host key algorithms
 		key_list = item.get('key', [])
@@ -258,7 +254,7 @@ class sshaudit(Command):
 			# Create vulnerabilities for failures
 			for failure in failures:
 				yield Vulnerability(
-					name=f'SSH weak host key algorithm: {algorithm}',
+					name='SSH weak host key algorithm',
 					matched_at=target,
 					tags=['ssh', 'host-key'],
 					severity='high',
@@ -274,7 +270,7 @@ class sshaudit(Command):
 			# Create vulnerabilities for warnings
 			for warning in warnings:
 				yield Vulnerability(
-					name=f'SSH host key algorithm warning: {algorithm}',
+					name='SSH host key algorithm warning',
 					matched_at=target,
 					tags=['ssh', 'host-key'],
 					severity='medium',
@@ -289,14 +285,14 @@ class sshaudit(Command):
 
 			# Create info tags for successful algorithms if verbose
 			if not failures and not warnings:
-				info_notes = notes.get('info', [])
-				if info_notes:
-					yield Tag(
-						category='info',
-						name='ssh_host_key',
-						match=target,
-						extra_data={
-							'algorithm': algorithm,
-							'info': info_notes
-						}
-					)
+				info_notes = ', '.join(notes.get('info', []))
+				value = f'{algorithm} {info_notes}'
+				yield Tag(
+					category='info',
+					name='ssh_host_key',
+					match=target,
+					value=value,
+					extra_data={
+						'algorithm': algorithm,
+					}
+				)
