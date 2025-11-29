@@ -105,4 +105,5 @@ class searchsploit(Command):
 			# 	self._print(f'[bold red]{item.name} ({item.reference}) did not quite match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
 		input_tag = '-'.join(self.inputs[0].replace('\'', '').split(' '))
 		item.tags = [input_tag] + item.tags
+		item.matched_at = self.matched_at if self.matched_at else self.inputs[0] if self.inputs else ''
 		return item

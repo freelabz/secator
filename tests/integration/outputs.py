@@ -1,6 +1,6 @@
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability, Record, Certificate, Domain)
+                                Vulnerability, Record, Certificate, Exploit, Domain)
 
 
 OUTPUTS_CHECKS = {
@@ -324,6 +324,24 @@ OUTPUTS_TASKS = {
             expiration_date='2026-01-13 00:12:14',
             registrant='',
             _source='whois'
+        )
+    ],
+    'searchsploit': [
+        Exploit(
+            name='cgi-bin Remote Code Execution',
+            provider='EDB',
+            id='29290',
+            matched_at='apache 2.4.5',
+            confidence='low'
+        )
+    ],
+    'search_vulns': [
+        Exploit(
+            name='Apache exploit',
+            provider='apache',
+            id='CVE-2019-10081-exploit',
+            matched_at='apache 2.4.39',
+            confidence='high'
         )
     ],
     'testssl': [
