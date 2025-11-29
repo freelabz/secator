@@ -13,16 +13,6 @@ options:
     default: False
     short: ps
 
-  probe_http:
-    is_flag: True
-    help: Probe domain and subdomains (HTTP)
-    default: True
-
-  probe_dns:
-    is_flag: True
-    help: Probe domain and subdomains (DNS)
-    default: True
-
   brute_http:
     is_flag: True
     help: Bruteforce subdomains with HTTP Host header (ffuf)
@@ -63,11 +53,12 @@ tasks:
       if: opts.brute_dns and not opts.passive
 
     httpx:
-      description: Run HTTP probe on domain
+      description: Find subdomains through TLS certificates
       tech_detect: True
+      tls_grab: True
       targets_:
       - target.name
-      if: (opts.probe_http or opts.brute_http) and not opts.passive
+      if: not opts.passive
 
   _group/2:
     testssl:
@@ -83,7 +74,6 @@ tasks:
       wordlist: False
       targets_:
       - subdomain.host
-      if: opts.probe_dns
 
     nuclei:
       description: Check for subdomain takeovers
@@ -111,7 +101,7 @@ tasks:
       targets_:
       - target.name
       - subdomain.host
-      if: opts.probe_http and not opts.passive
+      if: not opts.passive
 
   trufflehog:
     description: Find secrets in HTTP responses

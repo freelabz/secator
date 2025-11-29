@@ -1,0 +1,6 @@
+type: profile
+name: all_ports
+description: "Scan all ports"
+opts:
+    ports: "-"
+    full: true

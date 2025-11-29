@@ -1,0 +1,21 @@
+type: profile
+name: full
+description: "Active all optional features"
+opts:
+    full: true
+    nuclei: true
+    brute_dns: true
+    brute_http: true
+    hunt_secrets: true
+    test_ssl: true
+    headless: true
+    system_chrome: true
+    no_sandbox: true
+    screenshot: true
+    server_defaults: false
+    host_recon_nuclei: true
+    host_recon_full: true
+    subdomain_recon_hunt_secrets: true
+    subdomain_recon_test_ssl: true
+    url_crawl_hunt_secrets: true
+    url_vuln_nuclei: true

@@ -54,7 +54,7 @@ class getasn(Command):
 			category='info',
 			name='asn',
 			match=self.inputs[0],
-			extra_data={'content': line.strip()}
+			value=line.strip(),
 		)
 		if tag not in self.self_results:
 			yield tag

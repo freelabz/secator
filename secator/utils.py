@@ -6,11 +6,12 @@ import json
 import logging
 import operator
 import os
-import signal
-import tldextract
 import re
 import select
+import signal
 import sys
+import tldextract
+import traceback
 import validators
 import warnings
 
@@ -18,7 +19,6 @@ from datetime import datetime, timedelta
 from functools import reduce
 from pathlib import Path, PurePath
 from time import time
-import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
@@ -309,6 +309,19 @@ def rich_to_ansi(text):
 	except Exception:
 		print(f'Could not convert rich text to ansi: {text}[/]', file=sys.stderr)
 		return text
+
+
+def strip_rich_markup(text):
+	"""Strip rich markup from text.
+
+	Args:
+		text (str): Text.
+
+	Returns:
+		str: Text without rich markup.
+	"""
+	from rich.text import Text
+	return Text.from_markup(text).plain
 
 
 def rich_escape(obj):

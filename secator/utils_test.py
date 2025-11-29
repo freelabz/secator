@@ -73,6 +73,7 @@ INPUTS_TASKS = {
 	'gf': 'http://testphp.vulnweb.com/hpp?pp=1',
 	'maigret': 'Linus__Torvalds',
 	'searchsploit': 'apache',
+	'search_vulns': 'apache 2.4.39',
 }
 
 #---------------------#

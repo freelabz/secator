@@ -4,6 +4,7 @@ alias: hostrec
 description: Host recon
 tags: [recon, network, http]
 input_types:
+  - ip
   - host
   - cidr_range
 
@@ -19,14 +20,14 @@ options:
     help: "Run full port scan (default: top 100 ports)"
 
 tasks:
-  naabu:
+  naabu/light:
     description: Find open ports
     if: opts.ports or not opts.full
 
   naabu/full:
-    description: Find open ports
+    description: Find all open ports
     ports: "-"  # scan all ports
-    if: opts.full and not opts.ports
+    if: opts.full
 
   nmap:
     description: Search for vulnerabilities on open ports
@@ -51,8 +52,17 @@ tasks:
       description: Search for related exploits
       targets_:
         - type: port
-          field: service_name
+          field: '{host}:{port}~{service_name}'
           condition: len(item.service_name.split('/')) > 1
+
+    search_vulns:
+      description: Search for related exploits
+      targets_:
+        - type: port
+          field: '{host}:{port}~{service_name}'
+          condition: len(item.service_name.split('/')) > 1
+        - type: vulnerability
+          field: '{matched_at}~{id}'
 
   _group/2:
     nuclei/network:
