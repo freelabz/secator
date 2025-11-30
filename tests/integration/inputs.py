@@ -34,6 +34,7 @@ INPUTS_TASKS = {
 	'whois': 'wikipedia.org',
 	'x8': 'http://testphp.vulnweb.com/hpp/?pp=1',
 	'xurlfind3r': 'http://testphp.vulnweb.com',
+	'opensquat': 'google.com',
 }
 
 INPUTS_WORKFLOWS = {
