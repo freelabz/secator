@@ -88,8 +88,18 @@ class opensquat(ReconDns):
 			return
 
 		yield Info(message=f'JSON results saved to {self.output_path}')
-		with open(self.output_path, 'r') as f:
-			data = json.load(f)
+		
+		# Read and parse the JSON file
+		try:
+			with open(self.output_path, 'r') as f:
+				content = f.read()
+				if not content or content.strip() == '':
+					# Empty file, no results found
+					return
+				data = json.loads(content)
+		except json.JSONDecodeError as e:
+			yield Error(message=f'Failed to parse JSON output: {e}')
+			return
 
 		# opensquat returns a simple JSON array of domain strings
 		if isinstance(data, list):
