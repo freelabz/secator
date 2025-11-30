@@ -123,6 +123,7 @@ META_OPTS = {
 	'trivy.output_path': load_fixture('trivy_output', FIXTURES_DIR, only_path=True),
 	'wafw00f.output_path': load_fixture('wafw00f_output', FIXTURES_DIR, only_path=True),
 	'testssl.output_path': load_fixture('testssl_output', FIXTURES_DIR, only_path=True),
+	'ssh_audit.output_path': load_fixture('ssh_audit_output', FIXTURES_DIR, only_path=True),
 	'x8.wordlist': 'http_params'
 }
 
