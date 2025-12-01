@@ -238,11 +238,13 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 					# If so, skip adding shared version as those nodes will have their own prefixed versions
 					same_opt_ids = [so['id'] for so in same_opts]
 					relevant_nodes = [node] + [n for n in nodes if n.id in same_opt_ids]
+					# debug(f'relevant nodes: {[n.name for n in relevant_nodes]}', sub=f'cli.{config.name}')
 					has_config_override = False
 					for node_to_check in relevant_nodes:
 						if hasattr(node_to_check.opts, 'get'):
 							if node_to_check.opts.get(k) is not None:
 								has_config_override = True
+								# debug(f'has config override: {has_config_override}: {node_to_check.opts.get(k)}', sub=f'cli.{config.name}')
 								break
 						elif k in node_to_check.opts:
 							has_config_override = True
@@ -256,7 +258,10 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 					else:
 						# Skip this option as it will be handled by the config override logic
 						debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] skipped [dim red](has config override)[/]', sub=f'cli.{config.name}')  # noqa: E501
-						continue
+						opt_name = f'{node.name}-{k}'
+						conf['applies_to'] = set([node.name])
+						conf['prefix'] = 'Config'
+						# continue
 			else:
 				raise ValueError(f'Unknown option {k} for task {node.id}')
 			all_opts[opt_name] = conf
