@@ -125,8 +125,10 @@ class TestTree(unittest.TestCase):
 			f.write(yaml.dump(self.workflow_config_2, sort_keys=False))
 
 	def tearDown(self):
-		self.custom_workflow_path_1.unlink()
-		self.custom_workflow_path_2.unlink()
+		if self.custom_workflow_path_1.exists():
+			self.custom_workflow_path_1.unlink()
+		if self.custom_workflow_path_2.exists():
+			self.custom_workflow_path_2.unlink()
 
 	def test_tree_task(self):
 		find_templates.cache_clear()

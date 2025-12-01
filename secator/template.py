@@ -236,10 +236,18 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 				if len(same_opts) > 0:
 					# Check if any node has this option explicitly set in config
 					# If so, skip adding shared version as those nodes will have their own prefixed versions
-					has_config_override = any(
-						_.opts.get(k) is not None if hasattr(_.opts, 'get') else k in _.opts
-						for _ in [node] + [n for n in nodes if n.id in [so['id'] for so in same_opts]]
-					)
+					same_opt_ids = [so['id'] for so in same_opts]
+					relevant_nodes = [node] + [n for n in nodes if n.id in same_opt_ids]
+					has_config_override = False
+					for node_to_check in relevant_nodes:
+						if hasattr(node_to_check.opts, 'get'):
+							if node_to_check.opts.get(k) is not None:
+								has_config_override = True
+								break
+						elif k in node_to_check.opts:
+							has_config_override = True
+							break
+
 					if not has_config_override:
 						applies_to = set([node.name] + [_['name'] for _ in same_opts])
 						conf['applies_to'] = applies_to
