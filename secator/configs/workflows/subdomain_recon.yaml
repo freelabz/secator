@@ -65,15 +65,18 @@ tasks:
       description: Test SSL/TLS security on subdomains
       server_defaults: True
       targets_:
-      - subdomain.host
+      - type: subdomain
+        field: host
+        condition: subdomain.verified
       if: opts.test_ssl
 
     dnsx/probe:
       description: Probe DNS records on subdomains
       subdomains_only: True
-      wordlist: False
       targets_:
-      - subdomain.host
+      - type: subdomain
+        field: host
+        condition: subdomain.verified
 
     nuclei:
       description: Check for subdomain takeovers
