@@ -190,22 +190,25 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		for k, v in task_opts_all.items():
 			conf = v.copy()
 			conf['prefix'] = f'Task {node.name}'
-			default_from_config = node_opts.get(k) or ancestor_opts_defaults.get(k) or config_opts_defaults.get(k)
+			# Use explicit None checks to properly handle boolean False values
+			default_from_config = node_opts.get(k) if node_opts.get(k) is not None else (
+				ancestor_opts_defaults.get(k) if ancestor_opts_defaults.get(k) is not None else config_opts_defaults.get(k)
+			)
 			opt_name = k
 			same_opts = find_same_opts(node, nodes, k)
 
 			# Found a default in YAML config, either in task options, or workflow options, or config options
-			if default_from_config:
+			if default_from_config is not None:
 				conf['required'] = False
 				conf['default'] = default_from_config
 				conf['default_from'] = node_id_str
-				if node_opts.get(k):
+				if node_opts.get(k) is not None:
 					conf['default_from'] = node_id_str
 					conf['prefix'] = 'Config'
-				elif ancestor_opts_defaults.get(k):
+				elif ancestor_opts_defaults.get(k) is not None:
 					conf['default_from'] = get_short_id(node.ancestor.id, config.name)
 					conf['prefix'] = f'{node.ancestor.type.capitalize()} {node.ancestor.name}'
-				elif config_opts_defaults.get(k):
+				elif config_opts_defaults.get(k) is not None:
 					conf['default_from'] = config.name
 					conf['prefix'] = 'Config'
 				mapped_value = cls.opt_value_map.get(opt_name)
@@ -215,7 +218,9 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 					else:
 						default_from_config = mapped_value
 				conf['default'] = default_from_config
-				if len(same_opts) > 0 or k in task_opts_meta:  # change opt name to avoid conflict
+				# Check for same opts in both config and class definitions to determine if we need to rename
+				same_opts_class = find_same_opts(node, nodes, k, check_class_opts=True)
+				if len(same_opts) > 0 or len(same_opts_class) > 0 or k in task_opts_meta:  # change opt name to avoid conflict
 					conf['prefix'] = 'Config'
 					opt_name = f'{conf["default_from"]}.{k}'
 					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] renamed to [bold green]{opt_name}[/] [dim red](default set in config)[/]', sub=f'cli.{config.name}')  # noqa: E501
@@ -229,10 +234,21 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 			elif k in task_opts:
 				same_opts = find_same_opts(node, nodes, k, check_class_opts=True)
 				if len(same_opts) > 0:
-					applies_to = set([node.name] + [_['name'] for _ in same_opts])
-					conf['applies_to'] = applies_to
-					conf['prefix'] = 'Shared task'
-					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Common[/] [dim red](duplicated {len(same_opts)} times)[/]', sub=f'cli.{config.name}')  # noqa: E501
+					# Check if any node has this option explicitly set in config
+					# If so, skip adding shared version as those nodes will have their own prefixed versions
+					has_config_override = any(
+						_.opts.get(k) is not None if hasattr(_.opts, 'get') else k in _.opts
+						for _ in [node] + [n for n in nodes if n.id in [so['id'] for so in same_opts]]
+					)
+					if not has_config_override:
+						applies_to = set([node.name] + [_['name'] for _ in same_opts])
+						conf['applies_to'] = applies_to
+						conf['prefix'] = 'Shared task'
+						debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Common[/] [dim red](duplicated {len(same_opts)} times)[/]', sub=f'cli.{config.name}')  # noqa: E501
+					else:
+						# Skip this option as it will be handled by the config override logic
+						debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] skipped [dim red](has config override)[/]', sub=f'cli.{config.name}')  # noqa: E501
+						continue
 			else:
 				raise ValueError(f'Unknown option {k} for task {node.id}')
 			all_opts[opt_name] = conf

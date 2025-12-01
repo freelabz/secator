@@ -124,6 +124,10 @@ class TestTree(unittest.TestCase):
 		with open(self.custom_workflow_path_2, 'w') as f:
 			f.write(yaml.dump(self.workflow_config_2, sort_keys=False))
 
+	def tearDown(self):
+		self.custom_workflow_path_1.unlink()
+		self.custom_workflow_path_2.unlink()
+
 	def test_tree_task(self):
 		find_templates.cache_clear()
 		config = TemplateLoader(input=self.task_config)
@@ -201,3 +205,57 @@ class TestTree(unittest.TestCase):
 		self.assertNotIn('Skipped task nuclei/first because condition is not met: opts.nuclei', messages)
 		self.assertNotIn('Skipped task nuclei/network because condition is not met: opts.nuclei', messages)
 		self.assertNotIn('Skipped task nuclei/host because condition is not met: opts.nuclei', messages)
+
+	def test_boolean_flag_with_false_default_can_be_overridden(self):
+		"""Test that boolean flags with default False can be overridden in YAML config.
+		
+		This tests the fix for the issue where boolean flags with 'default': False
+		could not be overridden to True in YAML config due to False being treated
+		as falsy in or chains.
+		"""
+		find_templates.cache_clear()
+		# Test case 1: Setting tls_grab: True for first httpx should work
+		workflow_config = {
+			'type': 'workflow',
+			'name': 'test_bool_override',
+			'tasks': {
+				'httpx/1': {'tls_grab': True},
+				'httpx/2': {}
+			}
+		}
+		config = TemplateLoader(input=workflow_config)
+		opts = get_config_options(config)
+		# The tls_grab option for httpx/1 should be set to True
+		self.assertIn('httpx-1-tls-grab', opts)
+		self.assertEqual(opts['httpx-1-tls-grab']['default'], True)
+		self.assertEqual(opts['httpx-1-tls-grab']['default_from'], 'httpx/1')
+		
+		# Test case 2: Setting tls_grab: False for first and True for second
+		workflow_config_2 = {
+			'type': 'workflow',
+			'name': 'test_bool_override_2',
+			'tasks': {
+				'httpx/1': {'tls_grab': False},
+				'httpx/2': {'tls_grab': True}
+			}
+		}
+		config_2 = TemplateLoader(input=workflow_config_2)
+		opts_2 = get_config_options(config_2)
+		self.assertIn('httpx-1-tls-grab', opts_2)
+		self.assertEqual(opts_2['httpx-1-tls-grab']['default'], False)
+		self.assertIn('httpx-2-tls-grab', opts_2)
+		self.assertEqual(opts_2['httpx-2-tls-grab']['default'], True)
+		
+		# Test case 3: Not setting tls_grab should use task default
+		workflow_config_3 = {
+			'type': 'workflow',
+			'name': 'test_bool_no_override',
+			'tasks': {
+				'httpx/1': {},
+			}
+		}
+		config_3 = TemplateLoader(input=workflow_config_3)
+		opts_3 = get_config_options(config_3)
+		# Should use the default from httpx task (False)
+		self.assertIn('tls-grab', opts_3)
+		self.assertEqual(opts_3['tls-grab']['default'], False)
