@@ -186,10 +186,18 @@ class TestTree(unittest.TestCase):
 		# console.print(tree.render_tree())
 		# console.print('')
 		messages = [r.message for r in scan.infos]
-		self.assertIn('Skipped task [bold gold3]nuclei/first[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
-		self.assertIn('Skipped task [bold gold3]nuclei/second[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
-		self.assertIn('Skipped task [bold gold3]nuclei/host[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
-		self.assertIn('Skipped task [bold gold3]nuclei/network[/] because condition is not met: [bold green]opts.nuclei[/]', messages)
+		self.assertIn(
+			'Skipped task [bold gold3]nuclei/first[/] because condition is not met: [bold green]opts.nuclei[/]',
+			messages)
+		self.assertIn(
+			'Skipped task [bold gold3]nuclei/second[/] because condition is not met: [bold green]opts.nuclei[/]',
+			messages)
+		self.assertIn(
+			'Skipped task [bold gold3]nuclei/host[/] because condition is not met: [bold green]opts.nuclei[/]',
+			messages)
+		self.assertIn(
+			'Skipped task [bold gold3]nuclei/network[/] because condition is not met: [bold green]opts.nuclei[/]',
+			messages)
 
 	def test_dry_run_with_condition_enabled(self):
 		from secator.runners import Scan
@@ -208,7 +216,7 @@ class TestTree(unittest.TestCase):
 
 	def test_boolean_flag_with_false_default_can_be_overridden(self):
 		"""Test that boolean flags with default False can be overridden in YAML config.
-		
+
 		This tests the fix for the issue where boolean flags with 'default': False
 		could not be overridden to True in YAML config due to False being treated
 		as falsy in or chains.
@@ -229,7 +237,7 @@ class TestTree(unittest.TestCase):
 		self.assertIn('httpx-1-tls-grab', opts)
 		self.assertEqual(opts['httpx-1-tls-grab']['default'], True)
 		self.assertEqual(opts['httpx-1-tls-grab']['default_from'], 'httpx/1')
-		
+
 		# Test case 2: Setting tls_grab: False for first and True for second
 		workflow_config_2 = {
 			'type': 'workflow',
@@ -245,7 +253,7 @@ class TestTree(unittest.TestCase):
 		self.assertEqual(opts_2['httpx-1-tls-grab']['default'], False)
 		self.assertIn('httpx-2-tls-grab', opts_2)
 		self.assertEqual(opts_2['httpx-2-tls-grab']['default'], True)
-		
+
 		# Test case 3: Not setting tls_grab should use task default
 		workflow_config_3 = {
 			'type': 'workflow',
