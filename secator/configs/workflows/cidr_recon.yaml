@@ -2,6 +2,11 @@ type: workflow
 name: cidr_recon
 alias: cidrrec
 description: Local network recon
+long_description: |
+  Discovers and analyzes hosts within a CIDR range or local network.
+  Maps IP addresses, identifies live hosts, scans for open ports and services,
+  and probes HTTP services with technology detection. Useful for internal network
+  assessments and discovering all assets within a given IP range.
 tags: [recon, cidr, network]
 input_types:
   - cidr_range

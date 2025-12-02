@@ -2,6 +2,11 @@ type: workflow
 name: subdomain_recon
 alias: subrec
 description: Subdomain discovery
+long_description: |
+  Discovers subdomains associated with a target domain using multiple passive and active techniques.
+  Combines passive sources, DNS queries, TLS certificate analysis, and optional brute-force methods.
+  Verifies discovered subdomains, checks for subdomain takeover vulnerabilities, and can optionally
+  test SSL/TLS security or hunt for secrets in HTTP responses. Perfect for mapping attack surface.
 tags: [recon, dns, takeovers]
 input_types:
   - host

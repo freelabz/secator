@@ -2,6 +2,11 @@ type: workflow
 name: url_fuzz
 alias: urlfuzz
 description: URL fuzz (slow)
+long_description: |
+  Performs comprehensive fuzzing of URLs to discover hidden content and directories.
+  Uses multiple fuzzing engines (dirsearch, feroxbuster, ffuf) with intelligent calibration
+  to filter false positives. Probes discovered URLs, captures screenshots when configured,
+  and optionally hunts for secrets in HTTP responses. Thorough but time-intensive.
 tags: [http, fuzz]
 input_types:
   - url

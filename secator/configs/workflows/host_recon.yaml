@@ -2,6 +2,11 @@ type: workflow
 name: host_recon
 alias: hostrec
 description: Host recon
+long_description: |
+  Performs comprehensive reconnaissance on a host or IP address to identify open ports and services.
+  Combines multiple port scanning techniques, detects service versions, searches for known vulnerabilities,
+  audits SSH configurations, and probes HTTP services. Optionally runs nuclei scans for network and
+  SSL vulnerabilities. Essential for understanding a host's security posture and attack surface.
 tags: [recon, network, http]
 input_types:
   - ip
