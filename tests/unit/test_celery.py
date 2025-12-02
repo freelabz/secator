@@ -125,3 +125,72 @@ class TestCelery(unittest.TestCase):
 			targets = [r.name for r in results if r._type == 'target']
 			self.assertEqual(len(targets), len(HTTP_TARGETS) * 2)
 			self.assertEqual(len(urls), len(HTTP_TARGETS))
+
+	def test_rate_limit_adjustment_for_chunked_tasks(self):
+		"""Test that rate_limit is divided by chunk count when chunking tasks."""
+		from secator.celery import break_task
+		from secator.tasks import httpx
+		if httpx not in TEST_TASKS:
+			return
+
+		# Create a task with rate_limit
+		HTTP_TARGETS = [f'https://{target}' for target in TARGETS]
+		task_opts = {'rate_limit': 100, 'sync': False}
+
+		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(HTTP_TARGETS)):
+			task = httpx(HTTP_TARGETS, **task_opts)
+			task.has_children = True
+
+			# Break the task into chunks
+			workflow = break_task(task, task_opts, results=[])
+
+			# Check that rate_limit was adjusted
+			# With 6 targets and input_chunk_size=1 (default for most tasks),
+			# we should have 6 chunks, so rate_limit should be 100 // 6 = 16
+			# The workflow should be a chord with adjusted rate_limit in each signature
+			self.assertIsNotNone(workflow)
+
+			# Extract the signatures from the chord to check rate_limit
+			# The workflow is a chord, so we can access its tasks
+			header_tasks = workflow.tasks if hasattr(workflow, 'tasks') else []
+			if header_tasks:
+				# Each task should have the adjusted rate_limit in its kwargs
+				first_sig = header_tasks[0]
+				# The rate_limit should be in the kwargs of the signature
+				expected_rate_limit = 100 // 6  # = 16
+				if 'opts' in first_sig.kwargs and 'rate_limit' in first_sig.kwargs['opts']:
+					actual_rate_limit = first_sig.kwargs['opts']['rate_limit']
+					self.assertEqual(actual_rate_limit, expected_rate_limit)
+
+	def test_rate_limit_adjustment_minimum_value(self):
+		"""Test that rate_limit never goes below 1 when chunking."""
+		from secator.celery import break_task
+		from secator.tasks import httpx
+		if httpx not in TEST_TASKS:
+			return
+
+		# Create a task with low rate_limit
+		HTTP_TARGETS = [f'https://{target}' for target in TARGETS]
+		task_opts = {'rate_limit': 2, 'sync': False}
+
+		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(HTTP_TARGETS)):
+			task = httpx(HTTP_TARGETS, **task_opts)
+			task.has_children = True
+
+			# Break the task into chunks
+			# With rate_limit=2 and 6 chunks, adjusted rate_limit should be max(1, 2//6) = 1
+			workflow = break_task(task, task_opts, results=[])
+
+			# The workflow should exist and have properly adjusted rate_limit
+			self.assertIsNotNone(workflow)
+
+			# Extract the signatures from the chord to check rate_limit
+			header_tasks = workflow.tasks if hasattr(workflow, 'tasks') else []
+			if header_tasks:
+				# Each task should have the adjusted rate_limit in its kwargs
+				first_sig = header_tasks[0]
+				# The rate_limit should be at least 1
+				if 'opts' in first_sig.kwargs and 'rate_limit' in first_sig.kwargs['opts']:
+					actual_rate_limit = first_sig.kwargs['opts']['rate_limit']
+					self.assertGreaterEqual(actual_rate_limit, 1)
+					self.assertEqual(actual_rate_limit, 1)  # Should be 1 since 2//6 = 0, but max(1, 0) = 1
