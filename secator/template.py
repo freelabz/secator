@@ -191,8 +191,10 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 			conf = v.copy()
 			conf['prefix'] = f'Task {node.name}'
 			# Use explicit None checks to properly handle boolean False values
-			default_from_config = node_opts.get(k) if node_opts.get(k) is not None else (
-				ancestor_opts_defaults.get(k) if ancestor_opts_defaults.get(k) is not None else config_opts_defaults.get(k)
+			default_from_config = next(
+				(item for item in [node_opts.get(k), ancestor_opts_defaults.get(k), config_opts_defaults.get(k)]
+				 if item is not None),
+				None
 			)
 			opt_name = k
 			same_opts = find_same_opts(node, nodes, k)
