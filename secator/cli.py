@@ -1441,7 +1441,10 @@ def update(all):
 	if all:
 		return_code = 0
 		for cls in discover_tasks():
-			cmd = cls.cmd.split(' ')[0]
+			base_cmd = getattr(cls, 'cmd', None)
+			if not base_cmd:
+				continue
+			cmd = base_cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
 			if not info['installed'] or info['outdated'] or not info['latest_version']:
