@@ -33,15 +33,13 @@ class PythonRunner(Runner):
 		...             yield Url(url=f"http://{target}")
 		...             yield Tag(name="scanned", match=target)
 	"""
-
-	# Default exporters
 	default_exporters = CONFIG.tasks.exporters
-
-	# Tags
 	tags = []
-
-	# Additional task options
 	opts = {}
+	profile = 'io'
+
+	def needs_chunking(self, sync):
+		return False
 
 	def __init__(self, inputs=[], **run_opts):
 		"""Initialize PythonRunner.

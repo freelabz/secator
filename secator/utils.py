@@ -90,7 +90,8 @@ def expand_input(input, ctx):
 				console.print('No input passed on stdin.', style='bold red')
 				sys.exit(1)
 	elif os.path.exists(input):
-		if 'path' in ctx.obj['input_types']:
+		input_types = ctx.obj['input_types']
+		if not input_types or 'path' in input_types:
 			return input
 		elif os.path.isfile(input):
 			with open(input, 'r') as f:
