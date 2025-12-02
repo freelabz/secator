@@ -38,7 +38,15 @@ options:
     short: hs
 
 tasks:
-  _group/1:
+  httpx/tls:
+    description: Find subdomains through TLS certificates
+    tech_detect: True
+    tls_grab: True
+    targets_:
+    - target.name
+    if: not opts.passive
+
+  _group/hunt:
     subfinder:
       description: List subdomains (passive)
 
@@ -46,45 +54,11 @@ tasks:
       description: List subdomains (passive)
       subs: True
 
-    dnsx:
+    dnsx/brute:
       description: Bruteforce subdomains (DNS)
       subdomains_only: True
       wordlist: combined_subdomains
       if: opts.brute_dns and not opts.passive
-
-    httpx:
-      description: Find subdomains through TLS certificates
-      tech_detect: True
-      tls_grab: True
-      targets_:
-      - target.name
-      if: not opts.passive
-
-  _group/2:
-    testssl:
-      description: Test SSL/TLS security on subdomains
-      server_defaults: True
-      targets_:
-      - type: subdomain
-        field: host
-        condition: subdomain.verified
-      if: opts.test_ssl
-
-    dnsx/probe:
-      description: Probe DNS records on subdomains
-      subdomains_only: True
-      targets_:
-      - type: subdomain
-        field: host
-        condition: subdomain.verified
-
-    nuclei:
-      description: Check for subdomain takeovers
-      targets_:
-      - target.name
-      - subdomain.host
-      tags: [takeover]
-      if: not opts.passive
 
     ffuf:
       description: Bruteforce subdomains (Host header)
@@ -95,20 +69,47 @@ tasks:
       targets_:
       - type: url
         field: url
+        condition: item._source.startswith('httpx')
       if: opts.brute_http and not opts.passive
 
-    httpx:
+  _group/probe:
+    dnsx/probe:
+      description: Verify subdomains by probing DNS records
+      subdomains_only: True
+      targets_:
+      - type: subdomain
+        field: host
+        condition: not item.verified
+
+    httpx/probe:
       description: Run HTTP probes on subdomains
       tech_detect: True
       targets_:
-      - target.name
-      - subdomain.host
+      - type: subdomain
+        field: host
       if: not opts.passive
 
-  trufflehog:
-    description: Find secrets in HTTP responses
-    targets_:
-    - type: url
-      field: stored_response_path
-      condition: item.stored_response_path != ''
-    if: opts.hunt_secrets and not opts.passive
+  _group/vuln:
+    testssl:
+      description: Test SSL/TLS security on subdomains
+      server_defaults: True
+      targets_:
+      - type: subdomain
+        field: host
+      if: opts.test_ssl
+
+    nuclei:
+      description: Check for subdomain takeovers
+      targets_:
+      - target.name
+      - subdomain.host
+      tags: [takeover]
+      if: not opts.passive
+
+    trufflehog:
+      description: Find secrets in HTTP responses
+      targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+      if: opts.hunt_secrets and not opts.passive
