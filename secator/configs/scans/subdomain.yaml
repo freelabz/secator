@@ -1,6 +1,11 @@
 type: scan
 name: subdomain
 description: Subdomain scan
+long_description: |
+  Complete security assessment focused on subdomain discovery and testing.
+  Discovers all subdomains of a target domain, performs reconnaissance on discovered hosts,
+  crawls web applications, and scans for vulnerabilities. Identifies the full subdomain
+  attack surface and potential security issues. Crucial for comprehensive domain security testing.
 profile: default
 input_types:
   - host

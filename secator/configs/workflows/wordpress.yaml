@@ -2,6 +2,11 @@ type: workflow
 name: wordpress
 alias: wordpress
 description: Wordpress vulnerability scan
+long_description: |
+  Specialized security assessment for WordPress websites and installations.
+  Identifies WordPress version, installed themes and plugins, known vulnerabilities,
+  misconfigurations, and weak configurations. Uses multiple WordPress-specific tools
+  to provide comprehensive coverage. Critical for WordPress site security audits.
 tags: [http, wordpress, vulnerability]
 input_types:
   - url
