@@ -37,13 +37,6 @@ tasks:
       script: null
       if: opts.ports or not opts.full
 
-    nmap/full:
-      description: Find open ports
-      version_detection: False
-      script: null
-      ports: "-"  # scan all ports
-      if: opts.full
-
   nmap:
     description: Search for vulnerabilities on open ports
     version_detection: True

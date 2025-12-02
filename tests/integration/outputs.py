@@ -303,7 +303,7 @@ OUTPUTS_TASKS = {
     ],
     'urlfinder': [
         Url(
-            url='http://testphp.vulnweb.com/categories.php2',
+            url='http://testphp.vulnweb.com',
             host='testphp.vulnweb.com',
             _source='urlfinder'
         )

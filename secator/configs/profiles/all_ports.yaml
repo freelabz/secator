@@ -1,6 +1,7 @@
 type: profile
 name: all_ports
 description: "Scan all ports"
+enforce: true
 opts:
-    ports: "-"
     full: true
+    host_recon_full: true
