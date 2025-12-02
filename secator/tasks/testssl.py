@@ -49,9 +49,9 @@ class testssl(Command):
 	proxy_socks5 = False
 	profile = 'io'
 	install_cmd_pre = {
-		'apk': ['hexdump', 'coreutils', 'procps'],
-		'pacman': ['util-linux'],
-		'*': ['bsdmainutils']
+		'apk': ['hexdump', 'coreutils', 'procps', 'bash'],
+		'pacman': ['util-linux', 'bash'],
+		'*': ['bsdmainutils', 'bash']
 	}
 	install_version = 'v3.2.0'
 	install_cmd = (
@@ -144,9 +144,9 @@ class testssl(Command):
 						category='info',
 						name='ssl_tls',
 						match=host,
+						value=finding,
 						extra_data={
 							'subtype': id,
-							'content': finding,
 						}
 					)
 

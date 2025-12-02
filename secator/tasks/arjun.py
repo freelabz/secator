@@ -94,7 +94,7 @@ class arjun(Command):
 			parsed_url = urlparse(url)
 			yield Url(
 				url=url,
-				host=parsed_url.netloc,
+				host=parsed_url.hostname,
 				request_headers=values['headers'],
 				method=values['method'],
 			)
@@ -106,6 +106,7 @@ class arjun(Command):
 				yield Tag(
 					category='info',
 					name='url_param',
+					value=param,
 					match=url,
-					extra_data={'content': param, 'url': new_url}
+					extra_data={'url': new_url}
 				)

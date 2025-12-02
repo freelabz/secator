@@ -58,8 +58,8 @@ class Url(OutputType):
 	def __post_init__(self):
 		super().__post_init__()
 		if not self.host:
-			self.host = urlparse(self.url).netloc
-		if not self.status_code != 0:
+			self.host = urlparse(self.url).hostname
+		if self.status_code != 0:
 			self.verified = True
 		if self.title and 'Index of' in self.title:
 			self.is_directory = True

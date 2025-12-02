@@ -430,15 +430,17 @@ def break_task(task, task_opts, results=[]):
 		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
-		info = Info(message=f'Celery chunked task created ({ix + 1} / {len(chunks)}): {task_id}')
-		task.add_result(info)
+		if IN_CELERY_WORKER_PROCESS:
+			info = Info(message=f'Celery chunked task created ({ix + 1} / {len(chunks)}): {task_id}')
+			task.add_result(info)
 		sigs.append(sig)
 
 	# Mark main task as async since it's being chunked
 	task.sync = False
 	task.results = []
 	task.uuids = set()
-	console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
 	# console.print(Info(message=f'Results: {results}'))
 
 	# Build Celery workflow
@@ -446,5 +448,6 @@ def break_task(task, task_opts, results=[]):
 		tuple(sigs),
 		mark_runner_completed.s(runner=task).set(queue='results')
 	)
-	console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))
 	return workflow

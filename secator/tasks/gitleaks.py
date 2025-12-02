@@ -41,10 +41,10 @@ class gitleaks(Command):
 	}
 	input_type = "folder"
 	output_types = [Tag]
-	install_version = 'v8.24.3'
+	install_version = 'v8.29.1'
 	install_cmd_pre = {'*': ['git', 'make']}
 	install_cmd = (
-		f'git clone https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks_[install_version] || true &&'
+		f'git clone --single-branch -b [install_version] https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks_[install_version] || true &&'  # noqa: E501
 		f'cd {CONFIG.dirs.share}/gitleaks_[install_version] && make build &&'
 		f'mv {CONFIG.dirs.share}/gitleaks_[install_version]/gitleaks {CONFIG.dirs.bin}'
 	)
@@ -82,14 +82,14 @@ class gitleaks(Command):
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read())
 		for result in results:
-			extra_data = {'content': result.get('Secret')}
-			extra_data.update({
+			extra_data = {
 				caml_to_snake(k): v for k, v in result.items()
 				if k not in ['RuleID', 'File', 'Secret']
-			})
+			}
 			yield Tag(
 				category='secret',
 				name=result['RuleID'].replace('-', '_'),
+				value=result.get('Secret', ''),
 				match='{File}:{StartLine}:{StartColumn}'.format(**result),
 				extra_data=extra_data
 			)

@@ -196,15 +196,16 @@ class trufflehog(Command):
         rule_id = caml_to_snake(item.get('DetectorName', 'Unknown'))
         source_metadata = item.get('SourceMetadata', {}).get('Data', {})
         raw = item.get('RawV2') or item.get('Raw')
-        extra_data = {'content': raw}
         detector_data = {caml_to_snake(k): v for k, v in item.items() if k not in ['SourceMetadata', 'Raw', 'RawV2']}
         data = {caml_to_snake(k): v for k, v in source_metadata[list(source_metadata.keys())[0]].items()}
         if 'timestamp' in data:
             del data['timestamp']
         subtype = list(source_metadata.keys())[0].lower()
-        extra_data['subtype'] = subtype
+        extra_data = {
+            'subtype': subtype,
+            'detector_data': {caml_to_snake(k): v for k, v in detector_data.items()}
+        }
         extra_data.update({caml_to_snake(k): v for k, v in data.items()})
-        extra_data['detector_data'] = {caml_to_snake(k): v for k, v in detector_data.items()}
         match = ''
         repo_path = data.get('repository', '')
         if 'file://' in repo_path:
@@ -233,6 +234,7 @@ class trufflehog(Command):
         yield Tag(
             category='secret',
             name=name,
+            value=raw,
             match=match,
             extra_data=extra_data
         )

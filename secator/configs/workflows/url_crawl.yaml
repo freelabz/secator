@@ -69,10 +69,18 @@ tasks:
       condition: item.status_code == 0
     if: not opts.passive
 
-  trufflehog:
-    description: Find secrets in HTTP responses
-    targets_:
-    - type: url
-      field: stored_response_path
-      condition: item.stored_response_path != ''
-    if: opts.hunt_secrets and not opts.passive
+  _group/data_hunt:
+    trufflehog:
+      description: Find secrets in HTTP responses
+      targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+      if: opts.hunt_secrets and not opts.passive
+    maigret:
+      description: Hunt email addresses found
+      targets_:
+      - type: tag
+        field: value
+        condition: item.name == 'email_address'
+      if: opts.hunt_secrets and not opts.passive

@@ -302,5 +302,14 @@ class TestCli(unittest.TestCase):
 		# Should see the workflow running with explicit input
 		assert 'mapcidr' in result.output
 
+	def test_cheatsheet_command(self):
+		result = self.runner.invoke(cli, ['cheatsheet'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert 'Some basics' in result.output
+		assert 'Aliases' in result.output
+		assert 'Configuration' in result.output
+		assert 'Quick wins' in result.output
+
 if __name__ == '__main__':
 	unittest.main()

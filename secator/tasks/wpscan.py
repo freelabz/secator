@@ -146,8 +146,8 @@ class wpscan(VulnHttp):
 					category='info',
 					name='wordpress_theme',
 					match=target,
+					value=slug + ':' + number,
 					extra_data={
-						'content': slug + ':' + number,
 						'url': location,
 						'latest_version': latest_version
 					}
@@ -181,8 +181,8 @@ class wpscan(VulnHttp):
 					category='info',
 					name='wordpress_plugin',
 					match=target,
+					value=slug + ':' + number,
 					extra_data={
-						'content': slug + ':' + number,
 						'url': location,
 						'name': slug,
 						'version': number,
