@@ -73,8 +73,8 @@ class wpprobe(Command):
 						category='info',
 						name='wordpress_plugin',
 						match=url,
+						value=plugin_name + ':' + plugin_version,
 						extra_data={
-							'content': plugin_name + ':' + plugin_version,
 							'name': plugin_name,
 							'version': plugin_version
 						}

@@ -154,21 +154,24 @@ class cariddi(HttpCrawler):
 					yield Tag(
 						category='info',
 						name='url_param',
+						value=p_name,
 						match=url_without_param,
-						extra_data={'content': p_name, 'value': p_value, 'url': url}
+						extra_data={'value': p_value, 'url': url}
 					)
 
 		for error in errors:
 			error['category'] = 'error'
 			error['name'] = '_'.join(f'{error["name"]}'.lower().split())
-			error['extra_data'] = {'content': error['match'], 'url': url}
+			error['value'] = error['match']
+			error['extra_data'] = {'url': url}
 			error['match'] = url_without_param
 			yield Tag(**error)
 
 		for secret in secrets:
 			secret['category'] = 'secret'
 			secret['name'] = '_'.join(f'{secret["name"]}'.lower().split())
-			secret['extra_data'] = {'content': secret['match'], 'url': url}
+			secret['value'] = secret['match']
+			secret['extra_data'] = {'url': url}
 			secret['match'] = url_without_param
 			yield Tag(**secret)
 
@@ -185,5 +188,6 @@ class cariddi(HttpCrawler):
 			info['match'] = url_without_param
 			if CARIDDI_IGNORE_PATTERNS.match(content):
 				continue
-			info['extra_data'] = {'content': content, 'url': url}
+			info['value'] = content
+			info['extra_data'] = {'url': url}
 			yield Tag(**info)

@@ -2,6 +2,11 @@ type: workflow
 name: url_crawl
 alias: urlcrawl
 description: URL crawl (fast)
+long_description: |
+  Rapidly crawls and discovers URLs from a target website using multiple crawling engines.
+  Supports both passive sources (collecting from external databases) and active crawlers
+  (spidering the website directly). Identifies interesting patterns, endpoints, and parameters.
+  Can optionally hunt for secrets in HTTP responses and probe URLs for additional information.
 tags: [http, crawl]
 input_types:
   - url
@@ -69,10 +74,18 @@ tasks:
       condition: item.status_code == 0
     if: not opts.passive
 
-  trufflehog:
-    description: Find secrets in HTTP responses
-    targets_:
-    - type: url
-      field: stored_response_path
-      condition: item.stored_response_path != ''
-    if: opts.hunt_secrets and not opts.passive
+  _group/data_hunt:
+    trufflehog:
+      description: Find secrets in HTTP responses
+      targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+      if: opts.hunt_secrets and not opts.passive
+    maigret:
+      description: Hunt email addresses found
+      targets_:
+      - type: tag
+        field: value
+        condition: item.name == 'email_address'
+      if: opts.hunt_secrets and not opts.passive

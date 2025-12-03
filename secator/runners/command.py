@@ -432,7 +432,14 @@ class Command(Runner):
 
 			# Abort if no inputs
 			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Warning(message=f'{self.unique_name} skipped (no inputs)')
+				self.print_description()
+				self.print_command()
+				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
+				for item in self.warnings:
+					self._print_item(item)
+				for item in self.errors:
+					self._print_item(item)
+				self.skipped = True
 				return
 
 			# Print command
