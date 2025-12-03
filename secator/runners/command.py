@@ -538,13 +538,19 @@ class Command(Runner):
 	def process_line(self, line):
 		"""Process a single line of output emitted on stdout / stderr and yield results."""
 
-		# Strip line endings
+		# Strip line endings (inline to avoid function call overhead)
 		line = line.rstrip()
+		
+		# Skip empty lines early
+		if not line:
+			return
 
 		# Some commands output ANSI text, so we need to remove those ANSI chars
+		# Cache the regex pattern as a class variable to avoid recompilation
 		if self.encoding == 'ansi':
-			ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-			line = ansi_escape.sub('', line)
+			if not hasattr(self.__class__, '_ansi_escape_re'):
+				self.__class__._ansi_escape_re = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+			line = self.__class__._ansi_escape_re.sub('', line)
 			line = line.replace('\\x0d\\x0a', '\n')
 
 		# Run on_line hooks
@@ -555,13 +561,13 @@ class Command(Runner):
 		# Yield line if no items were yielded
 		yield line
 
-		# Run item_loader to try parsing as dict
-		for item in self.run_item_loaders(line):
-			yield item
-
 		# Skip rest of iteration (no process mode)
 		if self.no_process:
 			return
+
+		# Run item_loader to try parsing as dict
+		for item in self.run_item_loaders(line):
+			yield item
 
 	def process_monitor_queue(self):
 		"""Process and yield any queued items from monitor thread."""
@@ -628,6 +634,9 @@ class Command(Runner):
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
 		last_stats_time = 0
+		last_timeout_check = 0
+		# Only collect stats if explicitly enabled or if we need to monitor memory
+		collect_stats = self.print_stat or (self.memory_limit_mb and self.memory_limit_mb != -1)
 
 		while not self.monitor_stop_event.is_set():
 			if not self.process or not self.process.pid:
@@ -635,10 +644,10 @@ class Command(Runner):
 
 			try:
 				current_time = time()
-				self.debug('Collecting monitor items', sub='monitor')
 
-				# Collect and queue stats at regular intervals
-				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
+				# Collect and queue stats at regular intervals (only if needed)
+				if collect_stats and (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
+					self.debug('Collecting monitor items', sub='monitor')
 					stats_items = list(self._collect_stats())
 					for stat_item in stats_items:
 						if self.monitor_queue is not None:
@@ -655,23 +664,18 @@ class Command(Runner):
 							self.stop_process(exit_ok=True, sig=signal.SIGTERM)
 							break
 
-				# Check execution time
+				# Check execution time (less frequently than stats)
 				if self.process_start_time and CONFIG.celery.task_max_timeout != -1:
-					elapsed_time = current_time - self.process_start_time
-					if elapsed_time > CONFIG.celery.task_max_timeout:
-						warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
-						if self.monitor_queue is not None:
-							self.monitor_queue.put(warning)
-						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
-						break
-
-				# Check retry count
-				# TODO: remove this
-				# if CONFIG.celery.task_max_retries and self.retry_count >= CONFIG.celery.task_max_retries:
-				# 	warning = Warning(message=f'Max retries {CONFIG.celery.task_max_retries} exceeded (actual: {self.retry_count})')
-				# 	self.monitor_queue.put(warning)
-				# 	self.stop_process(exit_ok=False, sig=signal.SIGTERM)
-				# 	break
+					# Check timeout every 5 seconds instead of every stat interval
+					if (current_time - last_timeout_check) >= 5:
+						elapsed_time = current_time - self.process_start_time
+						if elapsed_time > CONFIG.celery.task_max_timeout:
+							warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
+							if self.monitor_queue is not None:
+								self.monitor_queue.put(warning)
+							self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+							break
+						last_timeout_check = current_time
 
 			except Exception as e:
 				self.debug(f'Monitor thread error: {e}', sub='monitor')
@@ -680,26 +684,31 @@ class Command(Runner):
 					self.monitor_queue.put(warning)
 				break
 
-			# Sleep for a short interval before next check (stat update frequency)
-			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
+			# Sleep for a short interval before next check
+			# Use longer sleep if not collecting stats to reduce CPU usage
+			sleep_interval = CONFIG.runners.stat_update_frequency if collect_stats else 5
+			self.monitor_stop_event.wait(sleep_interval)
 
 	def _collect_stats(self):
 		"""Collect stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
 			return
-		proc = psutil.Process(self.process.pid)
+		try:
+			proc = psutil.Process(self.process.pid)
+		except psutil.NoSuchProcess:
+			return
+		
+		# Collect stats with optimized field selection
 		stats = Command.get_process_info(proc, children=True)
-		total_mem = 0
 		for info in stats:
 			name = info['name']
 			pid = info['pid']
 			cpu_percent = info['cpu_percent']
-			# mem_percent = info['memory_percent']
 			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
+			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor', verbose=True)
 			net_conns = info.get('net_connections') or []
-			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+			# Only include essential extra_data to reduce memory overhead
+			extra_data = {k: v for k, v in info.items() if k in ['memory_info', 'pid', 'name']}
 			yield Stat(
 				name=name,
 				pid=pid,
@@ -709,9 +718,6 @@ class Command(Runner):
 				net_conns=len(net_conns),
 				extra_data=extra_data
 			)
-		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
-		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
-		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
 
 	def stats(self, memory_limit_mb=None):
 		"""Gather stats about the current running process, if any."""
