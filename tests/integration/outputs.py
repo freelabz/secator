@@ -388,6 +388,11 @@ OUTPUTS_TASKS = {
     'xurlfind3r': [
         Url(url='http://testphp.vulnweb.com/login.php', _source='xurlfind3r')
     ],
+    'opensquat': [
+        Domain(domain='gooogle.com', _source='opensquat'),
+        Domain(domain='g00gle.com', _source='opensquat'),
+        Domain(domain='googlle.com', _source='opensquat')
+    ],
 }
 
 OUTPUTS_WORKFLOWS = {
