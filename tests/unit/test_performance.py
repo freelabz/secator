@@ -17,7 +17,11 @@ class MockHighVolumeCommand(Command):
     
     @staticmethod
     def item_loader(self, line):
-        """Generate IP outputs from sequential numbers."""
+        """Generate IP outputs from sequential numbers.
+        
+        Note: Despite @staticmethod decorator, this takes self as first param
+        because it's called as item_loader(self, line) by run_item_loaders().
+        """
         if line.strip().isdigit():
             num = int(line.strip())
             ip = f"10.{(num // 65536) % 256}.{(num // 256) % 256}.{num % 256}"
