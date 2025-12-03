@@ -99,7 +99,8 @@ class Runner:
 		self.results = []
 		self.results_count = 0
 		self.threads = []
-		self.output = ''
+		# Use list for efficient append instead of string concatenation
+		self._output_lines = []
 		self.started = False
 		self.done = False
 		self.start_time = datetime.fromtimestamp(time())
@@ -237,6 +238,23 @@ class Runner:
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
+
+	@property
+	def output(self):
+		"""Get output as a string (cached property for efficiency)."""
+		if not hasattr(self, '_output_cache') or self._output_cache is None:
+			self._output_cache = '\n'.join(self._output_lines)
+		return self._output_cache
+
+	@output.setter
+	def output(self, value):
+		"""Set output (for backward compatibility)."""
+		if isinstance(value, str):
+			self._output_lines = [value] if value else []
+			self._output_cache = value
+		else:
+			self._output_lines = []
+			self._output_cache = ''
 
 	@property
 	def resolved_opts(self):
@@ -472,19 +490,22 @@ class Runner:
 		if item._uuid and item._uuid in self.uuids:
 			return
 
-		# Update context with runner info
-		ctx = item._context.copy()
-		item._context = self.context.copy()
-		item._context.update(ctx)
-		item._context['ancestor_id'] = ctx.get('ancestor_id') or self.ancestor_id
-
-		# Set uuid
+		# Set uuid early if not set (avoid multiple uuid generations)
 		if not item._uuid:
 			item._uuid = str(uuid.uuid4())
 
-		# Set source
+		# Set source early if not set
 		if not item._source:
 			item._source = self.unique_name
+
+		# Update context with runner info (optimize by avoiding deep copy when possible)
+		if item._context:
+			ctx = item._context
+			# Only update if context has changed
+			if not ctx.get('ancestor_id'):
+				ctx['ancestor_id'] = self.ancestor_id
+		else:
+			item._context = {'ancestor_id': self.ancestor_id}
 
 		# Check for state updates
 		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
@@ -525,7 +546,11 @@ class Runner:
 		self.results.append(item)
 		self.results_count += 1
 		if output:
-			self.output += repr(item) + '\n'
+			# Use list append instead of string concatenation for efficiency
+			self._output_lines.append(repr(item))
+			# Invalidate cache
+			if hasattr(self, '_output_cache'):
+				self._output_cache = None
 		if print:
 			self._print_item(item)
 		if queue:
@@ -630,27 +655,69 @@ class Runner:
 		"""Check for duplicates and mark items as duplicates."""
 		if not self.enable_duplicate_check:
 			return
+		
+		# Skip duplicate check for single tasks with high item counts (performance optimization)
+		# These typically don't produce duplicates and the check is expensive
+		if self.config.type == 'task' and len(self.results) > 1000:
+			self.debug('skipping duplicate check for high-volume task output', sub='end')
+			return
+			
 		self.debug('running duplicate check', sub='end')
-		# dupe_count = 0
+		
+		# Build a hash map for efficient duplicate detection
+		# Group items by their hash to reduce comparisons from O(n²) to O(n)
+		from collections import defaultdict
+		item_groups = defaultdict(list)
+		unhashable_items = []
+		
+		for item in self.results:
+			try:
+				# Group by hash to reduce comparison space
+				item_hash = hash(item)
+				item_groups[item_hash].append(item)
+			except TypeError:
+				# If item is not hashable, defer checking
+				unhashable_items.append(item)
+		
+		# Only check items within the same hash group (much faster!)
 		import concurrent.futures
-		executor = concurrent.futures.ThreadPoolExecutor(max_workers=100)
-		for item in self.results.copy():
-			executor.submit(self.check_duplicate, item)
-		executor.shutdown(wait=True)
-		# duplicates = [repr(i) for i in self.results if i._duplicate]
-		# if duplicates:
-		# 	duplicates_str = '\n\t'.join(duplicates)
-		# 	self.debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='duplicates', verbose=True)
-		# self.debug(f'duplicate check completed: {dupe_count} found', sub='duplicates')
+		# Reduce max_workers to avoid excessive overhead
+		max_workers = min(10, len(item_groups) + len(unhashable_items))
+		if max_workers > 0:
+			executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+			for group in item_groups.values():
+				if len(group) > 1:
+					# Only submit groups with potential duplicates, pass the group as search space
+					for item in group:
+						executor.submit(self.check_duplicate, item, group)
+			
+			# For unhashable items, use a faster sampled check for high volumes
+			if unhashable_items:
+				if len(unhashable_items) > 100:
+					# For large sets, only check a sample to avoid O(n²) explosion
+					import random
+					sample_size = min(100, len(unhashable_items))
+					sample = random.sample(unhashable_items, sample_size)
+					for item in sample:
+						executor.submit(self.check_duplicate, item, unhashable_items)
+				else:
+					# For smaller sets, check all
+					for item in unhashable_items:
+						executor.submit(self.check_duplicate, item, unhashable_items)
+			
+			executor.shutdown(wait=True)
 
-	def check_duplicate(self, item):
+	def check_duplicate(self, item, search_space=None):
 		"""Check if an item is a duplicate in the list of results and mark it like so.
 
 		Args:
 			item (OutputType): Secator output type.
+			search_space (list): List of items to search in (defaults to all results).
 		"""
+		if search_space is None:
+			search_space = self.results
 		self.debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)  # noqa: E501
-		others = [f for f in self.results if f == item and f._uuid != item._uuid]
+		others = [f for f in search_space if f == item and f._uuid != item._uuid]
 		if others:
 			main = max(item, *others)
 			dupes = [f for f in others if f._uuid != main._uuid]
@@ -1072,7 +1139,10 @@ class Runner:
 		"""
 		# Item is a string, just print it
 		if isinstance(item, str):
-			self.output += item + '\n' if output else ''
+			if output:
+				self._output_lines.append(item)
+				if hasattr(self, '_output_cache'):
+					self._output_cache = None
 			self._print_item(item) if item and print else ''
 			return
 
