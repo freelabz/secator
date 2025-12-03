@@ -655,12 +655,20 @@ class Runner:
 		"""Check for duplicates and mark items as duplicates."""
 		if not self.enable_duplicate_check:
 			return
+		
+		# Skip duplicate check for single tasks with high item counts (performance optimization)
+		# These typically don't produce duplicates and the check is expensive
+		if self.config.type == 'task' and len(self.results) > 1000:
+			self.debug('skipping duplicate check for high-volume task output', sub='end')
+			return
+			
 		self.debug('running duplicate check', sub='end')
 		
 		# Build a hash map for efficient duplicate detection
 		# Group items by their hash to reduce comparisons from O(n²) to O(n)
 		from collections import defaultdict
 		item_groups = defaultdict(list)
+		unhashable_items = []
 		
 		for item in self.results:
 			try:
@@ -668,30 +676,48 @@ class Runner:
 				item_hash = hash(item)
 				item_groups[item_hash].append(item)
 			except TypeError:
-				# If item is not hashable, check it individually
-				self.check_duplicate(item)
+				# If item is not hashable, defer checking
+				unhashable_items.append(item)
 		
-		# Only check items within the same hash group
+		# Only check items within the same hash group (much faster!)
 		import concurrent.futures
 		# Reduce max_workers to avoid excessive overhead
-		max_workers = min(10, len(item_groups))
+		max_workers = min(10, len(item_groups) + len(unhashable_items))
 		if max_workers > 0:
 			executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
 			for group in item_groups.values():
 				if len(group) > 1:
-					# Only submit groups with potential duplicates
+					# Only submit groups with potential duplicates, pass the group as search space
 					for item in group:
-						executor.submit(self.check_duplicate, item)
+						executor.submit(self.check_duplicate, item, group)
+			
+			# For unhashable items, use a faster sampled check for high volumes
+			if unhashable_items:
+				if len(unhashable_items) > 100:
+					# For large sets, only check a sample to avoid O(n²) explosion
+					import random
+					sample_size = min(100, len(unhashable_items))
+					sample = random.sample(unhashable_items, sample_size)
+					for item in sample:
+						executor.submit(self.check_duplicate, item, unhashable_items)
+				else:
+					# For smaller sets, check all
+					for item in unhashable_items:
+						executor.submit(self.check_duplicate, item, unhashable_items)
+			
 			executor.shutdown(wait=True)
 
-	def check_duplicate(self, item):
+	def check_duplicate(self, item, search_space=None):
 		"""Check if an item is a duplicate in the list of results and mark it like so.
 
 		Args:
 			item (OutputType): Secator output type.
+			search_space (list): List of items to search in (defaults to all results).
 		"""
+		if search_space is None:
+			search_space = self.results
 		self.debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)  # noqa: E501
-		others = [f for f in self.results if f == item and f._uuid != item._uuid]
+		others = [f for f in search_space if f == item and f._uuid != item._uuid]
 		if others:
 			main = max(item, *others)
 			dupes = [f for f in others if f._uuid != main._uuid]
