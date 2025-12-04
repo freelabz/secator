@@ -93,7 +93,8 @@ def expand_input(input, ctx):
 		# Input is already a list (e.g., from default_inputs), return as-is
 		pass
 	elif os.path.exists(input):
-		if 'path' in ctx.obj['input_types']:
+		input_types = ctx.obj['input_types']
+		if not input_types or 'path' in input_types:
 			return input
 		elif os.path.isfile(input):
 			with open(input, 'r') as f:
