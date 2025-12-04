@@ -11,17 +11,29 @@ tags: [recon, cidr, network]
 input_types:
   - cidr_range
   - ip
-default_inputs:
-  - 127.0.0.1/24      # localhost
-  - 192.168.0.0/24    # local
-  - 192.168.1.0/24    # local
-  - 10.0.0.0/24       # standard subnet
-  - 172.16.0.0/24     # private network
-  - 172.17.0.0/16     # docker
+  - slug
+input_required: False
+default_inputs: [discover]
+# default_inputs:
+#   - 127.0.0.1/24      # localhost
+#   - 192.168.0.0/24    # local
+#   - 192.168.1.0/24    # local
+#   - 10.0.0.0/24       # standard subnet
+#   - 172.16.0.0/24     # private network
+#   - 172.17.0.0/16     # docker
 
 tasks:
-  mapcidr:
-    description: Find CIDR range IPs
+  _group/mapper:
+    arpscan:
+      description: Scan CIDR range for alive hosts
+
+    mapcidr:
+      description: Find CIDR range IPs
+      hide_ips: True
+      targets_:
+      - type: target
+        field: name
+        condition: target.type == 'cidr_range'
 
   fping:
     description: Check for alive IPs
@@ -29,6 +41,8 @@ tasks:
 
   nmap:
     description: Scan alive IPs' ports
+    version_detection: True
+    script: vulners
     targets_:
     - type: ip
       field: ip
@@ -40,3 +54,13 @@ tasks:
     targets_:
     - type: port
       field: '{ip}:{port}'
+
+  search_vulns:
+    description: Search for related exploits
+    targets_:
+      - type: port
+        field: '{host}:{port}~{service_name}'
+        condition: len(item.service_name.split('/')) > 1
+      - type: vulnerability
+        field: '{matched_at}~{id}'
+        condition: item.confidence in ['high', 'medium']

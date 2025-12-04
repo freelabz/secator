@@ -431,7 +431,7 @@ class Command(Runner):
 				return
 
 			# Abort if no inputs
-			if len(self.inputs) == 0 and self.skip_if_no_inputs:
+			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.input_required:
 				self.print_description()
 				self.print_command()
 				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
