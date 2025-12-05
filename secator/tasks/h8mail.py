@@ -1,5 +1,6 @@
 import os
 import json
+import shlex
 
 from secator.decorators import task
 from secator.definitions import EMAIL, OUTPUT_PATH
@@ -32,7 +33,8 @@ class h8mail(OSInt):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd = self.cmd.replace('--json', f'--json {self.output_path}')
+		output_path_quoted = shlex.quote(self.output_path)
+		self.cmd = self.cmd.replace('--json', f'--json {output_path_quoted}')
 
 	@staticmethod
 	def on_cmd_done(self):
