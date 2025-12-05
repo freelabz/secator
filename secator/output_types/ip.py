@@ -4,7 +4,7 @@ from enum import Enum
 
 from secator.definitions import ALIVE, IP
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, format_object
+from secator.utils import rich_to_ansi
 
 
 class IpProtocol(str, Enum):
@@ -39,8 +39,6 @@ class Ip(OutputType):
 			s += rf' \[[bold magenta]{self.host}[/]]'
 		if self.alive:
 			s += rf' \[[bold green]alive[/]]'
-		if self.extra_data:
-			s += format_object(self.extra_data, 'yellow')
-		if not self.alive:
+		else:
 			s = f'[dim]{s}[/]'
 		return rich_to_ansi(s)

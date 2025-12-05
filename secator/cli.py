@@ -1183,7 +1183,7 @@ def cheatsheet():
 	}
 	title_style = 'bold green'
 
-	panel1 = Panel("""
+	panel1 = Panel(r"""
 [dim bold]:left_arrow_curving_right: Secator basic commands to get you started.[/]
 
 secator [orange3]x[/]      [dim]# list tasks[/]
@@ -1224,7 +1224,7 @@ secator s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com  [dim]# ..
 """,  # noqa: E501
 		title=f":shield: [{title_style}]Some basics[/]", **kwargs)
 
-	panel2 = Panel("""
+	panel2 = Panel(r"""
 [dim bold]:left_arrow_curving_right: Secator aliases are useful to stop typing [bold cyan]secator <something>[/] and focus on what you want to run. Aliases are a must to increase your productivity.[/]
 
 [bold]To enable aliases:[/]
@@ -1242,7 +1242,7 @@ cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain t
 """,  # noqa: E501
 		title=f":shorts: [{title_style}]Aliases[/]", **kwargs)
 
-	panel3 = Panel("""
+	panel3 = Panel(r"""
 [dim bold]:left_arrow_curving_right: Secator configuration is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/]. You can edit it manually or use the following commands to get/set values.[/]
 
 c get         [dim]# get config value[/]
@@ -1254,7 +1254,7 @@ c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set defau
 """,  # noqa: E501
 		title=f":gear: [{title_style}]Configuration[/]", **kwargs)
 
-	panel4 = Panel("""
+	panel4 = Panel(r"""
 [dim bold]:left_arrow_curving_right: By default, tasks are run sequentially. You can use a worker to run tasks in parallel and massively speed up your scans.[/]
 
 wk                         [dim]# or [bold cyan]secator worker[/] if you don't use aliases ...[/]
@@ -1268,7 +1268,7 @@ c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis
 """,  # noqa: E501
 		title=f":zap: [{title_style}]Too slow ? Use a worker[/]", **kwargs)
 
-	panel5 = Panel("""
+	panel5 = Panel(r"""
 [dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, filter and export reports using the following commands.[/]
 
 [dim]# List and filter reports...[/]
@@ -1282,7 +1282,7 @@ r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"tag.match and 'signup.php'
 """,  # noqa: E501
 		title=f":file_cabinet: [{title_style}]Digging into reports[/]", **kwargs)
 
-	panel6 = Panel("""
+	panel6 = Panel(r"""
 [dim bold]:left_arrow_curving_right: Commands to manage secator installation.[/]
 
 update [dim]# update secator to the latest version[/]
@@ -1300,7 +1300,7 @@ i addon mongodb  [dim]# install addon 'mongodb'[/]
 """,  # noqa: E501
 		title=f":wrench: [{title_style}]Updates[/]", **kwargs)
 
-	panel7 = Panel("""
+	panel7 = Panel(r"""
 [dim bold]:left_arrow_curving_right: Some useful scans and workflows we use day-to-day for recon.[/]
 
 [orange3]:warning: Don't forget to add [bold blue]-dry[/] or [bold blue]-tree[/] before running your scans to see what will be done ![/]
