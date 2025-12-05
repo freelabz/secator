@@ -45,7 +45,7 @@ class Port(OutputType):
 		if self.service_name:
 			conf = ''
 			if self.confidence == 'low':
-				conf = '?'
+				conf = '[bold orange3]?[/]'
 			s += rf' \[[bold purple]{self.service_name}{conf}[/]]'
 		if self.host:
 			s += rf' \[[cyan]{self.host}[/]]'

@@ -18,10 +18,14 @@ workflows:
     - type: target
       field: name
       condition: target.type == 'host'
-    - subdomain.host
+    - type: subdomain
+      field: host
+      condition: subdomain.verified
   url_crawl:
     targets_:
     - url.url
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified

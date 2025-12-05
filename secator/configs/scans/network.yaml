@@ -7,13 +7,23 @@ long_description: |
   testing on discovered web applications. Combines CIDR reconnaissance with web application
   security testing. Essential for internal network security assessments and lateral movement testing.
 profile: default
+default_inputs: [discover]
 input_types:
   - cidr_range
+  - slug
 workflows:
   cidr_recon:
+  host_recon:
+    targets_:
+    - type: ip
+      field: host
+      condition: ip.alive
   url_crawl:
+    active: True
     targets_:
     - url.url
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified

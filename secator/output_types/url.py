@@ -107,4 +107,6 @@ class Url(OutputType):
 			s += rf' [link=file://{self.screenshot_path}]:camera:[/]'
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:pencil:[/]'
+		if not self.verified:
+			s = f'[dim]{s}[/]'
 		return rich_to_ansi(s)
