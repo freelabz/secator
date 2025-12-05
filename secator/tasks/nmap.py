@@ -1,7 +1,7 @@
 import logging
 import os
+import shlex
 import re
-
 import xmltodict
 
 from secator.config import CONFIG
@@ -152,7 +152,7 @@ class nmap(VulnMulti):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
-		self.cmd += f' -oX {self.output_path}'
+		self.cmd += f' -oX {shlex.quote(self.output_path)}'
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
 		tcp_connect = self.cmd_options.get('tcp_connect')
 		if tcp_connect and tcp_syn_stealth:
