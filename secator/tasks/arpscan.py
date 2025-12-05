@@ -12,6 +12,8 @@ class arpscan(Command):
 	output_types = [Ip]
 	input_flag = None
 	input_required = False
+	requires_sudo = True
+	file_copy_sudo = True  # Copy the input file to /tmp since it cannot access the reports folder
 	file_flag = '-f'
 	version_flag = '-V'
 	tags = ['ip', 'recon']
@@ -44,7 +46,7 @@ class arpscan(Command):
 	@staticmethod
 	def on_line(self, line):
 		if 'WARNING:' in line:
-		    return Warning(message=line.split('WARNING:')[1].strip())
+			return Warning(message=line.split('WARNING:')[1].strip())
 		elif 'permission' in line:
 			return Error(message=line + "\n" + (
 				"You must [bold]run this task as root[/bold] to scan the network, or use "
