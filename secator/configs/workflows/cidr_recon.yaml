@@ -3,10 +3,9 @@ name: cidr_recon
 alias: cidrrec
 description: Local network recon
 long_description: |
-  Discovers and analyzes hosts within a CIDR range or local network.
-  Maps IP addresses, identifies live hosts, scans for open ports and services,
-  and probes HTTP services with technology detection. Useful for internal network
-  assessments and discovering all assets within a given IP range.
+  Discovers and analyzes hosts within a CIDR range or local network through ARP / ICMP scanning.
+  Maps IP addresses and identifies live hosts.
+  Useful for local network security assessments and penetration testing.
 tags: [recon, cidr, network]
 input_types:
   - cidr_range
@@ -38,29 +37,3 @@ tasks:
   fping:
     description: Check for alive IPs
     targets_: ip.ip
-
-  nmap:
-    description: Scan alive IPs' ports
-    version_detection: True
-    script: vulners
-    targets_:
-    - type: ip
-      field: ip
-      condition: item.alive
-
-  httpx:
-    description: Probe HTTP services on open ports
-    tech_detect: True
-    targets_:
-    - type: port
-      field: '{ip}:{port}'
-
-  search_vulns:
-    description: Search for related exploits
-    targets_:
-      - type: port
-        field: '{host}:{port}~{service_name}'
-        condition: len(item.service_name.split('/')) > 1
-      - type: vulnerability
-        field: '{matched_at}~{id}'
-        condition: item.confidence in ['high', 'medium']
