@@ -15,7 +15,7 @@ class h8mail(OSInt):
 	input_types = [EMAIL]
 	output_types = [UserAccount]
 	tags = ['user', 'recon', 'email']
-	json_flag = '--json '
+	json_flag = '--json'
 	input_flag = '--targets'
 	file_flag = '-domain'
 	version_flag = '--help'
@@ -34,7 +34,7 @@ class h8mail(OSInt):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
 		output_path_quoted = shlex.quote(self.output_path)
-		self.cmd = self.cmd.replace('--json', f'--json {output_path_quoted}')
+		self.cmd = self.cmd.replace('--json ', f'--json {output_path_quoted} ')
 
 	@staticmethod
 	def on_cmd_done(self):

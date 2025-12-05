@@ -303,7 +303,7 @@ OUTPUTS_TASKS = {
     ],
     'urlfinder': [
         Url(
-            url='http://testphp.vulnweb.com',
+            url='http://testphp.vulnweb.com/categories.php',
             host='testphp.vulnweb.com',
             _source='urlfinder'
         )
@@ -351,7 +351,7 @@ OUTPUTS_TASKS = {
         Tag(
             name='wordpress_theme',
             category='info',
-            value='twentytwentyfive:1.3',
+            value='twentytwentyfive:1.4',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(
