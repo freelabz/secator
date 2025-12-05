@@ -1438,6 +1438,22 @@ def install_mongodb():
 	)
 
 
+@addons.command('mysql')
+def install_mysql():
+	"Install MySQL addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[mysql]',
+		title='MySQL addon',
+		next_steps=[
+			r'[dim]\[optional][/] Run [bold green4]docker run --name mysql -e MYSQL_ROOT_PASSWORD=secator -e MYSQL_DATABASE=secator -p 3306:3306 -d mysql:latest[/] to run a local MySQL instance.',  # noqa: E501
+			'Run [bold green4]secator config set addons.mysql.host <HOST>[/].',
+			'Run [bold green4]secator config set addons.mysql.user <USER>[/].',
+			'Run [bold green4]secator config set addons.mysql.password <PASSWORD>[/].',
+			'Run [bold green4]secator x httpx testphp.vulnweb.com -driver mysql[/] to save results to MySQL.'
+		]
+	)
+
+
 @addons.command('redis')
 def install_redis():
 	"Install Redis addon."

@@ -83,6 +83,9 @@ redis = [
 mongodb = [
   'pymongo < 5',
 ]
+mysql = [
+  'mysql-connector-python < 10',
+]
 gdrive = [
   'google-api-python-client < 3',
   'gspread < 7'
