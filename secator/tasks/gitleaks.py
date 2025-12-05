@@ -1,5 +1,6 @@
 import click
 import os
+import shlex
 import yaml
 
 from pathlib import Path
@@ -69,7 +70,7 @@ class gitleaks(Command):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' -r {self.output_path}'
+		self.cmd += f' -r {shlex.quote(self.output_path)}'
 		self.cmd += ' --exit-code 0'
 
 	@staticmethod

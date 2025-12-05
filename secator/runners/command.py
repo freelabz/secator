@@ -1050,7 +1050,9 @@ class Command(Runner):
 
 		# Add JSON flag to cmd
 		if self.json_flag:
-			self.cmd += f' {self.json_flag}'
+			parts = self.json_flag.split(' ')
+			for part in parts:
+				self.cmd += f' {shlex.quote(part)}'
 
 		# Opts str
 		opts_str = ''
