@@ -181,7 +181,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		# a.k.a task options defined in their respective task classes
 		cls = Task.get_task_class(node.name)
 		task_opts = cls.opts.copy()
-		task_opts_meta = cls.meta_opts.copy()
+		task_opts_meta = getattr(cls, 'meta_opts', {}).copy()
 		task_opts_all = {**task_opts, **task_opts_meta}
 		node_opts = node.opts or {}
 		ancestor_opts_defaults = node.ancestor.default_opts or {}
