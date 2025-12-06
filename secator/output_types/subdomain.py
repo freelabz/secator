@@ -40,4 +40,6 @@ class Subdomain(OutputType):
 			s += f' [{sources_str}]'
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
+		if not self.verified:
+			s = f'[dim]{s}[/]'
 		return rich_to_ansi(s)

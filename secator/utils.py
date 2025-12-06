@@ -804,6 +804,27 @@ def format_object(obj, color='magenta', skip_keys=[]):
 	return ''
 
 
+def is_host_port(target):
+	"""Check if a target is a host:port.
+
+	Args:
+		target (str): The target to check.
+
+	Returns:
+		bool: True if the target is a host:port, False otherwise.
+	"""
+	split = target.split(':')
+	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0])):
+		return False
+	try:
+		port = int(split[1])
+		if port < 1 or port > 65535:
+			return False
+	except ValueError:
+		return False
+	return True
+
+
 def autodetect_type(target):
 	"""Autodetect the type of a target.
 
@@ -823,7 +844,7 @@ def autodetect_type(target):
 		return IP
 	elif validators.domain(target):
 		return HOST
-	elif validators.domain(target.split(':')[0]) or validators.ipv4(target.split(':')[0]) or validators.ipv6(target.split(':')[0]):  # noqa: E501
+	elif is_host_port(target):
 		return HOST_PORT
 	elif validators.mac_address(target):
 		return MAC_ADDRESS

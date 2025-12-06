@@ -17,4 +17,6 @@ workflows:
     - url.url
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified

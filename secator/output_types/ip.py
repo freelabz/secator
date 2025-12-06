@@ -39,9 +39,9 @@ class Ip(OutputType):
 		if self.host:
 			s += rf' \[[bold magenta]{self.host}[/]]'
 		if self.alive:
-			s += r' [bold green]🟢[/]'
-		else:
-			s = f'[dim]{s}[/]'
+			s += r' \[[bold green]alive[/]]'
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
+		if not self.alive:
+			s = f'[dim]{s}[/]'
 		return rich_to_ansi(s)
