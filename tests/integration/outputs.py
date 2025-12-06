@@ -182,7 +182,7 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'gau': [
-        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
+        Url(url='http://testphp.vulnweb.com/categories.php', _source='gau')
     ],
     'getasn': [
         Tag(name='asn', category='info', value='AS14907', match='wikipedia.org', _source='getasn')

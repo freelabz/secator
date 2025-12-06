@@ -77,6 +77,8 @@ def expand_input(input, ctx):
 	piped_input = ctx.obj['piped_input']
 	dry_run = ctx.obj['dry_run']
 	if input is None:  # read from stdin
+		if not ctx.obj['input_required']:
+			return []
 		if not piped_input and not dry_run:
 			console.print('No input passed on stdin. Showing help page.', style='bold red')
 			ctx.get_help()
@@ -821,7 +823,7 @@ def autodetect_type(target):
 		return IP
 	elif validators.domain(target):
 		return HOST
-	elif validators.domain(target.split(':')[0]):
+	elif validators.domain(target.split(':')[0]) or validators.ipv4(target.split(':')[0]) or validators.ipv6(target.split(':')[0]):  # noqa: E501
 		return HOST_PORT
 	elif validators.mac_address(target):
 		return MAC_ADDRESS

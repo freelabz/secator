@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import SITE_NAME, URL, USERNAME
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s
+from secator.utils import rich_to_ansi, rich_escape as _s, format_object
 
 
 @dataclass
@@ -37,5 +37,5 @@ class UserAccount(OutputType):
 		if self.url:
 			s += rf' \[[white]{_s(self.url)}[/]]'
 		if self.extra_data:
-			s += r' \[[bold yellow]' + _s(', '.join(f'{k}:{v}' for k, v in self.extra_data.items())) + '[/]]'
+			s += format_object(self.extra_data, 'yellow')
 		return rich_to_ansi(s)
