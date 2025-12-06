@@ -42,6 +42,6 @@ class Ip(OutputType):
 			s += r' \[[bold green]alive[/]]'
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
-    if not self.alive:
-      s = f'[dim]{s}[/]'
-    return rich_to_ansi(s)
+        if not self.alive:
+            s = f'[dim]{s}[/]'
+        return rich_to_ansi(s)
