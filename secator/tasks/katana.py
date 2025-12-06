@@ -8,7 +8,7 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTE
 								 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
 								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.config import CONFIG
-from secator.output_types import Url, Tag
+from secator.output_types import Url, Tag, File
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
@@ -201,3 +201,21 @@ class katana(HttpCrawler):
 		index_rpath = f'{self.reports_folder}/.outputs/index.txt'
 		if store_responses and os.path.exists(index_rpath):
 			os.remove(index_rpath)
+		# Yield File outputs for all saved responses
+		if store_responses:
+			response_dir = f'{self.reports_folder}/.outputs'
+			if os.path.exists(response_dir):
+				for filename in os.listdir(response_dir):
+					if filename == 'index.txt':
+						continue
+					file_path = os.path.join(response_dir, filename)
+					if os.path.isfile(file_path):
+						file_size = os.path.getsize(file_path)
+						yield File(
+							path=file_path,
+							type='local',
+							category='http',
+							tags=['response', 'katana'],
+							size=file_size,
+							mime_type='text/html'
+						)

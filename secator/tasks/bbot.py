@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 
@@ -6,7 +7,7 @@ from secator.decorators import task
 from secator.definitions import FILENAME, HOST, IP, ORG_NAME, PORT, URL, USERNAME
 from secator.runners import Command
 from secator.serializers import RegexSerializer
-from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error, UserAccount, Warning
+from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error, UserAccount, Warning, File
 from secator.serializers import JSONSerializer
 
 
@@ -353,6 +354,16 @@ class bbot(Command):
 			yield Info(f'Copying screenshot {path} to {secator_path}')
 			shutil.copyfile(path, secator_path)
 			item['data']['path'] = secator_path
+			# Yield File output for the screenshot
+			file_size = os.path.getsize(secator_path)
+			yield File(
+				path=secator_path,
+				type='local',
+				category='screenshot',
+				tags=['visual', 'bbot'],
+				size=file_size,
+				mime_type='image/png'
+			)
 
 		yield item
 

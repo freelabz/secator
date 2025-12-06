@@ -12,7 +12,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
 								 SEVERITY, STATE, TAGS, THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability, Info, Error
+from secator.output_types import Exploit, Port, Vulnerability, Info, Error, File
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug, traceback_as_string
 
@@ -167,6 +167,16 @@ class nmap(VulnMulti):
 			yield Error(message=f'Could not find XML results in {self.output_path}')
 			return
 		yield Info(message=f'XML results saved to {self.output_path}')
+		# Yield File output for the XML file
+		file_size = os.path.getsize(self.output_path)
+		yield File(
+			path=self.output_path,
+			type='local',
+			category='nmap',
+			tags=['scan-result', 'xml'],
+			size=file_size,
+			mime_type='application/xml'
+		)
 		yield from self.xml_to_json()
 
 	def xml_to_json(self):
