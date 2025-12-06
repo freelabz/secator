@@ -79,6 +79,7 @@ tasks:
     - type: url
       field: url
       condition: item.status_code == 0
+    if: not opts.passive
 
   _group/data_hunt:
     trufflehog:
