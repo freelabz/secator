@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -75,6 +76,7 @@ class Command(Runner):
 	# Flag to take a file as input
 	file_flag = None
 	file_eof_newline = False
+	file_copy_sudo = False
 
 	# Flag to enable output JSON
 	json_flag = None
@@ -107,6 +109,9 @@ class Command(Runner):
 
 	# Ignore return code
 	ignore_return_code = False
+
+	# Sudo
+	requires_sudo = False
 
 	# Return code
 	return_code = -1
@@ -190,9 +195,6 @@ class Command(Runner):
 		self.monitor_queue = None
 		self.process_start_time = None
 		# self.retry_count = 0  # TODO: remove this
-
-		# Sudo
-		self.requires_sudo = False
 
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
@@ -431,7 +433,7 @@ class Command(Runner):
 				return
 
 			# Abort if no inputs
-			if len(self.inputs) == 0 and self.skip_if_no_inputs:
+			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.input_required:
 				self.print_description()
 				self.print_command()
 				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
@@ -1153,6 +1155,11 @@ class Command(Runner):
 				f.write('\n'.join(inputs))
 				if self.file_eof_newline:
 					f.write('\n')
+
+			if self.file_copy_sudo:
+				sudo_fpath = f'/tmp/{self.unique_name}.txt'
+				shutil.copy(fpath, sudo_fpath)
+				fpath = sudo_fpath
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import CPES, EXTRA_DATA, HOST, IP, PORT
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, format_object
 
 
 @dataclass
@@ -49,4 +49,7 @@ class Port(OutputType):
 			s += rf' \[[bold purple]{self.service_name}{conf}[/]]'
 		if self.host:
 			s += rf' \[[cyan]{self.host}[/]]'
+		if self.extra_data:
+			skip_keys = ['name', 'servicefp', 'method', 'service_name', 'product', 'version', 'conf']
+			s += format_object(self.extra_data, 'yellow', skip_keys=skip_keys)
 		return rich_to_ansi(s)

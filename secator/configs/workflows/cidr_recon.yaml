@@ -3,40 +3,37 @@ name: cidr_recon
 alias: cidrrec
 description: Local network recon
 long_description: |
-  Discovers and analyzes hosts within a CIDR range or local network.
-  Maps IP addresses, identifies live hosts, scans for open ports and services,
-  and probes HTTP services with technology detection. Useful for internal network
-  assessments and discovering all assets within a given IP range.
+  Discovers and analyzes hosts within a CIDR range or local network through ARP / ICMP scanning.
+  Maps IP addresses and identifies live hosts.
+  Useful for local network security assessments and penetration testing.
 tags: [recon, cidr, network]
 input_types:
   - cidr_range
   - ip
-default_inputs:
-  - 127.0.0.1/24      # localhost
-  - 192.168.0.0/24    # local
-  - 192.168.1.0/24    # local
-  - 10.0.0.0/24       # standard subnet
-  - 172.16.0.0/24     # private network
-  - 172.17.0.0/16     # docker
+  - slug
+input_required: False
+default_inputs: [discover]
+# default_inputs:
+#   - 127.0.0.1/24      # localhost
+#   - 192.168.0.0/24    # local
+#   - 192.168.1.0/24    # local
+#   - 10.0.0.0/24       # standard subnet
+#   - 172.16.0.0/24     # private network
+#   - 172.17.0.0/16     # docker
 
 tasks:
-  mapcidr:
-    description: Find CIDR range IPs
+  _group/mapper:
+    arpscan:
+      description: Scan CIDR range for alive hosts
+
+    mapcidr:
+      description: Find CIDR range IPs
+      hide_ips: True
+      targets_:
+      - type: target
+        field: name
+        condition: target.type == 'cidr_range'
 
   fping:
     description: Check for alive IPs
     targets_: ip.ip
-
-  nmap:
-    description: Scan alive IPs' ports
-    targets_:
-    - type: ip
-      field: ip
-      condition: item.alive
-
-  httpx:
-    description: Probe HTTP services on open ports
-    tech_detect: True
-    targets_:
-    - type: port
-      field: '{ip}:{port}'

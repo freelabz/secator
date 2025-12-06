@@ -161,7 +161,6 @@ def register_runner(cli_endpoint, config):
 
 	elif cli_endpoint.name == 'task':
 		runner_cls = Task
-		input_required = False  # allow targets from stdin
 		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
 		short_help = f'[magenta]{task_category:<25}[/] {task_cls.__doc__}'
@@ -171,7 +170,7 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = task_cls.input_types
-
+		input_required = task_cls.input_required
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
@@ -213,6 +212,7 @@ def register_runner(cli_endpoint, config):
 		# Set dry run
 		ctx.obj['dry_run'] = dry_run
 		ctx.obj['input_types'] = input_types
+		ctx.obj['input_required'] = input_required
 
 		# Show version
 		if version:
