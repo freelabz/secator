@@ -276,6 +276,41 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 1
 		assert 'Cannot run this command in offline mode' in result.output
 
+	def test_update_secator_command(self):
+		result = self.runner.invoke(cli, ['update', 'secator'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_langs_command(self):
+		result = self.runner.invoke(cli, ['update', 'langs'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_tools_command(self):
+		result = self.runner.invoke(cli, ['update', 'tools'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_wordlists_command(self):
+		result = self.runner.invoke(cli, ['update', 'wordlists'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_templates_command(self):
+		result = self.runner.invoke(cli, ['update', 'templates'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_install_tools_deprecation(self):
+		result = self.runner.invoke(cli, ['install', 'tools'])
+		assert result.exit_code == 1
+		assert 'deprecated' in result.output.lower()
+
+	def test_install_langs_deprecation(self):
+		result = self.runner.invoke(cli, ['install', 'langs', 'go'])
+		assert result.exit_code == 1
+		assert 'deprecated' in result.output.lower()
+
 	def test_health_command(self):
 		result = self.runner.invoke(cli, ['health'])
 		assert result.exit_code == 1
