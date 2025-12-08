@@ -1,4 +1,5 @@
 import re
+import validators
 
 from secator.decorators import task
 from secator.output_types import Ip
@@ -32,6 +33,10 @@ class arp(Command):
 
 		if match:
 			name, ip, mac, physical, interface = match.groups()
+
+			# Validate IP address
+			if not (validators.ipv4(ip) or validators.ipv6(ip)):
+				return
 
 			# Set host to the name if it's not just '?'
 			host = name.strip() if name.strip() != '?' else ''
