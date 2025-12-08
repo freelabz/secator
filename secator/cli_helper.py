@@ -146,7 +146,7 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = config.input_types
-		input_required = config.default_inputs is not None
+		input_required = config.default_inputs is None
 
 	elif cli_endpoint.name == 'workflow':
 		runner_cls = Workflow
@@ -158,7 +158,7 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = config.input_types
-		input_required = config.default_inputs is not None
+		input_required = config.default_inputs is None
 
 	elif cli_endpoint.name == 'task':
 		runner_cls = Task
@@ -171,7 +171,7 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = task_cls.input_types
-		input_required = config.default_inputs is not None
+		input_required = config.default_inputs is None
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
