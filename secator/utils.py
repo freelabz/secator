@@ -78,7 +78,11 @@ def expand_input(input, ctx):
 	dry_run = ctx.obj['dry_run']
 	default_inputs = ctx.obj['default_inputs']
 	if input is None:  # read from stdin
-		if piped_input:
+		if not piped_input and not default_inputs and not dry_run:
+			console.print('No input passed on stdin. Showing help page.', style='bold red')
+			ctx.get_help()
+			sys.exit(1)
+		elif piped_input:
 			rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 			if rlist:
 				data = sys.stdin.read().splitlines()
@@ -91,10 +95,6 @@ def expand_input(input, ctx):
 			for inp in default_inputs:
 				console.print(f'  • {inp}')
 			return default_inputs
-		elif not dry_run:
-			console.print('No input passed on stdin. Showing help page.', style='bold red')
-			ctx.get_help()
-			sys.exit(1)
 	elif os.path.exists(input):
 		if 'path' in ctx.obj['input_types']:
 			return input
