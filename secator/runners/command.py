@@ -955,7 +955,7 @@ class Command(Runner):
 	@staticmethod
 	def _validate_input_nonempty(self, inputs):
 		"""Input is empty."""
-		if self.default_inputs:
+		if self.default_inputs is not None:
 			return True
 		if not inputs or len(inputs) == 0:
 			return False

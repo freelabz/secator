@@ -171,7 +171,7 @@ def register_runner(cli_endpoint, config):
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
-	default_inputs = config.default_inputs or None
+	default_inputs = None if config.default_inputs == {} else config.default_inputs
 	input_required = default_inputs is None
 	options = get_config_options(
 		config,
