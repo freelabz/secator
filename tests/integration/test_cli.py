@@ -1,14 +1,10 @@
 import os
 import unittest
-import subprocess
-import warnings
 
 from click.testing import CliRunner
 
 from secator.cli import cli
 from secator.runners import Command
-from secator.output_types import Target, Port, Url, Info
-from secator.serializers import JSONSerializer
 from secator.rich import console
 
 class TestCli(unittest.TestCase):
