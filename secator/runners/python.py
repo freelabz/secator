@@ -34,6 +34,7 @@ class PythonRunner(Runner):
 		...             yield Tag(name="scanned", match=target)
 	"""
 	default_exporters = CONFIG.tasks.exporters
+	input_required = False
 	tags = []
 	opts = {}
 	profile = 'io'
