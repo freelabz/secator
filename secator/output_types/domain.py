@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import ALIVE, DOMAIN
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s
+from secator.utils import rich_to_ansi, format_object
 
 
 @dataclass
@@ -45,7 +45,6 @@ class Domain(OutputType):
 			else:
 				s += rf' \[[bold green]{self.expiration_date}[/]]'
 		if self.extra_data:
-			data = ', '.join([f'{k}:{v}' for k, v in self.extra_data.items()])
-			s += rf' \[[yellow]{_s(str(data))}[/]]'
+			s += format_object(self.extra_data, 'yellow')
 
 		return rich_to_ansi(s)

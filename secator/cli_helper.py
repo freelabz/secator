@@ -138,7 +138,6 @@ def register_runner(cli_endpoint, config):
 
 	if cli_endpoint.name == 'scan':
 		runner_cls = Scan
-		input_required = False  # allow targets from stdin
 		short_help = config.description or ''
 		short_help += f' [dim]alias: {config.alias}' if config.alias else ''
 		command_opts.update({
@@ -147,10 +146,10 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = config.input_types
+		input_required = config.default_inputs is not None
 
 	elif cli_endpoint.name == 'workflow':
 		runner_cls = Workflow
-		input_required = False  # allow targets from stdin
 		short_help = config.description or ''
 		short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}' if config.alias else ''
 		command_opts.update({
@@ -159,10 +158,10 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = config.input_types
+		input_required = config.default_inputs is not None
 
 	elif cli_endpoint.name == 'task':
 		runner_cls = Task
-		input_required = False  # allow targets from stdin
 		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
 		short_help = f'[magenta]{task_category:<25}[/] {task_cls.__doc__}'
@@ -172,7 +171,7 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = task_cls.input_types
-
+		input_required = config.default_inputs is not None
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
@@ -192,7 +191,7 @@ def register_runner(cli_endpoint, config):
 	# 		for i in range(0, len(ctx.args), 2)
 	# 	}
 
-	@click.argument('inputs', metavar=input_types_str, required=input_required)
+	@click.argument('inputs', metavar=input_types_str, required=False)
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, **opts):
@@ -214,6 +213,8 @@ def register_runner(cli_endpoint, config):
 		# Set dry run
 		ctx.obj['dry_run'] = dry_run
 		ctx.obj['input_types'] = input_types
+		ctx.obj['input_required'] = input_required
+		ctx.obj['default_inputs'] = config.default_inputs
 
 		# Show version
 		if version:

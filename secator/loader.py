@@ -43,6 +43,7 @@ def get_configs_by_type(type):
 			'description': cls.__doc__,
 			'input_types': cls.input_types,
 			'output_types': [t.get_name() for t in cls.output_types],
+			'default_inputs': cls.default_inputs,
 			'proxychains': getattr(cls, 'proxychains', True),
 			'proxy_socks5': getattr(cls, 'proxy_socks5', True),
 			'proxy_http': getattr(cls, 'proxy_http', True),

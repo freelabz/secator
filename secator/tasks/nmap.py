@@ -1,18 +1,18 @@
 import logging
 import os
+import shlex
 import re
-
 import xmltodict
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
+from secator.definitions import (CONFIDENCE, CIDR_RANGE, CVSS_SCORE, DELAY,
 								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
 								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
 								 SEVERITY, STATE, TAGS, THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability, Info, Error
+from secator.output_types import Exploit, Port, Vulnerability, Info, Error, Ip
 from secator.tasks._categories import VulnMulti
 from secator.utils import debug, traceback_as_string
 
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 class nmap(VulnMulti):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap'
-	input_types = [HOST, IP]
-	output_types = [Port, Vulnerability, Exploit]
+	input_types = [HOST, IP, CIDR_RANGE]
+	output_types = [Port, Ip, Vulnerability, Exploit]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
 	file_flag = '-iL'
@@ -152,7 +152,7 @@ class nmap(VulnMulti):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
-		self.cmd += f' -oX {self.output_path}'
+		self.cmd += f' -oX {shlex.quote(self.output_path)}'
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
 		tcp_connect = self.cmd_options.get('tcp_connect')
 		if tcp_connect and tcp_syn_stealth:
@@ -187,9 +187,13 @@ class nmapData(dict):
 
 	def __iter__(self):
 		datas = []
+		ips = []
 		for host in self._get_hosts():
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
+			if ip not in ips:
+				yield Ip(ip=ip, alive=True, host=hostname, extra_data={'protocol': 'tcp'})
+				ips.append(ip)
 			for port in self._get_ports(host):
 				# Get port number
 				port_number = port['@portid']
@@ -226,7 +230,7 @@ class nmapData(dict):
 					EXTRA_DATA: extra_data,
 					CONFIDENCE: conf
 				}
-				yield port
+				yield Port(**port)
 
 				# Parse each script output to get vulns
 				for script in scripts:

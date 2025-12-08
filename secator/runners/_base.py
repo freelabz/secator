@@ -524,7 +524,7 @@ class Runner:
 		self.uuids.add(item._uuid)
 		self.results.append(item)
 		self.results_count += 1
-		if output:
+		if output and item._type not in ['stat', 'progress']:
 			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)

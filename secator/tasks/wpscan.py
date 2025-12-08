@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 
 from secator.config import CONFIG
 from secator.decorators import task
@@ -97,7 +98,7 @@ class wpscan(VulnHttp):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
