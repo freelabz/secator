@@ -103,6 +103,7 @@ class Runners(StrictModel):
 	remove_duplicates: bool = False
 	force_tty: bool = False
 
+
 class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
