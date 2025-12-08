@@ -55,6 +55,7 @@ class TestExtractRootDomain(unittest.TestCase):
 			("localhost", IP),
 			("127.0.0.1", IP),
 			("192.168.1.1", IP),
+			("localhost:22", HOST_PORT),
 			("192.168.1.1:8080", HOST_PORT),
 			("example.com:8080", HOST_PORT),
 			("example.co.uk:80", HOST_PORT),

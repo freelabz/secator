@@ -77,8 +77,6 @@ def expand_input(input, ctx):
 	piped_input = ctx.obj['piped_input']
 	dry_run = ctx.obj['dry_run']
 	default_inputs = ctx.obj['default_inputs']
-	print('is it a piped input ?', file=sys.stderr)
-	print(piped_input, file=sys.stderr)
 	if input is None:  # read from stdin
 		if not piped_input and not default_inputs and not dry_run:
 			console.print('No input passed on stdin. Showing help page.', style='bold red')
@@ -817,7 +815,7 @@ def is_host_port(target):
 		bool: True if the target is a host:port, False otherwise.
 	"""
 	split = target.split(':')
-	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0])):
+	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0]) or split[0] == 'localhost'):  # noqa: E501
 		return False
 	try:
 		port = int(split[1])

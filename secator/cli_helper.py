@@ -137,7 +137,6 @@ def register_runner(cli_endpoint, config):
 
 	if cli_endpoint.name == 'scan':
 		runner_cls = Scan
-		input_required = False  # allow targets from stdin
 		short_help = config.description or ''
 		short_help += f' [dim]alias: {config.alias}' if config.alias else ''
 		command_opts.update({
@@ -150,7 +149,6 @@ def register_runner(cli_endpoint, config):
 
 	elif cli_endpoint.name == 'workflow':
 		runner_cls = Workflow
-		input_required = False  # allow targets from stdin
 		short_help = config.description or ''
 		short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}' if config.alias else ''
 		command_opts.update({
