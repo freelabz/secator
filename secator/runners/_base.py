@@ -75,6 +75,9 @@ class Runner:
 	# Output types
 	output_types = []
 
+	# Default inputs
+	default_inputs = None
+
 	# Default exporters
 	default_exporters = []
 

@@ -34,10 +34,8 @@ class PythonRunner(Runner):
 		...             yield Tag(name="scanned", match=target)
 	"""
 	default_exporters = CONFIG.tasks.exporters
-	input_required = False
 	tags = []
 	opts = {}
-	default_inputs = None
 	profile = 'io'
 
 	def needs_chunking(self, sync):

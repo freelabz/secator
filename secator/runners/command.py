@@ -70,12 +70,6 @@ class Command(Runner):
 	# Input chunk size
 	input_chunk_size = CONFIG.runners.input_chunk_size
 
-	# Input required
-	input_required = True
-
-	# Default inputs
-	default_inputs = None
-
 	# Flag to take a file as input
 	file_flag = None
 	file_eof_newline = False
@@ -361,7 +355,7 @@ class Command(Runner):
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
 		kwargs['process'] = kwargs.get('process', False)
-		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
+		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
 		if run:
@@ -436,7 +430,7 @@ class Command(Runner):
 				return
 
 			# Abort if no inputs
-			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.input_required:
+			if len(self.inputs) == 0 and self.skip_if_no_inputs and not self.default_inputs:
 				self.print_description()
 				self.print_command()
 				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
@@ -961,7 +955,7 @@ class Command(Runner):
 	@staticmethod
 	def _validate_input_nonempty(self, inputs):
 		"""Input is empty."""
-		if not self.input_required:
+		if self.default_inputs:
 			return True
 		if not inputs or len(inputs) == 0:
 			return False

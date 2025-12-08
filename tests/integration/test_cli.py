@@ -40,3 +40,8 @@ class TestCli(unittest.TestCase):
 		assert not result.exception
 		assert result.exit_code == 0
 		assert 'No inputs provided, using default inputs:' in result.output
+
+	def test_task_input_not_required_with_no_default_inputs(self):
+		result = self.runner.invoke(cli, ['task', 'arp'])
+		assert not result.exception
+		assert result.exit_code == 0

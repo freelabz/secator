@@ -12,7 +12,7 @@ class arp(Command):
 	cmd = 'arp -a'
 	output_types = [Ip]
 	input_flag = None
-	input_required = False
+	default_inputs = ''
 	requires_sudo = True
 	tags = ['ip', 'recon']
 	opts = {}
