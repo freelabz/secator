@@ -1,4 +1,5 @@
 import os
+import shlex
 import yaml
 
 from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
@@ -77,7 +78,7 @@ class arjun(Command):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.cmd += f' -oJ {self.output_path}'
+		self.cmd += f' -oJ {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):

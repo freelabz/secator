@@ -14,4 +14,6 @@ workflows:
   url_fuzz:
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified

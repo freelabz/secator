@@ -76,8 +76,9 @@ def expand_input(input, ctx):
 	"""
 	piped_input = ctx.obj['piped_input']
 	dry_run = ctx.obj['dry_run']
+	default_inputs = ctx.obj['default_inputs']
 	if input is None:  # read from stdin
-		if not piped_input and not dry_run:
+		if not piped_input and not default_inputs and not dry_run:
 			console.print('No input passed on stdin. Showing help page.', style='bold red')
 			ctx.get_help()
 			sys.exit(1)
@@ -89,6 +90,11 @@ def expand_input(input, ctx):
 			else:
 				console.print('No input passed on stdin.', style='bold red')
 				sys.exit(1)
+		elif default_inputs:
+			console.print('[bold yellow]No inputs provided, using default inputs:[/]')
+			for inp in default_inputs:
+				console.print(f'  • {inp}')
+			return default_inputs
 	elif os.path.exists(input):
 		input_types = ctx.obj['input_types']
 		if not input_types or 'path' in input_types:
@@ -800,6 +806,27 @@ def format_object(obj, color='magenta', skip_keys=[]):
 	return ''
 
 
+def is_host_port(target):
+	"""Check if a target is a host:port.
+
+	Args:
+		target (str): The target to check.
+
+	Returns:
+		bool: True if the target is a host:port, False otherwise.
+	"""
+	split = target.split(':')
+	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0]) or split[0] == 'localhost'):  # noqa: E501
+		return False
+	try:
+		port = int(split[1])
+		if port < 1 or port > 65535:
+			return False
+	except ValueError:
+		return False
+	return True
+
+
 def autodetect_type(target):
 	"""Autodetect the type of a target.
 
@@ -819,7 +846,7 @@ def autodetect_type(target):
 		return IP
 	elif validators.domain(target):
 		return HOST
-	elif validators.domain(target.split(':')[0]):
+	elif is_host_port(target):
 		return HOST_PORT
 	elif validators.mac_address(target):
 		return MAC_ADDRESS
@@ -885,3 +912,8 @@ def is_valid_path(path):
 		return True
 	except (TypeError, ValueError):
 		return False
+
+
+def is_terminal_interactive():
+    """Check if the terminal is interactive (even if stdin is piped)."""
+    return sys.stdout.isatty() and not os.getenv('CI', '').lower() in ('true', '1')

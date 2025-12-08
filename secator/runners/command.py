@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -72,9 +73,13 @@ class Command(Runner):
 	# Input required
 	input_required = True
 
+	# Default inputs
+	default_inputs = None
+
 	# Flag to take a file as input
 	file_flag = None
 	file_eof_newline = False
+	file_copy_sudo = False
 
 	# Flag to enable output JSON
 	json_flag = None
@@ -107,6 +112,9 @@ class Command(Runner):
 
 	# Ignore return code
 	ignore_return_code = False
+
+	# Sudo
+	requires_sudo = False
 
 	# Return code
 	return_code = -1
@@ -190,9 +198,6 @@ class Command(Runner):
 		self.monitor_queue = None
 		self.process_start_time = None
 		# self.retry_count = 0  # TODO: remove this
-
-		# Sudo
-		self.requires_sudo = False
 
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
@@ -431,7 +436,7 @@ class Command(Runner):
 				return
 
 			# Abort if no inputs
-			if len(self.inputs) == 0 and self.skip_if_no_inputs:
+			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.input_required:
 				self.print_description()
 				self.print_command()
 				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
@@ -805,7 +810,7 @@ class Command(Runner):
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
-		if not os.isatty(sys.stdin.fileno()):
+		if not sys.stdin.isatty():
 			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
 			return -1, error
 
@@ -1048,7 +1053,9 @@ class Command(Runner):
 
 		# Add JSON flag to cmd
 		if self.json_flag:
-			self.cmd += f' {self.json_flag}'
+			parts = self.json_flag.split(' ')
+			for part in parts:
+				self.cmd += f' {shlex.quote(part)}'
 
 		# Opts str
 		opts_str = ''
@@ -1151,6 +1158,11 @@ class Command(Runner):
 				f.write('\n'.join(inputs))
 				if self.file_eof_newline:
 					f.write('\n')
+
+			if self.file_copy_sudo:
+				sudo_fpath = f'/tmp/{self.unique_name}.txt'
+				shutil.copy(fpath, sudo_fpath)
+				fpath = sudo_fpath
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'

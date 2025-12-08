@@ -70,14 +70,16 @@ class TestPythonRunner(unittest.TestCase):
 			def yielder(self):
 				tag_name = self.run_opts.get('tag_name', 'default')
 				for inp in self.inputs:
-					yield Tag(name=tag_name, match=inp)
+					yield Tag(name=tag_name, value=inp, match=inp)
 
 		runner = TaskWithOpts(inputs=['target1'], tag_name='custom')
 		results = runner.run()
-
 		tag_results = [r for r in results if r._type == 'tag']
+
 		self.assertEqual(len(tag_results), 1)
 		self.assertEqual(tag_results[0].name, 'custom')
+		self.assertEqual(tag_results[0].value, 'target1')
+		self.assertEqual(tag_results[0].match, 'target1')
 
 	def test_task_name(self):
 		"""Test that task name is derived from class name."""

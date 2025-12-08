@@ -9,6 +9,7 @@ long_description: |
 profile: default
 input_types:
   - host
+  - ip
 
 workflows:
   host_recon:
@@ -17,4 +18,6 @@ workflows:
     - url.url
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified

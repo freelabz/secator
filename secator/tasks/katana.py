@@ -1,4 +1,6 @@
 import os
+import shlex
+
 from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
@@ -88,7 +90,8 @@ class katana(HttpCrawler):
 		form_extraction = self.get_opt_value('form_extraction')
 		store_responses = self.get_opt_value('store_responses')
 		if form_fill or form_extraction or store_responses:
-			self.cmd += f' -srd {self.reports_folder}/.outputs'
+			reports_folder_outputs = f'{self.reports_folder}/.outputs'
+			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
 		self.tags = []
 		self.urls = []
 
