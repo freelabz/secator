@@ -58,8 +58,8 @@ class Url(OutputType):
 	def __post_init__(self):
 		super().__post_init__()
 		if not self.host:
-			self.host = urlparse(self.url).netloc
-		if not self.status_code != 0:
+			self.host = urlparse(self.url).hostname
+		if self.status_code != 0:
 			self.verified = True
 		if self.title and 'Index of' in self.title:
 			self.is_directory = True
@@ -107,4 +107,6 @@ class Url(OutputType):
 			s += rf' [link=file://{self.screenshot_path}]:camera:[/]'
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:pencil:[/]'
+		if not self.verified:
+			s = f'[dim]{s}[/]'
 		return rich_to_ansi(s)

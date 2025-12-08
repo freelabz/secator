@@ -10,8 +10,8 @@ from cpe import CPE
 
 from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DATA, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
 								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, IP,
-								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
-								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PORTS, PROVIDER, PROXY,
+								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, TOP_PORTS, URL, USER_AGENT,
 								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
@@ -26,14 +26,8 @@ def process_headers(headers_dict):
 	return headers
 
 
-USER_AGENTS = {
-	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
-	'chrome_134.0_macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
-}
-
-
 OPTS = {
-	HEADER: {'type': str, 'short': 'H', 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'pre_process': headers_to_dict, 'process': process_headers, 'default': 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']},  # noqa: E501
+	HEADER: {'type': str, 'short': 'H', 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'pre_process': headers_to_dict, 'process': process_headers, 'default': CONFIG.http.default_header},  # noqa: E501
 	DATA: {'type': str, 'help': 'Data to send in the request body'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
 	DEPTH: {'type': int, 'help': 'Scan depth'},
@@ -139,6 +133,10 @@ class ReconIp(Recon):
 class ReconPort(Recon):
 	input_types = [IP]
 	output_types = [Port]
+	meta_opts = {
+		PORTS: {'type': str, 'short': 'p', 'help': 'Only scan specific ports (comma separated list, "-" for all ports)'},  # noqa: E501
+		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Scan <number> most common ports'},
+	}
 
 
 #---------------#

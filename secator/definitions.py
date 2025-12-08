@@ -21,6 +21,7 @@ ASCII = rf"""
 
 # Debug
 DEBUG = CONFIG.debug.split(',')
+FORCE_TTY = CONFIG.runners.force_tty
 
 # Constants
 OPT_NOT_SUPPORTED = -1

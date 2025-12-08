@@ -53,10 +53,10 @@ class dnsx(ReconDns):
 		for target in self.inputs:
 			subdomain = f'xxxxxx.{target}'
 			if check_dns_response(subdomain):
-				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'))  # noqa: E501
+				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'), print=False)  # noqa: E501
 				self.inputs = [t for t in self.inputs if t != target]
 				if len(self.inputs) == 0 and not self.has_parent:
-					self.add_result(Warning(message='Please specify the wildcard_domain option to get accurate results.'))  # noqa: E501
+					self.add_result(Warning(message='Please specify the wildcard_domain option to get accurate results.'), print=False)  # noqa: E501
 					return False
 		return True
 

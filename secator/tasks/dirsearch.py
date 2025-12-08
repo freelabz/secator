@@ -1,5 +1,5 @@
 import os
-
+import shlex
 import yaml
 
 from secator.decorators import task
@@ -68,7 +68,7 @@ class dirsearch(HttpFuzzer):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):

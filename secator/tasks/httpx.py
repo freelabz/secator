@@ -1,4 +1,5 @@
 import os
+import shlex
 
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
@@ -95,7 +96,8 @@ class httpx(Http):
 		screenshot = self.get_opt_value('screenshot')
 		store_responses = self.get_opt_value('store_responses')
 		if store_responses or screenshot:
-			self.cmd += f' -srd {self.reports_folder}/.outputs'
+			reports_folder_outputs = f'{self.reports_folder}/.outputs'
+			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
 		if screenshot:
 			self.cmd += ' -esb -ehb'
 		self.domains = []
@@ -160,5 +162,6 @@ class httpx(Http):
 		return Subdomain(
 			host=domain,
 			domain=extract_domain_info(domain, domain_only=True),
-			verified=False,
+			verified=True,
+			sources=['tls'],
 		)
