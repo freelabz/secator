@@ -96,7 +96,7 @@ def expand_input(input, ctx):
 			for inp in default_inputs:
 				console.print(f'  • {inp}')
 			return default_inputs
-		else:
+		elif not dry_run:
 			return []
 	elif os.path.exists(input):
 		input_types = ctx.obj['input_types']

@@ -19,30 +19,24 @@ options:
     default: False
     help: Run nuclei scans (slow)
 
-  full:
-    is_flag: True
-    default: False
-    help: "Run full port scan (default: top 100 ports)"
+  scanners:
+    type: list
+    required: True
+    default: [nmap, naabu]
+    help: Port scanners to use (naabu, nmap)
 
 tasks:
 
   _group:
-    naabu/light:
-      description: Find open ports
-      if: opts.ports or not opts.full
+    naabu:
+      description: Find open ports (light)
+      if: "'naabu' in opts.scanners"
 
-    naabu/full:
-      description: Find all open ports
-      ports: "-"  # scan all ports
-      if: opts.full
+    nmap:
+      description: Find open ports (light)
+      if: "'nmap' in opts.scanners"
 
-    nmap/light:
-      description: Find open ports
-      version_detection: False
-      script: null
-      if: opts.ports or not opts.full
-
-  nmap:
+  nmap/vulners:
     description: Search for vulnerabilities on open ports
     version_detection: True
     script: vulners
@@ -52,6 +46,7 @@ tasks:
     - type: port
       field: port
       condition: port.host in targets
+    if: "'nmap' in opts.scanners"
 
   sshaudit:
     description: Audit SSH port
@@ -88,7 +83,6 @@ tasks:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
-      exclude_tags: []
       if: opts.nuclei
 
     nuclei/url:

@@ -12,7 +12,7 @@ opts:
     server_defaults: false  # testssl
 
     # Workflow options overrides
-    full: true
+    ports: "-"
     nuclei: true
     brute_dns: true
     brute_http: true
@@ -21,7 +21,7 @@ opts:
 
     # Scan options overrides
     host_recon_nuclei: true
-    host_recon_full: true
+    host_recon_ports: "-"
     domain_recon_testssl_server_defaults: null
     subdomain_recon_hunt_secrets: true
     subdomain_recon_test_ssl: true

@@ -149,6 +149,7 @@ class Command(Runner):
 		if node_name:
 			config.node_name = context.get('node_name')
 		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
+		self.enable_validators = run_opts.pop('enable_validators', True)
 
 		# Prepare validators
 		input_validators = []
@@ -355,6 +356,7 @@ class Command(Runner):
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
 		kwargs['process'] = kwargs.get('process', False)
+		kwargs['enable_validators'] = False
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
