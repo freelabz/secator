@@ -127,6 +127,7 @@ def generate_cli_subcommand(cli_endpoint, func, **opts):
 def register_runner(cli_endpoint, config):
 	name = config.name
 	input_required = True
+	input_types = []
 	command_opts = {
 		'no_args_is_help': True,
 		'context_settings': {
