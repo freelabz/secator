@@ -1,4 +1,6 @@
 import os
+import shlex
+
 from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
@@ -88,7 +90,8 @@ class katana(HttpCrawler):
 		form_extraction = self.get_opt_value('form_extraction')
 		store_responses = self.get_opt_value('store_responses')
 		if form_fill or form_extraction or store_responses:
-			self.cmd += f' -srd {self.reports_folder}/.outputs'
+			reports_folder_outputs = f'{self.reports_folder}/.outputs'
+			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
 		self.tags = []
 		self.urls = []
 
@@ -105,7 +108,7 @@ class katana(HttpCrawler):
 				method = form['method']
 				url = Url(
 					form['action'],
-					host=parsed_url.netloc,
+					host=parsed_url.hostname,
 					method=method,
 					stored_response_path=response["stored_response_path"],
 					request_headers=self.get_opt_value('header', preprocess=True)
@@ -117,6 +120,7 @@ class katana(HttpCrawler):
 				yield Tag(
 					category='info',
 					name='form',
+					value=form['action'],
 					match=form['action'],
 					stored_response_path=response["stored_response_path"],
 					extra_data={
@@ -130,11 +134,15 @@ class katana(HttpCrawler):
 						category='info',
 						name='url_param',
 						match=form['action'],
-						extra_data={'content': param, 'value': 'FUZZ'}
+						value=param,
+						extra_data={'url': url, 'value': 'FUZZ'}
 					)
+		response = item.get('response')
+		if not response:
+			return item
 		url = Url(
 			url=item['request']['endpoint'],
-			host=parsed_url.netloc,
+			host=parsed_url.hostname,
 			method=item['request']['method'],
 			request_headers=self.get_opt_value('header', preprocess=True),
 			time=item['timestamp'],
@@ -162,8 +170,9 @@ class katana(HttpCrawler):
 			tag = Tag(
 				category='info',
 				name='url_param',
+				value=param_name,
 				match=url_without_params,
-				extra_data={'content': param_name, 'value': param_value}
+				extra_data={'value': param_value, 'url': item['request']['endpoint']}
 			)
 			if tag not in self.tags:
 				self.tags.append(tag)

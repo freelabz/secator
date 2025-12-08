@@ -4,7 +4,7 @@ from typing import List
 
 from secator.definitions import DOMAIN, HOST, SOURCES
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, format_object
 
 
 @dataclass
@@ -39,5 +39,7 @@ class Subdomain(OutputType):
 		if sources_str:
 			s += f' [{sources_str}]'
 		if self.extra_data:
-			s += r' \[[bold yellow]' + ', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + '[/]]'
+			s += format_object(self.extra_data, 'yellow')
+		if not self.verified:
+			s = f'[dim]{s}[/]'
 		return rich_to_ansi(s)

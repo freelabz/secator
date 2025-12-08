@@ -695,12 +695,12 @@ def list_aliases(silent):
 	aliases.append('alias ws="secator workspaces"')
 	aliases.append('alias p="secator profiles"')
 	aliases.append('alias a="secator alias"')
-	aliases.append('alias aliases="secator alias list"')
 	aliases.append('alias r="secator reports"')
 	aliases.append('alias h="secator health"')
 	aliases.append('alias i="secator install"')
-	aliases.append('alias u="secator update"')
+	aliases.append('alias update="secator update"')
 	aliases.append('alias t="secator test"')
+	aliases.append('alias cs="secator cheatsheet"')
 	aliases.append('\n# Tasks')
 	for task in [t for t in discover_tasks()]:
 		alias_str = f'alias {task.__name__}="secator task {task.__name__}"'
@@ -1161,6 +1161,189 @@ def health(json_, debug, strict, bleeding):
 			print(upgrade_cmd)
 	else:
 		console.print(Info(message='Everything is up to date !')) if not json_ else None
+
+
+#------------#
+# CHEATSHEET #
+#------------#
+
+@cli.command(name='cheatsheet', aliases=['cs'])
+def cheatsheet():
+	"""Display a cheatsheet of secator commands."""
+	from rich.panel import Panel
+	from rich import box
+	kwargs = {
+		'box': box.ROUNDED,
+		'title_align': 'left',
+		# 'style': 'bold blue3',
+		'border_style': 'green',
+		'padding': (0, 1, 0, 1),
+		'highlight': False,
+		'expand': False,
+	}
+	title_style = 'bold green'
+
+	panel1 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator basic commands to get you started.[/]
+
+secator [orange3]x[/]      [dim]# list tasks[/]
+secator [orange3]w[/]      [dim]# list workflows[/]
+secator [orange3]s[/]      [dim]# list scans[/]
+secator [orange3]p[/]      [dim]# manage profiles[/]
+secator [orange3]r[/]      [dim]# manage reports[/]
+secator [orange3]c[/]      [dim]# manage configuration[/]
+secator [orange3]ws[/]     [dim]# manage workspaces[/]
+secator [orange3]update[/] [dim]# update secator[/]
+
+[dim]# Running tasks, workflows or scans...[/]
+secator \[[orange3]x[/]|[orange3]w[/]|[orange3]s[/]] [NAME] [OPTIONS] [INPUTS]   [dim]# run a task ([bold orange3]x[/]), workflow ([bold orange3]w[/]) or scan ([bold orange3]s[/])[/]
+secator [orange3]x[/] [red]httpx[/] example.com                 [dim]# run an [bold red]httpx[/] task ([bold orange3]x[/] is for e[bold orange3]x[/]ecute)[/]
+secator [orange3]w[/] [red]url_crawl[/] https://example.com     [dim]# run a [bold red]url crawl[/] workflow ([bold orange3]w[/])[/]
+secator [orange3]s[/] [red]host[/] example.com                  [dim]# run a [bold red]host[/] scan ([bold orange3]s[/])[/]
+
+[dim]# Show information on tasks, workflows or scans ...[/]
+secator s host [blue]-dry[/]                         [dim]# show dry run (show exact commands that will be run)[/]
+secator s host [blue]-tree[/]                        [dim]# show config tree (workflows and scans only)[/]
+secator s host [blue]-yaml[/]                        [dim]# show config yaml (workflows and scans only)[/]
+
+[dim]# Organize your results (workspace, database)[/]
+secator s host [blue]-ws[/] [bright_magenta]prod[/] example.com         [dim]# save results to 'prod' workspace[/]
+secator s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com  [dim]# save results to mongodb database[/]
+
+[dim]# Input types are flexible ...[/]
+secator s host [cyan]example.com[/]                  [dim]# single input[/]
+secator s host [cyan]host1,host2,host3[/]            [dim]# multiple inputs (comma-separated)[/]
+secator s host [cyan]hosts.txt[/]                    [dim]# multiple inputs (txt file)[/]
+[cyan]cat hosts.txt | [/]secator s host              [dim]# piped inputs[/]
+
+[dim]# Options are mutualized ...[/]
+secator s host [blue]-rl[/] [bright_magenta]10[/] [blue]-delay[/] [bright_magenta]1[/] [blue]-proxy[/] [bright_magenta]http://127.0.0.1:9090[/] example.com  [dim]# set rate limit, delay and proxy for all subtasks[/]
+secator s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com  [dim]# ... or use a profile to automatically set options[/]
+
+[dim]:point_right: and [bold]YES[/], the above options and inputs work with any scan ([bold orange3]s[/]), workflow ([bold orange3]w[/]), and task ([bold orange3]x[/]), not just the host scan shown here![/]
+""",  # noqa: E501
+		title=f":shield: [{title_style}]Some basics[/]", **kwargs)
+
+	panel2 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator aliases are useful to stop typing [bold cyan]secator <something>[/] and focus on what you want to run. Aliases are a must to increase your productivity.[/]
+
+[bold]To enable aliases:[/]
+
+secator alias enable       [dim]# enable aliases[/]
+source ~/.secator/.aliases [dim]# load aliases in current shell[/]
+
+[dim]# Now you can use aliases...[/]
+a list                                                   [dim]# list all aliases[/]
+httpx                                                    [dim]# aliased httpx ![/]
+nmap -sV -p 443 --script vulners example.com             [dim]# aliased nmap ![/]
+w subdomain_recon                                        [dim]# aliased subdomain_recon ![/]
+s domain                                                 [dim]# aliased domain scan ![/]
+cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain tasks ![/]
+""",  # noqa: E501
+		title=f":shorts: [{title_style}]Aliases[/]", **kwargs)
+
+	panel3 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator configuration is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/]. You can edit it manually or use the following commands to get/set values.[/]
+
+c get         [dim]# get config value[/]
+c get --user  [dim]# get user config value[/]
+c edit        [dim]# edit user config in editor[/]
+c set profiles.defaults aggressive                              [dim]# set 'aggressive' profile as default[/]
+c set drivers.defaults mongodb                                  [dim]# set mongodb as default driver[/]
+c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set default wordlist for http fuzzing[/]
+""",  # noqa: E501
+		title=f":gear: [{title_style}]Configuration[/]", **kwargs)
+
+	panel4 = Panel(r"""
+[dim bold]:left_arrow_curving_right: By default, tasks are run sequentially. You can use a worker to run tasks in parallel and massively speed up your scans.[/]
+
+wk                         [dim]# or [bold cyan]secator worker[/] if you don't use aliases ...[/]
+httpx testphp.vulnweb.com  [dim]# <-- will run in worker and output results normally[/]
+
+[dim]:question: Want to use a remote worker ?[/]
+[dim]:point_right: Spawn a Celery worker on your remote server, a Redis instance and set the following config values to connect to it, both in the worker and locally:[/]
+c set celery.result_backend redis://<remote_ip>:6379/0          [dim]# set redis backend[/]
+c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis broker[/]
+[dim]:point_right: Then, run your tasks, workflows or scans like you would locally ![/]
+""",  # noqa: E501
+		title=f":zap: [{title_style}]Too slow ? Use a worker[/]", **kwargs)
+
+	panel5 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, filter and export reports using the following commands.[/]
+
+[dim]# List and filter reports...[/]
+r list                    [dim]# list all reports[/]
+r list [blue]-ws[/] [bright_magenta]prod[/]           [dim]# list reports from the workspace 'prod'[/]
+r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
+
+[dim]# Show and filter results...[/]
+r show [blue]-q[/] [bright_magenta]"url.status_code not in ['401', '403']"[/] [blue]-o[/] [bright_magenta]txt[/]                                 [dim]# show urls with status 401 or 403, save to txt file[/]
+r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"tag.match and 'signup.php' in tag.match"[/] [blue]--unified[/] [blue]-o[/] [bright_magenta]json[/]  [dim]# show tags with targets matching 'signup.php' from tasks 10 and 11[/]
+""",  # noqa: E501
+		title=f":file_cabinet: [{title_style}]Digging into reports[/]", **kwargs)
+
+	panel6 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Commands to manage secator installation.[/]
+
+update [dim]# update secator to the latest version[/]
+
+[dim]:point_right: Tools are automatically installed when first running a task, workflow or scan, but you can still install them manually.[/]
+i tools httpx    [dim]# install tool 'httpx'[/]
+i tools          [dim]# install all tools[/]
+
+[dim]:point_right: Addons are optional dependencies required to enable certain features.[/]
+i addon redis    [dim]# install addon 'redis'[/]
+i addon gcs      [dim]# install addon 'gcs'[/]
+i addon worker   [dim]# install addon 'worker'[/]
+i addon gdrive   [dim]# install addon 'gdrive'[/]
+i addon mongodb  [dim]# install addon 'mongodb'[/]
+""",  # noqa: E501
+		title=f":wrench: [{title_style}]Updates[/]", **kwargs)
+
+	panel7 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Some useful scans and workflows we use day-to-day for recon.[/]
+
+[orange3]:warning: Don't forget to add [bold blue]-dry[/] or [bold blue]-tree[/] before running your scans to see what will be done ![/]
+
+[bold orange3]:trophy: Domain recon + Subdomain recon + Port scanning + URL crawl + URL vulns (XSS, SQLi, RCE, ...)[/]
+s domain <DOMAIN>                [dim]# light[/]
+s domain <DOMAIN> -pf all_ports  [dim]# light + full port scan[/]
+s domain <DOMAIN> -pf full       [dim]# all features (full port scan, nuclei, pattern hunting, headless crawling, screenshots, etc.)[/]
+s domain <DOMAIN> -pf passive    [dim]# passive (0 requests to targets)[/]
+
+[bold orange3]:trophy: Subdomain recon[/]
+w subdomain_recon <DOMAIN>                         [dim]# standard[/]
+w subdomain_recon <DOMAIN> -brute-dns -brute-http  [dim]# bruteforce subdomains (DNS queries + HTTP Host header fuzzing)[/]
+w subdomain_recon <DOMAIN> -pf passive             [dim]# passive (0 requests to targets)[/]
+
+[bold orange3]:trophy: URL fuzzing[/]
+w url_fuzz <URL>                                   [dim]# standard fuzzing (ffuf)[/]
+w url_fuzz <URL> -hs                               [dim]# hunt secrets in HTTP responses (trufflehog)[/]
+w url_fuzz <URL> -mc 200,301 -fs 204               [dim]# match 200, 301, and filter size equal to 204 bytes[/]
+w url_fuzz -fuzzers ffuf,dirsearch <URL> -w <URL>  [dim]# choose fuzzers, use remote wordlist[/]
+
+[bold orange3]:trophy: Vuln and secret scan:[/]
+w code_scan <PATH>                                 [dim]# on a local path or git repo[/]
+w code_scan https://github.com/freelabz/secator    [dim]# on a github repo[/]
+w code_scan https://github.com/freelabz            [dim]# on a github org (all repos)[/]
+
+[bold orange3]:trophy: Hunt user accounts[/]
+w user_hunt elonmusk                               [dim]# by username[/]
+w user_hunt elonmusk@tesla.com                     [dim]# by email[/]
+
+[bold orange3]:trophy: Custom pipeline to find HTTP servers and fuzz alive ones[/]
+subfinder vulnweb.com | naabu | httpx | ffuf -mc 200,301 -recursion
+""",  # noqa: E501
+		title=f":trophy: [{title_style}]Quick wins[/]", **kwargs)
+
+	console.print(panel1)
+	console.print(panel2)
+	console.print(panel3)
+	console.print(panel4)
+	console.print(panel5)
+	console.print(panel6)
+	console.print(panel7)
+
 
 #---------#
 # INSTALL #

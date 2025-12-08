@@ -1,6 +1,6 @@
 FROM sickcodes/docker-osx:latest
 ARG flavor=full
-ARG build_from_source=true
+ARG build_from_source=false
 ENV PATH="${PATH}:/home/arch/.local/bin"
 ENV GOBIN="/home/arch/.local/bin"
 ENV CARGO_HOME="/home/arch/.local"

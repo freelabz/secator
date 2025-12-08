@@ -6,11 +6,12 @@ import json
 import logging
 import operator
 import os
-import signal
-import tldextract
 import re
 import select
+import signal
 import sys
+import tldextract
+import traceback
 import validators
 import warnings
 
@@ -18,7 +19,6 @@ from datetime import datetime, timedelta
 from functools import reduce
 from pathlib import Path, PurePath
 from time import time
-import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
@@ -77,6 +77,8 @@ def expand_input(input, ctx):
 	piped_input = ctx.obj['piped_input']
 	dry_run = ctx.obj['dry_run']
 	if input is None:  # read from stdin
+		if not ctx.obj['input_required']:
+			return []
 		if not piped_input and not dry_run:
 			console.print('No input passed on stdin. Showing help page.', style='bold red')
 			ctx.get_help()
@@ -89,6 +91,9 @@ def expand_input(input, ctx):
 			else:
 				console.print('No input passed on stdin.', style='bold red')
 				sys.exit(1)
+	elif isinstance(input, list):
+		# Input is already a list (e.g., from default_inputs), return as-is
+		pass
 	elif os.path.exists(input):
 		input_types = ctx.obj['input_types']
 		if not input_types or 'path' in input_types:
@@ -310,6 +315,19 @@ def rich_to_ansi(text):
 	except Exception:
 		print(f'Could not convert rich text to ansi: {text}[/]', file=sys.stderr)
 		return text
+
+
+def strip_rich_markup(text):
+	"""Strip rich markup from text.
+
+	Args:
+		text (str): Text.
+
+	Returns:
+		str: Text without rich markup.
+	"""
+	from rich.text import Text
+	return Text.from_markup(text).plain
 
 
 def rich_escape(obj):
@@ -787,6 +805,27 @@ def format_object(obj, color='magenta', skip_keys=[]):
 	return ''
 
 
+def is_host_port(target):
+	"""Check if a target is a host:port.
+
+	Args:
+		target (str): The target to check.
+
+	Returns:
+		bool: True if the target is a host:port, False otherwise.
+	"""
+	split = target.split(':')
+	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0])):
+		return False
+	try:
+		port = int(split[1])
+		if port < 1 or port > 65535:
+			return False
+	except ValueError:
+		return False
+	return True
+
+
 def autodetect_type(target):
 	"""Autodetect the type of a target.
 
@@ -806,7 +845,7 @@ def autodetect_type(target):
 		return IP
 	elif validators.domain(target):
 		return HOST
-	elif validators.domain(target.split(':')[0]):
+	elif is_host_port(target):
 		return HOST_PORT
 	elif validators.mac_address(target):
 		return MAC_ADDRESS
