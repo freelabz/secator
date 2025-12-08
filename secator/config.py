@@ -101,7 +101,7 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
-
+	force_tty: bool = False
 
 class Security(StrictModel):
 	allow_local_file_access: bool = True
