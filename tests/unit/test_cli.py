@@ -284,11 +284,9 @@ class TestCli(unittest.TestCase):
 	def test_workflow_default_inputs(self):
 		"""Test that workflows with default_inputs use them when no input is provided."""
 		result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '--dry-run'])
-		print(result)
-		print(str(result))
-		print(type(result).__name__)
-		# assert not result.exception
-		# assert result.exit_code == 0
+		print(result.output)
+		assert not result.exception
+		assert result.exit_code == 0
 		assert 'No inputs provided, using default inputs:' in result.output
 		assert 'discover' in result.output
 
