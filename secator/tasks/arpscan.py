@@ -11,7 +11,6 @@ class arpscan(Command):
 	input_types = [CIDR_RANGE, IP, HOST, SLUG]
 	output_types = [Ip]
 	input_flag = None
-	input_required = False
 	requires_sudo = True
 	file_copy_sudo = True  # Copy the input file to /tmp since it cannot access the reports folder
 	file_flag = '-f'

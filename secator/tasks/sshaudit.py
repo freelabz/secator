@@ -20,7 +20,7 @@ class sshaudit(Command):
 	ignore_return_code = True
 	opt_prefix = '--'
 	opts = {
-		'port': {'type': int, 'short': 'p', 'default': 22, 'help': 'Port to connect to'},
+		'ssh_port': {'type': int, 'short': 'sshp', 'default': 22, 'help': 'SSH port to connect to'},
 		'ipv4': {'is_flag': True, 'short': '4', 'default': False, 'help': 'Enable IPv4 (order of precedence)'},
 		'ipv6': {'is_flag': True, 'short': '6', 'default': False, 'help': 'Enable IPv6 (order of precedence)'},
 		'batch': {'is_flag': True, 'short': 'b', 'default': False, 'help': 'Enable batch output for automated processing'},
@@ -36,6 +36,7 @@ class sshaudit(Command):
 		'client_audit': '-c',
 		'level': '-l',
 		'verbose': '-v',
+		'ssh_port': '-p',
 	}
 	install_github_handle = 'jtesta/ssh-audit'
 	install_version = 'v3.3.0'

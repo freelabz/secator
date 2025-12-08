@@ -13,14 +13,14 @@ from secator.definitions import (CONFIDENCE, CIDR_RANGE, CVSS_SCORE, DELAY,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
 								 SEVERITY, STATE, TAGS, THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
 from secator.output_types import Exploit, Port, Vulnerability, Info, Error, Ip
-from secator.tasks._categories import VulnMulti
+from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
 
 logger = logging.getLogger(__name__)
 
 
 @task()
-class nmap(VulnMulti):
+class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap'
 	input_types = [HOST, IP, CIDR_RANGE]
@@ -30,10 +30,6 @@ class nmap(VulnMulti):
 	file_flag = '-iL'
 	opt_prefix = '--'
 	opts = {
-		# Port specification and scan order
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (- to scan all)'},
-		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [100, 1000, full]'},
-
 		# Script scanning
 		SCRIPT: {'type': str, 'default': None, 'help': 'NSE scripts'},
 		'script_args': {'type': str, 'short': 'sargs', 'default': None, 'help': 'NSE script arguments (n1=v1,n2=v2,...)'},
@@ -94,9 +90,10 @@ class nmap(VulnMulti):
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: 'max-rtt-timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		PORTS: '-p',
+		TOP_PORTS: 'top-ports',
 
 		# Nmap opts
-		PORTS: '-p',
 		'skip_host_discovery': '-Pn',
 		'version_detection': '-sV',
 		'detect_all': '-A',
@@ -191,7 +188,7 @@ class nmapData(dict):
 		for host in self._get_hosts():
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
-			if ip not in ips:
+			if ip and ip not in ips:
 				yield Ip(ip=ip, alive=True, host=hostname, extra_data={'protocol': 'tcp'})
 				ips.append(ip)
 			for port in self._get_ports(host):

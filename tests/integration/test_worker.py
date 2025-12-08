@@ -21,7 +21,7 @@ class TestWorker(unittest.TestCase):
 		cls.cmd.stop_process()
 		cls.thread.join()
 
-	def test_httpx(self):
+	def test_httpx_command(self):
 		cmd = Command.execute(
 			'secator x httpx testphp.vulnweb.com -json',
 			name='secator_x_httpx',
@@ -30,6 +30,8 @@ class TestWorker(unittest.TestCase):
 			cls_attributes={'output_types': [Target, Url, Info], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
+		self.assertEqual(cmd.errors, [])
+		self.assertEqual(cmd.status, 'SUCCESS')
 		self.assertEqual(len(cmd.findings), 1)
 		url = Url(
 			'http://testphp.vulnweb.com',

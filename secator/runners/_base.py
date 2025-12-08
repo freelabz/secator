@@ -75,6 +75,9 @@ class Runner:
 	# Output types
 	output_types = []
 
+	# Default inputs
+	default_inputs = None
+
 	# Default exporters
 	default_exporters = []
 
@@ -83,6 +86,9 @@ class Runner:
 
 	# Run hooks
 	enable_hooks = True
+
+	# Run validators
+	enable_validators = True
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
@@ -822,6 +828,9 @@ class Runner:
 			return True
 		if self.dry_run:
 			self.debug('validator skipped (dry_run)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
+			return True
+		if not self.enable_validators:
+			self.debug('validator skipped (disabled validators)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
 			return True
 		for validator in self.resolved_validators[validator_type]:
 			fun = self.get_func_path(validator)
