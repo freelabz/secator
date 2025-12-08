@@ -1,5 +1,13 @@
 import unittest
-from secator.utils import extract_domain_info
+from secator.utils import extract_domain_info, autodetect_type
+from secator.definitions import HOST, IP, HOST_PORT, URL, CIDR_RANGE, SLUG, EMAIL
+from secator.definitions import UUID, PATH
+from secator.definitions import MAC_ADDRESS
+from secator.definitions import IBAN
+from secator.definitions import GCS_URL
+from secator.definitions import GIT_REPOSITORY
+from secator.definitions import STRING
+
 
 class TestExtractRootDomain(unittest.TestCase):
 	def test_root_domain_extraction(self):
@@ -38,3 +46,35 @@ class TestExtractRootDomain(unittest.TestCase):
 			with self.subTest(domain=domain):
 				result = extract_domain_info(domain, domain_only=True)
 				self.assertEqual(result, expected, f"Failed for domain: {domain}")
+
+	def test_autodetect_type(self):
+		targets = [
+			("example.com", HOST),
+			("example.co.uk", HOST),
+			("example.tata", HOST),
+			("localhost", IP),
+			("127.0.0.1", IP),
+			("192.168.1.1", IP),
+			("192.168.1.1:8080", HOST_PORT),
+			("example.com:8080", HOST_PORT),
+			("example.co.uk:80", HOST_PORT),
+			("example.tata:443", HOST_PORT),
+			("http://localhost", URL),
+			("https://localhost", URL),
+			("http://localhost:8080", URL),
+			("https://localhost:8080", URL),
+			("192.168.1.0/24", CIDR_RANGE),
+			("test1234567890", SLUG),
+			("test@example.com", EMAIL),
+			("/tmp", PATH),
+			("1234567890", SLUG),
+			("testuniformstring", SLUG),
+			("test uniform string with spaces", STRING),
+			("https://github.com/example/example.git", URL),
+			("github.com/example/example.git", STRING),
+			("gs://example/example.txt", GCS_URL),
+		]
+		for target, expected in targets:
+			with self.subTest(target=target):
+				result = autodetect_type(target)
+				self.assertEqual(result, expected, f"Failed for target: {target}")
