@@ -82,14 +82,14 @@ def expand_input(input, ctx):
 			console.print('No input passed on stdin. Showing help page.', style='bold red')
 			ctx.get_help()
 			sys.exit(1)
-		elif piped_input:
-			rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
-			if rlist:
-				data = sys.stdin.read().splitlines()
-				return data
-			else:
-				console.print('No input passed on stdin.', style='bold red')
-				sys.exit(1)
+		# elif piped_input:
+		# 	rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
+		# 	if rlist:
+		# 		data = sys.stdin.read().splitlines()
+		# 		return data
+		# 	else:
+		# 		console.print('No input passed on stdin.', style='bold red')
+		# 		sys.exit(1)
 		elif default_inputs:
 			console.print('[bold yellow]No inputs provided, using default inputs:[/]')
 			for inp in default_inputs:
