@@ -73,6 +73,9 @@ class Command(Runner):
 	# Input required
 	input_required = True
 
+	# Default inputs
+	default_inputs = None
+
 	# Flag to take a file as input
 	file_flag = None
 	file_eof_newline = False
