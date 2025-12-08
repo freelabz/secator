@@ -36,7 +36,7 @@ class Ip(OutputType):
 
 	def __repr__(self) -> str:
 		s = f'💻 [bold white]{self.ip}[/]'
-		if self.host:
+		if self.host and self.host != self.ip:
 			s += rf' \[[bold magenta]{self.host}[/]]'
 		if self.alive:
 			s += r' \[[bold green]alive[/]]'

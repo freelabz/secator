@@ -47,7 +47,7 @@ class Port(OutputType):
 			if self.confidence == 'low':
 				conf = '[bold orange3]?[/]'
 			s += rf' \[[bold purple]{self.service_name}{conf}[/]]'
-		if self.host:
+		if self.host and self.host != self.ip:
 			s += rf' \[[cyan]{self.host}[/]]'
 		if self.extra_data:
 			skip_keys = ['name', 'servicefp', 'method', 'service_name', 'product', 'version', 'conf']

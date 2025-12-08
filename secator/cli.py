@@ -28,10 +28,12 @@ from secator.runners import Command, Runner
 from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
-	debug, detect_host, flatten, print_version, get_file_date,
+	debug, detect_host, flatten, print_version, get_file_date, is_terminal_interactive,
 	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
 )
 from contextlib import nullcontext
+
+
 click.rich_click.USE_RICH_MARKUP = True
 click.rich_click.STYLE_ARGUMENT = ""
 click.rich_click.STYLE_OPTION_HELP = ""
@@ -57,7 +59,7 @@ PROFILES = get_configs_by_type('profile')
 def cli(ctx, version, quiet):
 	"""Secator CLI."""
 	ctx.obj = {
-		'piped_input': S_ISFIFO(os.fstat(0).st_mode),
+		'piped_input': is_terminal_interactive() and S_ISFIFO(os.fstat(0).st_mode),
 		'piped_output': not sys.stdout.isatty()
 	}
 	if not ctx.obj['piped_output'] and not quiet:
@@ -1624,7 +1626,10 @@ def update(all):
 	if all:
 		return_code = 0
 		for cls in discover_tasks():
-			cmd = cls.cmd.split(' ')[0]
+			base_cmd = getattr(cls, 'cmd', None)
+			if not base_cmd:
+				continue
+			cmd = base_cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
 			if not info['installed'] or info['outdated'] or not info['latest_version']:
