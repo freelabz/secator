@@ -810,9 +810,9 @@ class Command(Runner):
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
-		# if not os.isatty(sys.stdin.fileno()):
-		# 	error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
-		# 	return -1, error
+		if not os.isatty(sys.stdin.fileno()):
+			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
+			return -1, error
 
 		# If not, prompt the user for a password
 		self._print('[bold red]Please enter sudo password to continue.[/]', rich=True)
