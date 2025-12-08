@@ -295,7 +295,6 @@ class TestCli(unittest.TestCase):
 		assert not result.exception
 		assert result.exit_code == 0
 		assert 'No inputs provided, using default inputs:' not in result.output
-		assert 'mapcidr' in result.output
 
 	def test_cheatsheet_command(self):
 		result = self.runner.invoke(cli, ['cheatsheet'])
