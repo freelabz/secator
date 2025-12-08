@@ -19,7 +19,7 @@ from rich.table import Table
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path, download_files
 from secator.click import OrderedGroup
 from secator.cli_helper import register_runner
-from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
+from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, FORCE_TTY, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
@@ -59,7 +59,7 @@ PROFILES = get_configs_by_type('profile')
 def cli(ctx, version, quiet):
 	"""Secator CLI."""
 	ctx.obj = {
-		'piped_input': is_terminal_interactive() and S_ISFIFO(os.fstat(0).st_mode),
+		'piped_input': (is_terminal_interactive() or FORCE_TTY) and S_ISFIFO(os.fstat(0).st_mode),
 		'piped_output': not sys.stdout.isatty()
 	}
 	if not ctx.obj['piped_output'] and not quiet:

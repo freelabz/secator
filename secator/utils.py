@@ -77,8 +77,9 @@ def expand_input(input, ctx):
 	piped_input = ctx.obj['piped_input']
 	dry_run = ctx.obj['dry_run']
 	default_inputs = ctx.obj['default_inputs']
+	input_required = ctx.obj['input_required']
 	if input is None:  # read from stdin
-		if not piped_input and not default_inputs and not dry_run:
+		if not piped_input and input_required and not default_inputs and not dry_run:
 			console.print('No input passed on stdin. Showing help page.', style='bold red')
 			ctx.get_help()
 			sys.exit(1)
@@ -95,6 +96,8 @@ def expand_input(input, ctx):
 			for inp in default_inputs:
 				console.print(f'  • {inp}')
 			return default_inputs
+		elif not dry_run:
+			return []
 	elif os.path.exists(input):
 		input_types = ctx.obj['input_types']
 		if not input_types or 'path' in input_types:
