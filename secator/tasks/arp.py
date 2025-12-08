@@ -13,7 +13,7 @@ class arp(Command):
 	output_types = [Ip]
 	input_flag = None
 	input_required = False
-	requires_sudo = False
+	requires_sudo = True
 	tags = ['ip', 'recon']
 	opts = {}
 	install_pre = {
