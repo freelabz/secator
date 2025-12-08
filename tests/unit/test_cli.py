@@ -294,8 +294,7 @@ class TestCli(unittest.TestCase):
 		result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '10.10.10.0/24', '--dry-run'])
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'No inputs provided, using default inputs:' not in result.output
-		assert 'mapcidr' in result.output
+		assert not 'No inputs provided, using default inputs:' in result.output
 
 	def test_cheatsheet_command(self):
 		result = self.runner.invoke(cli, ['cheatsheet'])

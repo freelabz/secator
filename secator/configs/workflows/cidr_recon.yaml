@@ -19,21 +19,31 @@ default_inputs: [discover]
 #   - 192.168.1.0/24    # local
 #   - 10.0.0.0/24       # standard subnet
 #   - 172.16.0.0/24     # private network
-#   - 172.17.0.0/16     # docker
+#   - 172.16.0.0/16     # docker
+#   - 172.17.0.1/16     # docker #2
+#   - 172.18.0.1/16     # docker #3
 
 tasks:
-  _group/mapper:
     arpscan:
-      description: Scan CIDR range for alive hosts
+      description: Discover hosts with ARP requests
 
-    mapcidr:
-      description: Find CIDR range IPs
-      hide_ips: True
+    fping:
+      description: Discover hosts with ICMP requests
       targets_:
+      - type: ip
+        field: ip
+        condition: ip.alive and 'discover' in targets
       - type: target
         field: name
-        condition: target.type == 'cidr_range'
+        condition: target.name not in ['discover']
 
-  fping:
-    description: Check for alive IPs
-    targets_: ip.ip
+    nmap:
+      description: Discover hosts and ports with TCP SYN scan
+      tcp_syn_stealth: True
+      targets_:
+      - type: ip
+        field: ip
+        condition: ip.alive and 'discover' in targets
+      - type: target
+        field: name
+        condition: target.name not in ['discover']

@@ -17,6 +17,8 @@ class arpscan(Command):
 	file_flag = '-f'
 	version_flag = '-V'
 	tags = ['ip', 'recon']
+	default_inputs = ['discover']
+	opt_prefix = '--'
 	opts = {
 		'resolve': {'is_flag': True, 'short': 'r', 'default': False, 'help': 'Resolve IP addresses to hostnames'},
 		'interface': {'type': str, 'short': 'i', 'default': None, 'help': 'Interface to use'},

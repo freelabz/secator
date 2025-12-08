@@ -9,6 +9,7 @@ long_description: |
 profile: default
 input_types:
   - host
+  - ip
 
 workflows:
   host_recon:

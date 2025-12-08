@@ -16,12 +16,13 @@ workflows:
   host_recon:
     targets_:
     - type: ip
-      field: host
+      field: ip
       condition: ip.alive
   url_crawl:
-    active: True
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified
   url_vuln:
     targets_:
     - type: url
