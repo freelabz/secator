@@ -1,6 +1,7 @@
 import time
-from dataclasses import dataclass, field
 from enum import Enum
+from typing import Dict, List
+from pydantic import Field, ConfigDict
 
 from secator.definitions import ALIVE, IP
 from secator.output_types import OutputType
@@ -12,24 +13,25 @@ class IpProtocol(str, Enum):
 	IPv4 = 'IPv4'
 
 
-@dataclass
 class Ip(OutputType):
 	ip: str
-	host: str = field(default='', repr=True, compare=False)
+	host: str = ''
 	alive: bool = False
-	protocol: str = field(default=IpProtocol.IPv4)
-	extra_data: dict = field(default_factory=dict, compare=False)
-	_source: str = field(default='', repr=True, compare=False)
-	_type: str = field(default='ip', repr=True)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_tagged: bool = field(default=False, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	protocol: str = IpProtocol.IPv4
+	extra_data: Dict = Field(default_factory=dict)
+	source_: str = Field(default='', alias='_source')
+	type_: str = Field(default='ip', alias='_type')
+	timestamp_: int = Field(default_factory=lambda: time.time(), alias='_timestamp')
+	uuid_: str = Field(default='', alias='_uuid')
+	context_: Dict = Field(default_factory=dict, alias='_context')
+	tagged_: bool = Field(default=False, alias='_tagged')
+	duplicate_: bool = Field(default=False, alias='_duplicate')
+	related_: List = Field(default_factory=list, alias='_related')
 
-	_table_fields = [IP, ALIVE]
-	_sort_by = (IP,)
+
+# Class attributes (not model fields)
+Ip._table_fields = [IP, ALIVE]
+Ip._sort_by = (IP,)
 
 	def __str__(self) -> str:
 		return self.ip

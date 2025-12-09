@@ -1,16 +1,38 @@
 import logging
 import re
-from dataclasses import _MISSING_TYPE, dataclass, fields
+from pydantic import BaseModel, ConfigDict, Field
 from secator.definitions import DEBUG
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class OutputType:
-	_table_fields = []
-	_sort_by = ()
+class OutputType(BaseModel):
+	model_config = ConfigDict(
+		arbitrary_types_allowed=True,
+		extra='allow',
+		populate_by_name=True
+	)
+
+	def __getattribute__(self, name):
+		# Handle underscore-prefixed attributes by redirecting to the alias
+		if name.startswith('_') and name not in ('_table_fields', '_sort_by', '_icon', '_color') and not name.startswith('__'):
+			try:
+				# Try to get the non-underscore version
+				return super().__getattribute__(name[1:] + '_')
+			except AttributeError:
+				pass
+		return super().__getattribute__(name)
+	
+	def __setattr__(self, name, value):
+		# Handle underscore-prefixed attributes by redirecting to the alias
+		if name.startswith('_') and name not in ('_table_fields', '_sort_by', '_icon', '_color') and not name.startswith('__'):
+			try:
+				# Try to set the non-underscore version
+				return super().__setattr__(name[1:] + '_', value)
+			except Exception:
+				pass
+		return super().__setattr__(name, value)
 
 	def __str__(self):
 		return self.__class__.__name__
@@ -21,12 +43,12 @@ class OutputType:
 
 		# Point-based system based on number of non-empty extra-data present.
 		# In this configuration, a > b if a == b AND a has more non-empty fields than b
-		# extra_fields = [f for f in fields(self) if not f.compare]
+		# extra_fields = [f for f in self.model_fields.items() if not f[1].exclude]
 		# points1 = 0
 		# points2 = 0
-		# for field in extra_fields:
-		# 	v1 = getattr(self, field.name)
-		# 	v2 = getattr(other, field.name)
+		# for field_name, field_info in extra_fields:
+		# 	v1 = getattr(self, field_name)
+		# 	v2 = getattr(other, field_name)
 		# 	if v1 and not v2:
 		# 		points1 += 1
 		# 	elif v2 and not v1:
@@ -46,17 +68,6 @@ class OutputType:
 	def __le__(self, other):
 		return self == other
 
-	def __post_init__(self):
-		"""Initialize default fields to their proper types."""
-		for field in fields(self):
-			default_factory = field.default_factory
-			default = field.default
-			if getattr(self, field.name) is None:
-				if not isinstance(default, _MISSING_TYPE):
-					setattr(self, field.name, field.default)
-				elif not isinstance(default_factory, _MISSING_TYPE):
-					setattr(self, field.name, default_factory())
-
 	@classmethod
 	def load(cls, item, output_map={}):
 		new_item = {}
@@ -66,8 +77,8 @@ class OutputType:
 		if _type and _type != cls.get_name():
 			raise TypeError(f'Item has different _type set: {_type}')
 
-		for field in fields(cls):
-			key = field.name
+		for field_name, field_info in cls.model_fields.items():
+			key = field_name
 			if key in output_map:
 				mapped_key = output_map[key]
 				if callable(mapped_key):
@@ -99,10 +110,10 @@ class OutputType:
 
 	@classmethod
 	def keys(cls):
-		return [f.name for f in fields(cls)]
+		return list(cls.model_fields.keys())
 
 	def toDict(self, exclude=[]):
-		data = self.__dict__.copy()
+		data = self.model_dump()
 		if exclude:
 			return {k: v for k, v in data.items() if k not in exclude}
 		return data

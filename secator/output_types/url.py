@@ -1,8 +1,7 @@
 import time
-
-from dataclasses import dataclass, field
-
+from typing import Dict, List
 from urllib.parse import urlparse
+from pydantic import Field, model_validator
 
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE,
 								 TECH, TITLE, URL, WEBSERVER, METHOD)
@@ -11,35 +10,34 @@ from secator.utils import rich_to_ansi, trim_string, format_object, rich_escape 
 from secator.config import CONFIG
 
 
-@dataclass
 class Url(OutputType):
 	url: str
-	host: str = field(default='', compare=False)
-	verified: bool = field(default=False, compare=False)
-	status_code: int = field(default=0, compare=False)
-	title: str = field(default='', compare=False)
-	webserver: str = field(default='', compare=False)
-	tech: list = field(default_factory=list, compare=False)
-	content_type: str = field(default='', compare=False)
-	content_length: int = field(default=0, compare=False)
-	time: str = field(default='', compare=False)
-	method: str = field(default='', compare=False)
-	words: int = field(default=0, compare=False)
-	lines: int = field(default=0, compare=False)
-	screenshot_path: str = field(default='', compare=False)
-	stored_response_path: str = field(default='', compare=False)
-	response_headers: dict = field(default_factory=dict, repr=True, compare=False)
-	request_headers: dict = field(default_factory=dict, repr=True, compare=False)
-	is_directory: dict = field(default='', compare=False)
-	extra_data: dict = field(default_factory=dict, compare=False)
-	_source: str = field(default='', repr=True, compare=False)
-	_type: str = field(default='url', repr=True)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_tagged: bool = field(default=False, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	host: str = ''
+	verified: bool = False
+	status_code: int = 0
+	title: str = ''
+	webserver: str = ''
+	tech: List = Field(default_factory=list)
+	content_type: str = ''
+	content_length: int = 0
+	time: str = ''
+	method: str = ''
+	words: int = 0
+	lines: int = 0
+	screenshot_path: str = ''
+	stored_response_path: str = ''
+	response_headers: Dict = Field(default_factory=dict)
+	request_headers: Dict = Field(default_factory=dict)
+	is_directory: str = ''
+	extra_data: Dict = Field(default_factory=dict)
+	_source: str = ''
+	_type: str = 'url'
+	_timestamp: int = Field(default_factory=lambda: time.time())
+	_uuid: str = ''
+	_context: Dict = Field(default_factory=dict)
+	_tagged: bool = False
+	_duplicate: bool = False
+	_related: List = Field(default_factory=list)
 
 	_table_fields = [
 		URL,
@@ -55,14 +53,15 @@ class Url(OutputType):
 	]
 	_sort_by = (URL,)
 
-	def __post_init__(self):
-		super().__post_init__()
+	@model_validator(mode='after')
+	def set_computed_fields(self):
 		if not self.host:
 			self.host = urlparse(self.url).hostname
 		if self.status_code != 0:
 			self.verified = True
 		if self.title and 'Index of' in self.title:
 			self.is_directory = True
+		return self
 
 	def __gt__(self, other):
 		# favor httpx over other url info tools

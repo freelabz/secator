@@ -1,22 +1,22 @@
 import time
-from dataclasses import dataclass, field
+from typing import Dict, List
+from pydantic import Field, model_validator
 
 from secator.output_types import OutputType
 from secator.utils import autodetect_type, rich_to_ansi, rich_escape as _s
 
 
-@dataclass
 class Target(OutputType):
 	name: str
 	type: str = ''
-	_source: str = field(default='', repr=True, compare=False)
-	_type: str = field(default='target', repr=True)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_tagged: bool = field(default=False, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	_source: str = ''
+	_type: str = 'target'
+	_timestamp: int = Field(default_factory=lambda: time.time())
+	_uuid: str = ''
+	_context: Dict = Field(default_factory=dict)
+	_tagged: bool = False
+	_duplicate: bool = False
+	_related: List = Field(default_factory=list)
 
 	_table_fields = [
 		'name',
@@ -24,9 +24,11 @@ class Target(OutputType):
 	]
 	_sort_by = ('type', 'name')
 
-	def __post_init__(self):
+	@model_validator(mode='after')
+	def set_type(self):
 		if not self.type:
 			self.type = autodetect_type(self.name)
+		return self
 
 	def __str__(self):
 		return self.name
