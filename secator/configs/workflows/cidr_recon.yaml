@@ -11,7 +11,6 @@ input_types:
   - cidr_range
   - ip
   - slug
-input_required: False
 default_inputs: [discover]
 # default_inputs:
 #   - 127.0.0.1/24      # localhost

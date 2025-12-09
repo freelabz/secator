@@ -158,9 +158,9 @@ class TestTree(unittest.TestCase):
 		find_templates.cache_clear()
 		config = TemplateLoader(input=self.workflow_config_1)
 		opts = get_config_options(config)
-		self.assertEqual(opts['ports']['default'], '80,443')
-		self.assertEqual(opts['ports']['default_from'], 'test1')
-		self.assertEqual(opts['ports']['prefix'], 'Workflow test1')
+		self.assertEqual(opts['test1-ports']['default'], '80,443')
+		self.assertEqual(opts['test1-ports']['default_from'], 'test1')
+		self.assertEqual(opts['test1-ports']['prefix'], 'Config')
 		self.assertEqual(opts['nuclei']['default'], False)
 		self.assertEqual(opts['nuclei']['prefix'], 'Workflow test1')
 

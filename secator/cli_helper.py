@@ -126,7 +126,6 @@ def generate_cli_subcommand(cli_endpoint, func, **opts):
 
 def register_runner(cli_endpoint, config):
 	name = config.name
-	input_required = True
 	input_types = []
 	command_opts = {
 		'no_args_is_help': True,
@@ -146,7 +145,6 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = config.input_types
-		input_required = config.default_inputs is None
 
 	elif cli_endpoint.name == 'workflow':
 		runner_cls = Workflow
@@ -158,7 +156,6 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = config.input_types
-		input_required = config.default_inputs is None
 
 	elif cli_endpoint.name == 'task':
 		runner_cls = Task
@@ -171,10 +168,11 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = task_cls.input_types
-		input_required = config.default_inputs is None
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
+	default_inputs = None if config.default_inputs == {} else config.default_inputs
+	input_required = default_inputs is None
 	options = get_config_options(
 		config,
 		exec_opts=CLI_EXEC_OPTS,
@@ -214,7 +212,7 @@ def register_runner(cli_endpoint, config):
 		ctx.obj['dry_run'] = dry_run
 		ctx.obj['input_types'] = input_types
 		ctx.obj['input_required'] = input_required
-		ctx.obj['default_inputs'] = config.default_inputs
+		ctx.obj['default_inputs'] = default_inputs
 
 		# Show version
 		if version:

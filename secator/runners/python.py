@@ -34,7 +34,6 @@ class PythonRunner(Runner):
 		...             yield Tag(name="scanned", match=target)
 	"""
 	default_exporters = CONFIG.tasks.exporters
-	input_required = False
 	tags = []
 	opts = {}
 	default_inputs = None
@@ -70,6 +69,7 @@ class PythonRunner(Runner):
 		if node_name:
 			config.node_name = node_name
 		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
+		self.enable_validators = run_opts.pop('enable_validators', True)
 
 		# Prepare validators
 		input_validators = []
@@ -92,6 +92,8 @@ class PythonRunner(Runner):
 	@staticmethod
 	def _validate_input_nonempty(self, inputs):
 		"""Input is empty."""
+		if self.default_inputs is not None:
+			return True
 		if not inputs or len(inputs) == 0:
 			return False
 		return True

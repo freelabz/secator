@@ -1,14 +1,10 @@
 import os
 import unittest
-import subprocess
-import warnings
 
 from click.testing import CliRunner
 
 from secator.cli import cli
 from secator.runners import Command
-from secator.output_types import Target, Port, Url, Info
-from secator.serializers import JSONSerializer
 from secator.rich import console
 
 class TestCli(unittest.TestCase):
@@ -40,3 +36,8 @@ class TestCli(unittest.TestCase):
 		assert not result.exception
 		assert result.exit_code == 0
 		assert 'No inputs provided, using default inputs:' in result.output
+
+	def test_task_input_not_required_with_no_default_inputs(self):
+		result = self.runner.invoke(cli, ['task', 'arp'])
+		assert not result.exception
+		assert result.exit_code == 0
