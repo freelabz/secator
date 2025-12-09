@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.22.1](https://github.com/freelabz/secator/compare/v0.22.0...v0.22.1) (2025-12-09)
+
+
+### Bug Fixes
+
+* **cli:** broken secator pipes ([#826](https://github.com/freelabz/secator/issues/826)) ([518b50e](https://github.com/freelabz/secator/commit/518b50eaf823f42854bc0707efce5eb1e04441c2))
+* misc bugfixes found in latest release ([#823](https://github.com/freelabz/secator/issues/823)) ([b458980](https://github.com/freelabz/secator/commit/b458980d47964577e69e6af5cbe7d9023b255b5e))
+* **tests:** remove failing test on ci ([742233b](https://github.com/freelabz/secator/commit/742233ba84e77f4667a6cabdba0c51cd7d850b64))
+
 ## [0.22.0](https://github.com/freelabz/secator/compare/v0.21.1...v0.22.0) (2025-12-08)
 
 
