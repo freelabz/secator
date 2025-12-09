@@ -3,5 +3,5 @@ name: all_ports
 description: "Scan all ports"
 enforce: true
 opts:
-    full: true
-    host_recon_full: true
+    ports: "-"
+    host_recon_ports: "-"
