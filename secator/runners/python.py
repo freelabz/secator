@@ -36,6 +36,7 @@ class PythonRunner(Runner):
 	default_exporters = CONFIG.tasks.exporters
 	tags = []
 	opts = {}
+	default_inputs = None
 	profile = 'io'
 
 	def needs_chunking(self, sync):

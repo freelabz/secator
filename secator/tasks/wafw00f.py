@@ -79,11 +79,13 @@ class wafw00f(Command):
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read())
 
-		if len(results) > 0 and results[0]['detected']:
-			waf_name = results[0]['firewall']
-			url = results[0]['url']
-			match = results[0]['trigger_url']
-			manufacter = results[0]['manufacturer']
+		for result in results:
+			if not result['detected']:
+				continue
+			waf_name = result['firewall']
+			url = result['url']
+			match = result['trigger_url']
+			manufacter = result['manufacturer']
 			yield Tag(
 				category='info',
 				name='waf',
