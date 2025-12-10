@@ -53,17 +53,13 @@ tasks:
       description: Hunt debug params
       pattern: debug_logic
 
-    gf/sqli:
-      description: Hunt SQLI params
-      pattern: sqli
-
   _group/vuln_scan:
     dalfox:
       description: Attack XSS vulnerabilities
       targets_:
         - type: tag
           field: match
-          condition: item._source.startswith("gf")
+          condition: item._source.startswith("gf") and item.name == 'xss' and item.category == 'url_pattern'
       if: not opts.passive
 
     sqlmap:
@@ -71,7 +67,7 @@ tasks:
       targets_:
         - type: tag
           field: match
-          condition: item._source.startswith("gf")
+          condition: item._source.startswith("gf") and item.category == 'url_pattern'
       if: not opts.passive
 
     nuclei:
@@ -84,6 +80,13 @@ tasks:
           field: match
           condition: item._source.startswith("gf")
       if: opts.nuclei and not opts.passive
+  # TODO: Add support for SQLMap
+  # sqlmap:
+  #   description: Attack SQLI vulnerabilities
+  #   targets_:
+  #     - type: tag
+  #       field: match
+  #       condition: item.name in ['sqli']
 
   # TODO: Make this work, need transform functions to replace a parameter fetched dynamically by the keyword 'FUZZ'
   # ffuf:
