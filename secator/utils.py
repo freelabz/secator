@@ -769,6 +769,7 @@ def process_wordlist(val):
 		type='wordlist'
 	)
 
+
 def convert_functions_to_strings(data):
 	"""Recursively convert functions to strings in a dict.
 
