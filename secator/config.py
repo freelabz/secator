@@ -182,11 +182,21 @@ class MongodbAddon(StrictModel):
 	server_selection_timeout_ms: int = 5000
 
 
+class CloudAddon(StrictModel):
+	enabled: bool = False
+	auth_url: str = 'https://secator.cloud/auth'
+	api_url: str = 'https://app.secator.cloud/api'
+	org_id: int = None
+	retries: int = 3
+	default_workspace: str = None
+
+
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	cloud: CloudAddon = CloudAddon()
 
 
 class SecatorConfig(StrictModel):
