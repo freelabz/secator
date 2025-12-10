@@ -226,6 +226,33 @@ Addons are available for `secator`, please check [our docs](https://docs.freelab
 
 For instance, using the `mongodb` addon allows you to send runner results to MongoDB.
 
+### AI-Powered Code Generation
+The `ai` addon enables AI-powered generation of tasks, workflows, and scans:
+
+```sh
+# Install the AI addon
+secator install addons ai
+
+# Configure your AI model and API key
+secator config set ai.model 'gpt-4o'  # or claude-3-5-sonnet-20241022, ollama/llama3, etc.
+secator config set ai.api_key '<YOUR_API_KEY>'
+
+# Generate a task from a GitHub URL, tool name, or description
+secator generate task https://github.com/projectdiscovery/subfinder
+secator generate task "a fast subdomain enumeration tool"
+
+# Generate a workflow configuration
+secator generate workflow "Find all subdomains using subfinder, probe them with httpx, and scan for vulnerabilities with nuclei"
+
+# Generate a scan configuration
+secator generate scan "Comprehensive domain assessment with subdomain discovery, port scanning, and vulnerability testing"
+
+# Override the default model for a single generation
+secator generate task httpx --model gpt-4o
+```
+
+Generated files are saved to `~/.secator/templates/` and can be used immediately or customized further.
+
 ## Learn more
 
 To go deeper with `secator`, check out:

@@ -90,6 +90,9 @@ gdrive = [
 gcs = [
 	'google-cloud-storage < 3'
 ]
+ai = [
+	'litellm < 2',
+]
 
 [project.scripts]
 secator = 'secator.cli:cli'

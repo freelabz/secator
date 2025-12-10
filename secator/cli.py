@@ -1456,6 +1456,22 @@ def install_redis():
 	)
 
 
+@addons.command('ai')
+def install_ai():
+	"Install AI addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[ai]',
+		title='AI addon',
+		next_steps=[
+			'Run [bold green4]secator config set ai.model <MODEL>[/] to set your preferred AI model (default: claude-3-5-sonnet-20241022).',  # noqa: E501
+			'Run [bold green4]secator config set ai.api_key <KEY>[/] to set your API key.',
+			'Run [bold green4]secator generate task <TOOL_NAME>[/] to generate a task implementation.',
+			'Run [bold green4]secator generate workflow <DESCRIPTION>[/] to generate a workflow.',
+			'Run [bold green4]secator generate scan <DESCRIPTION>[/] to generate a scan.'
+		]
+	)
+
+
 @addons.command('dev')
 def install_dev():
 	"Install dev addon."
@@ -1638,6 +1654,63 @@ def update(all):
 				if not status.is_ok():
 					return_code = 1
 		sys.exit(return_code)
+
+
+#----------#
+# GENERATE #
+#----------#
+
+
+@cli.group(aliases=['g', 'gen'])
+def generate():
+	"""Generate tasks, workflows, and scans with AI."""
+	pass
+
+
+@generate.command('task')
+@click.argument('input_text', required=True)
+@click.option('--model', '-m', type=str, default=None, help='AI model to use (overrides config)')
+def generate_task(input_text, model):
+	"""Generate a task implementation.
+
+	INPUT_TEXT can be:
+	- A GitHub repository URL (e.g., https://github.com/projectdiscovery/subfinder)
+	- A tool name (e.g., subfinder)
+	- A tool description (e.g., "a fast subdomain enumeration tool")
+	"""
+	from secator.ai_generator import generate_task as gen_task
+	success = gen_task(input_text, model)
+	sys.exit(0 if success else 1)
+
+
+@generate.command('workflow')
+@click.argument('description', required=True)
+@click.option('--model', '-m', type=str, default=None, help='AI model to use (overrides config)')
+def generate_workflow(description, model):
+	"""Generate a workflow configuration.
+
+	DESCRIPTION should explain what the workflow should do.
+
+	Example: "Find all subdomains using subfinder, probe them with httpx, and scan for vulnerabilities with nuclei"
+	"""
+	from secator.ai_generator import generate_workflow as gen_workflow
+	success = gen_workflow(description, model)
+	sys.exit(0 if success else 1)
+
+
+@generate.command('scan')
+@click.argument('description', required=True)
+@click.option('--model', '-m', type=str, default=None, help='AI model to use (overrides config)')
+def generate_scan(description, model):
+	"""Generate a scan configuration.
+
+	DESCRIPTION should explain what the scan should accomplish.
+
+	Example: "Comprehensive domain assessment with subdomain discovery, port scanning, and vulnerability testing"
+	"""
+	from secator.ai_generator import generate_scan as gen_scan
+	success = gen_scan(description, model)
+	sys.exit(0 if success else 1)
 
 
 #------#
