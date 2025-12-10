@@ -1,7 +1,7 @@
 type: workflow
 name: url_params_fuzz
 alias: url_params_fuzz
-description: Extract parameters from an URL and fuzz them
+description: Extract and find hidden parameters from URLs
 long_description: |
   Identifies and tests URL parameters for vulnerabilities through intelligent fuzzing.
   Extracts parameters from URLs using multiple techniques, then fuzzes them with various payloads
@@ -18,27 +18,41 @@ options:
     default: False
     short: hs
 
+  fuzz:
+    is_flag: True
+    help: Fuzz discovered parameters (ffuf)
+    default: False
+    short: fuzz
+
 tasks:
-  httpx/1:
-    description: Probe URLs
-    follow_redirect: True
+  httpx:
+    description: Probe URLs and eliminate unresponsive ones
+    tech_detect: True
+    filter_duplicates: True
+
+  urlparser:
+    description: Extract query string parameters from URLs
+    include: [url_base]
+    targets_:
+    - type: url
+      field: url
 
   _group/extract_params:
+
     arjun:
       description: Extract parameters from URLs
       wordlist: http_params
       targets_:
-      - type: url
-        field: '{url}/'
-        condition: "'?' not in url.url"
-
+      - type: tag
+        field: value
+        condition: item.name == 'url_base'
     x8:
       description: Bruteforce URL params
       wordlist: http_params
       targets_:
-      - type: url
-        field: '{url}/'
-        condition: "'?' not in url.url"
+      - type: tag
+        field: f'{value}/'
+        condition: item.name == 'url_base'
 
   ffuf:
     description: Fuzz URL params
@@ -48,14 +62,8 @@ tasks:
     targets_:
       - type: tag
         field: '{match}?{value}=FUZZ'
-        condition: item._source.startswith('arjun') or item._source.startswith('x8')
-
-  httpx:
-    description: Probe fuzzed URLs
-    targets_:
-      - type: url
-        field: url
-        condition: item._source.startswith('ffuf')
+        condition: item._source.startswith('qsextract') or item._source.startswith('arjun') or item._source.startswith('x8')
+    if: opts.fuzz
 
   trufflehog:
     description: Find secrets in HTTP responses

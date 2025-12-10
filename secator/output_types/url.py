@@ -28,6 +28,7 @@ class Url(OutputType):
 	lines: int = field(default=0, compare=False)
 	screenshot_path: str = field(default='', compare=False)
 	stored_response_path: str = field(default='', compare=False)
+	confidence: str = field(default='high', compare=False)
 	response_headers: dict = field(default_factory=dict, repr=True, compare=False)
 	request_headers: dict = field(default_factory=dict, repr=True, compare=False)
 	is_directory: dict = field(default='', compare=False)
@@ -59,10 +60,19 @@ class Url(OutputType):
 		super().__post_init__()
 		if not self.host:
 			self.host = urlparse(self.url).hostname
-		if self.status_code != 0:
+		if self.confidence == 'high' and self.status_code != 0:
 			self.verified = True
 		if self.title and 'Index of' in self.title:
 			self.is_directory = True
+		if self.response_headers:
+			for k, v in self.response_headers.items():
+				new_k = k.lower().replace('-', '_')
+				if new_k == 'server':
+					self.webserver = v
+				if new_k == 'content_type':
+					self.content_type = v.split(';')[0]
+				if new_k == 'content_length':
+					self.content_length = int(v)
 
 	def __gt__(self, other):
 		# favor httpx over other url info tools

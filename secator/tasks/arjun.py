@@ -2,7 +2,7 @@ import os
 import shlex
 import yaml
 
-from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
+from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
@@ -93,6 +93,7 @@ class arjun(Command):
 				return
 		for url, values in results.items():
 			parsed_url = urlparse(url)
+			url_without_param = urlunparse(parsed_url._replace(query=''))
 			yield Url(
 				url=url,
 				host=parsed_url.hostname,
@@ -100,14 +101,9 @@ class arjun(Command):
 				method=values['method'],
 			)
 			for param in values['params']:
-				new_params = parse_qs(parsed_url.query).copy()
-				new_params[param] = 'FUZZ'
-				new_query = urlencode(new_params, doseq=True)
-				new_url = urlunparse(parsed_url._replace(query=new_query))
 				yield Tag(
 					category='info',
 					name='url_param',
 					value=param,
-					match=url,
-					extra_data={'url': new_url}
+					match=url_without_param,
 				)

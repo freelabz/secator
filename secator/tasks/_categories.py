@@ -44,12 +44,20 @@ OPTS = {
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
 	RETRIES: {'type': int, 'help': 'Retries'},
-	THREADS: {'type': int, 'help': 'Number of threads to run'},
+	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': CONFIG.runners.threads},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use'},
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use for HTTP requests'},
 	PORTS: {'type': str, 'short': 'p', 'help': 'Only scan specific ports (comma separated list, "-" for all ports)'},  # noqa: E501
 	TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Scan <number> most common ports'},
+}
+
+WORDLIST_PARAMS = {
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'http_params', 'process': process_wordlist, 'help': 'Wordlist to use for HTTP requests'},
+}
+
+WORDLIST_DNS = {
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'dns', 'process': process_wordlist, 'help': 'Wordlist to use for DNS requests'},
 }
 
 OPTS_HTTP = [
@@ -96,6 +104,7 @@ class HttpFuzzer(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
 	input_types = [URL]
 	output_types = [Url]
+	enable_duplicate_check = False
 	profile = lambda opts: HttpFuzzer.dynamic_profile(opts)  # noqa: E731
 
 	@staticmethod
@@ -110,6 +119,10 @@ class HttpFuzzer(Command):
 		)
 		wordlist_size_mb = os.path.getsize(wordlist) / (1024 * 1024)
 		return 'cpu' if wordlist_size_mb > 5 else 'io'
+
+
+class HttpParamsFuzzer(HttpFuzzer):
+	meta_opts = {**{k: OPTS[k] for k in OPTS_HTTP_FUZZERS}, **WORDLIST_PARAMS}
 
 
 #----------------#

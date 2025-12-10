@@ -213,7 +213,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 				elif config_opts_defaults.get(k) is not None:
 					conf['default_from'] = config.name
 					conf['prefix'] = 'Config'
-				mapped_value = cls.opt_value_map.get(opt_name)
+				mapped_value = getattr(cls, 'opt_value_map', {}).get(opt_name)
 				if mapped_value:
 					if callable(mapped_value):
 						default_from_config = mapped_value(default_from_config)

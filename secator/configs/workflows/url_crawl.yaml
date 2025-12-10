@@ -71,14 +71,14 @@ tasks:
       if: "'cariddi' in opts.crawlers and not opts.passive"
 
   httpx:
-    description: Run HTTP probes on passive URLs
+    description: Run HTTP probes on unverified URLs
     tech_detect: True
-    filter_codes: 404
+    filter_duplicates: True
     targets_:
     - target.name
     - type: url
       field: url
-      condition: item.status_code == 0
+      condition: not url.verified
     if: not opts.passive
 
   _group/data_hunt:

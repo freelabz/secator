@@ -66,7 +66,7 @@ class katana(HttpCrawler):
 	}
 	item_loaders = [JSONSerializer()]
 	install_pre = {'apk': ['libc6-compat']}
-	install_version = 'v1.1.3'
+	install_version = 'v1.3.0'
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@[install_version]'
 	github_handle = 'projectdiscovery/katana'
 	proxychains = False
@@ -132,10 +132,10 @@ class katana(HttpCrawler):
 				for param in params:
 					yield Tag(
 						category='info',
-						name='url_param',
+						name='form_param',
 						match=form['action'],
 						value=param,
-						extra_data={'url': url, 'value': 'FUZZ'}
+						extra_data={'form_url': url}
 					)
 		response = item.get('response')
 		if not response:
@@ -147,9 +147,7 @@ class katana(HttpCrawler):
 			request_headers=self.get_opt_value('header', preprocess=True),
 			time=item['timestamp'],
 			status_code=item['response'].get('status_code'),
-			content_type=item['response'].get('headers', {}).get('content_type', ';').split(';')[0],
-			content_length=item['response'].get('headers', {}).get('content_length', 0),
-			webserver=item['response'].get('headers', {}).get('server', ''),
+			content_length=item['response'].get('content_length', 0),
 			tech=item['response'].get('technologies', []),
 			stored_response_path=item['response'].get('stored_response_path', ''),
 			response_headers=item['response'].get('headers', {}),
