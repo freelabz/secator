@@ -23,13 +23,10 @@ def get_tools_data():
         'h8mail': 'https://github.com/khast3x/h8mail',
         'fping': 'https://github.com/schweikert/fping',
         'msfconsole': 'https://docs.rapid7.com/metasploit/msf-overview/',
-        'searchsploit': 'https://gitlab.com/exploit-database/exploitdb',
-        'arpscan': 'https://github.com/royhills/arp-scan'
+        'searchsploit': 'https://gitlab.com/exploit-database/exploitdb'
     }
     for task in discover_tasks():
-        url = task.github_handle
-        if not url:
-            url = getattr(task, 'install_github_handle', None)
+        url = getattr(task, 'github_handle', None)
         if url:
             url = f'https://github.com/{url}'
         else:
@@ -64,20 +61,17 @@ def generate_tools_table_markdown(tools_data):
 
     for tool in tools_data:
         name = tool.get('name', 'N/A')
-        url = tool.get('url', None)
+        url = tool.get('url')
         description = tool.get('description', '')
         category = tool.get('category', '')
 
         # Format columns
-        # If url is None or empty, just use the name without a link
         if url:
             name_md = f"[{name}]({url})"
-            # Pad based on the *visible* length of the markdown link for alignment
-            # This is an approximation, perfect alignment is tricky with variable link lengths
             name_padded = name_md.ljust(name_col_width + len(name_md) - len(name))
         else:
-            name_md = name
-            name_padded = name_md.ljust(name_col_width)
+            name_padded = name.ljust(name_col_width) # Pad based on the *visible* length of the markdown link for alignment
+            # This is an approximation, perfect alignment is tricky with variable link lengths
 
         desc_padded = description.ljust(desc_col_width)
 
