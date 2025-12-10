@@ -7,11 +7,10 @@ import xmltodict
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CIDR_RANGE, CVSS_SCORE, DELAY,
-								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
-								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
+								 DESCRIPTION, EXTRA_DATA, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
 								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
 								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
-								 SEVERITY, STATE, TAGS, THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
+								 SEVERITY, STATE, TAGS, THREADS, TIMEOUT, TOP_PORTS)
 from secator.output_types import Exploit, Port, Vulnerability, Info, Error, Ip
 from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
