@@ -31,24 +31,21 @@ When implementing a task, follow these rules:
 
 2. **Code Structure**:
    - Use the @task() decorator
-   - Inherit from appropriate category class (Http, HttpCrawler, HttpFuzzer,
-     ReconDns, ReconPort, ReconAsn, VulnHttp, etc.)
-   - Define cmd, input_types, output_types, and tags
+   - Don't use type annotations
+   - Inherit from appropriate category class (Http, HttpCrawler, HttpFuzzer, ReconDns, ReconPort, ReconAsn, VulnHttp, etc.)
+   - Define cmd, input_types, output_types, tags, file_flag, input_flag, json_flag, version_flag, opt_prefix if needed
    - Map options using opt_key_map and opt_value_map
-   - Use item_loaders for parsing (JSONSerializer for JSON output)
-   - Define output_map to map tool output fields to Secator output types
-   - Include install_cmd, install_version, and github_handle
+   - Define on_cmd(self) static method to set additional command options if needed
+   - Define on_json_loaded(self, item) static method and item_loaders=[JSONSerializer()] to yield Secator output types if the tool supports JSON output
+   - Define on_line(self, line) static method to yield Secator output types if the tool doesn't support JSON output
+   - Define install_cmd, install_version, install_github_bin, github_handle, install_github_version_prefix, and install_ignore_bin if needed
+   - When yielding Secator output types, make sure to use the correct fields for the output type by looking up the schema in secator/output_types/<output_type>.py. Underscored fields should not be used as they are automatically set.
 
-3. **Output Types**: Use appropriate Secator output types:
-   - Subdomain, Ip, Port, Url, Vulnerability, UserAccount, Tag, etc.
-
-4. **Meta Options**: Leverage meta_opts from parent category classes for common options like:
-   - THREADS, TIMEOUT, DELAY, RATE_LIMIT, PROXY, RETRIES, etc.
-
-5. **Code Style**:
-   - Use staticmethod decorator with self parameter for item_loader, on_line, on_cmd methods
-   - Follow existing code patterns from other tasks
-   - Include proper validation in validate_item if needed
+3. **Other considerations**:
+   - Check if there is a similar tool already implemented in the Github repository and learn from it
+   - Lookup the tool's documentation and usage examples, and if possible the --help output to understand all of it's options and flags
+   - Lookup the tool's output format and how to parse it
+   - Lookup the tool's installation method and how to install it
 
 ## Example Task Implementation
 
@@ -78,11 +75,6 @@ class example_tool(ReconDns):
         THREADS: 'threads'
     }
     item_loaders = [JSONSerializer()]
-    output_map = {
-        Subdomain: {
-            DOMAIN: 'domain',
-        }
-    }
     install_version = 'v1.0.0'
     install_cmd = 'go install -v github.com/example/example_tool@[install_version]'
     github_handle = 'example/example_tool'
@@ -90,6 +82,16 @@ class example_tool(ReconDns):
     proxy_http = True
     proxy_socks5 = False
     profile = 'io'
+
+    @staticmethod
+    def on_json_loaded(self, item):
+        yield Subdomain(
+            domain=item['domain'],
+            host=item['host'],
+            verified=item['verified'],
+            sources=item['sources'],
+            extra_data=item['extra_data']
+        )
 ```
 
 ## Your Task
@@ -317,7 +319,9 @@ def get_model_and_key(model_override=None):
 def call_ai(prompt, system_prompt, model, api_key):
     """Call AI model with the given prompt."""
     try:
+        import litellm
         from litellm import completion
+        litellm.drop_params = True
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -398,9 +402,8 @@ def generate_task(input_text, model=None):
         "3. Correct class inheritance\n"
         "4. All required fields (cmd, input_types, output_types, tags, etc.)\n"
         "5. Option mappings (opt_key_map, opt_value_map)\n"
-        "6. Output parsing (item_loaders, output_map)\n"
-        "7. Installation information (install_cmd, install_version, "
-        "github_handle)\n\n"
+        "6. Output parsing (item_loaders, on_json_loaded, on_line, etc...)\n"
+        "7. Installation information (install_cmd, install_version, github_handle)\n\n"
         "Make sure the implementation is production-ready and follows the "
         "exact patterns from the example and guidelines.\n\n"
         "Output ONLY the Python code, wrapped in ```python code blocks. "
