@@ -64,13 +64,13 @@ def generate_tools_table_markdown(tools_data):
 
     for tool in tools_data:
         name = tool.get('name', 'N/A')
-        url = tool.get('url', '#') # Default to '#' if URL is missing
+        url = tool.get('url', None)
         description = tool.get('description', '')
         category = tool.get('category', '')
 
         # Format columns
         # If url is None or empty, just use the name without a link
-        if url and url != 'None':
+        if url:
             name_md = f"[{name}]({url})"
             # Pad based on the *visible* length of the markdown link for alignment
             # This is an approximation, perfect alignment is tricky with variable link lengths
