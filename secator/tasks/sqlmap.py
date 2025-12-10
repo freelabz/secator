@@ -75,12 +75,12 @@ class sqlmap(VulnHttp):
 		self.current_payload = None
 		self.current_dbms = None
 		self.vuln_found = False
-		self.risk_level = self.get_opt_value('risk', default=1)
+		self.risk_level = self.get_opt_value('risk') or 1
 		self._yielded_vulns = set()
 		self._vuln_buffer = None
 
 	@staticmethod
-	def on_line(self, line):
+	def item_loader(self, line):
 		# Parse sqlmap output for vulnerability information
 		if 'testing connection' in line.lower():
 			return ''
@@ -157,11 +157,11 @@ class sqlmap(VulnHttp):
 
 		yield Vulnerability(
 			id=None,
-			name=self._vuln_buffer['title'],
+			name='SQL Injection - ' + self._vuln_buffer['title'],
 			provider='sqlmap',
 			tags=['sqli', 'CWE-89'],
 			confidence='high',
-			matched_at=self.current_url or '',
+			matched_at=self.current_url or self.inputs[0],
 			extra_data=extra_data,
 			severity=severity
 		)
