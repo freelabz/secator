@@ -1,6 +1,7 @@
 import click
 import os
 import yaml
+import shlex
 
 from pathlib import Path
 
@@ -75,7 +76,7 @@ class trivy(Vuln):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
 		self.cmd = self.cmd.replace(f' -mode {mode}', '').replace('trivy', f'trivy {mode}')
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -118,11 +119,12 @@ class trivy(Vuln):
 				yield Vulnerability(**data)
 			for secret in item.get('Secrets', []):
 				code_context = '\n'.join([line['Content'] for line in secret.get('Code', {}).get('Lines') or []])
-				extra_data = {'content': secret['Match'], 'code_context': code_context}
+				extra_data = {'code_context': code_context}
 				extra_data.update({caml_to_snake(k): v for k, v in secret.items() if k not in ['RuleID', 'Match', 'Code']})
 				yield Tag(
 					category='secret',
 					name=secret['RuleID'].replace('-', '_'),
+					value=secret['Match'],
 					match=item['Target'],
 					extra_data=extra_data
 				)

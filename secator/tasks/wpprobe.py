@@ -2,6 +2,7 @@ import os
 import re
 import click
 import yaml
+import shlex
 
 from secator.decorators import task
 from secator.runners import Command
@@ -48,7 +49,7 @@ class wpprobe(Command):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -73,8 +74,8 @@ class wpprobe(Command):
 						category='info',
 						name='wordpress_plugin',
 						match=url,
+						value=plugin_name + ':' + plugin_version,
 						extra_data={
-							'content': plugin_name + ':' + plugin_version,
 							'name': plugin_name,
 							'version': plugin_version
 						}

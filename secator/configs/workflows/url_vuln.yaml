@@ -1,7 +1,12 @@
 type: workflow
 name: url_vuln
 alias: url_vuln
-description: URL vulnerability scan (gf, dalfox, sqlmap)
+description: URL vulnerability scan (gf, dalfox)
+long_description: |
+  Scans URLs for common web vulnerabilities using pattern matching and automated testing tools.
+  Identifies potential XSS, LFI, SSRF, RCE, IDOR, and other vulnerability indicators in URL parameters.
+  Tests discovered vulnerable patterns with specialized tools like Dalfox for XSS exploitation.
+  Optionally runs comprehensive nuclei scans for additional HTTP vulnerability detection.
 tags: [http, vulnerability]
 input_types:
   - url

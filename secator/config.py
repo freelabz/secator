@@ -24,6 +24,11 @@ LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
 
+USER_AGENTS = {
+	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+	'chrome_134.0_macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+}
+
 
 class StrictModel(BaseModel, extra='forbid'):
 	pass
@@ -111,6 +116,7 @@ class HTTP(StrictModel):
 	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
+	default_header: str = 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']
 
 
 class Tasks(StrictModel):

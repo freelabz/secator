@@ -1,5 +1,8 @@
 import json
 import os
+import re
+import shlex
+
 from datetime import datetime
 
 from secator.config import CONFIG
@@ -49,9 +52,9 @@ class testssl(Command):
 	proxy_socks5 = False
 	profile = 'io'
 	install_cmd_pre = {
-		'apk': ['hexdump', 'coreutils', 'procps'],
-		'pacman': ['util-linux'],
-		'*': ['bsdmainutils']
+		'apk': ['hexdump', 'coreutils', 'procps', 'bash'],
+		'pacman': ['util-linux', 'bash'],
+		'*': ['bsdmainutils', 'bash']
 	}
 	install_version = 'v3.2.0'
 	install_cmd = (
@@ -67,13 +70,14 @@ class testssl(Command):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' --jsonfile {self.output_path}'
+		self.cmd += f' --jsonfile {shlex.quote(self.output_path)}'
 
 		# Hack because target needs to be the last argument in testssl.sh
 		if len(self.inputs) == 1:
 			target = self.inputs[0]
-			self.cmd = self.cmd.replace(f' {target}', '')
-			self.cmd += f' {target}'
+			target_quoted = shlex.quote(target)
+			self.cmd = re.sub(re.escape(f' {target_quoted}'), "", self.cmd)
+			self.cmd += f' {target_quoted}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -144,9 +148,9 @@ class testssl(Command):
 						category='info',
 						name='ssl_tls',
 						match=host,
+						value=finding,
 						extra_data={
 							'subtype': id,
-							'content': finding,
 						}
 					)
 

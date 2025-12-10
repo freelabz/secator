@@ -230,8 +230,8 @@ class TestCommandRunner(unittest.TestCase):
 				fields=['name', 'id', 'matched_at']
 			),
 			RegexSerializer(
-				r'^(?P<name>.*?) \| TAG \| (?P<category>.*?) \| (?P<match>.*?) \| (?P<matched_at>.*?)$',
-				fields=['name', 'category', 'match', 'matched_at']
+				r'^(?P<name>.*?) \| TAG \| (?P<category>.*?) \| (?P<value>.*?) \| (?P<match>.*?)$',
+				fields=['name', 'category', 'match', 'value', 'match']
 			)
 		]
 		def on_regex_loaded(self, item):
@@ -303,7 +303,7 @@ class TestCommandRunner(unittest.TestCase):
 		json_output = [
 			{"url": "http://example.com", "status_code": 200},
 			{"name": "SQL Injection", "severity": "high", "matched_at": "http://example.com"},
-			{"name": "sensitive_data", "category": "PII", "match": "http://example.com", "extra_data": {"tag_type": "PII", "value": "SSN"}}
+			{"name": "sensitive_data", "value": "1234567890", "category": "PII", "match": "http://example.com", "extra_data": {"tag_type": "PII"}}
 		]
 
 		import json
@@ -406,6 +406,7 @@ class TestCommandRunner(unittest.TestCase):
 				'__test__': 'Item of type vulnerability with no _type hint should be incorrectly loaded as Tag',
 				'name': 'sensitive_data',
 				'match': 'http://example.com',
+				'value': 'sensitive',
 				'category': 'PII',
 				'extra_data': {
 					'tag_type': 'PII',

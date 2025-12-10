@@ -75,6 +75,9 @@ class Runner:
 	# Output types
 	output_types = []
 
+	# Default inputs
+	default_inputs = None
+
 	# Default exporters
 	default_exporters = []
 
@@ -83,6 +86,9 @@ class Runner:
 
 	# Run hooks
 	enable_hooks = True
+
+	# Run validators
+	enable_validators = True
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
@@ -112,6 +118,7 @@ class Runner:
 		self.celery_ids = []
 		self.celery_ids_map = {}
 		self.revoked = False
+		self.skipped = False
 		self.results_buffer = []
 		self._hooks = hooks
 
@@ -269,14 +276,20 @@ class Runner:
 
 	@property
 	def infos(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Info) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Info)]
 
 	@property
 	def warnings(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Warning) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Warning)]
 
 	@property
 	def errors(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Error)]
 
 	@property
@@ -311,6 +324,8 @@ class Runner:
 			return 'PENDING'
 		if self.revoked:
 			return 'REVOKED'
+		if self.skipped:
+			return 'SKIPPED'
 		if not self.done:
 			return 'RUNNING'
 		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
@@ -515,7 +530,7 @@ class Runner:
 		self.uuids.add(item._uuid)
 		self.results.append(item)
 		self.results_count += 1
-		if output:
+		if output and item._type not in ['stat', 'progress']:
 			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
@@ -814,6 +829,9 @@ class Runner:
 		if self.dry_run:
 			self.debug('validator skipped (dry_run)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
 			return True
+		if not self.enable_validators:
+			self.debug('validator skipped (disabled validators)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
+			return True
 		for validator in self.resolved_validators[validator_type]:
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
@@ -824,7 +842,7 @@ class Runner:
 					if doc:
 						message += f': {doc}'
 					err = Error(message=message)
-					self.add_result(err)
+					self.add_result(err, print=False)
 				return False
 			self.debug('validator success', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
 		return True

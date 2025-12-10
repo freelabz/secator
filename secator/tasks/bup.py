@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 
 from secator.decorators import task
 from secator.output_types import Url, Progress
@@ -71,7 +72,8 @@ class bup(Http):
 
 	@staticmethod
 	def on_init(self):
-		self.cmd += f' -o {self.reports_folder}/.outputs/response'
+		response_path = f'{self.reports_folder}/.outputs/response'
+		self.cmd += f' -o {shlex.quote(response_path)}'
 
 	@staticmethod
 	def on_line(self, line):
