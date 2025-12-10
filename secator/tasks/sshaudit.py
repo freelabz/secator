@@ -38,7 +38,8 @@ class sshaudit(Command):
 		'verbose': '-v',
 		'ssh_port': '-p',
 	}
-	install_github_handle = 'jtesta/ssh-audit'
+	github_handle = 'jtesta/ssh-audit'
+	install_github_bin = False
 	install_version = 'v3.3.0'
 	install_cmd = (
 		f'git clone --depth 1 --single-branch -b [install_version] '

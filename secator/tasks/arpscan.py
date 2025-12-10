@@ -25,6 +25,8 @@ class arpscan(Command):
 		'ouifile': {'type': str, 'short': 'o', 'default': None, 'help': 'Use IEEE registry vendor mapping file.'},
 		'macfile': {'type': str, 'short': 'm', 'default': None, 'help': 'Use custom vendor mapping file.'},
 	}
+	github_handle = 'royhills/arp-scan'
+	install_github_bin = False
 	install_pre = {
 		'*': ['arp-scan'],
 	}
