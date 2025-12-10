@@ -47,7 +47,9 @@ OPTS = {
 	THREADS: {'type': int, 'help': 'Number of threads to run'},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use'},
+	PORTS: {'type': str, 'short': 'p', 'help': 'Only scan specific ports (comma separated list, "-" for all ports)'},  # noqa: E501
+	TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Scan <number> most common ports'},
 }
 
 OPTS_HTTP = [
@@ -63,6 +65,10 @@ OPTS_HTTP_FUZZERS = OPTS_HTTP_CRAWLERS + [WORDLIST, DATA]
 
 OPTS_RECON = [
 	DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
+]
+
+OPTS_RECON_PORT = [
+	PORTS, TOP_PORTS, DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
 ]
 
 OPTS_VULN = [
@@ -131,12 +137,9 @@ class ReconIp(Recon):
 
 
 class ReconPort(Recon):
+	meta_opts = {k: OPTS[k] for k in OPTS_RECON_PORT}
 	input_types = [IP]
 	output_types = [Port]
-	meta_opts = {
-		PORTS: {'type': str, 'short': 'p', 'help': 'Only scan specific ports (comma separated list, "-" for all ports)'},  # noqa: E501
-		TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Scan <number> most common ports'},
-	}
 
 
 #---------------#
