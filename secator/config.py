@@ -189,6 +189,11 @@ class Addons(StrictModel):
 	mongodb: MongodbAddon = MongodbAddon()
 
 
+class AI(StrictModel):
+	model: str = 'claude-3-5-sonnet-20241022'
+	api_key: str = os.environ.get('ANTHROPIC_API_KEY', '')
+
+
 class SecatorConfig(StrictModel):
 	debug: str = ''
 	dirs: Directories = Directories()
@@ -205,6 +210,7 @@ class SecatorConfig(StrictModel):
 	drivers: Drivers = Drivers()
 	addons: Addons = Addons()
 	security: Security = Security()
+	ai: AI = AI()
 	offline_mode: bool = False
 
 
