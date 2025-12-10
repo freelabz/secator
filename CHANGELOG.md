@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.22.2](https://github.com/freelabz/secator/compare/v0.22.1...v0.22.2) (2025-12-10)
+
+
+### Bug Fixes
+
+* **docs:** add missing tools to README.md tools table ([#831](https://github.com/freelabz/secator/issues/831)) ([16f444a](https://github.com/freelabz/secator/commit/16f444a7e17dc18691f47ced482c6c0ef630c979))
+* simpler README.md ([290d899](https://github.com/freelabz/secator/commit/290d899d3e7b4e3151954dafafe991549da7a36d))
+* **tasks:** restore nmap and naabu meta options ([#828](https://github.com/freelabz/secator/issues/828)) ([6bdaf2e](https://github.com/freelabz/secator/commit/6bdaf2e3594ac6049c742cb96b297cff5b105f71))
+
 ## [0.22.1](https://github.com/freelabz/secator/compare/v0.22.0...v0.22.1) (2025-12-09)
 
 
