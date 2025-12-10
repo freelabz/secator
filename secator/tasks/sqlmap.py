@@ -137,7 +137,7 @@ class sqlmap(VulnHttp):
             self._sqlmap_state['current_payload'] = m_payload.group(1).strip()
             name = 'SQL Injection'
             # When payload is printed, we have enough info to yield a finding
-            extra = {'payload': self._sqlmap_state.get('current_payload'), 'param': self._sqlmap_state.get('current_param')}
+            extra = {'payload': self._sqlmap_state.get('current_payload'), 'param': self._sqlmap_state.get('current_param')}  # noqa: E501
             dbms = self._sqlmap_state.get('dbms')
             if dbms:
                 extra['dbms'] = dbms
