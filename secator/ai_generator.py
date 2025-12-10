@@ -1,6 +1,8 @@
 """AI-powered code generation for Secator."""
 
 import os
+import re
+import yaml
 from pathlib import Path
 
 from secator.config import CONFIG
@@ -346,8 +348,6 @@ def call_ai(prompt, system_prompt, model, api_key):
 
 def extract_code_block(content, language='python'):
     """Extract code block from markdown-formatted response."""
-    import re
-
     # Try to find code block with language specifier
     pattern = f'```{language}\\n(.*?)```'
     match = re.search(pattern, content, re.DOTALL)
@@ -416,7 +416,6 @@ def generate_task(input_text, model=None):
     code = extract_code_block(response, 'python')
 
     # Extract task name from code
-    import re
     match = re.search(r'class\s+(\w+)\s*\(', code)
     if not match:
         console.print(Error(message='Could not extract task name from generated code'))
@@ -477,7 +476,6 @@ def generate_workflow(description, model=None):
     code = extract_code_block(response, 'yaml')
 
     # Extract workflow name from YAML
-    import yaml
     try:
         config = yaml.safe_load(code)
         workflow_name = config.get('name', 'unnamed_workflow')
@@ -539,7 +537,6 @@ def generate_scan(description, model=None):
     code = extract_code_block(response, 'yaml')
 
     # Extract scan name from YAML
-    import yaml
     try:
         config = yaml.safe_load(code)
         scan_name = config.get('name', 'unnamed_scan')
