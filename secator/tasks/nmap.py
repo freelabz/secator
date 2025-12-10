@@ -81,15 +81,12 @@ class nmap(ReconPort):
 		'timing': {'type': int, 'short': 'T', 'default': None, 'help': 'Timing template (0: paranoid, 1: sneaky, 2: polite, 3: normal, 4: aggressive, 5: insane)'},  # noqa: E501
 	}
 	opt_key_map = {
-		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: 'scan-delay',
-		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
 		PROXY: None,  # TODO: supports --proxies but not in TCP mode [https://github.com/nmap/nmap/issues/1098]
 		RATE_LIMIT: 'max-rate',
 		RETRIES: 'max-retries',
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: 'max-rtt-timeout',
-		USER_AGENT: OPT_NOT_SUPPORTED,
 		PORTS: '-p',
 		TOP_PORTS: 'top-ports',
 
