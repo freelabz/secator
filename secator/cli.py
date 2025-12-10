@@ -1672,7 +1672,7 @@ def generate():
 @click.option('--model', '-m', type=str, default=None, help='AI model to use (overrides config)')
 def generate_task(input_text, model):
 	"""Generate a task implementation.
-	
+
 	INPUT_TEXT can be:
 	- A GitHub repository URL (e.g., https://github.com/projectdiscovery/subfinder)
 	- A tool name (e.g., subfinder)
@@ -1688,9 +1688,9 @@ def generate_task(input_text, model):
 @click.option('--model', '-m', type=str, default=None, help='AI model to use (overrides config)')
 def generate_workflow(description, model):
 	"""Generate a workflow configuration.
-	
+
 	DESCRIPTION should explain what the workflow should do.
-	
+
 	Example: "Find all subdomains using subfinder, probe them with httpx, and scan for vulnerabilities with nuclei"
 	"""
 	from secator.ai_generator import generate_workflow as gen_workflow
@@ -1703,9 +1703,9 @@ def generate_workflow(description, model):
 @click.option('--model', '-m', type=str, default=None, help='AI model to use (overrides config)')
 def generate_scan(description, model):
 	"""Generate a scan configuration.
-	
+
 	DESCRIPTION should explain what the scan should accomplish.
-	
+
 	Example: "Comprehensive domain assessment with subdomain discovery, port scanning, and vulnerability testing"
 	"""
 	from secator.ai_generator import generate_scan as gen_scan

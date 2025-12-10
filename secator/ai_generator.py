@@ -109,7 +109,7 @@ Research the tool thoroughly, understand its:
 - GitHub repository
 
 Then generate a complete, production-ready task implementation file that follows all guidelines above.
-"""
+"""  # noqa: E501
 
 WORKFLOW_SYSTEM_PROMPT = """You are a programming assistant for Secator, a pentesting automation tool.
 
@@ -202,7 +202,7 @@ You will receive a description of a workflow to create. Generate a complete, val
 3. Follows the structure and patterns of existing workflows
 4. Includes clear descriptions
 5. Uses appropriate input and output types
-"""
+"""  # noqa: E501
 
 SCAN_SYSTEM_PROMPT = """You are a programming assistant for Secator, a pentesting automation tool.
 
@@ -277,7 +277,7 @@ YAML scan configuration that:
 3. Follows the structure and patterns of existing scans
 4. Includes clear descriptions
 5. Provides comprehensive coverage for the stated goal
-"""
+"""  # noqa: E501
 
 
 def check_ai_addon():
