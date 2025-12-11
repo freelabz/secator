@@ -17,7 +17,7 @@ class netdetect(PythonRunner):
     def yielder(self):
         adapters = ifaddr.get_adapters()
         for adapter in adapters:
-            if adapter.name == 'lo':
+            if adapter.name == 'lo' or adapter.name.lower().startswith('loopback'):
                 continue
             yield Tag(
                 name='net_interface',
