@@ -63,7 +63,7 @@ class ToolInstaller:
 		console.print(Info(message=f'Installing {name}'))
 		status = InstallerStatus.UNKNOWN
 		if not hasattr(tool_cls, 'cmd'):
-			return InstallerStatus.INSTALL_NOT_SUPPORTED
+			return InstallerStatus.INSTALL_SKIPPED_OK
 
 		# Fail if not supported
 		if not any(_ for _ in [
