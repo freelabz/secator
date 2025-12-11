@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 
 from secator.utils_test import load_fixture, FIXTURES_DIR
@@ -16,7 +17,9 @@ class TestCveHelpers(unittest.TestCase):
 	def test_lookup_cve(self):
 		fixture = load_fixture('cve_circle_output', FIXTURES_DIR)
 		fixture = circl.convert_cve_info(fixture)
-		cve_path = f'{CONFIG.dirs.data}/cves/CVE-2023-5568.json'
+		cve_dir = CONFIG.dirs.data / 'cves'
+		os.makedirs(cve_dir, exist_ok=True)
+		cve_path = cve_dir / 'CVE-2023-5568.json'
 		with open(cve_path, 'w') as f:
 			f.write(json.dumps(fixture.toDict(), indent=2))
 		vuln = Vuln.lookup_cve('CVE-2023-5568', 'cpe:/o:redhat:enterprise_linux:9')
