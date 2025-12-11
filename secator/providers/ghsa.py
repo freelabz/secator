@@ -30,7 +30,13 @@ class ghsa(CVEProvider):
 			return None
 		soup = BeautifulSoup(resp.text, 'lxml')
 		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
+		if len(sidebar_items) < 4:
+			debug(f'{ghsa_id}: Unexpected HTML structure, expected at least 4 sidebar items', sub='cve')
+			return None
 		cve_id = sidebar_items[3].find('div').text.strip()
+		if not cve_id:
+			debug(f'{ghsa_id}: No CVE ID found in sidebar', sub='cve')
+			return None
 		if not cve_id.startswith('CVE'):
 			debug(f'{ghsa_id}: No CVE_ID extracted from https://github.com/advisories/{ghsa_id}', sub='cve')
 			return None
