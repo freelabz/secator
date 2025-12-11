@@ -21,7 +21,7 @@ opts:
 
     # Scan options overrides
     host_recon_nuclei: true
-    host_recon_ports: "-"
+    host_recon_nmap_ports: "-"
     domain_recon_testssl_server_defaults: null
     subdomain_recon_hunt_secrets: true
     subdomain_recon_test_ssl: true
