@@ -106,16 +106,4 @@ class circl(CVEProvider):
 			reference=reference
 		)
 		return vuln
-		# cve_info = {
-		# 	'id': cve_id,
-		# 	'cwe_id': cwe_id,
-		# 	'cvss_score': cvss_score,
-		# 	'description': description,
-		# 	'cpes': cpes_affected,
-		# 	'references': references
-		# }
-		# if not cpes_affected:
-		# 	debug(f'{cve_id}: no CPEs found in CVE data', sub='cve.circl', verbose=True)
-		# else:
-		# 	debug(f'{cve_id}: {len(cpes_affected)} CPEs found in CVE data', sub='cve.circl', verbose=True)
-		# return cve_info
+		return vuln
