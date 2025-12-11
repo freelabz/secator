@@ -93,6 +93,7 @@ jobs:
     - name: Install dependencies
       run: |
         secator install addons worker
+        secator install addons redis
         secator install langs go
         secator install langs ruby
         secator install tools --fail-fast
@@ -101,7 +102,7 @@ jobs:
 
     - name: Run integration tests
       run: |
-        secator test integration --test test_celery,test_worker,test_tasks
+        secator test integration --test test_celery,test_worker,test_remote_worker,test_tasks
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
