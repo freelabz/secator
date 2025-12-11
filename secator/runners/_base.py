@@ -240,9 +240,12 @@ class Runner:
 		# Print targets
 		if self.print_target:
 			pluralize = 'targets' if len(self.self_targets) > 1 else 'target'
-			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize} for {format_runner_name(self)}:'), rich=True)
-			for target in self.self_targets:
+			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize} for {format_runner_name(self)}'), rich=True)
+			truncated_targets = self.self_targets[:10] if len(self.self_targets) > 10 else self.self_targets
+			for target in truncated_targets:
 				self._print(f'      {repr(target)}', rich=True)
+			if len(self.self_targets) > 10:
+				self._print(f'      and {len(self.self_targets) - 10} more...', rich=True)
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
@@ -1112,18 +1115,17 @@ class Runner:
 	@staticmethod
 	def _validate_inputs(self, inputs):
 		"""Input type is not supported by runner"""
-		supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
+		# supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
 		for _input in inputs:
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
 				message = (
-					f'Validator failed: target [bold blue]{_input}[/] of type [bold green]{input_type}[/] '
-					f'is not supported by [bold gold3]{self.unique_name}[/]. Supported types: [bold green]{supported_types}[/]'
+					f'Target [bold blue]{_input}[/] skipped'
+					f' ([bold]{input_type}[/] not supported by {format_runner_name(self)}) '
 				)
-				message += '. Removing from current inputs (runner context)'
-				warning = Warning(message=message)
+				info = Info(message=message)
 				self.inputs.remove(_input)
-				self.add_result(warning)
+				self.add_result(info)
 		return True
 
 	@staticmethod

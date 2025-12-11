@@ -73,11 +73,20 @@ class x8(HttpParamsFuzzer):
 	@staticmethod
 	def on_json_loaded(self, item):
 		url = item['url']
-		if url not in self.urls:
-			self.urls.append(url)
-			yield Url(url=url, method=item['method'], status_code=item['status'], content_length=item['size'], request_headers=self.request_headers)  # noqa: E501
 		parsed_url = urlparse(url)
 		url_without_param = urlunparse(parsed_url._replace(query=''))
+
+		if url not in self.urls:
+			self.urls.append(url)
+			yield Url(
+				url=url,
+				host=parsed_url.hostname,
+				method=item['method'],
+				status_code=item['status'],
+				content_length=item['size'],
+				request_headers=self.request_headers,
+			)
+
 		for param in item.get('found_params', []):
 			extra_data = {k: v for k, v in param.items() if k != 'name'}
 			extra_data['value'] = param['value']

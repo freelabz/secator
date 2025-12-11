@@ -57,7 +57,8 @@ class Scan(Runner):
 			# Skip workflow if condition is not met
 			condition = workflow_opts.pop('if', None) if workflow_opts else None
 			local_ns = {'opts': DotMap(opts)}
-			if condition and not eval(condition, {"__builtins__": {}}, local_ns):
+			safe_globals = {'__builtins__': {'len': len}}
+			if condition and not eval(condition, safe_globals, local_ns):
 				self.add_result(Info(message=f'Skipped workflow {name} because condition is not met: {condition}'))
 				continue
 

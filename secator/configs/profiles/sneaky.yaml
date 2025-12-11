@@ -2,7 +2,5 @@ type: profile
 name: sneaky
 description: "IDS/IPS evasion, sensitive networks"
 opts:
-    rate_limit: 10
-    delay: 2
-    timeout: 15
-    retries: 5
+    fragment: true
+    nmap_light_fragment: true

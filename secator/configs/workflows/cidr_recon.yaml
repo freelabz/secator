@@ -11,38 +11,51 @@ input_types:
   - cidr_range
   - ip
   - slug
-default_inputs: [discover]
-# default_inputs:
-#   - 127.0.0.1/24      # localhost
-#   - 192.168.0.0/24    # local
-#   - 192.168.1.0/24    # local
-#   - 10.0.0.0/24       # standard subnet
-#   - 172.16.0.0/24     # private network
-#   - 172.16.0.0/16     # docker
-#   - 172.17.0.1/16     # docker #2
-#   - 172.18.0.1/16     # docker #3
+default_inputs: ''
 
 tasks:
+  _group/discover:
+    netdetect:
+      description: Discover local network CIDR ranges
+      if: len(targets) == 0
+    arp:
+      description: Discover neighbors with ARP requests
+      if: len(targets) == 0
+
+  prompt:
+    description: Select a CIDR range manually
+    message: "Scan CIDR range {input}?"
+    targets_:
+    - type: tag
+      field: value
+      condition: item.name == 'net_cidr' and len(targets) == 0
+
+  _group/probe:
     arpscan:
       description: Discover hosts with ARP requests
+      targets_:
+      - type: tag
+        field: value
+        condition: item.name == 'user_input'
 
     fping:
       description: Discover hosts with ICMP requests
       targets_:
-      - type: ip
-        field: ip
-        condition: ip.alive and 'discover' in targets
-      - type: target
-        field: name
-        condition: target.name not in ['discover']
+      - type: tag
+        field: value
+        condition: item.name == 'user_input'
 
     nmap:
       description: Discover hosts and ports with TCP SYN scan
-      tcp_syn_stealth: True
+      version_detection: true
       targets_:
-      - type: ip
-        field: ip
-        condition: ip.alive and 'discover' in targets
-      - type: target
-        field: name
-        condition: target.name not in ['discover']
+      - type: tag
+        field: value
+        condition: item.name == 'user_input'
+
+  search_vulns:
+    description: Search for related exploits
+    targets_:
+    - type: port
+      field: '{host}~{service_name}'
+      condition: len(item.service_name.split('/')) > 1

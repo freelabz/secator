@@ -4,4 +4,4 @@ description: "Scan all ports"
 enforce: true
 opts:
     ports: "-"
-    host_recon_ports: "-"
+    host_recon_nmap_ports: "-"

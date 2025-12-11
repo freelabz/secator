@@ -21,32 +21,48 @@ options:
 
   scanners:
     type: list
-    required: True
-    default: [nmap, naabu]
+    default: [nmap]
     help: Port scanners to use (naabu, nmap)
+
+  exploiters:
+    type: list
+    default: [search_vulns]
+    help: Exploit providers to use (searchsploit, search_vulns)
+
+  passive:
+    is_flag: True
+    default: False
+    help: Passive only (no requests to targets)
+    short: ps
 
 tasks:
 
   _group:
     naabu:
       description: Find open ports (light)
-      if: "'naabu' in opts.scanners"
+      if: "'naabu' in opts.scanners and not opts.ports and not opts.passive"
 
-    nmap:
+    nmap/light:
       description: Find open ports (light)
-      if: "'nmap' in opts.scanners"
+      if: "'nmap' in opts.scanners and not opts.ports and not opts.passive"
 
-  nmap/vulners:
-    description: Search for vulnerabilities on open ports
-    version_detection: True
-    script: vulners
+  nmap:
+    description: Detect services and versions
+    version_detection: true
+    tcp_syn_stealth: false
+    fragment: false
     targets_:
-    - port.host
+    - type: target
+      field: name
+      condition: opts.ports
+    - type: port
+      field: host
+      condition: opts.scanners
     ports_:
     - type: port
       field: port
-      condition: port.host in targets
-    if: "'nmap' in opts.scanners"
+      condition: port.host in targets and opts.scanners
+    if: not opts.passive
 
   sshaudit:
     description: Audit SSH port
@@ -54,6 +70,7 @@ tasks:
     - type: port
       field: host
       condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
+    if: not opts.passive
 
   _group/1:
     httpx:
@@ -62,6 +79,7 @@ tasks:
       targets_:
         - type: port
           field: '{host}:{port}'
+      if: not opts.passive
 
     searchsploit:
       description: Search for related exploits
@@ -69,6 +87,7 @@ tasks:
         - type: port
           field: '{host}:{port}~{service_name}'
           condition: len(item.service_name.split('/')) > 1
+      if: "'searchsploit' in opts.exploiters"
 
     search_vulns:
       description: Search for related exploits
@@ -78,12 +97,14 @@ tasks:
           condition: len(item.service_name.split('/')) > 1
         - type: vulnerability
           field: '{matched_at}~{id}'
+          condition: item.id
+      if: "'search_vulns' in opts.exploiters"
 
   _group/2:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
-      if: opts.nuclei
+      if: opts.nuclei and not opts.passive
 
     nuclei/url:
       description: Search for vulnerabilities on alive HTTP services
@@ -92,4 +113,4 @@ tasks:
         - type: url
           field: url
           condition: item.status_code != 0
-      if: opts.nuclei
+      if: opts.nuclei and not opts.passive

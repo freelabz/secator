@@ -1456,6 +1456,19 @@ def install_redis():
 	)
 
 
+@addons.command('vulners')
+def install_vulners():
+	"Install Vulners addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[vulners]',
+		title='Vulners addon',
+		next_steps=[
+			'Run [bold green4]secator config set addons.vulners.api_key <API_KEY>[/].',
+			'Set [bold green4]secator config set providers.cve_default_provider vulners[/].',
+		]
+	)
+
+
 @addons.command('dev')
 def install_dev():
 	"Install dev addon."

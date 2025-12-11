@@ -18,24 +18,40 @@ options:
     default: False
     short: hs
 
-  fuzz:
+  fuzz_values:
     is_flag: True
-    help: Fuzz discovered parameters (ffuf)
+    help: Fuzz discovered parameter values (ffuf)
     default: False
     short: fuzz
+
+  probe:
+    is_flag: True
+    help: Probe URLs (httpx)
+    default: False
+    short: probe
+  
+  fuzzers:
+    type: list
+    help: "Parameter fuzzers to use (comma-separated) (arjun, x8)"
+    default: ['arjun', 'x8']
 
 tasks:
   httpx:
     description: Probe URLs and eliminate unresponsive ones
     tech_detect: True
     filter_duplicates: True
+    if: opts.probe
 
   urlparser:
-    description: Extract query string parameters from URLs
+    description: Extract base URLs
     include: [url_base]
     targets_:
+    - type: target
+      field: name
+      condition: not opts.probe
     - type: url
       field: url
+      condition: opts.probe
 
   _group/extract_params:
 
@@ -46,13 +62,15 @@ tasks:
       - type: tag
         field: value
         condition: item.name == 'url_base'
+      if: "'arjun' in opts.fuzzers"
     x8:
       description: Bruteforce URL params
       wordlist: http_params
       targets_:
       - type: tag
-        field: f'{value}/'
+        field: '{value}/'
         condition: item.name == 'url_base'
+      if: "'x8' in opts.fuzzers"
 
   ffuf:
     description: Fuzz URL params
@@ -62,8 +80,8 @@ tasks:
     targets_:
       - type: tag
         field: '{match}?{value}=FUZZ'
-        condition: item._source.startswith('qsextract') or item._source.startswith('arjun') or item._source.startswith('x8')
-    if: opts.fuzz
+        condition: item._source.startswith('urlparser') or item._source.startswith('arjun') or item._source.startswith('x8')
+    if: opts.fuzz_values
 
   trufflehog:
     description: Find secrets in HTTP responses

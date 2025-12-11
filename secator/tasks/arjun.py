@@ -99,6 +99,7 @@ class arjun(Command):
 				host=parsed_url.hostname,
 				request_headers=values['headers'],
 				method=values['method'],
+				confidence='high'
 			)
 			for param in values['params']:
 				yield Tag(
