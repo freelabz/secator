@@ -1193,6 +1193,7 @@ class Command(Runner):
 			list: A list of strings, each an identified error message.
 		"""
 		error_messages = []
+		ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 		# Define a regex pattern for error indicators and ANSI red text
 		error_pattern = re.compile(
@@ -1203,6 +1204,7 @@ class Command(Runner):
 		# Search the output for any matches to the error pattern
 		matches = error_pattern.findall(output)
 		for match in matches:
+			match = ansi_escape.sub('', match).strip()
 			if match not in error_messages:
 				error_messages.append(match)
 
