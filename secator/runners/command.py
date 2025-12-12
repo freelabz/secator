@@ -854,9 +854,11 @@ class Command(Runner):
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
-			last_lines = last_lines[max(0, len(last_lines) - 2):]
+			last_lines = last_lines[max(0, len(last_lines) - 10):]
 			last_lines = [line for line in last_lines if line != '']
-			yield Error(message=error, traceback='\n'.join(last_lines), traceback_title='Last stdout lines')
+			errors = Command.parse_errors('\n'.join(last_lines))
+			for error in errors:
+				yield Error(message=error, traceback='Traceback (from command output):\n' + '\n'.join(last_lines))
 
 	@staticmethod
 	def _process_opts(
@@ -1176,3 +1178,30 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
+
+	@staticmethod
+	def parse_errors(output):
+		"""Searches for error messages in the provided multi-line string.
+		Errors can be indicated by specific keywords or red ANSI color codes.
+
+		Args:
+			output (str): Multi-line string containing the output of many commands.
+
+		Returns:
+			list: A list of strings, each an identified error message.
+		"""
+		error_messages = []
+
+		# Define a regex pattern for error indicators and ANSI red text
+		error_pattern = re.compile(
+			r'^(.*(?:err|error|ftl|fatal|traceback|exception[s]?|exc|\x1b\[31m.*\x1b\[0m).*)$',
+			re.IGNORECASE | re.MULTILINE
+		)
+
+		# Search the output for any matches to the error pattern
+		matches = error_pattern.findall(output)
+		for match in matches:
+			if match not in error_messages:
+				error_messages.append(match)
+
+		return error_messages
