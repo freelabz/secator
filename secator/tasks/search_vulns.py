@@ -93,13 +93,11 @@ class search_vulns(Vuln):
 		# 	common_extra_data.update({'cpes': cpes})
 
 		# Yield each vulnerability
-		for vuln_id, vuln_data in vulns.items():
-			cve_id = search_vulns.extract_id(vuln_data)
+		for cve_id, vuln_data in vulns.items():
 			yield Vulnerability(
-				id=vuln_id,
-				name=search_vulns.extract_id(vuln_data),
+				id=cve_id,
+				name=cve_id,
 				description=vuln_data.get('description', ''),
-				severity=search_vulns.cvss_to_severity(vuln_data.get('cvss', 0)),
 				confidence='high',
 				cvss_score=float(vuln_data.get('cvss', 0)),
 				epss_score=vuln_data.get('epss', ''),
@@ -208,18 +206,3 @@ class search_vulns(Vuln):
 			extra['match_reason'] = item['match_reason']
 
 		return extra
-
-	@staticmethod
-	def cvss_to_severity(cvss):
-		"""Convert CVSS score to severity level."""
-		cvss = float(cvss)
-		if not cvss or cvss < 0:
-			return None
-		if cvss < 4:
-			return 'low'
-		elif cvss < 7:
-			return 'medium'
-		elif cvss < 9:
-			return 'high'
-		else:
-			return 'critical'

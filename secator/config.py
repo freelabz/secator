@@ -101,6 +101,7 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+	threads: int = 50
 
 
 class Security(StrictModel):
@@ -182,11 +183,25 @@ class MongodbAddon(StrictModel):
 	server_selection_timeout_ms: int = 5000
 
 
+class VulnersAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+
+
+class Providers(StrictModel):
+	defaults: Dict[str, str] = {
+		'cve': 'circl',
+		'exploit': 'exploitdb',
+		'ghsa': 'ghsa'
+	}
+
+
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	vulners: VulnersAddon = VulnersAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -205,6 +220,7 @@ class SecatorConfig(StrictModel):
 	drivers: Drivers = Drivers()
 	addons: Addons = Addons()
 	security: Security = Security()
+	providers: Providers = Providers()
 	offline_mode: bool = False
 
 
