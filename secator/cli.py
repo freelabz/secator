@@ -340,6 +340,76 @@ def serve(directory, host, port, interface):
 	Command.execute(f'{sys.executable} -m http.server {port}', cwd=directory)
 
 
+@util.command('completion')
+@click.option('--shell', type=click.Choice(['bash', 'zsh', 'fish']), default='bash', help='Shell type')
+@click.option('--install', is_flag=True, help='Install completion to shell config file')
+def completion(shell, install):
+	"""Show or install shell completion for secator."""
+	import subprocess
+	
+	# Get completion script
+	env_var = '_SECATOR_COMPLETE'
+	completion_cmd = f'{env_var}={shell}_source secator'
+	
+	try:
+		result = subprocess.run(
+			completion_cmd,
+			shell=True,
+			capture_output=True,
+			text=True,
+			env=os.environ.copy()
+		)
+		completion_script = result.stdout
+		
+		if not completion_script:
+			console.print(Error(message=f'Failed to generate completion script for {shell}'))
+			sys.exit(1)
+			
+	except Exception as e:
+		console.print(Error(message=f'Error generating completion: {str(e)}'))
+		sys.exit(1)
+	
+	if install:
+		# Determine shell config file
+		shell_configs = {
+			'bash': os.path.expanduser('~/.bashrc'),
+			'zsh': os.path.expanduser('~/.zshrc'),
+			'fish': os.path.expanduser('~/.config/fish/completions/secator.fish')
+		}
+		
+		config_file = shell_configs.get(shell)
+		if not config_file:
+			console.print(Error(message=f'Unsupported shell: {shell}'))
+			sys.exit(1)
+		
+		# For fish, write directly to completion file
+		if shell == 'fish':
+			os.makedirs(os.path.dirname(config_file), exist_ok=True)
+			with open(config_file, 'w') as f:
+				f.write(completion_script)
+			console.print(Info(message=f'Completion installed to {config_file}'))
+		else:
+			# For bash/zsh, add eval command to rc file
+			eval_line = f'eval "$({env_var}={shell}_source secator)"'
+			
+			# Check if already installed
+			if os.path.exists(config_file):
+				with open(config_file, 'r') as f:
+					content = f.read()
+				if eval_line in content:
+					console.print(Info(message=f'Completion already installed in {config_file}'))
+					return
+			
+			# Add completion to config file
+			with open(config_file, 'a') as f:
+				f.write(f'\n# secator shell completion\n{eval_line}\n')
+			console.print(Info(message=f'Completion installed to {config_file}'))
+			console.print(Warning(message=f'Run "source {config_file}" or restart your shell to enable completion'))
+	else:
+		# Just print the completion script
+		console.print(completion_script)
+
+
 @util.command()
 @click.argument('record_name', type=str, default=None)
 @click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')

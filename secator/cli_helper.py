@@ -18,6 +18,7 @@ from secator.template import get_config_options
 from secator.tree import build_runner_tree
 from secator.utils import (deduplicate, expand_input, get_command_category)
 from secator.loader import get_configs_by_type
+from secator.completion import complete_profiles, complete_workspaces, complete_drivers, complete_exporters
 
 
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
@@ -29,7 +30,7 @@ PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.def
 EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['csv', 'gdrive', 'json', 'table', 'txt']])
 
 CLI_OUTPUT_OPTS = {
-	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o'},  # noqa: E501
+	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o', 'shell_complete': complete_exporters},  # noqa: E501
 	'fmt': {'default': '', 'short': 'fmt', 'internal_name': 'print_format', 'help': 'Output formatting string'},
 	'json': {'is_flag': True, 'short': 'json', 'internal_name': 'print_json', 'default': False, 'help': 'Print items as JSON lines'},  # noqa: E501
 	'raw': {'is_flag': True, 'short': 'raw', 'internal_name': 'print_raw', 'default': False, 'help': 'Print items in raw format'},  # noqa: E501
@@ -43,9 +44,9 @@ CLI_OUTPUT_OPTS = {
 }
 
 CLI_EXEC_OPTS = {
-	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws'},  # noqa: E501
-	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf'},  # noqa: E501
-	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR},  # noqa: E501
+	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws', 'shell_complete': complete_workspaces},  # noqa: E501
+	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf', 'shell_complete': complete_profiles},  # noqa: E501
+	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR, 'shell_complete': complete_drivers},  # noqa: E501
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
 	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
@@ -97,6 +98,7 @@ def decorate_command_options(opts):
 			default_from = conf.pop('default_from', None)
 			reverse = conf.pop('reverse', False)
 			opposite = conf.pop('opposite', None)
+			# Keep shell_complete in conf - it's a valid click.option parameter
 			long = f'--{opt_name}'
 			short = f'-{short_opt}' if short_opt else f'-{opt_name}'
 			if reverse:
