@@ -321,7 +321,7 @@ OUTPUTS_TASKS = {
             domain='wikipedia.org',
             registrar='MarkMonitor Inc.',
             creation_date='2001-01-13 00:12:14',
-            expiration_date='2026-01-13 00:12:14',
+            expiration_date='2027-01-13 00:12:14',
             registrant='',
             _source='whois'
         )
