@@ -1091,40 +1091,53 @@ def health(json_, debug, strict, bleeding):
 	upgrade_cmd = 'secator install tools'
 	with contextmanager:
 		for tool in tools:
-			info = get_version_info(
-				tool.cmd.split(' ')[0],
-				tool.version_flag or f'{tool.opt_prefix}version',
-				tool.github_handle,
-				tool.install_github_version_prefix,
-				tool.install_cmd,
-				tool.install_version,
-				bleeding=bleeding
-			)
-			info['_name'] = tool.__name__
-			info['_type'] = 'tool'
-			row = fmt_health_table_row(info, 'tools')
-			table.add_row(*row)
-			if not info['installed']:
-				messages.append(f'{tool.__name__} is not installed.')
-				info['next_version'] = tool.install_version
-				error = True
-			elif info['outdated']:
-				msg = 'latest' if bleeding else 'supported'
-				message = (
-					f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+			if hasattr(tool, 'cmd'):
+				info = get_version_info(
+					tool.cmd.split(' ')[0],
+					tool.version_flag or f'{tool.opt_prefix}version',
+					tool.github_handle,
+					tool.install_github_version_prefix,
+					tool.install_cmd,
+					tool.install_version,
+					bleeding=bleeding
 				)
-				messages.append(message)
-				info['upgrade'] = True
-				info['next_version'] = info['latest_version']
+				info['_name'] = tool.__name__
+				info['_type'] = 'tool'
+				row = fmt_health_table_row(info, 'tools')
+				table.add_row(*row)
+				if not info['installed']:
+					messages.append(f'{tool.__name__} is not installed.')
+					info['next_version'] = tool.install_version
+					error = True
+				elif info['outdated']:
+					msg = 'latest' if bleeding else 'supported'
+					message = (
+						f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+					)
+					messages.append(message)
+					info['upgrade'] = True
+					info['next_version'] = info['latest_version']
 
-			elif info['bleeding']:
-				msg = 'latest' if bleeding else 'supported'
-				message = (
-					f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
-				)
-				messages.append(message)
-				info['downgrade'] = True
-				info['next_version'] = info['latest_version']
+				elif info['bleeding']:
+					msg = 'latest' if bleeding else 'supported'
+					message = (
+						f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+					)
+					messages.append(message)
+					info['downgrade'] = True
+					info['next_version'] = info['latest_version']
+			else:
+				info = {
+					'name': tool.__name__,
+					'_type': 'python',
+					'version': None,
+					'status': 'ok',
+					'latest_version': None,
+					'installed': False,
+					'location': None
+				}
+				row = fmt_health_table_row(info, 'python')
+				table.add_row(*row)
 			results.append(info)
 			if json_:
 				print(json.dumps(info))
