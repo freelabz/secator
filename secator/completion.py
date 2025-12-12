@@ -7,6 +7,11 @@ from secator.config import CONFIG
 from secator.loader import get_configs_by_type
 
 
+# Available drivers and exporters
+AVAILABLE_DRIVERS = ['mongodb', 'gcs']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
+
+
 def complete_profiles(ctx, param, incomplete):
 	"""Complete profile names."""
 	profiles = get_configs_by_type('profile')
@@ -33,19 +38,17 @@ def complete_workspaces(ctx, param, incomplete):
 
 def complete_drivers(ctx, param, incomplete):
 	"""Complete driver names."""
-	drivers = ['mongodb', 'gcs']
 	return [
 		CompletionItem(name)
-		for name in drivers
+		for name in AVAILABLE_DRIVERS
 		if name.startswith(incomplete)
 	]
 
 
 def complete_exporters(ctx, param, incomplete):
 	"""Complete exporter names."""
-	exporters = ['csv', 'gdrive', 'json', 'table', 'txt']
 	return [
 		CompletionItem(name)
-		for name in exporters
+		for name in AVAILABLE_EXPORTERS
 		if name.startswith(incomplete)
 	]

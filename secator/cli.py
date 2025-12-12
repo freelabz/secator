@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 
 from pathlib import Path
@@ -345,8 +346,6 @@ def serve(directory, host, port, interface):
 @click.option('--install', is_flag=True, help='Install completion to shell config file')
 def completion(shell, install):
 	"""Show or install shell completion for secator."""
-	import subprocess
-	
 	# Get completion script
 	env_var = '_SECATOR_COMPLETE'
 	completion_cmd = f'{env_var}={shell}_source secator'
