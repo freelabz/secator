@@ -4,7 +4,6 @@ import re
 
 from functools import cache
 
-import requests
 from bs4 import BeautifulSoup
 from cpe import CPE
 
@@ -15,6 +14,7 @@ from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DATA, DELAY, DEPTH, DES
 								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
+from secator.requests import requests
 from secator.runners import Command
 from secator.utils import debug, process_wordlist, headers_to_dict
 

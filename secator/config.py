@@ -5,13 +5,13 @@ from typing import Dict, List
 from typing_extensions import Annotated, Self
 
 import validators
-import requests
 import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
 from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
+from secator.requests import requests
 from secator.rich import console, console_stdout
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
