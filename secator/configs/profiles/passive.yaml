@@ -1,6 +1,6 @@
 type: profile
 name: passive
-description: "Passive only (no requests to targets)"
+description: "Passive scanning only (no requests to targets)"
 enforce: true
 opts:
   passive: True

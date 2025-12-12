@@ -1,6 +1,6 @@
 type: profile
 name: full
-description: "Active all optional features"
+description: "Activate all optional features"
 enforce: true
 opts:
     # Task option overrides

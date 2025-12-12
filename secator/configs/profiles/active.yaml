@@ -1,6 +1,6 @@
 type: profile
 name: active
-description: "Active only (requests to targets)"
+description: "Active scanning only (no passive sources used)"
 enforce: true
 opts:
   active: True
