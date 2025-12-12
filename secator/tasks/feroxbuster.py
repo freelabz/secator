@@ -83,7 +83,7 @@ class feroxbuster(HttpFuzzer):
 		rate_limit = self.get_opt_value('rate_limit')
 		auto_tune = self.get_opt_value('auto_tune')
 		if rate_limit is not None and auto_tune:
-			self.add_result(Info(message=f'Disabling auto-tune since it conflicts with rate-limit'))
+			self.add_result(Info(message='Disabling auto-tune since it conflicts with rate-limit'))
 			self.cmd = self.cmd.replace('--auto-tune', '')
 		return self.cmd
 
