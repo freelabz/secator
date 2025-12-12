@@ -857,6 +857,8 @@ class Command(Runner):
 			last_lines = last_lines[max(0, len(last_lines) - 10):]
 			last_lines = [line for line in last_lines if line != '']
 			errors = Command.parse_errors('\n'.join(last_lines))
+			if not errors:
+				errors = [error]
 			for error in errors:
 				yield Error(message=error, traceback='Traceback (from command output):\n' + '\n'.join(last_lines))
 
@@ -1194,7 +1196,7 @@ class Command(Runner):
 
 		# Define a regex pattern for error indicators and ANSI red text
 		error_pattern = re.compile(
-			r'^(.*(?:err|error|ftl|fatal|traceback|exception[s]?|exc|\x1b\[31m.*\x1b\[0m).*)$',
+			r'^(.*\b(?:err|error|ftl|fatal|traceback|exceptions?|exc)\b.*|\x1b\[31m.*\x1b\[0m)$',
 			re.IGNORECASE | re.MULTILINE
 		)
 
