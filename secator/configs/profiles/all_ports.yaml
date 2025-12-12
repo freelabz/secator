@@ -1,6 +1,6 @@
 type: profile
 name: all_ports
-category: port_scan
+category: network
 description: "Scan all ports"
 enforce: true
 opts:

@@ -1,7 +1,7 @@
 type: workflow
 name: url_params_fuzz
 alias: url_params_fuzz
-description: Extract and find hidden parameters from URLs
+description: URL parameter fuzzing
 long_description: |
   Identifies and tests URL parameters for vulnerabilities through intelligent fuzzing.
   Extracts parameters from URLs using multiple techniques, then fuzzes them with various payloads

@@ -1,7 +1,7 @@
 type: workflow
 name: cidr_recon
 alias: cidrrec
-description: Local network recon
+description: Local network reconnaissance
 long_description: |
   Discovers and analyzes hosts within a CIDR range or local network through ARP / ICMP scanning.
   Maps IP addresses and identifies live hosts.

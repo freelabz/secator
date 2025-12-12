@@ -1,7 +1,7 @@
 type: workflow
 name: url_crawl
 alias: urlcrawl
-description: URL crawl (fast)
+description: URL crawl
 long_description: |
   Rapidly crawls and discovers URLs from a target website using multiple crawling engines.
   Supports both passive sources (collecting from external databases) and active crawlers

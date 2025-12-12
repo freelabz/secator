@@ -7,7 +7,7 @@ from secator.definitions import (CONTENT_TYPE, DATA, DELAY, DEPTH, FILTER_CODES,
 							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, URL)
-from secator.output_types import Url
+from secator.output_types import Url, Info
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpFuzzer
 
@@ -77,6 +77,15 @@ class feroxbuster(HttpFuzzer):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
+
+	@staticmethod
+	def on_cmd(self):
+		rate_limit = self.get_opt_value('rate_limit')
+		auto_tune = self.get_opt_value('auto_tune')
+		if rate_limit is not None and auto_tune:
+			self.add_result(Info(message=f'Disabling auto-tune since it conflicts with rate-limit'))
+			self.cmd = self.cmd.replace('--auto-tune', '')
+		return self.cmd
 
 	@staticmethod
 	def on_start(self):
