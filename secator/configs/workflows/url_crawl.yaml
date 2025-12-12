@@ -1,7 +1,7 @@
 type: workflow
 name: url_crawl
 alias: urlcrawl
-description: URL crawl (fast)
+description: URL crawl
 long_description: |
   Rapidly crawls and discovers URLs from a target website using multiple crawling engines.
   Supports both passive sources (collecting from external databases) and active crawlers
@@ -71,14 +71,14 @@ tasks:
       if: "'cariddi' in opts.crawlers and not opts.passive"
 
   httpx:
-    description: Run HTTP probes on passive URLs
+    description: Run HTTP probes on unverified URLs
     tech_detect: True
-    filter_codes: 404
+    filter_duplicates: True
     targets_:
     - target.name
     - type: url
       field: url
-      condition: item.status_code == 0
+      condition: not url.verified
     if: not opts.passive
 
   _group/data_hunt:
