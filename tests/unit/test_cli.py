@@ -305,5 +305,39 @@ class TestCli(unittest.TestCase):
 		assert 'Configuration' in result.output
 		assert 'Quick wins' in result.output
 
+	def test_util_completion_command(self):
+		result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert '_secator_completion' in result.output
+
+	def test_util_completion_install_command(self):
+		with tempfile.TemporaryDirectory() as tmpdir:
+			bashrc_path = os.path.join(tmpdir, '.bashrc')
+			with mock.patch('os.path.expanduser', return_value=bashrc_path):
+				result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash', '--install'])
+				assert not result.exception
+				assert result.exit_code == 0
+				assert 'Completion installed' in result.output
+				
+				# Verify the completion was actually written
+				assert os.path.exists(bashrc_path)
+				with open(bashrc_path, 'r') as f:
+					content = f.read()
+					assert '_SECATOR_COMPLETE=bash_source secator' in content
+
+	def test_util_completion_already_installed(self):
+		with tempfile.TemporaryDirectory() as tmpdir:
+			bashrc_path = os.path.join(tmpdir, '.bashrc')
+			# Pre-populate the bashrc with completion
+			with open(bashrc_path, 'w') as f:
+				f.write('eval "$(_SECATOR_COMPLETE=bash_source secator)"\n')
+			
+			with mock.patch('os.path.expanduser', return_value=bashrc_path):
+				result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash', '--install'])
+				assert not result.exception
+				assert result.exit_code == 0
+				assert 'already installed' in result.output
+
 if __name__ == '__main__':
 	unittest.main()
