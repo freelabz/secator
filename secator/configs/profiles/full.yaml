@@ -1,5 +1,6 @@
 type: profile
 name: full
+category: general
 description: "Activate all optional features"
 enforce: true
 opts:

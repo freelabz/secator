@@ -1,5 +1,6 @@
 type: profile
 name: stealth
+category: evasion
 description: "Stealth scan"
 opts:
   tcp_syn_stealth: true

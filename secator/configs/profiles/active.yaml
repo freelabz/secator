@@ -1,5 +1,6 @@
 type: profile
 name: active
+category: general
 description: "Active scanning only (no passive sources used)"
 enforce: true
 opts:
