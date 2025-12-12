@@ -16,3 +16,5 @@ def get_session():
 
 
 requests = get_session()
+requests.RequestException = requests_lib.RequestException
+requests.codes = requests_lib.codes
