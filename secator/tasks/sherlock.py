@@ -1,11 +1,10 @@
 import csv
 import os
-import shlex
 
 from secator.decorators import task
-from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
-								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
-								 TIMEOUT, URL, STRING, SLUG, USERNAME)
+from secator.definitions import (DELAY, OPT_NOT_SUPPORTED, PROXY,
+								 RATE_LIMIT, RETRIES, THREADS,
+								 TIMEOUT, STRING, SLUG, USERNAME)
 from secator.output_types import UserAccount, Info, Error
 from secator.tasks._categories import ReconUser
 
