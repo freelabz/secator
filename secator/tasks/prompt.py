@@ -11,7 +11,7 @@ from secator.config import CONFIG
 
 def _is_ci():
     """Check if running in CI environment."""
-    return any(os.environ.get(var) for var in ('CI', 'CONTINUOUS_INTEGRATION', 'GITHUB_ACTIONS', 'GITLAB_CI', 'JENKINS_URL', 'BUILDKITE'))
+    return any(os.environ.get(var) for var in ('CI', 'CONTINUOUS_INTEGRATION', 'GITHUB_ACTIONS', 'GITLAB_CI', 'JENKINS_URL', 'BUILDKITE'))  # noqa: E501
 
 
 def confirm_with_timeout(message, default=True, timeout=CONFIG.runners.prompt_timeout):
@@ -76,7 +76,7 @@ class prompt(PythonRunner):
         if yes or in_ci:
             console.print('\n\[[bold green]PROMPT[/]] [bold green]Auto-accepted all inputs.[/]')
         else:
-            console.print('\n\[[bold red]PROMPT[/]] [bold red]Prompting user for validation ({timeout}s timeout)...[/]'.format(timeout=CONFIG.runners.prompt_timeout))
+            console.print('\n\[[bold red]PROMPT[/]] [bold red]Prompting user for validation ({timeout}s timeout)...[/]'.format(timeout=CONFIG.runners.prompt_timeout))  # noqa: E501
 
         for input in self.inputs:
             if yes or in_ci:
