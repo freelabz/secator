@@ -57,5 +57,5 @@ tasks:
     description: Search for related exploits
     targets_:
     - type: port
-      field: '{host}~{service_name}'
+      field: '{host}:{port}~{service_name}'
       condition: len(item.service_name.split('/')) > 1
