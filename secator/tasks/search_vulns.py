@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlparse
 
 
@@ -8,6 +9,10 @@ from secator.definitions import (OPT_NOT_SUPPORTED, HEADER,
 from secator.output_types import Vulnerability, Exploit, Warning
 from secator.tasks._categories import Vuln
 from secator.serializers import JSONSerializer
+
+
+# Pattern to identify version strings like: 1.0, 1.2.3, 2.4.39, 1.0.0-rc1, 7.4.1, etc.
+VERSION_PATTERN = r'^\d+(\.\d+)*([.-]\w+)*$'
 
 
 @task()
@@ -196,8 +201,6 @@ class search_vulns(Vuln):
 		Returns:
 			tuple: (product, version) where either can be empty string
 		"""
-		import re
-		
 		if not query:
 			return '', ''
 		
@@ -208,10 +211,7 @@ class search_vulns(Vuln):
 		# If the last part looks like a version number, treat everything before it as the product name
 		if len(parts) >= 2:
 			last_part = parts[-1]
-			# Use a more robust regex pattern to identify version strings
-			# Matches patterns like: 1.0, 1.2.3, 2.4.39, 1.0.0-rc1, 7.4.1, etc.
-			version_pattern = r'^\d+(\.\d+)*([.-]\w+)*$'
-			if re.match(version_pattern, last_part):
+			if re.match(VERSION_PATTERN, last_part):
 				product = ' '.join(parts[:-1])
 				version = last_part
 				return product, version
