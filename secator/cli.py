@@ -349,7 +349,7 @@ def completion(shell, install):
 	# Get completion script
 	env_var = '_SECATOR_COMPLETE'
 	completion_cmd = f'{env_var}={shell}_source secator'
-	
+
 	try:
 		result = subprocess.run(
 			completion_cmd,
@@ -359,15 +359,15 @@ def completion(shell, install):
 			env=os.environ.copy()
 		)
 		completion_script = result.stdout
-		
+
 		if not completion_script:
 			console.print(Error(message=f'Failed to generate completion script for {shell}'))
 			sys.exit(1)
-			
+
 	except Exception as e:
 		console.print(Error(message=f'Error generating completion: {str(e)}'))
 		sys.exit(1)
-	
+
 	if install:
 		# Determine shell config file
 		shell_configs = {
@@ -375,12 +375,12 @@ def completion(shell, install):
 			'zsh': os.path.expanduser('~/.zshrc'),
 			'fish': os.path.expanduser('~/.config/fish/completions/secator.fish')
 		}
-		
+
 		config_file = shell_configs.get(shell)
 		if not config_file:
 			console.print(Error(message=f'Unsupported shell: {shell}'))
 			sys.exit(1)
-		
+
 		# For fish, write directly to completion file
 		if shell == 'fish':
 			os.makedirs(os.path.dirname(config_file), exist_ok=True)
@@ -390,7 +390,7 @@ def completion(shell, install):
 		else:
 			# For bash/zsh, add eval command to rc file
 			eval_line = f'eval "$({env_var}={shell}_source secator)"'
-			
+
 			# Check if already installed
 			if os.path.exists(config_file):
 				with open(config_file, 'r') as f:
@@ -398,7 +398,7 @@ def completion(shell, install):
 				if eval_line in content:
 					console.print(Info(message=f'Completion already installed in {config_file}'))
 					return
-			
+
 			# Add completion to config file
 			with open(config_file, 'a') as f:
 				f.write(f'\n# secator shell completion\n{eval_line}\n')
