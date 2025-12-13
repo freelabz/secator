@@ -102,6 +102,7 @@ class Runners(StrictModel):
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
 	threads: int = 50
+	prompt_timeout: int = 20
 
 
 class Security(StrictModel):
