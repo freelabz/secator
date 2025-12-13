@@ -34,6 +34,10 @@ STATE_COLORS = {
 	'REVOKED': 'bold magenta'
 }
 
+# Available drivers and exporters
+AVAILABLE_DRIVERS = ['mongodb', 'gcs']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
+
 # Vocab
 ALIVE = 'alive'
 AUTO_CALIBRATION = 'auto_calibration'

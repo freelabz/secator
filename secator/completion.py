@@ -4,12 +4,8 @@ import os
 from click.shell_completion import CompletionItem
 
 from secator.config import CONFIG
+from secator.definitions import AVAILABLE_DRIVERS, AVAILABLE_EXPORTERS
 from secator.loader import get_configs_by_type
-
-
-# Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs']
-AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
 
 
 def complete_profiles(ctx, param, incomplete):
