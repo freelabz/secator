@@ -211,6 +211,40 @@ To figure out which languages or tools are installed on your system (along with 
 secator health
 ```
 
+### Shell completion
+
+`secator` supports shell completion for bash, zsh, and fish. This provides auto-completion for:
+- Task names (e.g., `nmap`, `httpx`, `nuclei`)
+- Workflow names (e.g., `url_crawl`, `subdomain_recon`)
+- Scan names (e.g., `host`, `domain`, `network`)
+- CLI options like `--profiles`, `--workspace`, `--driver`, `--output`
+
+To install shell completion:
+
+**Bash:**
+```sh
+secator util completion --shell bash --install
+source ~/.bashrc
+```
+
+**Zsh:**
+```sh
+secator util completion --shell zsh --install
+source ~/.zshrc
+```
+
+**Fish:**
+```sh
+secator util completion --shell fish --install
+```
+
+After installation, you can use tab completion:
+```sh
+secator task n<TAB>     # completes to nmap, naabu, nuclei, etc.
+secator w url_<TAB>     # completes to url_crawl, url_fuzz, url_dirsearch, etc.
+secator x nmap --profiles ag<TAB>  # completes to aggressive
+```
+
 ## Installing tools
 
 `secator` auto-installs tools when you first use them.
