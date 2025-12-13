@@ -1,30 +1,30 @@
 import time
-from dataclasses import dataclass, field
+from typing import Dict, List
+from pydantic import Field
 
 from secator.definitions import CPES, EXTRA_DATA, HOST, IP, PORT
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, format_object
 
 
-@dataclass
 class Port(OutputType):
 	port: int
 	ip: str
 	state: str = 'UNKNOWN'
-	service_name: str = field(default='', compare=False)
-	cpes: list = field(default_factory=list, compare=False)
-	host: str = field(default='', repr=True, compare=False)
-	protocol: str = field(default='tcp', repr=True, compare=False)
-	extra_data: dict = field(default_factory=dict, compare=False)
-	confidence: str = field(default='low', repr=False, compare=False)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_source: str = field(default='', repr=True, compare=False)
-	_type: str = field(default='port', repr=True)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_tagged: bool = field(default=False, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	service_name: str = ''
+	cpes: List = Field(default_factory=list)
+	host: str = ''
+	protocol: str = 'tcp'
+	extra_data: Dict = Field(default_factory=dict)
+	confidence: str = 'low'
+	_timestamp: int = Field(default_factory=lambda: time.time())
+	_source: str = ''
+	_type: str = 'port'
+	_uuid: str = ''
+	_context: Dict = Field(default_factory=dict)
+	_tagged: bool = False
+	_duplicate: bool = False
+	_related: List = Field(default_factory=list)
 
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (PORT, IP)

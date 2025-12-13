@@ -1,7 +1,5 @@
 import csv as _csv
 
-from dataclasses import fields
-
 from secator.exporters._base import Exporter
 from secator.rich import console
 from secator.output_types import FINDING_TYPES
@@ -17,7 +15,7 @@ class CsvExporter(Exporter):
 
 		for output_type, items in results.items():
 			output_cls = [o for o in FINDING_TYPES if o._type == output_type][0]
-			keys = [o.name for o in fields(output_cls)]
+			keys = list(output_cls.model_fields.keys())
 			items = [i.toDict() for i in items]
 			if not items:
 				continue

@@ -1,21 +1,21 @@
-from dataclasses import dataclass, field
 import time
+from typing import Dict, List
+from pydantic import Field
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, traceback_as_string, rich_escape as _s
 
 
-@dataclass
 class Error(OutputType):
 	message: str
-	traceback: str = field(default='', compare=False)
-	traceback_title: str = field(default='', compare=False)
-	_source: str = field(default='', repr=True)
-	_type: str = field(default='error', repr=True)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	traceback: str = ''
+	traceback_title: str = ''
+	_source: str = ''
+	_type: str = 'error'
+	_timestamp: int = Field(default_factory=lambda: time.time())
+	_uuid: str = ''
+	_context: Dict = Field(default_factory=dict)
+	_duplicate: bool = False
+	_related: List = Field(default_factory=list)
 
 	_table_fields = ['message', 'traceback']
 	_sort_by = ('_timestamp',)

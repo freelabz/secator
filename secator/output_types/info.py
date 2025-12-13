@@ -1,20 +1,20 @@
-from dataclasses import dataclass, field
 import time
+from typing import Dict, List
+from pydantic import Field
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi
 
 
-@dataclass
 class Info(OutputType):
 	message: str
-	task_id: str = field(default='', compare=False)
-	_source: str = field(default='', repr=True)
-	_type: str = field(default='info', repr=True)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	task_id: str = ''
+	_source: str = ''
+	_type: str = 'info'
+	_timestamp: int = Field(default_factory=lambda: time.time())
+	_uuid: str = ''
+	_context: Dict = Field(default_factory=dict)
+	_duplicate: bool = False
+	_related: List = Field(default_factory=list)
 
 	_table_fields = ['message', 'task_id']
 	_sort_by = ('_timestamp',)

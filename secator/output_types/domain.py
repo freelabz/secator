@@ -1,13 +1,13 @@
 import time
 from datetime import datetime
-from dataclasses import dataclass, field
+from typing import Dict, List
+from pydantic import Field
 
 from secator.definitions import ALIVE, DOMAIN
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, format_object
 
 
-@dataclass
 class Domain(OutputType):
 	domain: str
 	registrar: str = ''
@@ -15,15 +15,15 @@ class Domain(OutputType):
 	creation_date: str = ''
 	expiration_date: str = ''
 	registrant: str = ''
-	extra_data: dict = field(default_factory=dict, compare=False)
-	_source: str = field(default='', repr=True)
-	_type: str = field(default='domain', repr=True)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_tagged: bool = field(default=False, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	extra_data: Dict = Field(default_factory=dict)
+	_source: str = ''
+	_type: str = 'domain'
+	_timestamp: int = Field(default_factory=lambda: time.time())
+	_uuid: str = ''
+	_context: Dict = Field(default_factory=dict)
+	_tagged: bool = False
+	_duplicate: bool = False
+	_related: List = Field(default_factory=list)
 
 	_table_fields = [DOMAIN, ALIVE]
 	_sort_by = (DOMAIN,)

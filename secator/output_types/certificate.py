@@ -1,39 +1,39 @@
 import time
 from datetime import datetime, timedelta
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from pydantic import Field
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
 
 
-@dataclass
 class Certificate(OutputType):
 	host: str
-	fingerprint_sha256: str = field(default='')
-	ip: str = field(default='', compare=False)
-	raw_value: str = field(default='', compare=False)
-	subject_cn: str = field(default='', compare=False)
-	subject_an: list[str] = field(default_factory=list, compare=False)
-	not_before: datetime = field(default=None, compare=False)
-	not_after: datetime = field(default=None, compare=False)
-	issuer_dn: str = field(default='', compare=False)
-	issuer_cn: str = field(default='', compare=False)
-	issuer: str = field(default='', compare=False)
-	self_signed: bool = field(default=True, compare=False)
-	trusted: bool = field(default=False, compare=False)
-	status: str = field(default=CERTIFICATE_STATUS_UNKNOWN, compare=False)
-	keysize: int = field(default=None, compare=False)
-	serial_number: str = field(default='', compare=False)
-	ciphers: list[str] = field(default_factory=list, compare=False)
+	fingerprint_sha256: str = ''
+	ip: str = ''
+	raw_value: str = ''
+	subject_cn: str = ''
+	subject_an: List[str] = Field(default_factory=list)
+	not_before: Optional[datetime] = None
+	not_after: Optional[datetime] = None
+	issuer_dn: str = ''
+	issuer_cn: str = ''
+	issuer: str = ''
+	self_signed: bool = True
+	trusted: bool = False
+	status: str = CERTIFICATE_STATUS_UNKNOWN
+	keysize: Optional[int] = None
+	serial_number: str = ''
+	ciphers: List[str] = Field(default_factory=list)
 	# parent_certificate: 'Certificate' = None  # noqa: F821
-	_source: str = field(default='', repr=True, compare=False)
-	_type: str = field(default='certificate', repr=True)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_tagged: bool = field(default=False, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	_source: str = ''
+	_type: str = 'certificate'
+	_timestamp: int = Field(default_factory=lambda: time.time())
+	_uuid: str = ''
+	_context: Dict = Field(default_factory=dict)
+	_tagged: bool = False
+	_duplicate: bool = False
+	_related: List = Field(default_factory=list)
 	_table_fields = ['ip', 'host']
 	_sort_by = ('ip',)
 
