@@ -101,8 +101,9 @@ class search_vulns(Vuln):
 
 		# Yield each vulnerability
 		for cve_id, vuln_data in vulns.items():
-			vuln_extra_data = search_vulns.extract_extra_data(vuln_data)
-			vuln_extra_data.update(common_extra_data)
+			# Merge extra data, with vulnerability-specific data taking precedence
+			vuln_extra_data = common_extra_data.copy()
+			vuln_extra_data.update(search_vulns.extract_extra_data(vuln_data))
 			yield Vulnerability(
 				id=cve_id,
 				name=cve_id,
@@ -195,6 +196,8 @@ class search_vulns(Vuln):
 		Returns:
 			tuple: (product, version) where either can be empty string
 		"""
+		import re
+		
 		if not query:
 			return '', ''
 		
@@ -202,12 +205,13 @@ class search_vulns(Vuln):
 		if not parts:
 			return '', ''
 		
-		# Simple heuristic: if the last part looks like a version number, 
-		# treat everything before it as the product name
+		# If the last part looks like a version number, treat everything before it as the product name
 		if len(parts) >= 2:
 			last_part = parts[-1]
-			# Check if last part looks like a version (contains digits and dots/dashes)
-			if any(c.isdigit() for c in last_part) and any(c in last_part for c in ['.', '-', ':']):
+			# Use a more robust regex pattern to identify version strings
+			# Matches patterns like: 1.0, 1.2.3, 2.4.39, 1.0.0-rc1, 7.4.1, etc.
+			version_pattern = r'^\d+(\.\d+)*([.-]\w+)*$'
+			if re.match(version_pattern, last_part):
 				product = ' '.join(parts[:-1])
 				version = last_part
 				return product, version
