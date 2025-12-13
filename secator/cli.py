@@ -1091,40 +1091,53 @@ def health(json_, debug, strict, bleeding):
 	upgrade_cmd = 'secator install tools'
 	with contextmanager:
 		for tool in tools:
-			info = get_version_info(
-				tool.cmd.split(' ')[0],
-				tool.version_flag or f'{tool.opt_prefix}version',
-				tool.github_handle,
-				tool.install_github_version_prefix,
-				tool.install_cmd,
-				tool.install_version,
-				bleeding=bleeding
-			)
-			info['_name'] = tool.__name__
-			info['_type'] = 'tool'
-			row = fmt_health_table_row(info, 'tools')
-			table.add_row(*row)
-			if not info['installed']:
-				messages.append(f'{tool.__name__} is not installed.')
-				info['next_version'] = tool.install_version
-				error = True
-			elif info['outdated']:
-				msg = 'latest' if bleeding else 'supported'
-				message = (
-					f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+			if hasattr(tool, 'cmd'):
+				info = get_version_info(
+					tool.cmd.split(' ')[0],
+					tool.version_flag or f'{tool.opt_prefix}version',
+					tool.github_handle,
+					tool.install_github_version_prefix,
+					tool.install_cmd,
+					tool.install_version,
+					bleeding=bleeding
 				)
-				messages.append(message)
-				info['upgrade'] = True
-				info['next_version'] = info['latest_version']
+				info['_name'] = tool.__name__
+				info['_type'] = 'tool'
+				row = fmt_health_table_row(info, 'tools')
+				table.add_row(*row)
+				if not info['installed']:
+					messages.append(f'{tool.__name__} is not installed.')
+					info['next_version'] = tool.install_version
+					error = True
+				elif info['outdated']:
+					msg = 'latest' if bleeding else 'supported'
+					message = (
+						f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+					)
+					messages.append(message)
+					info['upgrade'] = True
+					info['next_version'] = info['latest_version']
 
-			elif info['bleeding']:
-				msg = 'latest' if bleeding else 'supported'
-				message = (
-					f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
-				)
-				messages.append(message)
-				info['downgrade'] = True
-				info['next_version'] = info['latest_version']
+				elif info['bleeding']:
+					msg = 'latest' if bleeding else 'supported'
+					message = (
+						f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+					)
+					messages.append(message)
+					info['downgrade'] = True
+					info['next_version'] = info['latest_version']
+			else:
+				info = {
+					'name': tool.__name__,
+					'_type': 'python',
+					'version': None,
+					'status': 'ok',
+					'latest_version': None,
+					'installed': False,
+					'location': None
+				}
+				row = fmt_health_table_row(info, 'python')
+				table.add_row(*row)
 			results.append(info)
 			if json_:
 				print(json.dumps(info))
@@ -1452,6 +1465,19 @@ def install_redis():
 			'Run [bold green4]secator config set celery.result_backend redis://<URL>[/]',
 			'Run [bold green4]secator worker[/] to run a worker.',
 			'Run [bold green4]secator x httpx testphp.vulnweb.com[/] to run a test task.'
+		]
+	)
+
+
+@addons.command('vulners')
+def install_vulners():
+	"Install Vulners addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[vulners]',
+		title='Vulners addon',
+		next_steps=[
+			'Run [bold green4]secator config set addons.vulners.api_key <API_KEY>[/].',
+			'Set [bold green4]secator config set providers.cve_default_provider vulners[/].',
 		]
 	)
 
@@ -1857,12 +1883,14 @@ def task(name, verbose, check, system_exit):
 	task_name = task.__name__
 
 	# Check task command is set
-	check_test(
-		task.cmd,
-		'Check task command is set (cls.cmd)',
-		'Task has no cmd attribute.',
-		errors
-	)
+	cmd = getattr(task, 'cmd', None)
+	if cmd:
+		check_test(
+			task.cmd,
+			'Check task command is set (cls.cmd)',
+			'Task has no cmd attribute.',
+			errors
+		)
 	if errors:
 		if system_exit:
 			sys.exit(1)
@@ -1870,45 +1898,46 @@ def task(name, verbose, check, system_exit):
 			return False
 
 	# Run install
-	cmd = f'secator install tools {task_name}'
-	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
-	version_info = task.get_version_info()
-	if verbose:
-		console.print(f'Version info:\n{version_info}')
-	status = version_info['status']
-	check_test(
-		version_info['installed'],
-		'Check task is installed',
-		'Failed to install command. Fix your installation command.',
-		errors
-	)
-	check_test(
-		any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
-		'Check task installation command is defined',
-		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `github_handle`.',  # noqa: E501
-		errors
-	)
-	check_test(
-		version_info['version'],
-		'Check task version can be fetched',
-		'Failed to detect current version. Consider updating your `version_flag` class attribute.',
-		warnings,
-		warn=True
-	)
-	check_test(
-		status != 'latest unknown',
-		'Check latest version',
-		'Failed to detect latest version.',
-		warnings,
-		warn=True
-	)
-	check_test(
-		not version_info['outdated'],
-		'Check task version is up to date',
-		f'Task is not up to date (current version: {version_info["version"]}, latest: {version_info["latest_version"]}). Consider updating your `install_version` class attribute.',  # noqa: E501
-		warnings,
-		warn=True
-	)
+	if hasattr(task, 'get_version_info'):
+		cmd = f'secator install tools {task_name}'
+		ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
+		version_info = task.get_version_info()
+		if verbose:
+			console.print(f'Version info:\n{version_info}')
+		status = version_info['status']
+		check_test(
+			version_info['installed'],
+			'Check task is installed',
+			'Failed to install command. Fix your installation command.',
+			errors
+		)
+		check_test(
+			any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
+			'Check task installation command is defined',
+			'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `github_handle`.',  # noqa: E501
+			errors
+		)
+		check_test(
+			version_info['version'],
+			'Check task version can be fetched',
+			'Failed to detect current version. Consider updating your `version_flag` class attribute.',
+			warnings,
+			warn=True
+		)
+		check_test(
+			status != 'latest unknown',
+			'Check latest version',
+			'Failed to detect latest version.',
+			warnings,
+			warn=True
+		)
+		check_test(
+			not version_info['outdated'],
+			'Check task version is up to date',
+			f'Task is not up to date (current version: {version_info["version"]}, latest: {version_info["latest_version"]}). Consider updating your `install_version` class attribute.',  # noqa: E501
+			warnings,
+			warn=True
+		)
 
 	# Run task-specific tests
 	check_test(
@@ -1931,13 +1960,14 @@ def task(name, verbose, check, system_exit):
 		warnings,
 		warn=True
 	)
-	check_test(
-		task.install_version,
-		'Check task install_version is set (cls.install_version)',
-		'Task has no install_version attribute. Consider setting it to pin the tool version and ensure it does not break in the future.',  # noqa: E501
-		warnings,
-		warn=True
-	)
+	if hasattr(task, 'install_version'):
+		check_test(
+			task.install_version,
+			'Check task install_version is set (cls.install_version)',
+			'Task has no install_version attribute. Consider setting it to pin the tool version and ensure it does not break in the future.',  # noqa: E501
+			warnings,
+			warn=True
+		)
 
 	if not check:
 

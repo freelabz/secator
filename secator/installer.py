@@ -14,7 +14,6 @@ from enum import Enum
 from pathlib import Path
 
 import json
-import requests
 
 from rich.table import Table
 
@@ -24,6 +23,7 @@ from secator.definitions import OPT_NOT_SUPPORTED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
+from secator.requests import requests
 from secator.utils import debug, get_versions_from_string
 
 
@@ -62,6 +62,8 @@ class ToolInstaller:
 		name = tool_cls.__name__
 		console.print(Info(message=f'Installing {name}'))
 		status = InstallerStatus.UNKNOWN
+		if not hasattr(tool_cls, 'cmd'):
+			return InstallerStatus.INSTALL_SKIPPED_OK
 
 		# Fail if not supported
 		if not any(_ for _ in [

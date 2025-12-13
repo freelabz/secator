@@ -125,3 +125,10 @@ class PythonRunner(Runner):
 			kwargs={'args': args, 'kwargs': kwargs},
 			queue=cls.profile if not callable(cls.profile) else cls.profile(kwargs)
 		)
+
+	@classmethod
+	def s(cls, *args, **kwargs):
+		# TODO: Move this to TaskBase
+		from secator.celery import run_command
+		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
+		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=profile)

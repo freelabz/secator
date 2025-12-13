@@ -57,11 +57,19 @@ class Url(OutputType):
 	def set_computed_fields(self):
 		if not self.host:
 			self.host = urlparse(self.url).hostname
-		if self.status_code != 0:
+		if self.confidence == 'high' and self.status_code != 0:
 			self.verified = True
 		if self.title and 'Index of' in self.title:
 			self.is_directory = True
-		return self
+		if self.response_headers:
+			for k, v in self.response_headers.items():
+				new_k = k.lower().replace('-', '_')
+				if new_k == 'server':
+					self.webserver = v
+				if new_k == 'content_type':
+					self.content_type = v.split(';')[0]
+				if new_k == 'content_length':
+					self.content_length = int(v)
 
 	def __gt__(self, other):
 		# favor httpx over other url info tools

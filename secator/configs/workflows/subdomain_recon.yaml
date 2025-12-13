@@ -1,7 +1,7 @@
 type: workflow
 name: subdomain_recon
 alias: subrec
-description: Subdomain discovery
+description: Subdomain reconnaissance
 long_description: |
   Discovers subdomains associated with a target domain using multiple passive and active techniques.
   Combines passive sources, DNS queries, TLS certificate analysis, and optional brute-force methods.
@@ -17,6 +17,12 @@ options:
     help: Passive only (no requests to targets)
     default: False
     short: ps
+
+  active:
+    is_flag: True
+    help: Active only (no passive sources)
+    default: False
+    short: active
 
   brute_http:
     is_flag: True
@@ -54,10 +60,12 @@ tasks:
   _group/hunt:
     subfinder:
       description: List subdomains (passive)
+      if: not opts.active
 
     gau:
       description: List subdomains (passive)
       subs: True
+      if: not opts.active
 
     dnsx/brute:
       description: Bruteforce subdomains (DNS)

@@ -34,6 +34,20 @@ class OutputType(BaseModel):
 				pass
 		return super().__setattr__(name, value)
 
+	def merge_with(self, data: 'OutputType', exclude_fields=[]):
+		"""Enrich the OutputType object with the data from another object."""
+		for k, v in data.toDict(exclude_fields).items():
+			if v is None or v == '' or v == []:
+				continue
+			if isinstance(v, list):
+				existing = getattr(self, k, [])
+				new = [_ for _ in v if _ not in existing]
+				setattr(self, k, existing + new)
+			elif isinstance(v, dict):
+				setattr(self, k, {**getattr(self, k), **v})
+			else:
+				setattr(self, k, v)
+
 	def __str__(self):
 		return self.__class__.__name__
 

@@ -37,7 +37,8 @@ class Tag(OutputType):
 		# content_xs = trim_string(content, max_length=50).replace('\n', '/')
 		if small_content:
 			s += f' [bold orange4]{content}[/]'
-		s += f' found @ [bold]{_s(self.match)}[/]'
+		if self.match != content:
+			s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:incoming_envelope:[/]'

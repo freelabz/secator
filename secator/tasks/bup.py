@@ -16,7 +16,7 @@ from secator.tasks._categories import Http
 @task()
 class bup(Http):
 	"""40X bypasser."""
-	cmd = 'bup'
+	cmd = 'bup -d'
 	input_types = [URL]
 	output_types = [Url, Progress]
 	tags = ['url', 'bypass']

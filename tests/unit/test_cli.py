@@ -281,13 +281,13 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 1
 		assert 'Cannot run this command in offline mode' in result.output
 
-	def test_workflow_default_inputs(self):
-		"""Test that workflows with default_inputs use them when no input is provided."""
-		result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '--dry-run'])
-		assert not result.exception
-		assert result.exit_code == 0
-		assert 'No inputs provided, using default inputs:' in result.output
-		assert 'discover' in result.output
+	# def test_workflow_default_inputs(self):
+	# 	"""Test that workflows with default_inputs use them when no input is provided."""
+	# 	result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '--dry-run'])
+	# 	assert not result.exception
+	# 	assert result.exit_code == 0
+	# 	assert 'No inputs provided, using default inputs:' in result.output
+	# 	assert 'discover' in result.output
 
 	def test_workflow_explicit_input_overrides_default(self):
 		"""Test that explicit inputs override default_inputs."""

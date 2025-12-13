@@ -915,8 +915,3 @@ def is_valid_path(path):
 		return True
 	except (TypeError, ValueError):
 		return False
-
-
-def is_terminal_interactive():
-    """Check if the terminal is interactive (even if stdin is piped)."""
-    return sys.stdout.isatty() and not os.getenv('CI', '').lower() in ('true', '1')

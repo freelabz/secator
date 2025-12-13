@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import CIDR_RANGE, IP, HOST, SLUG
+from secator.definitions import CIDR_RANGE, IP, HOST
 from secator.output_types import Ip, Warning, Error, Info
 from secator.runners import Command
 
@@ -8,7 +8,7 @@ from secator.runners import Command
 class arpscan(Command):
 	"""Scan a CIDR range for alive hosts using ARP."""
 	cmd = 'arp-scan --plain --resolve --format="${ip}\t${name}\t${mac}\t${vendor}"'
-	input_types = [CIDR_RANGE, IP, HOST, SLUG]
+	input_types = [CIDR_RANGE, IP, HOST]
 	output_types = [Ip]
 	input_flag = None
 	requires_sudo = True
@@ -16,7 +16,7 @@ class arpscan(Command):
 	file_flag = '-f'
 	version_flag = '-V'
 	tags = ['ip', 'recon']
-	default_inputs = ['discover']
+	default_inputs = ''
 	opt_prefix = '--'
 	opts = {
 		'resolve': {'is_flag': True, 'short': 'r', 'default': False, 'help': 'Resolve IP addresses to hostnames'},
@@ -25,18 +25,14 @@ class arpscan(Command):
 		'ouifile': {'type': str, 'short': 'o', 'default': None, 'help': 'Use IEEE registry vendor mapping file.'},
 		'macfile': {'type': str, 'short': 'm', 'default': None, 'help': 'Use custom vendor mapping file.'},
 	}
+	github_handle = 'royhills/arp-scan'
+	install_github_bin = False
 	install_pre = {
 		'*': ['arp-scan'],
 	}
 	install_post = {
 		'*': 'sudo ln -s /usr/sbin/arp-scan /usr/local/bin/arp-scan'
 	}
-
-	@staticmethod
-	def validate_input(self, inputs):
-		if not inputs or 'discover' in inputs:
-			self.inputs = []
-		return True
 
 	@staticmethod
 	def on_cmd(self):

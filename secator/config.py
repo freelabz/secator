@@ -5,13 +5,13 @@ from typing import Dict, List
 from typing_extensions import Annotated, Self
 
 import validators
-import requests
 import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
 from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
+from secator.requests import requests
 from secator.rich import console, console_stdout
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
@@ -101,6 +101,7 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+	threads: int = 50
 
 
 class Security(StrictModel):
@@ -182,11 +183,25 @@ class MongodbAddon(StrictModel):
 	server_selection_timeout_ms: int = 5000
 
 
+class VulnersAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+
+
+class Providers(StrictModel):
+	defaults: Dict[str, str] = {
+		'cve': 'circl',
+		'exploit': 'exploitdb',
+		'ghsa': 'ghsa'
+	}
+
+
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	vulners: VulnersAddon = VulnersAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -205,6 +220,7 @@ class SecatorConfig(StrictModel):
 	drivers: Drivers = Drivers()
 	addons: Addons = Addons()
 	security: Security = Security()
+	providers: Providers = Providers()
 	offline_mode: bool = False
 
 
