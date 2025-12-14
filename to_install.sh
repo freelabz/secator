@@ -1,0 +1,1 @@
+secator install tools dalfox==v2.12.0,dnsx==v1.2.3,feroxbuster==v2.13.1,fping==v5.4,gitleaks==v8.30.0,grype==v0.104.2,httpx==v1.7.4,mapcidr==v1.1.97,nuclei==v3.6.0,subfinder==v2.10.1,testssl==v3.2.2,trivy==v0.68.1,trufflehog==v3.92.3,wafw00f==v2.3.2,whois==1.20250220.2,wpprobe==v0.8.0
