@@ -42,7 +42,7 @@ class gitleaks(Command):
 	}
 	input_type = "folder"
 	output_types = [Tag]
-	install_version = 'v8.29.1'
+	install_version = 'v8.30.0'
 	install_cmd_pre = {'*': ['git', 'make']}
 	install_cmd = (
 		f'git clone --single-branch -b [install_version] https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks_[install_version] || true &&'  # noqa: E501
