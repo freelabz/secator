@@ -61,7 +61,7 @@ class bup(Http):
 			'content_type': 'response_content_type',
 			'content_length': 'response_content_length',
 			'title': 'response_title',
-			'server': 'response_server_type',
+			'server': lambda x: x['response_server_type'].strip(),
 			'lines': 'response_lines_count',
 			'words': 'response_words_count',
 			'stored_response_path': 'response_html_filename',
