@@ -194,6 +194,7 @@ class SourceInstaller:
 			install_cmd (str): The installation command being executed.
 		"""
 		path_var = os.environ.get('PATH', '')
+		path_entries = path_var.split(os.pathsep)
 		home = os.path.expanduser('~')
 
 		# Check for go install (use word boundaries to avoid matching "cargo install")
@@ -201,13 +202,13 @@ class SourceInstaller:
 		   ' go install' in install_cmd or ' go get' in install_cmd:
 			gobin = os.environ.get('GOBIN')
 			if gobin:
-				if gobin not in path_var:
-					console.print(Warning(message=f'GOBIN directory {gobin} not found in PATH! Go binaries will not work'))  # noqa: E501
+				if gobin not in path_entries:
+					console.print(Warning(message=f'GOBIN directory {gobin} not found in PATH ! Go binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{gobin}" to add the binaries to your PATH'))
 			else:
 				default_go_bin = os.path.join(home, 'go', 'bin')
-				if default_go_bin not in path_var:
-					console.print(Warning(message=f'Go bin directory {default_go_bin} not found in PATH! Go binaries will not work'))  # noqa: E501
+				if default_go_bin not in path_entries:
+					console.print(Warning(message=f'Go bin directory {default_go_bin} not found in PATH ! Go binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{default_go_bin}" to add the binaries to your PATH'))
 
 		# Check for cargo install
@@ -215,26 +216,26 @@ class SourceInstaller:
 			cargo_home = os.environ.get('CARGO_HOME')
 			if cargo_home:
 				cargo_bin = os.path.join(cargo_home, 'bin')
-				if cargo_bin not in path_var:
-					console.print(Warning(message=f'CARGO_HOME/bin directory {cargo_bin} not found in PATH! Cargo binaries will not work'))  # noqa: E501
+				if cargo_bin not in path_entries:
+					console.print(Warning(message=f'CARGO_HOME/bin directory {cargo_bin} not found in PATH ! Cargo binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{cargo_bin}" to add the binaries to your PATH'))
 			else:
 				default_cargo_bin = os.path.join(home, '.cargo', 'bin')
-				if default_cargo_bin not in path_var:
-					console.print(Warning(message=f'Cargo bin directory {default_cargo_bin} not found in PATH! Cargo binaries will not work'))  # noqa: E501
+				if default_cargo_bin not in path_entries:
+					console.print(Warning(message=f'Cargo bin directory {default_cargo_bin} not found in PATH ! Cargo binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{default_cargo_bin}" to add the binaries to your PATH'))
 
 		# Check for pip/pipx install
 		elif 'pip install' in install_cmd or 'pipx install' in install_cmd:
 			pipx_bin_dir = os.environ.get('PIPX_BIN_DIR')
 			if pipx_bin_dir:
-				if pipx_bin_dir not in path_var:
-					console.print(Warning(message=f'PIPX_BIN_DIR directory {pipx_bin_dir} not found in PATH! Python binaries will not work'))  # noqa: E501
+				if pipx_bin_dir not in path_entries:
+					console.print(Warning(message=f'PIPX_BIN_DIR directory {pipx_bin_dir} not found in PATH ! Python binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{pipx_bin_dir}" to add the binaries to your PATH'))
 			else:
 				default_local_bin = os.path.join(home, '.local', 'bin')
-				if default_local_bin not in path_var:
-					console.print(Warning(message=f'Python bin directory {default_local_bin} not found in PATH! Python binaries will not work'))  # noqa: E501
+				if default_local_bin not in path_entries:
+					console.print(Warning(message=f'Python bin directory {default_local_bin} not found in PATH ! Python binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{default_local_bin}" to add the binaries to your PATH'))
 
 	@classmethod
