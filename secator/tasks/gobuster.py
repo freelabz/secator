@@ -24,7 +24,7 @@ class gobuster(HttpFuzzer, ReconDns):
 	file_flag = None
 	opt_prefix = '--'
 	opts = {
-		'mode': {'type': str, 'default': 'dns', 'help': 'Gobuster mode (dns, dir, vhost, fuzz, s3, gcs, tftp)'},
+		'mode': {'type': str, 'default': 'dns', 'internal': True, 'help': 'Gobuster mode (dns, dir, vhost, fuzz, s3, gcs, tftp)'},
 		'extensions': {'type': str, 'short': 'x', 'help': 'File extension(s) to search for (dir mode)'},
 		'expanded': {'is_flag': True, 'short': 'e', 'default': False, 'help': 'Expanded mode, print full URLs (dir mode)'},
 		'no_status': {'is_flag': True, 'short': 'n', 'default': False, 'help': 'Do not print status codes (dir mode)'},
@@ -68,9 +68,11 @@ class gobuster(HttpFuzzer, ReconDns):
 	profile = 'io'
 
 	@staticmethod
-	def on_cmd(self):
+	def before_init(self):
 		mode = self.get_opt_value('mode', 'dns')
-		self.cmd = self.cmd.replace('gobuster', f'gobuster {mode}')
+		
+		# Update the base command with the mode
+		self.cmd = f'gobuster {mode}'
 		
 		# Set input flag based on mode
 		if mode == 'dns':
@@ -86,10 +88,8 @@ class gobuster(HttpFuzzer, ReconDns):
 		elif mode == 'tftp':
 			self.input_flag = '--server'
 		
-		# Add quiet and no-progress flags
+		# Add quiet and no-progress flags to suppress output noise
 		self.cmd += ' --quiet --no-progress --no-error'
-		
-		return self.cmd
 
 	@staticmethod
 	def on_line(self, line):
