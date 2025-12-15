@@ -132,6 +132,8 @@ class cariddi(HttpCrawler):
 
 		# Get matches, params, errors, secrets, infos
 		url = url_item[URL]
+		parsed_url = urlparse(url)
+		url_without_param = urlunparse(parsed_url._replace(query=''))
 		matches = item.get('matches', {})
 		params = matches.get('parameters', [])
 		errors = matches.get('errors', [])
@@ -143,10 +145,8 @@ class cariddi(HttpCrawler):
 			for attack in param['attacks']:
 				extra_data = {k: v for k, v in param.items() if k not in ['name', 'attacks']}
 				extra_data['content'] = attack
-				parsed_url = urlparse(url)
-				params = parsed_url.query.split('&')
-				url_without_param = urlunparse(parsed_url._replace(query=''))
-				for p in params:
+				query_params = parsed_url.query.split('&')
+				for p in query_params:
 					p_name, p_value = p.split('=')
 					if p_name == param_name:
 						p_value = p_value
@@ -181,8 +181,6 @@ class cariddi(HttpCrawler):
 			if info['name'] in CARIDDI_RENAME_LIST:
 				info['name'] = CARIDDI_RENAME_LIST[info['name']]
 			content = info['match']
-			parsed_url = urlparse(url)
-			url_without_param = urlunparse(parsed_url._replace(query=''))
 			info['category'] = 'info'
 			info['name'] = '_'.join(f'{info["name"]}'.lower().split())
 			info['match'] = url_without_param
