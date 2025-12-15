@@ -187,6 +187,57 @@ class SourceInstaller:
 	"""Install a tool from source."""
 
 	@classmethod
+	def _check_path_warning(cls, install_cmd):
+		"""Check if the installation location is in PATH and print warnings if not.
+
+		Args:
+			install_cmd (str): The installation command being executed.
+		"""
+		path_var = os.environ.get('PATH', '')
+		home = os.path.expanduser('~')
+
+		# Check for go install (use word boundaries to avoid matching "cargo install")
+		if install_cmd.startswith('go install') or install_cmd.startswith('go get') or \
+		   ' go install' in install_cmd or ' go get' in install_cmd:
+			gobin = os.environ.get('GOBIN')
+			if gobin:
+				if gobin not in path_var:
+					console.print(Warning(message=f'GOBIN directory {gobin} not found in PATH! Go binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{gobin}" to add the binaries to your PATH'))
+			else:
+				default_go_bin = os.path.join(home, 'go', 'bin')
+				if default_go_bin not in path_var:
+					console.print(Warning(message=f'Go bin directory {default_go_bin} not found in PATH! Go binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{default_go_bin}" to add the binaries to your PATH'))
+
+		# Check for cargo install
+		elif 'cargo install' in install_cmd:
+			cargo_home = os.environ.get('CARGO_HOME')
+			if cargo_home:
+				cargo_bin = os.path.join(cargo_home, 'bin')
+				if cargo_bin not in path_var:
+					console.print(Warning(message=f'CARGO_HOME/bin directory {cargo_bin} not found in PATH! Cargo binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{cargo_bin}" to add the binaries to your PATH'))
+			else:
+				default_cargo_bin = os.path.join(home, '.cargo', 'bin')
+				if default_cargo_bin not in path_var:
+					console.print(Warning(message=f'Cargo bin directory {default_cargo_bin} not found in PATH! Cargo binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{default_cargo_bin}" to add the binaries to your PATH'))
+
+		# Check for pip/pipx install
+		elif 'pip install' in install_cmd or 'pipx install' in install_cmd:
+			pipx_bin_dir = os.environ.get('PIPX_BIN_DIR')
+			if pipx_bin_dir:
+				if pipx_bin_dir not in path_var:
+					console.print(Warning(message=f'PIPX_BIN_DIR directory {pipx_bin_dir} not found in PATH! Python binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{pipx_bin_dir}" to add the binaries to your PATH'))
+			else:
+				default_local_bin = os.path.join(home, '.local', 'bin')
+				if default_local_bin not in path_var:
+					console.print(Warning(message=f'Python bin directory {default_local_bin} not found in PATH! Python binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{default_local_bin}" to add the binaries to your PATH'))
+
+	@classmethod
 	def install(cls, config, version=None, install_prereqs=True):
 		"""Install from source.
 
@@ -253,6 +304,9 @@ class SourceInstaller:
 		elif '[install_version_strip]' in install_cmd:
 			version = version or 'latest'
 			install_cmd = install_cmd.replace('[install_version_strip]', version.lstrip('v'))
+
+		# Check PATH and warn if needed
+		cls._check_path_warning(install_cmd)
 
 		# Run command
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
