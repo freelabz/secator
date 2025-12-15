@@ -1,5 +1,6 @@
 import os
 import tempfile
+import shlex
 import yaml
 
 from secator.decorators import task
@@ -53,7 +54,7 @@ class wafw00f(Command):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 		self.headers = self.get_opt_value(HEADER)
 		if self.headers:
@@ -78,17 +79,19 @@ class wafw00f(Command):
 		with open(self.output_path, 'r') as f:
 			results = yaml.safe_load(f.read())
 
-		if len(results) > 0 and results[0]['detected']:
-			waf_name = results[0]['firewall']
-			url = results[0]['url']
-			match = results[0]['trigger_url']
-			manufacter = results[0]['manufacturer']
+		for result in results:
+			if not result['detected']:
+				continue
+			waf_name = result['firewall']
+			url = result['url']
+			match = result['trigger_url']
+			manufacter = result['manufacturer']
 			yield Tag(
 				category='info',
 				name='waf',
 				match=url,
+				value=waf_name,
 				extra_data={
-					'content': waf_name,
 					'manufacter': manufacter,
 					'trigger_url': match,
 					'headers': self.get_opt_value('header', preprocess=True)

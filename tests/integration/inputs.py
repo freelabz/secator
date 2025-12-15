@@ -25,6 +25,7 @@ INPUTS_TASKS = {
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
 	'subfinder': 'github.com',
+	'search_vulns': 'apache 2.4.39',
 	'testssl': 'free.fr',
 	'trivy': 'https://github.com/blacklanternsecurity/bbot',
 	'trufflehog': 'https://github.com/trufflesecurity/test_keys',

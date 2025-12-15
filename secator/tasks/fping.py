@@ -2,16 +2,17 @@ import validators
 
 from secator.decorators import task
 from secator.definitions import (DELAY, IP, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
-							   RETRIES, THREADS, TIMEOUT)
+							   RETRIES, THREADS, TIMEOUT, CIDR_RANGE)
 from secator.output_types import Ip
 from secator.tasks._categories import ReconIp
+from secator.utils import validate_cidr_range
 
 
 @task()
 class fping(ReconIp):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
 	cmd = 'fping -a -A'
-	input_types = [IP, HOST]
+	input_types = [IP, HOST, CIDR_RANGE]
 	output_types = [Ip]
 	tags = ['ip', 'recon']
 	file_flag = '-f'
@@ -46,6 +47,14 @@ class fping(ReconIp):
 	ignore_return_code = True
 
 	@staticmethod
+	def before_init(self):
+		for input in self.inputs:
+			if validate_cidr_range(input):
+				self.file_flag = None
+				self.input_chunk_size = 1
+				self.input_flag = '-g'
+
+	@staticmethod
 	def item_loader(self, line):
 		if '(' in line:
 
@@ -67,7 +76,7 @@ class fping(ReconIp):
 			host = ''
 		if not (validators.ipv4(ip) or validators.ipv6(ip)):
 			return
-		yield {'ip': ip, 'alive': True, 'host': host}
+		yield Ip(ip=ip, alive=True, host=host, extra_data={'protocol': 'icmp'})
 
 	@staticmethod
 	def on_line(self, line):

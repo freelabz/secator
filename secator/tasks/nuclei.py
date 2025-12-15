@@ -5,9 +5,19 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 								 PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
 								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
 								 USER_AGENT, HOST, URL)
-from secator.output_types import Progress, Vulnerability
+from secator.output_types import Progress, Tag, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
+
+
+def output_discriminator(self, item):
+	"""Discriminate between Tag and Vulnerability based on severity."""
+	if 'percent' in item:
+		return Progress
+	severity = item.get('info', {}).get('severity', '').lower()
+	if severity == 'info':
+		return Tag
+	return Vulnerability
 
 
 @task()
@@ -15,7 +25,7 @@ class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
 	cmd = 'nuclei'
 	input_types = [HOST, IP, URL]
-	output_types = [Vulnerability, Progress]
+	output_types = [Vulnerability, Tag, Progress]
 	tags = ['vuln', 'scan']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -63,6 +73,7 @@ class nuclei(VulnMulti):
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
 	item_loaders = [JSONSerializer()]
+	output_discriminator = output_discriminator
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: nuclei.id_extractor(x),
@@ -77,6 +88,14 @@ class nuclei(VulnMulti):
 			REFERENCES: lambda x: x['info'].get('reference', []),
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 			PROVIDER: 'nuclei',
+		},
+		Tag: {
+			NAME: lambda x: nuclei.name_extractor(x),
+			'match': 'matched-at',
+			'value': lambda x: nuclei.value_extractor(x),
+			'category': lambda x: 'info',
+			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x, with_tags=True),
+			'_source': 'nuclei',
 		},
 		Progress: {
 			PERCENT: lambda x: int(x['percent']),
@@ -103,21 +122,35 @@ class nuclei(VulnMulti):
 		return None
 
 	@staticmethod
-	def extra_data_extractor(item):
+	def extra_data_extractor(item, with_tags=False):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
 		data['type'] = item.get('type', '')
+		data['matcher_name'] = item.get('matcher-name', '')
 		data['template_id'] = item['template-id']
-		data['template_url'] = item.get('template-url', '')
+		template = item.get('template')
+		template_url = item.get('template-url', '')
+		if template_url.startswith('https://cloud.projectdiscovery.io') and template:
+			template_url = 'https://github.com/projectdiscovery/nuclei-templates/blob/main/' + template
+		data['template_url'] = template_url
 		for k, v in item.get('meta', {}).items():
 			data['data'].append(f'{k}: {v}')
 		data['metadata'] = item.get('metadata', {})
+		if with_tags:
+			data['tags'] = item.get('info', {}).get('tags', [])
 		return data
+
+	@staticmethod
+	def value_extractor(item):
+		values = item.get('extracted-results', '')
+		if isinstance(values, list) and values:
+			return '\n'.join(values)
+		matcher_name = item.get('matcher-name', '')
+		if matcher_name:
+			return matcher_name
+		return ''
 
 	@staticmethod
 	def name_extractor(item):
 		name = item['template-id']
-		matcher_name = item.get('matcher-name', '')
-		if matcher_name:
-			name += f':{matcher_name}'
 		return name

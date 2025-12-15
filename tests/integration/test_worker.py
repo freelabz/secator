@@ -1,5 +1,5 @@
 import unittest
-from secator.output_types import Url, Target, Port, Vulnerability, Info, Warning, Error
+from secator.output_types import Url, Target, Port, Tag, Vulnerability, Info, Warning, Error
 from secator.runners import Command
 from secator.serializers import JSONSerializer
 from time import sleep
@@ -21,7 +21,7 @@ class TestWorker(unittest.TestCase):
 		cls.cmd.stop_process()
 		cls.thread.join()
 
-	def test_httpx(self):
+	def test_httpx_command(self):
 		cmd = Command.execute(
 			'secator x httpx testphp.vulnweb.com -json',
 			name='secator_x_httpx',
@@ -30,6 +30,8 @@ class TestWorker(unittest.TestCase):
 			cls_attributes={'output_types': [Target, Url, Info], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
+		self.assertEqual(cmd.errors, [])
+		self.assertEqual(cmd.status, 'SUCCESS')
 		self.assertEqual(len(cmd.findings), 1)
 		url = Url(
 			'http://testphp.vulnweb.com',
@@ -49,7 +51,7 @@ class TestWorker(unittest.TestCase):
 			name='secator_w_host_recon',
 			process=True,
 			quiet=True,
-			cls_attributes={'output_types': [Target, Url, Port, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]}
+			cls_attributes={'output_types': [Target, Url, Port, Tag, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]}
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
 		self.assertGreater(len(cmd.results), 0)
@@ -70,21 +72,16 @@ class TestWorker(unittest.TestCase):
 			content_length=4018,
 			_source='httpx'
 		)
-		vuln = Vulnerability(
+		tag = Tag(
 			name='nginx-version',
-			provider='',
-			id='',
-			matched_at='http://vulnweb.com',
-			confidence='high',
-			confidence_nb=4,
-			severity_nb=4,
-			severity='info',
-			tags=['tech', 'nginx'],
+			match='http://vulnweb.com',
+			category='info',
+			value='nginx/1.19.0',
 			_source='nuclei_url'
 		)
 		self.assertIn(port, cmd.findings)
 		self.assertIn(url, cmd.findings)
-		self.assertIn(vuln, cmd.findings)
+		self.assertIn(tag, cmd.findings)
 
 	# def test_pd_pipe(self):
 	# 	cmd = Command.execute(

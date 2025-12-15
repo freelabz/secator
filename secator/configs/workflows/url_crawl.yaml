@@ -1,7 +1,12 @@
 type: workflow
 name: url_crawl
 alias: urlcrawl
-description: URL crawl (fast)
+description: URL crawl
+long_description: |
+  Rapidly crawls and discovers URLs from a target website using multiple crawling engines.
+  Supports both passive sources (collecting from external databases) and active crawlers
+  (spidering the website directly). Identifies interesting patterns, endpoints, and parameters.
+  Can optionally hunt for secrets in HTTP responses and probe URLs for additional information.
 tags: [http, crawl]
 input_types:
   - url
@@ -11,7 +16,13 @@ options:
     is_flag: True
     help: Passive only (no requests to targets)
     default: False
-    short: ps
+    short: passive
+
+  active:
+    is_flag: True
+    help: Active only (no passive sources)
+    default: False
+    short: active
 
   crawlers:
     type: list
@@ -32,15 +43,15 @@ tasks:
   _group/crawl:
     xurlfind3r:
       description: Crawl URLs from passive sources
-      if: "'xurlfind3r' in opts.crawlers"
+      if: "'xurlfind3r' in opts.crawlers and not opts.active"
 
     urlfinder:
       description: Crawl URLs from passive sources
-      if: "'urlfinder' in opts.crawlers"
+      if: "'urlfinder' in opts.crawlers and not opts.active"
 
     gau:
       description: Crawl URLs from passive sources
-      if: "'gau' in opts.crawlers"
+      if: "'gau' in opts.crawlers and not opts.active"
 
     katana:
       description: Crawl URLs
@@ -60,19 +71,28 @@ tasks:
       if: "'cariddi' in opts.crawlers and not opts.passive"
 
   httpx:
-    description: Run HTTP probes on passive URLs
+    description: Run HTTP probes on unverified URLs
     tech_detect: True
+    filter_duplicates: True
     targets_:
     - target.name
     - type: url
       field: url
-      condition: item.status_code == 0
+      condition: not url.verified
     if: not opts.passive
 
-  trufflehog:
-    description: Find secrets in HTTP responses
-    targets_:
-    - type: url
-      field: stored_response_path
-      condition: item.stored_response_path != ''
-    if: opts.hunt_secrets and not opts.passive
+  _group/data_hunt:
+    trufflehog:
+      description: Find secrets in HTTP responses
+      targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+      if: opts.hunt_secrets and not opts.passive
+    maigret:
+      description: Hunt email addresses found
+      targets_:
+      - type: tag
+        field: value
+        condition: item.name == 'email_address'
+      if: opts.hunt_secrets and not opts.passive

@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 
 from secator.decorators import task
 from secator.output_types import Url, Progress
@@ -15,7 +16,7 @@ from secator.tasks._categories import Http
 @task()
 class bup(Http):
 	"""40X bypasser."""
-	cmd = 'bup'
+	cmd = 'bup -d'
 	input_types = [URL]
 	output_types = [Url, Progress]
 	tags = ['url', 'bypass']
@@ -60,7 +61,7 @@ class bup(Http):
 			'content_type': 'response_content_type',
 			'content_length': 'response_content_length',
 			'title': 'response_title',
-			'server': 'response_server_type',
+			'server': lambda x: x['response_server_type'].strip(),
 			'lines': 'response_lines_count',
 			'words': 'response_words_count',
 			'stored_response_path': 'response_html_filename',
@@ -71,7 +72,8 @@ class bup(Http):
 
 	@staticmethod
 	def on_init(self):
-		self.cmd += f' -o {self.reports_folder}/.outputs/response'
+		response_path = f'{self.reports_folder}/.outputs/response'
+		self.cmd += f' -o {shlex.quote(response_path)}'
 
 	@staticmethod
 	def on_line(self, line):

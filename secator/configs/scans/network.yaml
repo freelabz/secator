@@ -1,14 +1,30 @@
 type: scan
 name: network
 description: Internal network scan
+long_description: |
+  Comprehensive security assessment of an internal network or CIDR range.
+  Discovers live hosts, scans for services and vulnerabilities, and performs URL-based
+  testing on discovered web applications. Combines CIDR reconnaissance with web application
+  security testing. Essential for internal network security assessments and lateral movement testing.
 profile: default
+default_inputs: [discover]
 input_types:
   - cidr_range
+  - slug
 workflows:
   cidr_recon:
+  host_recon:
+    targets_:
+    - type: ip
+      field: ip
+      condition: ip.alive
   url_crawl:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified

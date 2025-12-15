@@ -1,7 +1,8 @@
 import os
+import shlex
 import yaml
 
-from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
+from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
@@ -77,7 +78,7 @@ class arjun(Command):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.cmd += f' -oJ {self.output_path}'
+		self.cmd += f' -oJ {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -92,20 +93,18 @@ class arjun(Command):
 				return
 		for url, values in results.items():
 			parsed_url = urlparse(url)
+			url_without_param = urlunparse(parsed_url._replace(query=''))
 			yield Url(
 				url=url,
-				host=parsed_url.netloc,
+				host=parsed_url.hostname,
 				request_headers=values['headers'],
 				method=values['method'],
+				confidence='high'
 			)
 			for param in values['params']:
-				new_params = parse_qs(parsed_url.query).copy()
-				new_params[param] = 'FUZZ'
-				new_query = urlencode(new_params, doseq=True)
-				new_url = urlunparse(parsed_url._replace(query=new_query))
 				yield Tag(
 					category='info',
 					name='url_param',
-					match=url,
-					extra_data={'content': param, 'url': new_url}
+					value=param,
+					match=url_without_param,
 				)

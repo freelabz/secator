@@ -5,13 +5,13 @@ from typing import Dict, List
 from typing_extensions import Annotated, Self
 
 import validators
-import requests
 import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
 from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
+from secator.requests import requests
 from secator.rich import console, console_stdout
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
@@ -23,6 +23,11 @@ ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
+
+USER_AGENTS = {
+	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+	'chrome_134.0_macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+}
 
 
 class StrictModel(BaseModel, extra='forbid'):
@@ -96,6 +101,8 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+	threads: int = 50
+	prompt_timeout: int = 20
 
 
 class Security(StrictModel):
@@ -111,6 +118,7 @@ class HTTP(StrictModel):
 	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
+	default_header: str = 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']
 
 
 class Tasks(StrictModel):
@@ -176,11 +184,25 @@ class MongodbAddon(StrictModel):
 	server_selection_timeout_ms: int = 5000
 
 
+class VulnersAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+
+
+class Providers(StrictModel):
+	defaults: Dict[str, str] = {
+		'cve': 'circl',
+		'exploit': 'exploitdb',
+		'ghsa': 'ghsa'
+	}
+
+
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	vulners: VulnersAddon = VulnersAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -199,6 +221,7 @@ class SecatorConfig(StrictModel):
 	drivers: Drivers = Drivers()
 	addons: Addons = Addons()
 	security: Security = Security()
+	providers: Providers = Providers()
 	offline_mode: bool = False
 
 

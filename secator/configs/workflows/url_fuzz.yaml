@@ -1,7 +1,12 @@
 type: workflow
 name: url_fuzz
-alias: urlfuzz
+alias: uf
 description: URL fuzz (slow)
+long_description: |
+  Performs comprehensive fuzzing of URLs to discover hidden content and directories.
+  Uses multiple fuzzing engines (dirsearch, feroxbuster, ffuf) with intelligent calibration
+  to filter false positives. Probes discovered URLs, captures screenshots when configured,
+  and optionally hunts for secrets in HTTP responses. Thorough but time-intensive.
 tags: [http, fuzz]
 input_types:
   - url
@@ -21,12 +26,9 @@ options:
     is_flag: True
     help: Hunt secrets in HTTP responses (trufflehog)
     default: False
-    short: hp
+    short: hs
 
 tasks:
-  httpx/1:
-    description: Run HTTP probes on URLs
-    tech_detect: True
 
   _group/fuzz:
     dirsearch:
@@ -44,15 +46,14 @@ tasks:
         - type: target
           field: '{name}/FUZZ'
 
-  httpx/2:
-    description: Run HTTP probes on crawled URLs
+  httpx:
+    description: Run HTTP probes on fuzzed URLs
     tech_detect: True
-    screenshot: True
+    filter_duplicates: True
     targets_:
       type: url
       field: url
-      condition: opts.screenshot or opts.headless
-    # enrich: true  # TODO: add enrich capabilities
+      condition: not url.verified
 
   trufflehog:
     description: Find secrets in HTTP responses

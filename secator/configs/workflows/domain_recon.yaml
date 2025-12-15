@@ -1,7 +1,12 @@
 type: workflow
 name: domain_recon
 alias: domrec
-description: Basic domain recon (WHOIS, SSL Certificates, WAF detection...)
+description: Domain reconnaissance
+long_description: |
+  Performs comprehensive reconnaissance on a domain to gather essential information.
+  Collects WHOIS data, probes HTTP services, detects technologies, analyzes SSL/TLS security,
+  resolves DNS records, retrieves ASN information, and identifies any Web Application Firewalls (WAF).
+  Ideal for understanding a domain's infrastructure and security posture before deeper testing.
 input_types:
 - host
 
@@ -20,6 +25,7 @@ tasks:
     httpx:
       description: Run HTTP probe on domain
       tech_detect: True
+      tls_grab: True
       if: not opts.passive
 
     getasn:

@@ -1,7 +1,12 @@
 type: workflow
 name: url_params_fuzz
 alias: url_params_fuzz
-description: Extract parameters from an URL and fuzz them
+description: URL parameter fuzzing
+long_description: |
+  Identifies and tests URL parameters for vulnerabilities through intelligent fuzzing.
+  Extracts parameters from URLs using multiple techniques, then fuzzes them with various payloads
+  to discover potential security issues. Probes fuzzed URLs to verify results and optionally
+  hunts for secrets in responses. Effective for finding hidden parameters and testing input validation.
 tags: [http, fuzz]
 input_types:
   - url
@@ -13,27 +18,59 @@ options:
     default: False
     short: hs
 
+  fuzz_values:
+    is_flag: True
+    help: Fuzz discovered parameter values (ffuf)
+    default: False
+    short: fuzz
+
+  probe:
+    is_flag: True
+    help: Probe URLs (httpx)
+    default: False
+    short: probe
+  
+  fuzzers:
+    type: list
+    help: "Parameter fuzzers to use (comma-separated) (arjun, x8)"
+    default: ['arjun', 'x8']
+
 tasks:
-  httpx/1:
-    description: Probe URLs
-    follow_redirect: True
+  httpx:
+    description: Probe URLs and eliminate unresponsive ones
+    tech_detect: True
+    filter_duplicates: True
+    if: opts.probe
+
+  urlparser:
+    description: Extract base URLs
+    include: [url_base]
+    targets_:
+    - type: target
+      field: name
+      condition: not opts.probe
+    - type: url
+      field: url
+      condition: opts.probe
 
   _group/extract_params:
+
     arjun:
       description: Extract parameters from URLs
       wordlist: http_params
       targets_:
-      - type: url
-        field: '{url}/'
-        condition: "'?' not in url.url"
-
+      - type: tag
+        field: value
+        condition: item.name == 'url_base'
+      if: "'arjun' in opts.fuzzers"
     x8:
       description: Bruteforce URL params
       wordlist: http_params
       targets_:
-      - type: url
-        field: '{url}/'
-        condition: "'?' not in url.url"
+      - type: tag
+        field: '{value}/'
+        condition: item.name == 'url_base'
+      if: "'x8' in opts.fuzzers"
 
   ffuf:
     description: Fuzz URL params
@@ -43,14 +80,8 @@ tasks:
     targets_:
       - type: tag
         field: '{match}?{value}=FUZZ'
-        condition: item._source.startswith('arjun') or item._source.startswith('x8')
-
-  httpx:
-    description: Probe fuzzed URLs
-    targets_:
-      - type: url
-        field: url
-        condition: item._source.startswith('ffuf')
+        condition: item._source.startswith('urlparser') or item._source.startswith('arjun') or item._source.startswith('x8')
+    if: opts.fuzz_values
 
   trufflehog:
     description: Find secrets in HTTP responses
