@@ -66,7 +66,7 @@ class prompt(PythonRunner):
     }
 
     def yielder(self):
-        yes = self.run_opts['yes']
+        yes = self.run_opts.get('yes', False)
         in_ci = _is_ci()
 
         if len(self.inputs) == 0:
