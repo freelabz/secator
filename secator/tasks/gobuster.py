@@ -1,4 +1,5 @@
 import re
+import validators
 
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
@@ -60,6 +61,7 @@ class gobuster(HttpFuzzer, ReconDns):
 		USER_AGENT: 'useragent',
 		WORDLIST: 'wordlist',
 	}
+	encoding = 'ansi'
 	install_version = 'v3.8.2'
 	install_cmd = 'go install -v github.com/OJ/gobuster/v3@[install_version]'
 	github_handle = 'OJ/gobuster'
@@ -100,26 +102,25 @@ class gobuster(HttpFuzzer, ReconDns):
 	def on_line(self, line):
 		"""Parse gobuster output line by line."""
 		if not line or line.startswith('==============='):
-			return None
+			return line
 		if line.startswith('[+]') or line.startswith('[-]') or line.startswith('[INFO]'):
-			return None
+			return line
 		
 		mode = self.get_opt_value('mode', 'dns')
 		
 		if mode == 'dns':
-			# DNS mode output: "Found: subdomain.example.com"
-			# or with IPs: "Found: subdomain.example.com [192.168.1.1, 192.168.1.2]"
-			match = re.match(r'^Found:\s+([a-zA-Z0-9\.\-_]+)(?:\s+\[([^\]]+)\])?', line)
+			# DNS mode output: "subdomain.example.com"
+			# or with IPs: "subdomain.example.com [192.168.1.1, 192.168.1.2]"
+			match = re.match(r'^([a-zA-Z0-9\.\-_]+)(?:\s+\[([^\]]+)\])?', line)
 			if match:
 				subdomain_host = match.group(1)
 				ips = match.group(2)
 				
-				domain = extract_domain_info(subdomain_host, domain_only=True)
-				
+				domain = extract_domain_info(subdomain_host, domain_only=False)
 				result = {
 					'_type': 'subdomain',
 					'host': subdomain_host,
-					'domain': domain,
+					'domain': str(domain),
 					'verified': True,
 					'sources': ['dns'],
 				}
@@ -127,13 +128,13 @@ class gobuster(HttpFuzzer, ReconDns):
 				if ips:
 					result['extra_data'] = {'ips': [ip.strip() for ip in ips.split(',')]}
 				
-				return result
+				return Subdomain(**result)
 		
 		elif mode == 'dir':
 			# Dir mode output: "/admin               (Status: 200) [Size: 1234]"
 			# or expanded: "http://example.com/admin (Status: 200) [Size: 1234]"
 			match = re.match(r'^(https?://[^\s]+|/[^\s]*)\s+\(Status:\s+(\d+)\)(?:\s+\[Size:\s+(\d+)\])?', line)
-			if match:
+			if match and validators.url(match):
 				path_or_url = match.group(1)
 				status_code = int(match.group(2))
 				size = int(match.group(3)) if match.group(3) else None
@@ -156,11 +157,11 @@ class gobuster(HttpFuzzer, ReconDns):
 				if size is not None:
 					result['content_length'] = size
 				
-				return result
+				return Url(**result)
 		
 		elif mode == 'vhost':
 			# VHost mode output: "Found: subdomain.example.com (Status: 200) [Size: 1234]"
-			match = re.match(r'^Found:\s+([^\s]+)\s+\(Status:\s+(\d+)\)(?:\s+\[Size:\s+(\d+)\])?', line)
+			match = re.match(r'^([^\s]+)\s+\(Status:\s+(\d+)\)(?:\s+\[Size:\s+(\d+)\])?', line)
 			if match:
 				vhost = match.group(1)
 				status_code = int(match.group(2))
@@ -182,25 +183,8 @@ class gobuster(HttpFuzzer, ReconDns):
 				}
 				
 				if size is not None:
-					result['extra_data']['size'] = size
-				
-				return result
+					result['extra_data']['size'] = size	
+				return Subdomain(**result)
 		
-		return None
+		return line
 
-	@staticmethod
-	def item_loader(self, item):
-		"""Load parsed items into output types."""
-		if not item or not isinstance(item, dict):
-			return None
-		
-		item_type = item.pop('_type', None)
-		
-		if item_type == 'subdomain':
-			return Subdomain(**item)
-		elif item_type == 'url':
-			return Url(**item)
-		elif item_type == 'record':
-			return Record(**item)
-		
-		return None
