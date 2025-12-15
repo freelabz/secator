@@ -93,7 +93,7 @@ class ffuf(HttpFuzzer):
 			opts['header']['value']['Host'] = f'FUZZ.{host}'
 			if self.get_opt_value('wordlist') == 'http':
 				self.add_result(Info(message='Changing wordlist to http_params as the default http wordlist is not suitable for fuzzing host header'))  # noqa: E501
-				opts['wordlist']['value'] = 'http_params'
+				opts['wordlist']['value'] = 'combined_subdomains'
 		self.headers = opts['header']['value'].copy()
 
 		# Check FUZZ keyword
