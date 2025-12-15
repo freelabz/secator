@@ -1,4 +1,5 @@
 import re
+import validators
 
 from secator.decorators import task
 from secator.definitions import (DELAY, HOST, IP, OPT_NOT_SUPPORTED, PORTS,
@@ -52,17 +53,46 @@ class nc(ReconPort):
 			if isinstance(ports, str):
 				for part in ports.split(','):
 					if '-' in part:
-						start, end = part.split('-', 1)
-						port_list.extend(range(int(start), int(end) + 1))
+						start_str, end_str = part.split('-', 1)
+						try:
+							start = int(start_str)
+							end = int(end_str)
+							if not (1 <= start <= 65535 and 1 <= end <= 65535):
+								self._print(f'Invalid port range: {part}. Ports must be between 1-65535.', 'red')
+								continue
+							port_list.extend(range(start, end + 1))
+						except ValueError:
+							self._print(f'Invalid port range: {part}. Must be numeric.', 'red')
+							continue
 					else:
-						port_list.append(int(part))
+						try:
+							port = int(part)
+							if not (1 <= port <= 65535):
+								self._print(f'Invalid port: {port}. Port must be between 1-65535.', 'red')
+								continue
+							port_list.append(port)
+						except ValueError:
+							self._print(f'Invalid port: {part}. Must be numeric.', 'red')
+							continue
 			elif isinstance(ports, list):
-				port_list = [int(p) for p in ports]
+				for p in ports:
+					try:
+						port = int(p)
+						if 1 <= port <= 65535:
+							port_list.append(port)
+					except ValueError:
+						continue
 			else:
-				port_list = [int(ports)]
+				try:
+					port = int(ports)
+					if 1 <= port <= 65535:
+						port_list = [port]
+				except ValueError:
+					pass
 
 			# Append ports to command
-			self.cmd += ' ' + ' '.join(str(p) for p in port_list)
+			if port_list:
+				self.cmd += ' ' + ' '.join(str(p) for p in port_list)
 
 	@staticmethod
 	def item_loader(self, line):
@@ -106,11 +136,10 @@ class nc(ReconPort):
 			protocol = match.group(3)
 			service = match.group(4)
 
-			# Determine if it's an IP or hostname
-			is_ipv4 = re.match(r'^\d+\.\d+\.\d+\.\d+$', ip_or_host)
-			is_ipv6 = '::' in ip_or_host or ip_or_host.count(':') > 1
+			# Determine if it's an IP or hostname using validators
+			is_ip = validators.ipv4(ip_or_host) or validators.ipv6(ip_or_host)
 
-			if is_ipv4 or is_ipv6:
+			if is_ip:
 				host = ''
 				ip = ip_or_host
 			else:
