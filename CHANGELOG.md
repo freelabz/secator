@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.23.0](https://github.com/freelabz/secator/compare/v0.22.2...v0.23.0) (2025-12-13)
+
+
+### Features
+
+* add shell completion for tasks, workflows, scans, and CLI options ([#839](https://github.com/freelabz/secator/issues/839)) ([93deb0c](https://github.com/freelabz/secator/commit/93deb0c0e5174c7ab747db8278b93ea7e03229a0))
+* **tasks:** add netdetect, prompt, urlparser; workflows improvs ([#835](https://github.com/freelabz/secator/issues/835)) ([a4f1219](https://github.com/freelabz/secator/commit/a4f121904989a048b17db4d6bb3538852d83e949))
+
+
+### Bug Fixes
+
+* add retries for requests ([#836](https://github.com/freelabz/secator/issues/836)) ([e5d2a1f](https://github.com/freelabz/secator/commit/e5d2a1fef03062f3fc3180ccf7459aa567001fa2))
+* **cli:** healthcheck for python-based tools ([6acdca9](https://github.com/freelabz/secator/commit/6acdca9c08a7f1480f597c6654bcb0f9a09abc14))
+* **runner:** extract errors from last output lines using regex ([#838](https://github.com/freelabz/secator/issues/838)) ([448a07b](https://github.com/freelabz/secator/commit/448a07b963f3b7cb930e12f2869a9cbf39be1334))
+* **tasks:** add default timeout to prompt ([#840](https://github.com/freelabz/secator/issues/840)) ([05c127b](https://github.com/freelabz/secator/commit/05c127bbf51c9c4dd2bee5e71070bedc1c380aad))
+* **tasks:** add port to cidr_recon search_vulns target ([#841](https://github.com/freelabz/secator/issues/841)) ([78c9676](https://github.com/freelabz/secator/commit/78c9676c575189ed47b5129e98d630b1d1ca84a0))
+
 ## [0.22.2](https://github.com/freelabz/secator/compare/v0.22.1...v0.22.2) (2025-12-10)
 
 
