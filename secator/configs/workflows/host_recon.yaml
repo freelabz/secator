@@ -4,6 +4,7 @@ alias: hostrec
 description: Host recon
 tags: [recon, network, http]
 input_types:
+  - ip
   - host
   - cidr_range
 

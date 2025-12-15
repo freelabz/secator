@@ -133,19 +133,24 @@ class dig(ReconDns):
 		# Check if the name is a valid domain/subdomain or IP
 		is_ip = validators.ipv4(name) or validators.ipv6(name)
 		is_valid_host = validators.domain(name) or is_ip
+		input_record_type = self.get_opt_value('record_type')
 
 		# Create appropriate output objects
 		results = []
 
 		# If it's a valid subdomain and not an IP
-		if is_valid_host and not is_ip and record_type in ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT']:
-			domain = extract_domain_info(name, domain_only=True)
+		if is_valid_host and not is_ip and record_type in ['A', 'AAAA', 'AXFR', 'CNAME', 'MX', 'NS', 'TXT']:
+			domain = extract_domain_info(name, domain_only=False)
 			if domain:
+				extra_data = {}
+				if input_record_type == "AXFR":
+					extra_data = {'vhost': True}
 				subdomain = {
 					'_type': 'subdomain',
 					'host': name,
-					'domain': domain,
-					'verified': True,
+					'domain': str(domain),
+					'verified': True if input_record_type != "AXFR" else False,
+					'extra_data': extra_data,
 					'sources': ['dns']
 				}
 				results.append(subdomain)
@@ -201,6 +206,7 @@ class dig(ReconDns):
 				host=item['host'],
 				domain=item['domain'],
 				verified=item['verified'],
+				extra_data=item['extra_data'],
 				sources=item['sources']
 			)
 		elif item_type == 'ip':
