@@ -136,7 +136,7 @@ class gobuster(HttpFuzzer, ReconDns):
 				# If it's a path, construct full URL
 				if not path_or_url.startswith('http'):
 					# Get the base URL from inputs
-					base_url = self.inputs[0] if self.inputs else ''
+					base_url = self.inputs[0] if len(self.inputs) > 0 else ''
 					url = base_url.rstrip('/') + path_or_url
 				else:
 					url = path_or_url
@@ -162,7 +162,7 @@ class gobuster(HttpFuzzer, ReconDns):
 				size = int(match.group(3)) if match.group(3) else None
 				
 				# Get the base URL from inputs
-				base_url = self.inputs[0] if self.inputs else ''
+				base_url = self.inputs[0] if len(self.inputs) > 0 else ''
 				
 				result = {
 					'_type': 'subdomain',
