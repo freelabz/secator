@@ -8,7 +8,7 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 								OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
 								RETRIES, THREADS, TIMEOUT, USER_AGENT,
 								WORDLIST, URL, CONTENT_LENGTH, STATUS_CODE)
-from secator.output_types import Subdomain, Url, Record
+from secator.output_types import Subdomain, Url, Record, Info
 from secator.tasks._categories import HttpFuzzer, ReconDns
 from secator.utils import extract_domain_info
 
@@ -38,7 +38,8 @@ class gobuster(HttpFuzzer, ReconDns):
 		'resolver': {'type': str, 'help': 'Use custom DNS server (dns mode)'},
 	}
 	opt_key_map = {
-		HEADER: 'headers',
+		#HEADER: 'headers', # supported only in dns mode
+		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: 'delay',
 		DEPTH: OPT_NOT_SUPPORTED,
 		FILTER_CODES: 'status-codes-blacklist',
@@ -88,8 +89,12 @@ class gobuster(HttpFuzzer, ReconDns):
 		elif mode == 'tftp':
 			self.input_flag = '--server'
 		
-		# Add quiet and no-progress flags to suppress output noise
-		self.cmd += ' --quiet --no-progress --no-error'
+	@staticmethod
+	def on_cmd_opts(self, opts):
+		if self.get_opt_value('wordlist') == 'http':
+			self.add_result(Info(message='Changing wordlist to combined_subdomains as the default http wordlist is not suitable for fuzzing host header'))  # noqa: E501
+			opts['wordlist']['value'] = 'combined_subdomains'
+		return opts
 
 	@staticmethod
 	def on_line(self, line):
