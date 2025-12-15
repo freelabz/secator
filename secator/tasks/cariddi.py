@@ -145,19 +145,24 @@ class cariddi(HttpCrawler):
 			for attack in param['attacks']:
 				extra_data = {k: v for k, v in param.items() if k not in ['name', 'attacks']}
 				extra_data['content'] = attack
-				query_params = parsed_url.query.split('&')
-				for p in query_params:
-					p_name, p_value = p.split('=')
-					if p_name == param_name:
-						p_value = p_value
-						break
-					yield Tag(
-						category='info',
-						name='url_param',
-						value=p_name,
-						match=url_without_param,
-						extra_data={'value': p_value, 'url': url}
-					)
+				if parsed_url.query:
+					query_params = parsed_url.query.split('&')
+					for p in query_params:
+						if '=' not in p:
+							continue
+						parts = p.split('=', 1)
+						p_name = parts[0]
+						p_value = parts[1] if len(parts) > 1 else ''
+						if p_name == param_name:
+							p_value = p_value
+							break
+						yield Tag(
+							category='info',
+							name='url_param',
+							value=p_name,
+							match=url_without_param,
+							extra_data={'value': p_value, 'url': url}
+						)
 
 		for error in errors:
 			error['category'] = 'error'
