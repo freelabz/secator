@@ -1,0 +1,3 @@
+Found: www.wikipedia.org
+Found: mail.wikipedia.org [198.35.26.96]
+Found: ftp.wikipedia.org

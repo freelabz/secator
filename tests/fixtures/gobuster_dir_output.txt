@@ -1,0 +1,5 @@
+/robots.txt           (Status: 200) [Size: 28]
+/api-docs/            (Status: 200) [Size: 3103]
+/ftp                  (Status: 200) [Size: 11081]
+/main.js              (Status: 200) [Size: 399134]
+/metrics              (Status: 200) [Size: 23627]
