@@ -101,11 +101,11 @@ class nc(ReconPort):
 			# Append ports to command
 			if port_list:
 				# For banner grabbing, we need to connect to each port individually
-				# and send empty input to trigger banner responses
+				# and send input to trigger banner responses
 				if banner and len(port_list) == 1:
-					# Single port banner grab - pipe empty input to trigger banner
+					# Single port banner grab - send 'hello' to trigger responses from services
 					# Wrap in bash to ensure stderr is properly redirected
-					self.cmd = f"bash -c \"echo '' | {self.cmd} {port_list[0]} 2>&1\""
+					self.cmd = f"bash -c \"echo 'hello' | {self.cmd} {port_list[0]} 2>&1\""
 				else:
 					# Multiple ports or scan-only mode - use standard port list
 					self.cmd += ' ' + ' '.join(str(p) for p in port_list)
