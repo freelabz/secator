@@ -5,22 +5,23 @@ from secator.decorators import task
 from secator.definitions import (DELAY, HOST, IP, OPT_NOT_SUPPORTED, PORTS,
 								 PROXY, RATE_LIMIT, RETRIES, THREADS,
 								 TIMEOUT, TOP_PORTS)
-from secator.output_types import Port
+from secator.output_types import Port, Tag
 from secator.tasks._categories import ReconPort
 
 
 @task()
 class nc(ReconPort):
 	"""Netcat - TCP/IP swiss army knife for reading and writing data across network connections."""
-	cmd = 'nc -zv'
+	cmd = 'nc -v -z'
 	input_types = [HOST, IP]
-	output_types = [Port]
+	output_types = [Port, Tag]
 	tags = ['port', 'scan']
 	input_flag = None
 	file_flag = None
 	opts = {
 		'udp': {'is_flag': True, 'short': 'u', 'default': False, 'help': 'UDP mode'},
 		'verbose': {'is_flag': True, 'short': 'vv', 'default': False, 'help': 'Very verbose'},
+		'banner': {'is_flag': True, 'short': 'b', 'default': False, 'help': 'Grab banners (disables zero-I/O mode)'},
 	}
 	opt_key_map = {
 		DELAY: 'i',
@@ -35,6 +36,7 @@ class nc(ReconPort):
 		# nc opts
 		'udp': '-u',
 		'verbose': '-vv',
+		'banner': OPT_NOT_SUPPORTED,  # Handled in on_cmd
 	}
 	install_pre = {
 		'apt|apk|pacman': ['netcat-openbsd'],
@@ -47,6 +49,12 @@ class nc(ReconPort):
 	def on_cmd(self):
 		"""Build command with ports."""
 		ports = self.get_opt_value(PORTS)
+		banner = self.get_opt_value('banner')
+
+		# If banner grabbing is enabled, remove -z flag
+		if banner:
+			self.cmd = self.cmd.replace(' -z', '')
+
 		if ports:
 			# Parse ports (can be single port, range, or comma-separated)
 			port_list = []
@@ -92,11 +100,25 @@ class nc(ReconPort):
 
 			# Append ports to command
 			if port_list:
-				self.cmd += ' ' + ' '.join(str(p) for p in port_list)
+				# For banner grabbing, we need to connect to each port individually
+				# and send empty input to trigger banner responses
+				if banner and len(port_list) == 1:
+					# Single port banner grab - pipe empty input to trigger banner
+					# Wrap in bash to ensure stderr is properly redirected
+					self.cmd = f"bash -c \"echo '' | {self.cmd} {port_list[0]} 2>&1\""
+				else:
+					# Multiple ports or scan-only mode - use standard port list
+					self.cmd += ' ' + ' '.join(str(p) for p in port_list)
+
+	@staticmethod
+	def before_init(self):
+		"""Initialize state for banner collection."""
+		self.current_connection = None
+		self.banner_buffer = []
 
 	@staticmethod
 	def item_loader(self, line):
-		"""Parse nc output for port scan results.
+		"""Parse nc output for port scan results and banners.
 
 		Expected format:
 		Connection to <ip> <port> port [tcp/<service>] succeeded!
@@ -116,43 +138,89 @@ class nc(ReconPort):
 			port_num = int(match.group(3))
 			protocol = match.group(4)
 			service = match.group(5)
+		else:
+			# Try pattern with just IP
+			pattern_ip_only = r'Connection to ([^\s]+) (\d+) port \[(\w+)/([^\]]*)\] succeeded!'
+			match = re.match(pattern_ip_only, line)
+			if match:
+				ip_or_host = match.group(1)
+				port_num = int(match.group(2))
+				protocol = match.group(3)
+				service = match.group(4)
 
-			yield Port(
-				ip=ip,
-				port=port_num,
-				host=host,
-				state='open',
-				protocol=protocol,
-				service_name=service if service else '',
-			)
-			return
+				# Determine if it's an IP or hostname using validators
+				is_ip = validators.ipv4(ip_or_host) or validators.ipv6(ip_or_host)
 
-		# Try pattern with just IP
-		pattern_ip_only = r'Connection to ([^\s]+) (\d+) port \[(\w+)/([^\]]*)\] succeeded!'
-		match = re.match(pattern_ip_only, line)
-		if match:
-			ip_or_host = match.group(1)
-			port_num = int(match.group(2))
-			protocol = match.group(3)
-			service = match.group(4)
-
-			# Determine if it's an IP or hostname using validators
-			is_ip = validators.ipv4(ip_or_host) or validators.ipv6(ip_or_host)
-
-			if is_ip:
-				host = ''
-				ip = ip_or_host
+				if is_ip:
+					host = ''
+					ip = ip_or_host
+				else:
+					host = ip_or_host
+					ip = ''
 			else:
-				host = ip_or_host
-				ip = ''
+				# Check if this is banner data (not a connection message)
+				if self.current_connection and line.strip() and not line.startswith('nc:'):
+					self.banner_buffer.append(line.strip())
+				return
 
-			yield Port(
-				ip=ip,
-				port=port_num,
-				host=host,
-				state='open',
-				protocol=protocol,
-				service_name=service if service else '',
+		# If we have a match, yield the previous connection's banner if any
+		if self.current_connection and self.banner_buffer:
+			banner = '\n'.join(self.banner_buffer)
+			conn = self.current_connection
+			match_target = f"{conn['host'] or conn['ip']}:{conn['port']}"
+			yield Tag(
+				name='banner',
+				value=banner,
+				match=match_target,
+				category='banner',
+				extra_data={
+					'ip': self.current_connection['ip'],
+					'port': self.current_connection['port'],
+					'host': self.current_connection['host'],
+					'protocol': self.current_connection['protocol'],
+					'service': self.current_connection['service'],
+				}
+			)
+			self.banner_buffer = []
+
+		# Yield Port object (reduced duplication)
+		yield Port(
+			ip=ip,
+			port=port_num,
+			host=host,
+			state='open',
+			protocol=protocol,
+			service_name=service if service else '',
+		)
+
+		# Store connection info for potential banner collection
+		self.current_connection = {
+			'ip': ip,
+			'port': port_num,
+			'host': host,
+			'protocol': protocol,
+			'service': service if service else '',
+		}
+
+	@staticmethod
+	def on_cmd_done(self):
+		"""Yield any remaining banner from the last connection."""
+		if self.current_connection and self.banner_buffer:
+			banner = '\n'.join(self.banner_buffer)
+			conn = self.current_connection
+			match_target = f"{conn['host'] or conn['ip']}:{conn['port']}"
+			yield Tag(
+				name='banner',
+				value=banner,
+				match=match_target,
+				category='banner',
+				extra_data={
+					'ip': self.current_connection['ip'],
+					'port': self.current_connection['port'],
+					'host': self.current_connection['host'],
+					'protocol': self.current_connection['protocol'],
+					'service': self.current_connection['service'],
+				}
 			)
 
 	@staticmethod
