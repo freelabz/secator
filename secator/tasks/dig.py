@@ -150,6 +150,7 @@ class dig(ReconDns):
 					'host': name,
 					'domain': str(domain),
 					'verified': True if input_record_type != "AXFR" else False,
+					# 'verified': True,
 					'extra_data': extra_data,
 					'sources': ['dns']
 				}
