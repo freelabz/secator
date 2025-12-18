@@ -790,6 +790,9 @@ def convert_functions_to_strings(data):
 
 
 def headers_to_dict(header_opt):
+	# If already a dict, return as-is
+	if isinstance(header_opt, dict):
+		return header_opt
 	headers = {}
 	for header in header_opt.split(';;'):
 		split = header.strip().split(':')
@@ -823,16 +826,22 @@ def parse_raw_http_request(raw_request):
 	
 	# Parse headers
 	headers = {}
-	body_start = 1
+	body_start = len(lines)  # Default to end of lines (no body)
+	found_empty_line = False
 	for i, line in enumerate(lines[1:], start=1):
-		line = line.strip()
-		if not line:
+		line_stripped = line.strip()
+		if not line_stripped:
 			# Empty line indicates end of headers
 			body_start = i + 1
+			found_empty_line = True
 			break
-		if ':' in line:
-			key, value = line.split(':', 1)
+		if ':' in line_stripped:
+			key, value = line_stripped.split(':', 1)
 			headers[key.strip()] = value.strip()
+		else:
+			# If we encounter a line without a colon and no empty line yet, it's not a valid header format
+			# This shouldn't happen in properly formatted requests, but we'll handle it gracefully
+			break
 	
 	# Extract host from headers to construct full URL
 	host = headers.get('Host', '')
@@ -850,7 +859,7 @@ def parse_raw_http_request(raw_request):
 	
 	# Parse body (everything after the empty line)
 	body = ''
-	if body_start < len(lines):
+	if found_empty_line and body_start < len(lines):
 		body = '\n'.join(lines[body_start:]).strip()
 	
 	return {
