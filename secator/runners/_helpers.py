@@ -55,6 +55,8 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 			computed_opt = deduplicate(values)
 			if computed_opt:
 				computed_opts[key] = computed_opt
+				if len(computed_opts[key]) == 1:
+					computed_opts[key] = computed_opts[key][0]
 				opts[key] = computed_opts[key]
 	if input_extractors:
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')

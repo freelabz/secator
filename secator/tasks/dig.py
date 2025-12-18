@@ -75,8 +75,6 @@ class dig(ReconDns):
 		# Add record type
 		self.cmd += f' {record_type}'
 
-		# Input will be added automatically by the framework
-
 		# Add resolver if specified
 		if resolver:
 			self.cmd += f' @{resolver}'
@@ -134,9 +132,7 @@ class dig(ReconDns):
 		is_ip = validators.ipv4(name) or validators.ipv6(name)
 		is_valid_host = validators.domain(name) or is_ip
 		input_record_type = self.get_opt_value('record_type')
-
-		# Create appropriate output objects
-		results = []
+		resolver = self.get_opt_value('resolver')
 
 		# If it's a valid subdomain and not an IP
 		if is_valid_host and not is_ip and record_type in ['A', 'AAAA', 'AXFR', 'CNAME', 'MX', 'NS', 'TXT']:
@@ -145,86 +141,48 @@ class dig(ReconDns):
 				extra_data = {}
 				if input_record_type == "AXFR":
 					extra_data = {'vhost': True}
-				subdomain = {
-					'_type': 'subdomain',
-					'host': name,
-					'domain': str(domain),
-					'verified': True if input_record_type != "AXFR" else False,
-					# 'verified': True,
-					'extra_data': extra_data,
-					'sources': ['dns']
-				}
-				results.append(subdomain)
+				yield Ip(
+					host=name,
+					ip=resolver,
+					protocol=IpProtocol.IPv4,
+					alive=False,
+					extra_data=extra_data,
+				)
+				yield Subdomain(
+					host=name,
+					domain=str(domain),
+					verified=False,
+					extra_data=extra_data,
+					sources=['dns', 'axfr']
+				)
 
 		# For A and AAAA records, also yield IP objects
 		if record_type == 'A':
 			ip_addr = rdata.strip()
 			if validators.ipv4(ip_addr):
-				ip_obj = {
-					'_type': 'ip',
-					'host': name,
-					'ip': ip_addr,
-					'protocol': 'ipv4',
-					'alive': False
-				}
-				results.append(ip_obj)
+				yield Ip(
+					host=name,
+					ip=ip_addr,
+					protocol=IpProtocol.IPv4,
+					alive=False,
+				)
 		elif record_type == 'AAAA':
 			ip_addr = rdata.strip()
 			if validators.ipv6(ip_addr):
-				ip_obj = {
-					'_type': 'ip',
-					'host': name,
-					'ip': ip_addr,
-					'protocol': 'ipv6',
-					'alive': False
-				}
-				results.append(ip_obj)
+				yield Ip(
+					host=name,
+					ip=ip_addr,
+					protocol=IpProtocol.IPv6,
+					alive=False,
+				)
 
 		# Always create a Record object
-		record = {
-			'_type': 'record',
-			'host': name,
-			'name': rdata,
-			'type': record_type,
-			'extra_data': {
+		yield Record(
+			host=name,
+			name=rdata,
+			type=record_type,
+			extra_data={
 				'ttl': ttl,
 				'class': record_class
 			}
-		}
-		results.append(record)
-
-		# Yield all results
-		for result in results:
-			yield result
-
-	@staticmethod
-	def on_item_pre_convert(self, item):
-		"""Convert dict items to proper output types."""
-		item_type = item.get('_type')
-
-		if item_type == 'subdomain':
-			return Subdomain(
-				host=item['host'],
-				domain=item['domain'],
-				verified=item['verified'],
-				extra_data=item['extra_data'],
-				sources=item['sources']
-			)
-		elif item_type == 'ip':
-			protocol = IpProtocol.IPv4 if item['protocol'] == 'ipv4' else IpProtocol.IPv6
-			return Ip(
-				host=item['host'],
-				ip=item['ip'],
-				protocol=protocol,
-				alive=item['alive']
-			)
-		elif item_type == 'record':
-			return Record(
-				host=item['host'],
-				name=item['name'],
-				type=item['type'],
-				extra_data=item['extra_data'],
-				_source=self.unique_name
-			)
-
-		return item
+		)

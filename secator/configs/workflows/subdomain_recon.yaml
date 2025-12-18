@@ -97,6 +97,7 @@ tasks:
     httpx/probe:
       description: Run HTTP probes on subdomains
       tech_detect: True
+      tls_grab: True
       targets_:
       - type: subdomain
         field: host
