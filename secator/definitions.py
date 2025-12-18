@@ -37,6 +37,7 @@ STATE_COLORS = {
 # Vocab
 ALIVE = 'alive'
 AUTO_CALIBRATION = 'auto_calibration'
+BODY = 'body'
 CONTENT_TYPE = 'content_type'
 CONTENT_LENGTH = 'content_length'
 CERTIFICATE_STATUS_UNKNOWN = 'Unknown'

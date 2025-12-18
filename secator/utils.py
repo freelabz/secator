@@ -804,26 +804,26 @@ def headers_to_dict(header_opt):
 
 def parse_raw_http_request(raw_request):
 	"""Parse a raw HTTP request (Burp-style format) and extract method, URL, headers, and body.
-	
+
 	Args:
 		raw_request (str): Raw HTTP request string.
-	
+
 	Returns:
 		dict: Dictionary containing 'method', 'url', 'headers', and 'data'.
 	"""
 	lines = raw_request.strip().split('\n')
 	if not lines or not lines[0]:
 		return {}
-	
+
 	# Parse request line (e.g., "POST /test HTTP/1.1")
 	request_line = lines[0].strip()
 	parts = request_line.split(' ')
 	if len(parts) < 3:
 		return {}
-	
+
 	method = parts[0]
 	path = parts[1]
-	
+
 	# Parse headers
 	headers = {}
 	body_start = len(lines)  # Default to end of lines (no body)
@@ -842,26 +842,26 @@ def parse_raw_http_request(raw_request):
 			# If we encounter a line without a colon and no empty line yet, it's not a valid header format
 			# This shouldn't happen in properly formatted requests, but we'll handle it gracefully
 			break
-	
+
 	# Extract host from headers to construct full URL
 	host = headers.get('Host', '')
 	if not host:
 		return {}
-	
+
 	# Determine scheme (default to https if not specified)
 	scheme = 'https'
 	# If port 80 is explicitly in host, use http
 	if ':80' in host and not host.startswith('['):
 		scheme = 'http'
-	
+
 	# Construct full URL
 	url = f"{scheme}://{host}{path}"
-	
+
 	# Parse body (everything after the empty line)
 	body = ''
 	if found_empty_line and body_start < len(lines):
 		body = '\n'.join(lines[body_start:]).strip()
-	
+
 	return {
 		'method': method,
 		'url': url,

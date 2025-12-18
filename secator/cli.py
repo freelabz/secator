@@ -217,17 +217,35 @@ def util():
 
 
 @util.command()
-@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
+@click.option('--timeout', type=float, default=3, help='Proxy timeout (in seconds)')
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
+	import requests
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
+	proxy_str = 'proxy' if number == 1 else 'proxies'
+	console.print(f"Searching for {number} {proxy_str} ...")
 	for _ in range(number):
-		url = proxy.get()
-		console.print(url)
+		proxy_ok = False
+		attempts = 0
+		while not proxy_ok and attempts < 5:
+			attempts += 1
+			url = proxy.get()
+			console.print(f"Testing proxy {url} ...")
+			try:
+				req = requests.get('https://httpbin.org/ip', proxies={'http': url, 'https': url}, timeout=5)
+				if not req.ok:
+					continue
+			except requests.exceptions.ProxyError:
+				continue
+			except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
+				continue
+			proxy_ok = True
+			console.print(f'Proxy {url} tested successfully !')
+			console.print(url)
 
 
 @util.command()

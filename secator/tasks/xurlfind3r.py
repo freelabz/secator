@@ -2,7 +2,7 @@ import validators
 from collections import defaultdict
 from urllib.parse import urlparse, urlunparse, parse_qs
 
-from secator.definitions import HOST, URL, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT, HEADER, OPT_NOT_SUPPORTED  # noqa: E501
+from secator.definitions import HOST, URL, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT, HEADER, OPT_NOT_SUPPORTED  # noqa: E501
 from secator.output_types import Url
 from secator.decorators import task
 from secator.serializers import JSONSerializer
@@ -15,7 +15,7 @@ MAX_PARAM_OCCURRENCES = 10
 class xurlfind3r(HttpCrawler):
 	"""Discover URLs for a given domain in a simple, passive and efficient way"""
 	cmd = 'xurlfind3r'
-	tags = ['url', 'recon']
+	tags = ['url', 'crawl', 'passive']
 	input_types = [HOST, URL]
 	output_types = [Url]
 	item_loaders = [JSONSerializer()]
@@ -42,7 +42,6 @@ class xurlfind3r(HttpCrawler):
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
 		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
-		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: OPT_NOT_SUPPORTED,
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
@@ -62,7 +61,7 @@ class xurlfind3r(HttpCrawler):
 	def before_init(self):
 		# Call parent's before_init to process raw HTTP request
 		HttpCrawler.before_init(self)
-		
+
 		for idx, input in enumerate(self.inputs):
 			if validators.url(input):
 				self.inputs[idx] = urlparse(input).netloc

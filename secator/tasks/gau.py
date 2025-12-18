@@ -21,7 +21,7 @@ class gau(HttpCrawler):
 	cmd = 'gau --verbose'
 	input_types = [URL, HOST]
 	output_types = [Url, Subdomain]
-	tags = ['pattern', 'scan']
+	tags = ['url', 'crawl', 'passive']
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
