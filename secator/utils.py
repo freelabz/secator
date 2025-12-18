@@ -799,6 +799,68 @@ def headers_to_dict(header_opt):
 	return headers
 
 
+def parse_raw_http_request(raw_request):
+	"""Parse a raw HTTP request (Burp-style format) and extract method, URL, headers, and body.
+	
+	Args:
+		raw_request (str): Raw HTTP request string.
+	
+	Returns:
+		dict: Dictionary containing 'method', 'url', 'headers', and 'data'.
+	"""
+	lines = raw_request.strip().split('\n')
+	if not lines:
+		return {}
+	
+	# Parse request line (e.g., "POST /test HTTP/1.1")
+	request_line = lines[0].strip()
+	parts = request_line.split(' ')
+	if len(parts) < 3:
+		return {}
+	
+	method = parts[0]
+	path = parts[1]
+	
+	# Parse headers
+	headers = {}
+	body_start = 1
+	for i, line in enumerate(lines[1:], start=1):
+		line = line.strip()
+		if not line:
+			# Empty line indicates end of headers
+			body_start = i + 1
+			break
+		if ':' in line:
+			key, value = line.split(':', 1)
+			headers[key.strip()] = value.strip()
+	
+	# Extract host from headers to construct full URL
+	host = headers.get('Host', '')
+	if not host:
+		return {}
+	
+	# Determine scheme (default to https if not specified)
+	scheme = 'https'
+	# If port 80 is explicitly in host, use http
+	if ':80' in host and not host.startswith('['):
+		scheme = 'http'
+	
+	# Construct full URL
+	url = f"{scheme}://{host}{path}"
+	
+	# Parse body (everything after the empty line)
+	body = ''
+	if body_start < len(lines):
+		body = '\n'.join(lines[body_start:]).strip()
+	
+	return {
+		'method': method,
+		'url': url,
+		'headers': headers,
+		'data': body
+	}
+
+
 def format_object(obj, color='magenta', skip_keys=[]):
 	if isinstance(obj, list) and obj:
 		return ' [' + ', '.join([f'[{color}]{rich_escape(item)}[/]' for item in obj]) + ']'

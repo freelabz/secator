@@ -7,13 +7,13 @@ from cpe import CPE
 from secator.definitions import (CIDR_RANGE, DATA, DELAY, DEPTH, FILTER_CODES,
 								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, IP,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, PATH, PORTS, PROXY,
-								 RATE_LIMIT, RETRIES, THREADS, TIMEOUT, TOP_PORTS, URL, USER_AGENT,
+								 RATE_LIMIT, RAW, RETRIES, THREADS, TIMEOUT, TOP_PORTS, URL, USER_AGENT,
 								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
 from secator.providers._base import CVEProvider
 from secator.runners import Command
-from secator.utils import debug, process_wordlist, headers_to_dict
+from secator.utils import debug, process_wordlist, headers_to_dict, parse_raw_http_request
 
 
 def process_headers(headers_dict):
@@ -21,6 +21,24 @@ def process_headers(headers_dict):
 	for key, value in headers_dict.items():
 		headers.append(f'{key}:{value}')
 	return headers
+
+
+def process_raw_request(file_path):
+	"""Process raw HTTP request file and return parsed request data.
+	
+	Args:
+		file_path (str): Path to file containing raw HTTP request.
+	
+	Returns:
+		dict: Parsed request data with method, url, headers, and data.
+	"""
+	if not file_path:
+		return None
+	if not os.path.exists(file_path):
+		raise ValueError(f"Raw request file not found: {file_path}")
+	with open(file_path, 'r') as f:
+		raw_request = f.read()
+	return parse_raw_http_request(raw_request)
 
 
 OPTS = {
@@ -40,6 +58,7 @@ OPTS = {
 	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
+	RAW: {'type': str, 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
 	RETRIES: {'type': int, 'help': 'Retries'},
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': CONFIG.runners.threads},
 	TIMEOUT: {'type': int, 'help': 'Request timeout'},
@@ -58,7 +77,7 @@ WORDLIST_DNS = {
 }
 
 OPTS_HTTP = [
-	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
+	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RAW, RETRIES, THREADS, TIMEOUT, USER_AGENT
 ]
 
 OPTS_HTTP_CRAWLERS = OPTS_HTTP + [
@@ -90,11 +109,59 @@ class Http(Command):
 	input_types = [URL]
 	output_types = [Url]
 
+	@staticmethod
+	def before_init(self):
+		"""Process raw HTTP request if provided and set appropriate options."""
+		raw_request_data = self.get_opt_value(RAW, preprocess=True)
+		if raw_request_data:
+			# Set method from raw request
+			if raw_request_data.get('method') and not self.get_opt_value(METHOD):
+				self.run_opts[METHOD] = raw_request_data['method']
+			
+			# Set URL from raw request if not already provided
+			if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
+				self.inputs = [raw_request_data['url']]
+			
+			# Merge headers from raw request with existing headers
+			if raw_request_data.get('headers'):
+				existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
+				# Raw request headers take precedence
+				merged_headers = {**existing_headers, **raw_request_data['headers']}
+				self.run_opts[HEADER] = merged_headers
+			
+			# Set data from raw request
+			if raw_request_data.get('data') and not self.get_opt_value(DATA):
+				self.run_opts[DATA] = raw_request_data['data']
+
 
 class HttpCrawler(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
 	input_types = [URL]
 	output_types = [Url]
+
+	@staticmethod
+	def before_init(self):
+		"""Process raw HTTP request if provided and set appropriate options."""
+		raw_request_data = self.get_opt_value(RAW, preprocess=True)
+		if raw_request_data:
+			# Set method from raw request
+			if raw_request_data.get('method') and not self.get_opt_value(METHOD):
+				self.run_opts[METHOD] = raw_request_data['method']
+			
+			# Set URL from raw request if not already provided
+			if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
+				self.inputs = [raw_request_data['url']]
+			
+			# Merge headers from raw request with existing headers
+			if raw_request_data.get('headers'):
+				existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
+				# Raw request headers take precedence
+				merged_headers = {**existing_headers, **raw_request_data['headers']}
+				self.run_opts[HEADER] = merged_headers
+			
+			# Set data from raw request
+			if raw_request_data.get('data') and not self.get_opt_value(DATA):
+				self.run_opts[DATA] = raw_request_data['data']
 
 
 class HttpFuzzer(Command):
@@ -103,6 +170,30 @@ class HttpFuzzer(Command):
 	output_types = [Url]
 	enable_duplicate_check = False
 	profile = lambda opts: HttpFuzzer.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def before_init(self):
+		"""Process raw HTTP request if provided and set appropriate options."""
+		raw_request_data = self.get_opt_value(RAW, preprocess=True)
+		if raw_request_data:
+			# Set method from raw request
+			if raw_request_data.get('method') and not self.get_opt_value(METHOD):
+				self.run_opts[METHOD] = raw_request_data['method']
+			
+			# Set URL from raw request if not already provided
+			if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
+				self.inputs = [raw_request_data['url']]
+			
+			# Merge headers from raw request with existing headers
+			if raw_request_data.get('headers'):
+				existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
+				# Raw request headers take precedence
+				merged_headers = {**existing_headers, **raw_request_data['headers']}
+				self.run_opts[HEADER] = merged_headers
+			
+			# Set data from raw request
+			if raw_request_data.get('data') and not self.get_opt_value(DATA):
+				self.run_opts[DATA] = raw_request_data['data']
 
 	@staticmethod
 	def dynamic_profile(opts):
