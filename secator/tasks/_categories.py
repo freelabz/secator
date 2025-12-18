@@ -41,6 +41,36 @@ def process_raw_request(file_path):
 	return parse_raw_http_request(raw_request)
 
 
+def apply_raw_request_options(self):
+	"""Apply raw HTTP request options to task if raw option is provided.
+	
+	This function is shared across Http, HttpCrawler, and HttpFuzzer classes.
+	
+	Args:
+		self: Task instance.
+	"""
+	raw_request_data = self.get_opt_value(RAW, preprocess=True)
+	if raw_request_data:
+		# Set method from raw request
+		if raw_request_data.get('method') and not self.get_opt_value(METHOD):
+			self.run_opts[METHOD] = raw_request_data['method']
+		
+		# Set URL from raw request if not already provided
+		if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
+			self.inputs = [raw_request_data['url']]
+		
+		# Merge headers from raw request with existing headers
+		if raw_request_data.get('headers'):
+			existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
+			# Raw request headers take precedence
+			merged_headers = {**existing_headers, **raw_request_data['headers']}
+			self.run_opts[HEADER] = merged_headers
+		
+		# Set data from raw request
+		if raw_request_data.get('data') and not self.get_opt_value(DATA):
+			self.run_opts[DATA] = raw_request_data['data']
+
+
 OPTS = {
 	HEADER: {'type': str, 'short': 'H', 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'pre_process': headers_to_dict, 'process': process_headers, 'default': CONFIG.http.default_header},  # noqa: E501
 	DATA: {'type': str, 'help': 'Data to send in the request body'},
@@ -112,26 +142,7 @@ class Http(Command):
 	@staticmethod
 	def before_init(self):
 		"""Process raw HTTP request if provided and set appropriate options."""
-		raw_request_data = self.get_opt_value(RAW, preprocess=True)
-		if raw_request_data:
-			# Set method from raw request
-			if raw_request_data.get('method') and not self.get_opt_value(METHOD):
-				self.run_opts[METHOD] = raw_request_data['method']
-			
-			# Set URL from raw request if not already provided
-			if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
-				self.inputs = [raw_request_data['url']]
-			
-			# Merge headers from raw request with existing headers
-			if raw_request_data.get('headers'):
-				existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
-				# Raw request headers take precedence
-				merged_headers = {**existing_headers, **raw_request_data['headers']}
-				self.run_opts[HEADER] = merged_headers
-			
-			# Set data from raw request
-			if raw_request_data.get('data') and not self.get_opt_value(DATA):
-				self.run_opts[DATA] = raw_request_data['data']
+		apply_raw_request_options(self)
 
 
 class HttpCrawler(Command):
@@ -142,26 +153,7 @@ class HttpCrawler(Command):
 	@staticmethod
 	def before_init(self):
 		"""Process raw HTTP request if provided and set appropriate options."""
-		raw_request_data = self.get_opt_value(RAW, preprocess=True)
-		if raw_request_data:
-			# Set method from raw request
-			if raw_request_data.get('method') and not self.get_opt_value(METHOD):
-				self.run_opts[METHOD] = raw_request_data['method']
-			
-			# Set URL from raw request if not already provided
-			if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
-				self.inputs = [raw_request_data['url']]
-			
-			# Merge headers from raw request with existing headers
-			if raw_request_data.get('headers'):
-				existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
-				# Raw request headers take precedence
-				merged_headers = {**existing_headers, **raw_request_data['headers']}
-				self.run_opts[HEADER] = merged_headers
-			
-			# Set data from raw request
-			if raw_request_data.get('data') and not self.get_opt_value(DATA):
-				self.run_opts[DATA] = raw_request_data['data']
+		apply_raw_request_options(self)
 
 
 class HttpFuzzer(Command):
@@ -174,26 +166,7 @@ class HttpFuzzer(Command):
 	@staticmethod
 	def before_init(self):
 		"""Process raw HTTP request if provided and set appropriate options."""
-		raw_request_data = self.get_opt_value(RAW, preprocess=True)
-		if raw_request_data:
-			# Set method from raw request
-			if raw_request_data.get('method') and not self.get_opt_value(METHOD):
-				self.run_opts[METHOD] = raw_request_data['method']
-			
-			# Set URL from raw request if not already provided
-			if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
-				self.inputs = [raw_request_data['url']]
-			
-			# Merge headers from raw request with existing headers
-			if raw_request_data.get('headers'):
-				existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
-				# Raw request headers take precedence
-				merged_headers = {**existing_headers, **raw_request_data['headers']}
-				self.run_opts[HEADER] = merged_headers
-			
-			# Set data from raw request
-			if raw_request_data.get('data') and not self.get_opt_value(DATA):
-				self.run_opts[DATA] = raw_request_data['data']
+		apply_raw_request_options(self)
 
 	@staticmethod
 	def dynamic_profile(opts):

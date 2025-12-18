@@ -812,7 +812,7 @@ def parse_raw_http_request(raw_request):
 		dict: Dictionary containing 'method', 'url', 'headers', and 'data'.
 	"""
 	lines = raw_request.strip().split('\n')
-	if not lines:
+	if not lines or not lines[0]:
 		return {}
 	
 	# Parse request line (e.g., "POST /test HTTP/1.1")
