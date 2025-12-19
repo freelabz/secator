@@ -182,6 +182,11 @@ class MongodbAddon(StrictModel):
 	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
+	# List of field names to copy from the previous main finding when a new main
+	# replaces it during duplicate tagging.
+	# Example:
+	#   duplicate_main_copy_fields: ['severity', 'score', 'notes']
+	duplicate_main_copy_fields: List[str] = []
 
 
 class VulnersAddon(StrictModel):

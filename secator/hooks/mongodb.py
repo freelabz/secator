@@ -218,6 +218,23 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 		]
 		debug(f' --> Found {len(duplicate_ws)} workspace duplicates for item', sub='hooks.mongodb', verbose=True)
 
+		# Copy selected fields from the previous "main" finding (first workspace duplicate)
+		# into the new main finding, if configured.
+		previous_main = duplicate_ws[0] if duplicate_ws else None
+		copied_fields = {}
+		if previous_main:
+			copy_fields = CONFIG.addons.mongodb.duplicate_main_copy_fields
+			if copy_fields:
+				for field in copy_fields:
+					# Only copy if the attribute exists on the previous finding
+					if not hasattr(previous_main, field):
+						continue
+					value = getattr(previous_main, field)
+					# Skip empty values to avoid overwriting with "less useful" data
+					if value is None or value == '' or value == []:
+						continue
+					copied_fields[field] = value
+
 		related_ids = []
 		if duplicate_ws:
 			duplicate_ws_ids = [_._uuid for _ in duplicate_ws]
@@ -228,6 +245,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 		debug(f' --> Found {len(duplicate_ids)} total duplicates for item', sub='hooks.mongodb', verbose=True)
 
 		db_updates[item._uuid] = {
+			**copied_fields,
 			'_related': duplicate_ids + related_ids,
 			'_context.workspace_duplicate': False,
 			'_tagged': True
