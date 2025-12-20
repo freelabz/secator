@@ -80,8 +80,11 @@ class ffuf(HttpFuzzer):
 
 	@staticmethod
 	def before_init(self):
+		# Call parent's before_init to process raw HTTP request
+		HttpFuzzer.before_init(self)
+
 		# Add /FUZZ to URL if recursion is enabled
-		if self.get_opt_value('recursion') and not len(self.inputs) > 1 and not self.inputs[0].endswith('FUZZ'):
+		if self.get_opt_value('recursion') and not len(self.inputs) > 1 and self.inputs and not self.inputs[0].endswith('FUZZ'):  # noqa: E501
 			self._print(Info(message='Adding /FUZZ to URL as it is needed when recursion is enabled'), rich=True)
 			self.inputs[0] = self.inputs[0].rstrip('/') + '/FUZZ'
 

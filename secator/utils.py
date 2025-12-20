@@ -790,6 +790,9 @@ def convert_functions_to_strings(data):
 
 
 def headers_to_dict(header_opt):
+	# If already a dict, return as-is
+	if isinstance(header_opt, dict):
+		return header_opt
 	headers = {}
 	for header in header_opt.split(';;'):
 		split = header.strip().split(':')
@@ -797,6 +800,74 @@ def headers_to_dict(header_opt):
 		val = ':'.join(split[1:]).strip()
 		headers[key] = val
 	return headers
+
+
+def parse_raw_http_request(raw_request):
+	"""Parse a raw HTTP request (Burp-style format) and extract method, URL, headers, and body.
+
+	Args:
+		raw_request (str): Raw HTTP request string.
+
+	Returns:
+		dict: Dictionary containing 'method', 'url', 'headers', and 'data'.
+	"""
+	lines = raw_request.strip().split('\n')
+	if not lines or not lines[0]:
+		return {}
+
+	# Parse request line (e.g., "POST /test HTTP/1.1")
+	request_line = lines[0].strip()
+	parts = request_line.split(' ')
+	if len(parts) < 3:
+		return {}
+
+	method = parts[0]
+	path = parts[1]
+
+	# Parse headers
+	headers = {}
+	body_start = len(lines)  # Default to end of lines (no body)
+	found_empty_line = False
+	for i, line in enumerate(lines[1:], start=1):
+		line_stripped = line.strip()
+		if not line_stripped:
+			# Empty line indicates end of headers
+			body_start = i + 1
+			found_empty_line = True
+			break
+		if ':' in line_stripped:
+			key, value = line_stripped.split(':', 1)
+			headers[key.strip()] = value.strip()
+		else:
+			# If we encounter a line without a colon and no empty line yet, it's not a valid header format
+			# This shouldn't happen in properly formatted requests, but we'll handle it gracefully
+			break
+
+	# Extract host from headers to construct full URL
+	host = headers.get('Host', '')
+	if not host:
+		return {}
+
+	# Determine scheme (default to https if not specified)
+	scheme = 'https'
+	# If port 80 is explicitly in host, use http
+	if ':80' in host and not host.startswith('['):
+		scheme = 'http'
+
+	# Construct full URL
+	url = f"{scheme}://{host}{path}"
+
+	# Parse body (everything after the empty line)
+	body = ''
+	if found_empty_line and body_start < len(lines):
+		body = '\n'.join(lines[body_start:]).strip()
+
+	return {
+		'method': method,
+		'url': url,
+		'headers': headers,
+		'data': body
+	}
 
 
 def format_object(obj, color='magenta', skip_keys=[]):

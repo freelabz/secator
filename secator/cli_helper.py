@@ -175,6 +175,7 @@ def register_runner(cli_endpoint, config):
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
 	default_inputs = None if config.default_inputs == {} else config.default_inputs
 	input_required = default_inputs is None
+	# input_required = False
 	options = get_config_options(
 		config,
 		exec_opts=CLI_EXEC_OPTS,

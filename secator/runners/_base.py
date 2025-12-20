@@ -848,7 +848,7 @@ class Runner:
 					if doc:
 						message += f': {doc}'
 					err = Error(message=message)
-					self.add_result(err, print=False)
+					self.add_result(err, print=True)
 				return False
 			self.debug('validator success', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
 		return True
