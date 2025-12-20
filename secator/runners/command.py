@@ -372,7 +372,8 @@ class Command(Runner):
 		related to core functionality.
 		"""
 		opt_key_map = self.opt_key_map
-		proxy_opt = opt_key_map.get('proxy', False)
+		meta_opts = self.meta_opts
+		proxy_opt = opt_key_map.get('proxy', False) or 'proxy' in meta_opts
 		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
 		proxychains_flavor = getattr(self, 'proxychains_flavor', CONFIG.http.proxychains_command)
 		proxy = False

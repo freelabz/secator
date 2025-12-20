@@ -2,9 +2,10 @@ import os
 import shlex
 
 from secator.decorators import task
-from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
-								 HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
-								 PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT, HOST, IP, HOST_PORT)
+from secator.definitions import (DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+							 	 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
+								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
+								 URL, USER_AGENT, HOST, IP, HOST_PORT)
 from secator.config import CONFIG
 from secator.output_types import Url, Subdomain
 from secator.serializers import JSONSerializer
@@ -44,6 +45,7 @@ class httpx(Http):
 		'filter_duplicates': {'is_flag': True, 'short': 'fd', 'default': False, 'help': 'Filter duplicates'},
 	}
 	opt_key_map = {
+		DATA: 'body',
 		HEADER: 'header',
 		DELAY: 'delay',
 		DEPTH: OPT_NOT_SUPPORTED,
