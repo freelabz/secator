@@ -663,7 +663,7 @@ def get_distro_config():
 		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
 			installer = "apt install -y --no-install-recommends"
 			finalizer = "rm -rf /var/lib/apt/lists/*"
-		elif distrib in ["arch", "manjaro", "endeavouros"]:
+		elif distrib in ["arch", "manjaro", "endeavouros", "cachyos"]:
 			installer = "pacman -S --noconfirm --needed"
 		elif distrib in ["alpine"]:
 			installer = "apk add --no-cache"
