@@ -7,4 +7,4 @@ class ConsoleExporter(Exporter):
 		results = self.report.data['results']
 		for items in results.values():
 			for item in items:
-				console_stdout.print(item)
+				console_stdout.print(item, highlight=False)

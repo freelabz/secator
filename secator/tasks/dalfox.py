@@ -1,14 +1,16 @@
+import json
+
 from urllib.parse import urlparse
 
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
+from secator.definitions import (CONFIDENCE, DATA, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   HEADER, ID, MATCHED_AT, METHOD, NAME,
 							   OPT_NOT_SUPPORTED, PROVIDER, PROXY, RATE_LIMIT,
 							   RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL,
 							   USER_AGENT)
 from secator.output_types import Vulnerability, Url
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import VulnHttp
+from secator.tasks._categories import HttpBase
 
 DALFOX_TYPE_MAP = {
 	'G': 'Grep XSS',
@@ -18,7 +20,7 @@ DALFOX_TYPE_MAP = {
 
 
 @task()
-class dalfox(VulnHttp):
+class dalfox(HttpBase):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox'
 	input_types = [URL]
@@ -35,6 +37,7 @@ class dalfox(VulnHttp):
 		HEADER: 'header',
 		DELAY: 'delay',
 		FOLLOW_REDIRECT: 'follow-redirects',
+		DATA: 'data',
 		METHOD: 'method',
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
@@ -42,6 +45,9 @@ class dalfox(VulnHttp):
 		THREADS: 'worker',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent'
+	}
+	opt_value_map = {
+		DATA: lambda x: dalfox.format_data(x)
 	}
 	item_loaders = [JSONSerializer()]
 	output_map = {
@@ -85,3 +91,12 @@ class dalfox(VulnHttp):
 			if key not in ['type', 'severity', 'cwe']:
 				extra_data[key] = value
 		return extra_data
+
+	@staticmethod
+	def format_data(data):
+		try:
+			data = json.loads(data)
+			data = '&'.join([f'{k}={v}' for k, v in data.items()])
+			return data
+		except json.JSONDecodeError:
+			return ''

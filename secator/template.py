@@ -168,7 +168,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		if node.type == 'workflow':
 			for k, v in node.opts.items():
 				same_opts = find_same_opts(node, nodes, k)
-				conf = v.copy()
+				conf = dict(v).copy()
 				opt_name = k
 				conf['prefix'] = f'{node.type.capitalize()} {node.name}'
 				if len(same_opts) > 0:  # opt name conflict, change opt name
