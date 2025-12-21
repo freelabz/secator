@@ -20,7 +20,6 @@ workflows:
       condition: target.type == 'host'
     - type: subdomain
       field: host
-      condition: subdomain.verified
   url_crawl:
     targets_:
     - url.url
