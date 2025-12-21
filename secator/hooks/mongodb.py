@@ -234,7 +234,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 					if value_prev is None or value_prev == '' or value_prev == []:
 						continue
 					# Only overwrite if current item field isn't set
-					value_curr = item.get(field)
+					value_curr = getattr(item, field)
 					if value_curr is None or value_curr == '' or value_curr == []:
 						copied_fields[field] = value_prev
 
