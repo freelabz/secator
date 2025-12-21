@@ -229,11 +229,14 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 					# Only copy if the attribute exists on the previous finding
 					if not hasattr(previous_main, field):
 						continue
-					value = getattr(previous_main, field)
+					value_prev = getattr(previous_main, field)
 					# Skip empty values to avoid overwriting with "less useful" data
-					if value is None or value == '' or value == []:
+					if value_prev is None or value_prev == '' or value_prev == []:
 						continue
-					copied_fields[field] = value
+					# Only overwrite if current item field isn't set
+					value_curr = item.get(field)
+					if value_curr is None or value_curr == '' or value_curr == []:
+						copied_fields[field] = value_prev
 
 		related_ids = []
 		if duplicate_ws:
