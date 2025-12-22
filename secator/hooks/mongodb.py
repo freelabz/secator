@@ -220,22 +220,29 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 
 		# Copy selected fields from the previous "main" finding (first workspace duplicate)
 		# into the new main finding, if configured.
-		previous_main = duplicate_ws[0] if duplicate_ws else None
 		copied_fields = {}
-		if previous_main:
+		for previous_item in duplicate_ws:
 			copy_fields = CONFIG.addons.mongodb.duplicate_main_copy_fields
 			if copy_fields:
 				for field in copy_fields:
 					# Only copy if the attribute exists on the previous finding
-					if not hasattr(previous_main, field):
+					if not hasattr(previous_item, field):
+						debug(f'{field} not found on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
 						continue
-					value_prev = getattr(previous_main, field)
+					value_prev = getattr(previous_item, field)
+					debug(f'{field} is {value_prev} on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
 					# Skip empty values to avoid overwriting with "less useful" data
-					if value_prev is None or value_prev == '' or value_prev == []:
+					if not value_prev:
+						debug(f'{field} is empty on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
 						continue
 					# Only overwrite if current item field isn't set
 					value_curr = getattr(item, field)
-					if value_curr is None or value_curr == '' or value_curr == []:
+					debug(f'{field} is {value_curr} on {item._uuid}', sub='hooks.mongodb', verbose=True)
+					if not value_curr:
+						if field in copied_fields:
+							debug(f'{field} is already copied from previous item', sub='hooks.mongodb', verbose=True)
+							continue
+						debug(f'Using {field}={value_prev} from {previous_item._uuid} for {item._uuid}', sub='hooks.mongodb', verbose=True)
 						copied_fields[field] = value_prev
 
 		related_ids = []
