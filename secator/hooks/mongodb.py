@@ -242,7 +242,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 						if field in copied_fields:
 							debug(f'{field} is already copied from previous item', sub='hooks.mongodb', verbose=True)
 							continue
-						debug(f'Using {field}={value_prev} from {previous_item._uuid} for {item._uuid}', sub='hooks.mongodb', verbose=True)
+						debug(f'Using {field}={value_prev} from {previous_item._uuid} for {item._uuid}', sub='hooks.mongodb', verbose=True)  # noqa: E501
 						copied_fields[field] = value_prev
 
 		related_ids = []
