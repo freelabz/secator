@@ -36,6 +36,7 @@ class Scan(Runner):
 		self.enable_hooks = False   # Celery will handle hooks
 		self.enable_reports = True  # Workflow will handle reports
 		self.print_item = not self.sync
+		self.has_children = True
 
 		# Build chain of workflows
 		sigs = []
