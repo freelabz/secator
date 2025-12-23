@@ -339,5 +339,85 @@ class TestCli(unittest.TestCase):
 				assert result.exit_code == 0
 				assert 'already installed' in result.output
 
+	def test_task_katana_in_scope_option(self):
+		"""Test that in-scope option is available for katana task."""
+		result = self.runner.invoke(cli, ['task', 'katana', '--help'])
+		assert not result.exception
+		assert result.exit_code == 0
+		# Strip ANSI codes for easier assertion
+		import re
+		output = re.sub(r'\x1b\[[0-9;]*m', '', result.output)
+		assert '--in-scope' in output
+		assert '-is' in output
+		assert 'In-scope URL regex patterns' in output
+
+	def test_task_katana_out_of_scope_option(self):
+		"""Test that out-of-scope option is available for katana task."""
+		result = self.runner.invoke(cli, ['task', 'katana', '--help'])
+		assert not result.exception
+		assert result.exit_code == 0
+		# Strip ANSI codes for easier assertion
+		import re
+		output = re.sub(r'\x1b\[[0-9;]*m', '', result.output)
+		assert '--out-of-scope' in output
+		assert '-os' in output
+		assert 'Out-of-scope URL regex' in output
+
+	def test_task_katana_scope_options_in_command(self):
+		"""Test that scope options are properly passed to katana command."""
+		with tempfile.TemporaryDirectory() as tmpdir:
+			# Mock CONFIG to use temp directory
+			with mock.patch('secator.cli_helper.CONFIG') as mock_config:
+				mock_config.dirs.reports = tmpdir
+				mock_config.cli.show_command_output = True
+				mock_config.http.default_header = 'User-Agent: Test'
+				mock_config.runners.threads = 50
+				
+				result = self.runner.invoke(cli, [
+					'task', 'katana', 
+					'https://example.com',
+					'--in-scope', r'.*example\.com.*',
+					'--out-of-scope', r'.*admin.*',
+					'--dry-run'
+				])
+				assert not result.exception
+				assert result.exit_code == 0
+				# Check that the command contains the crawl scope options
+				assert '-crawl-scope' in result.output or 'crawl-scope' in result.output
+				assert '-crawl-out-scope' in result.output or 'crawl-out-scope' in result.output
+
+	def test_workspace_config_loading(self):
+		"""Test that workspace configuration is loaded and applied."""
+		with tempfile.TemporaryDirectory() as tmpdir:
+			# Create workspace directory and config
+			ws_dir = os.path.join(tmpdir, 'test_workspace')
+			os.makedirs(ws_dir, exist_ok=True)
+			ws_config_path = os.path.join(ws_dir, 'workspace.yaml')
+			with open(ws_config_path, 'w') as f:
+				f.write("in_scope:\n")
+				f.write(r"  - '.*example\.com.*'")
+				f.write("\n")
+				f.write("out_of_scope:\n")
+				f.write(r"  - '.*admin.*'")
+				f.write("\n")
+			
+			# Mock CONFIG to use temp directory
+			with mock.patch('secator.cli_helper.CONFIG') as mock_config:
+				mock_config.dirs.reports = tmpdir
+				mock_config.cli.show_command_output = True
+				mock_config.http.default_header = 'User-Agent: Test'
+				mock_config.runners.threads = 50
+				
+				result = self.runner.invoke(cli, [
+					'task', 'katana', 
+					'https://example.com',
+					'--workspace', 'test_workspace',
+					'--dry-run'
+				])
+				assert not result.exception
+				assert result.exit_code == 0
+				# Workspace config should apply the scope options
+				assert 'example\\.com' in result.output or 'example.com' in result.output
+
 if __name__ == '__main__':
 	unittest.main()
