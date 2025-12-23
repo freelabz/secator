@@ -1,24 +1,24 @@
 import time
-from dataclasses import dataclass, field
+from typing import Dict, List
+from pydantic import Field
 
 from secator.output_types._base import OutputType
 from secator.utils import rich_to_ansi
 
 
-@dataclass
 class State(OutputType):
 	"""Represents the state of a Celery task."""
 
 	task_id: str
 	state: str
-	_type: str = field(default='state', repr=True)
-	_source: str = field(default='', repr=True, compare=False)
-	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
-	_uuid: str = field(default='', repr=True, compare=False)
-	_context: dict = field(default_factory=dict, repr=True, compare=False)
-	_tagged: bool = field(default=False, repr=True, compare=False)
-	_duplicate: bool = field(default=False, repr=True, compare=False)
-	_related: list = field(default_factory=list, compare=False)
+	_type: str = 'state'
+	_source: str = ''
+	_timestamp: int = Field(default_factory=lambda: time.time())
+	_uuid: str = ''
+	_context: Dict = Field(default_factory=dict)
+	_tagged: bool = False
+	_duplicate: bool = False
+	_related: List = Field(default_factory=list)
 	_icon = '📊'
 	_color = 'bright_blue'
 
