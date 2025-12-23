@@ -5,6 +5,7 @@ import sys
 
 from collections import OrderedDict
 from contextlib import nullcontext
+from pathlib import Path
 
 import psutil
 import rich_click as click
@@ -210,6 +211,18 @@ def register_runner(cli_endpoint, config):
 		enable_memray = opts['enable_memray']
 		contextmanager = nullcontext()
 		process = None
+
+		# Load workspace configuration if it exists
+		workspace_config_path = Path(CONFIG.dirs.reports) / ws / 'workspace.yaml'
+		if workspace_config_path.exists():
+			import yaml as yaml_lib
+			with open(workspace_config_path, 'r') as f:
+				workspace_config = yaml_lib.safe_load(f) or {}
+			# Apply workspace in_scope and out_of_scope if not already set via CLI
+			if 'in_scope' in workspace_config and (opts.get('in_scope') is None):
+				opts['in_scope'] = ','.join(workspace_config['in_scope']) if isinstance(workspace_config['in_scope'], list) else workspace_config['in_scope']
+			if 'out_of_scope' in workspace_config and (opts.get('out_of_scope') is None):
+				opts['out_of_scope'] = ','.join(workspace_config['out_of_scope']) if isinstance(workspace_config['out_of_scope'], list) else workspace_config['out_of_scope']
 
 		# Set dry run
 		ctx.obj['dry_run'] = dry_run
