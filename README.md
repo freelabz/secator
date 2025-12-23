@@ -70,6 +70,7 @@ and it is designed to improve productivity for pentesters and security researche
 | [getasn](https://github.com/Vulnpire/getasn)                                                          | Get ASN information from IP address.                                             | `ip/probe`        |
 | [gf](https://github.com/tomnomnom/gf)                                                              | Wrapper around grep, to help you grep for things.                                | `pattern/scan`    |
 | [gitleaks](https://github.com/gitleaks/gitleaks)                                                        | Tool for detecting secrets like passwords, API keys, and tokens in git repos, files, and stdin. | `secret/scan`     |
+| [gobuster](https://github.com/OJ/gobuster)                                                         | Directory/File, DNS and VHost busting tool written in Go.                        | `url/fuzz`, `dns/recon` |
 | [gospider](https://github.com/jaeles-project/gospider)                                                        | Fast web spider written in Go.                                                   | `url/crawl`       |
 | [grype](https://github.com/anchore/grype)                                                           | Vulnerability scanner for container images and filesystems.                      | `vuln/scan`       |
 | [h8mail](https://github.com/khast3x/h8mail)                                                          | Email information and password lookup tool.                                      | `user/recon/email` |

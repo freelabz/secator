@@ -16,6 +16,7 @@ INPUTS_TASKS = {
 	'gau': 'http://testphp.vulnweb.com',
 	'gf': 'http://localhost:3000?q=test',
     'gitleaks': str(ROOT_FOLDER),
+	'gobuster': 'wikipedia.org',
 	'gospider': 'https://danielmiessler.com/',
 	'grype': 'redis:7.4.1',
     'httpx': 'http://localhost:3000/',
