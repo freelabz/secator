@@ -7,8 +7,8 @@ from cpe import CPE
 from secator.definitions import (CIDR_RANGE, DATA, DELAY, DEPTH, FILTER_CODES,
 								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, IP,
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, PATH, PORTS, PROXY,
-								 RATE_LIMIT, RAW, RETRIES, THREADS, TIMEOUT, TOP_PORTS, URL, USER_AGENT,
-								 USERNAME, WORDLIST)
+								 RATE_LIMIT, REQUEST, RETRIES, THREADS, TIMEOUT, TOP_PORTS, URL, USER_AGENT,
+								 USERNAME, WORDLIST, REPLAY_PROXY)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
 from secator.providers._base import CVEProvider
@@ -49,7 +49,7 @@ def apply_raw_request_options(self):
 	Args:
 		self: Task instance.
 	"""
-	raw_request_data = self.get_opt_value(RAW, preprocess=True)
+	raw_request_data = self.get_opt_value(REQUEST, preprocess=True)
 	if raw_request_data:
 		# Set method from raw request
 		if raw_request_data.get('method') and not self.get_opt_value(METHOD):
@@ -63,6 +63,8 @@ def apply_raw_request_options(self):
 		if raw_request_data.get('headers'):
 			existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
 			# Raw request headers take precedence
+			print(existing_headers)
+			print(raw_request_data['headers'])
 			merged_headers = {**existing_headers, **raw_request_data['headers']}
 			self.run_opts[HEADER] = merged_headers
 
@@ -88,13 +90,14 @@ OPTS = {
 	METHOD: {'type': str, 'short': 'X', 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
-	RAW: {'type': str, 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
+	REQUEST: {'type': str, 'short': 'rf', 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
 	RETRIES: {'type': int, 'help': 'Retries'},
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': CONFIG.runners.threads},
 	TIMEOUT: {'type': int, 'short': 'to', 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
 	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use for HTTP requests'},  # noqa: E501
 	PORTS: {'type': str, 'short': 'p', 'help': 'Only scan specific ports (comma separated list, "-" for all ports)'},  # noqa: E501
+	REPLAY_PROXY: {'type': str, 'short': 'P', 'help': 'Proxy to use for replay requests'},
 	TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Scan <number> most common ports'},
 }
 
@@ -107,7 +110,7 @@ WORDLIST_DNS = {
 }
 
 OPTS_HTTP_BASE = [
-	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RAW, RETRIES, THREADS, TIMEOUT, USER_AGENT, DATA
+	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, REQUEST, RETRIES, THREADS, TIMEOUT, USER_AGENT, DATA
 ]
 OPTS_HTTP_FILTERS = [
 	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS, MATCH_CODES
@@ -115,7 +118,7 @@ OPTS_HTTP_FILTERS = [
 
 OPTS_HTTP = OPTS_HTTP_BASE + OPTS_HTTP_FILTERS
 
-OPTS_HTTP_FUZZERS = OPTS_HTTP + [WORDLIST, DATA]
+OPTS_HTTP_FUZZERS = OPTS_HTTP + [WORDLIST, DATA, REPLAY_PROXY]
 
 OPTS_HTTP_CRAWLERS = OPTS_HTTP_FUZZERS.copy()
 OPTS_HTTP_CRAWLERS.remove(DATA)

@@ -1,13 +1,15 @@
 import os
 import shlex
 
+from datetime import datetime
+
 from secator.decorators import task
 from secator.definitions import (DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							 	 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
 								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
 								 URL, USER_AGENT, HOST, IP, HOST_PORT)
 from secator.config import CONFIG
-from secator.output_types import Url, Subdomain
+from secator.output_types import Url, Subdomain, Certificate
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
 from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
@@ -114,13 +116,33 @@ class httpx(Http):
 		if tls:
 			subject_cn = tls.get('subject_cn', None)
 			subject_an = tls.get('subject_an', [])
-			cert_domains = subject_an
-			if subject_cn:
-				cert_domains.append(subject_cn)
-			for cert_domain in cert_domains:
-				subdomain = self._create_subdomain_from_tls_cert(cert_domain, item['url'])
-				if subdomain:
-					yield subdomain
+			not_after = tls.get('not_after', None)
+			if not_after:
+				not_after = datetime.strptime(not_after, '%Y-%m-%dT%H:%M:%SZ')
+			not_before = tls.get('not_before', None)
+			if not_before:
+				not_before = datetime.strptime(not_before, '%Y-%m-%dT%H:%M:%SZ')
+			cert = Certificate(
+				host=tls['host'],
+				subject_cn=subject_cn,
+				subject_an=subject_an,
+				issuer_dn=tls.get('issuer_dn', None),
+				issuer_cn=tls.get('issuer_cn', None),
+				issuer=tls.get('issuer_org', [None])[0],
+				fingerprint_sha256=tls.get('fingerprint_hash', {}).get('sha256', None),
+				not_before=not_before,
+				not_after=not_after,
+				serial_number=tls.get('serial_number', None),
+				keysize=tls.get('keysize', None),
+				status=tls.get('status'),
+			)
+			yield cert
+
+			# Create subdomains from certificate CN and ANs.
+			yield from self._create_subdomain_from_tls_cert(subject_cn, item['url'], cert)
+			for an in subject_an:
+				yield from self._create_subdomain_from_tls_cert(an, item['url'], cert)
+
 
 	@staticmethod
 	def on_end(self):
@@ -150,22 +172,27 @@ class httpx(Http):
 		item[URL] = item.get('final_url') or item[URL]
 		item['request_headers'] = self.get_opt_value('header', preprocess=True)
 		item['response_headers'] = item.get('header', {})
+		del item['host']
 		return item
 
-	def _create_subdomain_from_tls_cert(self, domain, url):
+	def _create_subdomain_from_tls_cert(self, host, url, cert):
 		"""Extract subdomains from TLS certificate."""
-		if domain.startswith('*.'):
-			domain = domain.lstrip('*.')
-		if domain in self.domains:
+		if host.startswith('*.'):
+			host = host.lstrip('*.')
+		if host in self.domains:
 			return None
 		url_domain = extract_domain_info(url)
 		url_domains = extract_subdomains_from_fqdn(url_domain.fqdn, url_domain.domain, url_domain.suffix)
-		if not url_domain or domain not in url_domains:
+		if not url_domain or host not in url_domains:
 			return None
-		self.domains.append(domain)
-		return Subdomain(
-			host=domain,
-			domain=extract_domain_info(domain, domain_only=True),
+		self.domains.append(host)
+		yield Subdomain(
+			host=host,
+			domain=extract_domain_info(host, domain_only=True),
 			verified=True,
-			sources=['tls'],
+			extra_data={
+				'tls_cert_state': 'EXPIRED' if cert.is_expired() else 'EXPIRES_SOON' if cert.is_expired(months=2) else 'VALID',  # noqa: E501
+				'tls_cert_expiration_date': cert.format_date(cert.not_after),
+			},
+			sources=['tls', 'certificate'],
 		)

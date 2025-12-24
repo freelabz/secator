@@ -40,15 +40,13 @@ class Certificate(OutputType):
 	def __str__(self) -> str:
 		return self.subject_cn
 
-	def is_expired(self) -> bool:
-		if self.not_after:
-			return self.not_after < datetime.now()
-		return True
-
-	def is_expired_soon(self, months: int = 1) -> bool:
+	def is_expired(self, months=0) -> bool:
 		if self.not_after:
 			return self.not_after < datetime.now() + timedelta(days=months * 30)
 		return True
+
+	def is_wildcard(self) -> bool:
+		return self.subject_cn and self.subject_cn.startswith('*')
 
 	@staticmethod
 	def format_date(date):
@@ -58,21 +56,24 @@ class Certificate(OutputType):
 
 	def __repr__(self) -> str:
 		s = f'📜 [bold white]{self.host}[/]'
-		s += f' [cyan]{self.status}[/]'
-		s += rf' [white]\[fingerprint={self.fingerprint_sha256[:10]}][/]'
-		if self.subject_cn:
-			s += rf' [white]\[cn={self.subject_cn}][/]'
-		if self.subject_an:
-			s += rf' [white]\[an={", ".join(self.subject_an)}][/]'
-		if self.issuer:
-			s += rf' [white]\[issuer={self.issuer}][/]'
-		elif self.issuer_cn:
-			s += rf' [white]\[issuer_cn={self.issuer_cn}][/]'
+		if self.status != CERTIFICATE_STATUS_UNKNOWN:
+			s += f' [cyan]{self.status}[/]'
+		if self.is_wildcard():
+			s += rf' \[[yellow]wildcard[/]]'
 		expiry_date = Certificate.format_date(self.not_after)
 		if self.is_expired():
-			s += f' [red]expired since {expiry_date}[/red]'
-		elif self.is_expired_soon(months=2):
-			s += f' [yellow]expires <2 months[/yellow], [yellow]valid until {expiry_date}[/yellow]'
+			s += rf' \[[red][bold]expired[/] since {expiry_date}[/]]'
+		elif self.is_expired(months=2):
+			s += rf' \[[red][bold]expires soon[/] on {expiry_date}[/]]'
 		else:
-			s += f' [green]not expired[/green], [yellow]valid until {expiry_date}[/yellow]'
+			s += rf' \[[green][bold]valid[/] until {expiry_date}[/]]'
+		if self.subject_cn:
+			s += rf' \[[red][bold]cn[/]={self.subject_cn}[/]]'
+		if self.subject_an:
+			s += rf' \[[orange4][bold]an[/]={", ".join(self.subject_an)}[/]]'
+		if self.issuer:
+			s += rf' \[[magenta][bold]issuer[/]={self.issuer}[/]]'
+		elif self.issuer_cn:
+			s += rf' \[[magenta][bold]issuer_cn[/]={self.issuer_cn}[/]]'
+		s += rf' \[[cyan][bold]fingerprint_sha256[/]={self.fingerprint_sha256[:10]}[/]]'
 		return rich_to_ansi(s)
