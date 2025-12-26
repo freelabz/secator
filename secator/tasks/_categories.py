@@ -63,9 +63,11 @@ def apply_raw_request_options(self):
 		if raw_request_data.get('headers'):
 			existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
 			# Raw request headers take precedence
-			print(existing_headers)
-			print(raw_request_data['headers'])
+		if raw_request_data.get('headers'):
+			existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
+			# Raw request headers take precedence
 			merged_headers = {**existing_headers, **raw_request_data['headers']}
+			self.run_opts[HEADER] = merged_headers
 			self.run_opts[HEADER] = merged_headers
 
 		# Set data from raw request

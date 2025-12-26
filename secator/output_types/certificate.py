@@ -59,7 +59,7 @@ class Certificate(OutputType):
 		if self.status != CERTIFICATE_STATUS_UNKNOWN:
 			s += f' [cyan]{self.status}[/]'
 		if self.is_wildcard():
-			s += rf' \[[yellow]wildcard[/]]'
+			s += r' \[[yellow]wildcard[/]]'
 		expiry_date = Certificate.format_date(self.not_after)
 		if self.is_expired():
 			s += rf' \[[red][bold]expired[/] since {expiry_date}[/]]'

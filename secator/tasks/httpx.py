@@ -172,7 +172,7 @@ class httpx(Http):
 		item[URL] = item.get('final_url') or item[URL]
 		item['request_headers'] = self.get_opt_value('header', preprocess=True)
 		item['response_headers'] = item.get('header', {})
-		del item['host']
+		item.pop('host', None)
 		return item
 
 	def _create_subdomain_from_tls_cert(self, host, url, cert):
