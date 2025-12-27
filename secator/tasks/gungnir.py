@@ -15,14 +15,15 @@ class gungnir(ReconDns):
 	tags = ['dns', 'recon', 'passive', 'ct']
 	file_flag = '-r'
 	json_flag = '-j'
+	opt_prefix = '-'
 	opts = {
-		'verbose': {'is_flag': True, 'short': 'v', 'default': False, 'help': 'Output go logs (500/429 errors) to command line'},
+		'verbose': {'is_flag': True, 'default': False, 'help': 'Output go logs (500/429 errors) to command line'},
 		'debug': {'is_flag': True, 'default': False, 'help': 'Debug CT logs to see if you are keeping up'},
-		'watch_file': {'is_flag': True, 'short': 'f', 'default': False, 'help': 'Monitor the root domain file for updates and restart the scan (requires -r flag)'},
-		'output_dir': {'type': str, 'short': 'o', 'default': None, 'help': 'Directory to store output files (one per hostname, requires -r flag)'},
-		'nats_subject': {'type': str, 'short': 'ns', 'default': None, 'help': 'NATs subject to publish domains to'},
-		'nats_url': {'type': str, 'short': 'nu', 'default': None, 'help': 'NATs URL to publish domains to'},
-		'nats_cred': {'type': str, 'short': 'nc', 'default': None, 'help': 'NATs credentials file to publish domains to'},
+		'watch_file': {'is_flag': True, 'default': False, 'help': 'Monitor the root domain file for updates and restart the scan (requires -r flag)'},
+		'output_dir': {'type': str, 'default': None, 'help': 'Directory to store output files (one per hostname, requires -r flag)'},
+		'nats_subject': {'type': str, 'default': None, 'help': 'NATs subject to publish domains to'},
+		'nats_url': {'type': str, 'default': None, 'help': 'NATs URL to publish domains to'},
+		'nats_cred': {'type': str, 'default': None, 'help': 'NATs credentials file to publish domains to'},
 	}
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,
@@ -31,6 +32,12 @@ class gungnir(ReconDns):
 		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
+		'verbose': 'v',
+		'watch_file': 'f',
+		'output_dir': 'o',
+		'nats_subject': 'ns',
+		'nats_url': 'nu',
+		'nats_cred': 'nc',
 	}
 	item_loaders = [JSONSerializer()]
 	install_version = 'v1.1.2'
