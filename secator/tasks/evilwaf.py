@@ -33,7 +33,6 @@ class evilwaf(Tagger):
 	@staticmethod
 	def on_init(self):
 		# Modify cmd to point to evilwaf.py script
-		import os
 		evilwaf_path = os.path.expanduser('~/.local/share/evilwaf/evilwaf.py')
 		self.cmd = f'python3 {evilwaf_path}'
 
@@ -85,7 +84,7 @@ class evilwaf(Tagger):
 					extra_data = {'technique': technique}
 				
 				# Get the input URL from the first input
-				match_url = self.inputs[0] if self.inputs else ''
+				match_url = self.inputs[0] if self.inputs and len(self.inputs) > 0 else ''
 				
 				yield Tag(
 					category='info',
