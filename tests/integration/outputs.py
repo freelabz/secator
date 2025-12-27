@@ -316,6 +316,24 @@ OUTPUTS_TASKS = {
             match='https://netflix.com',
             _source='wafw00f')
     ],
+    'evilwaf': [
+        Tag(
+            name='waf_bypass',
+            category='info',
+            value='admin.example.com',
+            match='https://example.com',
+            extra_data={'technique': 'subdomains'},
+            _source='evilwaf'
+        ),
+        Tag(
+            name='waf_bypass',
+            category='info',
+            value='192.168.1.100',
+            match='https://example.com',
+            extra_data={'technique': 'dns_history'},
+            _source='evilwaf'
+        )
+    ],
     'whois': [
         Domain(
             domain='wikipedia.org',

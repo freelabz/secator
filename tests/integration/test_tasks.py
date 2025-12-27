@@ -68,6 +68,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['h8mail.output_path']
 		del opts['wpprobe.output_path']
 		del opts['arjun.output_path']
+		del opts['evilwaf.output_path']
 		del opts['trivy.output_path']
 		del opts['wafw00f.output_path']
 		del opts['testssl.output_path']

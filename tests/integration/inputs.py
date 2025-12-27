@@ -12,6 +12,7 @@ INPUTS_TASKS = {
 	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
 	'dalfox': 'http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff',
 	'dnsx': 'wikipedia.org',
+	'evilwaf': False,  # disable evilwaf integration test (requires network access)
 	'ffuf': 'http://localhost:3000/FUZZ',
 	'gau': 'http://testphp.vulnweb.com',
 	'gf': 'http://localhost:3000?q=test',
