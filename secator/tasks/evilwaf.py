@@ -4,11 +4,11 @@ import os
 from secator.decorators import task
 from secator.definitions import OUTPUT_PATH, URL
 from secator.output_types import Tag, Info, Error
-from secator.runners import Command
+from secator.tasks._categories import Tagger
 
 
 @task()
-class evilwaf(Command):
+class evilwaf(Tagger):
 	"""Advanced WAF bypass tool testing various bypass techniques."""
 	cmd = 'python3'
 	input_types = [URL]
@@ -25,7 +25,7 @@ class evilwaf(Command):
 	opt_key_map = {
 		'output': 'output'
 	}
-	install_cmd = 'git clone https://github.com/matrixleons/evilwaf.git /tmp/evilwaf && cd /tmp/evilwaf && pip3 install -r requirements.txt'
+	install_cmd = 'git clone https://github.com/matrixleons/evilwaf.git ~/.local/share/evilwaf && pip3 install -r ~/.local/share/evilwaf/requirements.txt'
 	install_github_bin = False
 	github_handle = 'matrixleons/evilwaf'
 	proxy_http = False
@@ -33,7 +33,9 @@ class evilwaf(Command):
 	@staticmethod
 	def on_init(self):
 		# Modify cmd to point to evilwaf.py script
-		self.cmd = 'python3 /tmp/evilwaf/evilwaf.py'
+		import os
+		evilwaf_path = os.path.expanduser('~/.local/share/evilwaf/evilwaf.py')
+		self.cmd = f'python3 {evilwaf_path}'
 
 	@staticmethod
 	def on_cmd(self):
@@ -74,7 +76,7 @@ class evilwaf(Command):
 				if isinstance(bypass_item, dict):
 					# For dictionary items, use a key like 'ip', 'subdomain', 'header', etc.
 					value = bypass_item.get('ip') or bypass_item.get('subdomain') or bypass_item.get('header') or str(bypass_item)
-					extra_data = bypass_item
+					extra_data = {**bypass_item, 'technique': technique}
 				elif isinstance(bypass_item, str):
 					value = bypass_item
 					extra_data = {'technique': technique}
@@ -90,8 +92,5 @@ class evilwaf(Command):
 					name='waf_bypass',
 					match=match_url,
 					value=value,
-					extra_data={
-						'technique': technique,
-						**extra_data
-					}
+					extra_data=extra_data
 				)
