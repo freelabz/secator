@@ -197,6 +197,11 @@ OUTPUTS_TASKS = {
     'gospider': [
         Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider')
     ],
+    'gungnir': [
+        Subdomain(host='example.com', _source='gungnir'),
+        Subdomain(host='www.example.com', _source='gungnir'),
+        Subdomain(host='api.example.com', _source='gungnir')
+    ],
     'grype': [
 		Vulnerability(
 			name='CVE-2024-24790',
