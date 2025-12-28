@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -69,12 +70,10 @@ class Command(Runner):
 	# Input chunk size
 	input_chunk_size = CONFIG.runners.input_chunk_size
 
-	# Input required
-	input_required = True
-
 	# Flag to take a file as input
 	file_flag = None
 	file_eof_newline = False
+	file_copy_sudo = False
 
 	# Flag to enable output JSON
 	json_flag = None
@@ -107,6 +106,9 @@ class Command(Runner):
 
 	# Ignore return code
 	ignore_return_code = False
+
+	# Sudo
+	requires_sudo = False
 
 	# Return code
 	return_code = -1
@@ -147,6 +149,7 @@ class Command(Runner):
 		if node_name:
 			config.node_name = context.get('node_name')
 		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
+		self.enable_validators = run_opts.pop('enable_validators', True)
 
 		# Prepare validators
 		input_validators = []
@@ -190,9 +193,6 @@ class Command(Runner):
 		self.monitor_queue = None
 		self.process_start_time = None
 		# self.retry_count = 0  # TODO: remove this
-
-		# Sudo
-		self.requires_sudo = False
 
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
@@ -356,7 +356,8 @@ class Command(Runner):
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
 		kwargs['process'] = kwargs.get('process', False)
-		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
+		kwargs['enable_validators'] = False
+		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
 		if run:
@@ -371,7 +372,8 @@ class Command(Runner):
 		related to core functionality.
 		"""
 		opt_key_map = self.opt_key_map
-		proxy_opt = opt_key_map.get('proxy', False)
+		meta_opts = self.meta_opts
+		proxy_opt = opt_key_map.get('proxy', False) or 'proxy' in meta_opts
 		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
 		proxychains_flavor = getattr(self, 'proxychains_flavor', CONFIG.http.proxychains_command)
 		proxy = False
@@ -431,8 +433,14 @@ class Command(Runner):
 				return
 
 			# Abort if no inputs
-			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Warning(message=f'{self.unique_name} skipped (no inputs)')
+			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.default_inputs != '':
+				self.print_description()
+				self.print_command()
+				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
+				for item in self.warnings:
+					self._print_item(item)
+				for item in self.errors:
+					self._print_item(item)
 				self.skipped = True
 				return
 
@@ -525,7 +533,10 @@ class Command(Runner):
 		Returns:
 			bool: True if the command is installed, False otherwise.
 		"""
-		result = subprocess.Popen(["which", self.cmd_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		cmd = ["which", self.cmd_name]
+		if self.requires_sudo:
+			cmd = ["sudo"] + cmd
+		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		result.communicate()
 		return result.returncode == 0
 
@@ -799,7 +810,7 @@ class Command(Runner):
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
-		if not os.isatty(sys.stdin.fileno()):
+		if not sys.stdin.isatty():
 			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
 			return -1, error
 
@@ -844,9 +855,13 @@ class Command(Runner):
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
-			last_lines = last_lines[max(0, len(last_lines) - 2):]
+			last_lines = last_lines[max(0, len(last_lines) - 10):]
 			last_lines = [line for line in last_lines if line != '']
-			yield Error(message=error, traceback='\n'.join(last_lines), traceback_title='Last stdout lines')
+			errors = Command.parse_errors('\n'.join(last_lines))
+			if not errors:
+				errors = [error]
+			for error in errors:
+				yield Error(message=error, traceback='Traceback (from command output):\n' + '\n'.join(last_lines))
 
 	@staticmethod
 	def _process_opts(
@@ -950,7 +965,7 @@ class Command(Runner):
 	@staticmethod
 	def _validate_input_nonempty(self, inputs):
 		"""Input is empty."""
-		if not self.input_required:
+		if self.default_inputs is not None:
 			return True
 		if not inputs or len(inputs) == 0:
 			return False
@@ -1042,7 +1057,9 @@ class Command(Runner):
 
 		# Add JSON flag to cmd
 		if self.json_flag:
-			self.cmd += f' {self.json_flag}'
+			parts = self.json_flag.split(' ')
+			for part in parts:
+				self.cmd += f' {shlex.quote(part)}'
 
 		# Opts str
 		opts_str = ''
@@ -1146,6 +1163,11 @@ class Command(Runner):
 				if self.file_eof_newline:
 					f.write('\n')
 
+			if self.file_copy_sudo:
+				sudo_fpath = f'/tmp/{self.unique_name}.txt'
+				shutil.copy(fpath, sudo_fpath)
+				fpath = sudo_fpath
+
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'
 			elif self.file_flag == OPT_SPACE_SEPARATED:
@@ -1159,3 +1181,32 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
+
+	@staticmethod
+	def parse_errors(output):
+		"""Searches for error messages in the provided multi-line string.
+		Errors can be indicated by specific keywords or red ANSI color codes.
+
+		Args:
+			output (str): Multi-line string containing the output of many commands.
+
+		Returns:
+			list: A list of strings, each an identified error message.
+		"""
+		error_messages = []
+		ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+		# Define a regex pattern for error indicators and ANSI red text
+		error_pattern = re.compile(
+			r'^(.*\b(?:err|error|ftl|fatal|traceback|exceptions?|exc)\b.*|\x1b\[31m.*\x1b\[0m)$',
+			re.IGNORECASE | re.MULTILINE
+		)
+
+		# Search the output for any matches to the error pattern
+		matches = error_pattern.findall(output)
+		for match in matches:
+			match = ansi_escape.sub('', match).strip()
+			if match not in error_messages:
+				error_messages.append(match)
+
+		return error_messages

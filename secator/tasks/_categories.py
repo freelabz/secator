@@ -1,22 +1,19 @@
-import json
 import os
-import re
 
 from functools import cache
 
-import requests
-from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CIDR_RANGE, CVSS_SCORE, DATA, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
-								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, ID, IP,
-								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PATH, PROVIDER, PROXY,
-								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT,
+from secator.definitions import (CIDR_RANGE, DATA, DELAY, DEPTH, FILTER_CODES,
+								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, IP,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, PATH, PORTS, PROXY,
+								 RATE_LIMIT, RAW, RETRIES, THREADS, TIMEOUT, TOP_PORTS, URL, USER_AGENT,
 								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
+from secator.providers._base import CVEProvider
 from secator.runners import Command
-from secator.utils import debug, process_wordlist, headers_to_dict
+from secator.utils import debug, process_wordlist, headers_to_dict, parse_raw_http_request
 
 
 def process_headers(headers_dict):
@@ -26,14 +23,56 @@ def process_headers(headers_dict):
 	return headers
 
 
-USER_AGENTS = {
-	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
-	'chrome_134.0_macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
-}
+def process_raw_request(file_path):
+	"""Process raw HTTP request file and return parsed request data.
+
+	Args:
+		file_path (str): Path to file containing raw HTTP request.
+
+	Returns:
+		dict: Parsed request data with method, url, headers, and data.
+	"""
+	if not file_path:
+		return None
+	if not os.path.exists(file_path):
+		raise ValueError(f"Raw request file not found: {file_path}")
+	with open(file_path, 'r') as f:
+		raw_request = f.read()
+	return parse_raw_http_request(raw_request)
+
+
+def apply_raw_request_options(self):
+	"""Apply raw HTTP request options to task if raw option is provided.
+
+	This function is shared across Http, HttpCrawler, and HttpFuzzer classes.
+
+	Args:
+		self: Task instance.
+	"""
+	raw_request_data = self.get_opt_value(RAW, preprocess=True)
+	if raw_request_data:
+		# Set method from raw request
+		if raw_request_data.get('method') and not self.get_opt_value(METHOD):
+			self.run_opts[METHOD] = raw_request_data['method']
+
+		# Set URL from raw request if not already provided
+		if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
+			self.inputs = [raw_request_data['url']]
+
+		# Merge headers from raw request with existing headers
+		if raw_request_data.get('headers'):
+			existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
+			# Raw request headers take precedence
+			merged_headers = {**existing_headers, **raw_request_data['headers']}
+			self.run_opts[HEADER] = merged_headers
+
+		# Set data from raw request
+		if raw_request_data.get('data') and not self.get_opt_value(DATA):
+			self.run_opts[DATA] = raw_request_data['data']
 
 
 OPTS = {
-	HEADER: {'type': str, 'short': 'H', 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'pre_process': headers_to_dict, 'process': process_headers, 'default': 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']},  # noqa: E501
+	HEADER: {'type': str, 'short': 'H', 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'pre_process': headers_to_dict, 'process': process_headers, 'default': CONFIG.http.default_header},  # noqa: E501
 	DATA: {'type': str, 'help': 'Data to send in the request body'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
 	DEPTH: {'type': int, 'help': 'Scan depth'},
@@ -46,29 +85,49 @@ OPTS = {
 	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
 	MATCH_SIZE: {'type': int, 'short': 'ms', 'help': 'Match responses with size'},
 	MATCH_WORDS: {'type': int, 'short': 'mw', 'help': 'Match responses with word count'},
-	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
+	METHOD: {'type': str, 'short': 'X', 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
+	RAW: {'type': str, 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
 	RETRIES: {'type': int, 'help': 'Retries'},
-	THREADS: {'type': int, 'help': 'Number of threads to run'},
-	TIMEOUT: {'type': int, 'help': 'Request timeout'},
+	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': CONFIG.runners.threads},
+	TIMEOUT: {'type': int, 'short': 'to', 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use for HTTP requests'},  # noqa: E501
+	PORTS: {'type': str, 'short': 'p', 'help': 'Only scan specific ports (comma separated list, "-" for all ports)'},  # noqa: E501
+	TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Scan <number> most common ports'},
 }
 
-OPTS_HTTP = [
-	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
+WORDLIST_PARAMS = {
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'http_params', 'process': process_wordlist, 'help': 'Wordlist to use for HTTP requests'},  # noqa: E501
+}
+
+WORDLIST_DNS = {
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'dns', 'process': process_wordlist, 'help': 'Wordlist to use for DNS requests'},  # noqa: E501
+}
+
+OPTS_HTTP_BASE = [
+	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RAW, RETRIES, THREADS, TIMEOUT, USER_AGENT, DATA
+]
+OPTS_HTTP_FILTERS = [
+	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS, MATCH_CODES
 ]
 
-OPTS_HTTP_CRAWLERS = OPTS_HTTP + [
-	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS,
-	MATCH_CODES
-]
+OPTS_HTTP = OPTS_HTTP_BASE + OPTS_HTTP_FILTERS
 
-OPTS_HTTP_FUZZERS = OPTS_HTTP_CRAWLERS + [WORDLIST, DATA]
+OPTS_HTTP_FUZZERS = OPTS_HTTP + [WORDLIST, DATA]
+
+OPTS_HTTP_CRAWLERS = OPTS_HTTP_FUZZERS.copy()
+OPTS_HTTP_CRAWLERS.remove(DATA)
+OPTS_HTTP_CRAWLERS.remove(METHOD)
+OPTS_HTTP_CRAWLERS.remove(WORDLIST)
 
 OPTS_RECON = [
 	DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
+]
+
+OPTS_RECON_PORT = [
+	PORTS, TOP_PORTS, DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
 ]
 
 OPTS_VULN = [
@@ -80,10 +139,26 @@ OPTS_VULN = [
 # HTTP category #
 #---------------#
 
-class Http(Command):
-	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
+class HttpBase(Command):
+	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_BASE}
 	input_types = [URL]
 	output_types = [Url]
+
+	@staticmethod
+	def before_init(self):
+		"""Process raw HTTP request if provided and set appropriate options."""
+		apply_raw_request_options(self)
+
+
+class Http(Command):
+	meta_opts = {k: OPTS[k] for k in OPTS_HTTP}
+	input_types = [URL]
+	output_types = [Url]
+
+	@staticmethod
+	def before_init(self):
+		"""Process raw HTTP request if provided and set appropriate options."""
+		apply_raw_request_options(self)
 
 
 class HttpCrawler(Command):
@@ -91,12 +166,23 @@ class HttpCrawler(Command):
 	input_types = [URL]
 	output_types = [Url]
 
+	@staticmethod
+	def before_init(self):
+		"""Process raw HTTP request if provided and set appropriate options."""
+		apply_raw_request_options(self)
+
 
 class HttpFuzzer(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
 	input_types = [URL]
 	output_types = [Url]
+	enable_duplicate_check = False
 	profile = lambda opts: HttpFuzzer.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def before_init(self):
+		"""Process raw HTTP request if provided and set appropriate options."""
+		apply_raw_request_options(self)
 
 	@staticmethod
 	def dynamic_profile(opts):
@@ -110,6 +196,10 @@ class HttpFuzzer(Command):
 		)
 		wordlist_size_mb = os.path.getsize(wordlist) / (1024 * 1024)
 		return 'cpu' if wordlist_size_mb > 5 else 'io'
+
+
+class HttpParamsFuzzer(HttpFuzzer):
+	meta_opts = {**{k: OPTS[k] for k in OPTS_HTTP_FUZZERS}, **WORDLIST_PARAMS}
 
 
 #----------------#
@@ -137,6 +227,7 @@ class ReconIp(Recon):
 
 
 class ReconPort(Recon):
+	meta_opts = {k: OPTS[k] for k in OPTS_RECON_PORT}
 	input_types = [IP]
 	output_types = [Port]
 
@@ -148,28 +239,6 @@ class ReconPort(Recon):
 class Vuln(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_VULN}
 	output_types = [Vulnerability]
-
-	@staticmethod
-	def lookup_local_cve(cve_id):
-		cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
-		if os.path.exists(cve_path):
-			with open(cve_path, 'r') as f:
-				return json.load(f)
-		debug(f'{cve_id}: not found in cache', sub='cve')
-		return None
-
-	# @staticmethod
-	# def lookup_exploitdb(exploit_id):
-	# 	print('looking up exploit')
-	# 	try:
-	# 		resp = requests.get(f'https://exploit-db.com/exploits/{exploit_id}', timeout=5)
-	#		resp.raise_for_status()
-	#		content = resp.content
-	# 	except requests.RequestException as e:
-	#		debug(f'Failed remote query for {exploit_id} ({str(e)}).', sub='cve')
-	# 		logger.error(f'Could not fetch exploit info for exploit {exploit_id}. Skipping.')
-	# 		return None
-	# 	return cve_info
 
 	@staticmethod
 	def create_cpe_string(product_name, version):
@@ -227,82 +296,6 @@ class Vuln(Command):
 
 	@cache
 	@staticmethod
-	def lookup_cve_from_vulners_exploit(exploit_id, *cpes):
-		"""Search for a CVE corresponding to an exploit by extracting the CVE id from the exploit HTML page.
-
-		Args:
-			exploit_id (str): Exploit ID.
-			cpes (tuple[str], Optional): CPEs to match for.
-
-		Returns:
-			dict: vulnerability data.
-		"""
-		if CONFIG.runners.skip_exploit_search:
-			debug(f'{exploit_id}: skipped remote query since config.runners.skip_exploit_search is set.', sub='cve.vulners')
-			return None
-		if CONFIG.offline_mode:
-			debug(f'{exploit_id}: skipped remote query since config.offline_mode is set.', sub='cve.vulners')
-			return None
-		try:
-			resp = requests.get(f'https://vulners.com/githubexploit/{exploit_id}', timeout=5)
-			resp.raise_for_status()
-			soup = BeautifulSoup(resp.text, 'lxml')
-			title = soup.title.get_text(strip=True)
-			h1 = [h1.get_text(strip=True) for h1 in soup.find_all('h1')]
-			if '404' in h1:
-				raise requests.RequestException("404 [not found or rate limited]")
-			code = [code.get_text(strip=True) for code in soup.find_all('code')]
-			elems = [title] + h1 + code
-			content = '\n'.join(elems)
-			cve_regex = re.compile(r'(CVE(?:-|_)\d{4}(?:-|_)\d{4,7})', re.IGNORECASE)
-			matches = cve_regex.findall(str(content))
-			if not matches:
-				debug(f'{exploit_id}: no matching CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve.vulners')
-				return None
-			cve_id = matches[0].replace('_', '-').upper()
-			cve_data = Vuln.lookup_cve(cve_id, *cpes)
-			if cve_data:
-				return cve_data
-
-		except requests.RequestException as e:
-			debug(f'{exploit_id}: failed remote query ({str(e)}).', sub='cve.vulners')
-			return None
-
-	@cache
-	@staticmethod
-	def lookup_cve_from_cve_circle(cve_id):
-		"""Get CVE data from vulnerability.circl.lu.
-
-		Args:
-			cve_id (str): CVE id.
-
-		Returns:
-			dict | None: CVE data, None if no response or empty response.
-		"""
-		if CONFIG.runners.skip_cve_search:
-			debug(f'{cve_id}: skipped remote query since config.runners.skip_cve_search is set.', sub='cve.circl')
-			return None
-		if CONFIG.offline_mode:
-			debug(f'{cve_id}: skipped remote query since config.offline_mode is set.', sub='cve.circl')
-			return None
-		try:
-			resp = requests.get(f'https://vulnerability.circl.lu/api/cve/{cve_id}', timeout=5)
-			resp.raise_for_status()
-			cve_info = resp.json()
-			if not cve_info:
-				debug(f'{cve_id}: empty response from https://vulnerability.circl.lu/api/cve/{cve_id}', sub='cve.circl')
-				return None
-			cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
-			with open(cve_path, 'w') as f:
-				f.write(json.dumps(cve_info, indent=2))
-			debug(f'{cve_id}: downloaded to {cve_path}', sub='cve.circl')
-			return cve_info
-		except requests.RequestException as e:
-			debug(f'{cve_id}: failed remote query ({str(e)}).', sub='cve.circl')
-			return None
-
-	@cache
-	@staticmethod
 	def lookup_cve(cve_id, *cpes):
 		"""Search for a CVE info and return vulnerability data.
 
@@ -311,57 +304,28 @@ class Vuln(Command):
 			cpes (tuple[str], Optional): CPEs to match for.
 
 		Returns:
-			dict: vulnerability data.
+			Vulnerability: Vulnerability object.
 		"""
-		cve_info = Vuln.lookup_local_cve(cve_id)
-
-		# Online CVE lookup
-		if not cve_info:
-			cve_info = Vuln.lookup_cve_from_cve_circle(cve_id)
-			if not cve_info:
+		# Lookup CVE data
+		vuln = CVEProvider.lookup_local_cve(cve_id)
+		if not vuln:
+			vuln = CVEProvider.lookup_external_cve(cve_id)
+			if not vuln:
 				return None
-
-		# Convert cve info to easy format
-		cve_id = cve_info['cveMetadata']['cveId']
-		cna = cve_info['containers']['cna']
-		metrics = cna.get('metrics', [])
-		cvss_score = 0
-		for metric in metrics:
-			for name, value in metric.items():
-				if 'cvss' in name:
-					cvss_score = metric[name]['baseScore']
-		description = cna.get('descriptions', [{}])[0].get('value')
-		cwe_id = cna.get('problemTypes', [{}])[0].get('descriptions', [{}])[0].get('cweId')
-		cpes_affected = []
-		for product in cna['affected']:
-			cpes_affected.extend(product.get('cpes', []))
-		references = [u['url'] for u in cna['references']]
-		cve_info = {
-			'id': cve_id,
-			'cwe_id': cwe_id,
-			'cvss_score': cvss_score,
-			'description': description,
-			'cpes': cpes_affected,
-			'references': references
-		}
-		if not cpes_affected:
-			debug(f'{cve_id}: no CPEs found in CVE data', sub='cve.circl', verbose=True)
-		else:
-			debug(f'{cve_id}: {len(cpes_affected)} CPEs found in CVE data', sub='cve.circl', verbose=True)
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.
 		# This allow to limit the number of False positives (high) that we get from nmap NSE vuln scripts like vulscan
 		# and ensure we keep only right matches.
 		# The check is not executed if no CPE was passed (sometimes nmap cannot properly detect a CPE) or if the CPE
 		# version cannot be determined.
+		cpes_affected = vuln.extra_data.get('cpes', [])
 		cpe_match = False
-		tags = []
 		if cpes and cpes_affected:
 			for cpe in cpes:
 				cpe_fs = Vuln.get_cpe_fs(cpe)
 				if not cpe_fs:
 					debug(f'{cve_id}: Failed to parse CPE {cpe} with CPE parser', sub='cve.match', verbose=True)
-					tags.append('cpe-invalid')
+					vuln.tags.append('cpe-invalid')
 					continue
 				for cpe_affected in cpes_affected:
 					cpe_affected_fs = Vuln.get_cpe_fs(cpe_affected)
@@ -372,91 +336,13 @@ class Vuln(Command):
 					cpe_match = Vuln.match_cpes(cpe_fs, cpe_affected_fs)
 					if cpe_match:
 						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve.match')
-						tags.append('cpe-match')
+						vuln.tags.append('cpe-match')
 						break
 
 				if not cpe_match:
 					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve.match')
 
-		# Parse CVE id and CVSS
-		name = id = cve_info['id']
-		# exploit_ids = cve_info.get('refmap', {}).get('exploit-db', [])
-		# osvdb_ids = cve_info.get('refmap', {}).get('osvdb', [])
-
-		# Get description
-		description = cve_info['description']
-		if description is not None:
-			description = description.replace(id, '').strip()
-
-		# Get references
-		references = cve_info.get(REFERENCES, [])
-		cve_ref_url = f'https://vulnerability.circl.lu/cve/{id}'
-		references.append(cve_ref_url)
-
-		# Get CWE ID
-		cwe_id = cve_info['cwe_id']
-		if cwe_id is not None:
-			tags.append(cwe_id)
-
-		# Set vulnerability severity based on CVSS score
-		severity = None
-		cvss = cve_info['cvss_score']
-		if cvss:
-			severity = Vuln.cvss_to_severity(cvss)
-
-		# Set confidence
-		vuln = {
-			ID: id,
-			NAME: name,
-			PROVIDER: 'vulnerability.circl.lu',
-			SEVERITY: severity,
-			CVSS_SCORE: cvss,
-			TAGS: tags,
-			REFERENCES: [f'https://vulnerability.circl.lu/cve/{id}'] + references,
-			DESCRIPTION: description,
-		}
 		return vuln
-
-	@cache
-	@staticmethod
-	def lookup_cve_from_ghsa(ghsa_id):
-		"""Search for a GHSA on Github and and return associated CVE vulnerability data.
-
-		Args:
-			ghsa (str): GHSA ID in the form GHSA-*
-
-		Returns:
-			dict: vulnerability data.
-		"""
-		try:
-			resp = requests.get(f'https://github.com/advisories/{ghsa_id}', timeout=5)
-			resp.raise_for_status()
-		except requests.RequestException as e:
-			debug(f'Failed remote query for {ghsa_id} ({str(e)}).', sub='cve')
-			return None
-		soup = BeautifulSoup(resp.text, 'lxml')
-		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
-		cve_id = sidebar_items[3].find('div').text.strip()
-		if not cve_id.startswith('CVE'):
-			debug(f'{ghsa_id}: No CVE_ID extracted from https://github.com/advisories/{ghsa_id}', sub='cve')
-			return None
-		vuln = Vuln.lookup_cve(cve_id)
-		if vuln:
-			vuln[TAGS].append('ghsa')
-			return vuln
-		return None
-
-	@staticmethod
-	def cvss_to_severity(cvss):
-		if cvss < 4:
-			severity = 'low'
-		elif cvss < 7:
-			severity = 'medium'
-		elif cvss < 9:
-			severity = 'high'
-		else:
-			severity = 'critical'
-		return severity
 
 
 class VulnHttp(Vuln):

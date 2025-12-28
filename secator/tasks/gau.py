@@ -21,7 +21,7 @@ class gau(HttpCrawler):
 	cmd = 'gau --verbose'
 	input_types = [URL, HOST]
 	output_types = [Url, Subdomain]
-	tags = ['pattern', 'scan']
+	tags = ['url', 'crawl', 'passive']
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
@@ -66,6 +66,7 @@ class gau(HttpCrawler):
 	def on_init(self):
 		self.max_param_occurrences = self.get_opt_value('max_param_occurrences')
 		self.seen_params = defaultdict(lambda: defaultdict(int))
+		self.subdomains = []
 
 	@staticmethod
 	def on_line(self, line):
@@ -93,5 +94,9 @@ class gau(HttpCrawler):
 		if self.get_opt_value('subs'):
 			domain = extract_domain_info(parsed_url.hostname, domain_only=True)
 			if domain:
-				yield Subdomain(host=parsed_url.hostname, domain=domain)
-		yield Url(url=item['url'], host=parsed_url.hostname)
+				subdomain = Subdomain(host=parsed_url.hostname, domain=domain)
+				if subdomain not in self.subdomains:
+					self.subdomains.append(subdomain)
+					yield subdomain
+		else:
+			yield Url(url=item['url'], host=parsed_url.hostname)

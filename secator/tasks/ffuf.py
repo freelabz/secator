@@ -80,8 +80,11 @@ class ffuf(HttpFuzzer):
 
 	@staticmethod
 	def before_init(self):
+		# Call parent's before_init to process raw HTTP request
+		HttpFuzzer.before_init(self)
+
 		# Add /FUZZ to URL if recursion is enabled
-		if self.get_opt_value('recursion') and not len(self.inputs) > 1 and not self.inputs[0].endswith('FUZZ'):
+		if self.get_opt_value('recursion') and not len(self.inputs) > 1 and self.inputs and not self.inputs[0].endswith('FUZZ'):  # noqa: E501
 			self._print(Info(message='Adding /FUZZ to URL as it is needed when recursion is enabled'), rich=True)
 			self.inputs[0] = self.inputs[0].rstrip('/') + '/FUZZ'
 
@@ -91,6 +94,9 @@ class ffuf(HttpFuzzer):
 		if self.get_opt_value('fuzz_host_header') and len(self.inputs) > 0:
 			host = self.inputs[0].split('://')[1].split('/')[0]
 			opts['header']['value']['Host'] = f'FUZZ.{host}'
+			if self.get_opt_value('wordlist') == 'http':
+				self.add_result(Info(message='Changing wordlist to combined_subdomains as the default http wordlist is not suitable for fuzzing host header'))  # noqa: E501
+				opts['wordlist']['value'] = 'combined_subdomains'
 		self.headers = opts['header']['value'].copy()
 
 		# Check FUZZ keyword
@@ -98,6 +104,7 @@ class ffuf(HttpFuzzer):
 		fuzz_in_headers = any('FUZZ' in v for v in self.headers.values())
 		if len(self.inputs) > 0 and 'FUZZ' not in self.inputs[0] and not fuzz_in_headers and 'FUZZ' not in data:
 			self.add_result(Warning(message='Keyword FUZZ is not present in the URL, header or body'))
+
 		return opts
 
 	@staticmethod
@@ -116,6 +123,7 @@ class ffuf(HttpFuzzer):
 			time=item['duration'] * 10**-9,
 			method=self.get_opt_value(METHOD) or 'GET',
 			request_headers=headers,
+			confidence='high' if self.get_opt_value('auto_calibration') else 'medium'
 		)
 		if self.get_opt_value('fuzz_host_header'):
 			yield Subdomain(

@@ -1,5 +1,6 @@
 import click
 import os
+import shlex
 import yaml
 
 from pathlib import Path
@@ -41,10 +42,10 @@ class gitleaks(Command):
 	}
 	input_type = "folder"
 	output_types = [Tag]
-	install_version = 'v8.24.3'
+	install_version = 'v8.29.1'
 	install_cmd_pre = {'*': ['git', 'make']}
 	install_cmd = (
-		f'git clone https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks_[install_version] || true &&'
+		f'git clone --single-branch -b [install_version] https://github.com/gitleaks/gitleaks.git {CONFIG.dirs.share}/gitleaks_[install_version] || true &&'  # noqa: E501
 		f'cd {CONFIG.dirs.share}/gitleaks_[install_version] && make build &&'
 		f'mv {CONFIG.dirs.share}/gitleaks_[install_version]/gitleaks {CONFIG.dirs.bin}'
 	)
@@ -69,7 +70,7 @@ class gitleaks(Command):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' -r {self.output_path}'
+		self.cmd += f' -r {shlex.quote(self.output_path)}'
 		self.cmd += ' --exit-code 0'
 
 	@staticmethod

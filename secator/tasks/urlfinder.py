@@ -78,6 +78,9 @@ class urlfinder(HttpCrawler):
 
 	@staticmethod
 	def before_init(self):
+		# Call parent's before_init to process raw HTTP request
+		HttpCrawler.before_init(self)
+
 		for idx, input in enumerate(self.inputs):
 			if validators.url(input):
 				self.inputs[idx] = urlparse(input).netloc

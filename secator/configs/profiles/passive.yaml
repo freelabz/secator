@@ -1,6 +1,8 @@
 type: profile
 name: passive
-description: "Passive only (no requests to targets)"
+category: general
+description: "Passive scanning only (no requests to targets)"
+enforce: true
 opts:
   passive: True
   domain_recon_passive: True

@@ -1,6 +1,6 @@
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import (Ip, Port, Subdomain, Tag, Url, UserAccount,
-                                Vulnerability, Record, Certificate, Domain)
+                                Vulnerability, Record, Certificate, Exploit, Domain)
 
 
 OUTPUTS_CHECKS = {
@@ -182,7 +182,7 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'gau': [
-        Url(url='http://testphp.vulnweb.com/.idea/.name', _source='gau')
+        Url(url='http://testphp.vulnweb.com/categories.php', _source='gau')
     ],
     'getasn': [
         Tag(name='asn', category='info', value='AS14907', match='wikipedia.org', _source='getasn')
@@ -303,7 +303,7 @@ OUTPUTS_TASKS = {
     ],
     'urlfinder': [
         Url(
-            url='http://testphp.vulnweb.com/categories.php2',
+            url='http://testphp.vulnweb.com/categories.php',
             host='testphp.vulnweb.com',
             _source='urlfinder'
         )
@@ -321,9 +321,27 @@ OUTPUTS_TASKS = {
             domain='wikipedia.org',
             registrar='MarkMonitor Inc.',
             creation_date='2001-01-13 00:12:14',
-            expiration_date='2026-01-13 00:12:14',
+            expiration_date='2027-01-13 00:12:14',
             registrant='',
             _source='whois'
+        )
+    ],
+    'searchsploit': [
+        Exploit(
+            name='cgi-bin Remote Code Execution',
+            provider='EDB',
+            id='29290',
+            matched_at='apache 2.4.5',
+            confidence='low'
+        )
+    ],
+    'search_vulns': [
+        Exploit(
+            name='Apache exploit',
+            provider='apache',
+            id='CVE-2019-10081-exploit',
+            matched_at='apache 2.4.39',
+            confidence='high'
         )
     ],
     'testssl': [
@@ -333,7 +351,7 @@ OUTPUTS_TASKS = {
         Tag(
             name='wordpress_theme',
             category='info',
-            value='twentytwentyfive:1.3',
+            value='twentytwentyfive:1.4',
             match='http://localhost:8000/',
             _source='wpscan'),
         Vulnerability(

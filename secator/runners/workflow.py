@@ -90,10 +90,11 @@ class Workflow(Runner):
 
 				# Skip task if condition is not met
 				condition = node.opts.pop('if', None)
-				local_ns = {'opts': DotMap(opts)}
+				local_ns = {'opts': DotMap(opts), 'targets': self.inputs}
 				if condition:
 					# debug(f'{node.id} evaluating {condition} with opts {opts}', sub=self.config.name)
-					result = eval(condition, {"__builtins__": {}}, local_ns)
+					safe_globals = {'__builtins__': {'len': len}}
+					result = eval(condition, safe_globals, local_ns)
 					if not result:
 						debug(f'{node.id} skipped task because condition is not met: {condition}', sub=self.config.name)
 						self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] because condition is not met: [bold green]{condition}[/]'))  # noqa: E501

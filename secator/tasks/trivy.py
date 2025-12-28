@@ -1,6 +1,7 @@
 import click
 import os
 import yaml
+import shlex
 
 from pathlib import Path
 
@@ -75,7 +76,7 @@ class trivy(Vuln):
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
 		self.cmd = self.cmd.replace(f' -mode {mode}', '').replace('trivy', f'trivy {mode}')
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):

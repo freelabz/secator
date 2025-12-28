@@ -18,6 +18,7 @@ from secator.template import get_config_options
 from secator.tree import build_runner_tree
 from secator.utils import (deduplicate, expand_input, get_command_category)
 from secator.loader import get_configs_by_type
+from secator.completion import complete_profiles, complete_workspaces, complete_drivers, complete_exporters
 
 
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
@@ -29,7 +30,7 @@ PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.def
 EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['csv', 'gdrive', 'json', 'table', 'txt']])
 
 CLI_OUTPUT_OPTS = {
-	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o'},  # noqa: E501
+	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o', 'shell_complete': complete_exporters},  # noqa: E501
 	'fmt': {'default': '', 'short': 'fmt', 'internal_name': 'print_format', 'help': 'Output formatting string'},
 	'json': {'is_flag': True, 'short': 'json', 'internal_name': 'print_json', 'default': False, 'help': 'Print items as JSON lines'},  # noqa: E501
 	'raw': {'is_flag': True, 'short': 'raw', 'internal_name': 'print_raw', 'default': False, 'help': 'Print items in raw format'},  # noqa: E501
@@ -43,9 +44,9 @@ CLI_OUTPUT_OPTS = {
 }
 
 CLI_EXEC_OPTS = {
-	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws'},  # noqa: E501
-	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf'},  # noqa: E501
-	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR},  # noqa: E501
+	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws', 'shell_complete': complete_workspaces},  # noqa: E501
+	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf', 'shell_complete': complete_profiles},  # noqa: E501
+	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR, 'shell_complete': complete_drivers},  # noqa: E501
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
 	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
@@ -97,6 +98,7 @@ def decorate_command_options(opts):
 			default_from = conf.pop('default_from', None)
 			reverse = conf.pop('reverse', False)
 			opposite = conf.pop('opposite', None)
+			# Keep shell_complete in conf - it's a valid click.option parameter
 			long = f'--{opt_name}'
 			short = f'-{short_opt}' if short_opt else f'-{opt_name}'
 			if reverse:
@@ -126,7 +128,7 @@ def generate_cli_subcommand(cli_endpoint, func, **opts):
 
 def register_runner(cli_endpoint, config):
 	name = config.name
-	input_required = True
+	input_types = []
 	command_opts = {
 		'no_args_is_help': True,
 		'context_settings': {
@@ -137,7 +139,6 @@ def register_runner(cli_endpoint, config):
 
 	if cli_endpoint.name == 'scan':
 		runner_cls = Scan
-		input_required = False  # allow targets from stdin
 		short_help = config.description or ''
 		short_help += f' [dim]alias: {config.alias}' if config.alias else ''
 		command_opts.update({
@@ -149,7 +150,6 @@ def register_runner(cli_endpoint, config):
 
 	elif cli_endpoint.name == 'workflow':
 		runner_cls = Workflow
-		input_required = False  # allow targets from stdin
 		short_help = config.description or ''
 		short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}' if config.alias else ''
 		command_opts.update({
@@ -161,7 +161,6 @@ def register_runner(cli_endpoint, config):
 
 	elif cli_endpoint.name == 'task':
 		runner_cls = Task
-		input_required = False  # allow targets from stdin
 		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
 		short_help = f'[magenta]{task_category:<25}[/] {task_cls.__doc__}'
@@ -171,10 +170,12 @@ def register_runner(cli_endpoint, config):
 			'no_args_is_help': False
 		})
 		input_types = task_cls.input_types
-
 	else:
 		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
+	default_inputs = None if config.default_inputs == {} else config.default_inputs
+	input_required = default_inputs is None
+	# input_required = False
 	options = get_config_options(
 		config,
 		exec_opts=CLI_EXEC_OPTS,
@@ -191,7 +192,7 @@ def register_runner(cli_endpoint, config):
 	# 		for i in range(0, len(ctx.args), 2)
 	# 	}
 
-	@click.argument('inputs', metavar=input_types_str, required=input_required)
+	@click.argument('inputs', metavar=input_types_str, required=False)
 	@decorate_command_options(options)
 	@click.pass_context
 	def func(ctx, **opts):
@@ -213,6 +214,8 @@ def register_runner(cli_endpoint, config):
 		# Set dry run
 		ctx.obj['dry_run'] = dry_run
 		ctx.obj['input_types'] = input_types
+		ctx.obj['input_required'] = input_required
+		ctx.obj['default_inputs'] = default_inputs
 
 		# Show version
 		if version:

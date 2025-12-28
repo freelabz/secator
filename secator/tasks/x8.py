@@ -1,14 +1,14 @@
+from urllib.parse import urlparse, urlunparse
+
 from secator.decorators import task
-from secator.definitions import (URL, WORDLIST, RETRIES, OPT_NOT_SUPPORTED, USER_AGENT, THREADS, DELAY, TIMEOUT, RATE_LIMIT, METHOD, HEADER, FOLLOW_REDIRECT, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, DEPTH)  # noqa: E501
+from secator.definitions import (URL, PROXY, DATA, WORDLIST, RETRIES, OPT_NOT_SUPPORTED, USER_AGENT, THREADS, DELAY, TIMEOUT, RATE_LIMIT, METHOD, HEADER, FOLLOW_REDIRECT, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, DEPTH)  # noqa: E501
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpFuzzer
-from secator.utils import process_wordlist
-from urllib.parse import urlparse, urlunparse
+from secator.tasks._categories import HttpParamsFuzzer
 
 
 @task()
-class x8(HttpFuzzer):
+class x8(HttpParamsFuzzer):
 	"""Hidden parameters discovery suite written in Rust."""
 	cmd = 'x8'
 	input_types = [URL]
@@ -19,15 +19,14 @@ class x8(HttpFuzzer):
 	json_flag = '-O json'
 	opt_prefix = '-'
 	version_flag = '-V'
-	opts = {
-		WORDLIST: {'type': str, 'short': 'w', 'default': None, 'process': process_wordlist, 'help': 'Wordlist to use'},
-	}
 	opt_key_map = {
+		DATA: '--body',
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		THREADS: 'c',
 		DEPTH: OPT_NOT_SUPPORTED,
 		DELAY: '--delay',
 		TIMEOUT: '--timeout',
+		PROXY: 'x',
 		METHOD: '--method',
 		WORDLIST: 'w',
 		FILTER_CODES: OPT_NOT_SUPPORTED,
@@ -63,7 +62,7 @@ class x8(HttpFuzzer):
 	github_handle = 'Sh1Yo/x8'
 	proxychains = False
 	proxy_socks5 = False
-	proxy_http = False
+	proxy_http = True
 	profile = 'io'
 
 	@staticmethod
@@ -76,12 +75,21 @@ class x8(HttpFuzzer):
 	@staticmethod
 	def on_json_loaded(self, item):
 		url = item['url']
+		parsed_url = urlparse(url)
+		url_without_param = urlunparse(parsed_url._replace(query=''))
+
 		if url not in self.urls:
 			self.urls.append(url)
-			yield Url(url=url, method=item['method'], status_code=item['status'], content_length=item['size'], request_headers=self.request_headers)  # noqa: E501
+			yield Url(
+				url=url,
+				host=parsed_url.hostname,
+				method=item['method'],
+				status_code=item['status'],
+				content_length=item['size'],
+				request_headers=self.request_headers,
+			)
+
 		for param in item.get('found_params', []):
-			parsed_url = urlparse(url)
-			url_without_param = urlunparse(parsed_url._replace(query=''))
 			extra_data = {k: v for k, v in param.items() if k != 'name'}
 			extra_data['value'] = param['value']
 			extra_data['url'] = url

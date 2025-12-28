@@ -75,6 +75,9 @@ class Runner:
 	# Output types
 	output_types = []
 
+	# Default inputs
+	default_inputs = None
+
 	# Default exporters
 	default_exporters = []
 
@@ -83,6 +86,12 @@ class Runner:
 
 	# Run hooks
 	enable_hooks = True
+
+	# Run validators
+	enable_validators = True
+
+	# Run duplicate check
+	enable_duplicate_check = True
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
@@ -131,7 +140,7 @@ class Runner:
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 
 		# Runner toggles
-		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
+		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', self.enable_duplicate_check)
 		self.enable_profiles = self.run_opts.get('enable_profiles', True)
 		self.enable_reports = self.run_opts.get('enable_reports', not self.sync) and not self.dry_run and not self.no_process and not self.no_poll  # noqa: E501
 		self.enable_hooks = self.run_opts.get('enable_hooks', True) and not self.dry_run and not self.no_process  # noqa: E501
@@ -231,9 +240,12 @@ class Runner:
 		# Print targets
 		if self.print_target:
 			pluralize = 'targets' if len(self.self_targets) > 1 else 'target'
-			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize} for {format_runner_name(self)}:'), rich=True)
-			for target in self.self_targets:
+			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize} for {format_runner_name(self)}'), rich=True)
+			truncated_targets = self.self_targets[:10] if len(self.self_targets) > 10 else self.self_targets
+			for target in truncated_targets:
 				self._print(f'      {repr(target)}', rich=True)
+			if len(self.self_targets) > 10:
+				self._print(f'      and {len(self.self_targets) - 10} more...', rich=True)
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
@@ -524,7 +536,7 @@ class Runner:
 		self.uuids.add(item._uuid)
 		self.results.append(item)
 		self.results_count += 1
-		if output:
+		if output and item._type not in ['stat', 'progress']:
 			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
@@ -823,6 +835,9 @@ class Runner:
 		if self.dry_run:
 			self.debug('validator skipped (dry_run)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
 			return True
+		if not self.enable_validators:
+			self.debug('validator skipped (disabled validators)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
+			return True
 		for validator in self.resolved_validators[validator_type]:
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
@@ -833,7 +848,7 @@ class Runner:
 					if doc:
 						message += f': {doc}'
 					err = Error(message=message)
-					self.add_result(err)
+					self.add_result(err, print=True)
 				return False
 			self.debug('validator success', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
 		return True
@@ -1100,18 +1115,17 @@ class Runner:
 	@staticmethod
 	def _validate_inputs(self, inputs):
 		"""Input type is not supported by runner"""
-		supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
+		# supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
 		for _input in inputs:
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
 				message = (
-					f'Validator failed: target [bold blue]{_input}[/] of type [bold green]{input_type}[/] '
-					f'is not supported by [bold gold3]{self.unique_name}[/]. Supported types: [bold green]{supported_types}[/]'
+					f'Target [bold blue]{_input}[/] skipped'
+					f' ([bold]{input_type}[/] not supported by {format_runner_name(self)}) '
 				)
-				message += '. Removing from current inputs (runner context)'
-				warning = Warning(message=message)
+				info = Info(message=message)
 				self.inputs.remove(_input)
-				self.add_result(warning)
+				self.add_result(info)
 		return True
 
 	@staticmethod

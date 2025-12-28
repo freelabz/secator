@@ -6,7 +6,7 @@ from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
 							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
+							   MATCH_WORDS, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Tag, Url
@@ -67,7 +67,6 @@ class cariddi(HttpCrawler):
 		MATCH_REGEX: OPT_NOT_SUPPORTED,
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
 		MATCH_WORDS: OPT_NOT_SUPPORTED,
-		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
@@ -80,7 +79,7 @@ class cariddi(HttpCrawler):
 		'juicy_extensions': 'ext'
 	}
 	item_loaders = [JSONSerializer()]
-	install_version = 'v1.3.6'
+	install_version = 'v1.4.4'
 	install_cmd = 'go install -v github.com/edoardottt/cariddi/cmd/cariddi@[install_version]'
 	github_handle = 'edoardottt/cariddi'
 	encoding = 'ansi'
@@ -132,6 +131,8 @@ class cariddi(HttpCrawler):
 
 		# Get matches, params, errors, secrets, infos
 		url = url_item[URL]
+		parsed_url = urlparse(url)
+		url_without_param = urlunparse(parsed_url._replace(query=''))
 		matches = item.get('matches', {})
 		params = matches.get('parameters', [])
 		errors = matches.get('errors', [])
@@ -143,21 +144,24 @@ class cariddi(HttpCrawler):
 			for attack in param['attacks']:
 				extra_data = {k: v for k, v in param.items() if k not in ['name', 'attacks']}
 				extra_data['content'] = attack
-				parsed_url = urlparse(url)
-				params = parsed_url.query.split('&')
-				url_without_param = urlunparse(parsed_url._replace(query=''))
-				for p in params:
-					p_name, p_value = p.split('=')
-					if p_name == param_name:
-						p_value = p_value
-						break
-					yield Tag(
-						category='info',
-						name='url_param',
-						value=p_name,
-						match=url_without_param,
-						extra_data={'value': p_value, 'url': url}
-					)
+				if parsed_url.query:
+					query_params = parsed_url.query.split('&')
+					for p in query_params:
+						if '=' not in p:
+							continue
+						parts = p.split('=', 1)
+						p_name = parts[0]
+						p_value = parts[1] if len(parts) > 1 else ''
+						if p_name == param_name:
+							p_value = p_value
+							break
+						yield Tag(
+							category='info',
+							name='url_param',
+							value=p_name,
+							match=url_without_param,
+							extra_data={'value': p_value, 'url': url}
+						)
 
 		for error in errors:
 			error['category'] = 'error'
@@ -181,8 +185,6 @@ class cariddi(HttpCrawler):
 			if info['name'] in CARIDDI_RENAME_LIST:
 				info['name'] = CARIDDI_RENAME_LIST[info['name']]
 			content = info['match']
-			parsed_url = urlparse(url)
-			url_without_param = urlunparse(parsed_url._replace(query=''))
 			info['category'] = 'info'
 			info['name'] = '_'.join(f'{info["name"]}'.lower().split())
 			info['match'] = url_without_param
