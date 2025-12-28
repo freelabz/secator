@@ -38,7 +38,7 @@ jobs:
       uses: docker/setup-buildx-action@v3
 
     - name: Build Docker image
-      run: "docker build -t freelabz/secator:${{ matrix.distribution }} -f .docker/Dockerfile.${{ matrix.distribution }} ."
+      run: "DOCKER_BUILDKIT=1 docker build -t freelabz/secator:${{ matrix.distribution }} -f .docker/Dockerfile.${{ matrix.distribution }} ."
 
     - name: Run secator health check (strict)
       run: docker run --privileged freelabz/secator:${{ matrix.distribution }} health --strict
