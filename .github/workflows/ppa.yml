@@ -43,8 +43,12 @@ jobs:
 
     - name: Import GPG key
       run: |
-        echo "${{ secrets.PPA_GPG_PRIVATE_KEY }}" | gpg --import
-        echo "${{ secrets.PPA_GPG_PASSPHRASE }}" > /tmp/gpg_pass
+        echo "${{ secrets.PPA_GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
+        # Configure GPG to use passphrase from environment
+        echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+        echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+        gpgconf --kill gpg-agent
+        gpgconf --launch gpg-agent
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
 
     - name: Update changelog for Ubuntu release
@@ -58,11 +62,12 @@ jobs:
 
     - name: Build source package
       run: |
-        # Build the source package
-        debuild -S -sa -d
+        # Build the source package with GPG signing
+        debuild -S -sa
       env:
         DEBFULLNAME: FreeLabz
         DEBEMAIL: sales@freelabz.com
+        DEBSIGN_PROGRAM: "gpg --batch --pinentry-mode loopback --passphrase ${{ secrets.PPA_GPG_PASSPHRASE }}"
 
     - name: Upload to PPA
       run: |
@@ -72,7 +77,3 @@ jobs:
         DEBFULLNAME: FreeLabz
         DEBEMAIL: sales@freelabz.com
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-
-    - name: Clean up GPG passphrase
-      run: rm -f /tmp/gpg_pass
-      if: always()

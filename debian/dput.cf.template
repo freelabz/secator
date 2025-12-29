@@ -1,0 +1,12 @@
+# Configuration file for dput
+# Copy this to ~/.dput.cf and customize as needed
+
+[DEFAULT]
+default_host_main = ppa:freelabz/secator
+
+[ppa:freelabz/secator]
+fqdn = ppa.launchpad.net
+method = ftp
+incoming = ~freelabz/ubuntu/secator/
+login = anonymous
+allow_unsigned_uploads = 0
