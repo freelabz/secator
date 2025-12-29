@@ -1,0 +1,47 @@
+Source: secator
+Section: utils
+Priority: optional
+Maintainer: FreeLabz <sales@freelabz.com>
+Build-Depends: debhelper (>= 11),
+               dh-python,
+               python3-all,
+               python3-pip,
+               python3-hatchling,
+               pybuild-plugin-pyproject
+Standards-Version: 4.5.0
+Homepage: https://github.com/freelabz/secator
+Vcs-Browser: https://github.com/freelabz/secator
+Vcs-Git: https://github.com/freelabz/secator.git
+
+Package: secator
+Architecture: all
+Depends: ${python3:Depends},
+         ${misc:Depends},
+         python3-pip,
+         python3-beautifulsoup4,
+         python3-celery,
+         python3-distro,
+         python3-dnspython,
+         python3-jinja2,
+         python3-packaging,
+         python3-dotenv,
+         python3-yaml,
+         python3-pydantic,
+         python3-requests,
+         python3-rich,
+         python3-click,
+         python3-psutil,
+         python3-bs4
+Description: The pentester's swiss knife
+ secator is a task and workflow runner used for security assessments. It
+ supports dozens of well-known security tools and it is designed to improve
+ productivity for pentesters and security researchers.
+ .
+ Features include:
+  * Curated list of commands
+  * Unified input options
+  * Unified output schema
+  * CLI and library usage
+  * Distributed options with Celery
+  * Complexity from simple tasks to complex workflows
+  * Customizable

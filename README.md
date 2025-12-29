@@ -104,6 +104,18 @@ check that the tool complies with our selection criterias before doing so. If it
 ## Installing secator
 
 <details>
+    <summary>APT (Ubuntu PPA)</summary>
+
+```sh
+sudo add-apt-repository ppa:freelabz/secator
+sudo apt update
+sudo apt install secator
+```
+***Note:** This method is available for Ubuntu 20.04 (Focal), 22.04 (Jammy), and 24.04 (Noble).*
+
+</details>
+
+<details>
     <summary>Pipx</summary>
 
 ```sh
@@ -164,7 +176,7 @@ docker-compose exec secator-client secator --help
 
 </details>
 
-***Note:*** If you chose the Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
+***Note:*** If you chose the APT, Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
 
 
 ## Usage
