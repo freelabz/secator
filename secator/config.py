@@ -197,6 +197,11 @@ class Providers(StrictModel):
 	}
 
 
+class Workspaces(StrictModel):
+	in_scope: List[str] = []
+	out_of_scope: List[str] = []
+
+
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
@@ -222,6 +227,7 @@ class SecatorConfig(StrictModel):
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
+	workspaces: Workspaces = Workspaces()
 	offline_mode: bool = False
 
 

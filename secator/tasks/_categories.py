@@ -5,8 +5,8 @@ from functools import cache
 from cpe import CPE
 
 from secator.definitions import (CIDR_RANGE, DATA, DELAY, DEPTH, FILTER_CODES,
-								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, IP,
-								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, PATH, PORTS, PROXY,
+								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, IN_SCOPE, IP,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OUT_OF_SCOPE, PATH, PORTS, PROXY,
 								 RATE_LIMIT, RAW, RETRIES, THREADS, TIMEOUT, TOP_PORTS, URL, USER_AGENT,
 								 USERNAME, WORDLIST)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
@@ -81,11 +81,13 @@ OPTS = {
 	FILTER_SIZE: {'type': int, 'short': 'fs', 'help': 'Filter out responses with size'},
 	FILTER_WORDS: {'type': int, 'short': 'fw', 'help': 'Filter out responses with word count'},
 	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'frd', 'help': 'Follow HTTP redirects'},
+	IN_SCOPE: {'type': str, 'short': 'is', 'help': 'In-scope URL regex patterns (comma-separated)'},
 	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
 	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
 	MATCH_SIZE: {'type': int, 'short': 'ms', 'help': 'Match responses with size'},
 	MATCH_WORDS: {'type': int, 'short': 'mw', 'help': 'Match responses with word count'},
 	METHOD: {'type': str, 'short': 'X', 'help': 'HTTP method to use for requests'},
+	OUT_OF_SCOPE: {'type': str, 'short': 'os', 'help': 'Out-of-scope URL regex patterns (comma-separated)'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
 	RAW: {'type': str, 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
@@ -121,6 +123,7 @@ OPTS_HTTP_CRAWLERS = OPTS_HTTP_FUZZERS.copy()
 OPTS_HTTP_CRAWLERS.remove(DATA)
 OPTS_HTTP_CRAWLERS.remove(METHOD)
 OPTS_HTTP_CRAWLERS.remove(WORDLIST)
+OPTS_HTTP_CRAWLERS.extend([IN_SCOPE, OUT_OF_SCOPE])
 
 OPTS_RECON = [
 	DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT

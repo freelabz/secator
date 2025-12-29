@@ -5,8 +5,8 @@ from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-								 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
-								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT)
+								 FOLLOW_REDIRECT, HEADER, IN_SCOPE, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
+								 METHOD, OPT_NOT_SUPPORTED, OUT_OF_SCOPE, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
@@ -47,11 +47,13 @@ class katana(HttpCrawler):
 		FILTER_SIZE: OPT_NOT_SUPPORTED,
 		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		IN_SCOPE: 'crawl-scope',
 		MATCH_CODES: OPT_NOT_SUPPORTED,
 		MATCH_REGEX: OPT_NOT_SUPPORTED,
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
 		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		METHOD: OPT_NOT_SUPPORTED,
+		OUT_OF_SCOPE: 'crawl-out-scope',
 		PROXY: 'proxy',
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retry',
