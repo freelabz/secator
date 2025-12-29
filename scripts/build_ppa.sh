@@ -13,7 +13,7 @@ echo "Building secator ${PACKAGE_VERSION} for Ubuntu ${UBUNTU_RELEASE}"
 
 # Check if required tools are installed
 for cmd in debuild dput; do
-    if ! command -v $cmd &> /dev/null; then
+    if ! command -v "$cmd" &> /dev/null; then
         echo "Error: $cmd is not installed"
         echo "Please install: sudo apt-get install devscripts build-essential"
         exit 1

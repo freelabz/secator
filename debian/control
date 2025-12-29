@@ -30,8 +30,7 @@ Depends: ${python3:Depends},
          python3-requests,
          python3-rich,
          python3-click,
-         python3-psutil,
-         python3-bs4
+         python3-psutil
 Description: The pentester's swiss knife
  secator is a task and workflow runner used for security assessments. It
  supports dozens of well-known security tools and it is designed to improve

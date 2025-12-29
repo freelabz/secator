@@ -27,7 +27,7 @@ jobs:
 
     - name: Extract version from tag
       run: |
-        if [ -n "${{ github.ref_name }}" ]; then
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
         else
@@ -62,12 +62,16 @@ jobs:
 
     - name: Build source package
       run: |
+        # Create a temporary file for GPG passphrase
+        echo "${{ secrets.PPA_GPG_PASSPHRASE }}" > /tmp/gpg_passphrase
+        chmod 600 /tmp/gpg_passphrase
         # Build the source package with GPG signing
-        debuild -S -sa
+        debuild -S -sa -p"gpg --batch --pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase"
+        # Clean up passphrase file
+        rm -f /tmp/gpg_passphrase
       env:
         DEBFULLNAME: FreeLabz
         DEBEMAIL: sales@freelabz.com
-        DEBSIGN_PROGRAM: "gpg --batch --pinentry-mode loopback --passphrase ${{ secrets.PPA_GPG_PASSPHRASE }}"
 
     - name: Upload to PPA
       run: |
