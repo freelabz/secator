@@ -17,7 +17,7 @@ from secator.tasks._categories import HttpCrawler
 @task()
 class waymore(HttpCrawler):
 	"""Find way more from the Wayback Machine, Common Crawl, AlienVault OTX, URLScan, VirusTotal and Intelligence X."""
-	cmd = 'waymore -mode U'
+	cmd = 'waymore -mode U --stream'
 	input_types = [URL, HOST]
 	output_types = [Url]
 	tags = ['url', 'crawl', 'passive']
