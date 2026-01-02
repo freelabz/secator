@@ -19,7 +19,7 @@ options:
   fuzzers:
     type: list
     required: True
-    help: "Fuzzers to use (comma-separated) (dirsearch, feroxbuster, ffuf)"
+    help: "Fuzzers to use (comma-separated) (feroxbuster, ffuf)"
     default: ['ffuf']
 
   hunt_secrets:
@@ -31,9 +31,9 @@ options:
 tasks:
 
   _group/fuzz:
-    dirsearch:
-      description: Fuzz URLs
-      if: "'dirsearch' in opts.fuzzers"
+    # dirsearch:
+    #   description: Fuzz URLs
+    #   if: "'dirsearch' in opts.fuzzers"
 
     feroxbuster:
       description: Fuzz URLs
