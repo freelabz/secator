@@ -143,7 +143,6 @@ class httpx(Http):
 			for an in subject_an:
 				yield from self._create_subdomain_from_tls_cert(an, item['url'], cert)
 
-
 	@staticmethod
 	def on_end(self):
 		store_responses = self.get_opt_value('store_responses') or CONFIG.http.store_responses
