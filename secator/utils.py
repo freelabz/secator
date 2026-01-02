@@ -445,6 +445,18 @@ def caml_to_snake(name):
 	return name.lower().replace('__', '_')
 
 
+def to_title_case_hyphenated(name):
+	"""Convert a string to title case with hyphens.
+
+	Args:
+		name (str): String to convert.
+
+	Returns:
+		str: Title case string with hyphens.
+	"""
+	return '-'.join(word.capitalize() for word in name.split('-'))
+
+
 def print_version():
 	"""Print secator version information."""
 	from secator.installer import get_version_info

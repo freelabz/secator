@@ -7,7 +7,7 @@ from datetime import datetime
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Vulnerability, Certificate, Error, Info, Ip, Tag
+from secator.output_types import Vulnerability, Certificate, Error, Info, Ip, Tag, Warning
 from secator.definitions import (PROXY, HOST, USER_AGENT, HEADER, OUTPUT_PATH,
 								CERTIFICATE_STATUS_UNKNOWN, CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED,
 								TIMEOUT)
@@ -112,7 +112,7 @@ class testssl(Command):
 
 				# Add IP to address pool
 				host_to_ips.setdefault(host, []).append(ip)
-				if ip not in ip_addresses:
+				if ip and ip not in ip_addresses:
 					ip_addresses.append(ip)
 					yield Ip(
 						host=host,
@@ -123,6 +123,10 @@ class testssl(Command):
 				# Process errors
 				if id.startswith("scanProblem"):
 					yield Error(message=finding)
+
+				# Process warnings
+				elif id.startswith("engine_problem"):
+					yield Warning(message=finding)
 
 				# Process bad ciphers
 				elif id.startswith('cipher-'):
