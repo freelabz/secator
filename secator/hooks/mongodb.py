@@ -168,55 +168,80 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 		ws_id (str): Workspace id.
 		full_scan (bool): If True, scan all findings, otherwise only untagged findings.
 	"""
+	from dataclasses import fields
+	from collections import defaultdict
+
 	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
 	init_time = time.time()
 	client = get_mongodb_client()
 	db = client.main
+
 	start_time = time.time()
 	workspace_query = {'_context.workspace_id': str(ws_id), '_context.workspace_duplicate': False, '_tagged': True}
 	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$ne': True}}
 	if full_scan:
 		del untagged_query['_tagged']
+
 	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)), exclude_types)
 	untagged_findings = load_findings(list(db.findings.find(untagged_query).sort('_timestamp', -1)), exclude_types)
+
 	debug(
 		f'Workspace non-duplicates findings: {len(workspace_findings)}, '
 		f'Untagged findings: {len(untagged_findings)}. '
 		f'Query time: {time.time() - start_time}s',
 		sub='hooks.mongodb'
 	)
+
+	def make_key(item):
+		"""Build a hashable equality key based on dataclass compare fields, matching __eq__ semantics."""
+		cls = item.__class__
+		# Only include fields that participate in comparison (compare=True)
+		values = tuple(getattr(item, f.name) for f in fields(cls) if f.compare)
+		return (cls, values)
+
 	start_time = time.time()
-	seen = []
+
+	# Index workspace findings and untagged findings by equality key
+	workspace_by_key = defaultdict(list)
+	for f in workspace_findings:
+		workspace_by_key[make_key(f)].append(f)
+
+	untagged_by_key = defaultdict(list)
+	for f in untagged_findings:
+		untagged_by_key[make_key(f)].append(f)
+
 	db_updates = {}
 
-	for item in untagged_findings:
-		if item._uuid in seen:
-			continue
+	for key, items in untagged_by_key.items():
+		# Items are already sorted by -_timestamp from the DB cursor, so the first one
+		# is the "newest" canonical item, consistent with previous behavior.
+		item = items[0]
 
 		debug(
-			f'Processing: {repr(item)} ({item._timestamp}) [{item._uuid}]',
+			f'Processing group: {repr(item)} ({item._timestamp}) [{item._uuid}] with {len(items) - 1} local duplicates',
 			sub='hooks.mongodb',
 			verbose=True
 		)
 
-		duplicate_ids = [
-			_._uuid
-			for _ in untagged_findings
-			if _ == item and _._uuid != item._uuid
-		]
-		seen.extend(duplicate_ids)
+		# Untagged duplicates of this item (same equality key)
+		duplicate_untagged = [f for f in items[1:]]
+		duplicate_ids = [f._uuid for f in duplicate_untagged]
 
-		debug(
-			f'Found {len(duplicate_ids)} duplicates for item',
-			sub='hooks.mongodb',
-			verbose=True
-		)
+		if duplicate_untagged:
+			debug(
+				f'Found {len(duplicate_untagged)} untagged duplicates for item',
+				sub='hooks.mongodb',
+				verbose=True
+			)
 
-		duplicate_ws = [
-			_ for _ in workspace_findings
-			if _ == item and _._uuid != item._uuid
-		]
-		debug(f' --> Found {len(duplicate_ws)} workspace duplicates for item', sub='hooks.mongodb', verbose=True)
+		# Workspace duplicates (already tagged in workspace but equal to this item)
+		duplicate_ws = workspace_by_key.get(key, [])
+		if duplicate_ws:
+			debug(
+				f' --> Found {len(duplicate_ws)} workspace duplicates for item',
+				sub='hooks.mongodb',
+				verbose=True
+			)
 
 		# Copy selected fields from the previous "main" finding (first workspace duplicate)
 		# into the new main finding, if configured.
@@ -252,8 +277,17 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 			for related in duplicate_ws:
 				related_ids.extend(related._related)
 
-		debug(f' --> Found {len(duplicate_ids)} total duplicates for item', sub='hooks.mongodb', verbose=True)
+		debug(
+			f' --> Found {len(duplicate_ids)} total duplicates for item',
+			sub='hooks.mongodb',
+			verbose=True
+		)
 
+		if not duplicate_ids and not related_ids:
+			# Nothing to update for this group
+			continue
+
+		# Canonical item for this equality group
 		db_updates[item._uuid] = {
 			**copied_fields,
 			'_related': duplicate_ids + related_ids,
@@ -265,6 +299,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 				'_context.workspace_duplicate': True,
 				'_tagged': True
 			}
+
 	debug(f'Finished processing untagged findings in {time.time() - start_time}s', sub='hooks.mongodb')
 	start_time = time.time()
 
