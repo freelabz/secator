@@ -92,7 +92,6 @@ class ffuf(HttpFuzzer):
 		fuzz_in_data = 'FUZZ' in data
 		fuzz_in_url = 'FUZZ' in self.inputs[0]
 		self.has_fuzz_keyword = fuzz_in_headers or fuzz_in_data or fuzz_in_url
-		recursion = self.get_opt_value('recursion')
 		subs = self.get_opt_value('subs')
 		needs_fuzz_in_url = not fuzz_in_url and (recursion or (not fuzz_in_headers and not fuzz_in_data and not subs))
 		if needs_fuzz_in_url:
