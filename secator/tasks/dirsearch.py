@@ -14,7 +14,7 @@ from secator.output_types import Url, Info, Error
 from secator.tasks._categories import HttpFuzzer
 
 
-@task()
+# @task()
 class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
 	cmd = 'dirsearch'
