@@ -19,6 +19,8 @@ class Ip(OutputType):
 	alive: bool = False
 	protocol: str = field(default=IpProtocol.IPv4)
 	extra_data: dict = field(default_factory=dict, compare=False)
+	is_false_positive: bool = field(default=False, compare=False)
+	is_acknowledged: bool = field(default=False, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='ip', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)

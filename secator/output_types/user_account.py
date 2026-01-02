@@ -13,6 +13,8 @@ class UserAccount(OutputType):
 	email: str = ''
 	site_name: str = ''
 	extra_data: dict = field(default_factory=dict, compare=False)
+	is_false_positive: bool = field(default=False, compare=False)
+	is_acknowledged: bool = field(default=False, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='user_account', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)

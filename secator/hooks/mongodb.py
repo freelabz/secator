@@ -218,6 +218,33 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 		]
 		debug(f' --> Found {len(duplicate_ws)} workspace duplicates for item', sub='hooks.mongodb', verbose=True)
 
+		# Copy selected fields from the previous "main" finding (first workspace duplicate)
+		# into the new main finding, if configured.
+		copied_fields = {}
+		for previous_item in duplicate_ws:
+			copy_fields = CONFIG.addons.mongodb.duplicate_main_copy_fields
+			if copy_fields:
+				for field in copy_fields:
+					# Only copy if the attribute exists on the previous finding
+					if not hasattr(previous_item, field):
+						debug(f'{field} not found on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
+						continue
+					value_prev = getattr(previous_item, field)
+					debug(f'{field} is {value_prev} on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
+					# Skip empty values to avoid overwriting with "less useful" data
+					if not value_prev:
+						debug(f'{field} is empty on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
+						continue
+					# Only overwrite if current item field isn't set
+					value_curr = getattr(item, field)
+					debug(f'{field} is {value_curr} on {item._uuid}', sub='hooks.mongodb', verbose=True)
+					if not value_curr:
+						if field in copied_fields:
+							debug(f'{field} is already copied from previous item', sub='hooks.mongodb', verbose=True)
+							continue
+						debug(f'Using {field}={value_prev} from {previous_item._uuid} for {item._uuid}', sub='hooks.mongodb', verbose=True)  # noqa: E501
+						copied_fields[field] = value_prev
+
 		related_ids = []
 		if duplicate_ws:
 			duplicate_ws_ids = [_._uuid for _ in duplicate_ws]
@@ -228,6 +255,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 		debug(f' --> Found {len(duplicate_ids)} total duplicates for item', sub='hooks.mongodb', verbose=True)
 
 		db_updates[item._uuid] = {
+			**copied_fields,
 			'_related': duplicate_ids + related_ids,
 			'_context.workspace_duplicate': False,
 			'_tagged': True
