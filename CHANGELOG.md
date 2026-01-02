@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.24.0](https://github.com/freelabz/secator/compare/v0.23.0...v0.24.0) (2025-12-21)
+
+
+### Features
+
+* add --raw option to parse Burp-style HTTP requests for HTTP tasks ([#863](https://github.com/freelabz/secator/issues/863)) ([2b42496](https://github.com/freelabz/secator/commit/2b424962296f2a9f18443596805ac1b3116b19b0))
+* **install:** support cachyos ([#866](https://github.com/freelabz/secator/issues/866)) ([88a7fbc](https://github.com/freelabz/secator/commit/88a7fbcdf774b28eaad6fffe9861e971199ddac4))
+
+
+### Bug Fixes
+
+* add PATH warnings for go, cargo, and pip installations ([#857](https://github.com/freelabz/secator/issues/857)) ([e2e406b](https://github.com/freelabz/secator/commit/e2e406bfcb9db06adda35a4f2a6ed77163aa7643))
+* bup webserver and nuclei tag values ([#849](https://github.com/freelabz/secator/issues/849)) ([ff49a52](https://github.com/freelabz/secator/commit/ff49a52aec361ea3c8c4288be3ce0f53fd899fe6))
+* **scan:** domain scan should consider non-validated subdomains ([#868](https://github.com/freelabz/secator/issues/868)) ([467f8b3](https://github.com/freelabz/secator/commit/467f8b349a8d44ef97524195e7348edb05477fa6))
+* **tasks:** arpscan re-install ([#855](https://github.com/freelabz/secator/issues/855)) ([bdab5de](https://github.com/freelabz/secator/commit/bdab5deb6de8fb894a95247a37a7a578690b5e4e))
+* **tasks:** ffuf default wordlist in fuzzing mode ([#853](https://github.com/freelabz/secator/issues/853)) ([043134a](https://github.com/freelabz/secator/commit/043134a2f1f086bf72283d37d37fd6a9f3447074))
+* **tasks:** resolve cariddi UnboundLocalError when processing errors/secrets without params ([#851](https://github.com/freelabz/secator/issues/851)) ([a921be1](https://github.com/freelabz/secator/commit/a921be180583522f1c25e106afa43c09c3dde742))
+* **tasks:** set prompt default auto-accept ([#854](https://github.com/freelabz/secator/issues/854)) ([6fbce41](https://github.com/freelabz/secator/commit/6fbce41b6cad77239b4a3ac4d23864e9796c34d1))
+* **template:** workflow opts not serialized to dict ([#867](https://github.com/freelabz/secator/issues/867)) ([d0a4a19](https://github.com/freelabz/secator/commit/d0a4a19b66af59ae5165ff08d081fed7f31873e9))
+
 ## [0.23.0](https://github.com/freelabz/secator/compare/v0.22.2...v0.23.0) (2025-12-13)
 
 
