@@ -5,7 +5,7 @@
 	"main": "",
 	"scripts": {
 		"solo": "npm run venv && npm run install &&. .venv/bin/activate && .venv/bin/secator worker -r",
-		"dev": "npm run venv && npm run install &&. .venv/bin/activate && SECATOR_CELERY_BROKER_URL=redis://localhost:6379 SECATOR_CELERY_RESULT_BACKEND=redis://localhost:6379 secator worker -r",
+		"dev": "npm run venv && npm run install &&. .venv/bin/activate && SECATOR_CELERY_BROKER_URL=redis://localhost:6379 SECATOR_CELERY_RESULT_BACKEND=redis://localhost:6379 SECATOR_ADDONS_MONGODB_ENABLED=1 secator worker -r",
 		"install": ". .venv/bin/activate && pip install -e .[gcs,redis,worker,dev,mongodb]",
 		"venv": "python3 -m venv .venv",
 		"generate": "rm -r venv && npm run venv && .venv/bin/pip freeze > requirements.txt",

@@ -1,8 +1,8 @@
 import os
-
+import shlex
 import yaml
 
-from secator.decorators import task
+# from secator.decorators import task
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DATA, DELAY, DEPTH,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
@@ -14,7 +14,7 @@ from secator.output_types import Url, Info, Error
 from secator.tasks._categories import HttpFuzzer
 
 
-@task()
+# @task()
 class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
 	cmd = 'dirsearch'
@@ -58,18 +58,17 @@ class dirsearch(HttpFuzzer):
 		}
 	}
 	install_cmd = 'pipx install git+https://github.com/maurosoria/dirsearch.git --force'
-	install_version = '0.4.3'
+	# install_version = '0.4.3'
 	proxychains = True
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
 
 	@staticmethod
 	def on_init(self):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):

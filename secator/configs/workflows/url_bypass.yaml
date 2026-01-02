@@ -1,10 +1,15 @@
 type: workflow
 name: url_bypass
 alias: urlbypass
-description: Try bypass techniques for 4xx URLs
+description: 4xx URL bypass techniques
+long_description: |
+  Attempts to bypass access restrictions on URLs that return 4xx status codes (forbidden, not found, etc.).
+  Uses various HTTP header manipulation and path traversal techniques to potentially gain access
+  to protected resources. Useful for finding misconfigured access controls and authorization bypasses.
 tags: [http, crawl]
 input_types:
   - url
+
 tasks:
   bup:
     description: Bypass 4xx

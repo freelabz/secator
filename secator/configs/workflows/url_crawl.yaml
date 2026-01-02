@@ -1,58 +1,98 @@
 type: workflow
 name: url_crawl
 alias: urlcrawl
-description: URL crawl (fast)
+description: URL crawl
+long_description: |
+  Rapidly crawls and discovers URLs from a target website using multiple crawling engines.
+  Supports both passive sources (collecting from external databases) and active crawlers
+  (spidering the website directly). Identifies interesting patterns, endpoints, and parameters.
+  Can optionally hunt for secrets in HTTP responses and probe URLs for additional information.
 tags: [http, crawl]
 input_types:
   - url
 
 options:
+  passive:
+    is_flag: True
+    help: Passive only (no requests to targets)
+    default: False
+    short: passive
+
+  active:
+    is_flag: True
+    help: Active only (no passive sources)
+    default: False
+    short: active
+
   crawlers:
     type: list
-    help: Crawlers to use (katana, gospider)
-    default: ['gau', 'katana']
+    help: "Crawlers to use (comma-separated) (passive: xurlfind3r, urlfinder, gau; active: katana, gospider, cariddi)"
+    default: ['xurlfind3r', 'katana']
     internal: True
 
-  hunt_patterns:
+  hunt_secrets:
     is_flag: True
-    help: Hunt patterns in HTTP responses (cariddi)
-    default: True
-    short: hp
+    help: Hunt secrets in HTTP responses (trufflehog)
+    default: False
+    short: hs
 
 default_options:
   match_codes: 200,204,301,302,307,401,403,405,500
 
 tasks:
   _group/crawl:
+    xurlfind3r:
+      description: Crawl URLs from passive sources
+      if: "'xurlfind3r' in opts.crawlers and not opts.active"
+
+    urlfinder:
+      description: Crawl URLs from passive sources
+      if: "'urlfinder' in opts.crawlers and not opts.active"
+
     gau:
-      description: Search for passive URLs
-      if: "'gau' in opts.crawlers"
+      description: Crawl URLs from passive sources
+      if: "'gau' in opts.crawlers and not opts.active"
 
     katana:
       description: Crawl URLs
-      if: "'katana' in opts.crawlers"
+      if: "'katana' in opts.crawlers and not opts.passive"
 
     gospider:
       description: Crawl URLs
-      if: "'gospider' in opts.crawlers"
+      if: "'gospider' in opts.crawlers and not opts.passive"
 
-  cariddi:
-    description: Hunt URLs patterns
-    info: True
-    secrets: True
-    errors: True
-    juicy_extensions: 1
-    juicy_endpoints: True
-    targets_:
-    - target.name
-    - url.url
-    if: opts.hunt_patterns
+    cariddi:
+      description: Hunt URLs patterns
+      info: True
+      secrets: True
+      errors: True
+      juicy_extensions: 1
+      juicy_endpoints: True
+      if: "'cariddi' in opts.crawlers and not opts.passive"
 
   httpx:
-    description: Run HTTP probes on crawled URLs
+    description: Run HTTP probes on unverified URLs
     tech_detect: True
+    filter_duplicates: True
     targets_:
     - target.name
     - type: url
       field: url
-      condition: url.status_code != 0
+      condition: not url.verified
+    if: not opts.passive
+
+  _group/data_hunt:
+    trufflehog:
+      description: Find secrets in HTTP responses
+      targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+      if: opts.hunt_secrets and not opts.passive
+    maigret:
+      description: Hunt email addresses found
+      targets_:
+      - type: tag
+        field: value
+        condition: item.name == 'email_address'
+      if: opts.hunt_secrets and not opts.passive

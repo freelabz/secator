@@ -1,0 +1,5 @@
+NAME        INSTALLED  FIXED-IN  TYPE    VULNERABILITY        SEVERITY
+pip         23.0.1     25.3      python  GHSA-4xh5-x5gv-qwph  Medium
+pip         23.0.1     23.3      python  GHSA-mq26-g339-26xf  Medium
+setuptools  66.1.1     78.1.1    python  GHSA-5rjg-fvgr-3xxf  High
+setuptools  66.1.1     70.0.0    python  GHSA-cx63-2mw6-8hw5  High

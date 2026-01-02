@@ -1,30 +1,61 @@
 type: workflow
 name: cidr_recon
 alias: cidrrec
-description: Local network recon
+description: Local network reconnaissance
+long_description: |
+  Discovers and analyzes hosts within a CIDR range or local network through ARP / ICMP scanning.
+  Maps IP addresses and identifies live hosts.
+  Useful for local network security assessments and penetration testing.
 tags: [recon, cidr, network]
 input_types:
   - cidr_range
   - ip
+  - slug
+default_inputs: ''
 
 tasks:
-  mapcidr:
-    description: Find CIDR range IPs
+  _group/discover:
+    netdetect:
+      description: Discover local network CIDR ranges
+      if: len(targets) == 0
+    arp:
+      description: Discover neighbors with ARP requests
+      if: len(targets) == 0
 
-  fping:
-    description: Check for alive IPs
-    targets_: ip.ip
-
-  nmap:
-    description: Scan alive IPs' ports
+  prompt:
+    description: Select a CIDR range manually
+    message: "Scan CIDR range {input}?"
     targets_:
-    - type: ip
-      field: ip
-      condition: item.alive
+    - type: tag
+      field: value
+      condition: item.name == 'net_cidr' and len(targets) == 0
 
-  httpx:
-    description: Probe HTTP services on open ports
-    tech_detect: True
+  _group/probe:
+    arpscan:
+      description: Discover hosts with ARP requests
+      targets_:
+      - type: tag
+        field: value
+        condition: item.name == 'user_input'
+
+    fping:
+      description: Discover hosts with ICMP requests
+      targets_:
+      - type: tag
+        field: value
+        condition: item.name == 'user_input'
+
+    nmap:
+      description: Discover hosts and ports with TCP SYN scan
+      version_detection: true
+      targets_:
+      - type: tag
+        field: value
+        condition: item.name == 'user_input'
+
+  search_vulns:
+    description: Search for related exploits
     targets_:
     - type: port
-      field: '{ip}:{port}'
+      field: '{host}:{port}~{service_name}'
+      condition: len(item.service_name.split('/')) > 1

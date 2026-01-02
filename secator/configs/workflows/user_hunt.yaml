@@ -2,10 +2,28 @@ type: workflow
 name: user_hunt
 alias: userhunt
 description: User account search
+long_description: |
+  Searches for user accounts and associated information across various online platforms and services.
+  Takes usernames, email addresses, or other identifiers and queries multiple sources to find
+  associated accounts, password leaks, and online profiles. Useful for OSINT investigations,
+  credential stuffing prevention checks, and understanding a user's digital footprint.
 tags: [user_account]
 input_types:
-  - username
+  - slug
+  - string
+  - email
 
 tasks:
-  maigret:
-    description: Hunt user accounts
+  _group/hunt_users:
+    maigret:
+      description: Hunt user accounts
+      targets_:
+        - type: target
+          field: name
+          condition: target.type != 'email'
+    h8mail:
+      description: Find password leaks
+      targets_:
+        - type: target
+          field: name
+          condition: target.type == 'email'

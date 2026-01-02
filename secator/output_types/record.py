@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import HOST, NAME, TYPE
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s
+from secator.utils import rich_to_ansi, format_object
 
 
 @dataclass
@@ -12,7 +12,9 @@ class Record(OutputType):
 	type: str
 	host: str = ''
 	extra_data: dict = field(default_factory=dict, compare=False)
-	_source: str = field(default='', repr=True)
+	is_false_positive: bool = field(default=False, compare=False)
+	is_acknowledged: bool = field(default=False, compare=False)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='record', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
@@ -32,5 +34,5 @@ class Record(OutputType):
 		if self.host:
 			s += rf' \[[magenta]{self.host}[/]]'
 		if self.extra_data:
-			s += r' \[[bold yellow]' + ','.join(f'{_s(k)}={_s(v)}' for k, v in self.extra_data.items()) + '[/]]'
+			s += format_object(self.extra_data, 'yellow')
 		return rich_to_ansi(s)

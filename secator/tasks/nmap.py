@@ -1,39 +1,32 @@
 import logging
 import os
+import shlex
 import re
-
 import xmltodict
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
-								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
-								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
-								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
-								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
-								 SEVERITY, STATE, TAGS, THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability, Info, Error
-from secator.tasks._categories import VulnMulti
+from secator.definitions import (CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED,
+								 OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT,
+								 THREADS, TIMEOUT, TOP_PORTS)
+from secator.output_types import Exploit, Port, Vulnerability, Info, Error, Ip
+from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
 
 logger = logging.getLogger(__name__)
 
 
 @task()
-class nmap(VulnMulti):
+class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap'
-	input_types = [HOST, IP]
-	output_types = [Port, Vulnerability, Exploit]
+	input_types = [HOST, IP, CIDR_RANGE]
+	output_types = [Port, Ip, Vulnerability, Exploit]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
 	opts = {
-		# Port specification and scan order
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (- to scan all)'},
-		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [100, 1000, full]'},
-
 		# Script scanning
 		SCRIPT: {'type': str, 'default': None, 'help': 'NSE scripts'},
 		'script_args': {'type': str, 'short': 'sargs', 'default': None, 'help': 'NSE script arguments (n1=v1,n2=v2,...)'},
@@ -81,22 +74,20 @@ class nmap(VulnMulti):
 		# Misc
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path', 'internal': True, 'display': False},  # noqa: E501
 		'debug': {'is_flag': True, 'short': 'd', 'default': False, 'help': 'Enable debug mode'},
-		'verbose': {'is_flag': True, 'short': 'v', 'default': False, 'help': 'Enable verbose mode'},
+		'verbose_output': {'is_flag': True, 'short': 'vo', 'default': False, 'help': 'Enable verbose mode'},
 		'timing': {'type': int, 'short': 'T', 'default': None, 'help': 'Timing template (0: paranoid, 1: sneaky, 2: polite, 3: normal, 4: aggressive, 5: insane)'},  # noqa: E501
 	}
 	opt_key_map = {
-		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: 'scan-delay',
-		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
 		PROXY: None,  # TODO: supports --proxies but not in TCP mode [https://github.com/nmap/nmap/issues/1098]
 		RATE_LIMIT: 'max-rate',
 		RETRIES: 'max-retries',
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: 'max-rtt-timeout',
-		USER_AGENT: OPT_NOT_SUPPORTED,
+		PORTS: '-p',
+		TOP_PORTS: 'top-ports',
 
 		# Nmap opts
-		PORTS: '-p',
 		'skip_host_discovery': '-Pn',
 		'version_detection': '-sV',
 		'detect_all': '-A',
@@ -128,11 +119,12 @@ class nmap(VulnMulti):
 		'traceroute': '--traceroute',
 		'disable_arp_ping': '--disable-arp-ping',
 		'output_path': '-oX',
+		'verbose_output': '-v',
 	}
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
-	install_pre = {
+	install_cmd_pre = {
 		'apt|pacman|brew': ['nmap'],
 		'apk': ['nmap', 'nmap-scripts'],
 	}
@@ -152,7 +144,7 @@ class nmap(VulnMulti):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
-		self.cmd += f' -oX {self.output_path}'
+		self.cmd += f' -oX {shlex.quote(self.output_path)}'
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
 		tcp_connect = self.cmd_options.get('tcp_connect')
 		if tcp_connect and tcp_syn_stealth:
@@ -187,9 +179,13 @@ class nmapData(dict):
 
 	def __iter__(self):
 		datas = []
+		ips = []
 		for host in self._get_hosts():
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
+			if ip and ip not in ips:
+				yield Ip(ip=ip, alive=True, host=hostname, extra_data={'protocol': 'tcp'})
+				ips.append(ip)
 			for port in self._get_ports(host):
 				# Get port number
 				port_number = port['@portid']
@@ -216,17 +212,16 @@ class nmapData(dict):
 				protocol = port['@protocol'].lower()
 
 				# Yield port data
-				port = {
-					PORT: port_number,
-					HOST: hostname,
-					STATE: state,
-					SERVICE_NAME: service_name,
-					IP: ip,
-					PROTOCOL: protocol,
-					EXTRA_DATA: extra_data,
-					CONFIDENCE: conf
-				}
-				yield port
+				yield Port(
+					port=port_number,
+					ip=ip,
+					host=hostname,
+					state=state,
+					service_name=service_name,
+					protocol=protocol,
+					extra_data=extra_data,
+					confidence=conf
+				)
 
 				# Parse each script output to get vulns
 				for script in scripts:
@@ -240,27 +235,24 @@ class nmapData(dict):
 						'vulners': self._parse_vulners_output,
 					}
 					func = funcmap.get(script_id)
-					metadata = {
-						MATCHED_AT: f'{hostname}:{port_number}',
-						IP: ip,
-						EXTRA_DATA: extra_data,
-					}
 					if not func:
 						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve.nmap')
 						continue
 					for data in func(output, cpes=cpes):
-						data.update(metadata)
+						data.matched_at = f'{hostname}:{port_number}'
+						data.ip = ip
+						data.extra_data.update(extra_data)
 						confidence = 'low'
-						if 'cpe-match' in data[TAGS]:
+						if 'cpe-match' in data.tags:
 							confidence = 'high' if version_exact else 'medium'
-						data[CONFIDENCE] = confidence
-						if (CONFIG.runners.skip_cve_low_confidence and data[CONFIDENCE] == 'low'):
-							debug(f'{data[ID]}: ignored (low confidence).', sub='cve.nmap')
+						data.confidence = confidence
+						if (CONFIG.runners.skip_cve_low_confidence and data.confidence == 'low'):
+							debug(f'{data.id}: ignored (low confidence).', sub='cve.nmap')
 							continue
 						if data in datas:
 							continue
 						yield data
-						datas.append(data)
+						# datas.append(data)
 
 	#---------------------#
 	# XML FILE EXTRACTORS #
@@ -347,7 +339,10 @@ class nmapData(dict):
 		if not isinstance(cpes, list):
 			cpes = [cpes]
 			extra_data['cpe'] = cpes
-		debug(f'Found CPEs: {",".join(cpes)}', sub='cve.nmap')
+		if not cpes:
+			debug(f'No CPEs found for {extra_data.get("product", "")} {extra_data.get("version", "")}', sub='cve.nmap')
+		else:
+			debug(f'Found CPEs: {",".join(cpes)}', sub='cve.nmap')
 
 		# Grab confidence
 		conf = int(extra_data.get('conf', 0))
@@ -389,8 +384,8 @@ class nmapData(dict):
 		Args:
 			out (str): Vulscan script output.
 
-		Returns:
-			list: List of Vulnerability dicts.
+		Yields:
+			Vulnerability: Vulnerability object.
 		"""
 		provider_name = ''
 		for line in out.splitlines():
@@ -405,20 +400,20 @@ class nmapData(dict):
 			if not matches:
 				continue
 			vuln_id, vuln_title = matches.groups()
-			vuln = {
-				ID: vuln_id,
-				NAME: vuln_id,
-				DESCRIPTION: vuln_title,
-				PROVIDER: provider_name,
-				TAGS: [provider_name]
-			}
+			vuln = Vulnerability(
+				id=vuln_id,
+				name=vuln_id,
+				description=vuln_title,
+				provider=provider_name,
+				tags=[provider_name]
+			)
 			if provider_name == 'MITRE CVE':
-				data = VulnMulti.lookup_cve(vuln['id'], *cpes)
-				if data:
-					vuln.update(data)
+				vuln_lookup = VulnMulti.lookup_cve(vuln_id, *cpes)
+				if vuln_lookup:
+					vuln.merge_with(vuln_lookup)
 				yield vuln
 			else:
-				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve.provider', verbose=True)
+				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve.nmap')
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
@@ -437,25 +432,18 @@ class nmapData(dict):
 				exploit_id, cvss_score, reference_url, _ = elems
 				name = exploit_id
 				# edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
-				exploit = {
-					ID: exploit_id,
-					NAME: name,
-					PROVIDER: provider_name,
-					REFERENCE: reference_url,
-					TAGS: [exploit_id, provider_name],
-					CVSS_SCORE: cvss_score,
-					CONFIDENCE: 'low',
-					'_type': 'exploit',
-				}
+				exploit = Exploit(
+					id=exploit_id,
+					name=name,
+					provider=provider_name,
+					reference=reference_url,
+					tags=[exploit_id, provider_name],
+					confidence='low',
+				)
 				# TODO: lookup exploit in ExploitDB to find related CVEs
 				# if edb_id:
 				# 	print(edb_id)
 				# 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
-				vuln = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
-				if vuln:
-					yield vuln
-					exploit[TAGS].extend(vuln[TAGS])
-					exploit[CONFIDENCE] = vuln[CONFIDENCE]
 				yield exploit
 				continue
 
@@ -465,20 +453,18 @@ class nmapData(dict):
 				vuln_cvss = float(vuln_cvss)
 				vuln_id = vuln_id.split(':')[-1]
 				vuln_type = vuln_id.split('-')[0]
-				vuln = {
-					ID: vuln_id,
-					NAME: vuln_id,
-					PROVIDER: provider_name,
-					CVSS_SCORE: vuln_cvss,
-					SEVERITY: VulnMulti.cvss_to_severity(vuln_cvss),
-					REFERENCES: [reference_url],
-					TAGS: [vuln_id, provider_name],
-					CONFIDENCE: 'low'
-				}
+				vuln = Vulnerability(
+					id=vuln_id,
+					name=vuln_id,
+					provider=provider_name,
+					cvss_score=vuln_cvss,
+					references=[reference_url],
+					tags=[provider_name],
+					confidence='low',
+				)
 				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
-					data = VulnMulti.lookup_cve(vuln_id, *cpes)
-					if data:
-						vuln.update(data)
+					vuln2 = VulnMulti.lookup_cve(vuln_id, *cpes)
+					vuln.merge_with(vuln2)
 					yield vuln
 				else:
 					debug(f'Vulners parser for "{vuln_type}" is not implemented YET.', sub='cve.nmap')

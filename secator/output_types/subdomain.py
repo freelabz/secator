@@ -4,16 +4,19 @@ from typing import List
 
 from secator.definitions import DOMAIN, HOST, SOURCES
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, format_object
 
 
 @dataclass
 class Subdomain(OutputType):
 	host: str
 	domain: str
+	verified: bool = field(default=False, compare=False)
 	sources: List[str] = field(default_factory=list, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
-	_source: str = field(default='', repr=True)
+	is_false_positive: bool = field(default=False, compare=False)
+	is_acknowledged: bool = field(default=False, compare=False)
+	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='subdomain', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
@@ -38,5 +41,7 @@ class Subdomain(OutputType):
 		if sources_str:
 			s += f' [{sources_str}]'
 		if self.extra_data:
-			s += r' \[[bold yellow]' + ', '.join(f'{k}:{v}' for k, v in self.extra_data.items()) + '[/]]'
+			s += format_object(self.extra_data, 'yellow')
+		if not self.verified:
+			s = f'[dim]{s}[/]'
 		return rich_to_ansi(s)

@@ -75,6 +75,9 @@ class Runner:
 	# Output types
 	output_types = []
 
+	# Default inputs
+	default_inputs = None
+
 	# Default exporters
 	default_exporters = []
 
@@ -83,6 +86,12 @@ class Runner:
 
 	# Run hooks
 	enable_hooks = True
+
+	# Run validators
+	enable_validators = True
+
+	# Run duplicate check
+	enable_duplicate_check = True
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
@@ -112,11 +121,13 @@ class Runner:
 		self.celery_ids = []
 		self.celery_ids_map = {}
 		self.revoked = False
+		self.skipped = False
 		self.results_buffer = []
 		self._hooks = hooks
 
 		# Runner process options
 		self.no_poll = self.run_opts.get('no_poll', False)
+		self.no_live_updates = self.run_opts.get('no_live_updates', False)
 		self.no_process = not self.run_opts.get('process', True)
 		self.piped_input = self.run_opts.get('piped_input', False)
 		self.piped_output = self.run_opts.get('piped_output', False)
@@ -129,10 +140,10 @@ class Runner:
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 
 		# Runner toggles
-		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', True)
+		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', self.enable_duplicate_check)
 		self.enable_profiles = self.run_opts.get('enable_profiles', True)
 		self.enable_reports = self.run_opts.get('enable_reports', not self.sync) and not self.dry_run and not self.no_process and not self.no_poll  # noqa: E501
-		self.enable_hooks = self.run_opts.get('enable_hooks', True) and not self.dry_run and not self.no_process and not self.no_poll  # noqa: E501
+		self.enable_hooks = self.run_opts.get('enable_hooks', True) and not self.dry_run and not self.no_process  # noqa: E501
 
 		# Runner print opts
 		self.print_item = self.run_opts.get('print_item', False) and not self.dry_run
@@ -177,19 +188,23 @@ class Runner:
 
 		# Add prior results to runner results
 		self.debug(f'adding {len(results)} prior results to runner', sub='init')
+		if CONFIG.addons.mongodb.enabled:
+			self.debug(f'loading {len(results)} results from MongoDB', sub='init')
+			from secator.hooks.mongodb import get_results
+			results = get_results(results)
 		for result in results:
 			self.add_result(result, print=False, output=False, hooks=False, queue=not self.has_parent)
 
 		# Determine inputs
-		self.debug(f'resolving inputs with dynamic opts ({len(self.dynamic_opts)})', obj=self.dynamic_opts, sub='init')
+		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		self.inputs = list(set(self.inputs))
 		targets = [Target(name=target) for target in self.inputs]
 		for target in targets:
 			self.add_result(target, print=False, output=False)
 
-		# Run extractors on results and targets
-		self._run_extractors(results + targets)
+		# Run extractors on results
+		self._run_extractors()
 		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
 		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
 		self.debug(f'print opts ({len(self.resolved_print_opts)})', obj=self.resolved_print_opts, sub='init')
@@ -225,9 +240,12 @@ class Runner:
 		# Print targets
 		if self.print_target:
 			pluralize = 'targets' if len(self.self_targets) > 1 else 'target'
-			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize} for {format_runner_name(self)}:'), rich=True)
-			for target in self.self_targets:
+			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize} for {format_runner_name(self)}'), rich=True)
+			truncated_targets = self.self_targets[:10] if len(self.self_targets) > 10 else self.self_targets
+			for target in truncated_targets:
 				self._print(f'      {repr(target)}', rich=True)
+			if len(self.self_targets) > 10:
+				self._print(f'      and {len(self.self_targets) - 10} more...', rich=True)
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
@@ -264,14 +282,20 @@ class Runner:
 
 	@property
 	def infos(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Info) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Info)]
 
 	@property
 	def warnings(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Warning) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Warning)]
 
 	@property
 	def errors(self):
+		if self.config.type == 'task':
+			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
 		return [r for r in self.results if isinstance(r, Error)]
 
 	@property
@@ -306,6 +330,8 @@ class Runner:
 			return 'PENDING'
 		if self.revoked:
 			return 'REVOKED'
+		if self.skipped:
+			return 'SKIPPED'
 		if not self.done:
 			return 'RUNNING'
 		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
@@ -429,12 +455,12 @@ class Runner:
 			if error:
 				self.add_result(error)
 
-	def _run_extractors(self, results):
+	def _run_extractors(self):
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
 		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs, 'ancestor_id': self.ancestor_id}
 		inputs, run_opts, errors = run_extractors(
-			results,
+			self.results,
 			self.run_opts,
 			self.inputs,
 			ctx=ctx,
@@ -458,12 +484,11 @@ class Runner:
 		if item._uuid and item._uuid in self.uuids:
 			return
 
-		# Keep existing ancestor id in context
-		ancestor_id = item._context.get('ancestor_id', None)
-
-		# Set context
-		item._context.update(self.context)
-		item._context['ancestor_id'] = ancestor_id or self.ancestor_id
+		# Update context with runner info
+		ctx = item._context.copy()
+		item._context = self.context.copy()
+		item._context.update(ctx)
+		item._context['ancestor_id'] = ctx.get('ancestor_id') or self.ancestor_id
 
 		# Set uuid
 		if not item._uuid:
@@ -511,7 +536,7 @@ class Runner:
 		self.uuids.add(item._uuid)
 		self.results.append(item)
 		self.results_count += 1
-		if output:
+		if output and item._type not in ['stat', 'progress']:
 			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
@@ -751,6 +776,7 @@ class Runner:
 			'last_updated_db': self.last_updated_db,
 			'context': self.context,
 			'errors': [e.toDict() for e in self.errors],
+			'warnings': [w.toDict() for w in self.warnings],
 		})
 		return data
 
@@ -783,8 +809,6 @@ class Runner:
 					continue
 				result = hook(self, *args)
 				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)  # noqa: E501
-				if isinstance(result, Error):
-					self.add_result(result, hooks=False)
 			except Exception as e:
 				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
 				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
@@ -811,6 +835,9 @@ class Runner:
 		if self.dry_run:
 			self.debug('validator skipped (dry_run)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
 			return True
+		if not self.enable_validators:
+			self.debug('validator skipped (disabled validators)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
+			return True
 		for validator in self.resolved_validators[validator_type]:
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
@@ -821,7 +848,7 @@ class Runner:
 					if doc:
 						message += f': {doc}'
 					err = Error(message=message)
-					self.add_result(err)
+					self.add_result(err, print=True)
 				return False
 			self.debug('validator success', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
 		return True
@@ -1088,23 +1115,17 @@ class Runner:
 	@staticmethod
 	def _validate_inputs(self, inputs):
 		"""Input type is not supported by runner"""
-		supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
+		# supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
 		for _input in inputs:
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
 				message = (
-					f'Validator failed: target [bold blue]{_input}[/] of type [bold green]{input_type}[/] '
-					f'is not supported by [bold gold3]{self.unique_name}[/]. Supported types: [bold green]{supported_types}[/]'
+					f'Target [bold blue]{_input}[/] skipped'
+					f' ([bold]{input_type}[/] not supported by {format_runner_name(self)}) '
 				)
-				if self.has_parent:
-					message += '. Removing from current inputs (runner context)'
-					info = Info(message=message)
-					self.inputs.remove(_input)
-					self.add_result(info)
-				else:
-					error = Error(message=message)
-					self.add_result(error)
-					return False
+				info = Info(message=message)
+				self.inputs.remove(_input)
+				self.add_result(info)
 		return True
 
 	@staticmethod

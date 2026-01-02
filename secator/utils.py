@@ -6,18 +6,19 @@ import json
 import logging
 import operator
 import os
-import tldextract
 import re
 import select
+import signal
 import sys
+import tldextract
+import traceback
 import validators
 import warnings
 
 from datetime import datetime, timedelta
 from functools import reduce
-from pathlib import Path
+from pathlib import Path, PurePath
 from time import time
-import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
@@ -25,7 +26,7 @@ import ifaddr
 import yaml
 
 from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE, IP, HOST, CIDR_RANGE,
-								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT)
+								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT, GCS_URL)
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
@@ -35,6 +36,7 @@ _tasks = []
 _utils = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
+CAMEL_TO_SNAKE_REGEX = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 class TaskError(ValueError):
@@ -75,8 +77,10 @@ def expand_input(input, ctx):
 	"""
 	piped_input = ctx.obj['piped_input']
 	dry_run = ctx.obj['dry_run']
+	default_inputs = ctx.obj['default_inputs']
+	input_required = ctx.obj['input_required']
 	if input is None:  # read from stdin
-		if not piped_input and not dry_run:
+		if not piped_input and input_required and not default_inputs and not dry_run:
 			console.print('No input passed on stdin. Showing help page.', style='bold red')
 			ctx.get_help()
 			sys.exit(1)
@@ -88,8 +92,18 @@ def expand_input(input, ctx):
 			else:
 				console.print('No input passed on stdin.', style='bold red')
 				sys.exit(1)
+		elif default_inputs:
+			console.print('[bold yellow]No inputs provided, using default inputs:[/]')
+			for inp in default_inputs:
+				console.print(f'  • {inp}')
+			return default_inputs
+		elif not dry_run:
+			return []
 	elif os.path.exists(input):
-		if os.path.isfile(input):
+		input_types = ctx.obj['input_types']
+		if not input_types or 'path' in input_types:
+			return input
+		elif os.path.isfile(input):
 			with open(input, 'r') as f:
 				data = f.read().splitlines()
 			return data
@@ -398,6 +412,19 @@ def rich_to_ansi(text):
 		return text
 
 
+def strip_rich_markup(text):
+	"""Strip rich markup from text.
+
+	Args:
+		text (str): Text.
+
+	Returns:
+		str: Text without rich markup.
+	"""
+	from rich.text import Text
+	return Text.from_markup(text).plain
+
+
 def rich_escape(obj):
 	"""Escape object for rich printing.
 
@@ -487,15 +514,33 @@ def escape_mongodb_url(url):
 	return url
 
 
-def caml_to_snake(s):
-	return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
+def caml_to_snake(name):
+	"""
+	Convert CamelCase string to snake_case, handling acronyms properly.
+
+	Examples:
+		>>> caml_to_snake("MongoDB")
+		'mongo_db'
+		>>> caml_to_snake("MONGODB")
+		'mongodb'
+		>>> caml_to_snake("getHTTPResponseCode")
+		'get_http_response_code'
+		>>> caml_to_snake("XMLHttpRequest")
+		'xml_http_request'
+		>>> caml_to_snake("HTMLElement")
+		'html_element'
+	"""
+	if not name:
+		return ""
+	name = CAMEL_TO_SNAKE_REGEX.sub(r'_', name)
+	return name.lower().replace('__', '_')
 
 
 def print_version():
 	"""Print secator version information."""
 	from secator.installer import get_version_info
 	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False, end='')
-	info = get_version_info('secator', install_github_handle='freelabz/secator', version=VERSION)
+	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
 	status = info['status']
 	location = info['location']
@@ -836,6 +881,9 @@ def convert_functions_to_strings(data):
 
 
 def headers_to_dict(header_opt):
+	# If already a dict, return as-is
+	if isinstance(header_opt, dict):
+		return header_opt
 	headers = {}
 	for header in header_opt.split(';;'):
 		split = header.strip().split(':')
@@ -843,6 +891,74 @@ def headers_to_dict(header_opt):
 		val = ':'.join(split[1:]).strip()
 		headers[key] = val
 	return headers
+
+
+def parse_raw_http_request(raw_request):
+	"""Parse a raw HTTP request (Burp-style format) and extract method, URL, headers, and body.
+
+	Args:
+		raw_request (str): Raw HTTP request string.
+
+	Returns:
+		dict: Dictionary containing 'method', 'url', 'headers', and 'data'.
+	"""
+	lines = raw_request.strip().split('\n')
+	if not lines or not lines[0]:
+		return {}
+
+	# Parse request line (e.g., "POST /test HTTP/1.1")
+	request_line = lines[0].strip()
+	parts = request_line.split(' ')
+	if len(parts) < 3:
+		return {}
+
+	method = parts[0]
+	path = parts[1]
+
+	# Parse headers
+	headers = {}
+	body_start = len(lines)  # Default to end of lines (no body)
+	found_empty_line = False
+	for i, line in enumerate(lines[1:], start=1):
+		line_stripped = line.strip()
+		if not line_stripped:
+			# Empty line indicates end of headers
+			body_start = i + 1
+			found_empty_line = True
+			break
+		if ':' in line_stripped:
+			key, value = line_stripped.split(':', 1)
+			headers[key.strip()] = value.strip()
+		else:
+			# If we encounter a line without a colon and no empty line yet, it's not a valid header format
+			# This shouldn't happen in properly formatted requests, but we'll handle it gracefully
+			break
+
+	# Extract host from headers to construct full URL
+	host = headers.get('Host', '')
+	if not host:
+		return {}
+
+	# Determine scheme (default to https if not specified)
+	scheme = 'https'
+	# If port 80 is explicitly in host, use http
+	if ':80' in host and not host.startswith('['):
+		scheme = 'http'
+
+	# Construct full URL
+	url = f"{scheme}://{host}{path}"
+
+	# Parse body (everything after the empty line)
+	body = ''
+	if found_empty_line and body_start < len(lines):
+		body = '\n'.join(lines[body_start:]).strip()
+
+	return {
+		'method': method,
+		'url': url,
+		'headers': headers,
+		'data': body
+	}
 
 
 def format_object(obj, color='magenta', skip_keys=[]):
@@ -853,6 +969,27 @@ def format_object(obj, color='magenta', skip_keys=[]):
 		if obj:
 			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
 	return ''
+
+
+def is_host_port(target):
+	"""Check if a target is a host:port.
+
+	Args:
+		target (str): The target to check.
+
+	Returns:
+		bool: True if the target is a host:port, False otherwise.
+	"""
+	split = target.split(':')
+	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0]) or split[0] == 'localhost'):  # noqa: E501
+		return False
+	try:
+		port = int(split[1])
+		if port < 1 or port > 65535:
+			return False
+	except ValueError:
+		return False
+	return True
 
 
 def autodetect_type(target):
@@ -866,13 +1003,15 @@ def autodetect_type(target):
 	"""
 	if validators.url(target, simple_host=True):
 		return URL
+	elif target.startswith('gs://'):
+		return GCS_URL
 	elif validate_cidr_range(target):
 		return CIDR_RANGE
 	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
 		return IP
 	elif validators.domain(target):
 		return HOST
-	elif validators.domain(target.split(':')[0]):
+	elif is_host_port(target):
 		return HOST_PORT
 	elif validators.mac_address(target):
 		return MAC_ADDRESS
@@ -914,3 +1053,27 @@ def get_versions_from_string(string):
 	if not matches:
 		return []
 	return matches
+
+
+def signal_to_name(signum):
+	"""Convert a signal number to its name"""
+	for name, value in vars(signal).items():
+		if name.startswith('SIG') and not name.startswith('SIG_') and value == signum:
+			return name
+	return str(signum)
+
+
+def is_valid_path(path):
+	"""Check if a path is valid.
+
+	Args:
+		path (str): Path to check.
+
+	Returns:
+		bool: True if the path is valid, False otherwise.
+	"""
+	try:
+		PurePath(path)
+		return True
+	except (TypeError, ValueError):
+		return False

@@ -44,12 +44,12 @@ class msfconsole(VulnMulti):
 	}
 	encoding = 'ansi'
 	ignore_return_code = True
-	install_pre = {
+	install_version = '6.4.59'
+	install_cmd_pre = {
 		'apt|apk': ['libpq-dev', 'libpcap-dev', 'libffi-dev', 'g++', 'make'],
 		'pacman': ['ruby-erb', 'postgresql-libs', 'make'],
 		'yum|zypper': ['postgresql-devel', 'make'],
 	}
-	install_version = '6.4.59'
 	install_cmd = (
 		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework_[install_version] || true && '  # noqa: E501
 		f'cd {CONFIG.dirs.share}/metasploit-framework_[install_version] && '

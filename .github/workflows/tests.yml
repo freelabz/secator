@@ -87,6 +87,9 @@ jobs:
     - name: Add GOPATH to PATH
       run: echo "${HOME}/go/bin" >> $GITHUB_PATH
 
+    - name: Run apt update
+      run: sudo apt update
+
     - name: Install dependencies
       run: |
         secator install addons worker

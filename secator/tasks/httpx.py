@@ -1,9 +1,11 @@
 import os
+import shlex
 
 from secator.decorators import task
-from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
-								 HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
-								 PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT, HOST, IP, HOST_PORT)
+from secator.definitions import (DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+							 	 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
+								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
+								 URL, USER_AGENT, HOST, IP, HOST_PORT)
 from secator.config import CONFIG
 from secator.output_types import Url, Subdomain
 from secator.serializers import JSONSerializer
@@ -39,9 +41,11 @@ class httpx(Http):
 		'tech_detect': {'is_flag': True, 'short': 'td', 'default': False, 'help': 'Tech detection'},
 		'tls_grab': {'is_flag': True, 'short': 'tlsg', 'default': False, 'help': 'Grab some informations from the tls certificate'},  # noqa: E501
 		'rstr': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},
-		'rsts': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to save (bytes)'}
+		'rsts': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to save (bytes)'},
+		'filter_duplicates': {'is_flag': True, 'short': 'fd', 'default': False, 'help': 'Filter duplicates'},
 	}
 	opt_key_map = {
+		DATA: 'body',
 		HEADER: 'header',
 		DELAY: 'delay',
 		DEPTH: OPT_NOT_SUPPORTED,
@@ -62,17 +66,16 @@ class httpx(Http):
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		'store_responses': 'sr',
+		'filter_duplicates': 'fd',
 	}
 	opt_value_map = {
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
 	item_loaders = [JSONSerializer()]
-	install_pre = {
-		'apk': ['chromium']
-	}
+	install_pre = {'apk': ['chromium']}
 	install_version = 'v1.7.0'
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@[install_version]'
-	install_github_handle = 'projectdiscovery/httpx'
+	github_handle = 'projectdiscovery/httpx'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
@@ -97,7 +100,8 @@ class httpx(Http):
 		screenshot = self.get_opt_value('screenshot')
 		store_responses = self.get_opt_value('store_responses')
 		if store_responses or screenshot:
-			self.cmd += f' -srd {self.reports_folder}/.outputs'
+			reports_folder_outputs = f'{self.reports_folder}/.outputs'
+			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
 		if screenshot:
 			self.cmd += ' -esb -ehb'
 		self.domains = []
@@ -161,5 +165,7 @@ class httpx(Http):
 		self.domains.append(domain)
 		return Subdomain(
 			host=domain,
-			domain=extract_domain_info(domain, domain_only=True)
+			domain=extract_domain_info(domain, domain_only=True),
+			verified=True,
+			sources=['tls'],
 		)

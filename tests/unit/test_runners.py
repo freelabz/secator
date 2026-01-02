@@ -217,7 +217,7 @@ class TestCommandRunner(unittest.TestCase):
 		fixture = [
 			"http://example.com | URL | example.com | 200 | 1000 | Example Title",
 			"CVE-2021-1234 | VULNERABILITY | CVE-2021-1234 | http://example.com",
-			"AWS_KEY | TAG | AKIA1234567890ABCDEF | http://example.com"
+			"AWS_KEY | TAG | secret | AKIA1234567890ABCDEF | http://example.com"
 		]
 		MyCommand.output_types = [Url, Tag, Vulnerability]
 		MyCommand.item_loaders = [
@@ -230,8 +230,8 @@ class TestCommandRunner(unittest.TestCase):
 				fields=['name', 'id', 'matched_at']
 			),
 			RegexSerializer(
-				r'^(?P<name>.*?) \| TAG \| (?P<match>.*?) \| (?P<matched_at>.*?)$',
-				fields=['name', 'match', 'matched_at']
+				r'^(?P<name>.*?) \| TAG \| (?P<category>.*?) \| (?P<value>.*?) \| (?P<match>.*?)$',
+				fields=['name', 'category', 'match', 'value', 'match']
 			)
 		]
 		def on_regex_loaded(self, item):
@@ -261,7 +261,7 @@ class TestCommandRunner(unittest.TestCase):
 		fixture = [
 			'{"url": "http://host1:5000/api/", "status": 200}',
 			'{"vulnerability": "myvuln", "severity": "HIGH", "matched": "http://host1:5000/api/"}',
-			'{"tag": "mytag", "matched_at": "http://host1:5000/api/", "tag_type": "AWS_API_KEY", "value": "ACDIFOJ-ASDF"}'
+			'{"tag": "mytag", "category": "secret", "matched_at": "http://host1:5000/api/", "tag_type": "AWS_API_KEY", "value": "ACDIFOJ-ASDF"}'
 		]
 		MyCommand.output_types = [Url, Vulnerability, Tag]
 		MyCommand.item_loaders = [JSONSerializer()]
@@ -303,7 +303,7 @@ class TestCommandRunner(unittest.TestCase):
 		json_output = [
 			{"url": "http://example.com", "status_code": 200},
 			{"name": "SQL Injection", "severity": "high", "matched_at": "http://example.com"},
-			{"name": "sensitive_data", "match": "http://example.com", "extra_data": {"tag_type": "PII", "value": "SSN"}}
+			{"name": "sensitive_data", "value": "1234567890", "category": "PII", "match": "http://example.com", "extra_data": {"tag_type": "PII"}}
 		]
 
 		import json
@@ -406,6 +406,8 @@ class TestCommandRunner(unittest.TestCase):
 				'__test__': 'Item of type vulnerability with no _type hint should be incorrectly loaded as Tag',
 				'name': 'sensitive_data',
 				'match': 'http://example.com',
+				'value': 'sensitive',
+				'category': 'PII',
 				'extra_data': {
 					'tag_type': 'PII',
 					'value': 'SSN'

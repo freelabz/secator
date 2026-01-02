@@ -1,5 +1,8 @@
 import json
 import os
+import re
+import shlex
+
 from datetime import datetime
 
 from secator.config import CONFIG
@@ -48,17 +51,18 @@ class testssl(Command):
 	proxychains = False
 	proxy_socks5 = False
 	profile = 'io'
-	install_pre = {
-		'apk': ['hexdump', 'coreutils', 'procps'],
-		'pacman': ['util-linux'],
-		'*': ['bsdmainutils']
+	install_cmd_pre = {
+		'apk': ['hexdump', 'coreutils', 'procps', 'bash'],
+		'pacman': ['util-linux', 'bash'],
+		'*': ['bsdmainutils', 'bash']
 	}
-	install_github_handle = 'testssl/testssl.sh'
 	install_version = 'v3.2.0'
 	install_cmd = (
 		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh_[install_version] || true && '  # noqa: E501
 		f'ln -sf {CONFIG.dirs.share}/testssl.sh_[install_version]/testssl.sh {CONFIG.dirs.bin}'
 	)
+	install_github_bin = False
+	github_handle = 'testssl/testssl.sh'
 
 	@staticmethod
 	def on_cmd(self):
@@ -66,13 +70,14 @@ class testssl(Command):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' --jsonfile {self.output_path}'
+		self.cmd += f' --jsonfile {shlex.quote(self.output_path)}'
 
 		# Hack because target needs to be the last argument in testssl.sh
 		if len(self.inputs) == 1:
 			target = self.inputs[0]
-			self.cmd = self.cmd.replace(f' {target}', '')
-			self.cmd += f' {target}'
+			target_quoted = shlex.quote(target)
+			self.cmd = re.sub(re.escape(f' {target_quoted}'), "", self.cmd)
+			self.cmd += f' {target_quoted}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -140,11 +145,12 @@ class testssl(Command):
 					if not verbose:
 						continue
 					yield Tag(
-						name=f'SSL/TLS [{id}]',
+						category='info',
+						name='ssl_tls',
 						match=host,
+						value=finding,
 						extra_data={
-							'type': id,
-							'finding': finding,
+							'subtype': id,
 						}
 					)
 
@@ -153,7 +159,7 @@ class testssl(Command):
 					if id in ['TLS1', 'TLS1_1']:
 						human_name = f'SSL/TLS deprecated protocol offered: {id}'
 					else:
-						human_name = f'SSL/TLS {id}: {finding}'
+						human_name = f'SSL/TLS {id}'
 					yield Vulnerability(
 						name=human_name,
 						matched_at=host,

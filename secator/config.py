@@ -5,13 +5,13 @@ from typing import Dict, List
 from typing_extensions import Annotated, Self
 
 import validators
-import requests
 import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
 from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
+from secator.requests import requests
 from secator.rich import console, console_stdout
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
@@ -23,6 +23,11 @@ ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
+
+USER_AGENTS = {
+	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+	'chrome_134.0_macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+}
 
 
 class StrictModel(BaseModel, extra='forbid'):
@@ -67,6 +72,8 @@ class Celery(StrictModel):
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
+	task_max_timeout: int = -1
+	task_memory_limit_mb: int = -1
 	worker_max_tasks_per_child: int = 20
 	worker_prefetch_multiplier: int = 1
 	worker_send_task_events: bool = False
@@ -94,6 +101,8 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+	threads: int = 50
+	prompt_timeout: int = 20
 
 
 class Security(StrictModel):
@@ -105,10 +114,11 @@ class Security(StrictModel):
 class HTTP(StrictModel):
 	socks5_proxy: str = 'socks5://127.0.0.1:9050'
 	http_proxy: str = 'https://127.0.0.1:9080'
-	store_responses: bool = False
+	store_responses: bool = True
 	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
+	default_header: str = 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']
 
 
 class Tasks(StrictModel):
@@ -140,11 +150,12 @@ class Payloads(StrictModel):
 
 
 class Wordlists(StrictModel):
-	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains'}
+	defaults: Dict[str, str] = {'http': 'bo0m_fuzz', 'dns': 'combined_subdomains', 'http_params': 'burp-parameter-names'}
 	templates: Dict[str, str] = {
 		'bo0m_fuzz': 'https://raw.githubusercontent.com/Bo0oM/fuzz.txt/master/fuzz.txt',
 		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt',  # noqa: E501
-		'directory_list_small': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/directory-list-2.3-small.txt',  # noqa: E501
+		'directory_list_small': 'https://gist.githubusercontent.com/sl4v/c087e36164e74233514b/raw/c51a811c70bbdd87f4725521420cc30e7232b36d/directory-list-2.3-small.txt',  # noqa: E501
+		'burp-parameter-names': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt',  # noqa: E501
 	}
 	lists: Dict[str, List[str]] = {}
 
@@ -171,6 +182,26 @@ class MongodbAddon(StrictModel):
 	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
+	duplicate_main_copy_fields: List[str] = [
+		'screenshot_path',
+		'stored_response_path',
+		'is_false_positive',
+		'is_acknowledged',
+		'verified',
+	]
+
+
+class VulnersAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+
+
+class Providers(StrictModel):
+	defaults: Dict[str, str] = {
+		'cve': 'circl',
+		'exploit': 'exploitdb',
+		'ghsa': 'ghsa'
+	}
 
 
 class Addons(StrictModel):
@@ -178,6 +209,7 @@ class Addons(StrictModel):
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	vulners: VulnersAddon = VulnersAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -196,6 +228,7 @@ class SecatorConfig(StrictModel):
 	drivers: Drivers = Drivers()
 	addons: Addons = Addons()
 	security: Security = Security()
+	providers: Providers = Providers()
 	offline_mode: bool = False
 
 

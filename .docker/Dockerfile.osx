@@ -1,7 +1,9 @@
 FROM sickcodes/docker-osx:latest
-
+ARG flavor=full
+ARG build_from_source=false
 ENV PATH="${PATH}:/home/arch/.local/bin"
 ENV GOBIN="/home/arch/.local/bin"
+ENV CARGO_HOME="/home/arch/.local"
 RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 RUN echo >> /home/arch/.bashrc
 RUN echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /home/arch/.bashrc

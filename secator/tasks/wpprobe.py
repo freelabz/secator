@@ -2,6 +2,7 @@ import os
 import re
 import click
 import yaml
+import shlex
 
 from secator.decorators import task
 from secator.runners import Command
@@ -32,9 +33,9 @@ class wpprobe(Command):
 	}
 	install_version = 'v0.5.6'
 	install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
-	install_github_handle = 'Chocapikk/wpprobe'
+	github_handle = 'Chocapikk/wpprobe'
 	install_post = {
-		'*': 'wpprobe update && wpprobe update-db'
+		'*': 'wpprobe update-db'
 	}
 
 	@staticmethod
@@ -48,7 +49,7 @@ class wpprobe(Command):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -70,14 +71,26 @@ class wpprobe(Command):
 				for plugin_data_version in plugin_data:
 					plugin_version = plugin_data_version['version']
 					yield Tag(
-						name=f'Wordpress plugin - {plugin_name} {plugin_version}',
+						category='info',
+						name='wordpress_plugin',
 						match=url,
+						value=plugin_name + ':' + plugin_version,
 						extra_data={
 							'name': plugin_name,
 							'version': plugin_version
 						}
 					)
 					severities = plugin_data_version.get('severities', {})
+
+					# Fix for https://github.com/Chocapikk/wpprobe/issues/17
+					if isinstance(severities, list):
+						tmp_severities = {}
+						for severity in severities:
+							for k, v in severity.items():
+								if k != 'n/a':
+									tmp_severities[k] = v
+						severities = tmp_severities
+
 					for severity, severity_data in severities.items():
 						if severity == 'None':
 							severity = 'unknown'
@@ -95,7 +108,7 @@ class wpprobe(Command):
 									id=vuln['cve'],
 									severity=severity,
 									cvss_score=vuln['cvss_score'],
-									tags=[plugin_name],
+									tags=['wordpress', 'wordpress_plugin', plugin_name],
 									reference=vuln['cve_link'],
 									extra_data=extra_data,
 									matched_at=url,

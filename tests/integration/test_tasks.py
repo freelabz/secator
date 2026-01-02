@@ -8,7 +8,7 @@ from secator.rich import console
 from secator.runners import Command
 from secator.utils import merge_opts
 from secator.utils_test import (META_OPTS, TEST_TASKS, CommandOutputTester,
-                              load_fixture)
+							  load_fixture)
 from tests.integration.inputs import INPUTS_TASKS
 from tests.integration.outputs import OUTPUTS_TASKS, OUTPUTS_CHECKS
 
@@ -42,7 +42,6 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'ffuf.filter_size': 1987,
 			'feroxbuster.filter_size': 1987,
 			'arjun.wordlist': False,
-			'gau.providers': 'wayback',
 			'h8mail.local_breach': load_fixture('h8mail_breach', INTEGRATION_DIR, only_path=True),
 			'nmap.port': '3000,8080',
 			'nmap.tcp_connect': True,
@@ -85,7 +84,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 				continue
 			with self.subTest(name=cls.__name__):
 				input = INPUTS_TASKS.get(cls.__name__)
-				if input is None:
+				if input is None and len(cls.input_types) > 0:
 					input = INPUTS_TASKS.get(cls.input_types[0], [])
 				if not input:
 					console.print(f'\tTesting task {cls.__name__} ... [dim gold3] skipped (no input)[/]')

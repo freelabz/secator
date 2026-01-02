@@ -79,6 +79,7 @@ def fmt_extractor(extractor):
 	_type, _field, _condition = parsed_extractor
 	s = f'{_type}.{_field}'
 	if _condition:
+		_condition = _condition.replace("'", '').replace('"', '')
 		s = f'{s} if {_condition}'
 	return f'<DYNAMIC({s})>'
 

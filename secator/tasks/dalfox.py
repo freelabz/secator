@@ -1,14 +1,16 @@
+import json
+
 from urllib.parse import urlparse
 
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
+from secator.definitions import (CONFIDENCE, DATA, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   HEADER, ID, MATCHED_AT, METHOD, NAME,
 							   OPT_NOT_SUPPORTED, PROVIDER, PROXY, RATE_LIMIT,
 							   RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL,
 							   USER_AGENT)
 from secator.output_types import Vulnerability, Url
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import VulnHttp
+from secator.tasks._categories import HttpBase
 
 DALFOX_TYPE_MAP = {
 	'G': 'Grep XSS',
@@ -18,22 +20,24 @@ DALFOX_TYPE_MAP = {
 
 
 @task()
-class dalfox(VulnHttp):
+class dalfox(HttpBase):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox'
 	input_types = [URL]
 	output_types = [Vulnerability, Url]
 	tags = ['url', 'fuzz']
 	input_flag = 'url'
+	input_chunk_size = 20
+	ignore_return_code = True
 	file_flag = 'file'
-	# input_chunk_size = 1
-	json_flag = '--format json'
+	json_flag = '--format jsonl'
 	version_flag = 'version'
 	opt_prefix = '--'
 	opt_key_map = {
 		HEADER: 'header',
 		DELAY: 'delay',
 		FOLLOW_REDIRECT: 'follow-redirects',
+		DATA: 'data',
 		METHOD: 'method',
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
@@ -41,6 +45,9 @@ class dalfox(VulnHttp):
 		THREADS: 'worker',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent'
+	}
+	opt_value_map = {
+		DATA: lambda x: dalfox.format_data(x)
 	}
 	item_loaders = [JSONSerializer()]
 	output_map = {
@@ -56,19 +63,14 @@ class dalfox(VulnHttp):
 		}
 	}
 	install_version = 'v2.11.0'
-	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@latest'
-	install_github_handle = 'hahwul/dalfox'
+	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@[install_version]'
+	github_handle = 'hahwul/dalfox'
 	encoding = 'ansi'
 	proxychains = False
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = True
 	proxy_http = True
 	profile = 'cpu'
-
-	@staticmethod
-	def on_line(self, line):
-		line = line.rstrip(',')
-		return line
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -89,3 +91,12 @@ class dalfox(VulnHttp):
 			if key not in ['type', 'severity', 'cwe']:
 				extra_data[key] = value
 		return extra_data
+
+	@staticmethod
+	def format_data(data):
+		try:
+			data = json.loads(data)
+			data = '&'.join([f'{k}={v}' for k, v in data.items()])
+			return data
+		except json.JSONDecodeError:
+			return ''

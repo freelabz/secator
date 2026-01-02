@@ -1,9 +1,16 @@
 type: scan
 name: host
 description: Host scan
+long_description: |
+  In-depth security assessment of a specific host or IP address.
+  Combines host reconnaissance with URL crawling and vulnerability scanning to identify
+  open ports, running services, web applications, and potential security weaknesses.
+  Perfect for targeted host-level security testing and penetration testing.
 profile: default
 input_types:
   - host
+  - ip
+
 workflows:
   host_recon:
   url_crawl:
@@ -11,4 +18,6 @@ workflows:
     - url.url
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified

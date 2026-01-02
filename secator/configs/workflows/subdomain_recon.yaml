@@ -1,21 +1,28 @@
 type: workflow
 name: subdomain_recon
 alias: subrec
-description: Subdomain discovery
+description: Subdomain reconnaissance
+long_description: |
+  Discovers subdomains associated with a target domain using multiple passive and active techniques.
+  Combines passive sources, DNS queries, TLS certificate analysis, and optional brute-force methods.
+  Verifies discovered subdomains, checks for subdomain takeover vulnerabilities, and can optionally
+  test SSL/TLS security or hunt for secrets in HTTP responses. Perfect for mapping attack surface.
 tags: [recon, dns, takeovers]
 input_types:
   - host
 
 options:
-  probe_http:
+  passive:
     is_flag: True
-    help: Probe domain and subdomains (HTTP)
-    default: True
-
-  probe_dns:
-    is_flag: True
-    help: Probe domain and subdomains (DNS)
+    help: Passive only (no requests to targets)
     default: False
+    short: ps
+
+  active:
+    is_flag: True
+    help: Active only (no passive sources)
+    default: False
+    short: active
 
   brute_http:
     is_flag: True
@@ -29,43 +36,45 @@ options:
     short: bdns
     default: False
 
+  test_ssl:
+    is_flag: True
+    help: Test SSL/TLS security on subdomains
+    short: tssl
+    default: False
+
+  hunt_secrets:
+    is_flag: True
+    help: Hunt secrets in HTTP responses (trufflehog)
+    default: False
+    short: hs
+
 tasks:
-  _group/1:
+  httpx/tls:
+    description: Find subdomains through TLS certificates
+    tech_detect: True
+    tls_grab: True
+    targets_:
+    - target.name
+    if: not opts.passive
+
+  _group/hunt:
     subfinder:
       description: List subdomains (passive)
+      if: not opts.active
+
+    gau:
+      description: List subdomains (passive)
+      subs: True
+      if: not opts.active
 
     dnsx/brute:
       description: Bruteforce subdomains (DNS)
       subdomains_only: True
       wordlist: combined_subdomains
-      if: opts.brute_dns
-
-    httpx:
-      description: Run HTTP probe on domain
-      tech_detect: True
-      targets_:
-      - target.name
-      if: opts.probe_http or opts.brute_http
-
-  _group/2:
-    dnsx/probe:
-      description: Probe DNS records on subdomains
-      subdomains_only: True
-      wordlist: False
-      targets_:
-      - subdomain.host
-      if: opts.probe_dns
-
-    nuclei:
-      description: Check for subdomain takeovers
-      targets_:
-      - target.name
-      - subdomain.host
-      tags: [takeover]
+      if: opts.brute_dns and not opts.passive
 
     ffuf:
       description: Bruteforce subdomains (Host header)
-      header: "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
       fuzz_host_header: True
       auto_calibration: True
       wordlist: combined_subdomains
@@ -73,12 +82,47 @@ tasks:
       targets_:
       - type: url
         field: url
-      if: opts.brute_http
+        condition: item._source.startswith('httpx')
+      if: opts.brute_http and not opts.passive
 
-    httpx:
+  _group/probe:
+    dnsx/probe:
+      description: Verify subdomains by probing DNS records
+      subdomains_only: True
+      targets_:
+      - type: subdomain
+        field: host
+        condition: not item.verified
+
+    httpx/probe:
       description: Run HTTP probes on subdomains
       tech_detect: True
       targets_:
+      - type: subdomain
+        field: host
+      if: not opts.passive
+
+  _group/vuln:
+    testssl:
+      description: Test SSL/TLS security on subdomains
+      server_defaults: True
+      targets_:
+      - type: subdomain
+        field: host
+      if: opts.test_ssl
+
+    nuclei:
+      description: Check for subdomain takeovers
+      targets_:
       - target.name
       - subdomain.host
-      if: opts.probe_http
+      tags: [takeover]
+      if: not opts.passive
+
+    trufflehog:
+      description: Find secrets in HTTP responses
+      targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+      if: opts.hunt_secrets and not opts.passive

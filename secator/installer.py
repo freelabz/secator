@@ -14,7 +14,6 @@ from enum import Enum
 from pathlib import Path
 
 import json
-import requests
 
 from rich.table import Table
 
@@ -24,7 +23,8 @@ from secator.definitions import OPT_NOT_SUPPORTED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
-from secator.utils import get_versions_from_string
+from secator.requests import requests
+from secator.utils import debug, get_versions_from_string
 
 
 class InstallerStatus(Enum):
@@ -62,11 +62,13 @@ class ToolInstaller:
 		name = tool_cls.__name__
 		console.print(Info(message=f'Installing {name}'))
 		status = InstallerStatus.UNKNOWN
+		if not hasattr(tool_cls, 'cmd'):
+			return InstallerStatus.INSTALL_SKIPPED_OK
 
 		# Fail if not supported
 		if not any(_ for _ in [
 			tool_cls.install_pre,
-			tool_cls.install_github_handle,
+			tool_cls.github_handle,
 			tool_cls.install_cmd,
 			tool_cls.install_post]):
 			return InstallerStatus.INSTALL_NOT_SUPPORTED
@@ -86,12 +88,23 @@ class ToolInstaller:
 
 		# Install binaries from GH
 		gh_status = InstallerStatus.UNKNOWN
-		if tool_cls.install_github_handle and not CONFIG.security.force_source_install:
-			gh_status = GithubInstaller.install(tool_cls.install_github_handle, version=tool_cls.install_version or 'latest')
+		install_ignore_bin = get_distro_config().name in tool_cls.install_ignore_bin
+		if tool_cls.github_handle and tool_cls.install_github_bin and not CONFIG.security.force_source_install and not install_ignore_bin:  # noqa: E501
+			gh_status = GithubInstaller.install(
+				tool_cls.github_handle,
+				version=tool_cls.install_version or 'latest',
+				version_prefix=tool_cls.install_github_version_prefix
+			)
 			status = gh_status
 
 		# Install from source
 		if not gh_status.is_ok():
+			# Install pre-required packages
+			if tool_cls.install_cmd_pre:
+				status = PackageInstaller.install(tool_cls.install_cmd_pre)
+				if not status.is_ok():
+					cls.print_status(status, name)
+					return status
 			if not tool_cls.install_cmd:
 				status = InstallerStatus.INSTALL_SKIPPED_OK
 			else:
@@ -150,7 +163,7 @@ class PackageInstaller:
 
 		# Installer cmd
 		cmd = distribution.pm_installer
-		if CONFIG.security.autoinstall_commands and IN_CELERY_WORKER_PROCESS:
+		if CONFIG.security.auto_install_commands and IN_CELERY_WORKER_PROCESS:
 			cmd = f'flock /tmp/install.lock {cmd}'
 		if getpass.getuser() != 'root':
 			cmd = f'sudo {cmd}'
@@ -172,6 +185,58 @@ class PackageInstaller:
 
 class SourceInstaller:
 	"""Install a tool from source."""
+
+	@classmethod
+	def _check_path_warning(cls, install_cmd):
+		"""Check if the installation location is in PATH and print warnings if not.
+
+		Args:
+			install_cmd (str): The installation command being executed.
+		"""
+		path_var = os.environ.get('PATH', '')
+		path_entries = path_var.split(os.pathsep)
+		home = os.path.expanduser('~')
+
+		# Check for go install (use word boundaries to avoid matching "cargo install")
+		if install_cmd.startswith('go install') or install_cmd.startswith('go get') or \
+		   ' go install' in install_cmd or ' go get' in install_cmd:
+			gobin = os.environ.get('GOBIN')
+			if gobin:
+				if gobin not in path_entries:
+					console.print(Warning(message=f'GOBIN directory {gobin} not found in PATH ! Go binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{gobin}" to add the binaries to your PATH'))
+			else:
+				default_go_bin = os.path.join(home, 'go', 'bin')
+				if default_go_bin not in path_entries:
+					console.print(Warning(message=f'Go bin directory {default_go_bin} not found in PATH ! Go binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{default_go_bin}" to add the binaries to your PATH'))
+
+		# Check for cargo install
+		elif 'cargo install' in install_cmd:
+			cargo_home = os.environ.get('CARGO_HOME')
+			if cargo_home:
+				cargo_bin = os.path.join(cargo_home, 'bin')
+				if cargo_bin not in path_entries:
+					console.print(Warning(message=f'CARGO_HOME/bin directory {cargo_bin} not found in PATH ! Cargo binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{cargo_bin}" to add the binaries to your PATH'))
+			else:
+				default_cargo_bin = os.path.join(home, '.cargo', 'bin')
+				if default_cargo_bin not in path_entries:
+					console.print(Warning(message=f'Cargo bin directory {default_cargo_bin} not found in PATH ! Cargo binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{default_cargo_bin}" to add the binaries to your PATH'))
+
+		# Check for pip/pipx install
+		elif 'pip install' in install_cmd or 'pipx install' in install_cmd:
+			pipx_bin_dir = os.environ.get('PIPX_BIN_DIR')
+			if pipx_bin_dir:
+				if pipx_bin_dir not in path_entries:
+					console.print(Warning(message=f'PIPX_BIN_DIR directory {pipx_bin_dir} not found in PATH ! Python binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{pipx_bin_dir}" to add the binaries to your PATH'))
+			else:
+				default_local_bin = os.path.join(home, '.local', 'bin')
+				if default_local_bin not in path_entries:
+					console.print(Warning(message=f'Python bin directory {default_local_bin} not found in PATH ! Python binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'Run "export PATH=$PATH:{default_local_bin}" to add the binaries to your PATH'))
 
 	@classmethod
 	def install(cls, config, version=None, install_prereqs=True):
@@ -202,18 +267,36 @@ class SourceInstaller:
 
 		# Install build dependencies if needed
 		if install_prereqs:
-			if 'go ' in install_cmd:
-				status = PackageInstaller.install({'apt': ['golang-go'], '*': ['go']})
-				if not status.is_ok():
-					return status
-			if 'gem ' in install_cmd:
-				status = PackageInstaller.install({'apk': ['ruby', 'ruby-dev'], 'pacman': ['ruby', 'rubygems'], 'apt': ['ruby-full', 'rubygems']})  # noqa: E501
-				if not status.is_ok():
-					return status
-			if 'git ' in install_cmd or 'git+' in install_cmd:
-				status = PackageInstaller.install({'*': ['git']})
-				if not status.is_ok():
-					return status
+			regex = re.compile(r'(cargo\s+|go\s+|gem\s+|git\s+)')
+			matches = regex.findall(install_cmd)
+			matches = list(set(matches))
+			for match in matches:
+				match = match.strip()
+				if match == 'cargo':
+					status = PackageInstaller.install({'*': ['curl']})
+					if not status.is_ok():
+						return status
+					rust_install_cmd = 'curl https://sh.rustup.rs -sSf | sh -s -- -y'
+					distribution = get_distro_config()
+					if not distribution.pm_installer:
+						return InstallerStatus.UNKNOWN_DISTRIBUTION
+					if distribution.pm_name == 'apk':
+						install_cmd = install_cmd.replace('cargo ', 'RUSTFLAGS="-Ctarget-feature=-crt-static" cargo ')
+					status = SourceInstaller.install(rust_install_cmd)
+					if not status.is_ok():
+						return status
+				if match == 'go':
+					status = PackageInstaller.install({'apt': ['golang-go'], '*': ['go']})
+					if not status.is_ok():
+						return status
+				if match == 'gem':
+					status = PackageInstaller.install({'apk': ['ruby', 'ruby-dev'], 'pacman': ['ruby', 'rubygems'], 'apt': ['ruby-full', 'rubygems']})  # noqa: E501
+					if not status.is_ok():
+						return status
+				if match == 'git':
+					status = PackageInstaller.install({'*': ['git']})
+					if not status.is_ok():
+						return status
 
 		# Handle version
 		if '[install_version]' in install_cmd:
@@ -222,6 +305,9 @@ class SourceInstaller:
 		elif '[install_version_strip]' in install_cmd:
 			version = version or 'latest'
 			install_cmd = install_cmd.replace('[install_version_strip]', version.lstrip('v'))
+
+		# Check PATH and warn if needed
+		cls._check_path_warning(install_cmd)
 
 		# Run command
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True, 'no_process': False}, quiet=False)
@@ -234,7 +320,7 @@ class GithubInstaller:
 	"""Install a tool from GitHub releases."""
 
 	@classmethod
-	def install(cls, github_handle, version='latest'):
+	def install(cls, github_handle, version='latest', version_prefix=''):
 		"""Find and install a release from a GitHub handle {user}/{repo}.
 
 		Args:
@@ -244,8 +330,9 @@ class GithubInstaller:
 			InstallerStatus: status.
 		"""
 		_, repo = tuple(github_handle.split('/'))
-		release = cls.get_release(github_handle, version=version)
+		release = cls.get_release(github_handle, version=version, version_prefix=version_prefix)
 		if not release:
+			console.print(Warning(message=f'Could not find release {version} for {github_handle}.'))
 			return InstallerStatus.GITHUB_RELEASE_NOT_FOUND
 
 		# Find the right asset to download
@@ -260,7 +347,7 @@ class GithubInstaller:
 		return cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
 
 	@classmethod
-	def get_release(cls, github_handle, version='latest'):
+	def get_release(cls, github_handle, version='latest', version_prefix=''):
 		"""Get release from GitHub.
 
 		Args:
@@ -275,11 +362,12 @@ class GithubInstaller:
 		if version == 'latest':
 			url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 		else:
-			url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{version}"
+			url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{version_prefix}{version}"
 		headers = {}
 		if CONFIG.cli.github_token:
 			headers['Authorization'] = f'Bearer {CONFIG.cli.github_token}'
 		try:
+			debug(f'Fetching release {version} from {url}', sub='installer')
 			response = requests.get(url, headers=headers, timeout=5)
 			response.raise_for_status()
 			latest_release = response.json()
@@ -291,8 +379,8 @@ class GithubInstaller:
 			return None
 
 	@classmethod
-	def get_latest_version(cls, github_handle):
-		latest_release = cls.get_release(github_handle, version='latest')
+	def get_latest_version(cls, github_handle, version_prefix=None):
+		latest_release = cls.get_release(github_handle, version='latest', version_prefix=version_prefix)
 		if not latest_release:
 			return None
 		return latest_release['tag_name'].lstrip('v')
@@ -397,7 +485,7 @@ class GithubInstaller:
 		for root, _, files in os.walk(directory):
 			for file in files:
 				# Match the file name exactly with the repository name
-				if file == binary_name:
+				if file.startswith(binary_name):
 					return os.path.join(root, file)
 		return None
 
@@ -443,13 +531,14 @@ def parse_version(ver):
 		return None
 
 
-def get_version_info(name, version_flag=None, install_github_handle=None, install_cmd=None, install_version=None, version=None, bleeding=False):  # noqa: E501
+def get_version_info(name, version_flag=None, github_handle=None, install_github_version_prefix=None, install_cmd=None, install_version=None, version=None, bleeding=False):  # noqa: E501
 	"""Get version info for a command.
 
 	Args:
 		name (str): Command name.
 		version_flag (str): Version flag.
-		install_github_handle (str): Github handle.
+		github_handle (str): Github handle.
+		install_github_version_prefix (str): Github version prefix.
 		install_cmd (str): Install command.
 		install_version (str): Install version.
 		version (str): Existing version.
@@ -490,12 +579,16 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 		info['latest_version'] = str(ver)
 		info['install_version'] = str(ver)
 		info['source'] = 'supported'
-		latest_version = str(ver)
+		if ver:
+			latest_version = str(ver)
 	else:
 		latest_version = None
 		if not CONFIG.offline_mode:
-			if install_github_handle:
-				latest_version = GithubInstaller.get_latest_version(install_github_handle)
+			if github_handle:
+				latest_version = GithubInstaller.get_latest_version(
+					github_handle,
+					version_prefix=install_github_version_prefix,
+				)
 				info['latest_version'] = latest_version
 				info['source'] = 'github'
 			elif install_cmd and install_cmd.startswith('pip'):
@@ -510,6 +603,7 @@ def get_version_info(name, version_flag=None, install_github_handle=None, instal
 							version = max(version, ver)
 							latest_version = str(version)
 							info['source'] = 'pypi'
+				version = str(version) if version else None
 			else:
 				info['errors'].append('Cannot get latest version for query method (github, pip) is available')
 	info['latest_version'] = f'v{latest_version}' if install_version and install_version.startswith('v') else latest_version  # noqa: E501
@@ -571,7 +665,7 @@ def get_distro_config():
 		if distrib in ["ubuntu", "debian", "linuxmint", "popos", "kali"]:
 			installer = "apt install -y --no-install-recommends"
 			finalizer = "rm -rf /var/lib/apt/lists/*"
-		elif distrib in ["arch", "manjaro", "endeavouros"]:
+		elif distrib in ["arch", "manjaro", "endeavouros", "cachyos"]:
 			installer = "pacman -S --noconfirm --needed"
 		elif distrib in ["alpine"]:
 			installer = "apk add --no-cache"

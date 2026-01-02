@@ -4,7 +4,7 @@ from secator.decorators import task
 from secator.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
-							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
+							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   STATUS_CODE, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Url
@@ -36,7 +36,6 @@ class gospider(HttpCrawler):
 		MATCH_REGEX: OPT_NOT_SUPPORTED,
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
 		MATCH_WORDS: OPT_NOT_SUPPORTED,
-		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
@@ -58,7 +57,7 @@ class gospider(HttpCrawler):
 	}
 	install_version = 'v1.1.6'
 	install_cmd = 'go install -v github.com/jaeles-project/gospider@[install_version]'
-	install_github_handle = 'jaeles-project/gospider'
+	github_handle = 'jaeles-project/gospider'
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61
 	proxy_http = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61

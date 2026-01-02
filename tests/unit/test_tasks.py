@@ -21,7 +21,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 	def _valid_fixture(self, cls, fixture):
 		if not fixture:
-			if len(FIXTURES_TASKS.keys()) == 1: # make test fail.
+			if len(FIXTURES_TASKS.keys()) == 1 and hasattr(cls, 'cmd'): # make test fail.
 				raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory (must not be an empty file / empty json / empty list).')
 			return False
 		return True
@@ -44,7 +44,9 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 				# Run command
 				input_type = cls.input_types[0] if cls.input_types else 'fake'
-				targets = INPUTS_TASKS.get(input_type, [])
+				targets = INPUTS_TASKS.get(cls.__name__)
+				if not targets:
+					targets = INPUTS_TASKS.get(input_type, [])
 				with mock_command(cls, targets, META_OPTS, fixture) as runner:
 					try:
 						self._test_runner_output(

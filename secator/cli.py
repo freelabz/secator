@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 
 from pathlib import Path
@@ -32,6 +33,8 @@ from secator.utils import (
 	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
 )
 from contextlib import nullcontext
+
+
 click.rich_click.USE_RICH_MARKUP = True
 click.rich_click.STYLE_ARGUMENT = ""
 click.rich_click.STYLE_OPTION_HELP = ""
@@ -134,7 +137,10 @@ for config in SCANS:
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
 @click.option('--use-command-runner', is_flag=True, default=False, help='Use command runner to run the command.')
-def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner):
+@click.option('--without-gossip', is_flag=True)
+@click.option('--without-mingle', is_flag=True)
+@click.option('--without-heartbeat', is_flag=True)
+def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
 	"""Run a worker."""
 
 	# Check Celery addon is installed
@@ -182,6 +188,9 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 	cmd += f' -P {pool}' if pool else ''
 	cmd += f' -c {concurrency}' if concurrency else ''
 	cmd += f' -l {loglevel}' if loglevel else ''
+	cmd += ' --without-mingle' if without_mingle else ''
+	cmd += ' --without-gossip' if without_gossip else ''
+	cmd += ' --without-heartbeat' if without_heartbeat else ''
 
 	if reload:
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
@@ -208,17 +217,35 @@ def util():
 
 
 @util.command()
-@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
+@click.option('--timeout', type=float, default=3, help='Proxy timeout (in seconds)')
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
+	import requests
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
+	proxy_str = 'proxy' if number == 1 else 'proxies'
+	console.print(f"Searching for {number} {proxy_str} ...")
 	for _ in range(number):
-		url = proxy.get()
-		console.print(url)
+		proxy_ok = False
+		attempts = 0
+		while not proxy_ok and attempts < 5:
+			attempts += 1
+			url = proxy.get()
+			console.print(f"Testing proxy {url} ...")
+			try:
+				req = requests.get('https://httpbin.org/ip', proxies={'http': url, 'https': url}, timeout=5)
+				if not req.ok:
+					continue
+			except requests.exceptions.ProxyError:
+				continue
+			except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
+				continue
+			proxy_ok = True
+			console.print(f'Proxy {url} tested successfully !')
+			console.print(url)
 
 
 @util.command()
@@ -330,6 +357,74 @@ def serve(directory, host, port, interface):
 	console.print(Rule())
 	console.print(Info(message=f'[bold yellow]Started HTTP server on port {port}, waiting for incoming connections ...[/]'))  # noqa: E501
 	Command.execute(f'{sys.executable} -m http.server {port}', cwd=directory)
+
+
+@util.command('completion')
+@click.option('--shell', type=click.Choice(['bash', 'zsh', 'fish']), default='bash', help='Shell type')
+@click.option('--install', is_flag=True, help='Install completion to shell config file')
+def completion(shell, install):
+	"""Show or install shell completion for secator."""
+	# Get completion script
+	env_var = '_SECATOR_COMPLETE'
+	completion_cmd = f'{env_var}={shell}_source secator'
+
+	try:
+		result = subprocess.run(
+			completion_cmd,
+			shell=True,
+			capture_output=True,
+			text=True,
+			env=os.environ.copy()
+		)
+		completion_script = result.stdout
+
+		if not completion_script:
+			console.print(Error(message=f'Failed to generate completion script for {shell}'))
+			sys.exit(1)
+
+	except Exception as e:
+		console.print(Error(message=f'Error generating completion: {str(e)}'))
+		sys.exit(1)
+
+	if install:
+		# Determine shell config file
+		shell_configs = {
+			'bash': os.path.expanduser('~/.bashrc'),
+			'zsh': os.path.expanduser('~/.zshrc'),
+			'fish': os.path.expanduser('~/.config/fish/completions/secator.fish')
+		}
+
+		config_file = shell_configs.get(shell)
+		if not config_file:
+			console.print(Error(message=f'Unsupported shell: {shell}'))
+			sys.exit(1)
+
+		# For fish, write directly to completion file
+		if shell == 'fish':
+			os.makedirs(os.path.dirname(config_file), exist_ok=True)
+			with open(config_file, 'w') as f:
+				f.write(completion_script)
+			console.print(Info(message=f'Completion installed to {config_file}'))
+		else:
+			# For bash/zsh, add eval command to rc file
+			eval_line = f'eval "$({env_var}={shell}_source secator)"'
+
+			# Check if already installed
+			if os.path.exists(config_file):
+				with open(config_file, 'r') as f:
+					content = f.read()
+				if eval_line in content:
+					console.print(Info(message=f'Completion already installed in {config_file}'))
+					return
+
+			# Add completion to config file
+			with open(config_file, 'a') as f:
+				f.write(f'\n# secator shell completion\n{eval_line}\n')
+			console.print(Info(message=f'Completion installed to {config_file}'))
+			console.print(Warning(message=f'Run "source {config_file}" or restart your shell to enable completion'))
+	else:
+		# Just print the completion script
+		console.print(completion_script)
 
 
 @util.command()
@@ -689,12 +784,12 @@ def list_aliases(silent):
 	aliases.append('alias ws="secator workspaces"')
 	aliases.append('alias p="secator profiles"')
 	aliases.append('alias a="secator alias"')
-	aliases.append('alias aliases="secator alias list"')
 	aliases.append('alias r="secator reports"')
 	aliases.append('alias h="secator health"')
 	aliases.append('alias i="secator install"')
-	aliases.append('alias u="secator update"')
+	aliases.append('alias update="secator update"')
 	aliases.append('alias t="secator test"')
+	aliases.append('alias cs="secator cheatsheet"')
 	aliases.append('\n# Tasks')
 	for task in [t for t in discover_tasks()]:
 		alias_str = f'alias {task.__name__}="secator task {task.__name__}"'
@@ -1083,39 +1178,53 @@ def health(json_, debug, strict, bleeding):
 	upgrade_cmd = 'secator install tools'
 	with contextmanager:
 		for tool in tools:
-			info = get_version_info(
-				tool.cmd.split(' ')[0],
-				tool.version_flag or f'{tool.opt_prefix}version',
-				tool.install_github_handle,
-				tool.install_cmd,
-				tool.install_version,
-				bleeding=bleeding
-			)
-			info['_name'] = tool.__name__
-			info['_type'] = 'tool'
-			row = fmt_health_table_row(info, 'tools')
-			table.add_row(*row)
-			if not info['installed']:
-				messages.append(f'{tool.__name__} is not installed.')
-				info['next_version'] = tool.install_version
-				error = True
-			elif info['outdated']:
-				msg = 'latest' if bleeding else 'supported'
-				message = (
-					f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+			if hasattr(tool, 'cmd'):
+				info = get_version_info(
+					tool.cmd.split(' ')[0],
+					tool.version_flag or f'{tool.opt_prefix}version',
+					tool.github_handle,
+					tool.install_github_version_prefix,
+					tool.install_cmd,
+					tool.install_version,
+					bleeding=bleeding
 				)
-				messages.append(message)
-				info['upgrade'] = True
-				info['next_version'] = info['latest_version']
+				info['_name'] = tool.__name__
+				info['_type'] = 'tool'
+				row = fmt_health_table_row(info, 'tools')
+				table.add_row(*row)
+				if not info['installed']:
+					messages.append(f'{tool.__name__} is not installed.')
+					info['next_version'] = tool.install_version
+					error = True
+				elif info['outdated']:
+					msg = 'latest' if bleeding else 'supported'
+					message = (
+						f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+					)
+					messages.append(message)
+					info['upgrade'] = True
+					info['next_version'] = info['latest_version']
 
-			elif info['bleeding']:
-				msg = 'latest' if bleeding else 'supported'
-				message = (
-					f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
-				)
-				messages.append(message)
-				info['downgrade'] = True
-				info['next_version'] = info['latest_version']
+				elif info['bleeding']:
+					msg = 'latest' if bleeding else 'supported'
+					message = (
+						f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+					)
+					messages.append(message)
+					info['downgrade'] = True
+					info['next_version'] = info['latest_version']
+			else:
+				info = {
+					'name': tool.__name__,
+					'_type': 'python',
+					'version': None,
+					'status': 'ok',
+					'latest_version': None,
+					'installed': False,
+					'location': None
+				}
+				row = fmt_health_table_row(info, 'python')
+				table.add_row(*row)
 			results.append(info)
 			if json_:
 				print(json.dumps(info))
@@ -1154,6 +1263,189 @@ def health(json_, debug, strict, bleeding):
 			print(upgrade_cmd)
 	else:
 		console.print(Info(message='Everything is up to date !')) if not json_ else None
+
+
+#------------#
+# CHEATSHEET #
+#------------#
+
+@cli.command(name='cheatsheet', aliases=['cs'])
+def cheatsheet():
+	"""Display a cheatsheet of secator commands."""
+	from rich.panel import Panel
+	from rich import box
+	kwargs = {
+		'box': box.ROUNDED,
+		'title_align': 'left',
+		# 'style': 'bold blue3',
+		'border_style': 'green',
+		'padding': (0, 1, 0, 1),
+		'highlight': False,
+		'expand': False,
+	}
+	title_style = 'bold green'
+
+	panel1 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator basic commands to get you started.[/]
+
+secator [orange3]x[/]      [dim]# list tasks[/]
+secator [orange3]w[/]      [dim]# list workflows[/]
+secator [orange3]s[/]      [dim]# list scans[/]
+secator [orange3]p[/]      [dim]# manage profiles[/]
+secator [orange3]r[/]      [dim]# manage reports[/]
+secator [orange3]c[/]      [dim]# manage configuration[/]
+secator [orange3]ws[/]     [dim]# manage workspaces[/]
+secator [orange3]update[/] [dim]# update secator[/]
+
+[dim]# Running tasks, workflows or scans...[/]
+secator \[[orange3]x[/]|[orange3]w[/]|[orange3]s[/]] [NAME] [OPTIONS] [INPUTS]   [dim]# run a task ([bold orange3]x[/]), workflow ([bold orange3]w[/]) or scan ([bold orange3]s[/])[/]
+secator [orange3]x[/] [red]httpx[/] example.com                 [dim]# run an [bold red]httpx[/] task ([bold orange3]x[/] is for e[bold orange3]x[/]ecute)[/]
+secator [orange3]w[/] [red]url_crawl[/] https://example.com     [dim]# run a [bold red]url crawl[/] workflow ([bold orange3]w[/])[/]
+secator [orange3]s[/] [red]host[/] example.com                  [dim]# run a [bold red]host[/] scan ([bold orange3]s[/])[/]
+
+[dim]# Show information on tasks, workflows or scans ...[/]
+secator s host [blue]-dry[/]                         [dim]# show dry run (show exact commands that will be run)[/]
+secator s host [blue]-tree[/]                        [dim]# show config tree (workflows and scans only)[/]
+secator s host [blue]-yaml[/]                        [dim]# show config yaml (workflows and scans only)[/]
+
+[dim]# Organize your results (workspace, database)[/]
+secator s host [blue]-ws[/] [bright_magenta]prod[/] example.com         [dim]# save results to 'prod' workspace[/]
+secator s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com  [dim]# save results to mongodb database[/]
+
+[dim]# Input types are flexible ...[/]
+secator s host [cyan]example.com[/]                  [dim]# single input[/]
+secator s host [cyan]host1,host2,host3[/]            [dim]# multiple inputs (comma-separated)[/]
+secator s host [cyan]hosts.txt[/]                    [dim]# multiple inputs (txt file)[/]
+[cyan]cat hosts.txt | [/]secator s host              [dim]# piped inputs[/]
+
+[dim]# Options are mutualized ...[/]
+secator s host [blue]-rl[/] [bright_magenta]10[/] [blue]-delay[/] [bright_magenta]1[/] [blue]-proxy[/] [bright_magenta]http://127.0.0.1:9090[/] example.com  [dim]# set rate limit, delay and proxy for all subtasks[/]
+secator s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com  [dim]# ... or use a profile to automatically set options[/]
+
+[dim]:point_right: and [bold]YES[/], the above options and inputs work with any scan ([bold orange3]s[/]), workflow ([bold orange3]w[/]), and task ([bold orange3]x[/]), not just the host scan shown here![/]
+""",  # noqa: E501
+		title=f":shield: [{title_style}]Some basics[/]", **kwargs)
+
+	panel2 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator aliases are useful to stop typing [bold cyan]secator <something>[/] and focus on what you want to run. Aliases are a must to increase your productivity.[/]
+
+[bold]To enable aliases:[/]
+
+secator alias enable       [dim]# enable aliases[/]
+source ~/.secator/.aliases [dim]# load aliases in current shell[/]
+
+[dim]# Now you can use aliases...[/]
+a list                                                   [dim]# list all aliases[/]
+httpx                                                    [dim]# aliased httpx ![/]
+nmap -sV -p 443 --script vulners example.com             [dim]# aliased nmap ![/]
+w subdomain_recon                                        [dim]# aliased subdomain_recon ![/]
+s domain                                                 [dim]# aliased domain scan ![/]
+cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain tasks ![/]
+""",  # noqa: E501
+		title=f":shorts: [{title_style}]Aliases[/]", **kwargs)
+
+	panel3 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator configuration is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/]. You can edit it manually or use the following commands to get/set values.[/]
+
+c get         [dim]# get config value[/]
+c get --user  [dim]# get user config value[/]
+c edit        [dim]# edit user config in editor[/]
+c set profiles.defaults aggressive                              [dim]# set 'aggressive' profile as default[/]
+c set drivers.defaults mongodb                                  [dim]# set mongodb as default driver[/]
+c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set default wordlist for http fuzzing[/]
+""",  # noqa: E501
+		title=f":gear: [{title_style}]Configuration[/]", **kwargs)
+
+	panel4 = Panel(r"""
+[dim bold]:left_arrow_curving_right: By default, tasks are run sequentially. You can use a worker to run tasks in parallel and massively speed up your scans.[/]
+
+wk                         [dim]# or [bold cyan]secator worker[/] if you don't use aliases ...[/]
+httpx testphp.vulnweb.com  [dim]# <-- will run in worker and output results normally[/]
+
+[dim]:question: Want to use a remote worker ?[/]
+[dim]:point_right: Spawn a Celery worker on your remote server, a Redis instance and set the following config values to connect to it, both in the worker and locally:[/]
+c set celery.result_backend redis://<remote_ip>:6379/0          [dim]# set redis backend[/]
+c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis broker[/]
+[dim]:point_right: Then, run your tasks, workflows or scans like you would locally ![/]
+""",  # noqa: E501
+		title=f":zap: [{title_style}]Too slow ? Use a worker[/]", **kwargs)
+
+	panel5 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, filter and export reports using the following commands.[/]
+
+[dim]# List and filter reports...[/]
+r list                    [dim]# list all reports[/]
+r list [blue]-ws[/] [bright_magenta]prod[/]           [dim]# list reports from the workspace 'prod'[/]
+r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
+
+[dim]# Show and filter results...[/]
+r show [blue]-q[/] [bright_magenta]"url.status_code not in ['401', '403']"[/] [blue]-o[/] [bright_magenta]txt[/]                                 [dim]# show urls with status 401 or 403, save to txt file[/]
+r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"tag.match and 'signup.php' in tag.match"[/] [blue]--unified[/] [blue]-o[/] [bright_magenta]json[/]  [dim]# show tags with targets matching 'signup.php' from tasks 10 and 11[/]
+""",  # noqa: E501
+		title=f":file_cabinet: [{title_style}]Digging into reports[/]", **kwargs)
+
+	panel6 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Commands to manage secator installation.[/]
+
+update [dim]# update secator to the latest version[/]
+
+[dim]:point_right: Tools are automatically installed when first running a task, workflow or scan, but you can still install them manually.[/]
+i tools httpx    [dim]# install tool 'httpx'[/]
+i tools          [dim]# install all tools[/]
+
+[dim]:point_right: Addons are optional dependencies required to enable certain features.[/]
+i addon redis    [dim]# install addon 'redis'[/]
+i addon gcs      [dim]# install addon 'gcs'[/]
+i addon worker   [dim]# install addon 'worker'[/]
+i addon gdrive   [dim]# install addon 'gdrive'[/]
+i addon mongodb  [dim]# install addon 'mongodb'[/]
+""",  # noqa: E501
+		title=f":wrench: [{title_style}]Updates[/]", **kwargs)
+
+	panel7 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Some useful scans and workflows we use day-to-day for recon.[/]
+
+[orange3]:warning: Don't forget to add [bold blue]-dry[/] or [bold blue]-tree[/] before running your scans to see what will be done ![/]
+
+[bold orange3]:trophy: Domain recon + Subdomain recon + Port scanning + URL crawl + URL vulns (XSS, SQLi, RCE, ...)[/]
+s domain <DOMAIN>                [dim]# light[/]
+s domain <DOMAIN> -pf all_ports  [dim]# light + full port scan[/]
+s domain <DOMAIN> -pf full       [dim]# all features (full port scan, nuclei, pattern hunting, headless crawling, screenshots, etc.)[/]
+s domain <DOMAIN> -pf passive    [dim]# passive (0 requests to targets)[/]
+
+[bold orange3]:trophy: Subdomain recon[/]
+w subdomain_recon <DOMAIN>                         [dim]# standard[/]
+w subdomain_recon <DOMAIN> -brute-dns -brute-http  [dim]# bruteforce subdomains (DNS queries + HTTP Host header fuzzing)[/]
+w subdomain_recon <DOMAIN> -pf passive             [dim]# passive (0 requests to targets)[/]
+
+[bold orange3]:trophy: URL fuzzing[/]
+w url_fuzz <URL>                                   [dim]# standard fuzzing (ffuf)[/]
+w url_fuzz <URL> -hs                               [dim]# hunt secrets in HTTP responses (trufflehog)[/]
+w url_fuzz <URL> -mc 200,301 -fs 204               [dim]# match 200, 301, and filter size equal to 204 bytes[/]
+w url_fuzz -fuzzers ffuf,dirsearch <URL> -w <URL>  [dim]# choose fuzzers, use remote wordlist[/]
+
+[bold orange3]:trophy: Vuln and secret scan:[/]
+w code_scan <PATH>                                 [dim]# on a local path or git repo[/]
+w code_scan https://github.com/freelabz/secator    [dim]# on a github repo[/]
+w code_scan https://github.com/freelabz            [dim]# on a github org (all repos)[/]
+
+[bold orange3]:trophy: Hunt user accounts[/]
+w user_hunt elonmusk                               [dim]# by username[/]
+w user_hunt elonmusk@tesla.com                     [dim]# by email[/]
+
+[bold orange3]:trophy: Custom pipeline to find HTTP servers and fuzz alive ones[/]
+subfinder vulnweb.com | naabu | httpx | ffuf -mc 200,301 -recursion
+""",  # noqa: E501
+		title=f":trophy: [{title_style}]Quick wins[/]", **kwargs)
+
+	console.print(panel1)
+	console.print(panel2)
+	console.print(panel3)
+	console.print(panel4)
+	console.print(panel5)
+	console.print(panel6)
+	console.print(panel7)
+
 
 #---------#
 # INSTALL #
@@ -1228,7 +1520,8 @@ def install_gcs():
 		cmd=f'{sys.executable} -m pip install secator[gcs]',
 		title='Google Cloud Storage addon',
 		next_steps=[
-			'Run [bold green4]secator config set addons.gcs.credentials_path <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gcs.bucket_name <VALUE>[/].',
+			'Run [bold green4]secator config set addons.gcs.credentials_path <VALUE>[/]. [dim](optional if using default credentials)[/]',  # noqa: E501
 		]
 	)
 
@@ -1259,6 +1552,19 @@ def install_redis():
 			'Run [bold green4]secator config set celery.result_backend redis://<URL>[/]',
 			'Run [bold green4]secator worker[/] to run a worker.',
 			'Run [bold green4]secator x httpx testphp.vulnweb.com[/] to run a test task.'
+		]
+	)
+
+
+@addons.command('vulners')
+def install_vulners():
+	"Install Vulners addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[vulners]',
+		title='Vulners addon',
+		next_steps=[
+			'Run [bold green4]secator config set addons.vulners.api_key <API_KEY>[/].',
+			'Set [bold green4]secator config set providers.cve_default_provider vulners[/].',
 		]
 	)
 
@@ -1436,9 +1742,12 @@ def update(all):
 	if all:
 		return_code = 0
 		for cls in discover_tasks():
-			cmd = cls.cmd.split(' ')[0]
+			base_cmd = getattr(cls, 'cmd', None)
+			if not base_cmd:
+				continue
+			cmd = base_cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
-			info = get_version_info(cmd, version_flag, cls.install_github_handle)
+			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
 			if not info['installed'] or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
 				status = ToolInstaller.install(cls)
@@ -1516,7 +1825,8 @@ def lint(linter):
 @click.option('--workflows', type=str, default='', help='Secator workflows to test (comma-separated)')
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
-def unit(tasks, workflows, scans, test):
+@click.option('--no-coverage', is_flag=True, help='Disable coverage')
+def unit(tasks, workflows, scans, test, no_coverage):
 	"""Run unit tests."""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
@@ -1536,7 +1846,10 @@ def unit(tasks, workflows, scans, test):
 
 	import shutil
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
-	cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=5'  # noqa: E501
+	if not no_coverage:
+		cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=5'  # noqa: E501
+	else:
+		cmd = f'{sys.executable} -m pytest -s -vv tests/unit --durations=5'
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
@@ -1660,12 +1973,14 @@ def task(name, verbose, check, system_exit):
 	task_name = task.__name__
 
 	# Check task command is set
-	check_test(
-		task.cmd,
-		'Check task command is set (cls.cmd)',
-		'Task has no cmd attribute.',
-		errors
-	)
+	cmd = getattr(task, 'cmd', None)
+	if cmd:
+		check_test(
+			task.cmd,
+			'Check task command is set (cls.cmd)',
+			'Task has no cmd attribute.',
+			errors
+		)
 	if errors:
 		if system_exit:
 			sys.exit(1)
@@ -1673,45 +1988,46 @@ def task(name, verbose, check, system_exit):
 			return False
 
 	# Run install
-	cmd = f'secator install tools {task_name}'
-	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
-	version_info = task.get_version_info()
-	if verbose:
-		console.print(f'Version info:\n{version_info}')
-	status = version_info['status']
-	check_test(
-		version_info['installed'],
-		'Check task is installed',
-		'Failed to install command. Fix your installation command.',
-		errors
-	)
-	check_test(
-		any(cmd for cmd in [task.install_pre, task.install_cmd, task.install_github_handle]),
-		'Check task installation command is defined',
-		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `install_github_handle`.',  # noqa: E501
-		errors
-	)
-	check_test(
-		version_info['version'],
-		'Check task version can be fetched',
-		'Failed to detect current version. Consider updating your `version_flag` class attribute.',
-		warnings,
-		warn=True
-	)
-	check_test(
-		status != 'latest unknown',
-		'Check latest version',
-		'Failed to detect latest version.',
-		warnings,
-		warn=True
-	)
-	check_test(
-		not version_info['outdated'],
-		'Check task version is up to date',
-		f'Task is not up to date (current version: {version_info["version"]}, latest: {version_info["latest_version"]}). Consider updating your `install_version` class attribute.',  # noqa: E501
-		warnings,
-		warn=True
-	)
+	if hasattr(task, 'get_version_info'):
+		cmd = f'secator install tools {task_name}'
+		ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
+		version_info = task.get_version_info()
+		if verbose:
+			console.print(f'Version info:\n{version_info}')
+		status = version_info['status']
+		check_test(
+			version_info['installed'],
+			'Check task is installed',
+			'Failed to install command. Fix your installation command.',
+			errors
+		)
+		check_test(
+			any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
+			'Check task installation command is defined',
+			'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `github_handle`.',  # noqa: E501
+			errors
+		)
+		check_test(
+			version_info['version'],
+			'Check task version can be fetched',
+			'Failed to detect current version. Consider updating your `version_flag` class attribute.',
+			warnings,
+			warn=True
+		)
+		check_test(
+			status != 'latest unknown',
+			'Check latest version',
+			'Failed to detect latest version.',
+			warnings,
+			warn=True
+		)
+		check_test(
+			not version_info['outdated'],
+			'Check task version is up to date',
+			f'Task is not up to date (current version: {version_info["version"]}, latest: {version_info["latest_version"]}). Consider updating your `install_version` class attribute.',  # noqa: E501
+			warnings,
+			warn=True
+		)
 
 	# Run task-specific tests
 	check_test(
@@ -1734,13 +2050,14 @@ def task(name, verbose, check, system_exit):
 		warnings,
 		warn=True
 	)
-	check_test(
-		task.install_version,
-		'Check task install_version is set (cls.install_version)',
-		'Task has no install_version attribute. Consider setting it to pin the tool version and ensure it does not break in the future.',  # noqa: E501
-		warnings,
-		warn=True
-	)
+	if hasattr(task, 'install_version'):
+		check_test(
+			task.install_version,
+			'Check task install_version is set (cls.install_version)',
+			'Task has no install_version attribute. Consider setting it to pin the tool version and ensure it does not break in the future.',  # noqa: E501
+			warnings,
+			warn=True
+		)
 
 	if not check:
 

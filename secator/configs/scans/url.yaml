@@ -1,11 +1,19 @@
 type: scan
 name: url
 description: URL scan
+long_description: |
+  Thorough security assessment of web applications and URLs.
+  Combines URL crawling, fuzzing, and vulnerability scanning to discover hidden content,
+  identify potential attack vectors, and find security vulnerabilities. Tests for common
+  web vulnerabilities including XSS, injection flaws, and misconfigurations. Essential for web application security testing.
 profile: default
 input_types:
   - url
 workflows:
   url_crawl:
+  url_fuzz:
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified
