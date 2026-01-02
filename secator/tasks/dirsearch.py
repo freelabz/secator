@@ -2,7 +2,7 @@ import os
 import shlex
 import yaml
 
-from secator.decorators import task
+# from secator.decorators import task
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DATA, DELAY, DEPTH,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
