@@ -33,6 +33,7 @@ from secator.rich import console
 logger = logging.getLogger(__name__)
 
 _tasks = []
+_utils = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
 CAMEL_TO_SNAKE_REGEX = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -157,6 +158,96 @@ def deduplicate(array, attr=None):
 				memo.add(getattr(sub, attr))
 		return sorted(res, key=operator.attrgetter(attr))
 	return sorted(list(dict.fromkeys(array)))
+
+
+def find_classes(package_dir, attr_name, base_class=None):
+	"""Find classes with an attribute and possibly inheriting from a given base class.
+
+	Args:
+		package_dir (str): Package dir, relative to secator/ directory.
+		attr_name (str): Attribute name that needs to be present in the class.
+		base_class (str, Optional): Base class that our matches need to inherit from.
+
+	Returns:
+		list: List of matching classes.
+	"""
+	package_dir = Path(__file__).resolve().parent / package_dir
+	classes = []
+	for (_, module_name, _) in iter_modules([str(package_dir)]):
+		if module_name.startswith('_'):
+			continue
+		try:
+			module = importlib.import_module(f'secator.tasks.{module_name}')
+		except ImportError as e:
+			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
+			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
+			continue
+		for attribute_name in dir(module):
+			attribute = getattr(module, attribute_name)
+			if isclass(attribute):  # our attribute is a class !
+				if not base_class:
+					classes.append(attribute)
+				else:
+					bases = [_.__name__ for _ in inspect.getmro(attribute)]
+					if base_class in bases and hasattr(attribute, attr_name):
+						classes.append(attribute)
+
+	# Sort classes by name
+	classes = sorted(classes, key=lambda x: x.__name__)
+
+	return classes
+
+
+def discover_internal_tasks():
+	"""Find internal secator tasks."""
+	return find_classes('tasks', '__task__', base_class='Runner')
+
+
+def discover_external_tasks():
+	"""Find external secator tasks."""
+	output = []
+	sys.dont_write_bytecode = True
+	for path in CONFIG.dirs.templates.glob('**/*.py'):
+		try:
+			task_name = path.stem
+			module_name = f'secator.tasks.{task_name}'
+
+			# console.print(f'Importing module {module_name} from {path}')
+			spec = importlib.util.spec_from_file_location(module_name, path)
+			module = importlib.util.module_from_spec(spec)
+			# console.print(f'Adding module "{module_name}" to sys path')
+			sys.modules[module_name] = module
+
+			# console.print(f'Executing module "{module}"')
+			spec.loader.exec_module(module)
+
+			# console.print(f'Checking that {module} contains task {task_name}')
+			if not hasattr(module, task_name):
+				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
+				continue
+			cls = getattr(module, task_name)
+			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
+			output.append(cls)
+		except Exception as e:
+			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
+	sys.dont_write_bytecode = False
+	return output
+
+
+def discover_tasks():
+	"""Find all secator tasks (internal + external)."""
+	global _tasks
+	if not _tasks:
+		_tasks = discover_internal_tasks() + discover_external_tasks()
+	return _tasks
+
+
+def discover_utils():
+	"""Find all secator utils."""
+	global _utils
+	if not _utils:
+		_utils = find_classes('tasks', '__util__', base_class='Runner')
+	return _utils
 
 
 def import_dynamic(path, name=None):

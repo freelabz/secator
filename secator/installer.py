@@ -310,7 +310,9 @@ class SourceInstaller:
 		cls._check_path_warning(install_cmd)
 
 		# Run command
-		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
+		ret = Command.execute(install_cmd, cls_attributes={'shell': True, 'no_process': False}, quiet=False)
+		for error in ret.errors:
+			console.print(error)
 		return InstallerStatus.SUCCESS if ret.return_code == 0 else InstallerStatus.INSTALL_FAILED
 
 

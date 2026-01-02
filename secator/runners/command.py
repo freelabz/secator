@@ -807,7 +807,10 @@ class Command(Runner):
 			if subprocess.run(['sudo', '-n', 'true'], capture_output=False).returncode == 0:
 				return None, None
 		except ValueError:
-			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
+			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]', rich=True)
+		except FileNotFoundError:
+			error = 'Sudo not found, cannot prompt user'
+			return -1, error
 
 		# Check if we have a tty
 		if not sys.stdin.isatty():
