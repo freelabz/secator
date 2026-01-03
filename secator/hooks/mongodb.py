@@ -161,7 +161,7 @@ def load_findings(objs, exclude_types=[]):
 
 
 @shared_task
-def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=CONFIG.addons.mongodb.max_items):
+def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=CONFIG.addons.mongodb.max_items):  # noqa: C901
 	"""Tag duplicates in workspace.
 
 	Args:
@@ -183,8 +183,8 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 		untagged_query_cursor = untagged_query_cursor.limit(max_items)
 	untagged_findings = load_findings(list(untagged_query_cursor), exclude_types)
 	debug(
-		f'Workspace non-duplicates findings: {len(workspace_findings)}, '
-		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}',
+		f'Workspace non-duplicates findings: {len(workspace_findings)} '
+		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}'
 		f'Query time: {time.time() - start_time}s',
 		sub='hooks.mongodb'
 	)
