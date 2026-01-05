@@ -316,6 +316,9 @@ OUTPUTS_TASKS = {
             match='https://netflix.com',
             _source='wafw00f')
     ],
+    'waymore': [
+        Url(url='http://testphp.vulnweb.com/categories.php', _source='waymore')
+    ],
     'whois': [
         Domain(
             domain='wikipedia.org',
