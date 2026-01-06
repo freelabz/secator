@@ -30,7 +30,8 @@ from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
 	debug, detect_host, flatten, print_version, get_file_date,
-	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
+	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
+	vhs_tap_to_tape
 )
 from contextlib import nullcontext
 
@@ -428,89 +429,86 @@ def completion(shell, install):
 
 
 @util.command()
-@click.argument('record_name', type=str, default=None)
-@click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')
-@click.option('--interactive', '-i', is_flag=True, default=False, help='Interactive record.')
-@click.option('--width', '-w', type=int, default=None, help='Recording width')
-@click.option('--height', '-h', type=int, default=None, help='Recording height')
+@click.argument('file', type=str, required=False)
+@click.option('--name', '-n', type=str, default=None, help='Name for the output tape file (when recording interactively)')
+@click.option('--width', '-w', type=int, default=1920, help='Terminal width (for .tap conversion)')
+@click.option('--height', '-h', type=int, default=1080, help='Terminal height (for .tap conversion)')
+@click.option('--font-size', '-fs', type=int, default=18, help='Font size (for .tap conversion)')
+@click.option('--line-height', '-lh', type=float, default=1.4, help='Line height (for .tap conversion)')
 @click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
-def record(record_name, script, interactive, width, height, output_dir):
-	"""Record secator session using asciinema."""
-	# 120 x 30 is a good ratio for GitHub
-	width = width or console.size.width
-	height = height or console.size.height
-	attrs = {
-		'shell': False,
-		'env': {
-			'RECORD': '1',
-			'LINES': str(height),
-			'PS1': '$ ',
-			'COLUMNS': str(width),
-			'TERM': 'xterm-256color'
-		}
-	}
-	output_cast_path = f'{output_dir}/{record_name}.cast'
-	output_gif_path = f'{output_dir}/{record_name}.gif'
+def record(file, name, width, height, font_size, line_height, output_dir):
+	"""Record secator session using VHS.
+	
+	If a .tap file is provided, it will be converted to .tape and then run with VHS.
+	If a .tape file is provided, it will be run directly with VHS.
+	If no file is provided, VHS will start an interactive recording session.
+	"""
+	output_dir = Path(output_dir)
+	output_dir.mkdir(parents=True, exist_ok=True)
 
-	# Run automated 'story' script with asciinema-automation
-	if script:
-		# If existing cast file, remove it
-		if os.path.exists(output_cast_path):
-			os.unlink(output_cast_path)
-			console.print(Info(message=f'Removed existing {output_cast_path}'))
+	if file:
+		file_path = Path(file)
+		if not file_path.exists():
+			console.print(Error(message=f'File not found: {file}'))
+			sys.exit(1)
 
-		with console.status(Info(message='Recording with asciinema ...')):
-			Command.execute(
-				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
-				cls_attributes=attrs,
-				raw=True,
-			)
-			console.print(f'Generated {output_cast_path}', style='bold green')
-	elif interactive:
-		os.environ.update(attrs['env'])
-		Command.execute(f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}')
+		# Use the input file's directory for output
+		input_dir = file_path.parent
+		# Output GIF will be in the same directory with the same base name
+		output_gif = input_dir / f'{file_path.stem}.gif'
 
-	# Resize cast file
-	if os.path.exists(output_cast_path):
-		with console.status('[bold gold3]Cleaning up .cast and set custom settings ...'):
-			with open(output_cast_path, 'r') as f:
-				lines = f.readlines()
-			updated_lines = []
-			for ix, line in enumerate(lines):
-				tmp_line = json.loads(line)
-				if ix == 0:
-					tmp_line['width'] = width
-					tmp_line['height'] = height
-					tmp_line['env']['SHELL'] = '/bin/sh'
-					lines[0] = json.dumps(tmp_line) + '\n'
-					updated_lines.append(json.dumps(tmp_line) + '\n')
-				elif tmp_line[2].endswith(' \r'):
-					tmp_line[2] = tmp_line[2].replace(' \r', '')
-					updated_lines.append(json.dumps(tmp_line) + '\n')
-				else:
-					updated_lines.append(line)
-			with open(output_cast_path, 'w') as f:
-				f.writelines(updated_lines)
-			console.print('')
-
-		# Edit cast file to reduce long timeouts
-		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
-			Command.execute(
-				f'asciinema-edit quantize --range 1 {output_cast_path} --out {output_cast_path}.tmp',
-				cls_attributes=attrs,
-				raw=True,
-			)
-			if os.path.exists(f'{output_cast_path}.tmp'):
-				os.replace(f'{output_cast_path}.tmp', output_cast_path)
-			console.print(f'Edited {output_cast_path}', style='bold green')
-
-	# Convert to GIF
-	with console.status(f'[bold gold3]Converting to {output_gif_path} ...[/]'):
-		Command.execute(
-			f'agg {output_cast_path} {output_gif_path}',
-			cls_attributes=attrs,
-		)
-		console.print(Info(message=f'Generated {output_gif_path}'))
+		# Check if it's a .tap file
+		if file_path.suffix == '.tap':
+			# Convert .tap to .tape in the same directory as the tap file
+			tape_file = input_dir / file_path.with_suffix('.tape').name
+			vhs_tap_to_tape(file_path, tape_file, width, height, font_size, line_height)
+			# Run VHS with the converted tape file and specify output location
+			with console.status(f'Running VHS with {tape_file}...'):
+				Command.execute(f'vhs {tape_file} -o {output_gif}')
+			console.print(Info(message=f'Generated GIF: {output_gif}'))
+		
+		# Check if it's a .tape file
+		elif file_path.suffix == '.tape':
+			# Run VHS directly with the tape file and specify output location
+			with console.status(f'Running VHS with {file_path}...'):
+				Command.execute(f'vhs {file_path} -o {output_gif}')
+			console.print(Info(message=f'Generated GIF: {output_gif}'))
+		
+		else:
+			console.print(Error(message=f'File must be a .tap or .tape file, got: {file_path.suffix}'))
+			sys.exit(1)
+	
+	else:
+		# No file provided - create a template tape file
+		if not name:
+			console.print(Error(message='--name option is required when creating a new tape file'))
+			sys.exit(1)
+		
+		tape_file = output_dir / f'{name}.tape'
+		# Create a template tape file
+		template_lines = [
+			f'Output {name}.gif',
+			'Set Shell fish',
+		]
+		if width is not None:
+			template_lines.append(f'Set Width {width}')
+		if height is not None:
+			template_lines.append(f'Set Height {height}')
+		if font_size is not None:
+			template_lines.append(f'Set FontSize {font_size}')
+		template_lines.append(f'Set LineHeight {line_height}')
+		template_lines.append('')
+		template_lines.append('# Add your commands here')
+		template_lines.append('')
+		
+		try:
+			with open(tape_file, 'w') as f:
+				f.write('\n'.join(template_lines) + '\n')
+			console.print(Info(message=f'Created template tape file: {tape_file}'))
+			console.print(Info(message='Edit the file and then run: vhs ' + str(tape_file)))
+		except Exception as e:
+			console.print(Error(message=f'Failed to create template file: {str(e)}'))
+			sys.exit(1)
 
 
 @util.command('build')
