@@ -161,7 +161,7 @@ def load_findings(objs, exclude_types=[]):
 
 
 @shared_task
-def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=CONFIG.addons.mongodb.max_items):  # noqa: C901
+def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=CONFIG.addons.mongodb.max_items):  # noqa: E501
 	"""Tag duplicates in workspace.
 
 	Args:
