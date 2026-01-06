@@ -1000,7 +1000,7 @@ def is_valid_path(path):
 		return False
 
 
-def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12, line_height=1.4, sleep_before=200, sleep_after=500, wait_line=120):
+def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12, line_height=1.4, sleep_before=200, sleep_after=500, wait_line=120):  # noqa: E501
 	"""Convert .tap file to .tape file for VHS.
 
 	Args:
@@ -1015,7 +1015,7 @@ def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12
 		wait_line (int): Wait line timeout in seconds (default: 30).
 	"""
 	from secator.output_types import Error, Info
-	
+
 	VHS_KEYWORDS = {
 		'Output', 'Require', 'Set', 'Type', 'Left', 'Right', 'Up', 'Down',
 		'Backspace', 'Enter', 'Tab', 'Space', 'Ctrl', 'Sleep', 'Wait',
@@ -1036,7 +1036,7 @@ def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12
 	output_gif = output_tape.with_suffix('.gif').name
 	tape_lines.append(f'Output {output_gif}')
 	tape_lines.append('Set Shell fish')
-	
+
 	# Add terminal dimensions and font size if provided
 	if width is not None:
 		tape_lines.append(f'Set Width {width}')
@@ -1045,7 +1045,7 @@ def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12
 	if font_size is not None:
 		tape_lines.append(f'Set FontSize {font_size}')
 	tape_lines.append(f'Set LineHeight {line_height}')
-	
+
 	tape_lines.append('')  # Empty line after header
 
 	for line in lines:

@@ -430,7 +430,7 @@ def completion(shell, install):
 
 @util.command()
 @click.argument('file', type=str, required=False)
-@click.option('--name', '-n', type=str, default=None, help='Name for the output tape file (when recording interactively)')
+@click.option('--name', '-n', type=str, default=None, help='Name for the output tape file (when recording interactively)')  # noqa: E501
 @click.option('--width', '-w', type=int, default=1920, help='Terminal width (for .tap conversion)')
 @click.option('--height', '-h', type=int, default=1080, help='Terminal height (for .tap conversion)')
 @click.option('--font-size', '-fs', type=int, default=18, help='Font size (for .tap conversion)')
@@ -438,7 +438,7 @@ def completion(shell, install):
 @click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
 def record(file, name, width, height, font_size, line_height, output_dir):
 	"""Record secator session using VHS.
-	
+
 	If a .tap file is provided, it will be converted to .tape and then run with VHS.
 	If a .tape file is provided, it will be run directly with VHS.
 	If no file is provided, VHS will start an interactive recording session.
@@ -466,24 +466,24 @@ def record(file, name, width, height, font_size, line_height, output_dir):
 			with console.status(f'Running VHS with {tape_file}...'):
 				Command.execute(f'vhs {tape_file} -o {output_gif}')
 			console.print(Info(message=f'Generated GIF: {output_gif}'))
-		
+
 		# Check if it's a .tape file
 		elif file_path.suffix == '.tape':
 			# Run VHS directly with the tape file and specify output location
 			with console.status(f'Running VHS with {file_path}...'):
 				Command.execute(f'vhs {file_path} -o {output_gif}')
 			console.print(Info(message=f'Generated GIF: {output_gif}'))
-		
+
 		else:
 			console.print(Error(message=f'File must be a .tap or .tape file, got: {file_path.suffix}'))
 			sys.exit(1)
-	
+
 	else:
 		# No file provided - create a template tape file
 		if not name:
 			console.print(Error(message='--name option is required when creating a new tape file'))
 			sys.exit(1)
-		
+
 		tape_file = output_dir / f'{name}.tape'
 		# Create a template tape file
 		template_lines = [
@@ -500,7 +500,7 @@ def record(file, name, width, height, font_size, line_height, output_dir):
 		template_lines.append('')
 		template_lines.append('# Add your commands here')
 		template_lines.append('')
-		
+
 		try:
 			with open(tape_file, 'w') as f:
 				f.write('\n'.join(template_lines) + '\n')
