@@ -7,7 +7,7 @@ from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpParamsFuzzer
 
 
-@task()
+# @task()
 class x8(HttpParamsFuzzer):
 	"""Hidden parameters discovery suite written in Rust."""
 	cmd = 'x8'
