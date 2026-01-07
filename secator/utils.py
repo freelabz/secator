@@ -998,3 +998,131 @@ def is_valid_path(path):
 		return True
 	except (TypeError, ValueError):
 		return False
+
+
+def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12, line_height=1.4, sleep_before=200, sleep_after=500, wait_line=120):  # noqa: E501
+	"""Convert .tap file to .tape file for VHS.
+
+	Args:
+		tap_file (Path): Path to input .tap file.
+		output_tape (Path): Path to output .tape file.
+		width (int, optional): Terminal width.
+		height (int, optional): Terminal height.
+		font_size (int): Font size (default: 12).
+		line_height (float): Line height (default: 1.4).
+		sleep_before (int): Sleep before command in milliseconds (default: 200).
+		sleep_after (int): Sleep after command in milliseconds (default: 2000).
+		wait_line (int): Wait line timeout in seconds (default: 30).
+	"""
+	from secator.output_types import Error, Info
+
+	VHS_KEYWORDS = {
+		'Output', 'Require', 'Set', 'Type', 'Left', 'Right', 'Up', 'Down',
+		'Backspace', 'Enter', 'Tab', 'Space', 'Ctrl', 'Sleep', 'Wait',
+		'Hide', 'Show', 'Screenshot', 'Copy', 'Paste', 'Source', 'Env'
+	}
+
+	# Read tap file
+	try:
+		with open(tap_file, 'r') as f:
+			lines = f.readlines()
+	except Exception as e:
+		console.print(Error(message=f'Failed to read {tap_file}: {str(e)}'))
+		sys.exit(1)
+
+	tape_lines = []
+
+	# Add header: Output and Set Shell
+	output_gif = output_tape.with_suffix('.gif').name
+	tape_lines.append(f'Output {output_gif}')
+	tape_lines.append('Set Shell fish')
+
+	# Add terminal dimensions and font size if provided
+	if width is not None:
+		tape_lines.append(f'Set Width {width}')
+	if height is not None:
+		tape_lines.append(f'Set Height {height}')
+	if font_size is not None:
+		tape_lines.append(f'Set FontSize {font_size}')
+	tape_lines.append(f'Set LineHeight {line_height}')
+
+	tape_lines.append('')  # Empty line after header
+
+	for line in lines:
+		line = line.rstrip('\n\r')
+
+		# Skip empty lines
+		if not line.strip():
+			continue
+
+		# Check if line starts with a comment
+		if line.startswith('#'):
+			# Comment line: Type it, Enter, and add Wait
+			comment_text = line
+			tape_lines.append(f'Type "{comment_text}"')
+			tape_lines.append('Enter')
+			tape_lines.append(f'Wait+Line@{wait_line}s')
+			continue
+
+		# Check for inline comments and flags
+		has_noenter = '# noenter' in line
+		has_nowait = '# nowait' in line
+		has_hide = '# hide' in line
+
+		# Remove flags from the line
+		line_clean = line.replace('# noenter', '').replace('# nowait', '').replace('# hide', '')
+		line_stripped = line_clean
+		if has_noenter or has_nowait or has_hide:
+			line_stripped = line_stripped.rstrip()
+
+		# Check if this is a "clear" command
+		is_clear = line_stripped == 'clear'
+
+		# Check if line starts with a VHS keyword (handles cases like "Ctrl+C" and "Up 3")
+		is_vhs_keyword = any(line_stripped.startswith(keyword) for keyword in VHS_KEYWORDS)
+
+		if is_clear:
+			# Handle clear command: Hide, Type, Enter, Sleep, Show, Wait Line
+			tape_lines.append('Hide')
+			tape_lines.append(f'Type "{line_stripped}"')
+			if not has_noenter:
+				tape_lines.append('Enter')
+			tape_lines.append(f'Wait+Line@{wait_line}s')
+			tape_lines.append('Show')
+		elif is_vhs_keyword:
+			# VHS keyword: use as-is
+			tape_lines.append(line_stripped)
+		else:
+			# Regular command: add Wait before (unless nowait), Type command, Enter (unless noenter), Wait after
+			if not has_nowait:
+				tape_lines.append(f'Sleep {sleep_before}ms')
+
+			# Add Hide before command if # hide flag is present
+			if has_hide:
+				tape_lines.append('Hide')
+
+			# Type the command
+			tape_lines.append(f'Type "{line_stripped}"')
+
+			# Add Enter unless noenter flag
+			if not has_noenter:
+				tape_lines.append('Enter')
+				# Wait for command output
+				if not has_nowait:
+					tape_lines.append(f'Wait+Line@{wait_line}s')
+
+			# Add Show after command if # hide flag is present
+			if has_hide:
+				tape_lines.append('Show')
+
+			# Always add Wait after command
+			tape_lines.append(f'Sleep {sleep_after}ms')
+
+	# Write tape file
+	try:
+		with open(output_tape, 'w') as f:
+			f.write('\n'.join(tape_lines) + '\n')
+		console.print(Info(message=f'Converted {tap_file} to {output_tape}'))
+	except Exception as e:
+		console.print(Error(message=f'Failed to write {output_tape}: {str(e)}'))
+		sys.exit(1)
