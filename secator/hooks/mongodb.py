@@ -161,7 +161,7 @@ def load_findings(objs, exclude_types=[]):
 
 
 @shared_task
-def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[]):
+def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=CONFIG.addons.mongodb.max_items):  # noqa: E501
 	"""Tag duplicates in workspace.
 
 	Args:
@@ -178,10 +178,13 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[])
 	if full_scan:
 		del untagged_query['_tagged']
 	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)), exclude_types)
-	untagged_findings = load_findings(list(db.findings.find(untagged_query).sort('_timestamp', -1)), exclude_types)
+	untagged_query_cursor = db.findings.find(untagged_query).sort('_timestamp', 1)
+	if max_items is not None:
+		untagged_query_cursor = untagged_query_cursor.limit(max_items)
+	untagged_findings = load_findings(list(untagged_query_cursor), exclude_types)
 	debug(
-		f'Workspace non-duplicates findings: {len(workspace_findings)}, '
-		f'Untagged findings: {len(untagged_findings)}. '
+		f'Workspace non-duplicates findings: {len(workspace_findings)} '
+		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}'
 		f'Query time: {time.time() - start_time}s',
 		sub='hooks.mongodb'
 	)
