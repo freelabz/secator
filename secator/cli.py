@@ -31,7 +31,7 @@ from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
 	debug, detect_host, flatten, print_version, get_file_date,
 	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
-	vhs_tap_to_tape
+	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
 )
 from contextlib import nullcontext
 
@@ -466,6 +466,10 @@ def record(file, name, width, height, font_size, line_height, output_dir):
 			with console.status(f'Running VHS with {tape_file}...'):
 				Command.execute(f'vhs {tape_file} -o {output_gif}')
 			console.print(Info(message=f'Generated GIF: {output_gif}'))
+			# Optimize the GIF by trimming long pauses
+			with console.status('Optimizing GIF...'):
+				if trim_gif(output_gif, output_gif):
+					console.print(Info(message=f'Optimized GIF: {output_gif}'))
 
 		# Check if it's a .tape file
 		elif file_path.suffix == '.tape':
@@ -473,6 +477,10 @@ def record(file, name, width, height, font_size, line_height, output_dir):
 			with console.status(f'Running VHS with {file_path}...'):
 				Command.execute(f'vhs {file_path} -o {output_gif}')
 			console.print(Info(message=f'Generated GIF: {output_gif}'))
+			# Optimize the GIF by trimming long pauses
+			with console.status('Optimizing GIF...'):
+				if trim_gif(output_gif, output_gif):
+					console.print(Info(message=f'Optimized GIF: {output_gif}'))
 
 		else:
 			console.print(Error(message=f'File must be a .tap or .tape file, got: {file_path.suffix}'))
@@ -509,6 +517,76 @@ def record(file, name, width, height, font_size, line_height, output_dir):
 		except Exception as e:
 			console.print(Error(message=f'Failed to create template file: {str(e)}'))
 			sys.exit(1)
+
+
+@util.group()
+def gif():
+	"""GIF manipulation commands."""
+	if not ADDONS_ENABLED['dev']:
+		console.print(Error(message='Missing dev addon: please run "secator install addons dev"'))
+		sys.exit(1)
+	pass
+
+
+@gif.command()
+@click.argument('input_gif', type=str)
+@click.option('--output', '-o', type=str, default=None, help='Output GIF file path (default: input file with _reduced suffix)')  # noqa: E501
+@click.option('--max-frames', '-f', type=int, default=500, help='Maximum number of frames to keep (default: 500)')
+def reduce(input_gif, output, max_frames):
+	"""Reduce the number of frames in a GIF by accelerating it.
+
+	This command samples frames evenly and reduces their durations to accelerate the GIF,
+	making it faster while reducing the file size.
+	"""
+	input_path = Path(input_gif)
+	if not input_path.exists():
+		console.print(Error(message=f'File not found: {input_gif}'))
+		sys.exit(1)
+
+	if not input_path.suffix.lower() == '.gif':
+		console.print(Error(message=f'Input file must be a GIF file, got: {input_path.suffix}'))
+		sys.exit(1)
+
+	# Determine output path
+	if output:
+		output_path = Path(output)
+	else:
+		output_path = input_path.parent / f'{input_path.stem}_reduced{input_path.suffix}'
+
+	with console.status(f'Reducing GIF frames to {max_frames}...'):
+		if reduce_gif_frames(input_path, output_path, max_frames):
+			console.print(Info(message=f'Reduced GIF saved to: {output_path}'))
+		else:
+			console.print(Warning(message='GIF frame reduction failed or was not needed.'))
+
+
+@gif.command()
+@click.argument('input_gif', type=str)
+def info(input_gif):
+	"""View information about a GIF file (dimensions, frames, total pixels).
+
+	Displays the width, height, frame count, and total pixels (width × height × frames)
+	for the specified GIF file.
+	"""
+	input_path = Path(input_gif)
+	if not input_path.exists():
+		console.print(Error(message=f'File not found: {input_gif}'))
+		sys.exit(1)
+
+	if not input_path.suffix.lower() == '.gif':
+		console.print(Error(message=f'Input file must be a GIF file, got: {input_path.suffix}'))
+		sys.exit(1)
+
+	info = get_gif_info(input_path)
+	if info:
+		console.print('[bold gold3]GIF Information:[/]')
+		console.print(f'  [bold blue]Width:[/] {info["width"]} pixels')
+		console.print(f'  [bold blue]Height:[/] {info["height"]} pixels')
+		console.print(f'  [bold blue]Frames:[/] {info["frame_count"]}')
+		console.print(f'  [bold blue]Total pixels:[/] {info["total_pixels"]:,}')
+	else:
+		console.print(Error(message='Failed to read GIF information.'))
+		sys.exit(1)
 
 
 @util.command('build')

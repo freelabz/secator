@@ -1000,6 +1000,193 @@ def is_valid_path(path):
 		return False
 
 
+def trim_gif(input_path, output_path, max_pause_ms=3000):
+	"""Cap long pauses in a GIF where the terminal output is static.
+
+	Args:
+		input_path (Path): Path to input GIF file.
+		output_path (Path): Path to output GIF file.
+		max_pause_ms (int): Maximum pause duration in milliseconds (default: 3000).
+
+	Returns:
+		bool: True if successful, False otherwise.
+	"""
+	try:
+		from PIL import Image, ImageChops
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF optimization is disabled. Install with: pip install Pillow')
+		return False
+
+	try:
+		with Image.open(input_path) as im:
+			frames = []
+			durations = []
+
+			# Load the first frame
+			im.seek(0)
+			prev_frame = im.convert('RGB')
+
+			current_static_duration = 0
+
+			for i in range(im.n_frames):
+				im.seek(i)
+				duration = im.info.get('duration', 100)
+				curr_frame = im.convert('RGB')
+
+				# Check if visual content has changed
+				is_static = ImageChops.difference(prev_frame, curr_frame).getbbox() is None
+
+				if is_static and i > 0:
+					if current_static_duration + duration > max_pause_ms:
+						remaining_allowed = max_pause_ms - current_static_duration
+						if remaining_allowed > 0:
+							durations.append(remaining_allowed)
+							frames.append(im.copy())
+							current_static_duration = max_pause_ms
+					else:
+						current_static_duration += duration
+						durations.append(duration)
+						frames.append(im.copy())
+				else:
+					current_static_duration = 0
+					durations.append(duration)
+					frames.append(im.copy())
+					prev_frame = curr_frame
+
+			if frames:
+				frames[0].save(
+					output_path,
+					save_all=True,
+					append_images=frames[1:],
+					duration=durations,
+					loop=im.info.get('loop', 0),
+					optimize=True
+				)
+				return True
+		return False
+	except Exception as e:
+		logger.warning(f'Failed to optimize GIF: {str(e)}')
+		return False
+
+
+def get_gif_info(input_path):
+	"""Get information about a GIF file (dimensions, frames, total pixels).
+
+	Args:
+		input_path (Path): Path to input GIF file.
+
+	Returns:
+		dict: Dictionary with 'width', 'height', 'frame_count', and 'total_pixels', or None on error.
+	"""
+	try:
+		from PIL import Image
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF info is disabled. Install with: pip install Pillow')
+		return None
+
+	try:
+		with Image.open(input_path) as im:
+			width, height = im.size
+			frame_count = im.n_frames
+			total_pixels = width * height * frame_count
+			return {
+				'width': width,
+				'height': height,
+				'frame_count': frame_count,
+				'total_pixels': total_pixels
+			}
+	except Exception as e:
+		logger.warning(f'Failed to get GIF info: {str(e)}')
+		return None
+
+
+def reduce_gif_frames(input_path, output_path, max_frames=500):
+	"""Reduce the number of frames in a GIF by accelerating it.
+
+	Args:
+		input_path (Path): Path to input GIF file.
+		output_path (Path): Path to output GIF file.
+		max_frames (int): Maximum number of frames to keep (default: 500).
+
+	Returns:
+		bool: True if successful, False otherwise.
+	"""
+	try:
+		from PIL import Image
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF frame reduction is disabled. Install with: pip install Pillow')
+		return False
+
+	try:
+		with Image.open(input_path) as im:
+			total_frames = im.n_frames
+
+			# If already at or below max_frames, no need to reduce
+			if total_frames <= max_frames:
+				logger.info(f'GIF already has {total_frames} frames (<= {max_frames}), no reduction needed')
+				return False
+
+			# Calculate frame sampling interval
+			# If we have 1000 frames and want 500, we take every 2nd frame (indices 0, 2, 4, ...)
+			step = total_frames / max_frames
+
+			frames = []
+			durations = []
+
+			# Collect all original durations first
+			original_durations = []
+			for i in range(total_frames):
+				im.seek(i)
+				duration = im.info.get('duration', 100)
+				original_durations.append(duration)
+
+			# Sample frames evenly
+			kept_indices = []
+			for i in range(max_frames):
+				idx = int(i * step)
+				if idx >= total_frames:
+					idx = total_frames - 1
+				kept_indices.append(idx)
+
+			# Remove duplicates while preserving order
+			seen = set()
+			kept_indices = [x for x in kept_indices if not (x in seen or seen.add(x))]
+
+			# Calculate acceleration factor
+			# Total duration of kept frames should be proportional to reduction
+			# If we keep 50% of frames, we can either:
+			# 1. Keep same total duration (sum durations of skipped frames)
+			# 2. Accelerate by reducing durations proportionally
+			# We'll do option 2 for acceleration
+			acceleration_factor = total_frames / len(kept_indices)
+
+			# Load kept frames and adjust durations
+			for idx in kept_indices:
+				im.seek(idx)
+				frames.append(im.copy())
+				# Accelerate by reducing duration proportionally
+				original_duration = original_durations[idx]
+				new_duration = int(original_duration / acceleration_factor)
+				# Ensure minimum duration of 10ms for GIF compatibility
+				durations.append(max(10, new_duration))
+
+			if frames:
+				frames[0].save(
+					output_path,
+					save_all=True,
+					append_images=frames[1:],
+					duration=durations,
+					loop=im.info.get('loop', 0),
+					optimize=True
+				)
+				logger.info(f'Reduced GIF from {total_frames} to {len(frames)} frames (accelerated by {acceleration_factor:.2f}x)')
+				return True
+		return False
+	except Exception as e:
+		logger.warning(f'Failed to reduce GIF frames: {str(e)}')
+		return False
+
+
 def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12, line_height=1.4, sleep_before=200, sleep_after=500, wait_line=120):  # noqa: E501
 	"""Convert .tap file to .tape file for VHS.
 
@@ -1036,6 +1223,7 @@ def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12
 	output_gif = output_tape.with_suffix('.gif').name
 	tape_lines.append(f'Output {output_gif}')
 	tape_lines.append('Set Shell fish')
+	tape_lines.append('Set CursorBlink false')
 
 	# Add terminal dimensions and font size if provided
 	if width is not None:
