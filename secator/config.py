@@ -197,12 +197,20 @@ class Providers(StrictModel):
 	}
 
 
+class ApiAddon(StrictModel):
+	enabled: bool = False
+	url: str = 'https://app.secator.cloud/api'
+	key: str = ''
+	force_ssl: bool = True
+
+
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 	vulners: VulnersAddon = VulnersAddon()
+	api: ApiAddon = ApiAddon()
 
 
 class SecatorConfig(StrictModel):
