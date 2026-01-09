@@ -82,7 +82,7 @@ class katana(HttpCrawler):
 			opts_conf=dict(katana.opts, **katana.meta_opts),
 			opt_aliases=opts.get('aliases', [])
 		)
-		return 'cpu' if headless is True else 'io'
+		return 'large' if headless is True else 'medium'
 
 	@staticmethod
 	def on_init(self):
@@ -129,21 +129,13 @@ class katana(HttpCrawler):
 						'parameters': params
 					}
 				)
-				for param in params:
-					yield Tag(
-						category='info',
-						name='form_param',
-						match=form['action'],
-						value=param,
-						extra_data={'form_url': url}
-					)
 		response = item.get('response')
 		if not response:
 			return item
 		url = Url(
 			url=item['request']['endpoint'],
 			host=parsed_url.hostname,
-			method=item['request']['method'],
+			method=item['request'].get('method', ''),
 			request_headers=self.get_opt_value('header', preprocess=True),
 			time=item['timestamp'],
 			status_code=item['response'].get('status_code'),

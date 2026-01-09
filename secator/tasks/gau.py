@@ -60,7 +60,7 @@ class gau(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):

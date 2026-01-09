@@ -39,7 +39,7 @@ class subfinder(ReconDns):
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def validate_item(self, item):
