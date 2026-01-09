@@ -237,7 +237,7 @@ class Command(Runner):
 
 	def needs_chunking(self, sync):
 		many_targets = len(self.inputs) > 1
-		targets_over_chunk_size = self.input_chunk_size and len(self.inputs) > self.input_chunk_size
+		targets_over_chunk_size = self.input_chunk_size and self.input_chunk_size != -1 and len(self.inputs) > self.input_chunk_size  # noqa: E501
 		has_file_flag = self.file_flag is not None
 		is_chunk = self.chunk
 		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501

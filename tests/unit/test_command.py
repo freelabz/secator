@@ -266,3 +266,42 @@ class TestCommandHooks(unittest.TestCase):
 			with self.assertRaises(Exception, msg='Test passed'):
 				input = INPUTS_TASKS[HOST]
 				httpx(input, hooks=hooks, raise_on_error=True)
+
+
+class TestCommandChunking(unittest.TestCase):
+
+	def test_needs_chunking_disabled_with_minus_one(self):
+		"""Test that input_chunk_size=-1 disables chunking in async mode."""
+		class TestCmd(Command):
+			cmd = 'test'
+			input_chunk_size = -1
+			file_flag = None
+
+		# Test with async mode (sync=False) and many targets
+		targets = ['target1', 'target2', 'target3', 'target4', 'target5']
+		cmd = TestCmd(targets)
+		self.assertFalse(cmd.needs_chunking(sync=False))
+
+	def test_needs_chunking_with_default_size(self):
+		"""Test that chunking works with default input_chunk_size."""
+		class TestCmd(Command):
+			cmd = 'test'
+			input_chunk_size = 2  # Small chunk size for testing
+			file_flag = None
+
+		# Test with async mode (sync=False) and targets exceeding chunk size
+		targets = ['target1', 'target2', 'target3']
+		cmd = TestCmd(targets)
+		self.assertTrue(cmd.needs_chunking(sync=False))
+
+	def test_needs_chunking_under_chunk_size(self):
+		"""Test that chunking doesn't happen when inputs are under chunk size."""
+		class TestCmd(Command):
+			cmd = 'test'
+			input_chunk_size = 10
+			file_flag = None
+
+		# Test with async mode (sync=False) and targets under chunk size
+		targets = ['target1', 'target2']
+		cmd = TestCmd(targets)
+		self.assertFalse(cmd.needs_chunking(sync=False))
