@@ -82,7 +82,7 @@ class katana(HttpCrawler):
 			opts_conf=dict(katana.opts, **katana.meta_opts),
 			opt_aliases=opts.get('aliases', [])
 		)
-		return 'cpu' if headless is True else 'io'
+		return 'large' if headless is True else 'medium'
 
 	@staticmethod
 	def on_init(self):

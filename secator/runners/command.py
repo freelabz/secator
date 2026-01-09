@@ -126,7 +126,7 @@ class Command(Runner):
 	proxy_http = False
 
 	# Profile
-	profile = 'io'
+	profile = 'small'
 
 	def __init__(self, inputs=[], **run_opts):
 

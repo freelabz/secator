@@ -82,7 +82,6 @@ class httpx(Http):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
 	profile = lambda opts: httpx.dynamic_profile(opts)  # noqa: E731
 
 	@staticmethod
@@ -93,7 +92,7 @@ class httpx(Http):
 			opts_conf=dict(httpx.opts, **httpx.meta_opts),
 			opt_aliases=opts.get('aliases', [])
 		)
-		return 'cpu' if screenshot is True else 'io'
+		return 'large' if screenshot is True else 'small'
 
 	@staticmethod
 	def on_init(self):

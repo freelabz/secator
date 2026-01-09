@@ -168,7 +168,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		return
 
 	if not queue:
-		queue = 'io,cpu,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
+		queue = 'small,medium,large,extra_large,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
 
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'
@@ -179,10 +179,10 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		subcmd = 'stop' if stop else 'show' if show else 'start'
 		logfile = '%n.log'
 		pidfile = '%n.pid'
-		queues = '-Q:1 celery -Q:2 io -Q:3 cpu'
-		concur = '-c:1 10 -c:2 100 -c:3 4'
+		queues = '-Q:1 celery -Q:2 small -Q:3 medium -Q:4 large -Q:5 extra_large'
+		concur = '-c:1 10 -c:2 100 -c:3 50 -c:4 20 -c:5 4'
 		pool = 'eventlet'
-		cmd = f'{celery} -A {app_str} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
+		cmd = f'{celery} -A {app_str} multi {subcmd} 5 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
 		cmd = f'{celery} -A {app_str} worker -n {hostname} -Q {queue}'
 
