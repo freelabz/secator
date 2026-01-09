@@ -70,7 +70,7 @@ class dalfox(HttpBase):
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'cpu'
+	profile = 'extra_large'
 
 	@staticmethod
 	def on_json_loaded(self, item):

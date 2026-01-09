@@ -50,7 +50,7 @@ class testssl(Command):
 	proxy_http = True
 	proxychains = False
 	proxy_socks5 = False
-	profile = 'io'
+	profile = 'small'
 	install_cmd_pre = {
 		'apk': ['hexdump', 'coreutils', 'procps', 'bash'],
 		'pacman': ['util-linux', 'bash'],

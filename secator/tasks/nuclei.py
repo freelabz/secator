@@ -112,7 +112,7 @@ class nuclei(VulnMulti):
 	proxychains = False
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
-	profile = 'cpu'
+	profile = 'extra_large'
 
 	@staticmethod
 	def id_extractor(item):

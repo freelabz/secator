@@ -37,7 +37,7 @@ class PythonRunner(Runner):
 	tags = []
 	opts = {}
 	default_inputs = None
-	profile = 'io'
+	profile = 'small'
 
 	def needs_chunking(self, sync):
 		return False
