@@ -125,3 +125,25 @@ class TestCelery(unittest.TestCase):
 			targets = [r.name for r in results if r._type == 'target']
 			self.assertEqual(len(targets), len(HTTP_TARGETS) * 2)
 			self.assertEqual(len(urls), len(HTTP_TARGETS))
+
+	def test_break_task_with_disabled_chunking(self):
+		"""Test that break_task doesn't chunk when input_chunk_size=-1."""
+		from secator.tasks import httpx
+		from secator.celery import break_task
+		if httpx not in TEST_TASKS:
+			return
+
+		class TestTask(httpx):
+			input_chunk_size = -1
+
+		# Create a task with many inputs
+		inputs = ['target1', 'target2', 'target3', 'target4', 'target5']
+		task = TestTask(inputs)
+		task_opts = {}
+
+		# Mock to get the workflow signature
+		with mock_command(TestTask, fixture=[FIXTURES_TASKS[httpx]]):
+			workflow = break_task(task, task_opts, results=[])
+			# With input_chunk_size=-1, should return the inputs as-is without chunking
+			# This means one chunk with all inputs
+			self.assertEqual(len(workflow.tasks), len(inputs))
