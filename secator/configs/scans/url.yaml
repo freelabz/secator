@@ -12,6 +12,10 @@ input_types:
 workflows:
   url_crawl:
   url_fuzz:
+    targets_:
+    - type: url
+      field: url
+      condition: url.is_root
   url_vuln:
     targets_:
     - type: url
