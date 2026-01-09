@@ -16,6 +16,7 @@ class xurlfind3r(HttpCrawler):
 	"""Discover URLs for a given domain in a simple, passive and efficient way"""
 	cmd = 'xurlfind3r'
 	tags = ['url', 'crawl', 'passive']
+	opt_prefix = '--'
 	input_types = [HOST, URL]
 	output_types = [Url]
 	item_loaders = [JSONSerializer()]
