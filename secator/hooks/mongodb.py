@@ -161,14 +161,14 @@ def load_findings(objs, exclude_types=[]):
 
 
 @shared_task
-def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=CONFIG.addons.mongodb.max_items):  # noqa: E501
+def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=CONFIG.addons.mongodb.max_items, log_hook=None):  # noqa: E501
 	"""Tag duplicates in workspace.
 
 	Args:
 		ws_id (str): Workspace id.
 		full_scan (bool): If True, scan all findings, otherwise only untagged findings.
 	"""
-	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
+	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb', log_hook=log_hook)
 	init_time = time.time()
 	client = get_mongodb_client()
 	db = client.main
@@ -186,7 +186,8 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 		f'Workspace non-duplicates findings: {len(workspace_findings)} '
 		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}'
 		f'Query time: {time.time() - start_time}s',
-		sub='hooks.mongodb'
+		sub='hooks.mongodb',
+		log_hook=log_hook
 	)
 	start_time = time.time()
 	seen = []
@@ -199,7 +200,8 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 		debug(
 			f'Processing: {repr(item)} ({item._timestamp}) [{item._uuid}]',
 			sub='hooks.mongodb',
-			verbose=True
+			verbose=True,
+			log_hook=log_hook
 		)
 
 		duplicate_ids = [
@@ -212,14 +214,15 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 		debug(
 			f'Found {len(duplicate_ids)} duplicates for item',
 			sub='hooks.mongodb',
-			verbose=True
+			verbose=True,
+			log_hook=log_hook
 		)
 
 		duplicate_ws = [
 			_ for _ in workspace_findings
 			if _ == item and _._uuid != item._uuid
 		]
-		debug(f' --> Found {len(duplicate_ws)} workspace duplicates for item', sub='hooks.mongodb', verbose=True)
+		debug(f' --> Found {len(duplicate_ws)} workspace duplicates for item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
 
 		# Copy selected fields from the previous "main" finding (first workspace duplicate)
 		# into the new main finding, if configured.
@@ -230,22 +233,22 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 				for field in copy_fields:
 					# Only copy if the attribute exists on the previous finding
 					if not hasattr(previous_item, field):
-						debug(f'{field} not found on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
+						debug(f'{field} not found on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
 						continue
 					value_prev = getattr(previous_item, field)
-					debug(f'{field} is {value_prev} on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
+					debug(f'{field} is {value_prev} on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
 					# Skip empty values to avoid overwriting with "less useful" data
 					if not value_prev:
-						debug(f'{field} is empty on {previous_item._uuid}', sub='hooks.mongodb', verbose=True)
+						debug(f'{field} is empty on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
 						continue
 					# Only overwrite if current item field isn't set
 					value_curr = getattr(item, field)
-					debug(f'{field} is {value_curr} on {item._uuid}', sub='hooks.mongodb', verbose=True)
+					debug(f'{field} is {value_curr} on {item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
 					if not value_curr:
 						if field in copied_fields:
-							debug(f'{field} is already copied from previous item', sub='hooks.mongodb', verbose=True)
+							debug(f'{field} is already copied from previous item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
 							continue
-						debug(f'Using {field}={value_prev} from {previous_item._uuid} for {item._uuid}', sub='hooks.mongodb', verbose=True)  # noqa: E501
+						debug(f'Using {field}={value_prev} from {previous_item._uuid} for {item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
 						copied_fields[field] = value_prev
 
 		related_ids = []
@@ -255,7 +258,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 			for related in duplicate_ws:
 				related_ids.extend(related._related)
 
-		debug(f' --> Found {len(duplicate_ids)} total duplicates for item', sub='hooks.mongodb', verbose=True)
+		debug(f' --> Found {len(duplicate_ids)} total duplicates for item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
 
 		db_updates[item._uuid] = {
 			**copied_fields,
@@ -268,22 +271,22 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 				'_context.workspace_duplicate': True,
 				'_tagged': True
 			}
-	debug(f'Finished processing untagged findings in {time.time() - start_time}s', sub='hooks.mongodb')
+	debug(f'Finished processing untagged findings in {time.time() - start_time}s', sub='hooks.mongodb', log_hook=log_hook)
 	start_time = time.time()
 
-	debug(f'Executing {len(db_updates)} database updates', sub='hooks.mongodb')
+	debug(f'Executing {len(db_updates)} database updates', sub='hooks.mongodb', log_hook=log_hook)
 
 	from pymongo import UpdateOne
 	if not db_updates:
-		debug('no db updates to execute', sub='hooks.mongodb')
+		debug('no db updates to execute', sub='hooks.mongodb', log_hook=log_hook)
 		return
 
 	result = db.findings.bulk_write(
 		[UpdateOne({'_id': ObjectId(uuid)}, {'$set': update}) for uuid, update in db_updates.items()]
 	)
-	debug(result, sub='hooks.mongodb')
-	debug(f'Finished running db update in {time.time() - start_time}s', sub='hooks.mongodb')
-	debug(f'Finished running tag duplicates in {time.time() - init_time}s', sub='hooks.mongodb')
+	debug(result, sub='hooks.mongodb', log_hook=log_hook)
+	debug(f'Finished running db update in {time.time() - start_time}s', sub='hooks.mongodb', log_hook=log_hook)
+	debug(f'Finished running tag duplicates in {time.time() - init_time}s', sub='hooks.mongodb', log_hook=log_hook)
 
 
 HOOKS = {
