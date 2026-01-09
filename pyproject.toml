@@ -64,7 +64,7 @@ dev = [
   'flake8 < 8',
   'pytest < 9',
   'watchdog < 3',
-  'asciinema-automation < 1',
+  'pillow < 13',
 ]
 build = [
   'hatch < 2',

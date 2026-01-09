@@ -34,7 +34,7 @@ def confirm_with_timeout(message, default=True, timeout=CONFIG.runners.prompt_ti
         try:
             result = click.confirm(message, default=default)
         except (TimeoutError, KeyboardInterrupt):
-            console.print(f'\n\[[bold red]PROMPT[/]] [bold red]Prompt timed out after {timeout}s, continuing...[/]')
+            console.print(rf'\n\[[bold red]PROMPT[/]] [bold red]Prompt timed out after {timeout}s, continuing...[/]')
             result = default
         finally:
             signal.alarm(0)
@@ -68,15 +68,16 @@ class prompt(PythonRunner):
     def yielder(self):
         yes = self.run_opts.get('yes', False)
         in_ci = _is_ci()
+        timeout = CONFIG.runners.prompt_timeout
 
         if len(self.inputs) == 0:
             return
 
         # Auto-accept in CI or if yes flag is set
         if yes or in_ci:
-            console.print('\n\[[bold green]PROMPT[/]] [bold green]Auto-accepted all inputs.[/]')
+            console.print(r'\n\[[bold green]PROMPT[/]] [bold green]Auto-accepted all inputs.[/]')
         else:
-            console.print('\n\[[bold red]PROMPT[/]] [bold red]Prompting user for validation ({timeout}s timeout)...[/]'.format(timeout=CONFIG.runners.prompt_timeout))  # noqa: E501
+            console.print(rf'\n\[[bold red]PROMPT[/]] [bold red]Prompting user for validation ({timeout}s timeout)...[/]')  # noqa: E501
 
         for input in self.inputs:
             if yes or in_ci:
@@ -85,7 +86,7 @@ class prompt(PythonRunner):
                 result = confirm_with_timeout(
                     self.run_opts['message'].format(input=input),
                     default=True,
-                    timeout=CONFIG.runners.prompt_timeout
+                    timeout=timeout
                 )
 
             if result:

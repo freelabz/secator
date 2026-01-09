@@ -1,18 +1,20 @@
 secator --help
+Sleep 2s
 clear
 
 # Run tasks ...
-secator x katana http://testphp.vulnweb.com -rl 100 -timeout 10 -header Accept:text/html
+secator x katana http://testphp.vulnweb.com -rl 100 -to 10 -H Accept:text/html
+Sleep 2s
 clear
 
-# ... with mutualized input options and output types !
+# ... with the same meta options everywhere
 Up 3
-Left 72
+Left 62
 Backspace 6
-dirsearch # noenter
+httpx # noenter
 
 Up 1
-Backspace 9
+Backspace 5
 cariddi # noenter
 
 Up 1
@@ -20,10 +22,10 @@ Backspace 7
 feroxbuster # nowait
 Sleep 5s
 Ctrl+C
-Sleep 3s
+Sleep 2s
 
 Up 1
-Left 72
+Left 62
 Backspace 11
 nmap # noenter
 Right 8
@@ -31,17 +33,29 @@ Backspace 7
 Right 19
 Space 1
 -p 80,443 # noenter
-Right 45
-Backspace 25
-Sleep 2s
+Right 35
+Backspace 27
+Sleep 500ms
 Enter
-Wait
+Wait+Line
 Sleep 3s
 clear
 
 # Run workflows ...
-secator w host_recon --help
+secator w host_recon -h
 
 Up 1
-Backspace 6
-localhost -rl 1000 -ss -p 6379,8080 -tid redis-info,exposed-redis,CVE-2021-44228
+Backspace 2
+-tree
+Up 1
+Backspace 5
+-dry
+
+Up 1
+Backspace 4
+localhost -rl 1000 -ss -p 6379,8080 -tid redis-info,exposed-redis,CVE-2021-44228 --nuclei -dry
+Up 1
+Backspace 5
+ # now run it for real !
+Wait+Line
+Sleep 5s

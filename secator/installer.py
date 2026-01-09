@@ -86,6 +86,9 @@ class ToolInstaller:
 				cls.print_status(status, name)
 				return status
 
+		# Get custom binary name if specified
+		binary_name = getattr(tool_cls, 'install_binary_name', None)
+
 		# Install binaries from GH
 		gh_status = InstallerStatus.UNKNOWN
 		install_ignore_bin = get_distro_config().name in tool_cls.install_ignore_bin
@@ -93,7 +96,8 @@ class ToolInstaller:
 			gh_status = GithubInstaller.install(
 				tool_cls.github_handle,
 				version=tool_cls.install_version or 'latest',
-				version_prefix=tool_cls.install_github_version_prefix
+				version_prefix=tool_cls.install_github_version_prefix,
+				binary_name=binary_name
 			)
 			status = gh_status
 
@@ -108,7 +112,7 @@ class ToolInstaller:
 			if not tool_cls.install_cmd:
 				status = InstallerStatus.INSTALL_SKIPPED_OK
 			else:
-				status = SourceInstaller.install(tool_cls.install_cmd, tool_cls.install_version)
+				status = SourceInstaller.install(tool_cls.install_cmd, tool_cls.install_version, binary_name=binary_name)
 				if not status.is_ok():
 					cls.print_status(status, name)
 					return status
@@ -239,7 +243,7 @@ class SourceInstaller:
 					console.print(Warning(message=f'Run "export PATH=$PATH:{default_local_bin}" to add the binaries to your PATH'))
 
 	@classmethod
-	def install(cls, config, version=None, install_prereqs=True):
+	def install(cls, config, version=None, install_prereqs=True, binary_name=None):
 		"""Install from source.
 
 		Args:
@@ -247,6 +251,7 @@ class SourceInstaller:
 			config (dict): A dict of distros as keys and a command as value.
 			version (str, optional): Version to install.
 			install_prereqs (bool, optional): Install pre-requisites.
+			binary_name (str, optional): Custom binary name to use after installation.
 
 		Returns:
 			Status: install status.
@@ -311,18 +316,23 @@ class SourceInstaller:
 
 		# Run command
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
-		return InstallerStatus.SUCCESS if ret.return_code == 0 else InstallerStatus.INSTALL_FAILED
+		if ret.return_code != 0:
+			return InstallerStatus.INSTALL_FAILED
+		return InstallerStatus.SUCCESS
 
 
 class GithubInstaller:
 	"""Install a tool from GitHub releases."""
 
 	@classmethod
-	def install(cls, github_handle, version='latest', version_prefix=''):
+	def install(cls, github_handle, version='latest', version_prefix='', binary_name=None):
 		"""Find and install a release from a GitHub handle {user}/{repo}.
 
 		Args:
 			github_handle (str): A GitHub handle {user}/{repo}
+			version (str): Version to install (default: 'latest')
+			version_prefix (str): Version prefix (default: '')
+			binary_name (str, optional): Custom binary name to use instead of repo name
 
 		Returns:
 			InstallerStatus: status.
@@ -342,7 +352,9 @@ class GithubInstaller:
 
 		# Download and unpack asset
 		console.print(Info(message=f'Found release URL: {download_url}'))
-		return cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo)
+		# Use custom binary name if provided, otherwise use repo name
+		final_binary_name = binary_name or repo
+		return cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo, final_binary_name)
 
 	@classmethod
 	def get_release(cls, github_handle, version='latest', version_prefix=''):
@@ -432,14 +444,15 @@ class GithubInstaller:
 			return potential_matches[0]
 
 	@classmethod
-	def _download_and_unpack(cls, url, destination, repo_name):
+	def _download_and_unpack(cls, url, destination, repo_name, binary_name):
 		"""Download and unpack a release asset.
 
 		Args:
 			cls (Runner): Task class.
 			url (str): GitHub release URL.
 			destination (str): Local destination.
-			repo_name (str): GitHub repository name.
+			repo_name (str): GitHub repository name (used to find binary in archive).
+			binary_name (str): Final binary name to use (may differ from repo_name).
 
 		Returns:
 			InstallerStatus: install status.
@@ -469,9 +482,9 @@ class GithubInstaller:
 		binary_path = cls._find_binary_in_directory(temp_dir, repo_name)
 		if binary_path:
 			os.chmod(binary_path, 0o755)  # Make it executable
-			destination = os.path.join(destination, repo_name)
-			console.print(Info(message=f'Moving binary to {destination}...'))
-			shutil.move(binary_path, destination)  # Move the binary
+			final_destination = os.path.join(destination, binary_name)
+			console.print(Info(message=f'Moving binary to {final_destination}...'))
+			shutil.move(binary_path, final_destination)  # Move the binary with custom name
 			return InstallerStatus.SUCCESS
 		else:
 			console.print(Error(message='Binary matching the repository name was not found in the archive.'))
