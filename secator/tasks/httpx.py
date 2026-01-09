@@ -82,7 +82,6 @@ class httpx(Http):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'small'
 	profile = lambda opts: httpx.dynamic_profile(opts)  # noqa: E731
 
 	@staticmethod
