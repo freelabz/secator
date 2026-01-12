@@ -439,3 +439,66 @@ class TestCommandRunner(unittest.TestCase):
 					for k, v in expected_fields.items():
 						self.assertEqual(getattr(converted, k), v)
 		delattr(MyCommand, 'output_types')
+
+	def test_custom_profiles(self):
+		"""Test that custom profiles (TemplateLoader instances) can be passed to runners."""
+		from secator.template import TemplateLoader
+		
+		# Create a custom profile using TemplateLoader
+		custom_profile = TemplateLoader(input={
+			'name': 'custom_test_profile',
+			'type': 'profile',
+			'description': 'Custom test profile',
+			'opts': {
+				'timeout': 120,
+				'retries': 3
+			}
+		})
+		
+		# Create a command with the custom profile
+		with mock_command(MyCommand, TARGETS, {'profiles': [custom_profile]}, []) as cmd:
+			# Verify the profile was loaded
+			self.assertEqual(len(cmd.profiles), 1)
+			self.assertEqual(cmd.profiles[0].name, 'custom_test_profile')
+			# Verify the profile options were applied
+			self.assertEqual(cmd.run_opts.get('timeout'), 120)
+			self.assertEqual(cmd.run_opts.get('retries'), 3)
+
+	def test_mixed_profiles(self):
+		"""Test that both string profile names and TemplateLoader instances can be mixed."""
+		from secator.template import TemplateLoader
+		from unittest.mock import patch
+		
+		# Create a custom profile using TemplateLoader
+		custom_profile = TemplateLoader(input={
+			'name': 'custom_mixed_profile',
+			'type': 'profile',
+			'description': 'Custom mixed profile',
+			'opts': {
+				'timeout': 90
+			}
+		})
+		
+		# Mock get_configs_by_type to return a mock profile for string name
+		mock_profile = TemplateLoader(input={
+			'name': 'test_string_profile',
+			'type': 'profile',
+			'description': 'String profile',
+			'opts': {
+				'retries': 2
+			}
+		})
+		
+		with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+			mock_get_configs.return_value = [mock_profile]
+			
+			# Create a command with mixed profiles
+			with mock_command(MyCommand, TARGETS, {'profiles': [custom_profile, 'test_string_profile']}, []) as cmd:
+				# Verify both profiles were loaded
+				self.assertEqual(len(cmd.profiles), 2)
+				profile_names = [p.name for p in cmd.profiles]
+				self.assertIn('custom_mixed_profile', profile_names)
+				self.assertIn('test_string_profile', profile_names)
+				# Verify both profile options were applied
+				self.assertEqual(cmd.run_opts.get('timeout'), 90)
+				self.assertEqual(cmd.run_opts.get('retries'), 2)

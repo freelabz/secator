@@ -1153,7 +1153,7 @@ class Runner:
 		"""Resolve profiles and update run options.
 
 		Args:
-			profiles (list[str]): List of profile names to resolve.
+			profiles (list[str | TemplateLoader]): List of profile names or TemplateLoader instances to resolve.
 
 		Returns:
 			list: List of profiles.
@@ -1178,14 +1178,22 @@ class Runner:
 			return []
 
 		# Get profile configs
+		from secator.template import TemplateLoader
 		templates = []
 		profile_configs = get_configs_by_type('profile')
 		for pname in profiles:
-			matches = [p for p in profile_configs if p.name == pname]
-			if not matches:
-				self._print(Warning(message=f'Profile "{pname}" was not found. Run [bold green]secator profiles list[/] to see available profiles.'), rich=True)  # noqa: E501
+			# Handle TemplateLoader instances directly
+			if isinstance(pname, TemplateLoader):
+				templates.append(pname)
+			# Handle string profile names
+			elif isinstance(pname, str):
+				matches = [p for p in profile_configs if p.name == pname]
+				if not matches:
+					self._print(Warning(message=f'Profile "{pname}" was not found. Run [bold green]secator profiles list[/] to see available profiles.'), rich=True)  # noqa: E501
+				else:
+					templates.append(matches[0])
 			else:
-				templates.append(matches[0])
+				self._print(Warning(message=f'Profile "{pname}" has invalid type {type(pname).__name__}. Expected str or TemplateLoader.'), rich=True)  # noqa: E501
 
 		if not templates:
 			self.debug('no profiles loaded', sub='init')
