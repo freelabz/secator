@@ -1168,6 +1168,7 @@ class Runner:
 
 		# Add default profiles
 		# Extract profile names from the list (handling both strings and TemplateLoader instances)
+		# Note: Import is local to avoid circular dependency (template.py imports from runners.task)
 		from secator.template import TemplateLoader
 		existing_profile_names = set()
 		for p in profiles:
