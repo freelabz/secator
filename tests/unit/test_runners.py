@@ -502,3 +502,37 @@ class TestCommandRunner(unittest.TestCase):
 				# Verify both profile options were applied
 				self.assertEqual(cmd.run_opts.get('timeout'), 90)
 				self.assertEqual(cmd.run_opts.get('retries'), 2)
+
+	def test_custom_profile_no_duplicate_defaults(self):
+		"""Test that custom profiles with same name as defaults don't get duplicated."""
+		from secator.template import TemplateLoader
+		from unittest.mock import patch
+		
+		# Create a custom profile with the same name as would be in defaults
+		custom_profile = TemplateLoader(input={
+			'name': 'test_default',
+			'type': 'profile',
+			'description': 'Custom profile',
+			'opts': {
+				'timeout': 100
+			}
+		})
+		
+		# Mock the default profiles list and get_configs_by_type
+		with patch('secator.runners._base.CONFIG.profiles.defaults', ['test_default']):
+			with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+				# Mock profile would be returned for the default
+				default_profile = TemplateLoader(input={
+					'name': 'test_default',
+					'type': 'profile',
+					'opts': {'timeout': 50}
+				})
+				mock_get_configs.return_value = [default_profile]
+				
+				# Create a command with the custom profile
+				with mock_command(MyCommand, TARGETS, {'profiles': [custom_profile]}, []) as cmd:
+					# Verify only one profile was loaded (no duplicates)
+					self.assertEqual(len(cmd.profiles), 1)
+					self.assertEqual(cmd.profiles[0].name, 'test_default')
+					# Verify custom profile was used, not the default
+					self.assertEqual(cmd.run_opts.get('timeout'), 100)

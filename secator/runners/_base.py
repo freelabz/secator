@@ -1167,18 +1167,25 @@ class Runner:
 			profiles = profiles.split(',')
 
 		# Add default profiles
+		# Extract profile names from the list (handling both strings and TemplateLoader instances)
+		from secator.template import TemplateLoader
+		existing_profile_names = set()
+		for p in profiles:
+			if isinstance(p, str):
+				existing_profile_names.add(p)
+			elif isinstance(p, TemplateLoader):
+				existing_profile_names.add(p.name)
+		
 		default_profiles = CONFIG.profiles.defaults
 		for p in default_profiles:
-			if p in profiles:
-				continue
-			profiles.append(p)
+			if p not in existing_profile_names:
+				profiles.append(p)
 
 		# Abort if no profiles
 		if not profiles:
 			return []
 
 		# Get profile configs
-		from secator.template import TemplateLoader
 		templates = []
 		profile_configs = get_configs_by_type('profile')
 		for pname in profiles:
