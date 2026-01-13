@@ -1,0 +1,85 @@
+name: Build and Publish to PPA
+
+on:
+  push:
+    tags:
+      - v*.*.*
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  build-ppa:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu_release: ["focal", "jammy", "noble"]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Extract version from tag
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+        else
+          VERSION=$(grep '^version' pyproject.toml | head -1 | cut -d'"' -f2)
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+        fi
+        echo "Building version: $VERSION"
+
+    - name: Install packaging dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y debhelper dh-python devscripts build-essential
+
+    - name: Import GPG key
+      run: |
+        echo "${{ secrets.PPA_GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
+        # Configure GPG to use passphrase from environment
+        echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+        echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+        gpgconf --kill gpg-agent
+        gpgconf --launch gpg-agent
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+
+    - name: Update changelog for Ubuntu release
+      run: |
+        # Update changelog with appropriate Ubuntu release
+        sed -i "s/focal/${{ matrix.ubuntu_release }}/g" debian/changelog
+        # Update version in changelog if needed
+        if [ -n "$VERSION" ]; then
+          sed -i "s/^secator (.*)/secator ($VERSION-1ppa1~${{ matrix.ubuntu_release }})/" debian/changelog
+        fi
+
+    - name: Build source package
+      run: |
+        # Create a temporary file for GPG passphrase
+        echo "${{ secrets.PPA_GPG_PASSPHRASE }}" > /tmp/gpg_passphrase
+        chmod 600 /tmp/gpg_passphrase
+        # Build the source package with GPG signing
+        debuild -S -sa -p"gpg --batch --pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase"
+        # Clean up passphrase file
+        rm -f /tmp/gpg_passphrase
+      env:
+        DEBFULLNAME: FreeLabz
+        DEBEMAIL: sales@freelabz.com
+
+    - name: Upload to PPA
+      run: |
+        cd ..
+        dput ppa:freelabz/secator secator_${VERSION}-1ppa1~${{ matrix.ubuntu_release }}_source.changes
+      env:
+        DEBFULLNAME: FreeLabz
+        DEBEMAIL: sales@freelabz.com
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')

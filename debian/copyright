@@ -1,0 +1,27 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: secator
+Upstream-Contact: FreeLabz <sales@freelabz.com>
+Source: https://github.com/freelabz/secator
+
+Files: *
+Copyright: 2023-2024 FreeLabz
+License: BSL-1.1
+ Business Source License 1.1
+ .
+ The Licensor hereby grants you the right to copy, modify, create derivative
+ works, redistribute, and make non-production use of the Licensed Work. The
+ Licensor may make an Additional Use Grant, above, permitting limited production use.
+ .
+ Effective on the Change Date, or the fourth anniversary of the first publicly
+ available distribution of a specific version of the Licensed Work under this
+ License, whichever comes first, the Licensor hereby grants you rights under
+ the terms of the Change License.
+ .
+ Additional Use Grant: You may make production use of the Licensed Work,
+ provided such use does not include offering the Licensed Work to third parties
+ on a hosted or embedded basis which is competitive with FreeLabz's products.
+ .
+ Change Date: Four years from the date the Licensed Work is published.
+ .
+ For the full license text, see:
+ https://github.com/freelabz/secator/blob/main/LICENSE
