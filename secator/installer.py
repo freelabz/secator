@@ -1,4 +1,5 @@
 import distro
+import errno
 import getpass
 import os
 import platform
@@ -38,6 +39,7 @@ class InstallerStatus(Enum):
 	GITHUB_RELEASE_UNMATCHED_DISTRIBUTION = 'RELEASE_UNMATCHED_DISTRIBUTION'
 	GITHUB_RELEASE_FAILED_DOWNLOAD = 'GITHUB_RELEASE_FAILED_DOWNLOAD'
 	GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE = 'GITHUB_BINARY_NOT_FOUND_IN_ARCHIVE'
+	BINARY_NOT_FOUND = 'BINARY_NOT_FOUND'
 	UNKNOWN_DISTRIBUTION = 'UNKNOWN_DISTRIBUTION'
 	UNKNOWN = 'UNKNOWN'
 
@@ -87,7 +89,8 @@ class ToolInstaller:
 				return status
 
 		# Get custom binary name if specified
-		binary_name = getattr(tool_cls, 'install_binary_name', None)
+		target_binary_name = getattr(tool_cls, 'install_binary_name', None)
+		binary_name = tool_cls.__name__ if target_binary_name else tool_cls.cmd.split(' ')[0]
 
 		# Install binaries from GH
 		gh_status = InstallerStatus.UNKNOWN
@@ -97,7 +100,7 @@ class ToolInstaller:
 				tool_cls.github_handle,
 				version=tool_cls.install_version or 'latest',
 				version_prefix=tool_cls.install_github_version_prefix,
-				binary_name=binary_name
+				target_binary_name=target_binary_name
 			)
 			status = gh_status
 
@@ -112,7 +115,12 @@ class ToolInstaller:
 			if not tool_cls.install_cmd:
 				status = InstallerStatus.INSTALL_SKIPPED_OK
 			else:
-				status = SourceInstaller.install(tool_cls.install_cmd, tool_cls.install_version, binary_name=binary_name)
+				status = SourceInstaller.install(
+					tool_cls.install_cmd,
+					tool_cls.install_version,
+					binary_name=binary_name,
+					target_binary_name=target_binary_name
+				)
 				if not status.is_ok():
 					cls.print_status(status, name)
 					return status
@@ -191,15 +199,22 @@ class SourceInstaller:
 	"""Install a tool from source."""
 
 	@classmethod
-	def _check_path_warning(cls, install_cmd):
-		"""Check if the installation location is in PATH and print warnings if not.
+	def _get_bin_path(cls, install_cmd, binary_name, target_binary_name=None):
+		"""Get the binary path from the installation command.
+		Outputs a warning if the binary is not in PATH. If not found, returns the default binary path.
 
 		Args:
 			install_cmd (str): The installation command being executed.
+			binary_name (str): The name of the binary to search for.
+			target_binary_name (str, optional): Custom binary name to use instead of repo name.
+
+		Returns:
+			str: The binary path. None if not found.
 		"""
 		path_var = os.environ.get('PATH', '')
 		path_entries = path_var.split(os.pathsep)
 		home = os.path.expanduser('~')
+		bin_path = CONFIG.dirs.bin / binary_name
 
 		# Check for go install (use word boundaries to avoid matching "cargo install")
 		if install_cmd.startswith('go install') or install_cmd.startswith('go get') or \
@@ -209,11 +224,13 @@ class SourceInstaller:
 				if gobin not in path_entries:
 					console.print(Warning(message=f'GOBIN directory {gobin} not found in PATH ! Go binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{gobin}" to add the binaries to your PATH'))
+				bin_path = os.path.join(gobin, binary_name)
 			else:
 				default_go_bin = os.path.join(home, 'go', 'bin')
 				if default_go_bin not in path_entries:
-					console.print(Warning(message=f'Go bin directory {default_go_bin} not found in PATH ! Go binaries will not work'))  # noqa: E501
+					console.print(Warning(message=f'GOBIN default directory {default_go_bin} not found in PATH ! Go binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{default_go_bin}" to add the binaries to your PATH'))
+				bin_path = os.path.join(default_go_bin, binary_name)
 
 		# Check for cargo install
 		elif 'cargo install' in install_cmd:
@@ -223,11 +240,13 @@ class SourceInstaller:
 				if cargo_bin not in path_entries:
 					console.print(Warning(message=f'CARGO_HOME/bin directory {cargo_bin} not found in PATH ! Cargo binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{cargo_bin}" to add the binaries to your PATH'))
+				bin_path = os.path.join(cargo_bin, binary_name)
 			else:
 				default_cargo_bin = os.path.join(home, '.cargo', 'bin')
 				if default_cargo_bin not in path_entries:
 					console.print(Warning(message=f'Cargo bin directory {default_cargo_bin} not found in PATH ! Cargo binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{default_cargo_bin}" to add the binaries to your PATH'))
+				bin_path = os.path.join(default_cargo_bin, binary_name)
 
 		# Check for pip/pipx install
 		elif 'pip install' in install_cmd or 'pipx install' in install_cmd:
@@ -236,14 +255,48 @@ class SourceInstaller:
 				if pipx_bin_dir not in path_entries:
 					console.print(Warning(message=f'PIPX_BIN_DIR directory {pipx_bin_dir} not found in PATH ! Python binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{pipx_bin_dir}" to add the binaries to your PATH'))
+				bin_path = os.path.join(pipx_bin_dir, binary_name)
 			else:
 				default_local_bin = os.path.join(home, '.local', 'bin')
 				if default_local_bin not in path_entries:
 					console.print(Warning(message=f'Python bin directory {default_local_bin} not found in PATH ! Python binaries will not work'))  # noqa: E501
 					console.print(Warning(message=f'Run "export PATH=$PATH:{default_local_bin}" to add the binaries to your PATH'))
+				bin_path = os.path.join(default_local_bin, binary_name)
+
+		# Check if binary exists
+		if not os.path.exists(bin_path):
+			which_cmd = f'which {binary_name}'
+			which_ret = Command.execute(which_cmd, quiet=True, print_errors=False)
+			if which_ret.return_code == 0:
+				bin_path = which_ret.output.strip()
+			else:
+				console.print(Warning(message=f'Binary not found at {bin_path} or in PATH !'))
+				return None
+
+		# Symlink binary if needed
+		console.print(Info(message=f'Binary found at {bin_path}'))
+		if target_binary_name:
+			target_bin_path = CONFIG.dirs.bin / target_binary_name
+			cls._symlink_binary(bin_path, target_bin_path)
+			return target_bin_path
+
+		return bin_path
 
 	@classmethod
-	def install(cls, config, version=None, install_prereqs=True, binary_name=None):
+	def _symlink_binary(cls, source_path, target_path):
+		"""Symlink the binary to the given directory."""
+		console.print(Info(message=f'Symlinking binary {source_path} to {target_path}'))
+		try:
+			os.symlink(source_path, target_path)
+		except OSError as e:
+			if e.errno == errno.EEXIST:
+				os.remove(target_path)
+				os.symlink(source_path, target_path)
+			else:
+				raise e
+
+	@classmethod
+	def install(cls, config, version=None, install_prereqs=True, binary_name=None, target_binary_name=None):
 		"""Install from source.
 
 		Args:
@@ -252,6 +305,7 @@ class SourceInstaller:
 			version (str, optional): Version to install.
 			install_prereqs (bool, optional): Install pre-requisites.
 			binary_name (str, optional): Custom binary name to use after installation.
+			target_binary_name (str, optional): Custom binary name to use instead of repo name.
 
 		Returns:
 			Status: install status.
@@ -311,13 +365,17 @@ class SourceInstaller:
 			version = version or 'latest'
 			install_cmd = install_cmd.replace('[install_version_strip]', version.lstrip('v'))
 
-		# Check PATH and warn if needed
-		cls._check_path_warning(install_cmd)
-
 		# Run command
 		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
 		if ret.return_code != 0:
 			return InstallerStatus.INSTALL_FAILED
+
+		# Get binary path
+		if binary_name:
+			binary_path = cls._get_bin_path(install_cmd, binary_name, target_binary_name)
+			if not binary_path:
+				return InstallerStatus.BINARY_NOT_FOUND
+
 		return InstallerStatus.SUCCESS
 
 
@@ -325,14 +383,14 @@ class GithubInstaller:
 	"""Install a tool from GitHub releases."""
 
 	@classmethod
-	def install(cls, github_handle, version='latest', version_prefix='', binary_name=None):
+	def install(cls, github_handle, version='latest', version_prefix='', target_binary_name=None):
 		"""Find and install a release from a GitHub handle {user}/{repo}.
 
 		Args:
 			github_handle (str): A GitHub handle {user}/{repo}
 			version (str): Version to install (default: 'latest')
 			version_prefix (str): Version prefix (default: '')
-			binary_name (str, optional): Custom binary name to use instead of repo name
+			target_binary_name (str, optional): Custom binary name to use instead of repo name
 
 		Returns:
 			InstallerStatus: status.
@@ -353,7 +411,7 @@ class GithubInstaller:
 		# Download and unpack asset
 		console.print(Info(message=f'Found release URL: {download_url}'))
 		# Use custom binary name if provided, otherwise use repo name
-		final_binary_name = binary_name or repo
+		final_binary_name = target_binary_name or repo
 		return cls._download_and_unpack(download_url, CONFIG.dirs.bin, repo, final_binary_name)
 
 	@classmethod
