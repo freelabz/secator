@@ -21,6 +21,7 @@ class dnsx(ReconDns):
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
+	input_chunk_size = -1
 	opt_key_map = {
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retry',

@@ -178,7 +178,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	if full_scan:
 		del untagged_query['_tagged']
 	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)), exclude_types)
-	untagged_query_cursor = db.findings.find(untagged_query).sort('_timestamp', 1)
+	untagged_query_cursor = db.findings.find(untagged_query).sort('_timestamp', -1)
 	if max_items is not None:
 		untagged_query_cursor = untagged_query_cursor.limit(max_items)
 	untagged_findings = load_findings(list(untagged_query_cursor), exclude_types)
