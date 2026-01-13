@@ -41,7 +41,8 @@ RUN apk add --no-cache \
 RUN adduser -D secator
 
 # Allow runing 'nmap' with sudo; for priviledged scans
-RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers
+RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/sbin/arp *" >> /etc/sudoers
 
 # Allow user to install commands
 RUN echo "secator ALL=(ALL) NOPASSWD: /sbin/apk add *" >> /etc/sudoers && \

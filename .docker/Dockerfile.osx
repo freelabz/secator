@@ -52,7 +52,8 @@ WORKDIR /code
 RUN sudo useradd -m -s /bin/bash secator
 
 # Allow running 'nmap' with sudo; for privileged scans
-RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" | sudo tee -a /etc/sudoers
+RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" | sudo tee -a /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/sbin/arp *" | sudo tee -a /etc/sudoers
 
 # Allow user to install commands
 RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/pacman -S *" | sudo tee -a /etc/sudoers && \
