@@ -136,7 +136,7 @@ class nmap(ReconPort):
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = False
 	proxy_http = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_cmd(self):

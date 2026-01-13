@@ -34,6 +34,10 @@ STATE_COLORS = {
 	'REVOKED': 'bold magenta'
 }
 
+# Available drivers and exporters
+AVAILABLE_DRIVERS = ['mongodb', 'gcs']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
+
 # Vocab
 ALIVE = 'alive'
 AUTO_CALIBRATION = 'auto_calibration'
@@ -92,6 +96,8 @@ RATE_LIMIT = 'rate_limit'
 RAW = 'raw'
 REFERENCE = 'reference'
 REFERENCES = 'references'
+REQUEST = 'request'
+REPLAY_PROXY = 'replay_proxy'
 RETRIES = 'retries'
 SCRIPT = 'script'
 SERVICE_NAME = 'service_name'

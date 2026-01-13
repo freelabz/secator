@@ -16,6 +16,7 @@ class xurlfind3r(HttpCrawler):
 	"""Discover URLs for a given domain in a simple, passive and efficient way"""
 	cmd = 'xurlfind3r'
 	tags = ['url', 'crawl', 'passive']
+	opt_prefix = '--'
 	input_types = [HOST, URL]
 	output_types = [Url]
 	item_loaders = [JSONSerializer()]
@@ -55,7 +56,7 @@ class xurlfind3r(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def before_init(self):

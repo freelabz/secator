@@ -121,7 +121,7 @@ class cariddi(HttpCrawler):
 			opt_aliases=opts.get('aliases', [])
 		)
 		hunt = juicy_endpoints or (juicy_extensions is not None) or info or secrets or errors
-		return 'cpu' if hunt is True else 'io'
+		return 'medium' if hunt is True else 'small'
 
 	@staticmethod
 	def on_json_loaded(self, item):

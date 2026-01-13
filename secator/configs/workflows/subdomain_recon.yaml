@@ -73,9 +73,22 @@ tasks:
       wordlist: combined_subdomains
       if: opts.brute_dns and not opts.passive
 
-    ffuf:
+    ffuf/url:
+      description: Bruteforce subdomains (URL)
+      subs: True
+      follow_redirect: True
+      auto_calibration: True
+      wordlist: combined_subdomains
+      stop_on_error: True
+      targets_:
+      - type: url
+        field: '{protocol}://FUZZ.{host}'
+      if: opts.brute_http and not opts.passive
+
+    ffuf/host:
       description: Bruteforce subdomains (Host header)
-      fuzz_host_header: True
+      subs: True
+      follow_redirect: True
       auto_calibration: True
       wordlist: combined_subdomains
       stop_on_error: True
@@ -96,6 +109,7 @@ tasks:
 
     httpx/probe:
       description: Run HTTP probes on subdomains
+      follow_redirect: True
       tech_detect: True
       targets_:
       - type: subdomain

@@ -183,6 +183,14 @@ class MongodbAddon(StrictModel):
 	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
+	max_items: int | None = None
+	duplicate_main_copy_fields: List[str] = [
+		'screenshot_path',
+		'stored_response_path',
+		'is_false_positive',
+		'is_acknowledged',
+		'verified',
+	]
 
 
 class VulnersAddon(StrictModel):
