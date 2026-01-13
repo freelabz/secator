@@ -69,10 +69,10 @@ jobs:
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
 
     - name: Build Docker image (full)
-      run: docker build -t freelabz/secator:${VERSION} .
+      run: DOCKER_BUILDKIT=1 docker build -t freelabz/secator:${VERSION} .
 
     - name: Build Docker image (lite)
-      run: docker build -t freelabz/secator:${VERSION}-lite --build-arg flavor=lite .
+      run: DOCKER_BUILDKIT=1 docker build -t freelabz/secator:${VERSION}-lite --build-arg flavor=lite .
 
     - name: Tag image with 'latest'
       run: docker tag freelabz/secator:${VERSION} freelabz/secator:latest

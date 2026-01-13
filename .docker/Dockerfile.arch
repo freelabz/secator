@@ -26,7 +26,10 @@ RUN pacman -Syu --noconfirm && \
     wget
 COPY . /code
 WORKDIR /code
-RUN pipx install . && \
+# Use cache mounts for pip and pipx to speed up dependency installation
+RUN --mount=type=cache,target=/root/.cache/pip \
+	--mount=type=cache,target=/root/.cache/pipx \
+	pipx install . && \
 	secator install addons worker && \
 	secator install addons gdrive && \
 	secator install addons gcs && \
@@ -34,5 +37,11 @@ RUN pipx install . && \
 	secator install addons redis && \
 	secator install addons dev
 RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi
-RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
+# Use cache mounts for tool installation directories to speed up builds
+RUN --mount=type=cache,target=/root/.cache/pip \
+	--mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/root/go/pkg/mod \
+	--mount=type=cache,target=/root/.cargo/registry \
+	--mount=type=cache,target=/root/.cargo/git \
+	if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
 ENTRYPOINT ["secator"]
