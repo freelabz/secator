@@ -56,16 +56,18 @@ class sshaudit(Command):
 		banner = item.get('banner', {})
 		software = banner.get('software', 'unknown')
 
-		yield Tag(
-			category='info',
-			name='ssh_banner',
-			value=banner.get('raw', ''),
-			match=target,
-			extra_data={
-				'software': software,
-				'protocol': banner.get('protocol', ''),
-			}
-		)
+		raw_banner = banner.get('raw', '')
+		if raw_banner:
+			yield Tag(
+				category='info',
+				name='ssh_banner',
+				value=banner.get('raw', ''),
+				match=target,
+				extra_data={
+					'software': software,
+					'protocol': banner.get('protocol', ''),
+				}
+			)
 
 		# Process CVEs
 		cves = item.get('cves', [])
@@ -84,7 +86,7 @@ class sshaudit(Command):
 			)
 
 		# Process encryption algorithms
-		enc_list = item.get('enc', [])
+		enc_list = item.get('enc') or []
 		for enc in enc_list:
 			algorithm = enc.get('algorithm', '')
 			notes = enc.get('notes', {})
@@ -138,7 +140,7 @@ class sshaudit(Command):
 				)
 
 		# Process MAC algorithms
-		mac_list = item.get('mac', [])
+		mac_list = item.get('mac') or []
 		for mac in mac_list:
 			algorithm = mac.get('algorithm', '')
 			notes = mac.get('notes', {})
@@ -192,7 +194,7 @@ class sshaudit(Command):
 				)
 
 		# Process key exchange algorithms
-		kex_list = item.get('kex', [])
+		kex_list = item.get('kex') or []
 		for kex in kex_list:
 			algorithm = kex.get('algorithm', '')
 			notes = kex.get('notes', {})
@@ -246,7 +248,7 @@ class sshaudit(Command):
 				)
 
 		# Process host key algorithms
-		key_list = item.get('key', [])
+		key_list = item.get('key') or []
 		for key in key_list:
 			algorithm = key.get('algorithm', '')
 			notes = key.get('notes', {})
