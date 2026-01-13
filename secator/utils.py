@@ -371,7 +371,7 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 	if log_hook:
 		formatted_msg = ''
 		if msg:
-			formatted_msg += msg
+			formatted_msg += str(msg)
 		if obj:
 			formatted_msg += f'\n{json.dumps(obj, indent=4, default=str)}'
 		log_hook(formatted_msg)
