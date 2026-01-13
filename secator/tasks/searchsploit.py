@@ -49,7 +49,7 @@ class searchsploit(Command):
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def tags_extractor(item):

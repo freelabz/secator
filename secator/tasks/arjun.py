@@ -6,15 +6,14 @@ from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
-								 HEADER, URL, FOLLOW_REDIRECT)
+								 HEADER, URL, FOLLOW_REDIRECT, OPT_NOT_SUPPORTED, DATA, USER_AGENT)
 from secator.output_types import Info, Url, Warning, Tag
-from secator.runners import Command
-from secator.tasks._categories import OPTS
+from secator.tasks._categories import HttpBase
 from secator.utils import process_wordlist
 
 
 @task()
-class arjun(Command):
+class arjun(HttpBase):
 	"""HTTP Parameter Discovery Suite."""
 	cmd = 'arjun'
 	input_types = [URL]
@@ -31,16 +30,9 @@ class arjun(Command):
 		'casing': {'type': str, 'help': 'Casing style for params e.g. like_this, likeThis, LIKE_THIS, like_this'},  # noqa: E501
 		WORDLIST: {'type': str, 'short': 'w', 'default': 'burp-parameter-names', 'process': process_wordlist, 'help': 'Wordlist to use (default: arjun wordlist)'},  # noqa: E501
 	}
-	meta_opts = {
-		THREADS: OPTS[THREADS],
-		DELAY: OPTS[DELAY],
-		TIMEOUT: OPTS[TIMEOUT],
-		RATE_LIMIT: OPTS[RATE_LIMIT],
-		METHOD: OPTS[METHOD],
-		HEADER: OPTS[HEADER],
-		FOLLOW_REDIRECT: OPTS[FOLLOW_REDIRECT],
-	}
 	opt_key_map = {
+		DATA: OPT_NOT_SUPPORTED,
+		USER_AGENT: OPT_NOT_SUPPORTED,
 		THREADS: 't',
 		DELAY: 'd',
 		TIMEOUT: 'T',
@@ -48,11 +40,11 @@ class arjun(Command):
 		METHOD: 'm',
 		WORDLIST: 'w',
 		HEADER: '--headers',
+		FOLLOW_REDIRECT: '--follow-redirect',
 		'chunk_size': 'c',
 		'stable': '--stable',
 		'passive': '--passive',
 		'casing': '--casing',
-		'follow_redirect': '--follow-redirect',
 	}
 	opt_value_map = {
 		HEADER: lambda headers: "\\n".join(c.strip() for c in headers.split(";;"))

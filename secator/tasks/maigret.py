@@ -50,7 +50,7 @@ class maigret(ReconUser):
 	# }
 	install_cmd = 'pipx install maigret==[install_version] --force'
 	socks5_proxy = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):

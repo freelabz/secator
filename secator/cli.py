@@ -30,7 +30,8 @@ from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
 	debug, detect_host, flatten, print_version, get_file_date,
-	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
+	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
+	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
 )
 from contextlib import nullcontext
 
@@ -167,7 +168,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		return
 
 	if not queue:
-		queue = 'io,cpu,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
+		queue = 'small,medium,large,extra_large,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
 
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'
@@ -178,10 +179,10 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		subcmd = 'stop' if stop else 'show' if show else 'start'
 		logfile = '%n.log'
 		pidfile = '%n.pid'
-		queues = '-Q:1 celery -Q:2 io -Q:3 cpu'
-		concur = '-c:1 10 -c:2 100 -c:3 4'
+		queues = '-Q:1 celery -Q:2 small -Q:3 medium -Q:4 large -Q:5 extra_large'
+		concur = '-c:1 10 -c:2 100 -c:3 50 -c:4 20 -c:5 4'
 		pool = 'eventlet'
-		cmd = f'{celery} -A {app_str} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
+		cmd = f'{celery} -A {app_str} multi {subcmd} 5 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
 		cmd = f'{celery} -A {app_str} worker -n {hostname} -Q {queue}'
 
@@ -217,17 +218,35 @@ def util():
 
 
 @util.command()
-@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
+@click.option('--timeout', type=float, default=3, help='Proxy timeout (in seconds)')
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
+	import requests
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
+	proxy_str = 'proxy' if number == 1 else 'proxies'
+	console.print(f"Searching for {number} {proxy_str} ...")
 	for _ in range(number):
-		url = proxy.get()
-		console.print(url)
+		proxy_ok = False
+		attempts = 0
+		while not proxy_ok and attempts < 5:
+			attempts += 1
+			url = proxy.get()
+			console.print(f"Testing proxy {url} ...")
+			try:
+				req = requests.get('https://httpbin.org/ip', proxies={'http': url, 'https': url}, timeout=5)
+				if not req.ok:
+					continue
+			except requests.exceptions.ProxyError:
+				continue
+			except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
+				continue
+			proxy_ok = True
+			console.print(f'Proxy {url} tested successfully !')
+			console.print(url)
 
 
 @util.command()
@@ -410,89 +429,164 @@ def completion(shell, install):
 
 
 @util.command()
-@click.argument('record_name', type=str, default=None)
-@click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')
-@click.option('--interactive', '-i', is_flag=True, default=False, help='Interactive record.')
-@click.option('--width', '-w', type=int, default=None, help='Recording width')
-@click.option('--height', '-h', type=int, default=None, help='Recording height')
+@click.argument('file', type=str, required=False)
+@click.option('--name', '-n', type=str, default=None, help='Name for the output tape file (when recording interactively)')  # noqa: E501
+@click.option('--width', '-w', type=int, default=1920, help='Terminal width (for .tap conversion)')
+@click.option('--height', '-h', type=int, default=1080, help='Terminal height (for .tap conversion)')
+@click.option('--font-size', '-fs', type=int, default=18, help='Font size (for .tap conversion)')
+@click.option('--line-height', '-lh', type=float, default=1.4, help='Line height (for .tap conversion)')
 @click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
-def record(record_name, script, interactive, width, height, output_dir):
-	"""Record secator session using asciinema."""
-	# 120 x 30 is a good ratio for GitHub
-	width = width or console.size.width
-	height = height or console.size.height
-	attrs = {
-		'shell': False,
-		'env': {
-			'RECORD': '1',
-			'LINES': str(height),
-			'PS1': '$ ',
-			'COLUMNS': str(width),
-			'TERM': 'xterm-256color'
-		}
-	}
-	output_cast_path = f'{output_dir}/{record_name}.cast'
-	output_gif_path = f'{output_dir}/{record_name}.gif'
+def record(file, name, width, height, font_size, line_height, output_dir):
+	"""Record secator session using VHS.
 
-	# Run automated 'story' script with asciinema-automation
-	if script:
-		# If existing cast file, remove it
-		if os.path.exists(output_cast_path):
-			os.unlink(output_cast_path)
-			console.print(Info(message=f'Removed existing {output_cast_path}'))
+	If a .tap file is provided, it will be converted to .tape and then run with VHS.
+	If a .tape file is provided, it will be run directly with VHS.
+	If no file is provided, VHS will start an interactive recording session.
+	"""
+	output_dir = Path(output_dir)
+	output_dir.mkdir(parents=True, exist_ok=True)
 
-		with console.status(Info(message='Recording with asciinema ...')):
-			Command.execute(
-				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
-				cls_attributes=attrs,
-				raw=True,
-			)
-			console.print(f'Generated {output_cast_path}', style='bold green')
-	elif interactive:
-		os.environ.update(attrs['env'])
-		Command.execute(f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}')
+	if file:
+		file_path = Path(file)
+		if not file_path.exists():
+			console.print(Error(message=f'File not found: {file}'))
+			sys.exit(1)
 
-	# Resize cast file
-	if os.path.exists(output_cast_path):
-		with console.status('[bold gold3]Cleaning up .cast and set custom settings ...'):
-			with open(output_cast_path, 'r') as f:
-				lines = f.readlines()
-			updated_lines = []
-			for ix, line in enumerate(lines):
-				tmp_line = json.loads(line)
-				if ix == 0:
-					tmp_line['width'] = width
-					tmp_line['height'] = height
-					tmp_line['env']['SHELL'] = '/bin/sh'
-					lines[0] = json.dumps(tmp_line) + '\n'
-					updated_lines.append(json.dumps(tmp_line) + '\n')
-				elif tmp_line[2].endswith(' \r'):
-					tmp_line[2] = tmp_line[2].replace(' \r', '')
-					updated_lines.append(json.dumps(tmp_line) + '\n')
-				else:
-					updated_lines.append(line)
-			with open(output_cast_path, 'w') as f:
-				f.writelines(updated_lines)
-			console.print('')
+		# Use the input file's directory for output
+		input_dir = file_path.parent
+		# Output GIF will be in the same directory with the same base name
+		output_gif = input_dir / f'{file_path.stem}.gif'
 
-		# Edit cast file to reduce long timeouts
-		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
-			Command.execute(
-				f'asciinema-edit quantize --range 1 {output_cast_path} --out {output_cast_path}.tmp',
-				cls_attributes=attrs,
-				raw=True,
-			)
-			if os.path.exists(f'{output_cast_path}.tmp'):
-				os.replace(f'{output_cast_path}.tmp', output_cast_path)
-			console.print(f'Edited {output_cast_path}', style='bold green')
+		# Check if it's a .tap file
+		if file_path.suffix == '.tap':
+			# Convert .tap to .tape in the same directory as the tap file
+			tape_file = input_dir / file_path.with_suffix('.tape').name
+			vhs_tap_to_tape(file_path, tape_file, width, height, font_size, line_height)
+			# Run VHS with the converted tape file and specify output location
+			with console.status(f'Running VHS with {tape_file}...'):
+				Command.execute(f'vhs {tape_file} -o {output_gif}')
+			console.print(Info(message=f'Generated GIF: {output_gif}'))
+			# Optimize the GIF by trimming long pauses
+			with console.status('Optimizing GIF...'):
+				if trim_gif(output_gif, output_gif):
+					console.print(Info(message=f'Optimized GIF: {output_gif}'))
 
-	# Convert to GIF
-	with console.status(f'[bold gold3]Converting to {output_gif_path} ...[/]'):
-		Command.execute(
-			f'agg {output_cast_path} {output_gif_path}',
-			cls_attributes=attrs,
-		)
-		console.print(Info(message=f'Generated {output_gif_path}'))
+		# Check if it's a .tape file
+		elif file_path.suffix == '.tape':
+			# Run VHS directly with the tape file and specify output location
+			with console.status(f'Running VHS with {file_path}...'):
+				Command.execute(f'vhs {file_path} -o {output_gif}')
+			console.print(Info(message=f'Generated GIF: {output_gif}'))
+			# Optimize the GIF by trimming long pauses
+			with console.status('Optimizing GIF...'):
+				if trim_gif(output_gif, output_gif):
+					console.print(Info(message=f'Optimized GIF: {output_gif}'))
+
+		else:
+			console.print(Error(message=f'File must be a .tap or .tape file, got: {file_path.suffix}'))
+			sys.exit(1)
+
+	else:
+		# No file provided - create a template tape file
+		if not name:
+			console.print(Error(message='--name option is required when creating a new tape file'))
+			sys.exit(1)
+
+		tape_file = output_dir / f'{name}.tape'
+		# Create a template tape file
+		template_lines = [
+			f'Output {name}.gif',
+			'Set Shell fish',
+		]
+		if width is not None:
+			template_lines.append(f'Set Width {width}')
+		if height is not None:
+			template_lines.append(f'Set Height {height}')
+		if font_size is not None:
+			template_lines.append(f'Set FontSize {font_size}')
+		template_lines.append(f'Set LineHeight {line_height}')
+		template_lines.append('')
+		template_lines.append('# Add your commands here')
+		template_lines.append('')
+
+		try:
+			with open(tape_file, 'w') as f:
+				f.write('\n'.join(template_lines) + '\n')
+			console.print(Info(message=f'Created template tape file: {tape_file}'))
+			console.print(Info(message='Edit the file and then run: vhs ' + str(tape_file)))
+		except Exception as e:
+			console.print(Error(message=f'Failed to create template file: {str(e)}'))
+			sys.exit(1)
+
+
+@util.group()
+def gif():
+	"""GIF manipulation commands."""
+	if not ADDONS_ENABLED['dev']:
+		console.print(Error(message='Missing dev addon: please run "secator install addons dev"'))
+		sys.exit(1)
+	pass
+
+
+@gif.command()
+@click.argument('input_gif', type=str)
+@click.option('--output', '-o', type=str, default=None, help='Output GIF file path (default: input file with _reduced suffix)')  # noqa: E501
+@click.option('--max-frames', '-f', type=int, default=500, help='Maximum number of frames to keep (default: 500)')
+def reduce(input_gif, output, max_frames):
+	"""Reduce the number of frames in a GIF by accelerating it.
+
+	This command samples frames evenly and reduces their durations to accelerate the GIF,
+	making it faster while reducing the file size.
+	"""
+	input_path = Path(input_gif)
+	if not input_path.exists():
+		console.print(Error(message=f'File not found: {input_gif}'))
+		sys.exit(1)
+
+	if not input_path.suffix.lower() == '.gif':
+		console.print(Error(message=f'Input file must be a GIF file, got: {input_path.suffix}'))
+		sys.exit(1)
+
+	# Determine output path
+	if output:
+		output_path = Path(output)
+	else:
+		output_path = input_path.parent / f'{input_path.stem}_reduced{input_path.suffix}'
+
+	with console.status(f'Reducing GIF frames to {max_frames}...'):
+		if reduce_gif_frames(input_path, output_path, max_frames):
+			console.print(Info(message=f'Reduced GIF saved to: {output_path}'))
+		else:
+			console.print(Warning(message='GIF frame reduction failed or was not needed.'))
+
+
+@gif.command()
+@click.argument('input_gif', type=str)
+def info(input_gif):
+	"""View information about a GIF file (dimensions, frames, total pixels).
+
+	Displays the width, height, frame count, and total pixels (width × height × frames)
+	for the specified GIF file.
+	"""
+	input_path = Path(input_gif)
+	if not input_path.exists():
+		console.print(Error(message=f'File not found: {input_gif}'))
+		sys.exit(1)
+
+	if not input_path.suffix.lower() == '.gif':
+		console.print(Error(message=f'Input file must be a GIF file, got: {input_path.suffix}'))
+		sys.exit(1)
+
+	info = get_gif_info(input_path)
+	if info:
+		console.print('[bold gold3]GIF Information:[/]')
+		console.print(f'  [bold blue]Width:[/] {info["width"]} pixels')
+		console.print(f'  [bold blue]Height:[/] {info["height"]} pixels')
+		console.print(f'  [bold blue]Frames:[/] {info["frame_count"]}')
+		console.print(f'  [bold blue]Total pixels:[/] {info["total_pixels"]:,}')
+	else:
+		console.print(Error(message='Failed to read GIF information.'))
+		sys.exit(1)
 
 
 @util.command('build')

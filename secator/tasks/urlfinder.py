@@ -74,10 +74,13 @@ class urlfinder(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def before_init(self):
+		# Call parent's before_init to process raw HTTP request
+		HttpCrawler.before_init(self)
+
 		for idx, input in enumerate(self.inputs):
 			if validators.url(input):
 				self.inputs[idx] = urlparse(input).netloc

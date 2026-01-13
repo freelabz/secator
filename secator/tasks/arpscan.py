@@ -31,7 +31,7 @@ class arpscan(Command):
 		'*': ['arp-scan'],
 	}
 	install_post = {
-		'*': 'sudo ln -s /usr/sbin/arp-scan /usr/local/bin/arp-scan'
+		'*': 'sudo ln -s /usr/sbin/arp-scan /usr/local/bin/arp-scan || true'
 	}
 
 	@staticmethod

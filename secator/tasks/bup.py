@@ -6,15 +6,14 @@ from secator.decorators import task
 from secator.output_types import Url, Progress
 from secator.definitions import (
 	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT,
-	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS,
-	MATCH_CODES, OPT_NOT_SUPPORTED, URL
+	OPT_NOT_SUPPORTED, URL, DATA
 )
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import Http
+from secator.tasks._categories import HttpBase
 
 
 @task()
-class bup(Http):
+class bup(HttpBase):
 	"""40X bypasser."""
 	cmd = 'bup -d'
 	input_types = [URL]
@@ -30,6 +29,7 @@ class bup(Http):
 		'mode': {'type': str, 'help': 'Bypass modes (comma-delimited) amongst: all, mid_paths, end_paths, case_substitution, char_encode, http_methods, http_versions, http_headers_method, http_headers_scheme, http_headers_ip, http_headers_port, http_headers_url, user_agent'},  # noqa: E501
 	}
 	opt_key_map = {
+		DATA: OPT_NOT_SUPPORTED,
 		HEADER: 'header',
 		DELAY: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
@@ -39,15 +39,6 @@ class bup(Http):
 		THREADS: 'threads',
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
-		DEPTH: OPT_NOT_SUPPORTED,
-		MATCH_REGEX: OPT_NOT_SUPPORTED,
-		MATCH_SIZE: OPT_NOT_SUPPORTED,
-		MATCH_WORDS: OPT_NOT_SUPPORTED,
-		FILTER_REGEX: OPT_NOT_SUPPORTED,
-		FILTER_CODES: OPT_NOT_SUPPORTED,
-		FILTER_SIZE: OPT_NOT_SUPPORTED,
-		FILTER_WORDS: OPT_NOT_SUPPORTED,
-		MATCH_CODES: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 	}
 	item_loaders = [JSONSerializer()]
@@ -61,7 +52,7 @@ class bup(Http):
 			'content_type': 'response_content_type',
 			'content_length': 'response_content_length',
 			'title': 'response_title',
-			'server': 'response_server_type',
+			'server': lambda x: x['response_server_type'].strip(),
 			'lines': 'response_lines_count',
 			'words': 'response_words_count',
 			'stored_response_path': 'response_html_filename',

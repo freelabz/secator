@@ -1,13 +1,13 @@
 from urllib.parse import urlparse, urlunparse
 
-from secator.decorators import task
-from secator.definitions import (URL, WORDLIST, RETRIES, OPT_NOT_SUPPORTED, USER_AGENT, THREADS, DELAY, TIMEOUT, RATE_LIMIT, METHOD, HEADER, FOLLOW_REDIRECT, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, DEPTH)  # noqa: E501
+# from secator.decorators import task
+from secator.definitions import (URL, PROXY, DATA, WORDLIST, RETRIES, OPT_NOT_SUPPORTED, USER_AGENT, THREADS, DELAY, TIMEOUT, RATE_LIMIT, METHOD, HEADER, FOLLOW_REDIRECT, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, DEPTH)  # noqa: E501
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpParamsFuzzer
 
 
-@task()
+# @task()
 class x8(HttpParamsFuzzer):
 	"""Hidden parameters discovery suite written in Rust."""
 	cmd = 'x8'
@@ -20,11 +20,13 @@ class x8(HttpParamsFuzzer):
 	opt_prefix = '-'
 	version_flag = '-V'
 	opt_key_map = {
+		DATA: '--body',
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		THREADS: 'c',
 		DEPTH: OPT_NOT_SUPPORTED,
 		DELAY: '--delay',
 		TIMEOUT: '--timeout',
+		PROXY: 'x',
 		METHOD: '--method',
 		WORDLIST: 'w',
 		FILTER_CODES: OPT_NOT_SUPPORTED,
@@ -60,8 +62,8 @@ class x8(HttpParamsFuzzer):
 	github_handle = 'Sh1Yo/x8'
 	proxychains = False
 	proxy_socks5 = False
-	proxy_http = False
-	profile = 'io'
+	proxy_http = True
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):

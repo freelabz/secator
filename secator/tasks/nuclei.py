@@ -112,7 +112,7 @@ class nuclei(VulnMulti):
 	proxychains = False
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
-	profile = 'cpu'
+	profile = 'extra_large'
 
 	@staticmethod
 	def id_extractor(item):
@@ -126,8 +126,13 @@ class nuclei(VulnMulti):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
 		data['type'] = item.get('type', '')
+		data['matcher_name'] = item.get('matcher-name', '')
 		data['template_id'] = item['template-id']
-		data['template_url'] = item.get('template-url', '')
+		template = item.get('template')
+		template_url = item.get('template-url', '')
+		if template_url.startswith('https://cloud.projectdiscovery.io') and template:
+			template_url = 'https://github.com/projectdiscovery/nuclei-templates/blob/main/' + template
+		data['template_url'] = template_url
 		for k, v in item.get('meta', {}).items():
 			data['data'].append(f'{k}: {v}')
 		data['metadata'] = item.get('metadata', {})
@@ -138,14 +143,14 @@ class nuclei(VulnMulti):
 	@staticmethod
 	def value_extractor(item):
 		values = item.get('extracted-results', '')
-		if isinstance(values, list):
+		if isinstance(values, list) and values:
 			return '\n'.join(values)
-		return values
+		matcher_name = item.get('matcher-name', '')
+		if matcher_name:
+			return matcher_name
+		return ''
 
 	@staticmethod
 	def name_extractor(item):
 		name = item['template-id']
-		matcher_name = item.get('matcher-name', '')
-		if matcher_name:
-			name += f':{matcher_name}'
 		return name

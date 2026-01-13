@@ -366,8 +366,16 @@ def format_debug_object(obj, obj_breaklines=False):
 	return ''
 
 
-def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
+def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False, log_hook=None):
 	"""Print debug log if DEBUG >= level."""
+	if log_hook:
+		formatted_msg = ''
+		if msg:
+			formatted_msg += msg
+		if obj:
+			formatted_msg += f'\n{json.dumps(obj, indent=4, default=str)}'
+		log_hook(formatted_msg)
+
 	if not DEBUG == ['all'] and not DEBUG == ['1']:
 		if not DEBUG or DEBUG == [""]:
 			return
@@ -443,6 +451,18 @@ def caml_to_snake(name):
 		return ""
 	name = CAMEL_TO_SNAKE_REGEX.sub(r'_', name)
 	return name.lower().replace('__', '_')
+
+
+def to_title_case_hyphenated(name):
+	"""Convert a string to title case with hyphens.
+
+	Args:
+		name (str): String to convert.
+
+	Returns:
+		str: Title case string with hyphens.
+	"""
+	return '-'.join(word.capitalize() for word in name.split('-'))
 
 
 def print_version():
@@ -790,6 +810,9 @@ def convert_functions_to_strings(data):
 
 
 def headers_to_dict(header_opt):
+	# If already a dict, return as-is
+	if isinstance(header_opt, dict):
+		return header_opt
 	headers = {}
 	for header in header_opt.split(';;'):
 		split = header.strip().split(':')
@@ -797,6 +820,74 @@ def headers_to_dict(header_opt):
 		val = ':'.join(split[1:]).strip()
 		headers[key] = val
 	return headers
+
+
+def parse_raw_http_request(raw_request):
+	"""Parse a raw HTTP request (Burp-style format) and extract method, URL, headers, and body.
+
+	Args:
+		raw_request (str): Raw HTTP request string.
+
+	Returns:
+		dict: Dictionary containing 'method', 'url', 'headers', and 'data'.
+	"""
+	lines = raw_request.strip().split('\n')
+	if not lines or not lines[0]:
+		return {}
+
+	# Parse request line (e.g., "POST /test HTTP/1.1")
+	request_line = lines[0].strip()
+	parts = request_line.split(' ')
+	if len(parts) < 3:
+		return {}
+
+	method = parts[0]
+	path = parts[1]
+
+	# Parse headers
+	headers = {}
+	body_start = len(lines)  # Default to end of lines (no body)
+	found_empty_line = False
+	for i, line in enumerate(lines[1:], start=1):
+		line_stripped = line.strip()
+		if not line_stripped:
+			# Empty line indicates end of headers
+			body_start = i + 1
+			found_empty_line = True
+			break
+		if ':' in line_stripped:
+			key, value = line_stripped.split(':', 1)
+			headers[key.strip()] = value.strip()
+		else:
+			# If we encounter a line without a colon and no empty line yet, it's not a valid header format
+			# This shouldn't happen in properly formatted requests, but we'll handle it gracefully
+			break
+
+	# Extract host from headers to construct full URL
+	host = headers.get('Host', '')
+	if not host:
+		return {}
+
+	# Determine scheme (default to https if not specified)
+	scheme = 'https'
+	# If port 80 is explicitly in host, use http
+	if ':80' in host and not host.startswith('['):
+		scheme = 'http'
+
+	# Construct full URL
+	url = f"{scheme}://{host}{path}"
+
+	# Parse body (everything after the empty line)
+	body = ''
+	if found_empty_line and body_start < len(lines):
+		body = '\n'.join(lines[body_start:]).strip()
+
+	return {
+		'method': method,
+		'url': url,
+		'headers': headers,
+		'data': body
+	}
 
 
 def format_object(obj, color='magenta', skip_keys=[]):
@@ -915,3 +1006,319 @@ def is_valid_path(path):
 		return True
 	except (TypeError, ValueError):
 		return False
+
+
+def trim_gif(input_path, output_path, max_pause_ms=3000):
+	"""Cap long pauses in a GIF where the terminal output is static.
+
+	Args:
+		input_path (Path): Path to input GIF file.
+		output_path (Path): Path to output GIF file.
+		max_pause_ms (int): Maximum pause duration in milliseconds (default: 3000).
+
+	Returns:
+		bool: True if successful, False otherwise.
+	"""
+	try:
+		from PIL import Image, ImageChops
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF optimization is disabled. Install with: pip install Pillow')
+		return False
+
+	try:
+		with Image.open(input_path) as im:
+			frames = []
+			durations = []
+
+			# Load the first frame
+			im.seek(0)
+			prev_frame = im.convert('RGB')
+
+			current_static_duration = 0
+
+			for i in range(im.n_frames):
+				im.seek(i)
+				duration = im.info.get('duration', 100)
+				curr_frame = im.convert('RGB')
+
+				# Check if visual content has changed
+				is_static = ImageChops.difference(prev_frame, curr_frame).getbbox() is None
+
+				if is_static and i > 0:
+					if current_static_duration + duration > max_pause_ms:
+						remaining_allowed = max_pause_ms - current_static_duration
+						if remaining_allowed > 0:
+							durations.append(remaining_allowed)
+							frames.append(im.copy())
+							current_static_duration = max_pause_ms
+					else:
+						current_static_duration += duration
+						durations.append(duration)
+						frames.append(im.copy())
+				else:
+					current_static_duration = 0
+					durations.append(duration)
+					frames.append(im.copy())
+					prev_frame = curr_frame
+
+			if frames:
+				frames[0].save(
+					output_path,
+					save_all=True,
+					append_images=frames[1:],
+					duration=durations,
+					loop=im.info.get('loop', 0),
+					optimize=True
+				)
+				return True
+		return False
+	except Exception as e:
+		logger.warning(f'Failed to optimize GIF: {str(e)}')
+		return False
+
+
+def get_gif_info(input_path):
+	"""Get information about a GIF file (dimensions, frames, total pixels).
+
+	Args:
+		input_path (Path): Path to input GIF file.
+
+	Returns:
+		dict: Dictionary with 'width', 'height', 'frame_count', and 'total_pixels', or None on error.
+	"""
+	try:
+		from PIL import Image
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF info is disabled. Install with: pip install Pillow')
+		return None
+
+	try:
+		with Image.open(input_path) as im:
+			width, height = im.size
+			frame_count = im.n_frames
+			total_pixels = width * height * frame_count
+			return {
+				'width': width,
+				'height': height,
+				'frame_count': frame_count,
+				'total_pixels': total_pixels
+			}
+	except Exception as e:
+		logger.warning(f'Failed to get GIF info: {str(e)}')
+		return None
+
+
+def reduce_gif_frames(input_path, output_path, max_frames=500):
+	"""Reduce the number of frames in a GIF by accelerating it.
+
+	Args:
+		input_path (Path): Path to input GIF file.
+		output_path (Path): Path to output GIF file.
+		max_frames (int): Maximum number of frames to keep (default: 500).
+
+	Returns:
+		bool: True if successful, False otherwise.
+	"""
+	try:
+		from PIL import Image
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF frame reduction is disabled. Install with: pip install Pillow')
+		return False
+
+	try:
+		with Image.open(input_path) as im:
+			total_frames = im.n_frames
+
+			# If already at or below max_frames, no need to reduce
+			if total_frames <= max_frames:
+				logger.info(f'GIF already has {total_frames} frames (<= {max_frames}), no reduction needed')
+				return False
+
+			# Calculate frame sampling interval
+			# If we have 1000 frames and want 500, we take every 2nd frame (indices 0, 2, 4, ...)
+			step = total_frames / max_frames
+
+			frames = []
+			durations = []
+
+			# Collect all original durations first
+			original_durations = []
+			for i in range(total_frames):
+				im.seek(i)
+				duration = im.info.get('duration', 100)
+				original_durations.append(duration)
+
+			# Sample frames evenly
+			kept_indices = []
+			for i in range(max_frames):
+				idx = int(i * step)
+				if idx >= total_frames:
+					idx = total_frames - 1
+				kept_indices.append(idx)
+
+			# Remove duplicates while preserving order
+			seen = set()
+			kept_indices = [x for x in kept_indices if not (x in seen or seen.add(x))]
+
+			# Calculate acceleration factor
+			# Total duration of kept frames should be proportional to reduction
+			# If we keep 50% of frames, we can either:
+			# 1. Keep same total duration (sum durations of skipped frames)
+			# 2. Accelerate by reducing durations proportionally
+			# We'll do option 2 for acceleration
+			acceleration_factor = total_frames / len(kept_indices)
+
+			# Load kept frames and adjust durations
+			for idx in kept_indices:
+				im.seek(idx)
+				frames.append(im.copy())
+				# Accelerate by reducing duration proportionally
+				original_duration = original_durations[idx]
+				new_duration = int(original_duration / acceleration_factor)
+				# Ensure minimum duration of 10ms for GIF compatibility
+				durations.append(max(10, new_duration))
+
+			if frames:
+				frames[0].save(
+					output_path,
+					save_all=True,
+					append_images=frames[1:],
+					duration=durations,
+					loop=im.info.get('loop', 0),
+					optimize=True
+				)
+				logger.info(f'Reduced GIF from {total_frames} to {len(frames)} frames (accelerated by {acceleration_factor:.2f}x)')
+				return True
+		return False
+	except Exception as e:
+		logger.warning(f'Failed to reduce GIF frames: {str(e)}')
+		return False
+
+
+def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12, line_height=1.4, sleep_before=200, sleep_after=500, wait_line=120):  # noqa: E501
+	"""Convert .tap file to .tape file for VHS.
+
+	Args:
+		tap_file (Path): Path to input .tap file.
+		output_tape (Path): Path to output .tape file.
+		width (int, optional): Terminal width.
+		height (int, optional): Terminal height.
+		font_size (int): Font size (default: 12).
+		line_height (float): Line height (default: 1.4).
+		sleep_before (int): Sleep before command in milliseconds (default: 200).
+		sleep_after (int): Sleep after command in milliseconds (default: 2000).
+		wait_line (int): Wait line timeout in seconds (default: 30).
+	"""
+	from secator.output_types import Error, Info
+
+	VHS_KEYWORDS = {
+		'Output', 'Require', 'Set', 'Type', 'Left', 'Right', 'Up', 'Down',
+		'Backspace', 'Enter', 'Tab', 'Space', 'Ctrl', 'Sleep', 'Wait',
+		'Hide', 'Show', 'Screenshot', 'Copy', 'Paste', 'Source', 'Env'
+	}
+
+	# Read tap file
+	try:
+		with open(tap_file, 'r') as f:
+			lines = f.readlines()
+	except Exception as e:
+		console.print(Error(message=f'Failed to read {tap_file}: {str(e)}'))
+		sys.exit(1)
+
+	tape_lines = []
+
+	# Add header: Output and Set Shell
+	output_gif = output_tape.with_suffix('.gif').name
+	tape_lines.append(f'Output {output_gif}')
+	tape_lines.append('Set Shell fish')
+	tape_lines.append('Set CursorBlink false')
+
+	# Add terminal dimensions and font size if provided
+	if width is not None:
+		tape_lines.append(f'Set Width {width}')
+	if height is not None:
+		tape_lines.append(f'Set Height {height}')
+	if font_size is not None:
+		tape_lines.append(f'Set FontSize {font_size}')
+	tape_lines.append(f'Set LineHeight {line_height}')
+
+	tape_lines.append('')  # Empty line after header
+
+	for line in lines:
+		line = line.rstrip('\n\r')
+
+		# Skip empty lines
+		if not line.strip():
+			continue
+
+		# Check if line starts with a comment
+		if line.startswith('#'):
+			# Comment line: Type it, Enter, and add Wait
+			comment_text = line
+			tape_lines.append(f'Type "{comment_text}"')
+			tape_lines.append('Enter')
+			tape_lines.append(f'Wait+Line@{wait_line}s')
+			continue
+
+		# Check for inline comments and flags
+		has_noenter = '# noenter' in line
+		has_nowait = '# nowait' in line
+		has_hide = '# hide' in line
+
+		# Remove flags from the line
+		line_clean = line.replace('# noenter', '').replace('# nowait', '').replace('# hide', '')
+		line_stripped = line_clean
+		if has_noenter or has_nowait or has_hide:
+			line_stripped = line_stripped.rstrip()
+
+		# Check if this is a "clear" command
+		is_clear = line_stripped == 'clear'
+
+		# Check if line starts with a VHS keyword (handles cases like "Ctrl+C" and "Up 3")
+		is_vhs_keyword = any(line_stripped.startswith(keyword) for keyword in VHS_KEYWORDS)
+
+		if is_clear:
+			# Handle clear command: Hide, Type, Enter, Sleep, Show, Wait Line
+			tape_lines.append('Hide')
+			tape_lines.append(f'Type "{line_stripped}"')
+			if not has_noenter:
+				tape_lines.append('Enter')
+			tape_lines.append(f'Wait+Line@{wait_line}s')
+			tape_lines.append('Show')
+		elif is_vhs_keyword:
+			# VHS keyword: use as-is
+			tape_lines.append(line_stripped)
+		else:
+			# Regular command: add Wait before (unless nowait), Type command, Enter (unless noenter), Wait after
+			if not has_nowait:
+				tape_lines.append(f'Sleep {sleep_before}ms')
+
+			# Add Hide before command if # hide flag is present
+			if has_hide:
+				tape_lines.append('Hide')
+
+			# Type the command
+			tape_lines.append(f'Type "{line_stripped}"')
+
+			# Add Enter unless noenter flag
+			if not has_noenter:
+				tape_lines.append('Enter')
+				# Wait for command output
+				if not has_nowait:
+					tape_lines.append(f'Wait+Line@{wait_line}s')
+
+			# Add Show after command if # hide flag is present
+			if has_hide:
+				tape_lines.append('Show')
+
+			# Always add Wait after command
+			tape_lines.append(f'Sleep {sleep_after}ms')
+
+	# Write tape file
+	try:
+		with open(output_tape, 'w') as f:
+			f.write('\n'.join(tape_lines) + '\n')
+		console.print(Info(message=f'Converted {tap_file} to {output_tape}'))
+	except Exception as e:
+		console.print(Error(message=f'Failed to write {output_tape}: {str(e)}'))
+		sys.exit(1)

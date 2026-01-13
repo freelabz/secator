@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'secator'
-version = "0.22.2"
+version = "0.24.0"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -64,7 +64,7 @@ dev = [
   'flake8 < 8',
   'pytest < 9',
   'watchdog < 3',
-  'asciinema-automation < 1',
+  'pillow < 13',
 ]
 build = [
   'hatch < 2',
