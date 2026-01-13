@@ -1176,7 +1176,7 @@ class Runner:
 				existing_profile_names.add(p)
 			elif isinstance(p, TemplateLoader):
 				existing_profile_names.add(p.name)
-		
+
 		default_profiles = CONFIG.profiles.defaults
 		for p in default_profiles:
 			if p not in existing_profile_names:
