@@ -42,7 +42,7 @@ RUN adduser -D secator
 
 # Allow runing 'nmap' with sudo; for priviledged scans
 RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/arp-scan *" >> /etc/sudoers
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/arp-scan *" >> /etc/sudoers && \
     echo "secator ALL=(ALL) NOPASSWD: /sbin/arp *" >> /etc/sudoers
 
 # Allow user to install commands
