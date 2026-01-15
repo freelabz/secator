@@ -51,16 +51,13 @@ RUN useradd -m -s /bin/bash secator
 
 # Allow running 'nmap' with sudo; for privileged scans
 RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/sbin/arp *" >> /etc/sudoers
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/arp *" >> /etc/sudoers && \
+	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/arp-scan *" >> /etc/sudoers
 
 # Allow user to install commands
 RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/pacman -S *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/sbin/arp-scan /usr/local/bin/arp-scan" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers && \
     echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers && \
 	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock pacman -S *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /usr/sbin/arp-scan /usr/local/bin/arp-scan" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" >> /etc/sudoers && \
     echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers
 
 # Ensure proper permissions for sudoers
@@ -88,12 +85,8 @@ RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast
 USER root
 RUN if [ "$flavor" != "lite" ]; then \
 	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/pacman -S \*/d' /etc/sudoers && \
-	sed -i '/secator ALL=(ALL) NOPASSWD: \/bin\/ln -sf \/usr\/sbin\/arp-scan/d' /etc/sudoers && \
-	sed -i '/secator ALL=(ALL) NOPASSWD: \/bin\/ln -sf \/home\/secator\/.local\/share\/vulscan/d' /etc/sudoers && \
 	sed -i '/secator ALL=(ALL) NOPASSWD: \/bin\/ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers && \
 	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock pacman -S \*/d' /etc/sudoers && \
-	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/usr\/sbin\/arpscan/d' /etc/sudoers && \
-	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/home\/secator\/.local\/share\/vulscan/d' /etc/sudoers && \
 	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers; \
 	fi
 USER secator
