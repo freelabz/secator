@@ -242,13 +242,13 @@ create_symlink() {
     if ! in_path "$target_dir"; then
         warn "The directory $target_dir is not in your PATH!"
         warn "Add it to your PATH by running:"
-        echo "  export PATH=\"\$PATH:$target_dir\""
-        echo ""
+        echo "  export PATH=\"\$PATH:$target_dir\"" >&2
+        echo "" >&2
         warn "To make it permanent, add the above line to your shell configuration file:"
         if [[ -n "${ZSH_VERSION:-}" ]]; then
-            echo "  echo 'export PATH=\"\$PATH:$target_dir\"' >> ~/.zshrc"
+            echo "  echo 'export PATH=\"\$PATH:$target_dir\"' >> ~/.zshrc" >&2
         else
-            echo "  echo 'export PATH=\"\$PATH:$target_dir\"' >> ~/.bashrc"
+            echo "  echo 'export PATH=\"\$PATH:$target_dir\"' >> ~/.bashrc" >&2
         fi
     else
         success "$target_dir is in your PATH"
