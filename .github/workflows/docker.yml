@@ -44,7 +44,7 @@ jobs:
       run: docker run --privileged freelabz/secator:${{ matrix.distribution }} health --strict
 
     - name: Run secator cidr_recon workflow
-      run: docker run --env CI=1 --privileged freelabz/secator:${{ matrix.distribution }} w cidr_recon -sS
+      run: docker run --env CI=1 --privileged freelabz/secator:${{ matrix.distribution }} w cidr_recon -sS -p 80
 
     - name: Run Docker image ls to view size
       run: docker image ls
