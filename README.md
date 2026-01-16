@@ -104,6 +104,14 @@ check that the tool complies with our selection criterias before doing so. If it
 ## Installing secator
 
 <details>
+  <summary>Bash</summary>
+
+```sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_universal.sh)"
+```
+</details>
+
+<details>
     <summary>Pipx</summary>
 
 ```sh
@@ -118,15 +126,6 @@ pipx install secator
 
 ```sh
 pip install secator
-```
-
-</details>
-
-<details>
-  <summary>Bash (uses apt)</summary>
-
-```sh
-wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install.sh | sh
 ```
 
 </details>
@@ -164,7 +163,7 @@ docker-compose exec secator-client secator --help
 
 </details>
 
-***Note:*** If you chose the Bash, Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
+***Note:*** If you chose the Docker or Docker Compose installation methods, you can skip the next sections and go straight to [Usage](#usage).
 
 
 ## Usage
