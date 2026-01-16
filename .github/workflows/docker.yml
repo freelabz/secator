@@ -43,8 +43,11 @@ jobs:
     - name: Run secator health check (strict)
       run: docker run --privileged freelabz/secator:${{ matrix.distribution }} health --strict
 
-    - name: Run secator cidr_recon workflow
-      run: docker run --env CI=1 --privileged freelabz/secator:${{ matrix.distribution }} w cidr_recon -sS -p 80
+    - name: Run commands with sudo privileges
+      run: |
+        docker run --env CI=1 --privileged freelabz/secator:${{ matrix.distribution }} x arp
+        docker run --env CI=1 --privileged freelabz/secator:${{ matrix.distribution }} x arpscan
+        docker run --env CI=1 --privileged freelabz/secator:${{ matrix.distribution }} x nmap localhost -sS -T4
 
     - name: Run Docker image ls to view size
       run: docker image ls
