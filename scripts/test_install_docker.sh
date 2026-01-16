@@ -42,12 +42,12 @@ SCRIPT_URL="https://raw.githubusercontent.com/freelabz/secator/main/scripts/inst
 # For local testing, you can also use:
 # docker run -it --rm -v $(pwd)/scripts:/scripts $IMAGE bash -c "bash /scripts/install_universal.sh"
 
-docker run -it --rm $IMAGE bash -c "
+docker run -it --rm $IMAGE sh -c "
     # Install curl first (needed to download the script)
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq && apt-get install -y -qq curl
     elif command -v apk >/dev/null 2>&1; then
-        apk add --no-cache curl
+        apk add --no-cache bash curl
     elif command -v pacman >/dev/null 2>&1; then
         pacman -Sy --noconfirm curl
     elif command -v dnf >/dev/null 2>&1; then
