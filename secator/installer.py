@@ -62,7 +62,7 @@ class ToolInstaller:
 	@classmethod
 	def install(cls, tool_cls):
 		name = tool_cls.__name__
-		console.print(Info(message=f'Installing {name}'))
+		console.print(Info(message=f'[bold yellow]:wrench: Installing {name} ...[/]'))
 		status = InstallerStatus.UNKNOWN
 		if not hasattr(tool_cls, 'cmd'):
 			return InstallerStatus.INSTALL_SKIPPED_OK

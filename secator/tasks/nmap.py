@@ -124,14 +124,10 @@ class nmap(ReconPort):
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
 	}
-	install_cmd_pre = {
+	install_pre = {
 		'apt|pacman|brew': ['nmap'],
 		'apk': ['nmap', 'nmap-scripts'],
 	}
-	install_cmd = (
-		f'git clone --depth 1 --single-branch https://github.com/scipag/vulscan {CONFIG.dirs.share}/vulscan || true && '
-		f'sudo ln -sf {CONFIG.dirs.share}/vulscan /usr/share/nmap/scripts/vulscan || true'
-	)
 	proxychains = True
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = False

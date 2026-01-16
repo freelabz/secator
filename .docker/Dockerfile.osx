@@ -6,6 +6,7 @@ ARG flavor=full
 ARG build_from_source=false
 ARG python_version=3.12.0
 ENV PYENV_ROOT="/home/arch/pyenv"
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/linuxbrew/.linuxbrew/bin:$PATH"
 RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 RUN sudo pacman -Syu --noconfirm && \
     sudo pacman -S --noconfirm -y \
@@ -57,12 +58,8 @@ RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" | sudo tee -a /etc/sudoer
 
 # Allow user to install commands
 RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/pacman -S *" | sudo tee -a /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/sbin/arp-scan /usr/local/bin/arp-scan" | sudo tee -a /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" | sudo tee -a /etc/sudoers && \
     echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" | sudo tee -a /etc/sudoers && \
 	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock pacman -S *" | sudo tee -a /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /usr/sbin/arp-scan /usr/local/bin/arp-scan" | sudo tee -a /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /home/secator/.local/share/vulscan /usr/share/nmap/scripts/vulscan" | sudo tee -a /etc/sudoers && \
     echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" | sudo tee -a /etc/sudoers
 
 # Ensure proper permissions for sudoers
@@ -90,12 +87,8 @@ RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast
 USER root
 RUN if [ "$flavor" != "lite" ]; then \
 	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/pacman -S \*/d' /etc/sudoers && \
-	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/bin\/ln -sf \/usr\/sbin\/arp-scan/d' /etc/sudoers && \
-	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/bin\/ln -sf \/home\/secator\/.local\/share\/vulscan/d' /etc/sudoers && \
 	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/bin\/ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers && \
 	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock pacman -S \*/d' /etc/sudoers && \
-	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/usr\/sbin\/arpscan/d' /etc/sudoers && \
-	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/home\/secator\/.local\/share\/vulscan/d' /etc/sudoers && \
 	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers; \
 	fi
 USER secator
