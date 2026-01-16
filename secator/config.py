@@ -683,7 +683,7 @@ if not CONFIG:
 for name, dir in CONFIG.dirs.items():
 	if not dir.exists():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
-		dir.mkdir(parents=False)
+		dir.mkdir(parents=True)
 		console.print('[bold green]ok.[/]')
 
 # Download wordlists and payloads
