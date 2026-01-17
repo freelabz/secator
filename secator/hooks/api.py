@@ -5,10 +5,10 @@ API endpoints via HTTP requests. It supports both CREATE and UPDATE
 operations for runners and findings.
 
 Configuration:
-    - addons.api.enabled: Enable/disable the API hook
-    - addons.api.url: Base URL of the external API
-    - addons.api.api_key: API key for authentication
-    - addons.api.force_ssl: Enable/disable SSL certificate verification
+	- addons.api.enabled: Enable/disable the API hook
+	- addons.api.url: Base URL of the external API
+	- addons.api.api_key: API key for authentication
+	- addons.api.force_ssl: Enable/disable SSL certificate verification
 """
 
 import json
@@ -27,175 +27,176 @@ logger = logging.getLogger(__name__)
 
 API_URL = CONFIG.addons.api.url
 API_KEY = CONFIG.addons.api.key
+API_HEADER_NAME = CONFIG.addons.api.header_name
 FORCE_SSL = CONFIG.addons.api.force_ssl
 
 
 def get_runner_dbg(runner):
-    """Runner debug object"""
-    return {
-        runner.unique_name: runner.status,
-        'type': runner.config.type,
-        'class': runner.__class__.__name__,
-        'caller': runner.config.name,
-        **runner.context
-    }
+	"""Runner debug object"""
+	return {
+		runner.unique_name: runner.status,
+		'type': runner.config.type,
+		'class': runner.__class__.__name__,
+		'caller': runner.config.name,
+		**runner.context
+	}
 
 
 def _make_request(method, endpoint, data=None):
-    """Make HTTP request to external API endpoint."""
-    url = f"{API_URL.rstrip('/')}/{endpoint.lstrip('/')}"
-    headers = {
-        "Authorization": f"Api-Key {API_KEY}",
-        "Content-Type": "application/json"
-    }
-    verify = FORCE_SSL
-    logger.info(f'API request: {method} {url}')
-    logger.info(f'API headers: {headers}')
-    logger.info(f'API verify: {verify}')
-    logger.info('API timeout: 30')
-    debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
+	"""Make HTTP request to external API endpoint."""
+	url = f"{API_URL.rstrip('/')}/{endpoint.lstrip('/')}"
+	headers = {
+		"Authorization": f"{API_HEADER_NAME} {API_KEY}",
+		"Content-Type": "application/json"
+	}
+	verify = FORCE_SSL
+	logger.info(f'API request: {method} {url}')
+	logger.info(f'API headers: {headers}')
+	logger.info(f'API verify: {verify}')
+	logger.info('API timeout: 30')
+	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 
-    try:
-        json_data = json.dumps(data, cls=DataclassEncoder) if data else None
-        logger.info(f'API data: {json.dumps(json_data, indent=2)}')
+	try:
+		json_data = json.dumps(data, cls=DataclassEncoder) if data else None
+		logger.info(f'API data: {json.dumps(json_data, indent=2)}')
 
-        response = requests.request(
-            method=method,
-            url=url,
-            data=json_data,
-            headers=headers,
-            verify=verify,
-            timeout=30
-        )
-        response.raise_for_status()
-        result = response.json()
-        debug(f'API response: {result}', sub='hooks.api', verbose=True)
-        return result
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API request failed: {e}")
-        debug(f'API error: {e}', sub='hooks.api')
-        return None
+		response = requests.request(
+			method=method,
+			url=url,
+			data=json_data,
+			headers=headers,
+			verify=verify,
+			timeout=30
+		)
+		response.raise_for_status()
+		result = response.json()
+		debug(f'API response: {result}', sub='hooks.api', verbose=True)
+		return result
+	except requests.exceptions.RequestException as e:
+		logger.error(f"API request failed: {e}")
+		debug(f'API error: {e}', sub='hooks.api')
+		return None
 
 
 def update_runner(self):
 
-    runner_type = self.config.type
-    update = self.toDict()
-    chunk = update.get('chunk')
-    _id = self.context.get(f'{runner_type}_chunk_id') if chunk else self.context.get(f'{runner_type}_id')
+	runner_type = self.config.type
+	update = self.toDict()
+	chunk = update.get('chunk')
+	_id = self.context.get(f'{runner_type}_chunk_id') if chunk else self.context.get(f'{runner_type}_id')
 
-    debug(
-        'to_update',
-        sub='hooks.api',
-        id=_id,
-        obj=get_runner_dbg(self),
-        obj_after=True,
-        obj_breaklines=False,
-        verbose=True
-    )
+	debug(
+		'to_update',
+		sub='hooks.api',
+		id=_id,
+		obj=get_runner_dbg(self),
+		obj_after=True,
+		obj_breaklines=False,
+		verbose=True
+	)
 
-    start_time = time.time()
+	start_time = time.time()
 
-    if _id:
-        # Update existing runner
-        result = _make_request('PUT', f'runner/{_id}', update)
-        _log_runner_api_time(
-            self,
-            start_time, '[dim gold4]updated in ', 's[/]', _id
-        )
-        self.last_updated_db = start_time
-    else:
-        # Create new runner
-        result = _make_request('POST', 'runners', update)
-        if result and result.get('status'):
-            _id = result.get('id')
-            if chunk:
-                self.context[f'{runner_type}_chunk_id'] = _id
-            else:
-                self.context[f'{runner_type}_id'] = _id
-            _log_runner_api_time(self, start_time, 'in ', 's', _id)
+	if _id:
+		# Update existing runner
+		result = _make_request('PUT', f'runner/{_id}', update)
+		_log_runner_api_time(
+			self,
+			start_time, '[dim gold4]updated in ', 's[/]', _id
+		)
+		self.last_updated_db = start_time
+	else:
+		# Create new runner
+		result = _make_request('POST', 'runners', update)
+		if result and result.get('status'):
+			_id = result.get('id')
+			if chunk:
+				self.context[f'{runner_type}_chunk_id'] = _id
+			else:
+				self.context[f'{runner_type}_id'] = _id
+			_log_runner_api_time(self, start_time, 'in ', 's', _id)
 
 
 def update_finding(self, item):
-    """Update finding state via API."""
-    if type(item) not in FINDING_TYPES:
-        return item
+	"""Update finding state via API."""
+	if type(item) not in FINDING_TYPES:
+		return item
 
-    start_time = time.time()
-    update = item.toDict()
-    _type = item._type
-    _uuid = item._uuid if hasattr(item, '_uuid') else None
+	start_time = time.time()
+	update = item.toDict()
+	_type = item._type
+	_uuid = item._uuid if hasattr(item, '_uuid') else None
 
-    if _uuid:
-        # Update existing finding
-        result = _make_request('PUT', f'finding/{_uuid}', update)
-        status = 'UPDATED'
-    else:
-        # Create new finding
-        result = _make_request('POST', 'findings', update)
-        if result and result.get('status'):
-            item._uuid = result.get('id')
-            status = 'CREATED'
-        else:
-            status = 'FAILED'
+	if _uuid:
+		# Update existing finding
+		result = _make_request('PUT', f'finding/{_uuid}', update)
+		status = 'UPDATED'
+	else:
+		# Create new finding
+		result = _make_request('POST', 'findings', update)
+		if result and result.get('status'):
+			item._uuid = result.get('id')
+			status = 'CREATED'
+		else:
+			status = 'FAILED'
 
-    end_time = time.time()
-    elapsed = end_time - start_time
+	end_time = time.time()
+	elapsed = end_time - start_time
 
-    debug_obj = {
-        _type: status,
-        'type': 'finding',
-        'class': self.__class__.__name__,
-        'caller': self.config.name,
-        **self.context
-    }
-    debug(
-        f'in {elapsed:.4f}s',
-        sub='hooks.api',
-        id=str(getattr(item, '_uuid', 'unknown')),
-        obj=debug_obj,
-        obj_after=False
-    )
+	debug_obj = {
+		_type: status,
+		'type': 'finding',
+		'class': self.__class__.__name__,
+		'caller': self.config.name,
+		**self.context
+	}
+	debug(
+		f'in {elapsed:.4f}s',
+		sub='hooks.api',
+		id=str(getattr(item, '_uuid', 'unknown')),
+		obj=debug_obj,
+		obj_after=False
+	)
 
-    return item
+	return item
 
 
 HOOKS = {
-    Scan: {
-        'on_init': [update_runner],
-        'on_start': [update_runner],
-        'on_interval': [update_runner],
-        'on_item': [update_finding],
-        'on_duplicate': [update_finding],
-        'on_end': [update_runner],
-    },
-    Workflow: {
-        'on_init': [update_runner],
-        'on_start': [update_runner],
-        'on_interval': [update_runner],
-        'on_item': [update_finding],
-        'on_duplicate': [update_finding],
-        'on_end': [update_runner],
-    },
-    Task: {
-        'on_init': [update_runner],
-        'on_start': [update_runner],
-        'on_interval': [update_runner],
-        'on_item': [update_finding],
-        'on_duplicate': [update_finding],
-        'on_end': [update_runner]
-    }
+	Scan: {
+		'on_init': [update_runner],
+		'on_start': [update_runner],
+		'on_interval': [update_runner],
+		'on_item': [update_finding],
+		'on_duplicate': [update_finding],
+		'on_end': [update_runner],
+	},
+	Workflow: {
+		'on_init': [update_runner],
+		'on_start': [update_runner],
+		'on_interval': [update_runner],
+		'on_item': [update_finding],
+		'on_duplicate': [update_finding],
+		'on_end': [update_runner],
+	},
+	Task: {
+		'on_init': [update_runner],
+		'on_start': [update_runner],
+		'on_interval': [update_runner],
+		'on_item': [update_finding],
+		'on_duplicate': [update_finding],
+		'on_end': [update_runner]
+	}
 }
 
 
 def _log_runner_api_time(self, start_time, prefix, suffix, _id):
-    """Log elapsed time for runner API operation."""
-    end_time = time.time()
-    elapsed = end_time - start_time
-    debug(
-        f'{prefix}{elapsed:.4f}{suffix}',
-        sub='hooks.api',
-        id=_id,
-        obj=get_runner_dbg(self),
-        obj_after=False,
-    )
+	"""Log elapsed time for runner API operation."""
+	end_time = time.time()
+	elapsed = end_time - start_time
+	debug(
+		f'{prefix}{elapsed:.4f}{suffix}',
+		sub='hooks.api',
+		id=_id,
+		obj=get_runner_dbg(self),
+		obj_after=False,
+	)

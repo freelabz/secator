@@ -209,6 +209,7 @@ class ApiAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'https://app.secator.cloud/api'
 	key: str = ''
+	header_name: str = 'Bearer'
 	force_ssl: bool = True
 
 
