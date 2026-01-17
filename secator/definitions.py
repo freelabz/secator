@@ -156,6 +156,7 @@ for addon, module in [
 	('worker', 'eventlet'),
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
+	('api', 'requests'),
 	('mongodb', 'pymongo'),
 	('redis', 'redis'),
 	('dev', 'flake8'),

@@ -255,7 +255,7 @@ def register_runner(cli_endpoint, config):
 		hooks = []
 		drivers = driver.split(',') if driver else []
 		drivers = list(set(CONFIG.drivers.defaults + drivers))
-		supported_drivers = ['mongodb', 'gcs']
+		supported_drivers = ['mongodb', 'gcs', 'api']
 		for driver in drivers:
 			if driver in supported_drivers:
 				if not ADDONS_ENABLED[driver]:

@@ -12,7 +12,6 @@ Configuration:
 """
 
 import json
-import logging
 import time
 
 import requests
@@ -23,11 +22,13 @@ from secator.runners import Scan, Task, Workflow
 from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
 
-logger = logging.getLogger(__name__)
-
 API_URL = CONFIG.addons.api.url
 API_KEY = CONFIG.addons.api.key
 API_HEADER_NAME = CONFIG.addons.api.header_name
+API_RUNNER_CREATE_ENDPOINT = CONFIG.addons.api.runner_create_endpoint
+API_RUNNER_UPDATE_ENDPOINT = CONFIG.addons.api.runner_update_endpoint
+API_FINDING_CREATE_ENDPOINT = CONFIG.addons.api.finding_create_endpoint
+API_FINDING_UPDATE_ENDPOINT = CONFIG.addons.api.finding_update_endpoint
 FORCE_SSL = CONFIG.addons.api.force_ssl
 
 
@@ -46,40 +47,33 @@ def _make_request(method, endpoint, data=None):
 	"""Make HTTP request to external API endpoint."""
 	url = f"{API_URL.rstrip('/')}/{endpoint.lstrip('/')}"
 	headers = {
-		"Authorization": f"{API_HEADER_NAME} {API_KEY}",
 		"Content-Type": "application/json"
 	}
+	if API_KEY:
+		headers["Authorization"] = f"{API_HEADER_NAME} {API_KEY}"
 	verify = FORCE_SSL
-	logger.info(f'API request: {method} {url}')
-	logger.info(f'API headers: {headers}')
-	logger.info(f'API verify: {verify}')
-	logger.info('API timeout: 30')
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
+	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
+	debug('API verify', sub='hooks.api', verbose=True, obj=verify)
+	debug('API timeout', sub='hooks.api', verbose=True, obj=30)
+	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
+	debug('API data', sub='hooks.api', verbose=True, obj=json_data)
 
-	try:
-		json_data = json.dumps(data, cls=DataclassEncoder) if data else None
-		logger.info(f'API data: {json.dumps(json_data, indent=2)}')
-
-		response = requests.request(
-			method=method,
-			url=url,
-			data=json_data,
-			headers=headers,
-			verify=verify,
-			timeout=30
-		)
-		response.raise_for_status()
-		result = response.json()
-		debug(f'API response: {result}', sub='hooks.api', verbose=True)
-		return result
-	except requests.exceptions.RequestException as e:
-		logger.error(f"API request failed: {e}")
-		debug(f'API error: {e}', sub='hooks.api')
-		return None
+	response = requests.request(
+		method=method,
+		url=url,
+		data=json_data,
+		headers=headers,
+		verify=verify,
+		timeout=30
+	)
+	response.raise_for_status()
+	result = response.json()
+	debug('API response', sub='hooks.api', verbose=True, obj=result)
+	return result
 
 
 def update_runner(self):
-
 	runner_type = self.config.type
 	update = self.toDict()
 	chunk = update.get('chunk')
@@ -99,7 +93,7 @@ def update_runner(self):
 
 	if _id:
 		# Update existing runner
-		result = _make_request('PUT', f'runner/{_id}', update)
+		result = _make_request('PUT', f'{API_RUNNER_UPDATE_ENDPOINT.format(runner_id=_id)}', update)
 		_log_runner_api_time(
 			self,
 			start_time, '[dim gold4]updated in ', 's[/]', _id
@@ -107,7 +101,7 @@ def update_runner(self):
 		self.last_updated_db = start_time
 	else:
 		# Create new runner
-		result = _make_request('POST', 'runners', update)
+		result = _make_request('POST', API_RUNNER_CREATE_ENDPOINT, update)
 		if result and result.get('status'):
 			_id = result.get('id')
 			if chunk:
@@ -129,11 +123,11 @@ def update_finding(self, item):
 
 	if _uuid:
 		# Update existing finding
-		result = _make_request('PUT', f'finding/{_uuid}', update)
+		result = _make_request('PUT', f'{API_FINDING_UPDATE_ENDPOINT.format(finding_id=_uuid)}', update)
 		status = 'UPDATED'
 	else:
 		# Create new finding
-		result = _make_request('POST', 'findings', update)
+		result = _make_request('POST', API_FINDING_CREATE_ENDPOINT, update)
 		if result and result.get('status'):
 			item._uuid = result.get('id')
 			status = 'CREATED'
