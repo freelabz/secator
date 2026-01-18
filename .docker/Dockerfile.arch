@@ -1,9 +1,11 @@
+# syntax=docker/dockerfile:1
+# check=skip=SecretsUsedInArgOrEnv
+
 FROM archlinux:latest
 ARG flavor=full
 ARG build_from_source=true
-ENV PATH="${PATH}:/root/.local/bin"
-ENV GOBIN="/root/.local/bin"
-ENV CARGO_HOME="/root/.local"
+ARG python_version=3.12.0
+ENV PYENV_ROOT="/opt/pyenv"
 RUN pacman -Syu --noconfirm && \
     pacman -S --noconfirm \
 	base-devel \
@@ -15,17 +17,60 @@ RUN pacman -Syu --noconfirm && \
     openssl \
 	proxychains \
 	proxychains-ng \
-	python \
-	python-pip \
-	python-pipx \
+	pyenv \
 	ruby \
 	rubygems \
 	sudo \
 	unzip \
 	vim \
     wget
+
+# Install pyenv and Python 3.12
+RUN git clone https://github.com/pyenv/pyenv.git $PYENV_ROOT && \
+    echo "export PYENV_ROOT=\"$PYENV_ROOT\"" > /etc/profile.d/pyenv.sh && \
+    echo 'export PATH="$PYENV_ROOT/bin:$PATH"' >> /etc/profile.d/pyenv.sh && \
+    echo 'eval "$(pyenv init --path)"' >> /etc/profile.d/pyenv.sh && \
+    chmod +x /etc/profile.d/pyenv.sh
+
+RUN source /etc/profile.d/pyenv.sh && \
+    pyenv install $python_version && \
+    pyenv global $python_version
+
+RUN pacman -Syu --noconfirm \
+	python-pip \
+	python-pipx
+
+RUN ln -sf $PYENV_ROOT/versions/$python_version/bin/python /usr/local/bin/python && \
+	ln -sf $PYENV_ROOT/versions/$python_version/bin/pip /usr/local/bin/pip && \
+    chmod +x /usr/local/bin/python && \
+    chmod +x /usr/local/bin/pip
+
 COPY . /code
 WORKDIR /code
+RUN useradd -m -s /bin/bash secator
+
+# Allow running 'nmap' with sudo; for privileged scans
+RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/arp *" >> /etc/sudoers && \
+	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/arp-scan *" >> /etc/sudoers
+
+# Allow user to install commands
+RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/pacman -S *" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers && \
+	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock pacman -S *" >> /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" >> /etc/sudoers
+
+# Ensure proper permissions for sudoers
+RUN chmod 0440 /etc/sudoers
+
+USER secator
+ENV PATH="${PATH}:/home/secator/.local/bin"
+ENV CARGO_HOME="/home/secator/.local"
+ENV GOBIN="/home/secator/.local/bin"
+ENV GOPATH="/home/secator/go"
+ENV TERM="xterm-256color"
+ENV PIPX_DEFAULT_PYTHON="/usr/local/bin/python"
+ENV SECATOR_SECURITY_PROMPT_SUDO_PASSWORD="0"
 RUN pipx install . && \
 	secator install addons worker && \
 	secator install addons gdrive && \
@@ -35,4 +80,15 @@ RUN pipx install . && \
 	secator install addons dev
 RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi
 RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
+
+# In normal mode, revoke installation permissions after tools are installed
+USER root
+RUN if [ "$flavor" != "lite" ]; then \
+	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/pacman -S \*/d' /etc/sudoers && \
+	sed -i '/secator ALL=(ALL) NOPASSWD: \/bin\/ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers && \
+	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock pacman -S \*/d' /etc/sudoers && \
+	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers; \
+	fi
+USER secator
+
 ENTRYPOINT ["secator"]

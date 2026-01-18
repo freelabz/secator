@@ -109,6 +109,7 @@ class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
 	force_source_install: bool = False
+	prompt_sudo_password: bool = True
 
 
 class HTTP(StrictModel):
@@ -695,7 +696,7 @@ if not CONFIG:
 for name, dir in CONFIG.dirs.items():
 	if not dir.exists():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
-		dir.mkdir(parents=False)
+		dir.mkdir(parents=True)
 		console.print('[bold green]ok.[/]')
 
 # Download wordlists and payloads
