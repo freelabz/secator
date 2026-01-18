@@ -35,7 +35,7 @@ STATE_COLORS = {
 }
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
 
 # Vocab
@@ -160,6 +160,7 @@ for addon, module in [
 	('worker', 'eventlet'),
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
+	('api', 'requests'),
 	('mongodb', 'pymongo'),
 	('redis', 'redis'),
 	('dev', 'flake8'),
