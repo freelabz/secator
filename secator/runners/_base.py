@@ -1153,7 +1153,7 @@ class Runner:
 		"""Resolve profiles and update run options.
 
 		Args:
-			profiles (list[str]): List of profile names to resolve.
+			profiles (list[str | TemplateLoader]): List of profile names or TemplateLoader instances to resolve.
 
 		Returns:
 			list: List of profiles.
@@ -1167,11 +1167,20 @@ class Runner:
 			profiles = profiles.split(',')
 
 		# Add default profiles
+		# Extract profile names from the list (handling both strings and TemplateLoader instances)
+		# Note: Import is local to avoid circular dependency (template.py imports from runners.task)
+		from secator.template import TemplateLoader
+		existing_profile_names = set()
+		for p in profiles:
+			if isinstance(p, str):
+				existing_profile_names.add(p)
+			elif isinstance(p, TemplateLoader):
+				existing_profile_names.add(p.name)
+
 		default_profiles = CONFIG.profiles.defaults
 		for p in default_profiles:
-			if p in profiles:
-				continue
-			profiles.append(p)
+			if p not in existing_profile_names:
+				profiles.append(p)
 
 		# Abort if no profiles
 		if not profiles:
@@ -1181,11 +1190,18 @@ class Runner:
 		templates = []
 		profile_configs = get_configs_by_type('profile')
 		for pname in profiles:
-			matches = [p for p in profile_configs if p.name == pname]
-			if not matches:
-				self._print(Warning(message=f'Profile "{pname}" was not found. Run [bold green]secator profiles list[/] to see available profiles.'), rich=True)  # noqa: E501
+			# Handle TemplateLoader instances directly
+			if isinstance(pname, TemplateLoader):
+				templates.append(pname)
+			# Handle string profile names
+			elif isinstance(pname, str):
+				matches = [p for p in profile_configs if p.name == pname]
+				if not matches:
+					self._print(Warning(message=f'Profile "{pname}" was not found. Run [bold green]secator profiles list[/] to see available profiles.'), rich=True)  # noqa: E501
+				else:
+					templates.append(matches[0])
 			else:
-				templates.append(matches[0])
+				self._print(Warning(message=f'Profile "{pname}" has invalid type {type(pname).__name__}. Expected str or TemplateLoader.'), rich=True)  # noqa: E501
 
 		if not templates:
 			self.debug('no profiles loaded', sub='init')
