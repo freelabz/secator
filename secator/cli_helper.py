@@ -273,13 +273,13 @@ def register_runner(cli_endpoint, config):
 				console.print(f'Supported drivers: {supported_drivers_str}')
 				sys.exit(1)
 
-		if ADDONS_ENABLED['api'] and 'api' in drivers:
+		if driver == 'api':
 			try:
 				from secator.hooks.api import get_workspace_name
 				workspace_name = get_workspace_name(context.get('workspace_id'))
 				context['workspace_name'] = workspace_name
 			except Exception as e:
-				console.print(f'[bold red]Error getting workspace name: {e}[/]')
+				console.print(f'[bold red]Error getting workspace from API: {e}.[/]')
 				sys.exit(1)
 
 		if enable_pyinstrument or enable_memray:

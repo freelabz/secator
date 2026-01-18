@@ -176,9 +176,9 @@ def get_workspace_name(workspace_id):
 	if not API_WORKSPACE_GET_ENDPOINT:
 		return None
 	if workspace_id == 'default':
-		raise Exception('Workspace `default` cannot be used for API integration: please use a valid workspace ID')
+		raise Exception('Workspace `default` cannot be used for API integration: please use a valid workspace ID using `-ws <workspace_id>` (CLI) or `context.workspace_id = <workspace_id>` (Python API).')  # noqa: E501
 	if not workspace_id:
-		raise Exception('No workspace ID provided: please use a valid workspace ID')
+		raise Exception('No workspace ID provided: please use a valid workspace ID using `-ws <workspace_id>` (CLI) or `context.workspace_id = <workspace_id>` (Python API).')  # noqa: E501
 	result = _make_request('GET', f'{API_WORKSPACE_GET_ENDPOINT.format(workspace_id=workspace_id)}')
 	if result and result.get('name'):
 		console.print(Info(message=f'Loaded workspace "{result.get('name')}" from remote API [id: {workspace_id}]'))
