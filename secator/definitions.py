@@ -35,7 +35,7 @@ STATE_COLORS = {
 }
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
 
 # Vocab

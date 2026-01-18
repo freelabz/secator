@@ -213,9 +213,10 @@ class ApiAddon(StrictModel):
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	runner_create_endpoint: str = 'runners'
-	runner_update_endpoint: str = 'runners/{runner_id}'
+	runner_update_endpoint: str = 'runner/{runner_id}'
 	finding_create_endpoint: str = 'findings'
-	finding_update_endpoint: str = 'findings/{finding_id}'
+	finding_update_endpoint: str = 'finding/{finding_id}'
+	workspace_get_endpoint: str = 'workspace/{workspace_id}'
 
 
 class Addons(StrictModel):

@@ -13,14 +13,16 @@ Configuration:
 
 import json
 import time
-
 import requests
 
+from functools import cache
+
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES
+from secator.output_types import FINDING_TYPES, Error, Info
 from secator.runners import Scan, Task, Workflow
 from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
+from secator.rich import console
 
 API_URL = CONFIG.addons.api.url
 API_KEY = CONFIG.addons.api.key
@@ -29,6 +31,7 @@ API_RUNNER_CREATE_ENDPOINT = CONFIG.addons.api.runner_create_endpoint
 API_RUNNER_UPDATE_ENDPOINT = CONFIG.addons.api.runner_update_endpoint
 API_FINDING_CREATE_ENDPOINT = CONFIG.addons.api.finding_create_endpoint
 API_FINDING_UPDATE_ENDPOINT = CONFIG.addons.api.finding_update_endpoint
+API_WORKSPACE_GET_ENDPOINT = CONFIG.addons.api.workspace_get_endpoint
 FORCE_SSL = CONFIG.addons.api.force_ssl
 
 
@@ -54,10 +57,9 @@ def _make_request(method, endpoint, data=None):
 	verify = FORCE_SSL
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
-	debug('API verify', sub='hooks.api', verbose=True, obj=verify)
-	debug('API timeout', sub='hooks.api', verbose=True, obj=30)
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
-	debug('API data', sub='hooks.api', verbose=True, obj=json_data)
+	if json_data:
+		debug('API data', sub='hooks.api', verbose=True, obj=json_data)
 
 	response = requests.request(
 		method=method,
@@ -67,18 +69,23 @@ def _make_request(method, endpoint, data=None):
 		verify=verify,
 		timeout=30
 	)
-	response.raise_for_status()
 	result = response.json()
 	debug('API response', sub='hooks.api', verbose=True, obj=result)
+	if not response.ok and result.get('detail'):
+		console.print(Error(message=f'API error: {result["detail"]}'))
+	response.raise_for_status()
 	return result
 
 
 def update_runner(self):
+	self.context['driver'] = 'api'
 	runner_type = self.config.type
 	update = self.toDict()
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{runner_type}_chunk_id') if chunk else self.context.get(f'{runner_type}_id')
-
+	workspace_name = get_workspace_name(self.context.get('workspace_id'))
+	if workspace_name:
+		self.context['workspace_name'] = workspace_name
 	debug(
 		'to_update',
 		sub='hooks.api',
@@ -102,7 +109,7 @@ def update_runner(self):
 	else:
 		# Create new runner
 		result = _make_request('POST', API_RUNNER_CREATE_ENDPOINT, update)
-		if result and result.get('status'):
+		if result and result.get('id'):
 			_id = result.get('id')
 			if chunk:
 				self.context[f'{runner_type}_chunk_id'] = _id
@@ -113,26 +120,34 @@ def update_runner(self):
 
 def update_finding(self, item):
 	"""Update finding state via API."""
+	self.context['driver'] = 'api'
 	if type(item) not in FINDING_TYPES:
 		return item
 
 	start_time = time.time()
 	update = item.toDict()
+	in_api = update.get('_context', {}).get('api', False)
 	_type = item._type
 	_uuid = item._uuid if hasattr(item, '_uuid') else None
-
-	if _uuid:
-		# Update existing finding
-		result = _make_request('PUT', f'{API_FINDING_UPDATE_ENDPOINT.format(finding_id=_uuid)}', update)
-		status = 'UPDATED'
-	else:
+	workspace_name = get_workspace_name(self.context.get('workspace_id'))
+	if workspace_name:
+		self.context['workspace_name'] = workspace_name
+		update['_context']['workspace_name'] = workspace_name
+		update['_context']['workspace_id'] = self.context.get('workspace_id')
+	if not in_api:
 		# Create new finding
+		update['_context']['api'] = True
 		result = _make_request('POST', API_FINDING_CREATE_ENDPOINT, update)
-		if result and result.get('status'):
+		if result and result.get('id'):
 			item._uuid = result.get('id')
+			item._context['api'] = True
 			status = 'CREATED'
 		else:
 			status = 'FAILED'
+	else:
+		# Update existing finding
+		result = _make_request('PUT', f'{API_FINDING_UPDATE_ENDPOINT.format(finding_id=_uuid)}', update)
+		status = 'UPDATED'
 
 	end_time = time.time()
 	elapsed = end_time - start_time
@@ -153,6 +168,22 @@ def update_finding(self, item):
 	)
 
 	return item
+
+
+@cache
+def get_workspace_name(workspace_id):
+	"""Get workspace name from API."""
+	if not API_WORKSPACE_GET_ENDPOINT:
+		return None
+	if workspace_id == 'default':
+		raise Exception('Workspace `default` cannot be used for API integration: please use a valid workspace ID')
+	if not workspace_id:
+		raise Exception('No workspace ID provided: please use a valid workspace ID')
+	result = _make_request('GET', f'{API_WORKSPACE_GET_ENDPOINT.format(workspace_id=workspace_id)}')
+	if result and result.get('name'):
+		console.print(Info(message=f'Loaded workspace "{result.get('name')}" from remote API [id: {workspace_id}]'))
+		return result.get('name')
+	return None
 
 
 HOOKS = {
