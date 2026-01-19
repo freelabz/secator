@@ -499,13 +499,13 @@ def extract_domain_info(input, domain_only=False):
 		str | None: Registered domain name or None if invalid domain (only if domain_only is set).
 	"""
 	result = tldextract.extract(input)
-	if not result or not result.domain or not result.suffix:
+	if not result or not result.domain:
 		return None
 	if domain_only:
 		if not validators.domain(result.top_domain_under_public_suffix):
 			return None
 		return result.top_domain_under_public_suffix
-	return result
+	return result.domain
 
 
 def extract_subdomains_from_fqdn(fqdn, domain, suffix):

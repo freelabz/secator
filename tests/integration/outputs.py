@@ -18,7 +18,7 @@ OUTPUTS_CHECKS = {
                     'function': lambda item: item.request_headers['Hello'] == 'World',
                 }
             ],
-            'runner': '^(?!urlfinder|xurlfind3r|gau$).*',
+            'runner': '^(?!urlfinder|xurlfind3r|gau|gobuster$).*',
         }
     },
     # 'runner': {
@@ -193,6 +193,9 @@ OUTPUTS_TASKS = {
     'gitleaks': [
         # TODO: allow to test equality for this (dynamic path based on runner)
         # Tag(name='aws-access-token', match='/path/to/file.py:216', _source='gitleaks')
+    ],
+    'gobuster': [
+        Subdomain(host='www.wikipedia.org', domain='wikipedia.org', _source='gobuster'),
     ],
     'gospider': [
         Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider')
