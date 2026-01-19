@@ -205,7 +205,7 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		yaml = opts['yaml']
 		tree = opts['tree']
-		context = {'workspace_name': ws}
+		context = {'workspace_name': ws, 'workspace_id': ws}
 		enable_pyinstrument = opts['enable_pyinstrument']
 		enable_memray = opts['enable_memray']
 		contextmanager = nullcontext()
@@ -271,6 +271,15 @@ def register_runner(cli_endpoint, config):
 				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
 				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
 				console.print(f'Supported drivers: {supported_drivers_str}')
+				sys.exit(1)
+
+		if driver == 'api':
+			try:
+				from secator.hooks.api import get_workspace_name
+				workspace_name = get_workspace_name(context.get('workspace_id'))
+				context['workspace_name'] = workspace_name
+			except Exception as e:
+				console.print(f'[bold red]Error getting workspace from API: {e}.[/]')
 				sys.exit(1)
 
 		if enable_pyinstrument or enable_memray:
