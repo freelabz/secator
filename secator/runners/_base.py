@@ -407,34 +407,18 @@ class Runner:
 		Returns:
 			celery.result.AsyncResult: Celery async result.
 		"""
-		from secator.celery import run_task, run_workflow, run_scan
-
-		# Extract special kwargs
+		from secator.celery import start_runner
 		hooks = run_opts.pop('hooks', {})
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
-
-		# Normalize targets to list
-		if not isinstance(targets, list):
-			targets = [targets]
-
-		# Select the appropriate Celery task based on config type
-		celery_tasks = {
-			'task': run_task,
-			'workflow': run_workflow,
-			'scan': run_scan
-		}
-		celery_task = celery_tasks.get(config.type)
-		if not celery_task:
-			raise ValueError(f'Unknown runner type: {config.type}')
-
-		return celery_task.apply_async(
+		return start_runner.apply_async(
 			kwargs={
 				'config': config,
 				'targets': targets,
 				'results': results,
 				'run_opts': run_opts,
 				'hooks': hooks,
+				'validators': validators,
 				'context': context
 			},
 			queue='celery'

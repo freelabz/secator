@@ -145,58 +145,27 @@ def chunker(seq, size):
 
 
 @app.task(bind=True)
-def run_task(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
-	console.print(Info(message=f'Running task {self.request.id}'))
+def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
 	context = context or {}
 	context['celery_id'] = self.request.id
 	run_opts['sync'] = False
-	task = Task(
-		config=config,
+	run_opts["no_poll"] = True
+	run_opts["no_live_updates"] = True
+	runners = {"scan": Scan, "workflow": Workflow, "task": Task}
+	if config.type not in runners:
+		raise ValueError(f"Invalid runner type: {config.type}")
+	runner_cls = runners[config.type]
+	console.print(Info(message=f'Running {config.type} {self.request.id}'))
+	runner = runner_cls(
+		config,
 		inputs=targets,
 		results=results,
 		run_opts=run_opts,
 		hooks=hooks,
-		context=context
+		validators={},
+		context=context,
 	)
-	task.run()
-
-
-@app.task(bind=True)
-def run_workflow(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
-	console.print(Info(message=f'Running workflow {self.request.id}'))
-	context = context or {}
-	context['celery_id'] = self.request.id
-	console.print('Results: ', results)
-	console.print('Config: ', config)
-	console.print('Targets: ', targets)
-	console.print('Run opts: ', run_opts)
-	run_opts['sync'] = False
-	workflow = Workflow(
-		config=config,
-		inputs=targets,
-		results=results,
-		run_opts=run_opts,
-		hooks=hooks,
-		context=context
-	)
-	workflow.run()
-
-
-@app.task(bind=True)
-def run_scan(self, config, targets, results=[], run_opts={}, hooks={}, context={}):
-	console.print(Info(message=f'Running scan {self.request.id}'))
-	context = context or {}
-	context['celery_id'] = self.request.id
-	run_opts['sync'] = False
-	scan = Scan(
-		config=config,
-		inputs=targets,
-		results=results,
-		run_opts=run_opts,
-		hooks=hooks,
-		context=context
-	)
-	scan.run()
+	runner.run()
 
 
 @app.task(bind=True)
