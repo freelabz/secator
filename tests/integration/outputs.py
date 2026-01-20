@@ -18,7 +18,7 @@ OUTPUTS_CHECKS = {
                     'function': lambda item: item.request_headers['Hello'] == 'World',
                 }
             ],
-            'runner': '^(?!urlfinder|xurlfind3r|gau$).*',
+            'runner': '^(?!urlfinder|xurlfind3r|gau|urlparser$).*',
         }
     },
     # 'runner': {

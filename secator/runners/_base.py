@@ -95,7 +95,8 @@ class Runner:
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
-		self.config = DotMap(config.toDict())
+		self.serialize_config = run_opts.get('serialize_config', True)
+		self.config = self._process_config(config)
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description or '')
 		self.workspace_name = context.get('workspace_name', 'default')
@@ -205,6 +206,7 @@ class Runner:
 
 		# Run extractors on results
 		self._run_extractors()
+		self._merge_opts_defaults()
 		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
 		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
 		self.debug(f'print opts ({len(self.resolved_print_opts)})', obj=self.resolved_print_opts, sub='init')
@@ -249,6 +251,26 @@ class Runner:
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
+
+	def _process_config(self, config):
+		"""Process the configuration in different formats (dict, TemplateLoader, DotMap).
+
+		Args:
+			config (dict): The configuration to process.
+
+		Returns:
+			DotMap: The processed configuration.
+		"""
+		from secator.loader import TemplateLoader
+		if isinstance(config, TemplateLoader):
+			config = DotMap(config.toDict(serialize=self.serialize_config))
+		elif isinstance(config, dict):
+			config = DotMap(config)
+		elif isinstance(config, DotMap):
+			pass
+		else:
+			raise TypeError(f'Invalid configuration type: {type(config)}')
+		return config
 
 	@property
 	def resolved_opts(self):
@@ -395,6 +417,36 @@ class Runner:
 		"""
 		return list(self.__iter__())
 
+	@classmethod
+	def delay(cls, config, targets, **run_opts):
+		"""Run runner asynchronously via Celery.
+
+		Args:
+			config: TemplateLoader config.
+			targets: Target(s) for the runner.
+			**run_opts: Run options.
+
+		Returns:
+			celery.result.AsyncResult: Celery async result.
+		"""
+		from secator.celery import start_runner
+		hooks = run_opts.pop('hooks', {})
+		results = run_opts.pop('results', [])
+		context = run_opts.pop('context', {})
+		validators = run_opts.pop('validators', [])
+		return start_runner.apply_async(
+			kwargs={
+				'config': config,
+				'targets': targets,
+				'results': results,
+				'run_opts': run_opts,
+				'hooks': hooks,
+				'validators': validators,
+				'context': context
+			},
+			queue='celery'
+		)
+
 	def __iter__(self):
 		"""Process results from derived runner class in real-time and yield results.
 
@@ -470,6 +522,12 @@ class Runner:
 		self.inputs = sorted(list(set(inputs)))
 		self.debug(f'extracted {len(self.inputs)} inputs', sub='init')
 		self.run_opts = run_opts
+
+	def _merge_opts_defaults(self):
+		"""Merge config defaults with run options."""
+		for k, v in self.config.opts.items():
+			if k not in self.run_opts and v['default']:
+				self.run_opts[k] = v['default']
 
 	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
 		"""Add item to runner results.
@@ -765,6 +823,7 @@ class Runner:
 		data.update({
 			'config': self.config.toDict(),
 			'opts': self.config.supported_opts,
+			'profiles': [p.name for p in self.profiles],
 			'has_parent': self.has_parent,
 			'has_children': self.has_children,
 			'chunk': self.chunk,

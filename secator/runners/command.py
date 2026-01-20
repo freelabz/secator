@@ -168,7 +168,8 @@ class Command(Runner):
 			run_opts=run_opts,
 			hooks=hooks,
 			validators=validators,
-			context=context)
+			context=context
+		)
 
 		# Cmd name
 		self.cmd_name = self.__class__.cmd.split(' ')[0]
@@ -358,6 +359,7 @@ class Command(Runner):
 		kwargs['print_line'] = True
 		kwargs['process'] = kwargs.get('process', False)
 		kwargs['enable_validators'] = False
+		kwargs['serialize_config'] = False
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)

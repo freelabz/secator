@@ -493,16 +493,16 @@ class TestCommandRunner(unittest.TestCase):
 			'description': 'String profile',
 			'opts': {'retries': 2}
 		})
-
-		with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
-			mock_get_configs.return_value = [mock_profile]
-			with mock_command(LocalMyCommand, TARGETS, {'profiles': [custom_profile, 'test_string_profile']}, []) as cmd:
-				self.assertEqual(len(cmd.profiles), 2)
-				profile_names = [p.name for p in cmd.profiles]
-				self.assertIn('custom_mixed_profile', profile_names)
-				self.assertIn('test_string_profile', profile_names)
-				self.assertEqual(cmd.run_opts.get('timeout'), 90)
-				self.assertEqual(cmd.run_opts.get('retries'), 2)
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+				mock_get_configs.return_value = [mock_profile]
+				with mock_command(LocalMyCommand, TARGETS, {'profiles': [custom_profile, 'test_string_profile']}, []) as cmd:
+					self.assertEqual(len(cmd.profiles), 2)
+					profile_names = [p.name for p in cmd.profiles]
+					self.assertIn('custom_mixed_profile', profile_names)
+					self.assertIn('test_string_profile', profile_names)
+					self.assertEqual(cmd.run_opts.get('timeout'), 90)
+					self.assertEqual(cmd.run_opts.get('retries'), 2)
 
 	def test_custom_profile_no_duplicate_defaults(self):
 		"""Test that custom profiles with same name as defaults don't get duplicated."""
@@ -527,15 +527,16 @@ class TestCommandRunner(unittest.TestCase):
 			'opts': {'timeout': 100}
 		})
 
-		with patch('secator.runners._base.CONFIG.profiles.defaults', ['test_default']):
-			with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
-				default_profile = TemplateLoader(input={
-					'name': 'test_default',
-					'type': 'profile',
-					'opts': {'timeout': 50}
-				})
-				mock_get_configs.return_value = [default_profile]
-				with mock_command(LocalMyCommand, TARGETS, {'profiles': [custom_profile]}, []) as cmd:
-					self.assertEqual(len(cmd.profiles), 1)
-					self.assertEqual(cmd.profiles[0].name, 'test_default')
-					self.assertEqual(cmd.run_opts.get('timeout'), 100)
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.CONFIG.profiles.defaults', ['test_default']):
+				with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+					default_profile = TemplateLoader(input={
+						'name': 'test_default',
+						'type': 'profile',
+						'opts': {'timeout': 50}
+					})
+					mock_get_configs.return_value = [default_profile]
+					with mock_command(LocalMyCommand, TARGETS, {'profiles': [custom_profile]}, []) as cmd:
+						self.assertEqual(len(cmd.profiles), 1)
+						self.assertEqual(cmd.profiles[0].name, 'test_default')
+						self.assertEqual(cmd.run_opts.get('timeout'), 100)

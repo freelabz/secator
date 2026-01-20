@@ -12,16 +12,6 @@ class Workflow(Runner):
 
 	default_exporters = CONFIG.workflows.exporters
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secator.celery import run_workflow
-		return run_workflow.delay(args=args, kwargs=kwargs)
-
-	@classmethod
-	def s(cls, *args, **kwargs):
-		from secator.celery import run_workflow
-		return run_workflow.s(args=args, kwargs=kwargs)
-
 	def build_celery_workflow(self, chain_previous_results=False):
 		"""Build Celery workflow for workflow execution.
 
