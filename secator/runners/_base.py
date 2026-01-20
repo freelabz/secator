@@ -823,6 +823,7 @@ class Runner:
 		data.update({
 			'config': self.config.toDict(),
 			'opts': self.config.supported_opts,
+			'profiles': [p.name for p in self.profiles],
 			'has_parent': self.has_parent,
 			'has_children': self.has_children,
 			'chunk': self.chunk,
