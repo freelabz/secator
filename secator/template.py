@@ -58,7 +58,8 @@ class TemplateLoader(DotMap):
 	def toDict(self, *args, **kwargs):
 		serialize = kwargs.pop('serialize', False)
 		d = super().toDict(*args, **kwargs)
-		if serialize:
+		config_type = d.get('type')
+		if serialize and config_type != 'profile':
 			d['opts'] = serialize_config_options(get_config_options(self))
 		return d
 
@@ -93,10 +94,6 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 	from secator.tree import build_runner_tree, walk_runner_tree, get_flat_node_list
 	from secator.utils import debug
 	from secator.runners.task import Task
-
-	# Abort if config type is profile
-	if config.type == 'profile':
-		return OrderedDict()
 
 	# Task config created on-the-fly
 	if config.type == 'task':
