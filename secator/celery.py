@@ -149,6 +149,7 @@ def run_task(self, config, targets, results=[], run_opts={}, hooks={}, context={
 	console.print(Info(message=f'Running task {self.request.id}'))
 	context = context or {}
 	context['celery_id'] = self.request.id
+	run_opts['sync'] = False
 	task = Task(
 		config=config,
 		inputs=targets,
@@ -165,6 +166,11 @@ def run_workflow(self, config, targets, results=[], run_opts={}, hooks={}, conte
 	console.print(Info(message=f'Running workflow {self.request.id}'))
 	context = context or {}
 	context['celery_id'] = self.request.id
+	console.print('Results: ', results)
+	console.print('Config: ', config)
+	console.print('Targets: ', targets)
+	console.print('Run opts: ', run_opts)
+	run_opts['sync'] = False
 	workflow = Workflow(
 		config=config,
 		inputs=targets,
@@ -181,6 +187,7 @@ def run_scan(self, config, targets, results=[], run_opts={}, hooks={}, context={
 	console.print(Info(message=f'Running scan {self.request.id}'))
 	context = context or {}
 	context['celery_id'] = self.request.id
+	run_opts['sync'] = False
 	scan = Scan(
 		config=config,
 		inputs=targets,
