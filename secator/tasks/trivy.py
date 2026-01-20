@@ -52,7 +52,7 @@ class trivy(Vuln):
 	install_version = 'v0.61.1'
 	install_cmd = (
 		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'
-		f'sudo sh -s -- -b {CONFIG.dirs.bin} [install_version]'
+		f'sh -s -- -b {CONFIG.dirs.bin} [install_version]'
 	)
 	github_handle = 'aquasecurity/trivy'
 

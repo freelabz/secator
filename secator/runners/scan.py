@@ -15,11 +15,6 @@ class Scan(Runner):
 
 	default_exporters = CONFIG.scans.exporters
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secator.celery import run_scan
-		return run_scan.delay(args=args, kwargs=kwargs)
-
 	def build_celery_workflow(self):
 		"""Build Celery workflow for scan execution.
 

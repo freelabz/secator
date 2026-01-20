@@ -145,33 +145,27 @@ def chunker(seq, size):
 
 
 @app.task(bind=True)
-def run_task(self, args=[], kwargs={}):
-	console.print(Info(message=f'Running task {self.request.id}'))
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
-	kwargs['context']['celery_id'] = self.request.id
-	task = Task(*args, **kwargs)
-	task.run()
-
-
-@app.task(bind=True)
-def run_workflow(self, args=[], kwargs={}):
-	console.print(Info(message=f'Running workflow {self.request.id}'))
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
-	kwargs['context']['celery_id'] = self.request.id
-	workflow = Workflow(*args, **kwargs)
-	workflow.run()
-
-
-@app.task(bind=True)
-def run_scan(self, args=[], kwargs={}):
-	console.print(Info(message=f'Running scan {self.request.id}'))
-	if 'context' not in kwargs:
-		kwargs['context'] = {}
-	kwargs['context']['celery_id'] = self.request.id
-	scan = Scan(*args, **kwargs)
-	scan.run()
+def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, validators={}, context={}):
+	context = context or {}
+	context['celery_id'] = self.request.id
+	run_opts['sync'] = False
+	run_opts["no_poll"] = True
+	run_opts["no_live_updates"] = True
+	runners = {"scan": Scan, "workflow": Workflow, "task": Task}
+	if config.type not in runners:
+		raise ValueError(f"Invalid runner type: {config.type}")
+	runner_cls = runners[config.type]
+	console.print(Info(message=f'Running {config.type} {self.request.id}'))
+	runner = runner_cls(
+		config,
+		inputs=targets,
+		results=results,
+		run_opts=run_opts,
+		hooks=hooks,
+		validators=validators,
+		context=context,
+	)
+	runner.run()
 
 
 @app.task(bind=True)

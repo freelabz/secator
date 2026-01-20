@@ -34,6 +34,10 @@ STATE_COLORS = {
 	'REVOKED': 'bold magenta'
 }
 
+# Available drivers and exporters
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
+
 # Vocab
 ALIVE = 'alive'
 AUTO_CALIBRATION = 'auto_calibration'
@@ -156,6 +160,7 @@ for addon, module in [
 	('worker', 'eventlet'),
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
+	('api', 'requests'),
 	('mongodb', 'pymongo'),
 	('redis', 'redis'),
 	('dev', 'flake8'),

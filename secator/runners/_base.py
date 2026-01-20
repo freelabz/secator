@@ -95,7 +95,8 @@ class Runner:
 
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
-		self.config = DotMap(config.toDict())
+		self.serialize_config = run_opts.get('serialize_config', True)
+		self.config = self._process_config(config)
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description or '')
 		self.workspace_name = context.get('workspace_name', 'default')
@@ -205,6 +206,7 @@ class Runner:
 
 		# Run extractors on results
 		self._run_extractors()
+		self._merge_opts_defaults()
 		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
 		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
 		self.debug(f'print opts ({len(self.resolved_print_opts)})', obj=self.resolved_print_opts, sub='init')
@@ -249,6 +251,26 @@ class Runner:
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
+
+	def _process_config(self, config):
+		"""Process the configuration in different formats (dict, TemplateLoader, DotMap).
+
+		Args:
+			config (dict): The configuration to process.
+
+		Returns:
+			DotMap: The processed configuration.
+		"""
+		from secator.loader import TemplateLoader
+		if isinstance(config, TemplateLoader):
+			config = DotMap(config.toDict(serialize=self.serialize_config))
+		elif isinstance(config, dict):
+			config = DotMap(config)
+		elif isinstance(config, DotMap):
+			pass
+		else:
+			raise TypeError(f'Invalid configuration type: {type(config)}')
+		return config
 
 	@property
 	def resolved_opts(self):
@@ -395,6 +417,36 @@ class Runner:
 		"""
 		return list(self.__iter__())
 
+	@classmethod
+	def delay(cls, config, targets, **run_opts):
+		"""Run runner asynchronously via Celery.
+
+		Args:
+			config: TemplateLoader config.
+			targets: Target(s) for the runner.
+			**run_opts: Run options.
+
+		Returns:
+			celery.result.AsyncResult: Celery async result.
+		"""
+		from secator.celery import start_runner
+		hooks = run_opts.pop('hooks', {})
+		results = run_opts.pop('results', [])
+		context = run_opts.pop('context', {})
+		validators = run_opts.pop('validators', [])
+		return start_runner.apply_async(
+			kwargs={
+				'config': config,
+				'targets': targets,
+				'results': results,
+				'run_opts': run_opts,
+				'hooks': hooks,
+				'validators': validators,
+				'context': context
+			},
+			queue='celery'
+		)
+
 	def __iter__(self):
 		"""Process results from derived runner class in real-time and yield results.
 
@@ -470,6 +522,12 @@ class Runner:
 		self.inputs = sorted(list(set(inputs)))
 		self.debug(f'extracted {len(self.inputs)} inputs', sub='init')
 		self.run_opts = run_opts
+
+	def _merge_opts_defaults(self):
+		"""Merge config defaults with run options."""
+		for k, v in self.config.opts.items():
+			if k not in self.run_opts and v['default']:
+				self.run_opts[k] = v['default']
 
 	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
 		"""Add item to runner results.
@@ -765,6 +823,7 @@ class Runner:
 		data.update({
 			'config': self.config.toDict(),
 			'opts': self.config.supported_opts,
+			'profiles': [p.name for p in self.profiles],
 			'has_parent': self.has_parent,
 			'has_children': self.has_children,
 			'chunk': self.chunk,
@@ -1153,7 +1212,7 @@ class Runner:
 		"""Resolve profiles and update run options.
 
 		Args:
-			profiles (list[str]): List of profile names to resolve.
+			profiles (list[str | TemplateLoader]): List of profile names or TemplateLoader instances to resolve.
 
 		Returns:
 			list: List of profiles.
@@ -1167,11 +1226,20 @@ class Runner:
 			profiles = profiles.split(',')
 
 		# Add default profiles
+		# Extract profile names from the list (handling both strings and TemplateLoader instances)
+		# Note: Import is local to avoid circular dependency (template.py imports from runners.task)
+		from secator.template import TemplateLoader
+		existing_profile_names = set()
+		for p in profiles:
+			if isinstance(p, str):
+				existing_profile_names.add(p)
+			elif isinstance(p, TemplateLoader):
+				existing_profile_names.add(p.name)
+
 		default_profiles = CONFIG.profiles.defaults
 		for p in default_profiles:
-			if p in profiles:
-				continue
-			profiles.append(p)
+			if p not in existing_profile_names:
+				profiles.append(p)
 
 		# Abort if no profiles
 		if not profiles:
@@ -1181,11 +1249,18 @@ class Runner:
 		templates = []
 		profile_configs = get_configs_by_type('profile')
 		for pname in profiles:
-			matches = [p for p in profile_configs if p.name == pname]
-			if not matches:
-				self._print(Warning(message=f'Profile "{pname}" was not found. Run [bold green]secator profiles list[/] to see available profiles.'), rich=True)  # noqa: E501
+			# Handle TemplateLoader instances directly
+			if isinstance(pname, TemplateLoader):
+				templates.append(pname)
+			# Handle string profile names
+			elif isinstance(pname, str):
+				matches = [p for p in profile_configs if p.name == pname]
+				if not matches:
+					self._print(Warning(message=f'Profile "{pname}" was not found. Run [bold green]secator profiles list[/] to see available profiles.'), rich=True)  # noqa: E501
+				else:
+					templates.append(matches[0])
 			else:
-				templates.append(matches[0])
+				self._print(Warning(message=f'Profile "{pname}" has invalid type {type(pname).__name__}. Expected str or TemplateLoader.'), rich=True)  # noqa: E501
 
 		if not templates:
 			self.debug('no profiles loaded', sub='init')

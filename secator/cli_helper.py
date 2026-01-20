@@ -12,7 +12,7 @@ from rich_click.rich_click import _get_rich_console
 
 from secator.config import CONFIG
 from secator.click import CLICK_LIST
-from secator.definitions import ADDONS_ENABLED
+from secator.definitions import ADDONS_ENABLED, AVAILABLE_DRIVERS, AVAILABLE_EXPORTERS
 from secator.runners import Scan, Task, Workflow
 from secator.template import get_config_options
 from secator.tree import build_runner_tree
@@ -24,10 +24,10 @@ from secator.completion import complete_profiles, complete_workspaces, complete_
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
 WORKSPACES_STR = '|'.join([f'[dim yellow3]{_}[/]' for _ in WORKSPACES])
 PROFILES_STR = ','.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_type('profile')])
-DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['mongodb', 'gcs']])
+DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_DRIVERS])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
-EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['csv', 'gdrive', 'json', 'table', 'txt']])
+EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_EXPORTERS])
 
 CLI_OUTPUT_OPTS = {
 	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o', 'shell_complete': complete_exporters},  # noqa: E501
@@ -205,7 +205,7 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		yaml = opts['yaml']
 		tree = opts['tree']
-		context = {'workspace_name': ws}
+		context = {'workspace_name': ws, 'workspace_id': ws}
 		enable_pyinstrument = opts['enable_pyinstrument']
 		enable_memray = opts['enable_memray']
 		contextmanager = nullcontext()
@@ -255,7 +255,7 @@ def register_runner(cli_endpoint, config):
 		hooks = []
 		drivers = driver.split(',') if driver else []
 		drivers = list(set(CONFIG.drivers.defaults + drivers))
-		supported_drivers = ['mongodb', 'gcs']
+		supported_drivers = AVAILABLE_DRIVERS
 		for driver in drivers:
 			if driver in supported_drivers:
 				if not ADDONS_ENABLED[driver]:
@@ -271,6 +271,15 @@ def register_runner(cli_endpoint, config):
 				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
 				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
 				console.print(f'Supported drivers: {supported_drivers_str}')
+				sys.exit(1)
+
+		if driver == 'api':
+			try:
+				from secator.hooks.api import get_workspace_name
+				workspace_name = get_workspace_name(context.get('workspace_id'))
+				context['workspace_name'] = workspace_name
+			except Exception as e:
+				console.print(f'[bold red]Error getting workspace from API: {e}.[/]')
 				sys.exit(1)
 
 		if enable_pyinstrument or enable_memray:

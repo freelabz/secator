@@ -109,6 +109,7 @@ class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
 	force_source_install: bool = False
+	prompt_sudo_password: bool = True
 
 
 class HTTP(StrictModel):
@@ -205,12 +206,26 @@ class Providers(StrictModel):
 	}
 
 
+class ApiAddon(StrictModel):
+	enabled: bool = False
+	url: str = 'https://app.secator.cloud/api'
+	key: str = ''
+	header_name: str = 'Bearer'
+	force_ssl: bool = True
+	runner_create_endpoint: str = 'runners'
+	runner_update_endpoint: str = 'runner/{runner_id}'
+	finding_create_endpoint: str = 'findings'
+	finding_update_endpoint: str = 'finding/{finding_id}'
+	workspace_get_endpoint: str = 'workspace/{workspace_id}'
+
+
 class Addons(StrictModel):
 	gdrive: GoogleDriveAddon = GoogleDriveAddon()
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 	vulners: VulnersAddon = VulnersAddon()
+	api: ApiAddon = ApiAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -682,7 +697,7 @@ if not CONFIG:
 for name, dir in CONFIG.dirs.items():
 	if not dir.exists():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
-		dir.mkdir(parents=False)
+		dir.mkdir(parents=True)
 		console.print('[bold green]ok.[/]')
 
 # Download wordlists and payloads

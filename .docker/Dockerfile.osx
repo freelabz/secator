@@ -1,12 +1,13 @@
+# syntax=docker/dockerfile:1
+# check=skip=SecretsUsedInArgOrEnv
+
 FROM sickcodes/docker-osx:latest
 ARG flavor=full
 ARG build_from_source=false
-ENV PATH="${PATH}:/home/arch/.local/bin"
-ENV GOBIN="/home/arch/.local/bin"
-ENV CARGO_HOME="/home/arch/.local"
+ARG python_version=3.12.0
+ENV PYENV_ROOT="/home/arch/pyenv"
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/linuxbrew/.linuxbrew/bin:$PATH"
 RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-RUN echo >> /home/arch/.bashrc
-RUN echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /home/arch/.bashrc
 RUN sudo pacman -Syu --noconfirm && \
     sudo pacman -S --noconfirm -y \
 	base-devel \
@@ -18,18 +19,60 @@ RUN sudo pacman -Syu --noconfirm && \
     openssl \
 	proxychains \
 	proxychains-ng \
-	python \
-	python-pip \
-	python-pipx \
+	pyenv \
 	ruby \
 	rubygems \
 	sudo \
 	unzip \
 	vim \
     wget
+
+# Install pyenv and Python 3.12
+RUN mkdir -p $PYENV_ROOT
+RUN sudo git clone https://github.com/pyenv/pyenv.git $PYENV_ROOT && \
+    echo "export PYENV_ROOT=\"$PYENV_ROOT\"" | sudo tee /etc/profile.d/pyenv.sh && \
+    echo 'export PATH="$PYENV_ROOT/bin:$PATH"' | sudo tee -a /etc/profile.d/pyenv.sh && \
+    echo 'eval "$(pyenv init --path)"' | sudo tee -a /etc/profile.d/pyenv.sh && \
+    sudo chmod +x /etc/profile.d/pyenv.sh
+
+RUN source /etc/profile.d/pyenv.sh && \
+    pyenv install $python_version && \
+    pyenv global $python_version
+
+RUN sudo pacman -Syu --noconfirm \
+	python-pip \
+	python-pipx
+
+RUN sudo ln -sf $PYENV_ROOT/versions/$python_version/bin/python /usr/local/bin/python && \
+	sudo ln -sf $PYENV_ROOT/versions/$python_version/bin/pip /usr/local/bin/pip && \
+    sudo chmod +x /usr/local/bin/python && \
+    sudo chmod +x /usr/local/bin/pip
+
 COPY . /code
 WORKDIR /code
-USER arch
+RUN sudo useradd -m -s /bin/bash secator
+
+# Allow running 'nmap' with sudo; for privileged scans
+RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" | sudo tee -a /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/sbin/arp *" | sudo tee -a /etc/sudoers
+
+# Allow user to install commands
+RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/pacman -S *" | sudo tee -a /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /bin/ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" | sudo tee -a /etc/sudoers && \
+	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock pacman -S *" | sudo tee -a /etc/sudoers && \
+    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/flock /tmp/install.lock ln -sf /usr/lib/libpcap.so /usr/lib/libpcap.so.0.8" | sudo tee -a /etc/sudoers
+
+# Ensure proper permissions for sudoers
+RUN sudo chmod 0440 /etc/sudoers
+
+USER secator
+ENV PATH="${PATH}:/home/secator/.local/bin"
+ENV CARGO_HOME="/home/secator/.local"
+ENV GOBIN="/home/secator/.local/bin"
+ENV GOPATH="/home/secator/go"
+ENV TERM="xterm-256color"
+ENV PIPX_DEFAULT_PYTHON="/usr/local/bin/python"
+ENV SECATOR_SECURITY_PROMPT_SUDO_PASSWORD="0"
 RUN pipx install . && \
 	secator install addons worker && \
 	secator install addons gdrive && \
@@ -39,4 +82,15 @@ RUN pipx install . && \
 	secator install addons dev
 RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi
 RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
+
+# In normal mode, revoke installation permissions after tools are installed
+USER root
+RUN if [ "$flavor" != "lite" ]; then \
+	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/pacman -S \*/d' /etc/sudoers && \
+	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/bin\/ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers && \
+	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock pacman -S \*/d' /etc/sudoers && \
+	sudo sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers; \
+	fi
+USER secator
+
 ENTRYPOINT ["secator"]

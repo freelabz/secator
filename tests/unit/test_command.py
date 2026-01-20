@@ -279,8 +279,9 @@ class TestCommandChunking(unittest.TestCase):
 
 		# Test with async mode (sync=False) and many targets
 		targets = ['target1', 'target2', 'target3', 'target4', 'target5']
-		cmd = TestCmd(targets)
-		self.assertFalse(cmd.needs_chunking(sync=False))
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=TestCmd):
+			cmd = TestCmd(targets)
+			self.assertFalse(cmd.needs_chunking(sync=False))
 
 	def test_needs_chunking_with_default_size(self):
 		"""Test that chunking works with default input_chunk_size."""
@@ -291,8 +292,9 @@ class TestCommandChunking(unittest.TestCase):
 
 		# Test with async mode (sync=False) and targets exceeding chunk size
 		targets = ['target1', 'target2', 'target3']
-		cmd = TestCmd(targets)
-		self.assertTrue(cmd.needs_chunking(sync=False))
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=TestCmd):
+			cmd = TestCmd(targets)
+			self.assertTrue(cmd.needs_chunking(sync=False))
 
 	def test_needs_chunking_under_chunk_size(self):
 		"""Test that chunking doesn't happen when inputs are under chunk size."""
@@ -303,5 +305,6 @@ class TestCommandChunking(unittest.TestCase):
 
 		# Test with async mode (sync=False) and targets under chunk size
 		targets = ['target1', 'target2']
-		cmd = TestCmd(targets)
-		self.assertFalse(cmd.needs_chunking(sync=False))
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=TestCmd):
+			cmd = TestCmd(targets)
+			self.assertFalse(cmd.needs_chunking(sync=False))

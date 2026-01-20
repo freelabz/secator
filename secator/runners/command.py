@@ -168,7 +168,8 @@ class Command(Runner):
 			run_opts=run_opts,
 			hooks=hooks,
 			validators=validators,
-			context=context)
+			context=context
+		)
 
 		# Cmd name
 		self.cmd_name = self.__class__.cmd.split(' ')[0]
@@ -358,6 +359,7 @@ class Command(Runner):
 		kwargs['print_line'] = True
 		kwargs['process'] = kwargs.get('process', False)
 		kwargs['enable_validators'] = False
+		kwargs['serialize_config'] = False
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
@@ -452,7 +454,8 @@ class Command(Runner):
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
-			if sudo_required:
+			if CONFIG.security.prompt_sudo_password and sudo_required:
+				self.debug('prompting for sudo password', sub='start')
 				sudo_password, error = self._prompt_sudo(self.cmd)
 				if error:
 					yield Error(message=error)
@@ -463,6 +466,7 @@ class Command(Runner):
 
 			# Check command is installed and auto-install
 			if not self.no_process and not self.is_installed():
+				self.debug('command is not installed, auto-installing', sub='start')
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
 					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
@@ -535,8 +539,6 @@ class Command(Runner):
 			bool: True if the command is installed, False otherwise.
 		"""
 		cmd = ["which", self.cmd_name]
-		if self.requires_sudo:
-			cmd = ["sudo"] + cmd
 		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		result.communicate()
 		return result.returncode == 0

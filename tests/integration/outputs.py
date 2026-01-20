@@ -18,7 +18,7 @@ OUTPUTS_CHECKS = {
                     'function': lambda item: item.request_headers['Hello'] == 'World',
                 }
             ],
-            'runner': '^(?!urlfinder|xurlfind3r|gau$).*',
+            'runner': '^(?!urlfinder|xurlfind3r|gau|urlparser$).*',
         }
     },
     # 'runner': {
@@ -278,7 +278,7 @@ OUTPUTS_TASKS = {
             _source='nuclei')
     ],
     'subfinder': [
-        Subdomain(host='support.github.com', domain='github.com', _source='subfinder')
+        Subdomain(host='community.github.com', domain='github.com', _source='subfinder')
     ],
     'trivy': [
         Vulnerability(

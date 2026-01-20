@@ -22,6 +22,9 @@ tasks:
     jswhois:
       description: Get WHOIS information
 
+    whois:
+      description: Extract domain information from WHOIS data
+
     httpx:
       description: Run HTTP probe on domain
       tech_detect: True

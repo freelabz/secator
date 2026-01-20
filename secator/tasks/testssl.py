@@ -26,6 +26,7 @@ class testssl(Command):
 	file_eof_newline = True
 	version_flag = ''
 	opt_prefix = '--'
+	ignore_return_code = True
 	opts = {
 		'verbose': {'is_flag': True, 'default': False, 'internal': True, 'display': True, 'help': 'Record all SSL/TLS info, not only critical info'},  # noqa: E501
 		'parallel': {'is_flag': True, 'default': False, 'help': 'Test multiple hosts in parallel'},
@@ -122,7 +123,10 @@ class testssl(Command):
 
 				# Process errors
 				if id.startswith("scanProblem"):
-					yield Error(message=finding)
+					if "Can't connect to" in finding:
+						yield Warning(message=finding)
+					else:
+						yield Error(message=finding)
 
 				# Process warnings
 				elif id.startswith("engine_problem"):
@@ -281,7 +285,6 @@ class testssl(Command):
 						severity='medium',
 						confidence='high',
 						extra_data={
-							'id': id,
 							'expiration_date': Certificate.format_date(cert.not_after)
 						}
 					)

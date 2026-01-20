@@ -30,9 +30,6 @@ class arpscan(Command):
 	install_pre = {
 		'*': ['arp-scan'],
 	}
-	install_post = {
-		'*': 'sudo ln -s /usr/sbin/arp-scan /usr/local/bin/arp-scan || true'
-	}
 
 	@staticmethod
 	def on_cmd(self):
