@@ -395,6 +395,51 @@ class Runner:
 		"""
 		return list(self.__iter__())
 
+	@classmethod
+	def delay(cls, config, targets, **run_opts):
+		"""Run runner asynchronously via Celery.
+
+		Args:
+			config: TemplateLoader config.
+			targets: Target(s) for the runner.
+			**run_opts: Run options.
+
+		Returns:
+			celery.result.AsyncResult: Celery async result.
+		"""
+		from secator.celery import run_task, run_workflow, run_scan
+
+		# Extract special kwargs
+		hooks = run_opts.pop('hooks', {})
+		results = run_opts.pop('results', [])
+		context = run_opts.pop('context', {})
+
+		# Normalize targets to list
+		if not isinstance(targets, list):
+			targets = [targets]
+
+		# Select the appropriate Celery task based on config type
+		celery_tasks = {
+			'task': run_task,
+			'workflow': run_workflow,
+			'scan': run_scan
+		}
+		celery_task = celery_tasks.get(config.type)
+		if not celery_task:
+			raise ValueError(f'Unknown runner type: {config.type}')
+
+		return celery_task.apply_async(
+			kwargs={
+				'config': config,
+				'targets': targets,
+				'results': results,
+				'run_opts': run_opts,
+				'hooks': hooks,
+				'context': context
+			},
+			queue='celery'
+		)
+
 	def __iter__(self):
 		"""Process results from derived runner class in real-time and yield results.
 

@@ -8,11 +8,6 @@ class Task(Runner):
 
 	default_exporters = CONFIG.tasks.exporters
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secator.celery import run_task
-		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='celery')
-
 	def build_celery_workflow(self):
 		"""Build Celery workflow for task execution.
 
