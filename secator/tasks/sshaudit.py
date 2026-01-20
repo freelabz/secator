@@ -47,7 +47,7 @@ class sshaudit(Command):
 		f'ln -sf {CONFIG.dirs.share}/ssh-audit_[install_version]/ssh-audit.py {CONFIG.dirs.bin}/ssh-audit && '
 		f'chmod +x {CONFIG.dirs.bin}/ssh-audit'
 	)
-	profile = 'io'
+	profile = 'small'
 	ignore_return_code = True
 
 	@staticmethod

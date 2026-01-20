@@ -63,7 +63,7 @@ class x8(HttpParamsFuzzer):
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):

@@ -390,7 +390,7 @@ def replace(task_instance, sig):
 def break_task(task, task_opts, results=[]):
 	"""Break a task into multiple of the same type."""
 	chunks = task.inputs
-	if task.input_chunk_size > 1:
+	if task.input_chunk_size > 1 and task.input_chunk_size != -1:
 		chunks = list(chunker(task.inputs, task.input_chunk_size))
 	debug(
 		'',

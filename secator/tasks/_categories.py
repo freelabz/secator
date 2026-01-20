@@ -200,7 +200,7 @@ class HttpFuzzer(Command):
 			process=True,
 		)
 		wordlist_size_mb = os.path.getsize(wordlist) / (1024 * 1024)
-		return 'cpu' if wordlist_size_mb > 5 else 'io'
+		return 'large' if wordlist_size_mb > 5 else 'medium'
 
 
 class HttpParamsFuzzer(HttpFuzzer):

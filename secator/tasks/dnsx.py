@@ -41,7 +41,7 @@ class dnsx(ReconDns):
 	install_version = 'v1.2.2'
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
 	github_handle = 'projectdiscovery/dnsx'
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def validate_input(self, inputs):
