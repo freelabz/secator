@@ -1,3 +1,4 @@
+import json
 import yaml
 
 from collections import OrderedDict
@@ -54,6 +55,13 @@ class TemplateLoader(DotMap):
 		yaml_highlight = Syntax(yaml_str, 'yaml', line_numbers=True)
 		console.print(yaml_highlight)
 
+	def toDict(self, *args, **kwargs):
+		serialize = kwargs.pop('serialize', False)
+		d = super().toDict(*args, **kwargs)
+		if serialize:
+			d['opts'] = serialize_config_options(get_config_options(self))
+		return d
+
 
 def get_short_id(id_str, config_name):
 	"""Remove config name prefix from ID string if present.
@@ -85,6 +93,10 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 	from secator.tree import build_runner_tree, walk_runner_tree, get_flat_node_list
 	from secator.utils import debug
 	from secator.runners.task import Task
+
+	# Abort if config type is profile
+	if config.type == 'profile':
+		return OrderedDict()
 
 	# Task config created on-the-fly
 	if config.type == 'task':
@@ -292,3 +304,28 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		debug(f'\t[bold]{k}[/] -> [bold green]{v.get("default", "N/A")}[/] [dim red](default from {v.get("default_from", "N/A")})[/]', sub=f'cli.{config.name}')  # noqa: E501
 		normalized_opts[k] = v
 	return normalized_opts
+
+
+def serialize_config_options(options):
+	"""
+	Serialize config options to JSON format.
+
+	Args:
+		options (dict): Config options.
+
+	Returns:
+		str: Serialized config options.
+	"""
+	for opt_name, opt_config in options.items():
+		type = opt_config.get("type")
+		applies_to = list(opt_config.get("applies_to", {}))
+		if applies_to:
+			options[opt_name]["applies_to"] = applies_to
+		is_flag = opt_config.get("is_flag", False)
+		if type and getattr(type, "__name__", None):
+			options[opt_name]["type"] = type.__name__
+		if is_flag:
+			options[opt_name]["type"] = "bool"
+	options = {k.replace("-", "_"): v for k, v in options.items()}
+	options_str = json.dumps(options, default=str, indent=4)
+	return json.loads(options_str)

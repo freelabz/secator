@@ -229,7 +229,7 @@ class TestDelayMethods(unittest.TestCase):
 
 	def test_run_workflow_celery_task(self):
 		"""Test run_workflow Celery task with config as TemplateLoader."""
-		from secator.celery import run_workflow
+		from secator.celery import start_runner
 		from secator.loader import get_configs_by_type
 
 		workflows = get_configs_by_type('workflow')
@@ -239,7 +239,7 @@ class TestDelayMethods(unittest.TestCase):
 		config = workflows[0]
 
 		# Create a signature with config as TemplateLoader
-		sig = run_workflow.s(
+		sig = start_runner.s(
 			config=config,
 			targets=['example.com'],
 			results=[],
@@ -251,7 +251,7 @@ class TestDelayMethods(unittest.TestCase):
 
 	def test_run_scan_celery_task(self):
 		"""Test run_scan Celery task with config as TemplateLoader."""
-		from secator.celery import run_scan
+		from secator.celery import start_runner
 		from secator.loader import get_configs_by_type
 
 		scans = get_configs_by_type('scan')
@@ -261,7 +261,7 @@ class TestDelayMethods(unittest.TestCase):
 		config = scans[0]
 
 		# Create a signature with config as TemplateLoader
-		sig = run_scan.s(
+		sig = start_runner.s(
 			config=config,
 			targets=['example.com'],
 			results=[],

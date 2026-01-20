@@ -84,8 +84,6 @@ class Workflow(Runner):
 				if condition:
 					# debug(f'{node.id} evaluating {condition} with opts {opts}', sub=self.config.name)
 					safe_globals = {'__builtins__': {'len': len}}
-					print('Condition	', condition)
-					print('Local Namespace', local_ns)
 					result = eval(condition, safe_globals, local_ns)
 					if not result:
 						debug(f'{node.id} skipped task because condition is not met: {condition}', sub=self.config.name)
