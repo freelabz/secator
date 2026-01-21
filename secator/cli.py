@@ -196,7 +196,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 	if reload:
 		# Check Celery addon is installed
 		if not ADDONS_ENABLED['dev']:
-			console.print(Error(message='Missing worker addon: please run "secator install addons worker".'))
+			console.print(Error(message='Missing dev addon: please run "secator install addons dev".'))
 			sys.exit(1)
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
 		cmd = f'{Path(sys.executable).parent / "watchmedo"} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
