@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.25.0](https://github.com/freelabz/secator/compare/v0.24.0...v0.25.0) (2026-01-21)
+
+
+### Features
+
+* **hook:** add API addon for external application integration ([#889](https://github.com/freelabz/secator/issues/889)) ([11fdde2](https://github.com/freelabz/secator/commit/11fdde2e124014793e772859473270ebb23cf96e))
+* **installer:** add bash install script ([#902](https://github.com/freelabz/secator/issues/902)) ([c753662](https://github.com/freelabz/secator/commit/c7536620ef3b65d1d40ebb92d2b94463b8595921))
+* **runner:** disable input chunking when input_chunk_size=-1 ([#895](https://github.com/freelabz/secator/issues/895)) ([b45ac15](https://github.com/freelabz/secator/commit/b45ac15954fc760e1517acbcf030871cec0b2aca))
+* **runner:** migrate queue profiles from io/cpu to size-based system ([#894](https://github.com/freelabz/secator/issues/894)) ([010a5b9](https://github.com/freelabz/secator/commit/010a5b9e92abc92f6159ad7b013b782b661d813a))
+* **runner:** support TemplateLoader instances in profiles parameter ([#899](https://github.com/freelabz/secator/issues/899)) ([affb762](https://github.com/freelabz/secator/commit/affb762dabaf589806691a8aa895ab449f71d0d3))
+* **workflows:** add whoisdomain to domain_recon workflow ([#903](https://github.com/freelabz/secator/issues/903)) ([f466025](https://github.com/freelabz/secator/commit/f4660254b37f230feede1ed300a8955c3ec7d873))
+
+
+### Bug Fixes
+
+* certificates, testssl bug, subdomains discovery, replay proxy ([#871](https://github.com/freelabz/secator/issues/871)) ([1c9c3c6](https://github.com/freelabz/secator/commit/1c9c3c6f1bd0e30c30368f04b994421127f0385a))
+* **cli:** worker reload in dev mode ([#908](https://github.com/freelabz/secator/issues/908)) ([374137d](https://github.com/freelabz/secator/commit/374137da8dc532460091d8047a92a438469f28fe))
+* **command:** sudo prompt issue ([#901](https://github.com/freelabz/secator/issues/901)) ([b2fe076](https://github.com/freelabz/secator/commit/b2fe076ab2bdb68bcc4dc6ef1da97d8bda312a84))
+* consolidate driver and exporter lists to single source of truth ([#845](https://github.com/freelabz/secator/issues/845)) ([c7c7d99](https://github.com/freelabz/secator/commit/c7c7d999828a390ae25859dbbab2923278be0045))
+* **core:** delay and async runs ([#905](https://github.com/freelabz/secator/issues/905)) ([4899081](https://github.com/freelabz/secator/commit/4899081ddc57199ea72ee641ce1959fe4050df09))
+* **docs:** improve scripts for generating images and cli record command ([#885](https://github.com/freelabz/secator/issues/885)) ([c709a62](https://github.com/freelabz/secator/commit/c709a620d56a35fa80ba1edc50e27f4b976555b4))
+* **docs:** update README.md ([4349545](https://github.com/freelabz/secator/commit/4349545385fdbabe1461d4d96e129d50991e48ff))
+* **gif:** add gif editing commands ([#887](https://github.com/freelabz/secator/issues/887)) ([92bdab8](https://github.com/freelabz/secator/commit/92bdab8737c9163cb6164d38a46fb07de63d9319))
+* **install:** create parents dirs ([5c2d077](https://github.com/freelabz/secator/commit/5c2d077d87b691c342e37b43bcc87b3efc52fcd7))
+* **installer:** move binary name to avoid conflicts ([#888](https://github.com/freelabz/secator/issues/888)) ([320b8f7](https://github.com/freelabz/secator/commit/320b8f7ffcd27d1c7dc0e76dfce22879fddaadc4))
+* **lint:** lint fix ([e00efbe](https://github.com/freelabz/secator/commit/e00efbe7ea2b69117edaba6d1a62c5ecdb120cd5))
+* **misc:** tag duplicates log_hook, install source issue, debug issue, dnsx disable input_chunk_size ([#900](https://github.com/freelabz/secator/issues/900)) ([beee270](https://github.com/freelabz/secator/commit/beee2703ea36b87acca5aae7b6a8c38ce2b04774))
+* **mongodb:** add log hook for mongodb tag_duplicates ([#897](https://github.com/freelabz/secator/issues/897)) ([c96a2b3](https://github.com/freelabz/secator/commit/c96a2b3d2fe2897b3e6bce87ce792da128377fc8))
+* **mongodb:** add max_items to mongodb addon ([#884](https://github.com/freelabz/secator/issues/884)) ([4d67b88](https://github.com/freelabz/secator/commit/4d67b8889979a392d588fff31a4209f57678b3ce))
+* tag duplicates improv ([#864](https://github.com/freelabz/secator/issues/864)) ([88a73d7](https://github.com/freelabz/secator/commit/88a73d7f5ad1bbdfd082c9aa1b5643883747b373))
+* **tasks:** katana invalid doc + xurlfind3r opt char ([#891](https://github.com/freelabz/secator/issues/891)) ([5f20b20](https://github.com/freelabz/secator/commit/5f20b20b6a3494a9689ab7fbc37db4f07f398c94))
+* **tasks:** remove dirsearch support temporarily ([#882](https://github.com/freelabz/secator/issues/882)) ([da8dadc](https://github.com/freelabz/secator/commit/da8dadcc49114b75df15de4815390ed8bbfcfb33))
+* **tasks:** remove x8 since build is broken ([#886](https://github.com/freelabz/secator/issues/886)) ([ef52135](https://github.com/freelabz/secator/commit/ef521354afb15b7836d39386baead55ddd23bf8c))
+* **tasks:** testssl warning when cannot connect ([#904](https://github.com/freelabz/secator/issues/904)) ([3eea8bd](https://github.com/freelabz/secator/commit/3eea8bd23e8d70c5019878543c8000505e6ad4ba))
+* **workflows:** only fuzz root urls in url_scan ([#896](https://github.com/freelabz/secator/issues/896)) ([4bca7ab](https://github.com/freelabz/secator/commit/4bca7ab9920fd57bf38aaa1d0fe9dde0dc2b384f))
+
 ## [0.24.0](https://github.com/freelabz/secator/compare/v0.23.0...v0.24.0) (2025-12-21)
 
 
