@@ -64,6 +64,19 @@ tasks:
       condition: port.host in targets and opts.scanners
     if: not opts.passive
 
+  dig:
+    description: Find virtual hosts with DNS zone transfers
+    record_type: AXFR
+    targets_:
+      - type: port
+        field: host
+        condition: port.ip
+    resolver_:
+      - type: port
+        field: ip
+        condition: port.host in targets
+    if: not opts.passive
+
   sshaudit:
     description: Audit SSH port
     targets_:
