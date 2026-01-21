@@ -194,8 +194,12 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 	cmd += ' --without-heartbeat' if without_heartbeat else ''
 
 	if reload:
+		# Check Celery addon is installed
+		if not ADDONS_ENABLED['dev']:
+			console.print(Error(message='Missing worker addon: please run "secator install addons worker".'))
+			sys.exit(1)
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
-		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
+		cmd = f'{Path(sys.executable).parent / "watchmedo"} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
 
 	if use_command_runner:
 		ret = Command.execute(cmd, name='secator_worker')
