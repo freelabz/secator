@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlparse
 
 
@@ -8,6 +9,10 @@ from secator.definitions import (OPT_NOT_SUPPORTED, HEADER,
 from secator.output_types import Vulnerability, Exploit, Warning
 from secator.tasks._categories import Vuln
 from secator.serializers import JSONSerializer
+
+
+# Pattern to identify version strings like: 1.0, 1.2.3, 2.4.39, 1.0.0-rc1, 7.4.1, etc.
+VERSION_PATTERN = r'^\d+(\.\d+)*([.-]\w+)*$'
 
 
 @task()
@@ -92,8 +97,18 @@ class search_vulns(Vuln):
 		# if cpes:
 		# 	common_extra_data.update({'cpes': cpes})
 
+		# Extract product and version from the input query
+		product, version = search_vulns.parse_product_version(matched_at)
+		if product:
+			common_extra_data['product'] = product
+		if version:
+			common_extra_data['version'] = version
+
 		# Yield each vulnerability
 		for cve_id, vuln_data in vulns.items():
+			# Merge extra data, with vulnerability-specific data taking precedence
+			vuln_extra_data = common_extra_data.copy()
+			vuln_extra_data.update(search_vulns.extract_extra_data(vuln_data))
 			yield Vulnerability(
 				id=cve_id,
 				name=cve_id,
@@ -104,7 +119,7 @@ class search_vulns(Vuln):
 				cvss_vec=vuln_data.get('cvss_vec', ''),
 				matched_at=matched_at,
 				references=search_vulns.extract_references(vuln_data),
-				extra_data=search_vulns.extract_extra_data(vuln_data),
+				extra_data=vuln_extra_data,
 				provider='search_vulns',
 				tags=search_vulns.extract_tags(vuln_data),
 			)
@@ -175,6 +190,34 @@ class search_vulns(Vuln):
 			refs.extend(exploits)
 
 		return refs
+
+	@staticmethod
+	def parse_product_version(query):
+		"""Parse product name and version from the input query.
+		
+		Args:
+			query: Input query string (e.g., "apache 2.4.39")
+			
+		Returns:
+			tuple: (product, version) where either can be empty string
+		"""
+		if not query:
+			return '', ''
+		
+		parts = query.strip().split()
+		if not parts:
+			return '', ''
+		
+		# If the last part looks like a version number, treat everything before it as the product name
+		if len(parts) >= 2:
+			last_part = parts[-1]
+			if re.match(VERSION_PATTERN, last_part):
+				product = ' '.join(parts[:-1])
+				version = last_part
+				return product, version
+		
+		# If we can't determine version, treat the whole query as product name
+		return query, ''
 
 	@staticmethod
 	def extract_extra_data(item):
