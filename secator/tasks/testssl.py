@@ -10,7 +10,7 @@ from secator.decorators import task
 from secator.output_types import Vulnerability, Certificate, Error, Info, Ip, Tag, Warning
 from secator.definitions import (PROXY, HOST, USER_AGENT, HEADER, OUTPUT_PATH,
 								CERTIFICATE_STATUS_UNKNOWN, CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED,
-								TIMEOUT)
+								TIMEOUT, HOST_PORT, URL, IP)
 from secator.tasks._categories import Command, OPTS
 
 
@@ -18,7 +18,7 @@ from secator.tasks._categories import Command, OPTS
 class testssl(Command):
 	"""SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
 	cmd = 'testssl.sh'
-	input_types = [HOST]
+	input_types = [HOST, HOST_PORT, URL, IP]
 	output_types = [Certificate, Vulnerability, Ip, Tag]
 	tags = ['dns', 'recon', 'tls']
 	input_flag = None
