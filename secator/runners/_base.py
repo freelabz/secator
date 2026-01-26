@@ -5,7 +5,7 @@ import sys
 import textwrap
 import uuid
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import time
 
@@ -112,7 +112,7 @@ class Runner:
 		self.output = ''
 		self.started = False
 		self.done = False
-		self.start_time = datetime.fromtimestamp(time())
+		self.start_time = datetime.fromtimestamp(time(), timezone.utc)
 		self.end_time = None
 		self.last_updated_db = None
 		self.last_updated_celery = None
@@ -288,7 +288,7 @@ class Runner:
 	def elapsed(self):
 		if self.done:
 			return self.end_time - self.start_time
-		return datetime.fromtimestamp(time()) - self.start_time
+		return datetime.fromtimestamp(time(), timezone.utc) - self.start_time
 
 	@property
 	def elapsed_human(self):
@@ -563,10 +563,10 @@ class Runner:
 				self.started = True
 				self.done = True
 				self.progress = 100
-				self.end_time = datetime.fromtimestamp(time())
+				self.end_time = datetime.fromtimestamp(time(), timezone.utc)
 			elif item.state in ['RUNNING']:
 				self.started = True
-				self.start_time = datetime.fromtimestamp(time())
+				self.start_time = datetime.fromtimestamp(time(), timezone.utc)
 				self.end_time = None
 			self.last_updated_celery = item._timestamp
 			return
@@ -960,7 +960,7 @@ class Runner:
 		if self.started:
 			return
 		self.started = True
-		self.start_time = datetime.fromtimestamp(time())
+		self.start_time = datetime.fromtimestamp(time(), timezone.utc)
 		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks}), chunk: {self.chunk}, chunk_count: {self.chunk_count}', sub='start')  # noqa: E501
 		self.log_start()
 		self.run_hooks('on_start', sub='start')
@@ -972,7 +972,7 @@ class Runner:
 		self.started = True
 		self.done = True
 		self.progress = 100
-		self.end_time = datetime.fromtimestamp(time())
+		self.end_time = datetime.fromtimestamp(time(), timezone.utc)
 		self.debug(f'completed (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')  # noqa: E501
 		self.mark_duplicates()
 		self.run_hooks('on_end', sub='end')
