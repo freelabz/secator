@@ -5,7 +5,7 @@ from urllib.parse import urlparse, urlunparse
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT,
-							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
+							   HEADER, HOST, HOST_PORT, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
 							   THREADS, TIMEOUT, URL, USER_AGENT)
@@ -38,7 +38,7 @@ CARIDDI_RENAME_LIST = {
 class cariddi(HttpCrawler):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
 	cmd = 'cariddi'
-	input_types = [URL]
+	input_types = [URL, HOST, HOST_PORT]
 	output_types = [Url, Tag]
 	tags = ['url', 'crawl']
 	input_flag = OPT_PIPE_INPUT

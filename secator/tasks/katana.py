@@ -5,7 +5,7 @@ from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
 from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-								 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
+								 FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, IP, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
 								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
@@ -19,7 +19,7 @@ EXCLUDED_PARAMS = ['v']
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana'
-	input_types = [URL]
+	input_types = [URL, HOST, HOST_PORT, IP]
 	output_types = [Url, Tag]
 	tags = ['url', 'crawl']
 	file_flag = '-list'
