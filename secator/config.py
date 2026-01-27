@@ -89,6 +89,7 @@ class Cli(StrictModel):
 	show_http_response_headers: bool = False
 	show_command_output: bool = False
 	exclude_http_response_headers: List[str] = ["connection", "content_type", "content_length", "date", "server"]
+	date_format: str = "%m/%d/%Y"  # US, use "%d/%m/%Y" for EUROPEAN format
 
 
 class Runners(StrictModel):

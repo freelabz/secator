@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi
+from secator.config import CONFIG
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
 
 
@@ -51,7 +52,7 @@ class Certificate(OutputType):
 	@staticmethod
 	def format_date(date):
 		if date:
-			return date.strftime("%m/%d/%Y")
+			return date.strftime(CONFIG.cli.date_format)
 		return '?'
 
 	def __repr__(self) -> str:
