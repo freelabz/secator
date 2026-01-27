@@ -1871,7 +1871,7 @@ def run_test(cmd, name=None, exit=True, verbose=False, use_command_runner=True):
 		ret = subprocess.run(cmd, shell=True)
 		if exit:
 			sys.exit(ret.returncode)
-		return ret
+		return ret.returncode
 	else:
 		result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
 		if name:
