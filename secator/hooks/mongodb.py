@@ -31,7 +31,8 @@ def get_mongodb_client():
 			escape_mongodb_url(MONGODB_URL),
 			maxPoolSize=MONGODB_MAX_POOL_SIZE,
 			serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT,
-			connect=False
+			connect=False,
+			tz_aware=True
 		)
 	return _mongodb_client
 
