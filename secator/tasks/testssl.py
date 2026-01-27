@@ -274,17 +274,4 @@ class testssl(Command):
 					# parent_certificate=None,
 				)
 				yield cert
-				if cert.is_expired():
-					yield Vulnerability(
-						name='SSL certificate expired',
-						provider='testssl',
-						description='The SSL certificate is expired. This can easily lead to domain takeovers',
-						matched_at=host,
-						ip=ip,
-						tags=['ssl', 'tls'],
-						severity='medium',
-						confidence='high',
-						extra_data={
-							'expiration_date': Certificate.format_date(cert.not_after)
-						}
-					)
+				yield from cert.get_vulnerabilities()

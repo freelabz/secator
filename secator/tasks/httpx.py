@@ -1,7 +1,7 @@
 import os
 import shlex
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from secator.decorators import task
 from secator.definitions import (DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
@@ -9,7 +9,7 @@ from secator.definitions import (DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
 								 URL, USER_AGENT, HOST, IP, HOST_PORT)
 from secator.config import CONFIG
-from secator.output_types import Url, Subdomain, Certificate
+from secator.output_types import Url, Subdomain, Certificate, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
 from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
@@ -20,7 +20,7 @@ class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
 	cmd = 'httpx-toolkit -irh'
 	input_types = [HOST, HOST_PORT, IP, URL]
-	output_types = [Url, Subdomain]
+	output_types = [Url, Subdomain, Vulnerability]
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -119,9 +119,11 @@ class httpx(Http):
 			not_after = tls.get('not_after', None)
 			if not_after:
 				not_after = datetime.strptime(not_after, '%Y-%m-%dT%H:%M:%SZ')
+				not_after = not_after.replace(tzinfo=timezone.utc)
 			not_before = tls.get('not_before', None)
 			if not_before:
 				not_before = datetime.strptime(not_before, '%Y-%m-%dT%H:%M:%SZ')
+				not_before = not_before.replace(tzinfo=timezone.utc)
 			cert = Certificate(
 				host=tls['host'],
 				subject_cn=subject_cn,
@@ -137,6 +139,7 @@ class httpx(Http):
 				status=tls.get('status'),
 			)
 			yield cert
+			yield from cert.get_vulnerabilities()
 
 			# Create subdomains from certificate CN and ANs.
 			yield from self._create_subdomain_from_tls_cert(subject_cn, item['url'], cert)

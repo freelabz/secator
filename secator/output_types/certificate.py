@@ -1,7 +1,7 @@
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
-from secator.output_types import OutputType
+from secator.output_types import OutputType, Vulnerability
 from secator.utils import rich_to_ansi
 from secator.config import CONFIG
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
@@ -38,12 +38,17 @@ class Certificate(OutputType):
 	_table_fields = ['ip', 'host']
 	_sort_by = ('ip',)
 
+	def __post_init__(self):
+		super().__post_init__()
+		self.not_before = self.get_datetime(self.not_before)
+		self.not_after = self.get_datetime(self.not_after)
+
 	def __str__(self) -> str:
 		return self.subject_cn
 
 	def is_expired(self, months=0) -> bool:
 		if self.not_after:
-			return self.not_after < datetime.now() + timedelta(days=months * 30)
+			return self.not_after < datetime.now(timezone.utc) + timedelta(days=months * 30)
 		return True
 
 	def is_wildcard(self) -> bool:
@@ -54,6 +59,32 @@ class Certificate(OutputType):
 		if date:
 			return date.strftime(CONFIG.cli.date_format)
 		return '?'
+
+	@staticmethod
+	def get_datetime(date):
+		if isinstance(date, datetime):
+			date = date.replace(tzinfo=timezone.utc)
+			return date
+		try:
+			dt = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ")
+			dt = dt.replace(tzinfo=timezone.utc)
+			return dt
+		except (ValueError, TypeError):
+			return None
+
+	def get_vulnerabilities(self):
+		if self.is_expired():
+			yield Vulnerability(
+				name='SSL certificate expired',
+				description='The SSL certificate is expired. This can easily lead to domain takeovers',
+				matched_at=self.host,
+				tags=['ssl', 'tls'],
+				severity='high',
+				confidence='high',
+				extra_data={
+					'expiration_date': self.format_date(self.not_after)
+				}
+			)
 
 	def __repr__(self) -> str:
 		s = f'📜 [bold white]{self.host}[/]'
