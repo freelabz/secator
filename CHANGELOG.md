@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.2](https://github.com/freelabz/secator/compare/v0.25.1...v0.25.2) (2026-01-27)
+
+
+### Bug Fixes
+
+* **cli:** worker reload in dev mode ([#917](https://github.com/freelabz/secator/issues/917)) ([6ba7948](https://github.com/freelabz/secator/commit/6ba7948fb1227594c976c0013fa0532c2b54f869))
+* **mongodb:** max items default to -1 ([#918](https://github.com/freelabz/secator/issues/918)) ([7a64cba](https://github.com/freelabz/secator/commit/7a64cba348c78b03d6e925a8d5bbda5d583d7337))
+
 ## [0.25.1](https://github.com/freelabz/secator/compare/v0.25.0...v0.25.1) (2026-01-27)
 
 
