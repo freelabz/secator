@@ -28,7 +28,7 @@ class whois(Command):
 		self.cmd = self.cmd.replace('whois-go', 'whois-go -j')
 
 	@staticmethod
-	def on_end(self):
+	def on_cmd_done(self):
 		try:
 			item = json.loads(self.output)
 		except json.JSONDecodeError:
