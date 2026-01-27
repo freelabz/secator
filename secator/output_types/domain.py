@@ -16,9 +16,9 @@ class Domain(OutputType):
 	expiration_date: datetime = field(default=None, compare=False)
 	updated_date: datetime = field(default=None, compare=False)
 	status: list = field(default_factory=list, compare=False)
-	registrar: str = ''
+	registrar: str = field(default='', compare=False)
 	registrar_info: dict = field(default_factory=dict, compare=False)
-	registrant: str = ''
+	registrant: str = field(default='', compare=False)
 	registrant_info: dict = field(default_factory=dict, compare=False)
 	administrative_info: dict = field(default_factory=dict, compare=False)
 	technical_info: dict = field(default_factory=dict, compare=False)
