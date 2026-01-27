@@ -202,7 +202,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		cmd = f'{Path(sys.executable).parent / "watchmedo"} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
 
 	if use_command_runner:
-		ret = Command.execute(cmd, name='secator_worker')
+		ret = Command.execute(cmd, name='secator_worker', cwd=Path(sys.executable).parent)
 		sys.exit(ret.return_code)
 	else:
 		console.print(f'[bold red]{cmd}[/]')

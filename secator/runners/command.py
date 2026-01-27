@@ -358,6 +358,7 @@ class Command(Runner):
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
 		kwargs['process'] = kwargs.get('process', False)
+		kwargs['cwd'] = kwargs.get('cwd', None)
 		kwargs['enable_validators'] = False
 		kwargs['serialize_config'] = False
 		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
