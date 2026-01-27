@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.25.1](https://github.com/freelabz/secator/compare/v0.25.0...v0.25.1) (2026-01-27)
+
+
+### Bug Fixes
+
+* **cli:** worker reload mode ([#916](https://github.com/freelabz/secator/issues/916)) ([ed599f8](https://github.com/freelabz/secator/commit/ed599f8242abeafd0e634a95f6b6f0df23f74982))
+* datetimes in utc format ([#911](https://github.com/freelabz/secator/issues/911)) ([257141d](https://github.com/freelabz/secator/commit/257141d9869aa718805c2e657339a0bf810c7973))
+* **mongodb:** timezone-aware retrieval of objects ([a2ab6ea](https://github.com/freelabz/secator/commit/a2ab6eac6ce1aaa2d85bf27bf8f1068b80843c3b))
+* **output_types:** add `Domain` expiry warning and better date formatting ([#913](https://github.com/freelabz/secator/issues/913)) ([37669cb](https://github.com/freelabz/secator/commit/37669cb46b0147af1ece3e5aec12c5ca58f7375d))
+* **tasks:** bug with no inputs ([b3a9672](https://github.com/freelabz/secator/commit/b3a9672e3b4bdde29e0efa0a22db3efe8b492a1a))
+* **tasks:** extend input types support for multiple tasks ([#909](https://github.com/freelabz/secator/issues/909)) ([b47a0a6](https://github.com/freelabz/secator/commit/b47a0a69d27b657b8790a0c8de1d106fe39b5e41))
+* trufflehog profile set to medium ([#910](https://github.com/freelabz/secator/issues/910)) ([82316ab](https://github.com/freelabz/secator/commit/82316abb41c78240f456659f5e448de1424130c0))
+
 ## [0.25.0](https://github.com/freelabz/secator/compare/v0.24.0...v0.25.0) (2026-01-21)
 
 
