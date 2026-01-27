@@ -206,8 +206,8 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		sys.exit(ret.return_code)
 	else:
 		console.print(f'[bold red]{cmd}[/]')
-		ret = os.system(cmd)
-		sys.exit(os.waitstatus_to_exitcode(ret))
+		result = subprocess.run(cmd, shell=True, cwd=Path(sys.executable).parent)
+		sys.exit(result.returncode)
 
 
 #-------#
@@ -1850,7 +1850,7 @@ def test():
 	pass
 
 
-def run_test(cmd, name=None, exit=True, verbose=False, use_os_system=False):
+def run_test(cmd, name=None, exit=True, verbose=False, use_command_runner=True):
 	"""Run a test and return the result.
 
 	Args:
@@ -1858,20 +1858,20 @@ def run_test(cmd, name=None, exit=True, verbose=False, use_os_system=False):
 		name (str, optional): Name of the test.
 		exit (bool, optional): Exit after running the test with the return code.
 		verbose (bool, optional): Print verbose output.
-		use_os_system (bool, optional): Use os.system to run the command.
+		use_command_runner (bool, optional): Use Command.execute to run the command.
 
 	Returns:
 		Return code of the test.
 	"""
 	cmd_name = name + ' tests' if name else 'tests'
-	if use_os_system:
+	if not use_command_runner:
 		console.print(f'[bold red]{cmd}[/]')
 		if not verbose:
 			cmd += ' >/dev/null 2>&1'
-		ret = os.system(cmd)
+		ret = subprocess.run(cmd, shell=True)
 		if exit:
-			sys.exit(os.waitstatus_to_exitcode(ret))
-		return ret
+			sys.exit(ret.returncode)
+		return ret.returncode
 	else:
 		result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
 		if name:
@@ -1894,7 +1894,7 @@ def lint(linter):
 	elif linter == 'ruff':
 		opts = ' check'
 	cmd = f'{sys.executable} -m {linter} {opts} secator/'
-	run_test(cmd, 'lint', verbose=True, use_os_system=True)
+	run_test(cmd, 'lint', verbose=True, use_command_runner=False)
 
 
 @test.command()
@@ -1930,7 +1930,7 @@ def unit(tasks, workflows, scans, test, no_coverage):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'unit', verbose=True, use_os_system=True)
+	run_test(cmd, 'unit', verbose=True, use_command_runner=False)
 
 
 @test.command()
@@ -1963,7 +1963,7 @@ def integration(tasks, workflows, scans, test, no_cleanup):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'integration', verbose=True, use_os_system=True)
+	run_test(cmd, 'integration', verbose=True, use_command_runner=False)
 
 
 @test.command()
@@ -2017,7 +2017,7 @@ def performance(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'performance', verbose=True, use_os_system=True)
+	run_test(cmd, 'performance', verbose=True, use_command_runner=False)
 
 
 @test.command()
@@ -2229,4 +2229,4 @@ def coverage(unit_only, integration_only, template_only):
 		cmd += ' --data-file=.coverage.template'
 	else:
 		Command.execute(f'{sys.executable} -m coverage combine --keep', name='coverage combine', cwd=ROOT_FOLDER)
-	run_test(cmd, 'coverage', use_os_system=True)
+	run_test(cmd, 'coverage', use_command_runner=False)
