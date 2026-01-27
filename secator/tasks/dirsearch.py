@@ -9,7 +9,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DATA, DELAY, DEPT
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
-							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL)
+							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL, HOST, HOST_PORT, IP)
 from secator.output_types import Url, Info, Error
 from secator.tasks._categories import HttpFuzzer
 
@@ -18,7 +18,7 @@ from secator.tasks._categories import HttpFuzzer
 class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
 	cmd = 'dirsearch'
-	input_types = [URL]
+	input_types = [URL, HOST, HOST_PORT, IP]
 	output_types = [Url]
 	tags = ['url', 'fuzz']
 	input_flag = '-u'

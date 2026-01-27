@@ -9,7 +9,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
 							   SEVERITY, TAGS, THREADS, TIMEOUT,
-							   URL, USER_AGENT)
+							   URL, USER_AGENT, HOST, IP)
 from secator.output_types import Tag, Vulnerability, Info, Error
 from secator.tasks._categories import VulnHttp
 from secator.installer import parse_version
@@ -19,7 +19,7 @@ from secator.installer import parse_version
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
 	cmd = 'wpscan --force --verbose'
-	input_types = [URL]
+	input_types = [URL, HOST, IP]
 	output_types = [Vulnerability, Tag]
 	tags = ['vuln', 'scan', 'wordpress']
 	input_flag = '--url'

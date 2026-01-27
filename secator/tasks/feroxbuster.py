@@ -6,7 +6,7 @@ from secator.definitions import (CONTENT_TYPE, DATA, DELAY, DEPTH, FILTER_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
 							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
-							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, URL, REPLAY_PROXY)
+							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, URL, REPLAY_PROXY, HOST, HOST_PORT, IP)
 from secator.output_types import Url, Info
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpFuzzer
@@ -16,7 +16,7 @@ from secator.tasks._categories import HttpFuzzer
 class feroxbuster(HttpFuzzer):
 	"""Simple, fast, recursive content discovery tool written in Rust"""
 	cmd = 'feroxbuster --no-state'
-	input_types = [URL]
+	input_types = [URL, HOST, HOST_PORT, IP]
 	output_types = [Url]
 	tags = ['url', 'fuzz']
 	input_flag = '--url'
