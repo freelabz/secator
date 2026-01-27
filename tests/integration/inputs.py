@@ -27,7 +27,7 @@ INPUTS_TASKS = {
 	'search_vulns': 'apache 2.4.39',
 	'testssl': 'free.fr',
 	'trivy': 'https://github.com/blacklanternsecurity/bbot',
-	'trufflehog': 'https://github.com/trufflesecurity/test_keys',
+	'trufflehog': 'https://github.com/dehvCurtis/vulnerable-code-examples',
 	'urlfinder': 'vulnweb.com',
 	'wpscan': 'http://localhost:8000/',
 	'wafw00f': 'https://netflix.com',

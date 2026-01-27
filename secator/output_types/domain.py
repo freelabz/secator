@@ -1,8 +1,9 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
 from secator.definitions import ALIVE, DOMAIN
+from secator.config import CONFIG
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, format_object
 
@@ -30,6 +31,12 @@ class Domain(OutputType):
 	_table_fields = [DOMAIN, ALIVE]
 	_sort_by = (DOMAIN,)
 
+	def is_expired(self, months=0) -> bool:
+		if self.expiration_date:
+			expiry_date = datetime.strptime(self.expiration_date, "%Y-%m-%d %H:%M:%S")
+			return expiry_date < datetime.now() + timedelta(days=months * 30)
+		return True
+
 	def __str__(self) -> str:
 		return self.domain
 
@@ -39,13 +46,13 @@ class Domain(OutputType):
 			s += rf' \[[bold magenta]{self.registrant}[/]]'
 		if self.registrar:
 			s += rf' \[[bold blue]{self.registrar}[/]]'
-		if self.expiration_date:
-			now = datetime.now()
-			expiration_date_strptime = datetime.strptime(self.expiration_date, "%Y-%m-%d %H:%M:%S")
-			if expiration_date_strptime < now:
-				s += rf' \[[bold red]{self.expiration_date}[/]]'
-			else:
-				s += rf' \[[bold green]{self.expiration_date}[/]]'
+		expiry_date = datetime.strptime(self.expiration_date, "%Y-%m-%d %H:%M:%S").strftime(CONFIG.cli.date_format)
+		if self.is_expired():
+			s += rf' \[[red][bold]expired[/] since {expiry_date}[/]]'
+		elif self.is_expired(months=2):
+			s += rf' \[[red][bold]expires soon[/] on {expiry_date}[/]]'
+		else:
+			s += rf' \[[green][bold]expires on[/] {expiry_date}[/]]'
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
 
