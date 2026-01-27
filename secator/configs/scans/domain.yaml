@@ -22,7 +22,11 @@ workflows:
       field: host
   url_crawl:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.is_root
+    - type: subdomain
+      field: host
   url_vuln:
     targets_:
     - type: url
