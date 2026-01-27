@@ -90,6 +90,8 @@ class ffuf(HttpFuzzer):
 		headers = self.get_opt_value('header') or ''
 		fuzz_in_headers = 'FUZZ' in headers
 		fuzz_in_data = 'FUZZ' in data
+		if not self.inputs:
+			return
 		fuzz_in_url = 'FUZZ' in self.inputs[0]
 		self.has_fuzz_keyword = fuzz_in_headers or fuzz_in_data or fuzz_in_url
 		subs = self.get_opt_value('subs')
