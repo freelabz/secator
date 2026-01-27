@@ -316,13 +316,15 @@ OUTPUTS_TASKS = {
             match='https://netflix.com',
             _source='wafw00f')
     ],
-    'whois': [
+    'whoisdomain': [
         Domain(
             domain='wikipedia.org',
-            registrar='MarkMonitor Inc.',
-            creation_date='2001-01-13 00:12:14',
-            expiration_date='2027-01-13 00:12:14',
-            registrant='',
+            _source='whoisdomain'
+        )
+    ],
+    'whois': [
+        Domain(
+            domain='vulnweb.com',
             _source='whois'
         )
     ],

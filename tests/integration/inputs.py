@@ -31,7 +31,8 @@ INPUTS_TASKS = {
 	'urlfinder': 'vulnweb.com',
 	'wpscan': 'http://localhost:8000/',
 	'wafw00f': 'https://netflix.com',
-	'whois': 'wikipedia.org',
+	'whois': 'vulnweb.com',
+	'whoisdomain': 'wikipedia.org',
 	'x8': 'http://testphp.vulnweb.com/hpp/?pp=1',
 	'xurlfind3r': 'http://testphp.vulnweb.com',
 }

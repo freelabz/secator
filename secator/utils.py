@@ -890,11 +890,11 @@ def parse_raw_http_request(raw_request):
 	}
 
 
-def format_object(obj, color='magenta', skip_keys=[]):
+def format_object(obj, color='magenta', skip_keys=[], predicate=lambda x: True):
 	if isinstance(obj, list) and obj:
-		return ' [' + ', '.join([f'[{color}]{rich_escape(item)}[/]' for item in obj]) + ']'
+		return ' [' + ', '.join([f'[{color}]{rich_escape(item)}[/]' for item in obj if predicate(item)]) + ']'
 	elif isinstance(obj, dict) and obj.keys():
-		obj = {k: v for k, v in obj.items() if k.lower().replace('-', '_') not in skip_keys}
+		obj = {k: v for k, v in obj.items() if k.lower().replace('-', '_') not in skip_keys if predicate(v)}
 		if obj:
 			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
 	return ''
