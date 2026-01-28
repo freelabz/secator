@@ -143,11 +143,11 @@ def find_duplicates(self):
 
 def load_finding(obj, exclude_types=[]):
 	finding_type = obj['_type']
+	if finding_type in exclude_types:
+		return None
 	klass = None
 	for otype in OUTPUT_TYPES:
 		oname = otype.get_name()
-		if oname in exclude_types:
-			continue
 		if finding_type == oname:
 			klass = otype
 			item = klass.load(obj)
@@ -186,7 +186,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	untagged_findings = load_findings(list(untagged_query_cursor), exclude_types)
 	debug(
 		f'Workspace non-duplicates findings: {len(workspace_findings)} '
-		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}'
+		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}. Excluded types: {exclude_types}. '
 		f'Query time: {time.time() - start_time}s',
 		sub='hooks.mongodb',
 		log_hook=log_hook
