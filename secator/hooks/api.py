@@ -181,8 +181,9 @@ def get_workspace_name(workspace_id):
 		raise Exception('No workspace ID provided: please use a valid workspace ID using `-ws <workspace_id>` (CLI) or `context.workspace_id = <workspace_id>` (Python API).')  # noqa: E501
 	result = _make_request('GET', f'{API_WORKSPACE_GET_ENDPOINT.format(workspace_id=workspace_id)}')
 	if result and result.get('name'):
-		console.print(Info(message=f'Loaded workspace "{result.get('name')}" from remote API [id: {workspace_id}]'))
-		return result.get('name')
+		name = result['name']
+		console.print(Info(message=f'Loaded workspace "{name}" from remote API [id: {workspace_id}]'))
+		return name
 	return None
 
 
