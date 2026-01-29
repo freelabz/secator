@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.3](https://github.com/freelabz/secator/compare/v0.25.2...v0.25.3) (2026-01-29)
+
+
+### Bug Fixes
+
+* **core:** syntax error on python3.11 and above ([#921](https://github.com/freelabz/secator/issues/921)) ([29c6710](https://github.com/freelabz/secator/commit/29c671038b66e8f2bf662aa8b7c8d89d9241b5b5))
+* **mongodb:** type filters ([#920](https://github.com/freelabz/secator/issues/920)) ([d8c8dfc](https://github.com/freelabz/secator/commit/d8c8dfc35213f76cfcb76aab20d718862dc8c6ac))
+
 ## [0.25.2](https://github.com/freelabz/secator/compare/v0.25.1...v0.25.2) (2026-01-27)
 
 
