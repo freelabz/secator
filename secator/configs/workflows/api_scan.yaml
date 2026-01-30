@@ -1,0 +1,143 @@
+type: workflow
+name: api_scan
+alias: apiscan
+description: API security assessment
+long_description: |
+  Specialized security workflow for REST APIs and web services.
+  Discovers API endpoints, parameters, and authentication mechanisms.
+  Tests for common API vulnerabilities including broken authentication, excessive data exposure,
+  injection flaws, security misconfigurations, and rate limiting issues.
+  Ideal for securing modern web APIs and microservices.
+tags: [api, http, vulnerability]
+input_types:
+  - url
+  - host
+
+options:
+  passive:
+    is_flag: True
+    default: False
+    help: Passive only (no active requests)
+    short: ps
+
+  nuclei:
+    is_flag: True
+    default: True
+    help: Run nuclei API vulnerability scans
+    short: n
+
+  fuzz_params:
+    is_flag: True
+    default: True
+    help: Fuzz API parameters
+    short: fp
+
+  hunt_secrets:
+    is_flag: True
+    default: True
+    help: Hunt for API keys and secrets
+    short: hs
+
+tasks:
+  httpx:
+    description: Probe API endpoints
+    tech_detect: True
+    json: True
+    targets_:
+      - type: target
+        field: name
+    if: not opts.passive
+
+  _group/discover:
+    katana:
+      description: Crawl and discover API endpoints
+      targets_:
+        - type: target
+          field: name
+        - type: url
+          field: url
+      if: not opts.passive
+
+    gau:
+      description: Gather API endpoints from passive sources
+      targets_:
+        - type: target
+          field: name
+        - type: url
+          field: '{protocol}://{host}'
+
+    cariddi:
+      description: Hunt for API endpoints and patterns
+      info: True
+      secrets: True
+      endpoints: True
+      targets_:
+        - type: target
+          field: name
+        - type: url
+          field: url
+      if: not opts.passive
+
+  _group/params:
+    arjun:
+      description: Discover hidden API parameters
+      wordlist: http_params
+      targets_:
+        - type: url
+          field: url
+      if: opts.fuzz_params and not opts.passive
+
+    x8:
+      description: Discover hidden parameters (alternative)
+      wordlist: http_params
+      targets_:
+        - type: url
+          field: url
+      if: opts.fuzz_params and not opts.passive
+
+  _group/patterns:
+    gf/jwt:
+      description: Hunt for JWT tokens
+      pattern: jwt
+      targets_:
+        - type: url
+          field: url
+
+    gf/api_keys:
+      description: Hunt for API keys
+      pattern: api-keys
+      targets_:
+        - type: url
+          field: url
+
+    gf/interestingparams:
+      description: Hunt for interesting parameters
+      pattern: interestingparams
+      targets_:
+        - type: url
+          field: url
+
+  _group/vuln:
+    nuclei:
+      description: Scan for API vulnerabilities
+      tags: [api, jwt, graphql, swagger]
+      targets_:
+        - type: url
+          field: url
+      if: opts.nuclei and not opts.passive
+
+    dalfox:
+      description: Test API parameters for XSS
+      targets_:
+        - type: url
+          field: url
+          condition: "'?' in item.url"
+      if: not opts.passive
+
+  trufflehog:
+    description: Hunt for API keys and secrets
+    targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+    if: opts.hunt_secrets and not opts.passive

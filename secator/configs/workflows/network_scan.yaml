@@ -1,0 +1,101 @@
+type: workflow
+name: network_scan
+alias: netscan
+description: Network scanning workflow
+long_description: |
+  Comprehensive network scanning workflow that discovers live hosts, scans ports,
+  identifies services and versions, and searches for known vulnerabilities.
+  Combines multiple scanning techniques for thorough network reconnaissance.
+  Useful for mapping network infrastructure and identifying potential attack vectors.
+tags: [recon, network, port, vulnerability]
+input_types:
+  - ip
+  - host
+  - cidr_range
+
+options:
+  passive:
+    is_flag: True
+    default: False
+    help: Passive only (no active scanning)
+    short: ps
+
+  deep:
+    is_flag: True
+    default: False
+    help: Deep scanning (includes service detection and vulnerability scanning)
+    short: d
+
+  scanners:
+    type: list
+    default: [nmap]
+    help: Port scanners to use (naabu, nmap)
+
+tasks:
+  _group/discover:
+    fping:
+      description: Discover live hosts with ICMP
+      if: not opts.passive
+
+    arpscan:
+      description: Discover hosts with ARP requests (for local networks)
+      targets_:
+        - type: target
+          field: name
+          condition: "'/' in target.name"
+      if: not opts.passive
+
+  _group/scan:
+    naabu:
+      description: Fast port scanning
+      if: "'naabu' in opts.scanners and not opts.passive"
+
+    nmap/light:
+      description: Port scanning with nmap
+      if: "'nmap' in opts.scanners and not opts.passive and not opts.deep"
+
+    nmap:
+      description: Service detection and version scanning
+      version_detection: true
+      targets_:
+        - type: target
+          field: name
+        - type: port
+          field: host
+      if: "'nmap' in opts.scanners and opts.deep and not opts.passive"
+
+  _group/probe:
+    httpx:
+      description: Probe HTTP services on discovered ports
+      tech_detect: True
+      targets_:
+        - type: port
+          field: '{host}:{port}'
+      if: opts.deep and not opts.passive
+
+    sshaudit:
+      description: Audit SSH configurations
+      targets_:
+        - type: port
+          field: host
+          condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
+      if: opts.deep and not opts.passive
+
+  _group/vuln:
+    search_vulns:
+      description: Search for known vulnerabilities
+      targets_:
+        - type: port
+          field: '{host}:{port}~{service_name}'
+          condition: len(item.service_name.split('/')) > 1
+      if: opts.deep
+
+    nuclei/network:
+      description: Scan for network vulnerabilities
+      tags: [network, ssl]
+      targets_:
+        - type: target
+          field: name
+        - type: port
+          field: '{host}:{port}'
+      if: opts.deep and not opts.passive
