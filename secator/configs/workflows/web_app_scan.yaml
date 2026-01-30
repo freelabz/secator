@@ -37,12 +37,6 @@ options:
     help: Hunt for secrets in responses
     short: hs
 
-  screenshot:
-    is_flag: True
-    default: False
-    help: Take screenshots of discovered URLs
-    short: ss
-
 tasks:
   _group/probe:
     httpx:
@@ -134,7 +128,7 @@ tasks:
 
     nuclei:
       description: Comprehensive vulnerability scanning
-      exclude_tags: [network, dns, file]
+      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
       targets_:
         - type: url
           field: url

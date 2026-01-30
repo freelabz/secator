@@ -20,12 +20,6 @@ options:
     help: Ports to scan for SSL/TLS services
     short: p
 
-  check_cert:
-    is_flag: True
-    default: True
-    help: Check certificate validity and chain
-    short: cc
-
 tasks:
   httpx:
     description: Probe for HTTPS services
