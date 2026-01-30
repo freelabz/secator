@@ -1,0 +1,187 @@
+type: workflow
+name: full_recon
+alias: fullrec
+description: Full reconnaissance workflow
+long_description: |
+  Comprehensive reconnaissance workflow that combines multiple reconnaissance techniques
+  to gather extensive information about a target. Includes domain enumeration, subdomain
+  discovery, host reconnaissance, network mapping, service detection, and technology identification.
+  Provides a complete view of the target's attack surface for penetration testing.
+  This is an extensive workflow that may take significant time to complete.
+tags: [recon, comprehensive, domain, network]
+input_types:
+  - host
+  - ip
+  - cidr_range
+
+options:
+  passive:
+    is_flag: True
+    default: False
+    help: Passive only (no active scanning)
+    short: ps
+
+  deep:
+    is_flag: True
+    default: False
+    help: Deep scanning (includes vulnerability scanning)
+    short: d
+
+  subdomains:
+    is_flag: True
+    default: True
+    help: Include subdomain enumeration
+    short: sub
+
+  network:
+    is_flag: True
+    default: True
+    help: Include network scanning
+    short: net
+
+  ssl_audit:
+    is_flag: True
+    default: False
+    help: Perform SSL/TLS security audit
+    short: ssl
+
+tasks:
+  _group/domain_info:
+    jswhois:
+      description: Get WHOIS information
+      targets_:
+        - type: target
+          field: name
+          condition: "':' not in target.name and '/' not in target.name"
+
+    whois:
+      description: Extract domain information
+      targets_:
+        - type: target
+          field: name
+          condition: "':' not in target.name and '/' not in target.name"
+
+    getasn:
+      description: Get ASN information
+      targets_:
+        - type: target
+          field: name
+          condition: "':' not in target.name and '/' not in target.name"
+
+  _group/subdomain_enum:
+    subfinder:
+      description: Enumerate subdomains (passive)
+      targets_:
+        - type: target
+          field: name
+          condition: "':' not in target.name and '/' not in target.name"
+      if: opts.subdomains
+
+    httpx/tls:
+      description: Find subdomains via TLS certificates
+      tech_detect: True
+      tls_grab: True
+      targets_:
+        - type: target
+          field: name
+          condition: "':' not in target.name and '/' not in target.name"
+      if: opts.subdomains and not opts.passive
+
+  _group/dns:
+    dnsx:
+      description: Resolve DNS records
+      targets_:
+        - type: target
+          field: name
+          condition: "':' not in target.name and '/' not in target.name"
+        - type: subdomain
+          field: host
+      if: opts.subdomains
+
+  _group/http_probe:
+    httpx:
+      description: Probe HTTP services
+      tech_detect: True
+      follow_redirect: True
+      targets_:
+        - type: target
+          field: name
+          condition: "':' not in target.name and '/' not in target.name"
+        - type: subdomain
+          field: host
+      if: not opts.passive
+
+    wafw00f:
+      description: Detect Web Application Firewalls
+      targets_:
+        - type: url
+          field: url
+      if: not opts.passive
+
+  _group/network_scan:
+    naabu:
+      description: Port scanning
+      targets_:
+        - type: target
+          field: name
+        - type: subdomain
+          field: host
+        - type: url
+          field: host
+      if: opts.network and not opts.passive
+
+    nmap:
+      description: Service and version detection
+      version_detection: true
+      targets_:
+        - type: port
+          field: host
+      if: opts.network and opts.deep and not opts.passive
+
+  _group/service_audit:
+    sshaudit:
+      description: Audit SSH services
+      targets_:
+        - type: port
+          field: host
+          condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
+      if: opts.network and not opts.passive
+
+    testssl:
+      description: SSL/TLS security audit
+      server_defaults: True
+      targets_:
+        - type: url
+          field: host
+          condition: "'https' in item.url"
+        - type: port
+          field: '{host}:{port}'
+          condition: "'ssl' in port.service_name.lower() or 'https' in port.service_name.lower()"
+      if: opts.ssl_audit and not opts.passive
+
+  _group/vuln_scan:
+    nuclei/takeover:
+      description: Check for subdomain takeovers
+      tags: [takeover]
+      targets_:
+        - type: subdomain
+          field: host
+      if: opts.subdomains and opts.deep and not opts.passive
+
+    search_vulns:
+      description: Search for known vulnerabilities
+      targets_:
+        - type: port
+          field: '{host}:{port}~{service_name}'
+          condition: len(item.service_name.split('/')) > 1
+      if: opts.network and opts.deep
+
+    nuclei/network:
+      description: Network vulnerability scanning
+      tags: [network, ssl]
+      targets_:
+        - type: target
+          field: name
+        - type: port
+          field: '{host}:{port}'
+      if: opts.network and opts.deep and not opts.passive

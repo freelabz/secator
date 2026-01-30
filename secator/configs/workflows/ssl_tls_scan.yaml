@@ -1,0 +1,75 @@
+type: workflow
+name: ssl_tls_scan
+alias: sslscan
+description: SSL/TLS security audit
+long_description: |
+  Comprehensive SSL/TLS security assessment workflow for evaluating encryption configurations.
+  Tests SSL/TLS protocols, ciphers, certificate validity, and common SSL/TLS vulnerabilities
+  including Heartbleed, POODLE, BEAST, CRIME, and weak cipher suites.
+  Essential for ensuring secure HTTPS implementations and compliance.
+tags: [ssl, tls, security, audit]
+input_types:
+  - url
+  - host
+  - host:port
+
+options:
+  ports:
+    type: str
+    default: "443,8443"
+    help: Ports to scan for SSL/TLS services
+    short: p
+
+  check_cert:
+    is_flag: True
+    default: True
+    help: Check certificate validity and chain
+    short: cc
+
+tasks:
+  httpx:
+    description: Probe for HTTPS services
+    tech_detect: True
+    tls_grab: True
+
+  nmap:
+    description: Identify SSL/TLS enabled ports
+    version_detection: true
+    ports: '{opts.ports}'
+    targets_:
+      - type: target
+        field: name
+        condition: "':' not in target.name"
+      - type: url
+        field: host
+
+  testssl:
+    description: Comprehensive SSL/TLS security scan
+    server_defaults: True
+    protocols: True
+    standard: True
+    vulnerabilities: True
+    targets_:
+      - type: target
+        field: name
+      - type: url
+        field: '{host}:{port}'
+        condition: item.port and item.port != 80
+      - type: url
+        field: host
+        condition: not item.port or item.port == 80
+      - type: port
+        field: '{host}:{port}'
+        condition: "'ssl' in port.service_name.lower() or 'https' in port.service_name.lower() or port.port in [443, 8443]"
+
+  nuclei:
+    description: Scan for SSL/TLS vulnerabilities
+    tags: [ssl, tls]
+    targets_:
+      - type: target
+        field: name
+      - type: url
+        field: url
+      - type: port
+        field: '{host}:{port}'
+        condition: "'ssl' in port.service_name.lower() or 'https' in port.service_name.lower() or port.port in [443, 8443]"

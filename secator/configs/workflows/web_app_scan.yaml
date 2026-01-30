@@ -1,0 +1,150 @@
+type: workflow
+name: web_app_scan
+alias: webscan
+description: Web application security scan
+long_description: |
+  Comprehensive web application security assessment workflow combining URL crawling,
+  content discovery, parameter fuzzing, vulnerability scanning, and secret hunting.
+  Identifies common web vulnerabilities including XSS, SQLi, LFI, SSRF, and misconfigurations.
+  Perfect for thorough web application penetration testing.
+tags: [http, vulnerability, crawl, fuzz]
+input_types:
+  - url
+  - host
+
+options:
+  passive:
+    is_flag: True
+    default: False
+    help: Passive only (no active requests)
+    short: ps
+
+  nuclei:
+    is_flag: True
+    default: True
+    help: Run nuclei vulnerability scans
+    short: n
+
+  fuzz:
+    is_flag: True
+    default: False
+    help: Enable fuzzing for directories and parameters
+    short: f
+
+  hunt_secrets:
+    is_flag: True
+    default: True
+    help: Hunt for secrets in responses
+    short: hs
+
+  screenshot:
+    is_flag: True
+    default: False
+    help: Take screenshots of discovered URLs
+    short: ss
+
+tasks:
+  _group/probe:
+    httpx:
+      description: Initial URL probe
+      tech_detect: True
+      tls_grab: True
+      if: not opts.passive
+
+    wafw00f:
+      description: Detect Web Application Firewall
+      targets_:
+        - type: url
+          field: url
+      if: not opts.passive
+
+  _group/crawl:
+    katana:
+      description: Crawl URLs and endpoints
+      targets_:
+        - type: target
+          field: name
+        - type: url
+          field: url
+      if: not opts.passive
+
+    gau:
+      description: Gather URLs from passive sources
+      targets_:
+        - type: target
+          field: name
+        - type: url
+          field: '{protocol}://{host}'
+
+  _group/fuzz:
+    ffuf:
+      description: Directory and file fuzzing
+      auto_calibration: true
+      follow_redirect: true
+      targets_:
+        - type: url
+          field: '{url}/FUZZ'
+      if: opts.fuzz and not opts.passive
+
+    arjun:
+      description: Discover hidden parameters
+      wordlist: http_params
+      targets_:
+        - type: url
+          field: url
+      if: opts.fuzz and not opts.passive
+
+  _group/vuln_pattern:
+    gf/xss:
+      description: Hunt XSS patterns
+      pattern: xss
+      targets_:
+        - type: url
+          field: url
+
+    gf/sqli:
+      description: Hunt SQLi patterns
+      pattern: sqli
+      targets_:
+        - type: url
+          field: url
+
+    gf/ssrf:
+      description: Hunt SSRF patterns
+      pattern: ssrf
+      targets_:
+        - type: url
+          field: url
+
+    gf/lfi:
+      description: Hunt LFI patterns
+      pattern: lfi
+      targets_:
+        - type: url
+          field: url
+
+  _group/vuln_test:
+    dalfox:
+      description: Test for XSS vulnerabilities
+      targets_:
+        - type: tag
+          field: match
+          condition: item._source.startswith("gf") and "xss" in item.name
+      if: not opts.passive
+
+    nuclei:
+      description: Comprehensive vulnerability scanning
+      exclude_tags: [network, dns, file]
+      targets_:
+        - type: url
+          field: url
+      if: opts.nuclei and not opts.passive
+
+  _group/secrets:
+    trufflehog:
+      description: Hunt for secrets in HTTP responses
+      targets_:
+        - type: url
+          field: stored_response_path
+          condition: item.stored_response_path != ''
+      if: opts.hunt_secrets and not opts.passive
