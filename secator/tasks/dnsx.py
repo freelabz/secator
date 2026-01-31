@@ -39,7 +39,7 @@ class dnsx(ReconDns):
 		WORDLIST: {'type': str, 'short': 'w', 'default': None, 'process': process_wordlist, 'help': 'Wordlist to use'},  # noqa: E501
 	}
 	item_loaders = [JSONSerializer()]
-	install_version = 'v1.2.2'
+	install_version = 'v1.2.3'
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
 	github_handle = 'projectdiscovery/dnsx'
 	profile = 'small'
