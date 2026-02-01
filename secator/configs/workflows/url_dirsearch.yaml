@@ -10,6 +10,9 @@ long_description: |
 tags: [http, dir]
 input_types:
   - url
+  - host
+  - host_port
+  - ip
 
 options:
   hunt_secrets:
@@ -34,6 +37,7 @@ tasks:
   httpx:
     description: Run HTTP probes on URLs
     tech_detect: True
+    follow_redirect: True
 
   ffuf:
     description: Search for HTTP directories
@@ -43,6 +47,7 @@ tasks:
     targets_:
       - type: target
         field: '{name}/FUZZ'
+        condition: item.type == 'url'
     if: opts.hunt_dirs
 
   katana:
