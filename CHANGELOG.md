@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.25.4](https://github.com/freelabz/secator/compare/v0.25.3...v0.25.4) (2026-02-01)
+
+
+### Bug Fixes
+
+* **command:** do not lstrip output, only rstrip ([#925](https://github.com/freelabz/secator/issues/925)) ([8d28557](https://github.com/freelabz/secator/commit/8d28557ec15710b2819d936ceb7351e6650082fc))
+* **configs:** improve domain scan, domain_recon and url_dirsearch ([#927](https://github.com/freelabz/secator/issues/927)) ([16be6c0](https://github.com/freelabz/secator/commit/16be6c0b491bfe2513165fc4ad441ed78eafc378))
+* **xurlfind3r:** serialization issue with Celery ([#926](https://github.com/freelabz/secator/issues/926)) ([b2e429f](https://github.com/freelabz/secator/commit/b2e429f2341fe2ff227c7d3f9ff78bcb31385fa5))
+
 ## [0.25.3](https://github.com/freelabz/secator/compare/v0.25.2...v0.25.3) (2026-01-29)
 
 
