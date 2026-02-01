@@ -22,7 +22,9 @@ workflows:
       field: host
   url_crawl:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified
   url_vuln:
     targets_:
     - type: url

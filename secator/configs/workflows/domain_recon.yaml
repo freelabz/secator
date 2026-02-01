@@ -34,6 +34,10 @@ tasks:
     getasn:
       description: Get ASN from domain name
 
+    xurlfind3r:
+      description: Get passive URLs for domain
+      if: opts.passive
+
     testssl:
       description: Test SSL/TLS security
       server_defaults: True
