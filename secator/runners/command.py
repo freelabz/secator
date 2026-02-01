@@ -848,7 +848,7 @@ class Command(Runner):
 		self.return_code = 0 if self.exit_ok else self.process.returncode
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
-		self.output = self.output.strip()
+		self.output = self.output.rstrip()
 		self.killed = self.return_code == -2 or self.killed
 		self.debug(f'return code: {self.return_code}', sub='end')
 
