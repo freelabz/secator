@@ -1,5 +1,4 @@
 import validators
-from collections import defaultdict
 from urllib.parse import urlparse, urlunparse, parse_qs
 
 from secator.definitions import HOST, URL, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT, HEADER, OPT_NOT_SUPPORTED  # noqa: E501
@@ -70,7 +69,7 @@ class xurlfind3r(HttpCrawler):
 	@staticmethod
 	def on_init(self):
 		self.max_param_occurrences = self.get_opt_value('max_param_occurrences')
-		self.seen_params = defaultdict(lambda: defaultdict(int))
+		self.seen_params = {}
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -80,6 +79,10 @@ class xurlfind3r(HttpCrawler):
 		query_params = parse_qs(parsed_url.query)
 		current_params = set(query_params.keys())
 		for param in current_params:
+			if base_url not in self.seen_params:
+				self.seen_params[base_url] = {}
+			if param not in self.seen_params[base_url]:
+				self.seen_params[base_url][param] = 0
 			self.seen_params[base_url][param] += 1
 			if self.seen_params[base_url][param] > int(self.max_param_occurrences):
 				return
