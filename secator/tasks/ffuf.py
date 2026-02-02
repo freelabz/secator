@@ -151,15 +151,6 @@ class ffuf(HttpFuzzer):
 			)
 
 	@staticmethod
-	def on_item(self, item):
-		if isinstance(item, Url):
-			item.method = self.get_opt_value(METHOD) or 'GET'
-			item.request_headers = self.headers.copy()
-			if 'FUZZ' in self.headers.get('Host', ''):
-				item.request_headers['Host'] = self.current_host
-		return item
-
-	@staticmethod
 	def on_line(self, line):
 		if line.startswith('[ERR]'):
 			message = line.split('[ERR]')[1].strip()
