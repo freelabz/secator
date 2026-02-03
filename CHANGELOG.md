@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.5](https://github.com/freelabz/secator/compare/v0.25.4...v0.25.5) (2026-02-03)
+
+
+### Bug Fixes
+
+* **ffuf:** remove on_item as it has errors and not needed ([#929](https://github.com/freelabz/secator/issues/929)) ([cfd1da0](https://github.com/freelabz/secator/commit/cfd1da06ba1565f2aa9eebc28b75d956c2042f65))
+
 ## [0.25.4](https://github.com/freelabz/secator/compare/v0.25.3...v0.25.4) (2026-02-01)
 
 
