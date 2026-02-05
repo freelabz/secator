@@ -116,7 +116,7 @@ detect_pm() {
             PYTHON_PKG="python3"
             ;;
         *)
-            error "Unsupported OS: $OSTYPE"
+            error "Your OS is not supported for native install. You can run secator with Docker instead: https://docs.freelabz.com/getting-started/installation#docker"
             ;;
     esac
 }
