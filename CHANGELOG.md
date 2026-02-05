@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.6](https://github.com/freelabz/secator/compare/v0.25.5...v0.25.6) (2026-02-05)
+
+
+### Bug Fixes
+
+* **search_vulns:** switch to profile "medium" ([#931](https://github.com/freelabz/secator/issues/931)) ([2d1a0ef](https://github.com/freelabz/secator/commit/2d1a0ef83a60837a10c7c4179228826df34722a7))
+
 ## [0.25.5](https://github.com/freelabz/secator/compare/v0.25.4...v0.25.5) (2026-02-03)
 
 
