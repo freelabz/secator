@@ -117,41 +117,41 @@ class search_vulns(Vuln):
 				provider='search_vulns',
 				tags=tags,
 			)
-			# for exploit in exploits:
-			# 	extra_data = common_extra_data.copy()
-			# 	parts = exploit.replace('http://', '').replace('https://', '').replace('github.com', 'github').split('/')
-			# 	hostname = urlparse(exploit).hostname
-			# 	tags = [hostname]
-			# 	provider = hostname.split('.')[-2]
-			# 	is_github = 'github.com' in exploit
-			# 	if is_github:
-			# 		user = parts[1]
-			# 		repo = parts[2]
-			# 		name = 'Github'
-			# 		extra_data.update({
-			# 			'user': user,
-			# 			'repo': repo,
-			# 		})
-			# 	else:
-			# 		hostname = urlparse(exploit).hostname
-			# 		name = provider.capitalize()
-			# 	name = name + ' exploit'
-			# 	last_part = exploit.split('/')[-1]
-			# 	id = f'{cve_id}-exploit'
-			# 	if last_part.isnumeric():
-			# 		id = last_part
-			# 		name += f' {id}'
-			# 	yield Exploit(
-			# 		name=name,
-			# 		provider=provider,
-			# 		id=id,
-			# 		matched_at=matched_at,
-			# 		confidence=confidence,
-			# 		reference=exploit,
-			# 		cves=[cve_id],
-			# 		tags=tags,
-			# 		extra_data=extra_data,
-			# 	)
+			for exploit in exploits:
+				extra_data = common_extra_data.copy()
+				parts = exploit.replace('http://', '').replace('https://', '').replace('github.com', 'github').split('/')
+				hostname = urlparse(exploit).hostname
+				tags = [hostname]
+				provider = hostname.split('.')[-2]
+				is_github = 'github.com' in exploit
+				if is_github:
+					user = parts[1]
+					repo = parts[2]
+					name = 'Github'
+					extra_data.update({
+						'user': user,
+						'repo': repo,
+					})
+				else:
+					hostname = urlparse(exploit).hostname
+					name = provider.capitalize()
+				name = name + ' exploit'
+				last_part = exploit.split('/')[-1]
+				id = f'{cve_id}-exploit'
+				if last_part.isnumeric():
+					id = last_part
+					name += f' {id}'
+				yield Exploit(
+					name=name,
+					provider=provider,
+					id=id,
+					matched_at=matched_at,
+					confidence=confidence,
+					reference=exploit,
+					cves=[cve_id],
+					tags=tags,
+					extra_data=extra_data,
+				)
 
 	@staticmethod
 	def extract_id(item):
