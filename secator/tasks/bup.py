@@ -59,6 +59,9 @@ class bup(HttpBase):
 		}
 	}
 	install_version = '0.4.4'
+	install_pre = {
+		'*': ['curl'],
+	}
 	install_cmd = 'pipx install bypass-url-parser==[install_version] --force'
 
 	@staticmethod

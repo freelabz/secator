@@ -406,6 +406,10 @@ def break_task(task, task_opts, results=[]):
 
 		# Add chunk info to opts
 		opts = base_opts.copy()
+		# Deep copy the context so each chunk has its own context dict
+		# This prevents chunk IDs from being shared between chunks
+		if 'context' in opts:
+			opts['context'] = opts['context'].copy()
 		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
 		debug('', obj={
 			task.unique_name: 'CHUNK',

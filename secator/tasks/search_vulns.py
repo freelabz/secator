@@ -94,11 +94,20 @@ class search_vulns(Vuln):
 
 		# Yield each vulnerability
 		for cve_id, vuln_data in vulns.items():
+			match_reason = vuln_data.get('match_reason', '')
+			confidence = 'high'
+			tags = search_vulns.extract_tags(vuln_data)
+			if match_reason == 'general_product_uncertain':
+				confidence = 'low'
+				tags.append('uncertain')
+			exploits = vuln_data.get('exploits', [])
+			if len(exploits) > 0:
+				tags.append('exploitable')
 			yield Vulnerability(
 				id=cve_id,
 				name=cve_id,
 				description=vuln_data.get('description', ''),
-				confidence='high',
+				confidence=confidence,
 				cvss_score=float(vuln_data.get('cvss', 0)),
 				epss_score=vuln_data.get('epss', ''),
 				cvss_vec=vuln_data.get('cvss_vec', ''),
@@ -106,44 +115,43 @@ class search_vulns(Vuln):
 				references=search_vulns.extract_references(vuln_data),
 				extra_data=search_vulns.extract_extra_data(vuln_data),
 				provider='search_vulns',
-				tags=search_vulns.extract_tags(vuln_data),
+				tags=tags,
 			)
-			exploits = vuln_data.get('exploits', [])
-			for exploit in exploits:
-				extra_data = common_extra_data.copy()
-				parts = exploit.replace('http://', '').replace('https://', '').replace('github.com', 'github').split('/')
-				hostname = urlparse(exploit).hostname
-				tags = [hostname]
-				provider = hostname.split('.')[-2]
-				is_github = 'github.com' in exploit
-				if is_github:
-					user = parts[1]
-					repo = parts[2]
-					name = 'Github'
-					extra_data.update({
-						'user': user,
-						'repo': repo,
-					})
-				else:
-					hostname = urlparse(exploit).hostname
-					name = provider.capitalize()
-				name = name + ' exploit'
-				last_part = exploit.split('/')[-1]
-				id = f'{cve_id}-exploit'
-				if last_part.isnumeric():
-					id = last_part
-					name += f' {id}'
-				yield Exploit(
-					name=name,
-					provider=provider,
-					id=id,
-					matched_at=matched_at,
-					confidence='high',
-					reference=exploit,
-					cves=[cve_id],
-					tags=tags,
-					extra_data=extra_data,
-				)
+			# for exploit in exploits:
+			# 	extra_data = common_extra_data.copy()
+			# 	parts = exploit.replace('http://', '').replace('https://', '').replace('github.com', 'github').split('/')
+			# 	hostname = urlparse(exploit).hostname
+			# 	tags = [hostname]
+			# 	provider = hostname.split('.')[-2]
+			# 	is_github = 'github.com' in exploit
+			# 	if is_github:
+			# 		user = parts[1]
+			# 		repo = parts[2]
+			# 		name = 'Github'
+			# 		extra_data.update({
+			# 			'user': user,
+			# 			'repo': repo,
+			# 		})
+			# 	else:
+			# 		hostname = urlparse(exploit).hostname
+			# 		name = provider.capitalize()
+			# 	name = name + ' exploit'
+			# 	last_part = exploit.split('/')[-1]
+			# 	id = f'{cve_id}-exploit'
+			# 	if last_part.isnumeric():
+			# 		id = last_part
+			# 		name += f' {id}'
+			# 	yield Exploit(
+			# 		name=name,
+			# 		provider=provider,
+			# 		id=id,
+			# 		matched_at=matched_at,
+			# 		confidence=confidence,
+			# 		reference=exploit,
+			# 		cves=[cve_id],
+			# 		tags=tags,
+			# 		extra_data=extra_data,
+			# 	)
 
 	@staticmethod
 	def extract_id(item):
