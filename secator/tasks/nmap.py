@@ -178,7 +178,7 @@ class nmapData(dict):
 		ips = []
 		# Determine if this is a mass scan by counting total ports across all hosts
 		total_ports = sum(len(self._get_ports(host)) for host in self._get_hosts())
-		is_mass_scan = total_ports > 5
+		is_mass_scan = total_ports > 10
 		tags = ['mass'] if is_mass_scan else []
 		for host in self._get_hosts():
 			hostname = self._get_hostname(host)
