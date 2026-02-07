@@ -7,7 +7,7 @@ long_description: |
   Extracts parameters from URLs using multiple techniques, then fuzzes them with various payloads
   to discover potential security issues. Probes fuzzed URLs to verify results and optionally
   hunts for secrets in responses. Effective for finding hidden parameters and testing input validation.
-tags: [http, fuzz]
+tags: [http, fuzz, secrets]
 input_types:
   - url
 

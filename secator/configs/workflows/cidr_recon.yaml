@@ -6,7 +6,7 @@ long_description: |
   Discovers and analyzes hosts within a CIDR range or local network through ARP / ICMP scanning.
   Maps IP addresses and identifies live hosts.
   Useful for local network security assessments and penetration testing.
-tags: [recon, cidr, network]
+tags: [recon, cidr, network, internal]
 input_types:
   - cidr_range
   - ip

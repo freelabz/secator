@@ -8,6 +8,7 @@ long_description: |
   security testing. Essential for internal network security assessments and lateral movement testing.
 profile: default
 default_inputs: [discover]
+tags: [recon, cidr, dns, network, internal, http, crawl, ssl, vuln, secrets]
 input_types:
   - cidr_range
   - slug

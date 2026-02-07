@@ -7,6 +7,7 @@ long_description: |
   identify potential attack vectors, and find security vulnerabilities. Tests for common
   web vulnerabilities including XSS, injection flaws, and misconfigurations. Essential for web application security testing.
 profile: default
+tags: [http, crawl, fuzz, vuln, secrets]
 input_types:
   - url
 workflows:
