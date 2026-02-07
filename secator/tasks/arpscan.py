@@ -56,9 +56,8 @@ class arpscan(Command):
 					extra_data={
 						'mac': line_parts[2],
 						'vendor': line_parts[3],
-						'protocol': 'arp',
 					},
-					tags=["internal"],
+					tags=["arp", "internal"],
 					_source=self.unique_name
 				)
 		return line

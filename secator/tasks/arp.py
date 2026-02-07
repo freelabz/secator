@@ -50,5 +50,5 @@ class arp(Command):
 					'physical': physical,
 					'interface': interface,
 				},
-				tags=["internal"]
+				tags=["arp", "internal"]
 			)

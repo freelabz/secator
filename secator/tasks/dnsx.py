@@ -116,7 +116,7 @@ class dnsx(ReconDns):
 						ip=name,
 						protocol=IpProtocol.IPv4,
 						alive=False,
-						tags=['dns'],
+						tags=['dns', 'a'],
 					)
 					if ip not in self.results:
 						yield ip
@@ -126,7 +126,7 @@ class dnsx(ReconDns):
 						ip=name,
 						protocol=IpProtocol.IPv6,
 						alive=False,
-						tags=['dns'],
+						tags=['dns', 'aaaa'],
 					)
 					if ip not in self.results:
 						yield ip
@@ -136,7 +136,7 @@ class dnsx(ReconDns):
 						ip=name,
 						protocol=IpProtocol.IPv4,
 						alive=False,
-						tags=['dns'],
+						tags=['dns', 'ptr'],
 					)
 					if ip not in self.results:
 						yield ip

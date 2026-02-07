@@ -43,7 +43,7 @@ class fping(ReconIp):
 	github_handle = 'schweikert/fping'
 	install_github_bin = False
 	install_version = 'v5.1'
-	install_pre = {'*': ['fping']}
+	install_pre = {'*': ['ping']}
 	ignore_return_code = True
 
 	@staticmethod
@@ -76,7 +76,7 @@ class fping(ReconIp):
 			host = ''
 		if not (validators.ipv4(ip) or validators.ipv6(ip)):
 			return
-		yield Ip(ip=ip, alive=True, host=host, extra_data={'protocol': 'icmp'}, tags=['internal'])
+		yield Ip(ip=ip, alive=True, host=host, tags=['imcp'])
 
 	@staticmethod
 	def on_line(self, line):

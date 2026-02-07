@@ -176,15 +176,16 @@ class nmapData(dict):
 	def __iter__(self):
 		datas = []
 		ips = []
-		# Determine if this is a mass scan by counting total ports across all hosts
-		total_ports = sum(len(self._get_ports(host)) for host in self._get_hosts())
+		scan_type = self._get_scan_type()
+		hosts = self._get_hosts()
+		total_ports = sum(len(self._get_ports(host)) for host in hosts)
 		is_mass_scan = total_ports > 10
 		tags = ['mass'] if is_mass_scan else []
-		for host in self._get_hosts():
+		for host in hosts:
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
 			if ip and ip not in ips:
-				yield Ip(ip=ip, alive=True, host=hostname, extra_data={'protocol': 'tcp'}, tags=tags)
+				yield Ip(ip=ip, alive=True, host=hostname, tags=tags + ['ping'])
 				ips.append(ip)
 			for port in self._get_ports(host):
 				# Get port number
@@ -195,6 +196,7 @@ class nmapData(dict):
 
 				# Get port state
 				state = port.get('state', {}).get('@state', '')
+				reason = port.get('state', {}).get('@reason', '')
 
 				# Get extra data
 				extra_data = self._get_extra_data(port)
@@ -221,7 +223,7 @@ class nmapData(dict):
 					protocol=protocol,
 					extra_data=extra_data,
 					confidence=conf,
-					tags=tags
+					tags=tags + [scan_type, reason]
 				)
 
 				# Parse each script output to get vulns
@@ -260,6 +262,9 @@ class nmapData(dict):
 	#---------------------#
 	# XML FILE EXTRACTORS #
 	#---------------------#
+	def _get_scan_type(self):
+	    return self.get('nmaprun', {}).get('scaninfo', {}).get('@type')
+
 	def _get_hosts(self):
 		hosts = self.get('nmaprun', {}).get('host', {})
 		if isinstance(hosts, dict):
