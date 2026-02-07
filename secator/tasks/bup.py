@@ -56,7 +56,7 @@ class bup(HttpBase):
 			'lines': 'response_lines_count',
 			'words': 'response_words_count',
 			'stored_response_path': 'response_html_filename',
-			'tags': ["bypass"]
+			'tags': lambda x: ["bypass"]
 		}
 	}
 	install_version = '0.4.4'
