@@ -7,7 +7,7 @@ long_description: |
   Supports both passive sources (collecting from external databases) and active crawlers
   (spidering the website directly). Identifies interesting patterns, endpoints, and parameters.
   Can optionally hunt for secrets in HTTP responses and probe URLs for additional information.
-tags: [http, crawl]
+tags: [http, crawl, secrets]
 input_types:
   - url
 

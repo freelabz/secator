@@ -38,6 +38,7 @@ class Url(OutputType):
 	is_redirect: bool = field(default=False, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='url', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)

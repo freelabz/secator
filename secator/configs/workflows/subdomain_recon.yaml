@@ -7,7 +7,7 @@ long_description: |
   Combines passive sources, DNS queries, TLS certificate analysis, and optional brute-force methods.
   Verifies discovered subdomains, checks for subdomain takeover vulnerabilities, and can optionally
   test SSL/TLS security or hunt for secrets in HTTP responses. Perfect for mapping attack surface.
-tags: [recon, dns, takeovers]
+tags: [recon, dns, http, ssl, secrets, takeovers]
 input_types:
   - host
 

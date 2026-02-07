@@ -49,5 +49,6 @@ class arp(Command):
 					'mac': mac,
 					'physical': physical,
 					'interface': interface,
-				}
+				},
+				tags=["arp", "internal"]
 			)

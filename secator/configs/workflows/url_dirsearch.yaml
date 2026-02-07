@@ -7,7 +7,7 @@ long_description: |
   Probes URLs for directory listings, optionally bruteforces directories and crawls discovered
   directory contents. Can hunt for sensitive files and secrets in HTTP responses.
   Helpful for finding hidden admin panels, backup files, and exposed directories.
-tags: [http, dir]
+tags: [http, dir, secrets]
 input_types:
   - url
   - host

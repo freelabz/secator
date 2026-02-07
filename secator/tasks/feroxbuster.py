@@ -112,5 +112,6 @@ class feroxbuster(HttpFuzzer):
 			time=item['timestamp'],
 			response_headers=item['headers'],
 			request_headers=self.get_opt_value('header', preprocess=True),
-			confidence='low'
+			confidence='low',
+			tags=['fuzz']
 		)

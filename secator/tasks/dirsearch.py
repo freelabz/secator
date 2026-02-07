@@ -81,4 +81,5 @@ class dirsearch(HttpFuzzer):
 			results = yaml.safe_load(f.read()).get('results', [])
 			for result in results:
 				result['request_headers'] = self.get_opt_value(HEADER, preprocess=True)
+				result['tags'] = ['fuzz']
 				yield result

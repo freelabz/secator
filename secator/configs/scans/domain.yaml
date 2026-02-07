@@ -7,6 +7,7 @@ long_description: |
   vulnerability scanning. Provides a full picture of the domain's attack surface, infrastructure,
   and potential security issues. Ideal for thorough domain-level security assessments.
 profile: default
+tags: [recon, dns, ssl, network, http, crawl, takeovers, vuln, secrets]
 input_types:
   - host
 

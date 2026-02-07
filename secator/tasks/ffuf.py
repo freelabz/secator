@@ -123,9 +123,11 @@ class ffuf(HttpFuzzer):
 		status_code = item.get('status', 0)
 		has_status_code_3xx = str(status_code).startswith('3')
 		is_redirect = (self.get_opt_value('follow_redirect') and 'redirectlocation' in item) or has_status_code_3xx
+		auto_calibration = self.get_opt_value('auto_calibration')
 		yield Url(
 			url=item['url'],
 			host=item['host'],
+			verified=auto_calibration,
 			status_code=status_code,
 			content_length=content_length,
 			content_type=item['content-type'],
@@ -133,7 +135,8 @@ class ffuf(HttpFuzzer):
 			time=item['duration'] * 10**-9,
 			method=self.get_opt_value(METHOD) or 'GET',
 			request_headers=headers,
-			confidence='high' if self.get_opt_value('auto_calibration') else 'medium'
+			confidence='high' if self.get_opt_value('auto_calibration') else 'medium',
+			tags=['fuzz']
 		)
 		has_body = content_length != 0
 		if self.get_opt_value('subs'):

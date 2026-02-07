@@ -7,7 +7,7 @@ long_description: |
   Uses multiple fuzzing engines (dirsearch, feroxbuster, ffuf) with intelligent calibration
   to filter false positives. Probes discovered URLs, captures screenshots when configured,
   and optionally hunts for secrets in HTTP responses. Thorough but time-intensive.
-tags: [http, fuzz]
+tags: [http, fuzz, secrets]
 input_types:
   - url
 

@@ -86,4 +86,4 @@ class xurlfind3r(HttpCrawler):
 			self.seen_params[base_url][param] += 1
 			if self.seen_params[base_url][param] > int(self.max_param_occurrences):
 				return
-		yield Url(url=item['url'], host=parsed_url.hostname, extra_data={'source': item['source']})
+		yield Url(url=item['url'], host=parsed_url.hostname, extra_data={'source': item['source']}, tags=['passive'])

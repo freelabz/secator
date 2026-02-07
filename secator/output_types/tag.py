@@ -15,6 +15,7 @@ class Tag(OutputType):
 	stored_response_path: str = field(default='', compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='tag', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
