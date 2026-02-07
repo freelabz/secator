@@ -58,6 +58,7 @@ class arpscan(Command):
 						'vendor': line_parts[3],
 						'protocol': 'arp',
 					},
+					tags=["internal"],
 					_source=self.unique_name
 				)
 		return line

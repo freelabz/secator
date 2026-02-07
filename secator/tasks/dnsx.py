@@ -94,6 +94,7 @@ class dnsx(ReconDns):
 				domain=extract_domain_info(host, domain_only=True),
 				verified=True,
 				sources=['dns'],
+				tags=['dns'],
 			)
 			self.subdomains.append(subdomain)
 			yield subdomain
@@ -114,7 +115,8 @@ class dnsx(ReconDns):
 						host=host,
 						ip=name,
 						protocol=IpProtocol.IPv4,
-						alive=False
+						alive=False,
+						tags=['dns'],
 					)
 					if ip not in self.results:
 						yield ip
@@ -123,7 +125,8 @@ class dnsx(ReconDns):
 						host=host,
 						ip=name,
 						protocol=IpProtocol.IPv6,
-						alive=False
+						alive=False,
+						tags=['dns'],
 					)
 					if ip not in self.results:
 						yield ip
@@ -132,7 +135,8 @@ class dnsx(ReconDns):
 						host=host,
 						ip=name,
 						protocol=IpProtocol.IPv4,
-						alive=False
+						alive=False,
+						tags=['dns'],
 					)
 					if ip not in self.results:
 						yield ip
@@ -141,7 +145,8 @@ class dnsx(ReconDns):
 					name=name,
 					type=_type.upper(),
 					extra_data=extra_data,
-					_source=self.unique_name
+					_source=self.unique_name,
+					tags=['dns'],
 				)
 
 				if record not in self.results:

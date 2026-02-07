@@ -76,7 +76,7 @@ class fping(ReconIp):
 			host = ''
 		if not (validators.ipv4(ip) or validators.ipv6(ip)):
 			return
-		yield Ip(ip=ip, alive=True, host=host, extra_data={'protocol': 'icmp'})
+		yield Ip(ip=ip, alive=True, host=host, extra_data={'protocol': 'icmp'}, tags=['internal'])
 
 	@staticmethod
 	def on_line(self, line):

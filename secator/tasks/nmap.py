@@ -176,11 +176,15 @@ class nmapData(dict):
 	def __iter__(self):
 		datas = []
 		ips = []
+		# Determine if this is a mass scan by counting total ports across all hosts
+		total_ports = sum(len(self._get_ports(host)) for host in self._get_hosts())
+		is_mass_scan = total_ports > 5
+		tags = ['mass'] if is_mass_scan else []
 		for host in self._get_hosts():
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
 			if ip and ip not in ips:
-				yield Ip(ip=ip, alive=True, host=hostname, extra_data={'protocol': 'tcp'})
+				yield Ip(ip=ip, alive=True, host=hostname, extra_data={'protocol': 'tcp'}, tags=tags)
 				ips.append(ip)
 			for port in self._get_ports(host):
 				# Get port number
@@ -216,7 +220,8 @@ class nmapData(dict):
 					service_name=service_name,
 					protocol=protocol,
 					extra_data=extra_data,
-					confidence=conf
+					confidence=conf,
+					tags=tags
 				)
 
 				# Parse each script output to get vulns
@@ -242,6 +247,8 @@ class nmapData(dict):
 						if 'cpe-match' in data.tags:
 							confidence = 'high' if version_exact else 'medium'
 						data.confidence = confidence
+						if is_mass_scan:
+							data.tags = list(set(data.tags + ['mass']))
 						if (CONFIG.runners.skip_cve_low_confidence and data.confidence == 'low'):
 							debug(f'{data.id}: ignored (low confidence).', sub='cve.nmap')
 							continue

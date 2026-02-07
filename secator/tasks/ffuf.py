@@ -135,7 +135,8 @@ class ffuf(HttpFuzzer):
 			time=item['duration'] * 10**-9,
 			method=self.get_opt_value(METHOD) or 'GET',
 			request_headers=headers,
-			confidence='high' if self.get_opt_value('auto_calibration') else 'medium'
+			confidence='high' if self.get_opt_value('auto_calibration') else 'medium',
+			tags=['fuzz']
 		)
 		has_body = content_length != 0
 		if self.get_opt_value('subs'):

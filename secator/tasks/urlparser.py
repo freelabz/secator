@@ -26,19 +26,19 @@ class urlparser(PythonRunner):
         for input in self.inputs:
             include = self.run_opts.get('include', [])
             if 'url' in include:
-                yield Url(url=input)
+                yield Url(url=input, tags=['computed'])
             parsed_url = urlparse(input)
             base_url = urlunparse(parsed_url._replace(query=''))
             root_url = urlunparse(parsed_url._replace(query='', fragment='', path=''))
             query = parsed_url.query
             if 'url_root' in include and root_url not in root_urls:
-                yield Tag(category='info', name='url_root', value=root_url, match=base_url)
+                yield Tag(category='info', name='url_root', value=root_url, match=base_url, tags=['computed'])
                 root_urls.add(root_url)
             if 'url_base' in include and base_url not in base_urls:
-                yield Tag(category='info', name='url_base', value=base_url, match=base_url)
+                yield Tag(category='info', name='url_base', value=base_url, match=base_url, tags=['computed'])
                 base_urls.add(base_url)
             if 'url_query' in include:
-                yield Tag(category='info', name='url_query', value=query, match=base_url)
+                yield Tag(category='info', name='url_query', value=query, match=base_url, tags=['computed'])
             if 'url_param' in include:
                 params = parse_qs(parsed_url.query)
                 for param_name, param_value in params.items():
@@ -47,5 +47,6 @@ class urlparser(PythonRunner):
                         name='url_param',
                         value=param_name,
                         match=base_url,
-                        extra_data={'value': param_value[0], 'url': input}
+                        extra_data={'value': param_value[0], 'url': input},
+                        tags=['computed'],
                     )
