@@ -91,7 +91,8 @@ class arjun(HttpBase):
 				host=parsed_url.hostname,
 				request_headers=values['headers'],
 				method=values['method'],
-				confidence='high'
+				confidence='high',
+				tags=["fuzz"]
 			)
 			for param in values['params']:
 				yield Tag(

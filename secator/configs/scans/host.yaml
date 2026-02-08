@@ -7,6 +7,7 @@ long_description: |
   open ports, running services, web applications, and potential security weaknesses.
   Perfect for targeted host-level security testing and penetration testing.
 profile: default
+tags: [recon, dns, network, http, crawl, ssl, vuln, secrets]
 input_types:
   - host
   - ip

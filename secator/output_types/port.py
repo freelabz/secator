@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import CPES, EXTRA_DATA, HOST, IP, PORT
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, format_object
+from secator.utils import rich_to_ansi, rich_escape as _s, format_object
 
 
 @dataclass
@@ -19,6 +19,7 @@ class Port(OutputType):
 	confidence: str = field(default='low', repr=False, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='port', repr=True)
@@ -51,6 +52,9 @@ class Port(OutputType):
 			s += rf' \[[bold purple]{self.service_name}{conf}[/]]'
 		if self.host and self.host != self.ip:
 			s += rf' \[[cyan]{self.host}[/]]'
+		if self.tags:
+			tags_str = ','.join(self.tags)
+			s += rf' \[[cyan]{_s(tags_str)}[/]]'
 		if self.extra_data:
 			skip_keys = ['name', 'servicefp', 'method', 'service_name', 'product', 'version', 'conf']
 			s += format_object(self.extra_data, 'yellow', skip_keys=skip_keys)

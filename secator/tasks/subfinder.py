@@ -12,7 +12,7 @@ class subfinder(ReconDns):
 	cmd = 'subfinder -cs'
 	input_types = [HOST]
 	output_types = [Subdomain]
-	tags = ['dns', 'recon']
+	tags = ['dns', 'recon', 'passive']
 	file_flag = '-dL'
 	input_flag = '-d'
 	json_flag = '-json'
@@ -46,3 +46,9 @@ class subfinder(ReconDns):
 		if isinstance(item, dict):
 			return item['input'] != 'localhost'
 		return True
+
+	@staticmethod
+	def on_item(self, item):
+		if isinstance(item, Subdomain):
+			item.tags = ['passive']
+		return item

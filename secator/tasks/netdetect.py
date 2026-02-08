@@ -24,6 +24,7 @@ class netdetect(PythonRunner):
                 match='localhost',
                 value=adapter.nice_name,
                 category='info',
+                tags=['internal'],
             )
             for ip in adapter.ips:
                 if ip.is_IPv4:
@@ -33,12 +34,14 @@ class netdetect(PythonRunner):
                             ip=ip.ip,
                             host='localhost',
                             alive=True,
+                            tags=['internal'],
                         )
                         yield Tag(
                             name='net_cidr',
                             match='localhost',
                             value=str(network),
                             category='info',
+                            tags=['internal'],
                         )
                     except ValueError:
                         continue

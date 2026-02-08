@@ -7,7 +7,7 @@ long_description: |
   Identifies WordPress version, installed themes and plugins, known vulnerabilities,
   misconfigurations, and weak configurations. Uses multiple WordPress-specific tools
   to provide comprehensive coverage. Critical for WordPress site security audits.
-tags: [http, wordpress, vulnerability]
+tags: [http, wordpress, vuln]
 input_types:
   - url
   - ip
