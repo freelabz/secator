@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.7](https://github.com/freelabz/secator/compare/v0.25.6...v0.25.7) (2026-02-08)
+
+
+### Bug Fixes
+
+* improve tags for config + output types ([#933](https://github.com/freelabz/secator/issues/933)) ([f4f9e21](https://github.com/freelabz/secator/commit/f4f9e21926e6256ef2e95434ede01dd1bd668b95))
+
 ## [0.25.6](https://github.com/freelabz/secator/compare/v0.25.5...v0.25.6) (2026-02-05)
 
 
