@@ -132,6 +132,10 @@ class katana(HttpCrawler):
 		response = item.get('response')
 		if not response:
 			return item
+		tags = []
+		headless = self.get_opt_value('headless')
+		if headless:
+			tags.append('headless')
 		url = Url(
 			url=item['request']['endpoint'],
 			host=parsed_url.hostname,
@@ -143,6 +147,7 @@ class katana(HttpCrawler):
 			tech=item['response'].get('technologies', []),
 			stored_response_path=item['response'].get('stored_response_path', ''),
 			response_headers=item['response'].get('headers', {}),
+			tags=tags
 		)
 		if url not in self.urls:
 			self.urls.append(url)

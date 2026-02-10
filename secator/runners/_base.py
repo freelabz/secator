@@ -700,6 +700,7 @@ class Runner:
 		"""Check for duplicates and mark items as duplicates."""
 		if not self.enable_duplicate_check:
 			return
+		start_time = time()
 		self.debug('running duplicate check', sub='end')
 		# dupe_count = 0
 		import concurrent.futures
@@ -712,6 +713,8 @@ class Runner:
 		# 	duplicates_str = '\n\t'.join(duplicates)
 		# 	self.debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='duplicates', verbose=True)
 		# self.debug(f'duplicate check completed: {dupe_count} found', sub='duplicates')
+		total_time = time() - start_time
+		self.debug(f'duplicate check completed in {total_time:.2f} seconds', sub='end')
 
 	def check_duplicate(self, item):
 		"""Check if an item is a duplicate in the list of results and mark it like so.

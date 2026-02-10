@@ -17,6 +17,7 @@ class Port(OutputType):
 	protocol: str = field(default='tcp', repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	confidence: str = field(default='low', repr=False, compare=False)
+	service_confidence: str = field(default='low', repr=False, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
 	tags: list = field(default_factory=list, compare=False)
@@ -42,12 +43,16 @@ class Port(OutputType):
 		return f'{self.host}:{self.port}'
 
 	def __repr__(self) -> str:
-		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
+		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/]'
+		state = f'[bold yellow]{self.state.upper()}[/]'
+		if self.confidence == 'low':
+			state += '[bold orange3]?[/]'
+		s += f' {state}'
 		if self.protocol != 'TCP':
 			s += rf' \[[yellow3]{self.protocol}[/]]'
 		if self.service_name:
 			conf = ''
-			if self.confidence == 'low':
+			if self.service_confidence == 'low':
 				conf = '[bold orange3]?[/]'
 			s += rf' \[[bold purple]{self.service_name}{conf}[/]]'
 		if self.host and self.host != self.ip:

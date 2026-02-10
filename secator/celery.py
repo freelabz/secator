@@ -275,20 +275,40 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	Returns:
 		list: Runner results
 	"""
+	# Log mark_completed start
+	start_time = time()
 	if IN_CELERY_WORKER_PROCESS:
 		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
+
+	# Forward previous results
 	if results:
 		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
+
+	# Query results from db when mongodb is enabled
 	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
 		results = get_results(results)
+
+	# Add results to runner so it can compute status
+	# and extract dynamic targets
 	for item in results:
 		runner.add_result(item, print=False)
+
+	# Run mark_started
 	runner.mark_started()
+
+	# Log total time
+	total_time = time() - start_time
+	debug(f'Runner {runner.unique_name}: finished mark_started in {total_time:.2f}s', sub='celery')
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_started in {total_time:.2f}s'))
+
+	# Return only uuids when mongodb is enabled
 	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
+
 	return runner.results
 
 
@@ -304,19 +324,39 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	Returns:
 		list: Final results
 	"""
+	# Log mark_completed start
+	start_time = time()
+	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	if IN_CELERY_WORKER_PROCESS:
 		console.print(Info(message=f'Runner {runner.unique_name} has finished, running mark_completed'))
-	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
+
+	# Forward previous results
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
+
+	# Query results from db when mongodb is enabled
 	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
 		results = get_results(results)
+
+	# Add results to runner so it can compute status
+	# and run duplicate checks
 	for item in results:
 		runner.add_result(item, print=False)
+
+	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
 	runner.mark_completed()
+
+	# Log total time
+	total_time = time() - start_time
+	debug(f'Runner {runner.unique_name}: finished mark_completed in {total_time:.2f}s', sub='celery')
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_completed in {total_time:.2f}s'))
+
+	# Return only uuids when mongodb is enabled
 	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
+
 	return runner.results
 
 

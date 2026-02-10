@@ -9,7 +9,7 @@ from secator.decorators import task
 from secator.definitions import (CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED,
 								 OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT,
 								 THREADS, TIMEOUT, TOP_PORTS)
-from secator.output_types import Exploit, Port, Vulnerability, Info, Error, Ip
+from secator.output_types import Exploit, Port, Vulnerability, Info, Error, Ip, Warning
 from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
 
@@ -33,6 +33,7 @@ class nmap(ReconPort):
 
 		# Host discovery
 		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
+		'skip_dns_resolution': {'is_flag': True, 'short': 'n', 'default': False, 'help': 'Skip DNS resolution'},
 
 		# Service and version detection
 		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Enable version detection (slow)'},
@@ -89,6 +90,7 @@ class nmap(ReconPort):
 
 		# Nmap opts
 		'skip_host_discovery': '-Pn',
+		'skip_dns_resolution': '-n',
 		'version_detection': '-sV',
 		'detect_all': '-A',
 		'detect_os': '-O',
@@ -179,8 +181,13 @@ class nmapData(dict):
 		scan_type = self._get_scan_type()
 		hosts = self._get_hosts()
 		total_ports = sum(len(self._get_ports(host)) for host in hosts)
-		is_mass_scan = total_ports > 10
-		tags = ['mass'] if is_mass_scan else []
+		is_mass_scan = total_ports > 2
+		confidence = 'high'
+		tags = []
+		if is_mass_scan:
+			yield Warning(message='Unusual number of ports found. There might be an IDS interfering with the scan.')
+			confidence = 'low'
+			tags = ['ids']
 		for host in hosts:
 			hostname = self._get_hostname(host)
 			ip = self._get_ip(host)
@@ -202,7 +209,7 @@ class nmapData(dict):
 				extra_data = self._get_extra_data(port)
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
-				conf = extra_data.get('confidence')
+				service_confidence = extra_data.get('confidence', 0)
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
@@ -222,7 +229,8 @@ class nmapData(dict):
 					service_name=service_name,
 					protocol=protocol,
 					extra_data=extra_data,
-					confidence=conf,
+					confidence=confidence,
+					service_confidence=service_confidence,
 					tags=tags + [scan_type, reason]
 				)
 
@@ -354,12 +362,11 @@ class nmapData(dict):
 
 		# Grab confidence
 		conf = int(extra_data.get('conf', 0))
+		confidence = 'low'
 		if conf > 7:
 			confidence = 'high'
 		elif conf > 4:
 			confidence = 'medium'
-		else:
-			confidence = 'low'
 		extra_data['confidence'] = confidence
 
 		# Build custom CPE
