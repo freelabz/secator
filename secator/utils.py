@@ -145,7 +145,7 @@ def sanitize_folder_name(
     replacement_char: str = "_",
     replace_spaces: bool = True,
     replace_hyphens: bool = True,
-    max_length: Optional[int] = 255,
+    max_length: int = 255,
     normalize_unicode: bool = True,
 ) -> str:
     """
@@ -211,6 +211,7 @@ def sanitize_folder_name(
         return "unnamed_folder"
 
     return sanitized
+
 
 def deduplicate(array, attr=None):
 	"""Deduplicate list of OutputType items.
