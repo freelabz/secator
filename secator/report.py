@@ -76,13 +76,30 @@ class Report:
 			del data['info']['results']
 		data['info']['title'] = self.title
 		data['info']['errors'] = self.runner.errors
+		data['info']['celery_id'] = self.runner.celery_result.id if self.runner.celery_result else None
+		data['info']['celery_ids'] = self.runner.celery_ids
+		ids_map = self.runner.celery_ids_map.copy()
+		for idx, val in ids_map.items():
+			if 'results' in val:
+				del val['results']
+			if 'ready' in val:
+				del val['ready']
+		data['info']['celery_ids_map'] = ids_map
+		output_results, errors = Report.format_results(self.runner.results, dedupe=dedupe, extractors=extractors)
+		data['results'] = output_results
+		data['info']['errors'] = errors
+		self.data = data
+		return data
 
-		# Fill report
+	@staticmethod
+	def format_results(results, dedupe=CONFIG.runners.remove_duplicates, extractors=[]):
+		output_results = {}
+		output_errors = []
 		for output_type in FINDING_TYPES:
 			output_name = output_type.get_name()
 			sort_by, _ = get_table_fields(output_type)
 			items = [
-				item for item in self.runner.results
+				item for item in results
 				if isinstance(item, OutputType) and item._type == output_name
 			]
 			if items:
@@ -104,7 +121,7 @@ class Report:
 						if not res:
 							continue
 						if errors:
-							data['info']['errors'] = errors
+							output_errors.extend(errors)
 						if res:
 							if op == 'or':
 								all_res = all_res + res
@@ -114,10 +131,8 @@ class Report:
 								else:
 									all_res = [item for item in res if item in all_res]
 					items = remove_duplicates(all_res) if dedupe else all_res
-				data['results'][output_name] = items
-
-		# Save data
-		self.data = data
+				output_results[output_name] = items
+		return output_results, output_errors
 
 	def is_empty(self):
 		return all(not items for items in self.data['results'].values())
