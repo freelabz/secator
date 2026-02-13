@@ -264,6 +264,10 @@ OUTPUTS_TASKS = {
         Port(port=3000, ip='127.0.0.1', state='open', service_name='ppp', _source='nmap'),
         Port(port=8080, ip='127.0.0.1', state='open', service_name='nagios nsca', _source='nmap'),
     ],
+    'nslookup': [
+        Ip(ip='91.198.174.192', host='wikipedia.org', alive=False, _source='nslookup'),
+        Record(name='91.198.174.192', type='A', host='wikipedia.org', _source='nslookup'),
+    ],
     'nuclei': [
         Vulnerability(
             matched_at='http://localhost:3000/metrics',
