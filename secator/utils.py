@@ -61,6 +61,47 @@ def setup_logging(level):
 	return logger
 
 
+def detect_secator_piped_input(data):
+	"""Detect if piped input is from a secator command.
+	
+	Checks if input lines contain valid secator JSON output by looking for the presence
+	of '_type' and '_source' fields, which are standard in all secator output types.
+	
+	Args:
+		data (list): List of input lines (JSON strings expected for secator output).
+		
+	Returns:
+		tuple: (is_secator_pipe, results) where is_secator_pipe is bool indicating if
+			   secator output was detected, and results is a list of OutputType objects
+			   parsed from the JSON input.
+	"""
+	# Import here to avoid circular dependency
+	from secator.serializers.dataclass import loads_dataclass
+	
+	if not data or not isinstance(data, list):
+		return False, []
+	
+	results = []
+	is_secator = False
+	
+	for line in data:
+		if not line or not line.strip():
+			continue
+		try:
+			obj = json.loads(line)
+			# Check if this is a secator output (has _type and _source fields)
+			if isinstance(obj, dict) and '_type' in obj and '_source' in obj:
+				is_secator = True
+				# Convert JSON to OutputType object
+				result = loads_dataclass(line)
+				results.append(result)
+		except (json.JSONDecodeError, TypeError, ValueError):
+			# Not valid JSON or not a secator output, keep as regular input
+			pass
+	
+	return is_secator, results
+
+
 def expand_input(input, ctx):
 	"""Expand user-provided input on the CLI:
 	- If input is a path, read the file and return the lines.
@@ -87,6 +128,12 @@ def expand_input(input, ctx):
 			rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 			if rlist:
 				data = sys.stdin.read().splitlines()
+				# Detect if this is secator piped output
+				is_secator_pipe, results = detect_secator_piped_input(data)
+				if is_secator_pipe:
+					# Store the results in context for later use
+					ctx.obj['secator_piped_results'] = results
+					ctx.obj['is_secator_pipe'] = True
 				return data
 			else:
 				console.print('No input passed on stdin.', style='bold red')
