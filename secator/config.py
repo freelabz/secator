@@ -93,6 +93,7 @@ class Cli(StrictModel):
 
 
 class Runners(StrictModel):
+	backend: str = 'celery'  # 'celery' or 'airflow'
 	input_chunk_size: int = 100
 	progress_update_frequency: int = 20
 	stat_update_frequency: int = 20

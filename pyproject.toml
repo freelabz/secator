@@ -90,6 +90,11 @@ gdrive = [
 gcs = [
 	'google-cloud-storage < 3'
 ]
+airflow = [
+  'apache-airflow >= 3.0, < 4',
+  'cadwyn < 6',
+  'fastapi < 0.118',
+]
 
 [project.scripts]
 secator = 'secator.cli:cli'

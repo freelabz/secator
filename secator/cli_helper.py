@@ -48,6 +48,7 @@ CLI_EXEC_OPTS = {
 	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf', 'shell_complete': complete_profiles},  # noqa: E501
 	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR, 'shell_complete': complete_drivers},  # noqa: E501
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
+	'backend': {'type': str, 'default': 'celery', 'help': 'Execution backend [dim](celery|airflow)[/]', 'short': 'bk'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
 	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
 	'enable_memray': {'is_flag': True, 'short': 'memray', 'default': False, 'help': 'Enable memray profiling'},
@@ -296,7 +297,13 @@ def register_runner(cli_endpoint, config):
 		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
-		if sync or dry_run:
+		backend = opts.get('backend', 'celery')
+		if backend == 'airflow':
+			if not ADDONS_ENABLED['airflow']:
+				_get_rich_console().print('[bold red]Missing `airflow` addon: please run `secator install addons airflow`[/].')
+				sys.exit(1)
+			sync = False
+		elif sync or dry_run:
 			sync = True
 		else:
 			from secator.celery import is_celery_worker_alive

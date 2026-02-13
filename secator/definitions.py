@@ -31,7 +31,8 @@ STATE_COLORS = {
 	'RUNNING': 'bold yellow3',
 	'SUCCESS': 'bold green',
 	'FAILURE': 'bold red',
-	'REVOKED': 'bold magenta'
+	'REVOKED': 'bold magenta',
+	'SKIPPED': 'dim cyan',
 }
 
 # Available drivers and exporters
@@ -158,6 +159,7 @@ ADDONS_ENABLED = {}
 
 for addon, module in [
 	('worker', 'eventlet'),
+	('airflow', 'airflow'),
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
 	('api', 'requests'),

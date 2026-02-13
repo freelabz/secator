@@ -423,6 +423,23 @@ class Command(Runner):
 			str: Command stdout / stderr.
 			dict: Serialized object.
 		"""
+		# Dispatch to Airflow backend if requested
+		backend = self.run_opts.get('backend', CONFIG.runners.backend)
+		if backend == 'airflow':
+			# Check if chunking is needed (same logic as Celery path)
+			chunk_size = getattr(self, 'input_chunk_size', 0)
+			needs_chunk = (
+				len(self.inputs) > 1
+				and chunk_size
+				and chunk_size != -1
+				and not self.chunk
+			)
+			if needs_chunk:
+				yield from self._yield_airflow_chunked(chunk_size)
+			else:
+				yield from self._yield_airflow()
+			return
+
 		try:
 
 			# Abort if it has children tasks
@@ -485,7 +502,7 @@ class Command(Runner):
 			env = os.environ
 			self.process = subprocess.Popen(
 				command,
-				stdin=subprocess.PIPE if sudo_password else None,
+				stdin=subprocess.PIPE if sudo_password else subprocess.DEVNULL,
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,

@@ -747,12 +747,22 @@ class Runner:
 	def yielder(self):
 		"""Base yielder implementation.
 
-		This should be overridden by derived classes if they need custom behavior.
-		Otherwise, they can implement build_celery_workflow() and get standard behavior.
+		Dispatches to the appropriate backend: Airflow or Celery.
+		Derived classes can override this entirely if they need custom behavior,
+		or implement build_celery_workflow() / build_airflow_dag_id() for
+		standard behavior.
 
 		Yields:
 			secator.output_types.OutputType: Secator output type.
 		"""
+		# Check if Airflow backend is requested
+		backend = self.run_opts.get('backend', CONFIG.runners.backend)
+		if backend == 'airflow':
+			yield from self._yield_airflow()
+			return
+
+		# --- Celery backend (default) ---
+
 		# If existing celery result, yield from it
 		if self.celery_result:
 			yield from CeleryData.iter_results(
@@ -797,6 +807,166 @@ class Runner:
 
 		# Yield results
 		yield from results
+
+	def _yield_airflow(self):
+		"""Submit execution to Airflow and poll for results in real-time.
+
+		Triggers the appropriate DAG (task/workflow/scan) via the Airflow REST
+		API and streams results as each task completes (mirroring the Celery
+		worker's real-time result streaming via ``CeleryData.iter_results``).
+
+		Yields:
+			secator.output_types.OutputType: Secator output type.
+		"""
+		from secator.airflow.api_client import AirflowAPIClient
+		from secator.airflow.airflow_utils import AirflowData
+
+		client = AirflowAPIClient()
+
+		# Determine DAG id based on runner type
+		runner_type = self.config.type
+		dag_id = f'secator_{runner_type}_{self.config.name}'
+
+		# Check if the underlying task needs chunking
+		chunk_size = getattr(self, 'input_chunk_size', 0)
+		if not chunk_size:
+			try:
+				from secator.runners.task import Task as TaskRunner
+				if isinstance(self, TaskRunner):
+					task_cls = TaskRunner.get_task_class(self.config.name)
+					chunk_size = getattr(task_cls, 'input_chunk_size', 0)
+			except Exception:
+				pass
+		needs_chunk = (
+			len(self.inputs) > 1
+			and chunk_size
+			and chunk_size != -1
+			and not self.run_opts.get('chunk')
+		)
+		if needs_chunk:
+			yield from self._yield_airflow_chunked(chunk_size)
+			return
+
+		# Build DAG run configuration
+		conf = {
+			'targets': self.inputs,
+			'options': self.resolved_opts,
+			'workspace': self.workspace_name,
+		}
+
+		# Trigger the DAG
+		self.debug(f'triggering Airflow DAG {dag_id}', sub='airflow')
+		try:
+			run_info = client.trigger_dag(dag_id, conf=conf)
+		except Exception as e:
+			yield Error(message=f'Failed to trigger Airflow DAG {dag_id}: {e}')
+			return
+
+		run_id = run_info.get('dag_run_id')
+		yield Info(message=f'Airflow DAG run created: {dag_id} (run_id={run_id})')
+
+		if self.no_poll:
+			self.enable_reports = False
+			self.no_process = True
+			return
+
+		# Build task display metadata map (like CeleryData's ids_map)
+		ids_map = AirflowData.build_ids_map(self.config, runner_type)
+
+		# Stream results in real-time
+		panel_title = f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
+		yield from AirflowData.iter_results(
+			dag_id,
+			run_id,
+			ids_map=ids_map,
+			print_remote_info=self.print_remote_info,
+			print_remote_title=panel_title,
+		)
+
+	def _yield_airflow_chunked(self, chunk_size):
+		"""Split inputs into chunks and trigger one Airflow DAG run per chunk.
+
+		Mirrors the Celery ``break_task`` / chord pattern: each chunk runs as
+		an independent DAG run, all are polled in parallel, and results are
+		aggregated at the end.
+
+		Args:
+			chunk_size (int): Maximum number of targets per chunk.
+
+		Yields:
+			secator.output_types.OutputType: Secator output type.
+		"""
+		from secator.airflow.api_client import AirflowAPIClient
+		from secator.airflow.utils import deserialize_results
+		from secator.output_types import Info, Error, Progress
+
+		client = AirflowAPIClient()
+
+		runner_type = self.config.type
+		dag_id = f'secator_{runner_type}_{self.config.name}'
+
+		# Split inputs into chunks
+		chunks = [self.inputs[i:i + chunk_size] for i in range(0, len(self.inputs), chunk_size)]
+		yield Info(message=f'Splitting {len(self.inputs)} targets into {len(chunks)} chunks (size={chunk_size})')
+
+		# Trigger one DAG run per chunk
+		runs = []  # list of (run_id, chunk_targets)
+		for ix, chunk in enumerate(chunks):
+			conf = {
+				'targets': chunk,
+				'options': self.resolved_opts,
+				'workspace': self.workspace_name,
+			}
+			self.debug(f'triggering chunk {ix + 1}/{len(chunks)} ({len(chunk)} targets)', sub='airflow')
+			try:
+				run_info = client.trigger_dag(dag_id, conf=conf)
+				run_id = run_info.get('dag_run_id')
+				runs.append((run_id, chunk))
+				yield Info(message=f'Chunk {ix + 1}/{len(chunks)}: DAG run {run_id}')
+			except Exception as e:
+				yield Error(message=f'Failed to trigger chunk {ix + 1}: {e}')
+
+		if not runs:
+			yield Error(message='No DAG runs were triggered')
+			return
+
+		if self.no_poll:
+			self.enable_reports = False
+			self.no_process = True
+			return
+
+		# Poll all runs until all are done
+		from secator.airflow.config import get_poll_frequency
+		from time import sleep
+		poll_interval = get_poll_frequency()
+
+		completed = set()
+		while len(completed) < len(runs):
+			for idx, (run_id, _chunk) in enumerate(runs):
+				if run_id in completed:
+					continue
+				status = client.get_dag_run(dag_id, run_id)
+				state = status.get('state', 'unknown')
+				if state in ('success', 'failed'):
+					completed.add(run_id)
+					if state == 'failed':
+						yield Error(message=f'Chunk {idx + 1}/{len(runs)} failed (run_id={run_id})')
+
+			total_pct = int(len(completed) * 100 / len(runs))
+			yield Progress(percent=total_pct)
+
+			if len(completed) < len(runs):
+				sleep(poll_interval)
+
+		# Collect results from all successful runs
+		self.debug('collecting results from all chunks', sub='airflow')
+		for idx, (run_id, _chunk) in enumerate(runs):
+			try:
+				raw_results = client.collect_results(dag_id, run_id)
+				results = deserialize_results(raw_results)
+				yield from results
+			except Exception as e:
+				yield Error(message=f'Failed to collect results from chunk {idx + 1}: {e}')
 
 	def build_celery_workflow(self):
 		"""Build Celery workflow.

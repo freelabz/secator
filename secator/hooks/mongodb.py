@@ -1,6 +1,8 @@
 import logging
 import time
 
+from datetime import datetime, timezone
+
 import pymongo
 from bson.objectid import ObjectId
 from celery import shared_task
@@ -214,7 +216,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 		seen.extend(duplicate_ids)
 
 		debug(
-			f'Found {len(duplicate_ids)} duplicates for item',
+			f'Found {len(duplicate_ids)} duplicates for item {item._uuid}',
 			sub='hooks.mongodb',
 			verbose=True,
 			log_hook=log_hook
@@ -264,14 +266,16 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 
 		db_updates[item._uuid] = {
 			**copied_fields,
+			'_tagged': True,
 			'_related': duplicate_ids + related_ids,
 			'_context.workspace_duplicate': False,
-			'_tagged': True
+			'_context.updated_at': datetime.now(timezone.utc),
 		}
 		for uuid in duplicate_ids:
 			db_updates[uuid] = {
+				'_tagged': True,
 				'_context.workspace_duplicate': True,
-				'_tagged': True
+				'_context.updated_at': datetime.now(timezone.utc),
 			}
 	debug(f'Finished processing untagged findings in {time.time() - start_time}s', sub='hooks.mongodb', log_hook=log_hook)
 	start_time = time.time()

@@ -125,6 +125,156 @@ for config in SCANS:
 # WORKER #
 #--------#
 
+def _airflow_init():
+	"""Initialize Airflow: install, fix dependencies, migrate DB, deploy DAGs, apply patches, start."""
+	import importlib
+
+	airflow_home = os.environ.get('AIRFLOW_HOME', os.path.expanduser('~/airflow'))
+	dags_folder = os.path.join(airflow_home, 'dags')
+	secator_dags = os.path.join(ROOT_FOLDER, 'dags')
+	python = sys.executable
+
+	# Step 1: Install apache-airflow with compatible dependencies
+	console.print(Info(message='Step 1/6: Installing apache-airflow...'))
+	ret = subprocess.run(
+		f'{python} -m pip install "apache-airflow>=3.0,<4" "cadwyn<6" "fastapi<0.118"',
+		shell=True, capture_output=True, text=True
+	)
+	if ret.returncode != 0:
+		console.print(Error(message=f'Failed to install apache-airflow: {ret.stderr.strip().splitlines()[-1]}'))
+		sys.exit(1)
+	console.print(Info(message='apache-airflow installed.'))
+
+	# Step 2: Run database migration
+	console.print(Info(message='Step 2/6: Running airflow db migrate...'))
+	ret = subprocess.run(f'{python} -m airflow db migrate', shell=True, capture_output=True, text=True)
+	if ret.returncode != 0:
+		console.print(Error(message=f'airflow db migrate failed: {ret.stderr.strip().splitlines()[-1]}'))
+		sys.exit(1)
+	console.print(Info(message='Database migrated.'))
+
+	# Step 3: Deploy DAG entry points
+	console.print(Info(message=f'Step 3/6: Deploying DAG files to {dags_folder}...'))
+	os.makedirs(dags_folder, exist_ok=True)
+	dag_files = ['secator_tasks.py', 'secator_workflows.py', 'secator_scans.py']
+	for dag_file in dag_files:
+		src = os.path.join(secator_dags, dag_file)
+		dst = os.path.join(dags_folder, dag_file)
+		if os.path.exists(src):
+			shutil.copy2(src, dst)
+			console.print(Info(message=f'  Copied {dag_file}'))
+		else:
+			console.print(Warning(message=f'  {dag_file} not found at {src}, skipping'))
+	console.print(Info(message='DAGs deployed.'))
+
+	# Step 4: Apply cadwyn patches for Python 3.14+
+	if sys.version_info >= (3, 14):
+		console.print(Info(message='Step 4/6: Applying cadwyn patches for Python 3.14...'))
+		try:
+			cadwyn_mod = importlib.import_module('cadwyn.schema_generation')
+			cadwyn_path = cadwyn_mod.__file__
+			with open(cadwyn_path, 'r') as f:
+				content = f.read()
+			patched = False
+
+			# Patch 1: Union.__getitem__ descriptor issue
+			old_union = 'getitem = typing.Union.__getitem__'
+			if old_union in content:
+				content = content.replace(
+					'            getitem = typing.Union.__getitem__  # pyright: ignore[reportAttributeAccessIssue]\n'
+					'            return getitem(\n'
+					'                tuple(self.change_version_of_annotation(a) for a in get_args(annotation)),\n'
+					'            )',
+					'            return typing.Union[tuple(self.change_version_of_annotation(a) for a in get_args(annotation))]'
+				)
+				patched = True
+				console.print(Info(message='  Patched Union.__getitem__ issue'))
+
+			# Patch 2: __annotations__ -> inspect.get_annotations()
+			old_annot = 'callable_annotations = annotation_modifying_wrapper.__annotations__'
+			if old_annot in content:
+				new_annot = (
+					"callable_annotations = inspect.get_annotations(annotation_modifying_wrapper)"
+					" if hasattr(inspect, 'get_annotations')"
+					" else getattr(annotation_modifying_wrapper, '__annotations__', {})"
+				)
+				content = content.replace(old_annot, new_annot)
+				patched = True
+				console.print(Info(message='  Patched __annotations__ issue'))
+
+			if patched:
+				with open(cadwyn_path, 'w') as f:
+					f.write(content)
+				console.print(Info(message='cadwyn patches applied.'))
+			else:
+				console.print(Info(message='cadwyn already patched or patches not needed.'))
+		except ImportError:
+			console.print(Warning(message='cadwyn not installed, skipping patches.'))
+	else:
+		console.print(Info(message='Step 4/6: Python < 3.14, cadwyn patches not needed.'))
+
+	# Step 5: Apply httpx pickle patch
+	console.print(Info(message='Step 5/6: Checking httpx pickle compatibility...'))
+	try:
+		import httpx
+		import pickle
+		test_exc = httpx.HTTPStatusError('test', request=httpx.Request('GET', 'http://x'), response=httpx.Response(500))
+		try:
+			pickle.dumps(test_exc)
+			console.print(Info(message='httpx HTTPStatusError is pickleable, no patch needed.'))
+		except (TypeError, pickle.PicklingError):
+			httpx_path = httpx._exceptions.__file__
+			with open(httpx_path, 'r') as f:
+				content = f.read()
+			if '__reduce__' not in content:
+				patch = (
+					'\n'
+					'    def __reduce__(self) -> tuple:\n'
+					'        return (\n'
+					'            self.__class__,\n'
+					'            (str(self),),\n'
+					'            {"request": self.request, "response": self.response},\n'
+					'        )\n'
+					'\n'
+					'    def __setstate__(self, state: dict) -> None:\n'
+					'        self.request = state["request"]\n'
+					'        self.response = state["response"]\n'
+				)
+				# Insert after the __init__ method of HTTPStatusError
+				marker = '        self.request = request\n        self.response = response\n'
+				if marker in content:
+					content = content.replace(marker, marker + patch)
+					with open(httpx_path, 'w') as f:
+						f.write(content)
+					console.print(Info(message='httpx pickle patch applied.'))
+				else:
+					console.print(Warning(message='Could not auto-patch httpx, apply manually.'))
+			else:
+				console.print(Info(message='httpx already patched.'))
+	except ImportError:
+		console.print(Warning(message='httpx not installed, skipping patch.'))
+
+	# Step 6: Start Airflow standalone
+	console.print(Info(message='Step 6/6: Starting airflow standalone...'))
+	console.print('')
+	console.print(Info(message='Airflow will start all services (scheduler, webserver, triggerer, dag-processor).'))
+	console.print(Info(message='On first run, an admin user will be created automatically.'))
+	creds_path = f'{airflow_home}/simple_auth_manager_passwords.json.generated'
+	console.print(Info(message=f'Credentials will be saved to: {creds_path}'))
+	console.print('')
+	console.print(Info(message='Set environment variables to authenticate secator:'))
+	console.print('  [bold cyan]export SECATOR_AIRFLOW_USERNAME=admin[/]')
+	console.print('  [bold cyan]export SECATOR_AIRFLOW_PASSWORD=<password from credentials file>[/]')
+	console.print('')
+
+	env = os.environ.copy()
+	venv_bin = str(Path(python).parent)
+	env['PATH'] = f'{venv_bin}:{env.get("PATH", "")}'
+
+	result = subprocess.run(f'{python} -m airflow standalone', shell=True, env=env)
+	sys.exit(result.returncode)
+
+
 @cli.command(name='worker', context_settings=dict(ignore_unknown_options=True), aliases=['wk'])
 @click.option('-n', '--hostname', type=str, default='runner', help='Celery worker hostname (unique).')
 @click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
@@ -133,7 +283,7 @@ for config in SCANS:
 @click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
 @click.option('--quiet', is_flag=True, default=False, help='Quiet mode.')
 @click.option('--loglevel', type=str, default='INFO', help='Log level.')
-@click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
+@click.option('--check', is_flag=True, help='Check if worker is alive.')
 @click.option('--dev', is_flag=True, help='Start a worker in dev mode (celery multi).')
 @click.option('--stop', is_flag=True, help='Stop a worker in dev mode (celery multi).')
 @click.option('--show', is_flag=True, help='Show command (celery multi).')
@@ -141,8 +291,49 @@ for config in SCANS:
 @click.option('--without-gossip', is_flag=True)
 @click.option('--without-mingle', is_flag=True)
 @click.option('--without-heartbeat', is_flag=True)
-def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
+@click.option('-bk', '--backend', type=str, default='celery', help='Execution backend [dim](celery|airflow)[/].')
+@click.option('--init', 'do_init', is_flag=True, help='Initialize Airflow [dim](full setup)[/].')
+def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat, backend, do_init):  # noqa: E501
 	"""Run a worker."""
+
+	# --- Airflow backend ---
+	if backend == 'airflow':
+		if not do_init and not ADDONS_ENABLED['airflow']:
+			console.print(Error(message='Missing airflow addon: please run "secator install addons airflow".'))
+			sys.exit(1)
+
+		from secator.airflow.api_client import AirflowAPIClient
+		from secator.airflow.config import AIRFLOW_API_URL
+
+		if check:
+			client = AirflowAPIClient()
+			if client.is_healthy():
+				console.print(Info(message=f'Airflow is healthy at {AIRFLOW_API_URL}'))
+			else:
+				console.print(Error(message=f'Airflow is not reachable at {AIRFLOW_API_URL}'))
+				sys.exit(1)
+			return
+
+		if do_init:
+			_airflow_init()
+			return
+
+		console.print(Info(message='Airflow workers are managed by the Airflow scheduler.'))
+		console.print(Info(message='To initialize Airflow from scratch, run:'))
+		console.print('')
+		console.print('  [bold cyan]secator worker --backend airflow --init[/]')
+		console.print('')
+		console.print(Info(message='Or start Airflow manually:'))
+		console.print('')
+		console.print('  [bold cyan]airflow standalone[/]')
+		console.print('')
+		console.print(f'  API URL: [bold green]{AIRFLOW_API_URL}[/]')
+		console.print('')
+		console.print(Info(message='Check worker health with:'))
+		console.print('  [bold cyan]secator worker --backend airflow --check[/]')
+		return
+
+	# --- Celery backend (default) ---
 
 	# Check Celery addon is installed
 	if not ADDONS_ENABLED['worker']:
@@ -1575,6 +1766,20 @@ def install_worker():
 			'Run [bold green4]secator worker[/] to run a Celery worker using the file system as a backend and broker.',
 			'Run [bold green4]secator x httpx testphp.vulnweb.com[/] to admire your task running in a worker.',
 			r'[dim]\[optional][/dim] Run [bold green4]secator install addons redis[/] to setup Redis backend / broker.'
+		]
+	)
+
+
+@addons.command('airflow')
+def install_airflow():
+	"Install Apache Airflow addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[airflow]',
+		title='Apache Airflow addon',
+		next_steps=[
+			'Run [bold green4]secator worker --backend airflow --init[/] to initialize and start Airflow.',
+			'Run [bold green4]secator worker --backend airflow --check[/] to verify Airflow is healthy.',
+			'Run [bold green4]secator x httpx example.com --backend airflow[/] to run a task via Airflow.',
 		]
 	)
 
