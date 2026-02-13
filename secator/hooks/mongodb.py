@@ -1,5 +1,6 @@
 import logging
 import time
+from dataclasses import fields as dataclass_fields
 
 import pymongo
 from bson.objectid import ObjectId
@@ -101,6 +102,57 @@ def update_runner(self):
 		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
 
 
+def _has_new_items(existing_list, new_list):
+	"""Check if new_list contains items not in existing_list.
+
+	Args:
+		existing_list: The existing list to check against
+		new_list: The new list to check
+
+	Returns:
+		bool: True if new_list has items not in existing_list
+	"""
+	try:
+		existing_set = set(existing_list)
+		for item_val in new_list:
+			if item_val not in existing_set:
+				return True
+	except TypeError:
+		# Items not hashable, use slower check
+		for item_val in new_list:
+			if item_val not in existing_list:
+				return True
+	return False
+
+
+def _merge_lists(existing_list, new_list):
+	"""Merge two lists, avoiding duplicates while preserving order.
+
+	Note: This function modifies existing_list in-place by appending new items from new_list.
+	Callers should pass a copy if they want to preserve the original list.
+
+	Args:
+		existing_list: The existing list to merge into (modified in-place)
+		new_list: The new list to merge from
+
+	Returns:
+		The merged list (same object as existing_list)
+	"""
+	# Try to use set for O(1) lookup if items are hashable
+	try:
+		existing_set = set(existing_list)
+		for item_val in new_list:
+			if item_val not in existing_set:
+				existing_list.append(item_val)
+				existing_set.add(item_val)
+	except TypeError:
+		# Items are not hashable (e.g., dicts), fall back to O(n) check
+		for item_val in new_list:
+			if item_val not in existing_list:
+				existing_list.append(item_val)
+	return existing_list
+
+
 def update_finding(self, item):
 	if type(item) not in OUTPUT_TYPES:
 		return item
@@ -114,9 +166,79 @@ def update_finding(self, item):
 		finding = db['findings'].update_one({'_id': _id}, {'$set': update})
 		status = 'UPDATED'
 	else:
-		finding = db['findings'].insert_one(update)
-		item._uuid = str(finding.inserted_id)
-		status = 'CREATED'
+		# Check if a duplicate already exists in MongoDB
+		# Build query based on fields that are used for comparison
+		query = {'_type': _type}
+
+		# Add workspace_id to query if present to scope duplicates to workspace
+		workspace_id = getattr(item, '_context', {}).get('workspace_id') if hasattr(item, '_context') else None
+		if workspace_id:
+			query['_context.workspace_id'] = workspace_id
+
+		# Get fields that are used for comparison (compare != False)
+		item_class = type(item)
+		for field in dataclass_fields(item_class):
+			if field.compare and not field.name.startswith('_'):
+				field_value = getattr(item, field.name)
+				# Include all non-None, non-empty values in query (including False and 0)
+				# Empty strings, lists, and dicts are excluded as they're not meaningful for duplicate detection
+				if field_value is not None and field_value != '':
+					# Skip empty lists and dicts
+					if isinstance(field_value, (list, dict)) and len(field_value) == 0:
+						continue
+					query[field.name] = field_value
+
+		# Look for existing finding with same identifying fields
+		existing = db['findings'].find_one(query)
+
+		if existing:
+			# Update existing record instead of creating new one
+			_id = existing['_id']
+			# Track which fields actually changed
+			changed_fields = {}
+			for key, value in update.items():
+				# Always update special fields that may be modified
+				if key in ('_timestamp', '_tagged', '_duplicate', '_related', '_source'):
+					changed_fields[key] = value
+					continue
+				# Skip None values - keep existing value
+				if value is None:
+					continue
+				# Skip empty strings if existing value is non-empty
+				existing_value = existing.get(key)
+				if value == '' and existing_value and existing_value != '':
+					continue
+				# Skip empty lists or dicts if existing value is non-empty
+				if isinstance(value, (list, dict)) and len(value) == 0:
+					if isinstance(existing_value, (list, dict)) and len(existing_value) > 0:
+						continue
+				# For lists, merge them (avoiding duplicates)
+				if isinstance(value, list) and isinstance(existing_value, list):
+					# Only merge and mark as changed if there are new items
+					if _has_new_items(existing_value, value):
+						merged_list = _merge_lists(existing_value.copy(), value)
+						changed_fields[key] = merged_list
+				# For dicts, merge them
+				elif isinstance(value, dict) and isinstance(existing_value, dict):
+					merged_dict = existing_value.copy()
+					merged_dict.update(value)
+					# Only mark as changed if dict actually changed
+					if merged_dict != existing_value:
+						changed_fields[key] = merged_dict
+				else:
+					# Only update if value is different
+					if existing.get(key) != value:
+						changed_fields[key] = value
+			# Only update if there are actual changes
+			if changed_fields:
+				db['findings'].update_one({'_id': _id}, {'$set': changed_fields})
+			item._uuid = str(_id)
+			status = 'UPDATED'
+			debug('found existing finding in db, updating', sub='hooks.mongodb', id=str(_id), verbose=True)
+		else:
+			finding = db['findings'].insert_one(update)
+			item._uuid = str(finding.inserted_id)
+			status = 'CREATED'
 	end_time = time.time()
 	elapsed = end_time - start_time
 	debug_obj = {
