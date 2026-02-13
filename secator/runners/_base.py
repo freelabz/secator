@@ -126,6 +126,12 @@ class Runner:
 		self.results_buffer = []
 		self._hooks = hooks
 
+		# Event trigger state (lazy initialization for non-serializable objects)
+		self.event_triggers = {}
+		self.event_batches = {}
+		self.event_timers = {}
+		self._event_lock = None
+
 		# Runner process options
 		self.no_poll = self.run_opts.get('no_poll', False)
 		self.no_live_updates = self.run_opts.get('no_live_updates', False)
@@ -271,6 +277,17 @@ class Runner:
 		else:
 			raise TypeError(f'Invalid configuration type: {type(config)}')
 		return config
+
+	@property
+	def event_lock(self):
+		"""Lazy initialization of event lock for thread safety (non-serializable).
+		
+		Uses RLock (reentrant lock) to allow the same thread to acquire the lock multiple times.
+		"""
+		if self._event_lock is None:
+			import threading
+			self._event_lock = threading.RLock()
+		return self._event_lock
 
 	@property
 	def resolved_opts(self):
@@ -490,6 +507,7 @@ class Runner:
 
 	def _finalize(self):
 		"""Finalize the runner."""
+		self.cancel_event_timers()
 		self.join_threads()
 		gc.collect()
 		if self.sync:
@@ -600,6 +618,10 @@ class Runner:
 			self._print_item(item)
 		if queue:
 			self.results_buffer.append(item)
+
+		# Check event triggers
+		if isinstance(item, tuple(OUTPUT_TYPES)) and not isinstance(item, (Progress, Info, Warning, Error, State, Target)):
+			self._check_event_triggers(item)
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes.
@@ -1318,3 +1340,123 @@ class Runner:
 			else:
 				# Regular function not attached to a class
 				return f"{func.__module__}.{func.__name__}"
+
+	def register_event_trigger(self, trigger_id, trigger_config):
+		"""Register an event trigger.
+
+		Args:
+			trigger_id (str): Unique identifier for the trigger.
+			trigger_config (dict): Trigger configuration with keys:
+				- type (str): Output type to match (e.g., 'url', 'port')
+				- condition (str): Python expression to evaluate
+				- batch_size (int): Number of items to batch before triggering
+				- batch_timeout (int): Seconds to wait before triggering if batch not full
+				- task_name (str): Name of the task to trigger
+				- task_opts (dict): Options to pass to the triggered task
+		"""
+		self.event_triggers[trigger_id] = trigger_config
+		self.event_batches[trigger_id] = []
+		self.debug(f'registered event trigger {trigger_id}', obj=trigger_config, sub='event_trigger')
+
+	def _check_event_triggers(self, item):
+		"""Check if an item matches any event triggers and add to batch if so.
+
+		Args:
+			item (OutputType): Item to check.
+		"""
+		for trigger_id, trigger_config in self.event_triggers.items():
+			# Check if item type matches
+			if item._type != trigger_config.get('type'):
+				continue
+
+			# Evaluate condition
+			condition = trigger_config.get('condition')
+			if condition:
+				try:
+					ctx = {'item': item}
+					safe_globals = {'__builtins__': {'len': len}}
+					if not eval(condition, safe_globals, ctx):
+						continue
+				except Exception as e:
+					self.debug(f'event trigger {trigger_id} condition evaluation failed: {e}', sub='event_trigger')
+					continue
+
+			# Add to batch
+			with self.event_lock:
+				self.event_batches[trigger_id].append(item)
+				batch_size = len(self.event_batches[trigger_id])
+				max_batch_size = trigger_config.get('batch_size', 10)
+				
+				self.debug(f'added item to event trigger {trigger_id} batch ({batch_size}/{max_batch_size})', sub='event_trigger', verbose=True)
+
+				# Check if batch is full
+				if batch_size >= max_batch_size:
+					self._trigger_event_task(trigger_id, trigger_config)
+				elif batch_size == 1:
+					# Start timeout timer for first item in batch
+					self._start_event_timer(trigger_id, trigger_config)
+
+	def _start_event_timer(self, trigger_id, trigger_config):
+		"""Start a timeout timer for an event trigger batch.
+
+		Args:
+			trigger_id (str): Trigger identifier.
+			trigger_config (dict): Trigger configuration.
+		"""
+		import threading
+
+		# Cancel existing timer if any
+		if trigger_id in self.event_timers:
+			self.event_timers[trigger_id].cancel()
+
+		# Create new timer
+		timeout = trigger_config.get('batch_timeout', 30)
+		timer = threading.Timer(timeout, self._trigger_event_task, args=[trigger_id, trigger_config])
+		timer.daemon = True
+		timer.start()
+		self.event_timers[trigger_id] = timer
+		self.debug(f'started event timer for trigger {trigger_id} (timeout: {timeout}s)', sub='event_trigger')
+
+	def _trigger_event_task(self, trigger_id, trigger_config):
+		"""Trigger a task with batched items.
+
+		Args:
+			trigger_id (str): Trigger identifier.
+			trigger_config (dict): Trigger configuration.
+		"""
+		items = []
+		with self.event_lock:
+			# Get batched items
+			items = self.event_batches.get(trigger_id, [])
+			if not items:
+				return
+
+			# Clear batch
+			self.event_batches[trigger_id] = []
+
+			# Cancel timer if exists
+			if trigger_id in self.event_timers:
+				self.event_timers[trigger_id].cancel()
+				del self.event_timers[trigger_id]
+
+		# Release lock before calling add_result to avoid deadlock
+		task_name = trigger_config.get('task_name')
+		task_opts = trigger_config.get('task_opts', {})
+		
+		self.debug(f'triggering event task {task_name} with {len(items)} items', sub='event_trigger')
+		
+		# This will be implemented in Workflow class to actually spawn the task
+		# For now, just emit an info message
+		info = Info(
+			message=f'Event trigger {trigger_id}: would spawn task [bold gold3]{task_name}[/] with {len(items)} items',
+			_source=self.unique_name
+		)
+		self.add_result(info, hooks=False)
+
+	def cancel_event_timers(self):
+		"""Cancel all pending event timers."""
+		with self.event_lock:
+			for trigger_id, timer in self.event_timers.items():
+				timer.cancel()
+				self.debug(f'cancelled event timer for trigger {trigger_id}', sub='event_trigger')
+			self.event_timers.clear()

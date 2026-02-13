@@ -1,0 +1,34 @@
+# Example workflow demonstrating event triggers
+# Event triggers allow tasks to be automatically spawned when specific conditions are met
+#
+# Configuration:
+#   on_event:
+#     type: <output_type>        # Output type to watch (url, port, subdomain, etc.)
+#     condition: <expression>    # Python expression with 'item' in scope (optional)
+#     batch_size: <number>       # Number of items to batch before triggering (default: 10)
+#     batch_timeout: <seconds>   # Seconds to wait before triggering if batch not full (default: 30)
+#
+# The task is triggered when either batch_size is reached or batch_timeout expires
+
+type: workflow
+name: url_bypass_auto
+alias: urlbypassauto
+description: Automatically bypass 403 URLs using event triggers
+tags: [http, crawl, bypass]
+input_types:
+  - url
+
+tasks:
+  httpx:
+    description: Probe URLs for status codes
+
+  bup:
+    description: Auto-bypass 403 URLs
+    on_event:
+      type: url
+      condition: item.status_code == 403
+      batch_size: 5
+      batch_timeout: 30
+    targets_:
+      - type: url
+        field: url
