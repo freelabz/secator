@@ -136,9 +136,11 @@ def update_finding(self, item):
 		update['_context']['workspace_id'] = self.context.get('workspace_id')
 	if not in_api:
 		# Create new finding
+		update['_context']['api'] = True
 		result = _make_request('POST', API_FINDING_CREATE_ENDPOINT, update)
 		if result and result.get('id'):
 			item._uuid = result.get('id')
+			item._context['api'] = True
 			status = 'CREATED'
 		else:
 			status = 'FAILED'
