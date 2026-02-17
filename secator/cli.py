@@ -134,16 +134,12 @@ def _airflow_init():
 	secator_dags = os.path.join(ROOT_FOLDER, 'dags')
 	python = sys.executable
 
-	# Step 1: Install apache-airflow with compatible dependencies
-	console.print(Info(message='Step 1/6: Installing apache-airflow...'))
-	ret = subprocess.run(
-		f'{python} -m pip install "apache-airflow>=3.0,<4" "cadwyn<6" "fastapi<0.118"',
-		shell=True, capture_output=True, text=True
-	)
-	if ret.returncode != 0:
-		console.print(Error(message=f'Failed to install apache-airflow: {ret.stderr.strip().splitlines()[-1]}'))
+	# Step 1: Check airflow addon is installed
+	console.print(Info(message='Step 1/6: Checking airflow addon...'))
+	if not ADDONS_ENABLED['airflow']:
+		console.print(Error(message='Missing airflow addon: please run "secator install addons airflow".'))
 		sys.exit(1)
-	console.print(Info(message='apache-airflow installed.'))
+	console.print(Info(message='airflow addon is installed.'))
 
 	# Step 2: Run database migration
 	console.print(Info(message='Step 2/6: Running airflow db migrate...'))
@@ -173,6 +169,7 @@ def _airflow_init():
 		try:
 			cadwyn_mod = importlib.import_module('cadwyn.schema_generation')
 			cadwyn_path = cadwyn_mod.__file__
+			console.print(Info(message=f'  Patching {cadwyn_path}'))
 			with open(cadwyn_path, 'r') as f:
 				content = f.read()
 			patched = False
@@ -220,10 +217,11 @@ def _airflow_init():
 		import pickle
 		test_exc = httpx.HTTPStatusError('test', request=httpx.Request('GET', 'http://x'), response=httpx.Response(500))
 		try:
-			pickle.dumps(test_exc)
+			pickle.loads(pickle.dumps(test_exc))
 			console.print(Info(message='httpx HTTPStatusError is pickleable, no patch needed.'))
-		except (TypeError, pickle.PicklingError):
+		except (TypeError, pickle.PicklingError, pickle.UnpicklingError):
 			httpx_path = httpx._exceptions.__file__
+			console.print(Info(message=f'  Patching {httpx_path}'))
 			with open(httpx_path, 'r') as f:
 				content = f.read()
 			if '__reduce__' not in content:
@@ -231,19 +229,21 @@ def _airflow_init():
 					'\n'
 					'    def __reduce__(self) -> tuple:\n'
 					'        return (\n'
-					'            self.__class__,\n'
-					'            (str(self),),\n'
-					'            {"request": self.request, "response": self.response},\n'
+					'            _unpickle_http_status_error,\n'
+					'            (str(self), self.request, self.response),\n'
 					'        )\n'
-					'\n'
-					'    def __setstate__(self, state: dict) -> None:\n'
-					'        self.request = state["request"]\n'
-					'        self.response = state["response"]\n'
 				)
-				# Insert after the __init__ method of HTTPStatusError
+				helper = (
+					'\n\n'
+					'def _unpickle_http_status_error(message, request, response):\n'
+					'    return HTTPStatusError(message, request=request, response=response)\n'
+				)
+				# Insert __reduce__ after the __init__ method of HTTPStatusError
 				marker = '        self.request = request\n        self.response = response\n'
 				if marker in content:
 					content = content.replace(marker, marker + patch)
+					# Append the helper function at the end of the file
+					content = content.rstrip() + helper
 					with open(httpx_path, 'w') as f:
 						f.write(content)
 					console.print(Info(message='httpx pickle patch applied.'))
@@ -271,8 +271,23 @@ def _airflow_init():
 	venv_bin = str(Path(python).parent)
 	env['PATH'] = f'{venv_bin}:{env.get("PATH", "")}'
 
-	result = subprocess.run(f'{python} -m airflow standalone', shell=True, env=env)
-	sys.exit(result.returncode)
+	proc = subprocess.Popen(
+		f'{python} -m airflow standalone',
+		shell=True, env=env,
+		preexec_fn=os.setsid,
+	)
+	try:
+		proc.wait()
+	except KeyboardInterrupt:
+		import signal
+		console.print(Info(message='Shutting down Airflow...'))
+		os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+		try:
+			proc.wait(timeout=10)
+		except subprocess.TimeoutExpired:
+			os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+			proc.wait()
+	sys.exit(proc.returncode or 0)
 
 
 @cli.command(name='worker', context_settings=dict(ignore_unknown_options=True), aliases=['wk'])
