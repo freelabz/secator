@@ -181,12 +181,12 @@ class nmapData(dict):
 		scan_type = self._get_scan_type()
 		hosts = self._get_hosts()
 		total_ports = sum(len(self._get_ports(host)) for host in hosts)
-		is_mass_scan = total_ports > 2
-		confidence = 'high'
+		is_mass_scan = total_ports > 20
+		global_confidence = 'high'
 		tags = []
 		if is_mass_scan:
 			yield Warning(message='Unusual number of ports found. There might be an IDS interfering with the scan.')
-			confidence = 'low'
+			global_confidence = 'low'
 			tags = ['ids']
 		for host in hosts:
 			hostname = self._get_hostname(host)
@@ -209,7 +209,7 @@ class nmapData(dict):
 				extra_data = self._get_extra_data(port)
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
-				service_confidence = extra_data.get('confidence', 0)
+				service_confidence = extra_data.get('confidence', 'low')
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
@@ -229,7 +229,7 @@ class nmapData(dict):
 					service_name=service_name,
 					protocol=protocol,
 					extra_data=extra_data,
-					confidence=confidence,
+					confidence=global_confidence,
 					service_confidence=service_confidence,
 					tags=tags + [scan_type, reason]
 				)
@@ -253,7 +253,7 @@ class nmapData(dict):
 						data.matched_at = f'{hostname}:{port_number}'
 						data.ip = ip
 						data.extra_data.update(extra_data)
-						confidence = 'low'
+						confidence = global_confidence
 						if 'cpe-match' in data.tags:
 							confidence = 'high' if version_exact else 'medium'
 						data.confidence = confidence

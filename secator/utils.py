@@ -141,76 +141,76 @@ def sanitize_url(http_url):
 
 
 def sanitize_folder_name(
-    name: str,
-    replacement_char: str = "_",
-    replace_spaces: bool = True,
-    replace_hyphens: bool = True,
-    max_length: int = 255,
-    normalize_unicode: bool = True,
+	name: str,
+	replacement_char: str = "_",
+	replace_spaces: bool = True,
+	replace_hyphens: bool = True,
+	max_length: int = 255,
+	normalize_unicode: bool = True,
 ) -> str:
-    """
-    Sanitizes a string to be used as a folder name across Windows, Linux, and macOS.
+	"""
+	Sanitizes a string to be used as a folder name across Windows, Linux, and macOS.
 
-    Args:
-        name: The input string to sanitize.
-        replacement_char: Character to replace invalid chars (default: '_').
-        replace_spaces: If True, replaces spaces with `replacement_char`.
-        replace_hyphens: If True, replaces hyphens with `replacement_char`.
-        max_length: Maximum allowed length (default: 255, None to disable).
-        normalize_unicode: If True, normalizes Unicode (e.g., é → e).
+	Args:
+		name: The input string to sanitize.
+		replacement_char: Character to replace invalid chars (default: '_').
+		replace_spaces: If True, replaces spaces with `replacement_char`.
+		replace_hyphens: If True, replaces hyphens with `replacement_char`.
+		max_length: Maximum allowed length (default: 255, None to disable).
+		normalize_unicode: If True, normalizes Unicode (e.g., é → e).
 
-    Returns:
-        A sanitized folder name.
-    """
-    if not name:
-        return "unnamed_folder"
+	Returns:
+		A sanitized folder name.
+	"""
+	if not name:
+		return "unnamed_folder"
 
-    # Normalize Unicode (optional, helps with lookalike characters)
-    if normalize_unicode:
-        name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+	# Normalize Unicode (optional, helps with lookalike characters)
+	if normalize_unicode:
+		name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
 
-    # Replace spaces and hyphens if enabled
-    if replace_spaces:
-        name = re.sub(r"\s+", replacement_char, name)
-    if replace_hyphens:
-        name = name.replace("-", replacement_char)
+	# Replace spaces and hyphens if enabled
+	if replace_spaces:
+		name = re.sub(r"\s+", replacement_char, name)
+	if replace_hyphens:
+		name = name.replace("-", replacement_char)
 
-    # Remove invalid characters (OS-specific)
-    if platform.system() == "Windows":
-        # Windows: < > : " / \ | ? * and control chars (0-31)
-        invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
-    else:
-        # Unix: Only / and null byte are invalid
-        invalid_chars = r'[/\x00]'
+	# Remove invalid characters (OS-specific)
+	if platform.system() == "Windows":
+		# Windows: < > : " / \ | ? * and control chars (0-31)
+		invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
+	else:
+		# Unix: Only / and null byte are invalid
+		invalid_chars = r'[/\x00]'
 
-    sanitized = re.sub(invalid_chars, replacement_char, name)
+	sanitized = re.sub(invalid_chars, replacement_char, name)
 
-    # Handle reserved names (Windows only)
-    if platform.system() == "Windows":
-        reserved_names = {
-            "CON", "PRN", "AUX", "NUL",
-            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-        }
-        upper_name = sanitized.upper()
-        if upper_name in reserved_names:
-            sanitized = f"{sanitized}{replacement_char}"
+	# Handle reserved names (Windows only)
+	if platform.system() == "Windows":
+		reserved_names = {
+			"CON", "PRN", "AUX", "NUL",
+			"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+			"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+		}
+		upper_name = sanitized.upper()
+		if upper_name in reserved_names:
+			sanitized = f"{sanitized}{replacement_char}"
 
-    # Remove leading/trailing spaces, dots, and replacement chars
-    sanitized = sanitized.strip().strip(f".{replacement_char}")
+	# Remove leading/trailing spaces, dots, and replacement chars
+	sanitized = sanitized.strip().strip(f".{replacement_char}")
 
-    # Replace multiple replacement chars with a single one
-    sanitized = re.sub(f"{re.escape(replacement_char)}+", replacement_char, sanitized)
+	# Replace multiple replacement chars with a single one
+	sanitized = re.sub(f"{re.escape(replacement_char)}+", replacement_char, sanitized)
 
-    # Truncate if too long
-    if max_length and len(sanitized) > max_length:
-        sanitized = sanitized[:max_length].rstrip(f".{replacement_char}")
+	# Truncate if too long
+	if max_length and len(sanitized) > max_length:
+		sanitized = sanitized[:max_length].rstrip(f".{replacement_char}")
 
-    # Ensure the name is not empty
-    if not sanitized:
-        return "unnamed_folder"
+	# Ensure the name is not empty
+	if not sanitized:
+		return "unnamed_folder"
 
-    return sanitized
+	return sanitized
 
 
 def deduplicate(array, attr=None):
@@ -740,7 +740,8 @@ def list_reports(workspace=None, type=None, timedelta=None):
 	Returns:
 		list: List all JSON reports.
 	"""
-	workspace = sanitize_folder_name(workspace)
+	if workspace:
+		workspace = sanitize_folder_name(workspace)
 	if type and not type.endswith('s'):
 		type += 's'
 	json_reports = []

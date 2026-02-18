@@ -275,7 +275,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	Returns:
 		list: Runner results
 	"""
-	# Log mark_completed start
+	# Log mark_started start
 	start_time = time()
 	if IN_CELERY_WORKER_PROCESS:
 		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
