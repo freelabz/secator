@@ -1,0 +1,50 @@
+{
+    "timestamp": "2023-01-19T08:20:12.538714625Z",
+    "asn": {
+      "as_number": "AS12321",
+      "as_name": "PROXAD",
+      "as_country": "EN",
+      "as_range": [
+        "82.61.0.0/14"
+      ]
+    },
+    "cdn": true,
+    "cdn_name": "cloudfront",
+    "csp": {},
+    "hash": {
+      "body_md5": "e49c1a333878f576545714c123786367",
+      "body_mmh3": "1507786493",
+      "body_sha256": "b5db5609f28e870e5393c50fa08c827aa7e6d2549063f03dd1bf50196155cec8",
+      "body_simhash": "10975949629378114302",
+      "header_md5": "5974cc460d0acb3685bab33ecf467f4a",
+      "header_mmh3": "1995116439",
+      "header_sha256": "ea4faef1f6e0f3c1c2a53724d469adf37307b9a7e37013f1c764ef300e368ade",
+      "header_simhash": "9814070498050162543"
+    },
+    "port": "443",
+    "url": "https://media.example.synology.me:443",
+    "input": "media.example.synology.me",
+    "title": "Jellyfin",
+    "scheme": "https",
+    "webserver": "nginx",
+    "location": "https:/media.example.synology.me",
+    "content_type": "text/html",
+    "method": "GET",
+    "host": "82.61.151.800",
+    "path": "/",
+    "time": "307.296674ms",
+    "a": [
+      "82.61.151.800",
+      "2a11:e0a:a8d:91f0:011:12fd:eed1:4241"
+    ],
+    "tech": [
+      "HSTS",
+      "Nginx"
+    ],
+    "words": 411,
+    "lines": 1,
+    "status_code": 200,
+    "content_length": 7442,
+    "failed": false,
+    "final_url": "https://media.example.synology.me/web/index.html"
+  }
