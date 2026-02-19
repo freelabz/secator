@@ -20,6 +20,17 @@ MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
 
 logger = logging.getLogger(__name__)
 
+# Batch configuration for async hooks
+BATCH_CONFIG = {
+	'update_finding': {
+		'batch_size': CONFIG.addons.mongodb.batch_size,
+		'batch_interval': CONFIG.addons.mongodb.batch_interval
+	}
+}
+
+# Hooks that should be executed asynchronously with batching
+ASYNC_HOOKS = {'update_finding'}
+
 _mongodb_client = None
 
 
@@ -101,33 +112,59 @@ def update_runner(self):
 		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
 
 
-def update_finding(self, item):
-	if type(item) not in OUTPUT_TYPES:
-		return item
+def update_finding(self, items):
+	"""Batch upsert findings to MongoDB.
+
+	This hook is marked as async via ASYNC_HOOKS and receives batched items.
+
+	Args:
+		self: Runner instance.
+		items: List of output items to upsert.
+
+	Returns:
+		list: The input items (potentially with updated _uuid).
+	"""
+	if not items:
+		return items
+
+	# Handle single item for backward compatibility
+	if not isinstance(items, list):
+		items = [items]
+
+	# Filter to only OUTPUT_TYPES
+	valid_items = [item for item in items if type(item) in OUTPUT_TYPES]
+	if not valid_items:
+		return items
+
 	start_time = time.time()
 	client = get_mongodb_client()
 	db = client.main
-	update = item.toDict()
-	_type = item._type
-	_id = ObjectId(item._uuid) if ObjectId.is_valid(item._uuid) else None
-	if _id:
-		finding = db['findings'].update_one({'_id': _id}, {'$set': update})
-		status = 'UPDATED'
-	else:
-		finding = db['findings'].insert_one(update)
-		item._uuid = str(finding.inserted_id)
-		status = 'CREATED'
-	end_time = time.time()
-	elapsed = end_time - start_time
-	debug_obj = {
-		_type: status,
-		'type': 'finding',
-		'class': self.__class__.__name__,
-		'caller': self.config.name,
-		**self.context
-	}
-	debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=str(item._uuid), obj=debug_obj, obj_after=False)  # noqa: E501
-	return item
+
+	from pymongo import UpdateOne
+
+	operations = []
+	for item in valid_items:
+		update = item.toDict()
+		_id = ObjectId(item._uuid) if ObjectId.is_valid(item._uuid) else ObjectId()
+		item._uuid = str(_id)
+		operations.append(
+			UpdateOne(
+				{'_id': _id},
+				{'$set': update},
+				upsert=True
+			)
+		)
+
+	if operations:
+		result = db.findings.bulk_write(operations, ordered=False)
+		elapsed = time.time() - start_time
+		debug(
+			f'bulk upsert {len(operations)} findings in {elapsed:.4f}s '
+			f'(upserted: {result.upserted_count}, modified: {result.modified_count})',
+			sub='hooks.mongodb'
+		)
+
+	return items
 
 
 def find_duplicates(self):

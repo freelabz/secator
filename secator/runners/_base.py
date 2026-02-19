@@ -892,8 +892,13 @@ class Runner:
 					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)
 					continue
 
-				# Check if hook is async (after enable_hooks/no_process check)
-				if inspect.iscoroutinefunction(hook):
+				# Check if hook should be executed asynchronously
+				module = inspect.getmodule(hook)
+				is_async_hook = (
+					inspect.iscoroutinefunction(hook) or
+					(module and hasattr(module, 'ASYNC_HOOKS') and hook.__name__ in module.ASYNC_HOOKS)
+				)
+				if is_async_hook:
 					self._submit_async_hook(hook, hook_type, *args, sub=sub)
 					continue
 
