@@ -966,56 +966,147 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                     break
 
                 elif action_type == "execute":
-                    command = action.get("command", "")
-                    target = action.get("target", "")
+                    exec_type = action.get("type", "shell")
 
-                    # Scope check - target must be in or match one of our targets
-                    if not self._is_in_scope(target, targets):
-                        yield Warning(
-                            message=f"Target {target} is out of scope, skipping"
+                    # Handle secator runners (task, workflow, scan)
+                    if exec_type in ("task", "workflow", "scan"):
+                        name = action.get("name", "")
+                        action_targets = action.get("targets", []) or targets
+                        opts = action.get("opts", {})
+
+                        # Scope check - all targets must be in scope
+                        out_of_scope = [t for t in action_targets if not self._is_in_scope(t, targets)]
+                        if out_of_scope:
+                            yield Warning(message=f"Targets out of scope: {out_of_scope}")
+                            encrypted_context = json.dumps(attack_context)
+                            if sensitive:
+                                encrypted_context = encryptor.encrypt(encrypted_context)
+                            prompt = f"Targets {out_of_scope} are out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
+                            continue
+
+                        # Validate options
+                        valid_opts, invalid_opts, valid_opt_names = self._validate_runner_opts(
+                            exec_type, name, opts
                         )
-                        # Encrypt context for LLM prompt if sensitive encryption enabled
+
+                        if invalid_opts:
+                            yield Warning(message=f"Invalid options for {exec_type} '{name}': {invalid_opts}")
+                            encrypted_context = json.dumps(attack_context)
+                            if sensitive:
+                                encrypted_context = encryptor.encrypt(encrypted_context)
+                            prompt = f"""Invalid options for {exec_type} '{name}': {invalid_opts}
+
+Valid options are: {valid_opt_names}
+
+Please retry with valid options only.
+
+Context:
+{encrypted_context}"""
+                            continue
+
+                        yield Info(message=f"[CMD] secator {exec_type[0]} {name} {' '.join(action_targets)}")
+
+                        if dry_run:
+                            yield Tag(
+                                name="dry_run_runner",
+                                value=f"{exec_type}/{name}",
+                                match=", ".join(action_targets),
+                                category="attack",
+                                extra_data={
+                                    "reasoning": action.get("reasoning", ""),
+                                    "opts": valid_opts,
+                                },
+                            )
+                            result_output = f"[DRY RUN] {exec_type.capitalize()} '{name}' not executed"
+                            runner_results = []
+                        else:
+                            # Execute the runner and collect results
+                            runner_results = []
+                            for result in self._execute_secator_runner(
+                                exec_type, name, action_targets, valid_opts
+                            ):
+                                runner_results.append(result)
+                                yield result
+
+                            # Format results for LLM context
+                            result_output = format_results_for_llm(runner_results, max_items=50)
+
+                        if verbose:
+                            yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
+
+                        attack_context["successful_attacks"].append({
+                            "type": exec_type,
+                            "name": name,
+                            "targets": action_targets,
+                            "result_count": len(runner_results),
+                            "output": result_output[:2000],
+                        })
+
+                        # Build next prompt
+                        encrypted_output = result_output[:4000]
                         encrypted_context = json.dumps(attack_context)
                         if sensitive:
+                            encrypted_output = encryptor.encrypt(encrypted_output)
                             encrypted_context = encryptor.encrypt(encrypted_context)
-                        prompt = f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
-                        continue
 
-                    yield Info(message=f"[CMD] {command}")
+                        prompt = f"""{exec_type.capitalize()} '{name}' executed on {action_targets}.
 
-                    if dry_run:
-                        yield Tag(
-                            name="dry_run_command",
-                            value=command,
-                            match=target,
-                            category="attack",
-                            extra_data={"reasoning": action.get("reasoning", "")},
-                        )
-                        result_output = "[DRY RUN] Command not executed"
-                    else:
-                        result_output = self._execute_command(command)
+Results:
+{encrypted_output}
 
-                    if verbose:
-                        yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
+Previous context:
+{encrypted_context}
 
-                    attack_context["successful_attacks"].append(
-                        {
+Analyze the results and decide next action (execute, validate, or complete)."""
+
+                    # Handle shell commands (curl, wget, nmap direct)
+                    elif exec_type == "shell":
+                        command = action.get("command", "")
+                        target = action.get("target", "")
+
+                        # Scope check
+                        if target and not self._is_in_scope(target, targets):
+                            yield Warning(message=f"Target {target} is out of scope, skipping")
+                            encrypted_context = json.dumps(attack_context)
+                            if sensitive:
+                                encrypted_context = encryptor.encrypt(encrypted_context)
+                            prompt = f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
+                            continue
+
+                        yield Info(message=f"[CMD] {command}")
+
+                        if dry_run:
+                            yield Tag(
+                                name="dry_run_command",
+                                value=command,
+                                match=target,
+                                category="attack",
+                                extra_data={"reasoning": action.get("reasoning", "")},
+                            )
+                            result_output = "[DRY RUN] Command not executed"
+                        else:
+                            result_output = self._execute_command(command)
+
+                        if verbose:
+                            yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
+
+                        attack_context["successful_attacks"].append({
+                            "type": "shell",
                             "command": command,
                             "target": target,
                             "output": result_output[:2000],
-                        }
-                    )
+                        })
 
-                    # Encrypt command output for LLM prompt if sensitive encryption enabled
-                    encrypted_output = result_output[:4000]
-                    encrypted_command = command
-                    encrypted_context = json.dumps(attack_context)
-                    if sensitive:
-                        encrypted_output = encryptor.encrypt(encrypted_output)
-                        encrypted_command = encryptor.encrypt(encrypted_command)
-                        encrypted_context = encryptor.encrypt(encrypted_context)
+                        # Encrypt for next prompt
+                        encrypted_output = result_output[:4000]
+                        encrypted_command = command
+                        encrypted_context = json.dumps(attack_context)
+                        if sensitive:
+                            encrypted_output = encryptor.encrypt(encrypted_output)
+                            encrypted_command = encryptor.encrypt(encrypted_command)
+                            encrypted_context = encryptor.encrypt(encrypted_context)
 
-                    prompt = f"""Command executed:
+                        prompt = f"""Shell command executed:
 {encrypted_command}
 
 Output:
@@ -1025,6 +1116,11 @@ Previous context:
 {encrypted_context}
 
 Analyze the output and decide next action (execute, validate, or complete)."""
+
+                    else:
+                        yield Warning(message=f"Unknown execute type: {exec_type}")
+                        prompt = f"Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell."
+                        continue
 
                 elif action_type == "validate":
                     vuln_name = action.get("vulnerability", "Unknown")
