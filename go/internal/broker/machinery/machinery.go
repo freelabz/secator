@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/RichardKnop/machinery/v2"
 	backendsiface "github.com/RichardKnop/machinery/v2/backends/iface"
@@ -34,6 +35,7 @@ type Config struct {
 type Broker struct {
 	server   *machinery.Server
 	handlers map[string]broker.TaskHandler
+	mu       sync.RWMutex // Protects handlers map
 }
 
 // parseRedisURL parses a Redis URL and returns host, password, and db
@@ -99,7 +101,9 @@ func New(cfg Config) (*Broker, error) {
 
 // RegisterTask registers a task handler
 func (b *Broker) RegisterTask(name string, handler broker.TaskHandler) error {
+	b.mu.Lock()
 	b.handlers[name] = handler
+	b.mu.Unlock()
 
 	return b.server.RegisterTask(name, func(inputsJSON, optsJSON string) (string, error) {
 		var inputs []string
@@ -193,22 +197,23 @@ func (b *Broker) EnqueueWorkflow(ctx context.Context, spec broker.WorkflowSpec) 
 	return broker.JobID(chain.Tasks[0].UUID), nil
 }
 
-// Results returns results for a job (blocking)
+// Results returns results for a job.
+// TODO(poc): Implement result polling from backend.
+// For now, returns an empty channel as this is a PoC stub.
 func (b *Broker) Results(ctx context.Context, jobID broker.JobID) (<-chan types.OutputType, error) {
 	out := make(chan types.OutputType)
 
 	go func() {
 		defer close(out)
-		// Implementation would poll for results
-		// For now, just close the channel
 	}()
 
 	return out, nil
 }
 
-// Status returns the status of a job
+// Status returns the status of a job.
+// TODO(poc): Implement actual status checking via Machinery's GetState().
+// For now, returns JobPending as this is a PoC stub.
 func (b *Broker) Status(ctx context.Context, jobID broker.JobID) (broker.JobStatus, error) {
-	// Implementation would check job state
 	return broker.JobPending, nil
 }
 
@@ -230,7 +235,8 @@ func (b *Broker) StartWorker(ctx context.Context, concurrency int) error {
 	}
 }
 
-// Close closes the broker
+// Close closes the broker.
+// TODO(poc): Implement proper cleanup of Redis connections.
 func (b *Broker) Close() error {
 	return nil
 }
