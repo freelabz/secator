@@ -104,6 +104,9 @@ class Runners(StrictModel):
 	remove_duplicates: bool = False
 	threads: int = 50
 	prompt_timeout: int = 20
+	async_hook_pool_size: int = 4
+	async_hook_default_batch_size: int = 100
+	async_hook_default_batch_interval: float = 5.0
 
 
 class Security(StrictModel):
@@ -193,6 +196,8 @@ class MongodbAddon(StrictModel):
 		'verified',
 		'tags'
 	]
+	batch_size: int = 100
+	batch_interval: float = 5.0
 
 
 class VulnersAddon(StrictModel):
