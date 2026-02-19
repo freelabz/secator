@@ -507,7 +507,10 @@ When validating a vulnerability, respond with:
 }}
 
 When done, respond with:
-{{"action": "complete", "summary": "overall findings"}}""",
+{{"action": "complete", "summary": "overall findings"}}
+
+To stop immediately (e.g., if blocked or no further actions possible), respond with:
+{{"action": "stop", "reason": "why stopping"}}""",
     "initial_recon": f"""You are a senior penetration tester starting a new security assessment.
 Given the target(s), suggest an initial reconnaissance plan using Secator tasks.
 
@@ -981,6 +984,7 @@ Please respond with a valid JSON action in one of these formats:
 - {{"action": "execute", "type": "shell", "command": "...", "target": "...", "reasoning": "...", "expected_outcome": "..."}}
 - {{"action": "validate", "vulnerability": "...", "target": "...", "proof": "...", "severity": "...", "reproduction_steps": [...]}}
 - {{"action": "complete", "summary": "..."}}
+- {{"action": "stop", "reason": "..."}}
 
 Current attack context:
 {encrypted_context}"""
@@ -993,6 +997,24 @@ Current attack context:
                     yield Tag(
                         name="attack_summary",
                         value=action.get("summary", "Attack sequence completed"),
+                        match="attack",
+                        category="ai",
+                        extra_data={
+                            "iterations": iteration + 1,
+                            "successful_attacks": len(
+                                attack_context["successful_attacks"]
+                            ),
+                            "validated_vulns": len(attack_context["validated_vulns"]),
+                        },
+                    )
+                    break
+
+                elif action_type == "stop":
+                    reason = action.get("reason", "No reason provided")
+                    yield Warning(message=f"Attack loop stopped: {reason}")
+                    yield Tag(
+                        name="attack_stopped",
+                        value=reason,
                         match="attack",
                         category="ai",
                         extra_data={
