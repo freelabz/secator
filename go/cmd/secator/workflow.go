@@ -22,6 +22,7 @@ var workflowCmd = &cobra.Command{
 }
 
 func init() {
+	workflowCmd.Flags().BoolP("json", "j", false, "Output results as JSON")
 	rootCmd.AddCommand(workflowCmd)
 }
 
@@ -57,7 +58,11 @@ func runWorkflow(cmd *cobra.Command, args []string) {
 
 	for result := range wf.Run(ctx, targets) {
 		if jsonOutput {
-			data, _ := json.Marshal(result.ToMap())
+			data, err := json.Marshal(result.ToMap())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error marshaling result: %v\n", err)
+				continue
+			}
 			fmt.Println(string(data))
 		} else {
 			fmt.Printf("[%s] %v\n", result.Type(), result.ToMap())

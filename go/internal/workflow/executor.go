@@ -45,7 +45,13 @@ type resultStore struct {
 func (r *resultStore) get(key string) []types.OutputType {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.data[key]
+	original := r.data[key]
+	if original == nil {
+		return nil
+	}
+	copied := make([]types.OutputType, len(original))
+	copy(copied, original)
+	return copied
 }
 
 func (r *resultStore) set(key string, values []types.OutputType) {
