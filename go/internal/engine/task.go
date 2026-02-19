@@ -15,4 +15,5 @@ type Task interface {
 	Install() error                                  // Auto-installation
 	Parse(line []byte) ([]types.OutputType, error)   // Parse single output line
 	SetOptions(opts map[string]any)                  // Configure task options
+	CmdLine(inputs []string) string                  // Full command line for display
 }

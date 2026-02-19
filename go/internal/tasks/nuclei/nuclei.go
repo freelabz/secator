@@ -87,6 +87,16 @@ func (n *Nuclei) SetOptions(opts map[string]any) {
 	}
 }
 
+// CmdLine returns the full command line for display
+func (n *Nuclei) CmdLine(inputs []string) string {
+	args := n.BuildArgs()
+	// Add -u flag for each input
+	for _, input := range inputs {
+		args = append(args, "-u", input)
+	}
+	return n.Command() + " " + strings.Join(args, " ")
+}
+
 // BuildArgs constructs the command line arguments for nuclei
 func (n *Nuclei) BuildArgs() []string {
 	args := []string{"-jsonl", "-silent"}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/freelabz/secator/internal/engine"
 	"github.com/freelabz/secator/internal/tasks"
@@ -89,6 +90,16 @@ func (h *Httpx) SetOptions(opts map[string]any) {
 	if headers, ok := opts["headers"].([]string); ok {
 		h.opts.Headers = headers
 	}
+}
+
+// CmdLine returns the full command line for display
+func (h *Httpx) CmdLine(inputs []string) string {
+	args := h.BuildArgs()
+	// Add -u flag for each input
+	for _, input := range inputs {
+		args = append(args, "-u", input)
+	}
+	return h.Command() + " " + strings.Join(args, " ")
 }
 
 // BuildArgs constructs the command line arguments for httpx

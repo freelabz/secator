@@ -3,6 +3,7 @@ package workflow
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -36,14 +37,15 @@ func newMockTask(name string, results []types.OutputType) *mockTask {
 	}
 }
 
-func (m *mockTask) Name() string                               { return m.name }
-func (m *mockTask) Command() string                            { return m.name }
-func (m *mockTask) Description() string                        { return "Mock task for testing" }
-func (m *mockTask) InputType() string                          { return m.inputType }
-func (m *mockTask) OutputTypes() []string                      { return m.outputTypes }
-func (m *mockTask) Install() error                             { return nil }
+func (m *mockTask) Name() string                                  { return m.name }
+func (m *mockTask) Command() string                               { return m.name }
+func (m *mockTask) Description() string                           { return "Mock task for testing" }
+func (m *mockTask) InputType() string                             { return m.inputType }
+func (m *mockTask) OutputTypes() []string                         { return m.outputTypes }
+func (m *mockTask) Install() error                                { return nil }
 func (m *mockTask) Parse(line []byte) ([]types.OutputType, error) { return nil, nil }
-func (m *mockTask) Status() engine.Status                      { return engine.StatusSuccess }
+func (m *mockTask) Status() engine.Status                         { return engine.StatusSuccess }
+func (m *mockTask) CmdLine(inputs []string) string                { return m.name + " " + strings.Join(inputs, " ") }
 
 func (m *mockTask) SetOptions(opts map[string]any) {
 	for k, v := range opts {

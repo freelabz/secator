@@ -3,6 +3,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/freelabz/secator/pkg/types"
@@ -14,13 +15,14 @@ type mockTask struct {
 	cmd string
 }
 
-func (m *mockTask) Command() string     { return m.cmd }
-func (m *mockTask) Description() string { return "Mock task for testing" }
-func (m *mockTask) InputType() string   { return "url" }
-func (m *mockTask) OutputTypes() []string { return []string{"url"} }
-func (m *mockTask) Install() error      { return nil }
+func (m *mockTask) Command() string                               { return m.cmd }
+func (m *mockTask) Description() string                           { return "Mock task for testing" }
+func (m *mockTask) InputType() string                             { return "url" }
+func (m *mockTask) OutputTypes() []string                         { return []string{"url"} }
+func (m *mockTask) Install() error                                { return nil }
 func (m *mockTask) Parse(line []byte) ([]types.OutputType, error) { return nil, nil }
-func (m *mockTask) SetOptions(opts map[string]any) {}
+func (m *mockTask) SetOptions(opts map[string]any)                {}
+func (m *mockTask) CmdLine(inputs []string) string                { return m.cmd + " " + strings.Join(inputs, " ") }
 
 func TestTask_Interface(t *testing.T) {
 	var _ Task = &mockTask{}

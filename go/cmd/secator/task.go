@@ -52,7 +52,7 @@ func runTask(cmd *cobra.Command, args []string) {
 			fmt.Println(console.Target(t, detectTargetType(t)))
 		}
 		fmt.Println(console.TaskStart(taskName, task.Description()))
-		fmt.Println(console.Command(task.Command() + " " + strings.Join(targets, " ")))
+		fmt.Println(console.Command(task.CmdLine(targets)))
 	}
 
 	count := 0

@@ -17,7 +17,8 @@ func TestHttpx_ImplementsTask(t *testing.T) {
 
 func TestHttpx_Command(t *testing.T) {
 	h := New()
-	assert.Equal(t, "httpx", h.Command())
+	// Note: Command returns "httpx-toolkit" to avoid conflict with Python httpx library
+	assert.Equal(t, "httpx-toolkit", h.Command())
 }
 
 func TestHttpx_InputType(t *testing.T) {
