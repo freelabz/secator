@@ -45,7 +45,11 @@ func New() *Httpx {
 func (h *Httpx) Name() string { return "httpx" }
 
 // Command returns the CLI command name
-func (h *Httpx) Command() string { return "httpx" }
+// Note: The ProjectDiscovery httpx tool may be installed as "httpx" or "httpx-toolkit"
+func (h *Httpx) Command() string {
+	// Try httpx-toolkit first (common on systems where Python httpx is also installed)
+	return "httpx-toolkit"
+}
 
 // Description returns the tool description
 func (h *Httpx) Description() string { return "Fast and multi-purpose HTTP toolkit" }
