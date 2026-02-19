@@ -15,7 +15,7 @@ import click
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Error, Info, Tag, Vulnerability, Warning
+from secator.output_types import Action, Error, Info, Tag, Vulnerability, Warning
 from secator.runners import PythonRunner
 
 logger = logging.getLogger(__name__)
@@ -183,6 +183,30 @@ def _truncate(text: str, max_length: int = 2000) -> str:
     if not text or len(text) <= max_length:
         return text
     return text[:max_length] + "\n... (truncated)"
+
+
+def _strip_json_from_response(text: str) -> str:
+    """Strip JSON blocks from response, keeping only the text/reasoning."""
+    if not text:
+        return text
+
+    # Remove JSON code blocks
+    text = re.sub(r"```(?:json)?\s*\{[^`]*\}\s*```", "", text, flags=re.DOTALL)
+
+    # Remove standalone JSON objects (but be careful not to strip too much)
+    # Only remove if it looks like a complete JSON action
+    text = re.sub(
+        r'\{\s*"action"\s*:\s*"[^"]*"[^}]*\}',
+        "",
+        text,
+        flags=re.DOTALL
+    )
+
+    # Clean up extra whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text.strip()
+
+    return text if text else "(action only)"
 
 
 def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
@@ -962,11 +986,17 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                 if self.run_opts.get("sensitive", True):
                     response = encryptor.decrypt(response)
 
-                # Always show AI response (contains reasoning and actions)
-                yield Info(message=f"[AGENT] {_truncate(response)}")
-
                 # Parse action from response
                 action = self._parse_attack_action(response)
+
+                # Show AI reasoning (without JSON) and yield Action
+                response_text = _strip_json_from_response(response)
+                if response_text:
+                    yield Info(message=f"[AGENT] {_truncate(response_text)}")
+
+                if action:
+                    # Yield the action as a native output type
+                    yield Action.from_dict(action)
 
                 if not action:
                     yield Warning(message="Could not parse action from LLM response")
