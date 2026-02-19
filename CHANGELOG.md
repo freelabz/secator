@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.8](https://github.com/freelabz/secator/compare/v0.25.7...v0.25.8) (2026-02-19)
+
+
+### Bug Fixes
+
+* nmap dns + ids / headless tags + confidence tracking + workspace folder name fix ([#936](https://github.com/freelabz/secator/issues/936)) ([2a34a9a](https://github.com/freelabz/secator/commit/2a34a9a3bc2a50d8314ba6ebe22b482a7d9ee4ff))
+
 ## [0.25.7](https://github.com/freelabz/secator/compare/v0.25.6...v0.25.7) (2026-02-08)
 
 
