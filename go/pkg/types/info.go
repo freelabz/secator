@@ -1,6 +1,8 @@
 // go/pkg/types/info.go
 package types
 
+import "github.com/freelabz/secator/pkg/console"
+
 // Info represents an informational message from execution
 type Info struct {
 	BaseType
@@ -19,4 +21,9 @@ func (i *Info) ToMap() map[string]any {
 // NewInfo creates a new Info with the given message
 func NewInfo(msg string) *Info {
 	return &Info{Message: msg}
+}
+
+// String returns a formatted console representation
+func (i *Info) String() string {
+	return console.Info(i.Message)
 }

@@ -47,6 +47,9 @@ func (h *Httpx) Name() string { return "httpx" }
 // Command returns the CLI command name
 func (h *Httpx) Command() string { return "httpx" }
 
+// Description returns the tool description
+func (h *Httpx) Description() string { return "Fast and multi-purpose HTTP toolkit" }
+
 // InputType returns the expected input type
 func (h *Httpx) InputType() string { return "url" }
 

@@ -15,6 +15,7 @@ type OutputType interface {
 	Timestamp() time.Time
 	ToMap() map[string]any
 	SetContext(ctx map[string]any)
+	String() string // Console representation
 }
 
 // BaseType provides common fields for all output types
@@ -72,4 +73,9 @@ func (b *BaseType) SetContext(ctx map[string]any) {
 // SetSource sets the source name
 func (b *BaseType) SetSource(source string) {
 	b.SourceName = source
+}
+
+// String returns a basic string representation
+func (b *BaseType) String() string {
+	return b.TypeName
 }

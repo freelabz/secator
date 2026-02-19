@@ -47,6 +47,9 @@ func (n *Nuclei) Name() string { return "nuclei" }
 // Command returns the CLI command name
 func (n *Nuclei) Command() string { return "nuclei" }
 
+// Description returns the tool description
+func (n *Nuclei) Description() string { return "Fast and customizable vulnerability scanner" }
+
 // InputType returns the expected input type
 func (n *Nuclei) InputType() string { return "url" }
 

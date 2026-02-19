@@ -8,6 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Version is the current version of secator
+const Version = "0.1.0-go"
+
 var rootCmd = &cobra.Command{
 	Use:   "secator",
 	Short: "The Pentester's Swiss Knife",

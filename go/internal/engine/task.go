@@ -9,6 +9,7 @@ import (
 type Task interface {
 	Runner
 	Command() string                                 // e.g., "httpx"
+	Description() string                             // Tool description
 	InputType() string                               // "url", "host", "ip"
 	OutputTypes() []string                           // ["url", "subdomain"]
 	Install() error                                  // Auto-installation

@@ -4,6 +4,9 @@ package types
 import (
 	"fmt"
 	"strconv"
+	"strings"
+
+	"github.com/freelabz/secator/pkg/console"
 )
 
 // URL represents an HTTP URL finding
@@ -41,6 +44,48 @@ func (u *URL) ToMap() map[string]any {
 	m["technologies"] = u.Technologies
 	m["final_url"] = u.FinalURL
 	return m
+}
+
+// String returns a formatted console representation
+// Format: 🔗 https://example.com [200] [Title] [nginx] [Tech1, Tech2] [text/html] [1234]
+func (u *URL) String() string {
+	var parts []string
+
+	// URL with emoji
+	parts = append(parts, fmt.Sprintf("🔗 %s", console.White(u.URL)))
+
+	// Status code with color
+	if u.StatusCode != 0 {
+		colorFn := console.StatusCodeColor(u.StatusCode)
+		parts = append(parts, fmt.Sprintf("[%s]", colorFn(u.StatusCode)))
+	}
+
+	// Title
+	if u.Title != "" {
+		parts = append(parts, fmt.Sprintf("[%s]", console.Green(console.TrimString(u.Title, 40))))
+	}
+
+	// Webserver
+	if u.Webserver != "" {
+		parts = append(parts, fmt.Sprintf("[%s]", console.BoldMagenta(u.Webserver)))
+	}
+
+	// Technologies
+	if len(u.Technologies) > 0 {
+		parts = append(parts, console.JoinTech(u.Technologies))
+	}
+
+	// Content type
+	if u.ContentType != "" {
+		parts = append(parts, fmt.Sprintf("[%s]", console.Magenta(u.ContentType)))
+	}
+
+	// Content length
+	if u.ContentLength > 0 {
+		parts = append(parts, fmt.Sprintf("[%s]", console.Magenta(u.ContentLength)))
+	}
+
+	return strings.Join(parts, " ")
 }
 
 // URLFromMap creates a URL from a raw map (e.g., from httpx JSON)

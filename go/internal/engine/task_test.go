@@ -15,6 +15,7 @@ type mockTask struct {
 }
 
 func (m *mockTask) Command() string     { return m.cmd }
+func (m *mockTask) Description() string { return "Mock task for testing" }
 func (m *mockTask) InputType() string   { return "url" }
 func (m *mockTask) OutputTypes() []string { return []string{"url"} }
 func (m *mockTask) Install() error      { return nil }

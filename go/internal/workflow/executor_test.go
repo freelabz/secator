@@ -38,6 +38,7 @@ func newMockTask(name string, results []types.OutputType) *mockTask {
 
 func (m *mockTask) Name() string                               { return m.name }
 func (m *mockTask) Command() string                            { return m.name }
+func (m *mockTask) Description() string                        { return "Mock task for testing" }
 func (m *mockTask) InputType() string                          { return m.inputType }
 func (m *mockTask) OutputTypes() []string                      { return m.outputTypes }
 func (m *mockTask) Install() error                             { return nil }
