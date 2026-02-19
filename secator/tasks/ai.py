@@ -943,7 +943,25 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
 
                 if not action:
                     yield Warning(message="Could not parse action from LLM response")
-                    prompt = f"Previous response was not valid JSON. Please respond with a valid JSON action.\n\nContext:\n{context_text}"
+                    # Resend previous context with the invalid response so LLM can fix it
+                    encrypted_context = json.dumps(attack_context)
+                    encrypted_response = response[:2000]
+                    if sensitive:
+                        encrypted_context = encryptor.encrypt(encrypted_context)
+                        encrypted_response = encryptor.encrypt(encrypted_response)
+                    prompt = f"""Your previous response was not valid JSON and could not be parsed.
+
+Your response was:
+{encrypted_response}
+
+Please respond with a valid JSON action in one of these formats:
+- {{"action": "execute", "type": "task|workflow|scan", "name": "...", "targets": [...], "opts": {{...}}, "reasoning": "...", "expected_outcome": "..."}}
+- {{"action": "execute", "type": "shell", "command": "...", "target": "...", "reasoning": "...", "expected_outcome": "..."}}
+- {{"action": "validate", "vulnerability": "...", "target": "...", "proof": "...", "severity": "...", "reproduction_steps": [...]}}
+- {{"action": "complete", "summary": "..."}}
+
+Current attack context:
+{encrypted_context}"""
                     continue
 
                 action_type = action.get("action", "")
