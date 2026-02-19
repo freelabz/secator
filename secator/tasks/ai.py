@@ -600,6 +600,7 @@ Identify key findings, potential attack paths, and prioritize by severity."""
         run_suggestions = self.run_opts.get('run', False)
         auto_yes = self.run_opts.get('yes', False)
         in_ci = _is_ci()
+        verbose = self.run_opts.get('verbose', False)
 
         # Build prompt based on whether we have results
         if not results and targets:
@@ -618,6 +619,9 @@ Suggest initial reconnaissance commands to run."""
 Provide actionable commands with reasoning for each suggestion."""
             system_prompt = SYSTEM_PROMPTS['suggest']
 
+        if verbose:
+            yield Info(message=f"[PROMPT] {_truncate(prompt)}")
+
         try:
             response = get_llm_response(
                 prompt=prompt,
@@ -630,6 +634,9 @@ Provide actionable commands with reasoning for each suggestion."""
             # Decrypt sensitive data in response
             if self.run_opts.get('sensitive', True):
                 response = encryptor.decrypt(response)
+
+            if verbose:
+                yield Info(message=f"[AGENT] {_truncate(response)}")
 
             # Extract suggested commands
             commands = self._extract_commands(response)
