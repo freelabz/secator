@@ -9,9 +9,18 @@ tasks:
   httpx:
     tech_detect: true
 
-  nuclei:
-    targets_:
-      - url.url
-    severity:
-      - critical
-      - high
+  _group/test:
+    nuclei:
+      targets_:
+        - url.url
+      severity:
+        - critical
+        - high
+
+    katana:
+      description: Crawl URLs
+      targets_:
+        - type: url
+          field: url
+          condition: item.status_code == 200
+      depth: 2

@@ -4,6 +4,7 @@ package workflow
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -25,15 +26,34 @@ type OptionDef struct {
 	Help    string      `yaml:"help"`
 }
 
+// TargetDef represents a target definition which can be either a simple string
+// or a complex dict with type, field, and condition keys
+type TargetDef struct {
+	// Simple is the string value for simple targets like "url.url" or "target.name"
+	Simple string
+	// Type is the output type to filter (e.g., "subdomain", "url")
+	Type string
+	// Field is the field to extract from the output type
+	Field string
+	// Condition is a Python expression for filtering
+	Condition string
+}
+
+// IsSimple returns true if this is a simple string target
+func (t TargetDef) IsSimple() bool {
+	return t.Simple != ""
+}
+
 // TaskNode represents a task in the workflow
 type TaskNode struct {
-	Name      string
-	Type      NodeType
-	Task      string
-	Options   map[string]any
-	Targets   []string // e.g., ["url.url"]
-	Condition string
-	Children  []*TaskNode
+	Name       string
+	Type       NodeType
+	Task       string
+	Options    map[string]any
+	Targets    []string    // Simple string targets e.g., ["url.url"] (kept for backward compatibility)
+	TargetDefs []TargetDef // Full target definitions including complex dict targets
+	Condition  string
+	Children   []*TaskNode
 }
 
 // NodeType distinguishes task types
@@ -99,9 +119,9 @@ func parseTaskTree(tasks map[string]interface{}) *TaskNode {
 	root := &TaskNode{Type: ChainType}
 
 	for name, spec := range tasks {
-		if name == "_group" {
-			// Parallel group
-			group := &TaskNode{Type: GroupType}
+		if strings.HasPrefix(name, "_group") {
+			// Parallel group (e.g., "_group/hunt", "_group/probe", "_group/vuln")
+			group := &TaskNode{Type: GroupType, Name: name}
 			if groupTasks, ok := spec.(map[string]any); ok {
 				for childName, childSpec := range groupTasks {
 					group.Children = append(group.Children, parseTaskNode(childName, childSpec))
@@ -130,8 +150,11 @@ func parseTaskNode(name string, spec interface{}) *TaskNode {
 			if k == "targets_" {
 				if targets, ok := v.([]any); ok {
 					for _, t := range targets {
-						if s, ok := t.(string); ok {
-							node.Targets = append(node.Targets, s)
+						targetDef := parseTargetDef(t)
+						node.TargetDefs = append(node.TargetDefs, targetDef)
+						// Also populate Targets for backward compatibility with simple strings
+						if targetDef.IsSimple() {
+							node.Targets = append(node.Targets, targetDef.Simple)
 						}
 					}
 				}
@@ -146,4 +169,29 @@ func parseTaskNode(name string, spec interface{}) *TaskNode {
 	}
 
 	return node
+}
+
+// parseTargetDef parses a target definition from either a string or a dict
+func parseTargetDef(t interface{}) TargetDef {
+	// Handle simple string targets like "url.url" or "target.name"
+	if s, ok := t.(string); ok {
+		return TargetDef{Simple: s}
+	}
+
+	// Handle complex dict targets with type, field, and condition keys
+	if m, ok := t.(map[string]any); ok {
+		def := TargetDef{}
+		if typ, ok := m["type"].(string); ok {
+			def.Type = typ
+		}
+		if field, ok := m["field"].(string); ok {
+			def.Field = field
+		}
+		if cond, ok := m["condition"].(string); ok {
+			def.Condition = cond
+		}
+		return def
+	}
+
+	return TargetDef{}
 }
