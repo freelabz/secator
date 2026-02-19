@@ -1215,3 +1215,39 @@ Continue testing or mark complete if all attack paths are exhausted."""
             return help_result.stdout[:5000] if help_result.stdout else None
         except Exception:
             return None
+
+    def _validate_runner_opts(
+        self, runner_type: str, name: str, opts: Dict
+    ) -> tuple[Dict, List[str], List[str]]:
+        """Validate options for a secator runner.
+
+        Returns:
+            Tuple of (valid_opts, invalid_opt_names, valid_opt_names)
+        """
+        from secator.template import TemplateLoader, get_config_options
+
+        try:
+            # Load config based on runner type
+            if runner_type == "task":
+                config = TemplateLoader(input={"name": name, "type": "task"})
+            else:
+                config = TemplateLoader(name=f"{runner_type}s/{name}")
+
+            # Get valid options
+            config_opts = get_config_options(config)
+            valid_opt_names = [s.replace("-", "_") for s in config_opts.keys()]
+
+            # Separate valid and invalid options
+            valid_opts = {}
+            invalid_opts = []
+            for key, value in opts.items():
+                normalized_key = key.replace("-", "_")
+                if normalized_key in valid_opt_names:
+                    valid_opts[normalized_key] = value
+                else:
+                    invalid_opts.append(key)
+
+            return valid_opts, invalid_opts, valid_opt_names
+        except Exception as e:
+            logger.warning(f"Failed to validate options for {runner_type}/{name}: {e}")
+            return opts, [], []
