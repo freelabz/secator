@@ -129,5 +129,28 @@ class TestAsyncHookManager(unittest.TestCase):
 		self.assertGreaterEqual(call_count[0], 1)
 
 
+class TestRunnerAsyncIntegration(unittest.TestCase):
+	"""Test Runner integration with async hooks."""
+
+	def test_async_hook_detected(self):
+		"""async def hooks are detected by iscoroutinefunction."""
+		import inspect
+
+		async def async_hook(runner, items):
+			pass
+
+		def sync_hook(runner, item):
+			return item
+
+		self.assertTrue(inspect.iscoroutinefunction(async_hook))
+		self.assertFalse(inspect.iscoroutinefunction(sync_hook))
+
+	def test_runner_has_async_hook_manager_property(self):
+		"""Runner has lazy async_hook_manager property."""
+		from secator.runners._base import Runner
+
+		self.assertTrue(hasattr(Runner, 'async_hook_manager'))
+
+
 if __name__ == '__main__':
 	unittest.main()

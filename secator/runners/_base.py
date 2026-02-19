@@ -1,4 +1,5 @@
 import gc
+import inspect
 import json
 import logging
 import sys
@@ -125,6 +126,9 @@ class Runner:
 		self.skipped = False
 		self.results_buffer = []
 		self._hooks = hooks
+
+		# Async hook manager (lazy initialization)
+		self._async_hook_manager = None
 
 		# Runner process options
 		self.no_poll = self.run_opts.get('no_poll', False)
@@ -410,6 +414,14 @@ class Runner:
 		"""
 		return self.context.get('ancestor_id')
 
+	@property
+	def async_hook_manager(self):
+		"""Lazy initialization of AsyncHookManager."""
+		if self._async_hook_manager is None:
+			from secator.runners._async import AsyncHookManager
+			self._async_hook_manager = AsyncHookManager(self)
+		return self._async_hook_manager
+
 	def run(self):
 		"""Run method.
 
@@ -493,6 +505,15 @@ class Runner:
 		"""Finalize the runner."""
 		self.join_threads()
 		gc.collect()
+
+		# Flush async hooks and collect errors
+		if self._async_hook_manager is not None:
+			self.debug('flushing async hooks', sub='end')
+			errors = self._async_hook_manager.flush_all()
+			for error in errors:
+				self.add_result(error, hooks=False)
+			self._async_hook_manager.shutdown()
+
 		if self.sync:
 			self.mark_completed()
 		if self.enable_reports:
@@ -856,29 +877,52 @@ class Runner:
 		"""
 		result = args[0] if len(args) > 0 else None
 		if self.no_process:
-			self.debug('hook skipped (no_process)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
+			self.debug('hook skipped (no_process)', obj={'name': hook_type}, sub=sub, verbose=True)
 			return result
 		if self.dry_run:
-			self.debug('hook skipped (dry_run)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
+			self.debug('hook skipped (dry_run)', obj={'name': hook_type}, sub=sub, verbose=True)
 			return result
 		for hook in self.resolved_hooks[hook_type]:
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('hook skipped (backend update frequency)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
+					self.debug('hook skipped (backend update frequency)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)
 					return
 				if not self.enable_hooks or self.no_process:
-					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
+					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)
 					continue
+
+				# Check if hook is async (after enable_hooks/no_process check)
+				if inspect.iscoroutinefunction(hook):
+					self._submit_async_hook(hook, hook_type, *args, sub=sub)
+					continue
+
 				result = hook(self, *args)
-				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)  # noqa: E501
+				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)
 			except Exception as e:
-				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
+				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)
 				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
 				if self.raise_on_error:
 					raise e
 				self.add_result(error, hooks=False)
 		return result
+
+	def _submit_async_hook(self, hook, hook_type, *args, sub='hooks'):
+		"""Submit hook to async manager for batched execution.
+
+		Args:
+			hook: The async hook function.
+			hook_type: The hook type name.
+			args: Arguments passed to the hook.
+			sub: Debug subsystem name.
+		"""
+		fun = self.get_func_path(hook)
+		self.debug('async hook submitted', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)
+
+		# For on_item hooks, the item is args[0]
+		item = args[0] if args else None
+		if item is not None:
+			self.async_hook_manager.submit(hook, hook_type, item)
 
 	def run_validators(self, validator_type, *args, error=True, sub='validators'):
 		"""Run validators of a certain type.
