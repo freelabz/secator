@@ -1116,7 +1116,15 @@ Context:
 {encrypted_context}""" + custom_prompt_suffix
                             continue
 
-                        yield Info(message=f"[CMD] secator {exec_type[0]} {name} {' '.join(action_targets)}")
+                        # Build CLI command with options
+                        cli_opts = ' '.join(
+                            f"--{k.replace('_', '-')} {v}" if v is not True else f"--{k.replace('_', '-')}"
+                            for k, v in valid_opts.items()
+                        )
+                        cli_cmd = f"secator {exec_type[0]} {name} {' '.join(action_targets)}"
+                        if cli_opts:
+                            cli_cmd += f" {cli_opts}"
+                        yield Info(message=f"[CMD] {cli_cmd}")
 
                         if dry_run:
                             yield Tag(
