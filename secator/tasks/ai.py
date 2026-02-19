@@ -74,7 +74,8 @@ class SensitiveDataEncryptor:
 
     def __init__(self, salt: str = 'secator_pii_salt', custom_patterns: List[str] = None):
         self.salt = salt
-        self.pii_map: Dict[str, str] = {}
+        self.pii_map: Dict[str, str] = {}  # placeholder -> original
+        self.hash_map: Dict[str, str] = {}  # bare hash -> original (for LLM mistakes)
         self.custom_patterns: List[re.Pattern] = []
 
         # Compile custom patterns (can be literal strings or regexes)
@@ -96,6 +97,7 @@ class SensitiveDataEncryptor:
         hash_value = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
         placeholder = f"[{pii_type.upper()}:{hash_value}]"
         self.pii_map[placeholder] = value
+        self.hash_map[hash_value] = value  # Also store bare hash for fallback
         return placeholder
 
     def encrypt(self, text: str) -> str:
@@ -124,8 +126,12 @@ class SensitiveDataEncryptor:
     def decrypt(self, text: str) -> str:
         """Restore original sensitive values from placeholders."""
         result = text
+        # First replace full placeholders (e.g., [HOST:a07963bdcb1f])
         for placeholder, original in self.pii_map.items():
             result = result.replace(placeholder, original)
+        # Then replace bare hashes (e.g., a07963bdcb1f) that LLM might extract incorrectly
+        for hash_value, original in self.hash_map.items():
+            result = result.replace(hash_value, original)
         return result
 
 
