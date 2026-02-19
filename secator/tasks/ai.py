@@ -143,11 +143,16 @@ def get_llm_response(
     system_prompt: str = '',
     temperature: float = 0.7,
     max_tokens: int = 4096,
+    verbose: bool = False,
 ) -> Optional[str]:
     """Get response from LLM using LiteLLM."""
     try:
         import litellm
-        litellm.set_verbose = False
+
+        # Suppress debug output unless verbose mode
+        if not verbose:
+            litellm.suppress_debug_info = True
+            litellm.set_verbose = False
 
         messages = []
         if system_prompt:
@@ -393,6 +398,12 @@ class ai(PythonRunner):
             'default': False,
             'short': 'y',
             'help': 'Auto-accept prompts without confirmation',
+        },
+        'verbose': {
+            'is_flag': True,
+            'default': False,
+            'short': 'v',
+            'help': 'Show verbose LLM debug output',
         },
     }
 
