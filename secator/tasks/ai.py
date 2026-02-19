@@ -592,6 +592,12 @@ class ai(PythonRunner):
             "short": "v",
             "help": "Show verbose LLM debug output",
         },
+        "prompt": {
+            "type": str,
+            "default": None,
+            "short": "p",
+            "help": "Additional instructions to include in the initial prompt",
+        },
     }
 
     def __init__(self, inputs=[], **run_opts):
@@ -684,6 +690,8 @@ class ai(PythonRunner):
         targets: List[str],
     ) -> Generator:
         """Summarize results and identify attack paths."""
+        custom_prompt = self.run_opts.get("prompt", "")
+
         # If no results but have targets, suggest initial recon
         if not results and targets:
             yield Info(
@@ -703,6 +711,10 @@ Provide a brief assessment and initial steps."""
 
 Identify key findings, potential attack paths, and prioritize by severity."""
             system_prompt = SYSTEM_PROMPTS["summarize"]
+
+        # Add custom prompt if provided
+        if custom_prompt:
+            prompt += f"\n\n## Additional Instructions\n{custom_prompt}"
 
         verbose = self.run_opts.get("verbose", False)
 
@@ -748,6 +760,7 @@ Identify key findings, potential attack paths, and prioritize by severity."""
         auto_yes = self.run_opts.get("yes", False)
         in_ci = _is_ci()
         verbose = self.run_opts.get("verbose", False)
+        custom_prompt = self.run_opts.get("prompt", "")
 
         # Build prompt based on whether we have results
         if not results and targets:
@@ -765,6 +778,10 @@ Suggest initial reconnaissance commands to run."""
 
 Provide actionable commands with reasoning for each suggestion."""
             system_prompt = SYSTEM_PROMPTS["suggest"]
+
+        # Add custom prompt if provided
+        if custom_prompt:
+            prompt += f"\n\n## Additional Instructions\n{custom_prompt}"
 
         if verbose:
             yield Info(message=f"[PROMPT] {_truncate(prompt)}")
@@ -874,6 +891,7 @@ Provide actionable commands with reasoning for each suggestion."""
         max_iterations = int(self.run_opts.get("max_iterations", 10))
         dry_run = self.run_opts.get("dry_run", False)
         verbose = self.run_opts.get("verbose", False)
+        custom_prompt = self.run_opts.get("prompt", "")
 
         yield Info(
             message=f"Starting attack mode (max {max_iterations} iterations, dry_run={dry_run})"
@@ -915,6 +933,10 @@ Start with reconnaissance to identify attack surface. Respond with a JSON action
 
 ## Instructions
 Analyze the findings and plan your first attack. Respond with a JSON action."""
+
+        # Add custom prompt if provided
+        if custom_prompt:
+            prompt += f"\n\n## Additional Instructions\n{custom_prompt}"
 
         for iteration in range(max_iterations):
             attack_context["iteration"] = iteration + 1
