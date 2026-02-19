@@ -1037,8 +1037,38 @@ Continue testing or mark complete if all attack paths are exhausted."""
                 timeout=120,
             )
             output = result.stdout + result.stderr
+
+            # If secator command failed, append help output
+            if result.returncode != 0 and command.startswith('secator '):
+                help_output = self._get_secator_help(command)
+                if help_output:
+                    output += f"\n\n--- COMMAND HELP ---\n{help_output}"
+
             return output[:10000] if output else "No output"
         except subprocess.TimeoutExpired:
             return "Command timed out after 120 seconds"
         except Exception as e:
             return f"Execution error: {str(e)}"
+
+    def _get_secator_help(self, command: str) -> Optional[str]:
+        """Get help output for a failed secator command."""
+        # Parse the secator command to extract task name
+        # Format: secator x <task> ... or secator w <workflow> ...
+        match = re.match(r'secator\s+([xwst])\s+(\S+)', command)
+        if not match:
+            return None
+
+        runner_type = match.group(1)
+        name = match.group(2)
+
+        try:
+            help_result = subprocess.run(
+                f"secator {runner_type} {name} -h",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return help_result.stdout[:5000] if help_result.stdout else None
+        except Exception:
+            return None
