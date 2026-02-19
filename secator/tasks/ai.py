@@ -307,6 +307,52 @@ def run_secator_task(name: str, targets: List[str], options: Dict = None) -> Lis
     return results
 
 
+SECATOR_CHEATSHEET = """
+SECATOR CHEATSHEET:
+
+# Running tasks, workflows, or scans
+secator x <task> <target> [options]     # run a task (x = execute)
+secator w <workflow> <target> [options] # run a workflow
+secator s <scan> <target> [options]     # run a scan
+
+# Examples
+secator x httpx example.com             # run httpx task
+secator x nmap example.com -p 80,443    # run nmap with port option
+secator w url_crawl https://example.com # run url crawl workflow
+secator s host example.com              # run host scan
+secator s domain example.com            # run domain scan
+
+# Input types (flexible)
+secator s host example.com              # single input
+secator s host host1,host2,host3        # multiple inputs (comma-separated)
+secator s host hosts.txt                # file input
+
+# Common options (work with any task/workflow/scan)
+-rl 10                    # rate limit (requests per second)
+-delay 1                  # delay between requests
+-proxy http://127.0.0.1:8080  # proxy
+-pf <profile>             # use a profile (e.g., aggressive, passive, all_ports, full)
+-ws <workspace>           # save to workspace
+-o json                   # output format
+
+# Useful scans
+s domain <DOMAIN>                # domain recon + subdomain + port scan + URL crawl + vulns
+s domain <DOMAIN> -pf all_ports  # + full port scan
+s domain <DOMAIN> -pf full       # all features
+s domain <DOMAIN> -pf passive    # passive (0 requests)
+s host <HOST>                    # host recon
+
+# Useful workflows
+w subdomain_recon <DOMAIN>       # subdomain enumeration
+w url_crawl <URL>                # URL crawling and discovery
+w url_fuzz <URL>                 # directory/file fuzzing
+w code_scan <PATH_OR_REPO>       # code vulnerability scan
+w user_hunt <USERNAME_OR_EMAIL>  # hunt user accounts
+
+# Piping (chain tasks)
+secator x subfinder example.com | secator x httpx | secator x nuclei
+"""
+
 SYSTEM_PROMPTS = {
     'summarize': """You are a senior penetration tester analyzing security scan results.
 Your task is to:
@@ -323,25 +369,15 @@ Format your response with clear sections:
 
 Be concise but thorough. Focus on actionable intelligence.""",
 
-    'suggest': """You are a senior penetration tester recommending next steps for a security assessment.
+    'suggest': f"""You are a senior penetration tester recommending next steps for a security assessment.
 Based on the scan results and targets, suggest specific Secator tasks to run next.
 
-IMPORTANT: Before suggesting commands, verify the task exists and check its available options:
-- Tasks reference: https://github.com/freelabz/secator/tree/main/secator/tasks
+{SECATOR_CHEATSHEET}
+
+REFERENCE (verify tasks/options before using):
+- Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
   (Each .py file is a task - read the file to see available options in the 'opts' dict)
-- Configs reference: https://github.com/freelabz/secator/tree/main/secator/configs
-  (profiles/, workflows/, scans/ contain pre-built configurations)
-
-Common Secator tasks:
-- Reconnaissance: subfinder, httpx, katana, gospider, gau, waybackurls
-- Port scanning: nmap, naabu, masscan
-- Vulnerability scanning: nuclei, nikto, wpscan, sqlmap, dalfox
-- Directory fuzzing: ffuf, feroxbuster, dirsearch
-- Content discovery: katana, gospider, hakrawler
-
-You can also run workflows and scans:
-- secator w <workflow> <target>  (e.g., secator w host_recon example.com)
-- secator s <scan> <target>      (e.g., secator s domain example.com)
+- Configs: https://github.com/freelabz/secator/tree/main/secator/configs
 
 Format EACH suggestion as a single secator command:
 ```
@@ -353,7 +389,7 @@ ONLY use options that exist for the task. When in doubt, check the task file.
 Provide 3-5 specific commands with brief reasoning for each.
 Include the actual target from the findings, not placeholders.""",
 
-    'attack': """You are an autonomous penetration testing agent conducting authorized security testing.
+    'attack': f"""You are an autonomous penetration testing agent conducting authorized security testing.
 
 Your mission is to:
 1. Analyze the current findings and identify exploitable vulnerabilities
@@ -362,7 +398,9 @@ Your mission is to:
 4. Validate successful exploits with proof-of-concept
 5. Document findings with reproduction steps
 
-SECATOR REFERENCE (verify tasks/options before using):
+{SECATOR_CHEATSHEET}
+
+REFERENCE (verify tasks/options before using):
 - Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
 - Configs: https://github.com/freelabz/secator/tree/main/secator/configs
 
@@ -397,23 +435,14 @@ When validating a vulnerability, include:
 When done, respond with:
 {"action": "complete", "summary": "overall findings"}""",
 
-    'initial_recon': """You are a senior penetration tester starting a new security assessment.
+    'initial_recon': f"""You are a senior penetration tester starting a new security assessment.
 Given the target(s), suggest an initial reconnaissance plan using Secator tasks.
 
-SECATOR REFERENCE (verify tasks/options before using):
+{SECATOR_CHEATSHEET}
+
+REFERENCE (verify tasks/options before using):
 - Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
 - Configs: https://github.com/freelabz/secator/tree/main/secator/configs
-
-Common reconnaissance tasks:
-- subfinder: Subdomain enumeration
-- httpx: HTTP probing and technology detection
-- nmap: Port scanning and service detection
-- nuclei: Vulnerability scanning with templates
-- katana: Web crawling and endpoint discovery
-
-You can also use pre-built workflows:
-- secator w host_recon <target>   (comprehensive host reconnaissance)
-- secator w url_crawl <target>    (URL crawling and discovery)
 
 Suggest 2-3 initial commands to start the assessment.
 Format each as: secator x <task> <target> [options]
