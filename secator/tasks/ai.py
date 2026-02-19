@@ -1,4 +1,5 @@
 """AI-powered penetration testing task using LiteLLM."""
+
 import hashlib
 import json
 import logging
@@ -6,24 +7,33 @@ import os
 import re
 import signal
 import subprocess
+import time
 from dataclasses import asdict
-from typing import Generator, List, Dict, Any, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 import click
 
-from secator.decorators import task
-from secator.output_types import Vulnerability, Tag, Info, Warning, Error
-from secator.runners import PythonRunner
 from secator.config import CONFIG
+from secator.decorators import task
+from secator.output_types import Error, Info, Tag, Vulnerability, Warning
+from secator.runners import PythonRunner
 
 logger = logging.getLogger(__name__)
 
 
 def _is_ci():
     """Check if running in CI environment."""
-    return any(os.environ.get(var) for var in (
-        'CI', 'CONTINUOUS_INTEGRATION', 'GITHUB_ACTIONS', 'GITLAB_CI', 'JENKINS_URL', 'BUILDKITE'
-    ))
+    return any(
+        os.environ.get(var)
+        for var in (
+            "CI",
+            "CONTINUOUS_INTEGRATION",
+            "GITHUB_ACTIONS",
+            "GITLAB_CI",
+            "JENKINS_URL",
+            "BUILDKITE",
+        )
+    )
 
 
 def confirm_with_timeout(message, default=True, timeout=None):
@@ -32,8 +42,9 @@ def confirm_with_timeout(message, default=True, timeout=None):
         timeout = CONFIG.runners.prompt_timeout
 
     if timeout and timeout > 0:
+
         def timeout_handler(signum, frame):
-            raise TimeoutError('Prompt timeout')
+            raise TimeoutError("Prompt timeout")
 
         old_handler = signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(timeout)
@@ -41,7 +52,10 @@ def confirm_with_timeout(message, default=True, timeout=None):
             result = click.confirm(message, default=default)
         except (TimeoutError, KeyboardInterrupt):
             from secator.rich import console
-            console.print(rf'\n\[[bold red]AI[/]] [bold red]Prompt timed out after {timeout}s, skipping...[/]')
+
+            console.print(
+                rf"\n\[[bold red]AI[/]] [bold red]Prompt timed out after {timeout}s, skipping...[/]"
+            )
             result = False
         finally:
             signal.alarm(0)
@@ -54,25 +68,38 @@ def confirm_with_timeout(message, default=True, timeout=None):
 # PII patterns for detection and encryption
 # Order matters: more specific patterns should come before general ones
 PII_PATTERNS = {
-    'email': re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
-    'ipv4': re.compile(r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'),
-    'phone': re.compile(r'\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'),
-    'ssn': re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
-    'credit_card': re.compile(r'\b(?:4[0-9]{3}|5[1-5][0-9]{2}|6(?:011|5[0-9]{2})|3[47][0-9]{2})[-\s]?[0-9]{4}[-\s]?[0-9]{4}[-\s]?[0-9]{4}\b'),
-    'api_key': re.compile(r'\b(?:api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*["\']?[\w-]{16,}["\']?', re.I),
-    'jwt': re.compile(r'\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b'),
-    'private_key': re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),
-    'aws_key': re.compile(r'\b(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b'),
+    "email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+    "ipv4": re.compile(
+        r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
+    ),
+    "phone": re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
+    "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    "credit_card": re.compile(
+        r"\b(?:4[0-9]{3}|5[1-5][0-9]{2}|6(?:011|5[0-9]{2})|3[47][0-9]{2})[-\s]?[0-9]{4}[-\s]?[0-9]{4}[-\s]?[0-9]{4}\b"
+    ),
+    "api_key": re.compile(
+        r'\b(?:api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*["\']?[\w-]{16,}["\']?',
+        re.I,
+    ),
+    "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+    "private_key": re.compile(
+        r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+    ),
+    "aws_key": re.compile(r"\b(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b"),
     # Hostname/domain pattern - matches domains like example.com, sub.example.co.uk
     # Placed last to avoid matching parts of URLs/emails that were already encrypted
-    'host': re.compile(r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'),
+    "host": re.compile(
+        r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b"
+    ),
 }
 
 
 class SensitiveDataEncryptor:
     """Encrypt sensitive data using SHA-256 hashing with salt."""
 
-    def __init__(self, salt: str = 'secator_pii_salt', custom_patterns: List[str] = None):
+    def __init__(
+        self, salt: str = "secator_pii_salt", custom_patterns: List[str] = None
+    ):
         self.salt = salt
         self.pii_map: Dict[str, str] = {}  # placeholder -> original
         self.hash_map: Dict[str, str] = {}  # bare hash -> original (for LLM mistakes)
@@ -82,7 +109,7 @@ class SensitiveDataEncryptor:
         if custom_patterns:
             for pattern in custom_patterns:
                 pattern = pattern.strip()
-                if not pattern or pattern.startswith('#'):
+                if not pattern or pattern.startswith("#"):
                     continue  # Skip empty lines and comments
                 try:
                     # Try to compile as regex first
@@ -111,7 +138,7 @@ class SensitiveDataEncryptor:
         for i, pattern in enumerate(self.custom_patterns):
             for match in pattern.finditer(result):
                 original = match.group()
-                placeholder = self._hash_value(original, f'custom_{i}')
+                placeholder = self._hash_value(original, f"custom_{i}")
                 result = result.replace(original, placeholder)
 
         # Apply built-in PII patterns
@@ -139,10 +166,10 @@ def load_sensitive_patterns(file_path: str) -> List[str]:
     """Load sensitive patterns from a file (one pattern per line)."""
     patterns = []
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith('#'):
+                if line and not line.startswith("#"):
                     patterns.append(line)
     except FileNotFoundError:
         logger.warning(f"Sensitive patterns file not found: {file_path}")
@@ -155,7 +182,7 @@ def _truncate(text: str, max_length: int = 2000) -> str:
     """Truncate text to max_length, adding indicator if truncated."""
     if not text or len(text) <= max_length:
         return text
-    return text[:max_length] + '\n... (truncated)'
+    return text[:max_length] + "\n... (truncated)"
 
 
 def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
@@ -168,7 +195,7 @@ def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
 
     # Group results by type
     for result in results[:max_items]:
-        result_type = getattr(result, '_type', 'unknown')
+        result_type = getattr(result, "_type", "unknown")
         if result_type not in result_types:
             result_types[result_type] = []
         result_types[result_type].append(result)
@@ -177,10 +204,13 @@ def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
         formatted.append(f"\n## {rtype.upper()} ({len(items)} items)")
         for item in items[:20]:  # Limit per type
             try:
-                if hasattr(item, '__dict__'):
+                if hasattr(item, "__dict__"):
                     # Filter out internal fields
-                    data = {k: v for k, v in asdict(item).items()
-                            if not k.startswith('_') and v}
+                    data = {
+                        k: v
+                        for k, v in asdict(item).items()
+                        if not k.startswith("_") and v
+                    }
                     formatted.append(f"  - {json.dumps(data, default=str)}")
                 else:
                     formatted.append(f"  - {str(item)}")
@@ -192,40 +222,60 @@ def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
 
 def get_llm_response(
     prompt: str,
-    model: str = 'gpt-4o-mini',
-    system_prompt: str = '',
+    model: str = "gpt-4o-mini",
+    system_prompt: str = "",
     temperature: float = 0.7,
     max_tokens: int = 4096,
+    max_retries: int = 5,
+    initial_delay: float = 1.0,
 ) -> Optional[str]:
-    """Get response from LLM using LiteLLM."""
+    """Get response from LLM using LiteLLM with exponential backoff for rate limits."""
     try:
         import litellm
 
         # Suppress debug output unless 'litellm' is in CONFIG.debug
-        if 'litellm' not in CONFIG.debug:
+        if "litellm" not in CONFIG.debug:
             litellm.suppress_debug_info = True
             litellm.set_verbose = False
             litellm.json_logs = True
             # Suppress litellm logger debug output
-            logging.getLogger('LiteLLM').setLevel(logging.WARNING)
-            logging.getLogger('litellm').setLevel(logging.WARNING)
-            logging.getLogger('httpx').setLevel(logging.WARNING)
+            logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+            logging.getLogger("litellm").setLevel(logging.WARNING)
+            logging.getLogger("httpx").setLevel(logging.WARNING)
 
         messages = []
         if system_prompt:
-            messages.append({'role': 'system', 'content': system_prompt})
-        messages.append({'role': 'user', 'content': prompt})
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
 
         # Ensure temperature is a float (CLI may pass it as string)
         temp = float(temperature) if temperature is not None else 0.7
 
-        response = litellm.completion(
-            model=model,
-            messages=messages,
-            temperature=temp,
-            max_tokens=int(max_tokens),
-        )
-        return response.choices[0].message.content
+        # Retry loop with exponential backoff for rate limits
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                response = litellm.completion(
+                    model=model,
+                    messages=messages,
+                    temperature=temp,
+                    max_tokens=int(max_tokens),
+                )
+                return response.choices[0].message.content
+            except litellm.RateLimitError as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    delay = initial_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"Rate limit hit, retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"Rate limit exceeded after {max_retries} retries")
+                    raise
+
+        # Should not reach here, but just in case
+        if last_exception:
+            raise last_exception
+
     except ImportError:
         raise ImportError("litellm is required. Install with: pip install litellm")
     except Exception as e:
@@ -236,7 +286,7 @@ def get_llm_response(
 def parse_secator_command(cmd: str) -> Optional[Dict]:
     """Parse a secator command string into components."""
     # Match: secator [x|w|s] <name> <targets> [options]
-    match = re.match(r'secator\s+([xwst])\s+(\S+)\s*(.*)', cmd.strip())
+    match = re.match(r"secator\s+([xwst])\s+(\S+)\s*(.*)", cmd.strip())
     if not match:
         return None
 
@@ -252,17 +302,17 @@ def parse_secator_command(cmd: str) -> Optional[Dict]:
     i = 0
     while i < len(parts):
         part = parts[i]
-        if part.startswith('--'):
-            opt_name = part[2:].replace('-', '_')
-            if i + 1 < len(parts) and not parts[i + 1].startswith('-'):
+        if part.startswith("--"):
+            opt_name = part[2:].replace("-", "_")
+            if i + 1 < len(parts) and not parts[i + 1].startswith("-"):
                 options[opt_name] = parts[i + 1]
                 i += 2
             else:
                 options[opt_name] = True
                 i += 1
-        elif part.startswith('-') and len(part) == 2:
+        elif part.startswith("-") and len(part) == 2:
             opt_name = part[1:]
-            if i + 1 < len(parts) and not parts[i + 1].startswith('-'):
+            if i + 1 < len(parts) and not parts[i + 1].startswith("-"):
                 options[opt_name] = parts[i + 1]
                 i += 2
             else:
@@ -273,10 +323,10 @@ def parse_secator_command(cmd: str) -> Optional[Dict]:
             i += 1
 
     return {
-        'runner_type': runner_type,
-        'name': name,
-        'targets': targets,
-        'options': options,
+        "runner_type": runner_type,
+        "name": name,
+        "targets": targets,
+        "options": options,
     }
 
 
@@ -289,15 +339,15 @@ def run_secator_task(name: str, targets: List[str], options: Dict = None) -> Lis
 
     # Set minimal options for running embedded
     run_opts = {
-        'print_item': False,
-        'print_line': False,
-        'print_cmd': False,
-        'print_progress': False,
-        'print_start': False,
-        'print_end': False,
-        'print_target': False,
-        'sync': True,
-        **options
+        "print_item": False,
+        "print_line": False,
+        "print_cmd": False,
+        "print_progress": False,
+        "print_start": False,
+        "print_end": False,
+        "print_target": False,
+        "sync": True,
+        **options,
     }
 
     task_instance = task_cls(targets, **run_opts)
@@ -308,53 +358,57 @@ def run_secator_task(name: str, targets: List[str], options: Dict = None) -> Lis
 
 
 SECATOR_CHEATSHEET = """
-SECATOR CHEATSHEET:
+=== SECATOR CHEATSHEET ===
 
-# Running tasks, workflows, or scans
-secator x <task> <target> [options]     # run a task (x = execute)
-secator w <workflow> <target> [options] # run a workflow
-secator s <scan> <target> [options]     # run a scan
+SYNTAX:
+  secator x <task> <target> [options]     # run a task (x = execute)
+  secator w <workflow> <target> [options] # run a workflow
+  secator s <scan> <target> [options]     # run a scan
 
-# Examples
-secator x httpx example.com             # run httpx task
-secator x nmap example.com -p 80,443    # run nmap with port option
-secator w url_crawl https://example.com # run url crawl workflow
-secator s host example.com              # run host scan
-secator s domain example.com            # run domain scan
+EXAMPLES:
+  secator x httpx example.com             # run httpx task
+  secator x nmap example.com -p 80,443    # run nmap with port option
+  secator w url_crawl https://example.com # run url crawl workflow
+  secator s host example.com              # run host scan
+  secator s domain example.com            # run domain scan
 
-# Input types (flexible)
-secator s host example.com              # single input
-secator s host host1,host2,host3        # multiple inputs (comma-separated)
-secator s host hosts.txt                # file input
+INPUT TYPES:
+  example.com              # single input
+  host1,host2,host3        # comma-separated
+  hosts.txt                # file input
 
-# Common options (work with any task/workflow/scan)
--rl 10                    # rate limit (requests per second)
--delay 1                  # delay between requests
--proxy http://127.0.0.1:8080  # proxy
--pf <profile>             # use a profile (e.g., aggressive, passive, all_ports, full)
--ws <workspace>           # save to workspace
--o json                   # output format
+COMMON OPTIONS:
+  -rl 10                   # rate limit (req/sec)
+  -delay 1                 # delay between requests
+  -proxy http://127.0.0.1:8080
+  -pf <profile>            # aggressive, passive, all_ports, full
+  -o json                  # output format
 
-# Useful scans
-s domain <DOMAIN>                # domain recon + subdomain + port scan + URL crawl + vulns
-s domain <DOMAIN> -pf all_ports  # + full port scan
-s domain <DOMAIN> -pf full       # all features
-s domain <DOMAIN> -pf passive    # passive (0 requests)
-s host <HOST>                    # host recon
+USEFUL SCANS:
+  secator s domain <DOMAIN>              # full domain recon
+  secator s domain <DOMAIN> -pf passive  # passive only
+  secator s host <HOST>                  # host recon
 
-# Useful workflows
-w subdomain_recon <DOMAIN>       # subdomain enumeration
-w url_crawl <URL>                # URL crawling and discovery
-w url_fuzz <URL>                 # directory/file fuzzing
-w code_scan <PATH_OR_REPO>       # code vulnerability scan
-w user_hunt <USERNAME_OR_EMAIL>  # hunt user accounts
+USEFUL WORKFLOWS:
+  secator w subdomain_recon <DOMAIN>
+  secator w url_crawl <URL>
+  secator w url_fuzz <URL>
+  secator w code_scan <PATH_OR_REPO>
 
-# Piping (chain tasks)
-secator x subfinder example.com | secator x httpx | secator x nuclei
+PIPING:
+  secator x subfinder example.com | secator x httpx | secator x nuclei
+
+REFERENCE (verify options exist before using):
+  Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
+  Configs: https://github.com/freelabz/secator/tree/main/secator/configs
+
+RULES:
+  - ALWAYS use 'secator x <tool>' instead of raw tool commands
+  - ONLY use options that exist (check task file if unsure)
 """
 
 SYSTEM_PROMPTS = {
-    'summarize': """You are a senior penetration tester analyzing security scan results.
+    "summarize": """You are a senior penetration tester analyzing security scan results.
 Your task is to:
 1. Summarize the key findings from the scan results
 2. Identify potential attack paths based on discovered vulnerabilities, services, and endpoints
@@ -368,28 +422,14 @@ Format your response with clear sections:
 - **Recommendations**: Next steps for deeper testing
 
 Be concise but thorough. Focus on actionable intelligence.""",
-
-    'suggest': f"""You are a senior penetration tester recommending next steps for a security assessment.
+    "suggest": f"""You are a senior penetration tester recommending next steps for a security assessment.
 Based on the scan results and targets, suggest specific Secator tasks to run next.
 
 {SECATOR_CHEATSHEET}
 
-REFERENCE (verify tasks/options before using):
-- Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
-  (Each .py file is a task - read the file to see available options in the 'opts' dict)
-- Configs: https://github.com/freelabz/secator/tree/main/secator/configs
-
-Format EACH suggestion as a single secator command:
-```
-secator x <task> <target> [--option value]
-```
-
-ALWAYS use secator commands, never raw tool commands (e.g., 'secator x nmap' not 'nmap').
-ONLY use options that exist for the task. When in doubt, check the task file.
-Provide 3-5 specific commands with brief reasoning for each.
+Provide 3-5 specific secator commands with brief reasoning for each.
 Include the actual target from the findings, not placeholders.""",
-
-    'attack': f"""You are an autonomous penetration testing agent conducting authorized security testing.
+    "attack": f"""You are an autonomous penetration testing agent conducting authorized security testing.
 
 Your mission is to:
 1. Analyze the current findings and identify exploitable vulnerabilities
@@ -400,10 +440,6 @@ Your mission is to:
 
 {SECATOR_CHEATSHEET}
 
-REFERENCE (verify tasks/options before using):
-- Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
-- Configs: https://github.com/freelabz/secator/tree/main/secator/configs
-
 IMPORTANT RULES:
 - ALWAYS prefer secator commands over raw tool commands (e.g., use 'secator x nmap <target>' instead of 'nmap <target>')
 - Only test targets explicitly provided as inputs
@@ -413,41 +449,34 @@ IMPORTANT RULES:
 - Only use secator task options that actually exist (check the task file)
 
 For each attack attempt, respond with JSON:
-{
+{{
     "action": "execute|validate|report|complete",
     "tool": "tool_name",
     "command": "full command to run",
     "target": "specific target",
     "reasoning": "why this attack",
     "expected_outcome": "what we expect to find"
-}
+}}
 
 When validating a vulnerability, include:
-{
+{{
     "action": "validate",
     "vulnerability": "name",
     "target": "target url or host",
     "proof": "evidence of exploitation",
     "severity": "critical|high|medium|low|info",
     "reproduction_steps": ["step1", "step2", ...]
-}
+}}
 
 When done, respond with:
-{"action": "complete", "summary": "overall findings"}""",
-
-    'initial_recon': f"""You are a senior penetration tester starting a new security assessment.
+{{"action": "complete", "summary": "overall findings"}}""",
+    "initial_recon": f"""You are a senior penetration tester starting a new security assessment.
 Given the target(s), suggest an initial reconnaissance plan using Secator tasks.
 
 {SECATOR_CHEATSHEET}
 
-REFERENCE (verify tasks/options before using):
-- Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
-- Configs: https://github.com/freelabz/secator/tree/main/secator/configs
-
 Suggest 2-3 initial commands to start the assessment.
-Format each as: secator x <task> <target> [options]
-ALWAYS use secator commands, never raw tool commands.
-ONLY use options that exist for the task."""
+Format each as: secator x <task> <target> [options]""",
 }
 
 
@@ -466,69 +495,70 @@ class ai(PythonRunner):
         secator x ai example.com --mode suggest --run  # Run suggested tasks
         secator x ai example.com --mode attack --dry-run  # Dry-run attack
     """
+
     output_types = [Vulnerability, Tag, Info, Warning, Error]
-    tags = ['ai', 'analysis', 'pentest']
+    tags = ["ai", "analysis", "pentest"]
     input_types = []  # Accept any input type
-    install_cmd = 'pip install litellm'
+    install_cmd = "pip install litellm"
 
     opts = {
-        'mode': {
-            'type': str,
-            'default': 'summarize',
-            'help': 'Operation mode: summarize, suggest, or attack',
+        "mode": {
+            "type": str,
+            "default": "summarize",
+            "help": "Operation mode: summarize, suggest, or attack",
         },
-        'model': {
-            'type': str,
-            'default': 'gpt-4o-mini',
-            'help': 'LLM model to use (via LiteLLM)',
+        "model": {
+            "type": str,
+            "default": "gpt-4o-mini",
+            "help": "LLM model to use (via LiteLLM)",
         },
-        'sensitive': {
-            'is_flag': True,
-            'default': True,
-            'help': 'Encrypt sensitive data (PII, IPs, hosts) before sending to LLM',
+        "sensitive": {
+            "is_flag": True,
+            "default": True,
+            "help": "Encrypt sensitive data (PII, IPs, hosts) before sending to LLM",
         },
-        'sensitive_list': {
-            'type': str,
-            'default': None,
-            'help': 'File containing custom sensitive patterns to encrypt (one per line, supports regex)',
+        "sensitive_list": {
+            "type": str,
+            "default": None,
+            "help": "File containing custom sensitive patterns to encrypt (one per line, supports regex)",
         },
-        'max_iterations': {
-            'type': int,
-            'default': 10,
-            'help': 'Maximum attack loop iterations (attack mode only)',
+        "max_iterations": {
+            "type": int,
+            "default": 10,
+            "help": "Maximum attack loop iterations (attack mode only)",
         },
-        'temperature': {
-            'type': float,
-            'default': 0.7,
-            'help': 'LLM temperature for response generation',
+        "temperature": {
+            "type": float,
+            "default": 0.7,
+            "help": "LLM temperature for response generation",
         },
-        'dry_run': {
-            'is_flag': True,
-            'default': False,
-            'help': 'Show planned actions without executing (attack mode)',
+        "dry_run": {
+            "is_flag": True,
+            "default": False,
+            "help": "Show planned actions without executing (attack mode)",
         },
-        'run': {
-            'is_flag': True,
-            'default': False,
-            'help': 'Execute suggested tasks (suggest mode only)',
+        "run": {
+            "is_flag": True,
+            "default": False,
+            "help": "Execute suggested tasks (suggest mode only)",
         },
-        'yes': {
-            'is_flag': True,
-            'default': False,
-            'short': 'y',
-            'help': 'Auto-accept prompts without confirmation',
+        "yes": {
+            "is_flag": True,
+            "default": False,
+            "short": "y",
+            "help": "Auto-accept prompts without confirmation",
         },
-        'verbose': {
-            'is_flag': True,
-            'default': False,
-            'short': 'v',
-            'help': 'Show verbose LLM debug output',
+        "verbose": {
+            "is_flag": True,
+            "default": False,
+            "short": "v",
+            "help": "Show verbose LLM debug output",
         },
     }
 
     def __init__(self, inputs=[], **run_opts):
         # Store results before parent init resets them
-        self._previous_results = run_opts.get('results', [])
+        self._previous_results = run_opts.get("results", [])
         super().__init__(inputs, **run_opts)
 
     def yielder(self) -> Generator:
@@ -537,13 +567,15 @@ class ai(PythonRunner):
         try:
             import litellm  # noqa: F401
         except ImportError:
-            yield Error(message="litellm is required. Install with: pip install litellm")
+            yield Error(
+                message="litellm is required. Install with: pip install litellm"
+            )
             return
 
-        mode = self.run_opts.get('mode', 'summarize')
-        model = self.run_opts.get('model', 'gpt-4o-mini')
-        sensitive = self.run_opts.get('sensitive', True)
-        sensitive_list = self.run_opts.get('sensitive_list')
+        mode = self.run_opts.get("mode", "summarize")
+        model = self.run_opts.get("model", "gpt-4o-mini")
+        sensitive = self.run_opts.get("sensitive", True)
+        sensitive_list = self.run_opts.get("sensitive_list")
 
         # Get results from previous runs
         results = self._previous_results or self.results
@@ -552,7 +584,9 @@ class ai(PythonRunner):
         targets = self.inputs
 
         if not results and not targets:
-            yield Warning(message="No results or targets available for AI analysis. Provide targets as input.")
+            yield Warning(
+                message="No results or targets available for AI analysis. Provide targets as input."
+            )
             return
 
         yield Info(message=f"Starting AI analysis in '{mode}' mode using {model}")
@@ -562,7 +596,9 @@ class ai(PythonRunner):
         if sensitive_list:
             custom_patterns = load_sensitive_patterns(sensitive_list)
             if custom_patterns:
-                yield Info(message=f"Loaded {len(custom_patterns)} custom sensitive patterns")
+                yield Info(
+                    message=f"Loaded {len(custom_patterns)} custom sensitive patterns"
+                )
 
         # Initialize sensitive data encryptor
         encryptor = SensitiveDataEncryptor(custom_patterns=custom_patterns)
@@ -573,7 +609,9 @@ class ai(PythonRunner):
             context_text = format_results_for_llm(results)
             if sensitive:
                 context_text = encryptor.encrypt(context_text)
-                yield Info(message=f"Sensitive data encrypted: {len(encryptor.pii_map)} values masked")
+                yield Info(
+                    message=f"Sensitive data encrypted: {len(encryptor.pii_map)} values masked"
+                )
 
         if targets:
             targets_text = f"\n\n## Targets\n{', '.join(targets)}"
@@ -582,14 +620,22 @@ class ai(PythonRunner):
             context_text += targets_text
 
         # Route to appropriate mode handler
-        if mode == 'summarize':
-            yield from self._mode_summarize(context_text, model, encryptor, results, targets)
-        elif mode == 'suggest':
-            yield from self._mode_suggest(context_text, model, encryptor, results, targets)
-        elif mode == 'attack':
-            yield from self._mode_attack(context_text, model, encryptor, results, targets)
+        if mode == "summarize":
+            yield from self._mode_summarize(
+                context_text, model, encryptor, results, targets
+            )
+        elif mode == "suggest":
+            yield from self._mode_suggest(
+                context_text, model, encryptor, results, targets
+            )
+        elif mode == "attack":
+            yield from self._mode_attack(
+                context_text, model, encryptor, results, targets
+            )
         else:
-            yield Error(message=f"Unknown mode: {mode}. Use: summarize, suggest, or attack")
+            yield Error(
+                message=f"Unknown mode: {mode}. Use: summarize, suggest, or attack"
+            )
 
     def _mode_summarize(
         self,
@@ -597,28 +643,30 @@ class ai(PythonRunner):
         model: str,
         encryptor: SensitiveDataEncryptor,
         results: List[Any],
-        targets: List[str]
+        targets: List[str],
     ) -> Generator:
         """Summarize results and identify attack paths."""
         # If no results but have targets, suggest initial recon
         if not results and targets:
-            yield Info(message="No previous results. Providing initial reconnaissance suggestions.")
+            yield Info(
+                message="No previous results. Providing initial reconnaissance suggestions."
+            )
             prompt = f"""Analyze these targets and suggest an initial penetration testing approach:
 
 ## Targets
-{', '.join(targets)}
+{", ".join(targets)}
 
 Provide a brief assessment and initial steps."""
-            system_prompt = SYSTEM_PROMPTS['initial_recon']
+            system_prompt = SYSTEM_PROMPTS["initial_recon"]
         else:
             prompt = f"""Analyze the following penetration test results and provide a summary:
 
 {context_text}
 
 Identify key findings, potential attack paths, and prioritize by severity."""
-            system_prompt = SYSTEM_PROMPTS['summarize']
+            system_prompt = SYSTEM_PROMPTS["summarize"]
 
-        verbose = self.run_opts.get('verbose', False)
+        verbose = self.run_opts.get("verbose", False)
 
         if verbose:
             yield Info(message=f"[PROMPT] {_truncate(prompt)}")
@@ -628,22 +676,22 @@ Identify key findings, potential attack paths, and prioritize by severity."""
                 prompt=prompt,
                 model=model,
                 system_prompt=system_prompt,
-                temperature=float(self.run_opts.get('temperature', 0.7)),
+                temperature=float(self.run_opts.get("temperature", 0.7)),
             )
 
             # Decrypt sensitive data in response
-            if self.run_opts.get('sensitive', True):
+            if self.run_opts.get("sensitive", True):
                 response = encryptor.decrypt(response)
 
             if verbose:
                 yield Info(message=f"[AGENT] {_truncate(response)}")
 
             yield Tag(
-                name='ai_summary',
+                name="ai_summary",
                 value=response,
-                match='summarize',
-                category='ai',
-                extra_data={'model': model, 'mode': 'summarize'}
+                match="summarize",
+                category="ai",
+                extra_data={"model": model, "mode": "summarize"},
             )
 
         except Exception as e:
@@ -655,30 +703,30 @@ Identify key findings, potential attack paths, and prioritize by severity."""
         model: str,
         encryptor: SensitiveDataEncryptor,
         results: List[Any],
-        targets: List[str]
+        targets: List[str],
     ) -> Generator:
         """Suggest next secator tasks to run."""
-        run_suggestions = self.run_opts.get('run', False)
-        auto_yes = self.run_opts.get('yes', False)
+        run_suggestions = self.run_opts.get("run", False)
+        auto_yes = self.run_opts.get("yes", False)
         in_ci = _is_ci()
-        verbose = self.run_opts.get('verbose', False)
+        verbose = self.run_opts.get("verbose", False)
 
         # Build prompt based on whether we have results
         if not results and targets:
             prompt = f"""You are starting a new penetration test on these targets:
 
 ## Targets
-{', '.join(targets)}
+{", ".join(targets)}
 
 Suggest initial reconnaissance commands to run."""
-            system_prompt = SYSTEM_PROMPTS['initial_recon']
+            system_prompt = SYSTEM_PROMPTS["initial_recon"]
         else:
             prompt = f"""Based on these penetration test results, suggest specific Secator commands to run next:
 
 {context_text}
 
 Provide actionable commands with reasoning for each suggestion."""
-            system_prompt = SYSTEM_PROMPTS['suggest']
+            system_prompt = SYSTEM_PROMPTS["suggest"]
 
         if verbose:
             yield Info(message=f"[PROMPT] {_truncate(prompt)}")
@@ -688,11 +736,11 @@ Provide actionable commands with reasoning for each suggestion."""
                 prompt=prompt,
                 model=model,
                 system_prompt=system_prompt,
-                temperature=float(self.run_opts.get('temperature', 0.7)),
+                temperature=float(self.run_opts.get("temperature", 0.7)),
             )
 
             # Decrypt sensitive data in response
-            if self.run_opts.get('sensitive', True):
+            if self.run_opts.get("sensitive", True):
                 response = encryptor.decrypt(response)
 
             if verbose:
@@ -702,24 +750,24 @@ Provide actionable commands with reasoning for each suggestion."""
             commands = self._extract_commands(response)
 
             yield Tag(
-                name='ai_suggestions',
+                name="ai_suggestions",
                 value=response,
-                match='suggest',
-                category='ai',
+                match="suggest",
+                category="ai",
                 extra_data={
-                    'model': model,
-                    'mode': 'suggest',
-                    'suggested_commands': commands
-                }
+                    "model": model,
+                    "mode": "suggest",
+                    "suggested_commands": commands,
+                },
             )
 
             # Yield individual command suggestions
             for cmd in commands:
                 yield Tag(
-                    name='suggested_command',
+                    name="suggested_command",
                     value=cmd,
-                    match='suggest',
-                    category='action',
+                    match="suggest",
+                    category="action",
                 )
 
             # Run suggestions if requested
@@ -732,13 +780,15 @@ Provide actionable commands with reasoning for each suggestion."""
                         yield Warning(message=f"Could not parse command: {cmd}")
                         continue
 
-                    if parsed['runner_type'] != 'x':
-                        yield Warning(message=f"Only task execution (secator x) is supported: {cmd}")
+                    if parsed["runner_type"] != "x":
+                        yield Warning(
+                            message=f"Only task execution (secator x) is supported: {cmd}"
+                        )
                         continue
 
-                    task_name = parsed['name']
-                    task_targets = parsed['targets'] or targets
-                    task_options = parsed['options']
+                    task_name = parsed["name"]
+                    task_targets = parsed["targets"] or targets
+                    task_options = parsed["options"]
 
                     # Confirm with user unless auto-yes
                     if auto_yes or in_ci:
@@ -746,18 +796,26 @@ Provide actionable commands with reasoning for each suggestion."""
                     else:
                         should_run = confirm_with_timeout(
                             f"Run: secator x {task_name} {' '.join(task_targets)}?",
-                            default=True
+                            default=True,
                         )
 
                     if should_run:
-                        yield Info(message=f"Running: secator x {task_name} {' '.join(task_targets)}")
+                        yield Info(
+                            message=f"Running: secator x {task_name} {' '.join(task_targets)}"
+                        )
                         try:
-                            task_results = run_secator_task(task_name, task_targets, task_options)
+                            task_results = run_secator_task(
+                                task_name, task_targets, task_options
+                            )
                             for result in task_results:
                                 yield result
-                            yield Info(message=f"Task {task_name} completed with {len(task_results)} results")
+                            yield Info(
+                                message=f"Task {task_name} completed with {len(task_results)} results"
+                            )
                         except ValueError as e:
-                            yield Error(message=f"Task not found: {task_name} - {str(e)}")
+                            yield Error(
+                                message=f"Task not found: {task_name} - {str(e)}"
+                            )
                         except Exception as e:
                             yield Error(message=f"Task {task_name} failed: {str(e)}")
                     else:
@@ -772,28 +830,30 @@ Provide actionable commands with reasoning for each suggestion."""
         model: str,
         encryptor: SensitiveDataEncryptor,
         results: List[Any],
-        targets: List[str]
+        targets: List[str],
     ) -> Generator:
         """Execute reactive attack loop to exploit vulnerabilities."""
-        max_iterations = int(self.run_opts.get('max_iterations', 10))
-        dry_run = self.run_opts.get('dry_run', False)
-        verbose = self.run_opts.get('verbose', False)
+        max_iterations = int(self.run_opts.get("max_iterations", 10))
+        dry_run = self.run_opts.get("dry_run", False)
+        verbose = self.run_opts.get("verbose", False)
 
-        yield Info(message=f"Starting attack mode (max {max_iterations} iterations, dry_run={dry_run})")
+        yield Info(
+            message=f"Starting attack mode (max {max_iterations} iterations, dry_run={dry_run})"
+        )
         yield Info(message=f"Scope restricted to: {', '.join(targets)}")
 
         # Build attack context
         attack_context = {
-            'iteration': 0,
-            'successful_attacks': [],
-            'failed_attacks': [],
-            'validated_vulns': [],
-            'targets': targets,
+            "iteration": 0,
+            "successful_attacks": [],
+            "failed_attacks": [],
+            "validated_vulns": [],
+            "targets": targets,
         }
 
         # Encrypt targets for prompts if sensitive data encryption enabled
-        sensitive = self.run_opts.get('sensitive', True)
-        targets_str = ', '.join(targets)
+        sensitive = self.run_opts.get("sensitive", True)
+        targets_str = ", ".join(targets)
         if sensitive:
             targets_str = encryptor.encrypt(targets_str)
 
@@ -819,7 +879,7 @@ Start with reconnaissance to identify attack surface. Respond with a JSON action
 Analyze the findings and plan your first attack. Respond with a JSON action."""
 
         for iteration in range(max_iterations):
-            attack_context['iteration'] = iteration + 1
+            attack_context["iteration"] = iteration + 1
             yield Info(message=f"Attack iteration {iteration + 1}/{max_iterations}")
 
             try:
@@ -829,12 +889,12 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                 response = get_llm_response(
                     prompt=prompt,
                     model=model,
-                    system_prompt=SYSTEM_PROMPTS['attack'],
+                    system_prompt=SYSTEM_PROMPTS["attack"],
                     temperature=0.3,  # Lower temperature for attack mode
                 )
 
                 # Decrypt sensitive data
-                if self.run_opts.get('sensitive', True):
+                if self.run_opts.get("sensitive", True):
                     response = encryptor.decrypt(response)
 
                 if verbose:
@@ -848,30 +908,34 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                     prompt = f"Previous response was not valid JSON. Please respond with a valid JSON action.\n\nContext:\n{context_text}"
                     continue
 
-                action_type = action.get('action', '')
+                action_type = action.get("action", "")
 
-                if action_type == 'complete':
+                if action_type == "complete":
                     yield Info(message="Attack loop completed")
                     yield Tag(
-                        name='attack_summary',
-                        value=action.get('summary', 'Attack sequence completed'),
-                        match='attack',
-                        category='ai',
+                        name="attack_summary",
+                        value=action.get("summary", "Attack sequence completed"),
+                        match="attack",
+                        category="ai",
                         extra_data={
-                            'iterations': iteration + 1,
-                            'successful_attacks': len(attack_context['successful_attacks']),
-                            'validated_vulns': len(attack_context['validated_vulns']),
-                        }
+                            "iterations": iteration + 1,
+                            "successful_attacks": len(
+                                attack_context["successful_attacks"]
+                            ),
+                            "validated_vulns": len(attack_context["validated_vulns"]),
+                        },
                     )
                     break
 
-                elif action_type == 'execute':
-                    command = action.get('command', '')
-                    target = action.get('target', '')
+                elif action_type == "execute":
+                    command = action.get("command", "")
+                    target = action.get("target", "")
 
                     # Scope check - target must be in or match one of our targets
                     if not self._is_in_scope(target, targets):
-                        yield Warning(message=f"Target {target} is out of scope, skipping")
+                        yield Warning(
+                            message=f"Target {target} is out of scope, skipping"
+                        )
                         # Encrypt context for LLM prompt if sensitive encryption enabled
                         encrypted_context = json.dumps(attack_context)
                         if sensitive:
@@ -883,11 +947,11 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
 
                     if dry_run:
                         yield Tag(
-                            name='dry_run_command',
+                            name="dry_run_command",
                             value=command,
                             match=target,
-                            category='attack',
-                            extra_data={'reasoning': action.get('reasoning', '')}
+                            category="attack",
+                            extra_data={"reasoning": action.get("reasoning", "")},
                         )
                         result_output = "[DRY RUN] Command not executed"
                     else:
@@ -896,11 +960,13 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                     if verbose:
                         yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
 
-                    attack_context['successful_attacks'].append({
-                        'command': command,
-                        'target': target,
-                        'output': result_output[:2000]
-                    })
+                    attack_context["successful_attacks"].append(
+                        {
+                            "command": command,
+                            "target": target,
+                            "output": result_output[:2000],
+                        }
+                    )
 
                     # Encrypt command output for LLM prompt if sensitive encryption enabled
                     encrypted_output = result_output[:4000]
@@ -922,32 +988,34 @@ Previous context:
 
 Analyze the output and decide next action (execute, validate, or complete)."""
 
-                elif action_type == 'validate':
-                    vuln_name = action.get('vulnerability', 'Unknown')
-                    target = action.get('target', '')
-                    proof = action.get('proof', '')
-                    severity = action.get('severity', 'medium')
-                    steps = action.get('reproduction_steps', [])
+                elif action_type == "validate":
+                    vuln_name = action.get("vulnerability", "Unknown")
+                    target = action.get("target", "")
+                    proof = action.get("proof", "")
+                    severity = action.get("severity", "medium")
+                    steps = action.get("reproduction_steps", [])
 
-                    attack_context['validated_vulns'].append({
-                        'name': vuln_name,
-                        'severity': severity,
-                        'target': target,
-                    })
+                    attack_context["validated_vulns"].append(
+                        {
+                            "name": vuln_name,
+                            "severity": severity,
+                            "target": target,
+                        }
+                    )
 
                     yield Vulnerability(
                         name=vuln_name,
                         matched_at=target,
                         severity=severity,
-                        confidence='high',
+                        confidence="high",
                         description=f"AI-validated vulnerability: {vuln_name}",
-                        provider='ai',
+                        provider="ai",
                         extra_data={
-                            'proof_of_concept': proof,
-                            'reproduction_steps': steps,
-                            'ai_validated': True,
-                            'model': model,
-                        }
+                            "proof_of_concept": proof,
+                            "reproduction_steps": steps,
+                            "ai_validated": True,
+                            "model": model,
+                        },
                     )
 
                     # Encrypt context for LLM prompt if sensitive encryption enabled
@@ -962,13 +1030,13 @@ Context:
 
 Continue testing or mark complete if all attack paths are exhausted."""
 
-                elif action_type == 'report':
+                elif action_type == "report":
                     yield Tag(
-                        name='attack_report',
-                        value=action.get('content', ''),
-                        match='attack',
-                        category='ai',
-                        extra_data=attack_context
+                        name="attack_report",
+                        value=action.get("content", ""),
+                        match="attack",
+                        category="ai",
+                        extra_data=attack_context,
                     )
                     # Encrypt context for LLM prompt if sensitive encryption enabled
                     encrypted_context = json.dumps(attack_context)
@@ -981,8 +1049,10 @@ Continue testing or mark complete if all attack paths are exhausted."""
                     prompt = f"Unknown action '{action_type}'. Use: execute, validate, report, or complete."
 
             except Exception as e:
-                yield Error(message=f"Attack iteration {iteration + 1} failed: {str(e)}")
-                attack_context['failed_attacks'].append(str(e))
+                yield Error(
+                    message=f"Attack iteration {iteration + 1} failed: {str(e)}"
+                )
+                attack_context["failed_attacks"].append(str(e))
                 # Encrypt context for LLM prompt if sensitive encryption enabled
                 encrypted_context = json.dumps(attack_context)
                 if sensitive:
@@ -990,14 +1060,14 @@ Continue testing or mark complete if all attack paths are exhausted."""
                 prompt = f"Previous action failed with error: {str(e)}. Try a different approach.\n\nContext:\n{encrypted_context}"
 
         # Final summary if we hit max iterations
-        if attack_context['iteration'] >= max_iterations:
+        if attack_context["iteration"] >= max_iterations:
             yield Warning(message=f"Max iterations ({max_iterations}) reached")
             yield Tag(
-                name='attack_summary',
-                value='Attack loop reached maximum iterations',
-                match='attack',
-                category='ai',
-                extra_data=attack_context
+                name="attack_summary",
+                value="Attack loop reached maximum iterations",
+                match="attack",
+                category="ai",
+                extra_data=attack_context,
             )
 
     def _extract_commands(self, text: str) -> List[str]:
@@ -1005,16 +1075,16 @@ Continue testing or mark complete if all attack paths are exhausted."""
         commands = []
         # Match secator commands in code blocks or inline
         patterns = [
-            r'```[^\n]*\n(secator\s+[xwst]\s+[^\n]+)',
-            r'`(secator\s+[xwst]\s+[^`]+)`',
-            r'^(secator\s+[xwst]\s+\S+.*?)$',
+            r"```[^\n]*\n(secator\s+[xwst]\s+[^\n]+)",
+            r"`(secator\s+[xwst]\s+[^`]+)`",
+            r"^(secator\s+[xwst]\s+\S+.*?)$",
         ]
         for pattern in patterns:
             matches = re.findall(pattern, text, re.MULTILINE)
             for match in matches:
-                cmd = match.strip().strip('`')
+                cmd = match.strip().strip("`")
                 # Clean up the command
-                cmd = re.sub(r'\s+', ' ', cmd)
+                cmd = re.sub(r"\s+", " ", cmd)
                 if cmd and cmd not in commands:
                     commands.append(cmd)
         return commands
@@ -1027,7 +1097,7 @@ Continue testing or mark complete if all attack paths are exhausted."""
             pass
 
         # Try to find JSON in code blocks
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group(1))
@@ -1060,7 +1130,7 @@ Continue testing or mark complete if all attack paths are exhausted."""
         """Execute a command and return output."""
         try:
             # Security: only allow specific commands
-            allowed_prefixes = ['secator ', 'curl ', 'wget ', 'nmap ', 'httpx ']
+            allowed_prefixes = ["secator ", "curl ", "wget ", "nmap ", "httpx "]
             if not any(command.startswith(p) for p in allowed_prefixes):
                 return f"Command not allowed: {command}. Only secator, curl, wget, nmap, httpx commands permitted."
 
@@ -1074,7 +1144,7 @@ Continue testing or mark complete if all attack paths are exhausted."""
             output = result.stdout + result.stderr
 
             # If secator command failed, append help output
-            if result.returncode != 0 and command.startswith('secator '):
+            if result.returncode != 0 and command.startswith("secator "):
                 help_output = self._get_secator_help(command)
                 if help_output:
                     output += f"\n\n--- COMMAND HELP ---\n{help_output}"
@@ -1089,7 +1159,7 @@ Continue testing or mark complete if all attack paths are exhausted."""
         """Get help output for a failed secator command."""
         # Parse the secator command to extract task name
         # Format: secator x <task> ... or secator w <workflow> ...
-        match = re.match(r'secator\s+([xwst])\s+(\S+)', command)
+        match = re.match(r"secator\s+([xwst])\s+(\S+)", command)
         if not match:
             return None
 
