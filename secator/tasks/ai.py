@@ -937,9 +937,11 @@ Start with reconnaissance to identify attack surface. Respond with a JSON action
 ## Instructions
 Analyze the findings and plan your first attack. Respond with a JSON action."""
 
-        # Add custom prompt if provided
+        # Create custom prompt suffix to include in all prompts
+        custom_prompt_suffix = ""
         if custom_prompt:
-            prompt += f"\n\n## Additional Instructions\n{custom_prompt}"
+            custom_prompt_suffix = f"\n\n## IMPORTANT - User Instructions (MUST FOLLOW)\n{custom_prompt}"
+            prompt += custom_prompt_suffix
 
         for iteration in range(max_iterations):
             attack_context["iteration"] = iteration + 1
@@ -987,7 +989,7 @@ Please respond with a valid JSON action in one of these formats:
 - {{"action": "stop", "reason": "..."}}
 
 Current attack context:
-{encrypted_context}"""
+{encrypted_context}""" + custom_prompt_suffix
                     continue
 
                 action_type = action.get("action", "")
@@ -1043,7 +1045,7 @@ Current attack context:
                             encrypted_context = json.dumps(attack_context)
                             if sensitive:
                                 encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = f"Targets {out_of_scope} are out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
+                            prompt = f"Targets {out_of_scope} are out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}" + custom_prompt_suffix
                             continue
 
                         # Validate options
@@ -1063,7 +1065,7 @@ Valid options are: {valid_opt_names}
 Please retry with valid options only.
 
 Context:
-{encrypted_context}"""
+{encrypted_context}""" + custom_prompt_suffix
                             continue
 
                         yield Info(message=f"[CMD] secator {exec_type[0]} {name} {' '.join(action_targets)}")
@@ -1119,7 +1121,7 @@ Results:
 Previous context:
 {encrypted_context}
 
-Analyze the results and decide next action (execute, validate, or complete)."""
+Analyze the results and decide next action (execute, validate, stop, or complete).""" + custom_prompt_suffix
 
                     # Handle shell commands (curl, wget, nmap direct)
                     elif exec_type == "shell":
@@ -1132,7 +1134,7 @@ Analyze the results and decide next action (execute, validate, or complete)."""
                             encrypted_context = json.dumps(attack_context)
                             if sensitive:
                                 encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
+                            prompt = f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}" + custom_prompt_suffix
                             continue
 
                         yield Info(message=f"[CMD] {command}")
@@ -1177,11 +1179,11 @@ Output:
 Previous context:
 {encrypted_context}
 
-Analyze the output and decide next action (execute, validate, or complete)."""
+Analyze the output and decide next action (execute, validate, stop, or complete).""" + custom_prompt_suffix
 
                     else:
                         yield Warning(message=f"Unknown execute type: {exec_type}")
-                        prompt = f"Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell."
+                        prompt = f"Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell." + custom_prompt_suffix
                         continue
 
                 elif action_type == "validate":
@@ -1224,7 +1226,7 @@ Analyze the output and decide next action (execute, validate, or complete)."""
 Context:
 {encrypted_context}
 
-Continue testing or mark complete if all attack paths are exhausted."""
+Continue testing or mark complete if all attack paths are exhausted.""" + custom_prompt_suffix
 
                 elif action_type == "report":
                     yield Tag(
@@ -1238,11 +1240,11 @@ Continue testing or mark complete if all attack paths are exhausted."""
                     encrypted_context = json.dumps(attack_context)
                     if sensitive:
                         encrypted_context = encryptor.encrypt(encrypted_context)
-                    prompt = f"Report noted. Continue with next action.\n\nContext:\n{encrypted_context}"
+                    prompt = f"Report noted. Continue with next action.\n\nContext:\n{encrypted_context}" + custom_prompt_suffix
 
                 else:
                     yield Warning(message=f"Unknown action type: {action_type}")
-                    prompt = f"Unknown action '{action_type}'. Use: execute, validate, report, or complete."
+                    prompt = f"Unknown action '{action_type}'. Use: execute, validate, report, stop, or complete." + custom_prompt_suffix
 
             except Exception as e:
                 yield Error(
@@ -1253,7 +1255,7 @@ Continue testing or mark complete if all attack paths are exhausted."""
                 encrypted_context = json.dumps(attack_context)
                 if sensitive:
                     encrypted_context = encryptor.encrypt(encrypted_context)
-                prompt = f"Previous action failed with error: {str(e)}. Try a different approach.\n\nContext:\n{encrypted_context}"
+                prompt = f"Previous action failed with error: {str(e)}. Try a different approach.\n\nContext:\n{encrypted_context}" + custom_prompt_suffix
 
         # Final summary if we hit max iterations
         if attack_context["iteration"] >= max_iterations:
