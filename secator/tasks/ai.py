@@ -190,14 +190,13 @@ def get_llm_response(
     system_prompt: str = '',
     temperature: float = 0.7,
     max_tokens: int = 4096,
-    verbose: bool = False,
 ) -> Optional[str]:
     """Get response from LLM using LiteLLM."""
     try:
         import litellm
 
-        # Suppress debug output unless verbose mode
-        if not verbose:
+        # Suppress debug output unless 'litellm' is in CONFIG.debug
+        if 'litellm' not in CONFIG.debug:
             litellm.suppress_debug_info = True
             litellm.set_verbose = False
             litellm.json_logs = True
@@ -567,7 +566,6 @@ Identify key findings, potential attack paths, and prioritize by severity."""
                 model=model,
                 system_prompt=system_prompt,
                 temperature=float(self.run_opts.get('temperature', 0.7)),
-                verbose=self.run_opts.get('verbose', False),
             )
 
             # Decrypt sensitive data in response
@@ -628,7 +626,6 @@ Provide actionable commands with reasoning for each suggestion."""
                 model=model,
                 system_prompt=system_prompt,
                 temperature=float(self.run_opts.get('temperature', 0.7)),
-                verbose=self.run_opts.get('verbose', False),
             )
 
             # Decrypt sensitive data in response
@@ -771,7 +768,6 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                     model=model,
                     system_prompt=SYSTEM_PROMPTS['attack'],
                     temperature=0.3,  # Lower temperature for attack mode
-                    verbose=self.run_opts.get('verbose', False),
                 )
 
                 # Decrypt sensitive data
@@ -820,8 +816,7 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                         prompt = f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
                         continue
 
-                    if verbose:
-                        yield Info(message=f"[CMD] {command}")
+                    yield Info(message=f"[CMD] {command}")
 
                     if dry_run:
                         yield Tag(
