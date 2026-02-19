@@ -1251,3 +1251,58 @@ Continue testing or mark complete if all attack paths are exhausted."""
         except Exception as e:
             logger.warning(f"Failed to validate options for {runner_type}/{name}: {e}")
             return opts, [], []
+
+    def _execute_secator_runner(
+        self, runner_type: str, name: str, targets: List[str], opts: Dict
+    ) -> Generator:
+        """Execute a secator runner (task, workflow, or scan) and yield results.
+
+        Args:
+            runner_type: One of 'task', 'workflow', 'scan'
+            name: Name of the runner (e.g., 'httpx', 'host_recon', 'host')
+            targets: List of targets to run against
+            opts: Options to pass to the runner
+
+        Yields:
+            Results from the runner execution
+        """
+        from secator.runners import Task, Workflow, Scan
+        from secator.template import TemplateLoader
+
+        # Set minimal options for running embedded
+        run_opts = {
+            "print_item": False,
+            "print_line": False,
+            "print_cmd": False,
+            "print_progress": False,
+            "print_start": False,
+            "print_end": False,
+            "print_target": False,
+            "sync": True,
+            **opts,
+        }
+
+        try:
+            if runner_type == "task":
+                config = TemplateLoader(input={"name": name, "type": "task"})
+                runner = Task(config, inputs=targets, run_opts=run_opts)
+            elif runner_type == "workflow":
+                config = TemplateLoader(name=f"workflows/{name}")
+                runner = Workflow(config, inputs=targets, run_opts=run_opts)
+            elif runner_type == "scan":
+                config = TemplateLoader(name=f"scans/{name}")
+                runner = Scan(config, inputs=targets, run_opts=run_opts)
+            else:
+                yield Error(message=f"Unknown runner type: {runner_type}")
+                return
+
+            # Yield all results from the runner
+            result_count = 0
+            for result in runner:
+                result_count += 1
+                yield result
+
+            yield Info(message=f"{runner_type.capitalize()} '{name}' completed with {result_count} results")
+
+        except Exception as e:
+            yield Error(message=f"Failed to execute {runner_type} '{name}': {str(e)}")
