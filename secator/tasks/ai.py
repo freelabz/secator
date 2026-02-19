@@ -407,6 +407,33 @@ RULES:
   - ONLY use options that exist (check task file if unsure)
 """
 
+SECATOR_LIBRARY_REFERENCE = """
+=== SECATOR RUNNERS ===
+
+RUNNER TYPES:
+- task: Single tool execution (httpx, nmap, nuclei, ffuf, katana, subfinder, etc.)
+- workflow: Multi-task pipelines (host_recon, url_crawl, subdomain_recon, etc.)
+- scan: Comprehensive scans (host, domain, url, network, subdomain)
+
+AVAILABLE TASKS:
+httpx, nmap, nuclei, ffuf, katana, subfinder, dnsx, feroxbuster, gospider,
+dalfox, arjun, gau, waybackurls, cariddi, grype, gitleaks, semgrep, trufflehog
+
+AVAILABLE WORKFLOWS:
+host_recon, subdomain_recon, url_crawl, url_fuzz, url_vuln, url_dirsearch,
+domain_recon, code_scan, cidr_recon, url_bypass, url_secrets_hunt
+
+AVAILABLE SCANS:
+host, domain, url, network, subdomain
+
+COMMON OPTIONS:
+rate_limit, timeout, delay, proxy, threads, follow_redirect, header, output_path
+
+REFERENCE (verify options exist before using):
+Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
+Configs: https://github.com/freelabz/secator/tree/main/secator/configs
+"""
+
 SYSTEM_PROMPTS = {
     "summarize": """You are a senior penetration tester analyzing security scan results.
 Your task is to:
