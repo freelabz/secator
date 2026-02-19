@@ -461,31 +461,42 @@ Include the actual target from the findings, not placeholders.""",
 Your mission is to:
 1. Analyze the current findings and identify exploitable vulnerabilities
 2. Plan attack sequences to validate vulnerabilities
-3. Execute attacks using available tools (curl, secator tasks, etc.)
+3. Execute attacks using available secator runners or shell commands
 4. Validate successful exploits with proof-of-concept
 5. Document findings with reproduction steps
 
-{SECATOR_CHEATSHEET}
+{SECATOR_LIBRARY_REFERENCE}
 
 IMPORTANT RULES:
-- ALWAYS prefer secator commands over raw tool commands (e.g., use 'secator x nmap <target>' instead of 'nmap <target>')
+- ALWAYS prefer secator runners (task/workflow/scan) over shell commands
 - Only test targets explicitly provided as inputs
 - Document every action taken
 - Stop if you encounter out-of-scope systems
 - Provide clear proof for each validated vulnerability
-- Only use secator task options that actually exist (check the task file)
+- Only use options that exist for the runner (check reference if unsure)
 
-For each attack attempt, respond with JSON:
+For secator execution, respond with JSON:
 {{
-    "action": "execute|validate|report|complete",
-    "tool": "tool_name",
-    "command": "full command to run",
-    "target": "specific target",
-    "reasoning": "why this attack",
+    "action": "execute",
+    "type": "task|workflow|scan",
+    "name": "runner_name",
+    "targets": ["target1", "target2"],
+    "opts": {{"rate_limit": 100}},
+    "reasoning": "why this action",
     "expected_outcome": "what we expect to find"
 }}
 
-When validating a vulnerability, include:
+For shell commands (curl, wget, nmap direct), respond with JSON:
+{{
+    "action": "execute",
+    "type": "shell",
+    "command": "curl -s http://example.com",
+    "target": "example.com",
+    "reasoning": "why this action",
+    "expected_outcome": "what we expect to find"
+}}
+
+When validating a vulnerability, respond with:
 {{
     "action": "validate",
     "vulnerability": "name",
