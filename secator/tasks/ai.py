@@ -197,17 +197,17 @@ def _strip_json_from_response(text: str) -> str:
     result = []
     i = 0
     while i < len(text):
-        if text[i] == '{':
+        if text[i] == "{":
             # Check if this looks like an action JSON (has "action" key nearby)
-            lookahead = text[i:i+50]
+            lookahead = text[i : i + 50]
             if '"action"' in lookahead:
                 # Find matching closing brace
                 brace_count = 0
                 start = i
                 while i < len(text):
-                    if text[i] == '{':
+                    if text[i] == "{":
                         brace_count += 1
-                    elif text[i] == '}':
+                    elif text[i] == "}":
                         brace_count -= 1
                         if brace_count == 0:
                             i += 1
@@ -218,7 +218,7 @@ def _strip_json_from_response(text: str) -> str:
         result.append(text[i])
         i += 1
 
-    text = ''.join(result)
+    text = "".join(result)
 
     # Clean up extra whitespace
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -307,8 +307,10 @@ def get_llm_response(
             except litellm.RateLimitError as e:
                 last_exception = e
                 if attempt < max_retries - 1:
-                    delay = initial_delay * (2 ** attempt)  # Exponential backoff
-                    logger.warning(f"Rate limit hit, retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    delay = initial_delay * (2**attempt)  # Exponential backoff
+                    logger.warning(
+                        f"Rate limit hit, retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
                     time.sleep(delay)
                 else:
                     logger.error(f"Rate limit exceeded after {max_retries} retries")
@@ -500,58 +502,41 @@ Provide 3-5 specific secator commands with brief reasoning for each.
 Include the actual target from the findings, not placeholders.""",
     "attack": f"""You are an autonomous penetration testing agent conducting authorized security testing.
 
-Your mission is to:
-1. Analyze the current findings and identify exploitable vulnerabilities
-2. Plan attack sequences to validate vulnerabilities
-3. Execute attacks using available secator runners or shell commands
-4. Validate successful exploits with proof-of-concept
-5. Document findings with reproduction steps
+MISSION:
+1. Analyze findings and identify exploitable vulnerabilities
+2. Execute attacks using secator runners or shell commands
+3. Validate exploits with proof-of-concept
+4. Document findings
 
 {SECATOR_LIBRARY_REFERENCE}
 
-IMPORTANT RULES:
-- ALWAYS prefer secator runners (task/workflow/scan) over shell commands
-- Only test targets explicitly provided as inputs
-- Document every action taken
+RULES:
+- Prefer secator runners (task/workflow/scan) over shell commands
+- Only test targets explicitly provided
+- Only use options that exist for the runner
 - Stop if you encounter out-of-scope systems
-- Provide clear proof for each validated vulnerability
-- Only use options that exist for the runner (check reference if unsure)
 
-For secator execution, respond with JSON:
-{{
-    "action": "execute",
-    "type": "task|workflow|scan",
-    "name": "runner_name",
-    "targets": ["target1", "target2"],
-    "opts": {{"rate_limit": 100}},
-    "reasoning": "why this action",
-    "expected_outcome": "what we expect to find"
-}}
+RESPONSE FORMAT:
+- Respond with ONLY a JSON object, no other text
+- Do NOT include thinking, reasoning, or commentary outside the JSON
+- Put your reasoning in the "reasoning" field inside the JSON
+- Keep reasoning brief (1-2 sentences)
 
-For shell commands (curl, wget, nmap direct), respond with JSON:
-{{
-    "action": "execute",
-    "type": "shell",
-    "command": "curl -s http://example.com",
-    "target": "example.com",
-    "reasoning": "why this action",
-    "expected_outcome": "what we expect to find"
-}}
+ACTIONS:
 
-When validating a vulnerability, respond with:
-{{
-    "action": "validate",
-    "vulnerability": "name",
-    "target": "target url or host",
-    "proof": "evidence of exploitation",
-    "severity": "critical|high|medium|low|info",
-    "reproduction_steps": ["step1", "step2", ...]
-}}
+Execute secator runner:
+{{"action": "execute", "type": "task|workflow|scan", "name": "runner_name", "targets": ["target"], "opts": {{}}, "reasoning": "brief reason", "expected_outcome": "expected result"}}
 
-When done, respond with:
-{{"action": "complete", "summary": "overall findings"}}
+Execute shell command:
+{{"action": "execute", "type": "shell", "command": "curl -s http://example.com", "target": "example.com", "reasoning": "brief reason", "expected_outcome": "expected result"}}
 
-To stop immediately (e.g., if blocked or no further actions possible), respond with:
+Validate vulnerability:
+{{"action": "validate", "vulnerability": "name", "target": "url", "proof": "evidence", "severity": "critical|high|medium|low|info", "reproduction_steps": ["step1", "step2"]}}
+
+Complete (when done testing):
+{{"action": "complete", "summary": "findings summary"}}
+
+Stop (when user instruction says to stop, or no actions possible):
 {{"action": "stop", "reason": "why stopping"}}""",
     "initial_recon": f"""You are a senior penetration tester starting a new security assessment.
 Given the target(s), suggest an initial reconnaissance plan using Secator tasks.
@@ -982,7 +967,9 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
         # Create custom prompt suffix to include in all prompts
         custom_prompt_suffix = ""
         if custom_prompt:
-            custom_prompt_suffix = f"\n\n## IMPORTANT - User Instructions (MUST FOLLOW)\n{custom_prompt}"
+            custom_prompt_suffix = (
+                f"\n\n## IMPORTANT - User Instructions (MUST FOLLOW)\n{custom_prompt}"
+            )
             prompt += custom_prompt_suffix
 
         for iteration in range(max_iterations):
@@ -1024,7 +1011,8 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                     if sensitive:
                         encrypted_context = encryptor.encrypt(encrypted_context)
                         encrypted_response = encryptor.encrypt(encrypted_response)
-                    prompt = f"""Your previous response was not valid JSON and could not be parsed.
+                    prompt = (
+                        f"""Your previous response was not valid JSON and could not be parsed.
 
 Your response was:
 {encrypted_response}
@@ -1037,7 +1025,9 @@ Please respond with a valid JSON action in one of these formats:
 - {{"action": "stop", "reason": "..."}}
 
 Current attack context:
-{encrypted_context}""" + custom_prompt_suffix
+{encrypted_context}"""
+                        + custom_prompt_suffix
+                    )
                     continue
 
                 action_type = action.get("action", "")
@@ -1087,44 +1077,62 @@ Current attack context:
                         opts = action.get("opts", {})
 
                         # Scope check - all targets must be in scope
-                        out_of_scope = [t for t in action_targets if not self._is_in_scope(t, targets)]
+                        out_of_scope = [
+                            t
+                            for t in action_targets
+                            if not self._is_in_scope(t, targets)
+                        ]
                         if out_of_scope:
-                            yield Warning(message=f"Targets out of scope: {out_of_scope}")
+                            yield Warning(
+                                message=f"Targets out of scope: {out_of_scope}"
+                            )
                             encrypted_context = json.dumps(attack_context)
                             if sensitive:
                                 encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = f"Targets {out_of_scope} are out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}" + custom_prompt_suffix
+                            prompt = (
+                                f"Targets {out_of_scope} are out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
+                                + custom_prompt_suffix
+                            )
                             continue
 
                         # Validate options
-                        valid_opts, invalid_opts, valid_opt_names = self._validate_runner_opts(
-                            exec_type, name, opts
+                        valid_opts, invalid_opts, valid_opt_names = (
+                            self._validate_runner_opts(exec_type, name, opts)
                         )
 
                         if invalid_opts:
-                            yield Warning(message=f"Invalid options for {exec_type} '{name}': {invalid_opts}")
+                            yield Warning(
+                                message=f"Invalid options for {exec_type} '{name}': {invalid_opts}"
+                            )
                             encrypted_context = json.dumps(attack_context)
                             if sensitive:
                                 encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = f"""Invalid options for {exec_type} '{name}': {invalid_opts}
+                            prompt = (
+                                f"""Invalid options for {exec_type} '{name}': {invalid_opts}
 
 Valid options are: {valid_opt_names}
 
 Please retry with valid options only.
 
 Context:
-{encrypted_context}""" + custom_prompt_suffix
+{encrypted_context}"""
+                                + custom_prompt_suffix
+                            )
                             continue
 
                         # Build CLI command with options
-                        cli_opts = ' '.join(
-                            f"--{k.replace('_', '-')} {v}" if v is not True else f"--{k.replace('_', '-')}"
+                        cli_opts = " ".join(
+                            f"--{k.replace('_', '-')} {v}"
+                            if v is not True
+                            else f"--{k.replace('_', '-')}"
                             for k, v in valid_opts.items()
                         )
-                        cli_cmd = f"secator {exec_type[0]} {name} {' '.join(action_targets)}"
+                        cli_cmd = (
+                            f"secator {exec_type[0]} {name} {','.join(action_targets)}"
+                        )
                         if cli_opts:
                             cli_cmd += f" {cli_opts}"
-                        yield Info(message=f"[CMD] {cli_cmd}")
+                        yield Info(message=f"Started [bold red]{cli_cmd}[/]")
 
                         if dry_run:
                             yield Tag(
@@ -1149,18 +1157,22 @@ Context:
                                 yield result
 
                             # Format results for LLM context
-                            result_output = format_results_for_llm(runner_results, max_items=50)
+                            result_output = format_results_for_llm(
+                                runner_results, max_items=50
+                            )
 
                         if verbose:
                             yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
 
-                        attack_context["successful_attacks"].append({
-                            "type": exec_type,
-                            "name": name,
-                            "targets": action_targets,
-                            "result_count": len(runner_results),
-                            "output": result_output[:2000],
-                        })
+                        attack_context["successful_attacks"].append(
+                            {
+                                "type": exec_type,
+                                "name": name,
+                                "targets": action_targets,
+                                "result_count": len(runner_results),
+                                "output": result_output[:2000],
+                            }
+                        )
 
                         # Build next prompt
                         encrypted_output = result_output[:4000]
@@ -1169,7 +1181,8 @@ Context:
                             encrypted_output = encryptor.encrypt(encrypted_output)
                             encrypted_context = encryptor.encrypt(encrypted_context)
 
-                        prompt = f"""{exec_type.capitalize()} '{name}' executed on {action_targets}.
+                        prompt = (
+                            f"""{exec_type.capitalize()} '{name}' executed on {action_targets}.
 
 Results:
 {encrypted_output}
@@ -1177,7 +1190,9 @@ Results:
 Previous context:
 {encrypted_context}
 
-Analyze the results and decide next action (execute, validate, stop, or complete).""" + custom_prompt_suffix
+Analyze the results and decide next action (execute, validate, stop, or complete)."""
+                            + custom_prompt_suffix
+                        )
 
                     # Handle shell commands (curl, wget, nmap direct)
                     elif exec_type == "shell":
@@ -1186,11 +1201,16 @@ Analyze the results and decide next action (execute, validate, stop, or complete
 
                         # Scope check
                         if target and not self._is_in_scope(target, targets):
-                            yield Warning(message=f"Target {target} is out of scope, skipping")
+                            yield Warning(
+                                message=f"Target {target} is out of scope, skipping"
+                            )
                             encrypted_context = json.dumps(attack_context)
                             if sensitive:
                                 encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}" + custom_prompt_suffix
+                            prompt = (
+                                f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
+                                + custom_prompt_suffix
+                            )
                             continue
 
                         yield Info(message=f"[CMD] {command}")
@@ -1210,12 +1230,14 @@ Analyze the results and decide next action (execute, validate, stop, or complete
                         if verbose:
                             yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
 
-                        attack_context["successful_attacks"].append({
-                            "type": "shell",
-                            "command": command,
-                            "target": target,
-                            "output": result_output[:2000],
-                        })
+                        attack_context["successful_attacks"].append(
+                            {
+                                "type": "shell",
+                                "command": command,
+                                "target": target,
+                                "output": result_output[:2000],
+                            }
+                        )
 
                         # Encrypt for next prompt
                         encrypted_output = result_output[:4000]
@@ -1226,7 +1248,8 @@ Analyze the results and decide next action (execute, validate, stop, or complete
                             encrypted_command = encryptor.encrypt(encrypted_command)
                             encrypted_context = encryptor.encrypt(encrypted_context)
 
-                        prompt = f"""Shell command executed:
+                        prompt = (
+                            f"""Shell command executed:
 {encrypted_command}
 
 Output:
@@ -1235,11 +1258,16 @@ Output:
 Previous context:
 {encrypted_context}
 
-Analyze the output and decide next action (execute, validate, stop, or complete).""" + custom_prompt_suffix
+Analyze the output and decide next action (execute, validate, stop, or complete)."""
+                            + custom_prompt_suffix
+                        )
 
                     else:
                         yield Warning(message=f"Unknown execute type: {exec_type}")
-                        prompt = f"Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell." + custom_prompt_suffix
+                        prompt = (
+                            f"Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell."
+                            + custom_prompt_suffix
+                        )
                         continue
 
                 elif action_type == "validate":
@@ -1277,12 +1305,15 @@ Analyze the output and decide next action (execute, validate, stop, or complete)
                     if sensitive:
                         encrypted_context = encryptor.encrypt(encrypted_context)
 
-                    prompt = f"""Vulnerability validated: {vuln_name}
+                    prompt = (
+                        f"""Vulnerability validated: {vuln_name}
 
 Context:
 {encrypted_context}
 
-Continue testing or mark complete if all attack paths are exhausted.""" + custom_prompt_suffix
+Continue testing or mark complete if all attack paths are exhausted."""
+                        + custom_prompt_suffix
+                    )
 
                 elif action_type == "report":
                     yield Tag(
@@ -1296,11 +1327,17 @@ Continue testing or mark complete if all attack paths are exhausted.""" + custom
                     encrypted_context = json.dumps(attack_context)
                     if sensitive:
                         encrypted_context = encryptor.encrypt(encrypted_context)
-                    prompt = f"Report noted. Continue with next action.\n\nContext:\n{encrypted_context}" + custom_prompt_suffix
+                    prompt = (
+                        f"Report noted. Continue with next action.\n\nContext:\n{encrypted_context}"
+                        + custom_prompt_suffix
+                    )
 
                 else:
                     yield Warning(message=f"Unknown action type: {action_type}")
-                    prompt = f"Unknown action '{action_type}'. Use: execute, validate, report, stop, or complete." + custom_prompt_suffix
+                    prompt = (
+                        f"Unknown action '{action_type}'. Use: execute, validate, report, stop, or complete."
+                        + custom_prompt_suffix
+                    )
 
             except Exception as e:
                 yield Error(
@@ -1311,7 +1348,10 @@ Continue testing or mark complete if all attack paths are exhausted.""" + custom
                 encrypted_context = json.dumps(attack_context)
                 if sensitive:
                     encrypted_context = encryptor.encrypt(encrypted_context)
-                prompt = f"Previous action failed with error: {str(e)}. Try a different approach.\n\nContext:\n{encrypted_context}" + custom_prompt_suffix
+                prompt = (
+                    f"Previous action failed with error: {str(e)}. Try a different approach.\n\nContext:\n{encrypted_context}"
+                    + custom_prompt_suffix
+                )
 
         # Final summary if we hit max iterations
         if attack_context["iteration"] >= max_iterations:
@@ -1482,7 +1522,7 @@ Continue testing or mark complete if all attack paths are exhausted.""" + custom
         Yields:
             Results from the runner execution
         """
-        from secator.runners import Task, Workflow, Scan
+        from secator.runners import Scan, Task, Workflow
         from secator.template import TemplateLoader
 
         # Set minimal options for running embedded
@@ -1518,7 +1558,9 @@ Continue testing or mark complete if all attack paths are exhausted.""" + custom
                 result_count += 1
                 yield result
 
-            yield Info(message=f"{runner_type.capitalize()} '{name}' completed with {result_count} results")
+            yield Info(
+                message=f"{runner_type.capitalize()} '{name}' completed with {result_count} results"
+            )
 
         except Exception as e:
             yield Error(message=f"Failed to execute {runner_type} '{name}': {str(e)}")
