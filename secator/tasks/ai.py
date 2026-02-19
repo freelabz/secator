@@ -69,40 +69,87 @@ PII_PATTERNS = {
 }
 
 
-class PIIEncryptor:
-    """Simple PII encryption using SHA-256 hashing with salt."""
+class SensitiveDataEncryptor:
+    """Encrypt sensitive data using SHA-256 hashing with salt."""
 
-    def __init__(self, salt: str = 'secator_pii_salt'):
+    def __init__(self, salt: str = 'secator_pii_salt', custom_patterns: List[str] = None):
         self.salt = salt
         self.pii_map: Dict[str, str] = {}
+        self.custom_patterns: List[re.Pattern] = []
+
+        # Compile custom patterns (can be literal strings or regexes)
+        if custom_patterns:
+            for pattern in custom_patterns:
+                pattern = pattern.strip()
+                if not pattern or pattern.startswith('#'):
+                    continue  # Skip empty lines and comments
+                try:
+                    # Try to compile as regex first
+                    self.custom_patterns.append(re.compile(pattern))
+                except re.error:
+                    # If invalid regex, escape and use as literal string
+                    self.custom_patterns.append(re.compile(re.escape(pattern)))
 
     def _hash_value(self, value: str, pii_type: str) -> str:
-        """Hash a PII value and return a placeholder."""
+        """Hash a sensitive value and return a placeholder."""
         hash_input = f"{self.salt}:{pii_type}:{value}"
         hash_value = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
         placeholder = f"[{pii_type.upper()}:{hash_value}]"
         self.pii_map[placeholder] = value
         return placeholder
 
-    def encrypt_pii(self, text: str) -> str:
-        """Encrypt all PII in text, returning sanitized version."""
+    def encrypt(self, text: str) -> str:
+        """Encrypt all sensitive data in text, returning sanitized version."""
         if not text:
             return text
 
         result = text
+
+        # Apply custom patterns first (higher priority)
+        for i, pattern in enumerate(self.custom_patterns):
+            for match in pattern.finditer(result):
+                original = match.group()
+                placeholder = self._hash_value(original, f'custom_{i}')
+                result = result.replace(original, placeholder)
+
+        # Apply built-in PII patterns
         for pii_type, pattern in PII_PATTERNS.items():
             for match in pattern.finditer(result):
                 original = match.group()
                 placeholder = self._hash_value(original, pii_type)
                 result = result.replace(original, placeholder)
+
         return result
 
-    def decrypt_pii(self, text: str) -> str:
-        """Restore original PII values from placeholders."""
+    def decrypt(self, text: str) -> str:
+        """Restore original sensitive values from placeholders."""
         result = text
         for placeholder, original in self.pii_map.items():
             result = result.replace(placeholder, original)
         return result
+
+
+def load_sensitive_patterns(file_path: str) -> List[str]:
+    """Load sensitive patterns from a file (one pattern per line)."""
+    patterns = []
+    try:
+        with open(file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    patterns.append(line)
+    except FileNotFoundError:
+        logger.warning(f"Sensitive patterns file not found: {file_path}")
+    except Exception as e:
+        logger.warning(f"Error loading sensitive patterns: {e}")
+    return patterns
+
+
+def _truncate(text: str, max_length: int = 2000) -> str:
+    """Truncate text to max_length, adding indicator if truncated."""
+    if not text or len(text) <= max_length:
+        return text
+    return text[:max_length] + '\n... (truncated)'
 
 
 def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
@@ -153,6 +200,11 @@ def get_llm_response(
         if not verbose:
             litellm.suppress_debug_info = True
             litellm.set_verbose = False
+            litellm.json_logs = True
+            # Suppress litellm logger debug output
+            logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+            logging.getLogger('litellm').setLevel(logging.WARNING)
+            logging.getLogger('httpx').setLevel(logging.WARNING)
 
         messages = []
         if system_prompt:
@@ -368,10 +420,15 @@ class ai(PythonRunner):
             'default': 'gpt-4o-mini',
             'help': 'LLM model to use (via LiteLLM)',
         },
-        'encrypt_pii': {
+        'sensitive': {
             'is_flag': True,
             'default': True,
-            'help': 'Encrypt PII data before sending to LLM',
+            'help': 'Encrypt sensitive data (PII, IPs, hosts) before sending to LLM',
+        },
+        'sensitive_list': {
+            'type': str,
+            'default': None,
+            'help': 'File containing custom sensitive patterns to encrypt (one per line, supports regex)',
         },
         'max_iterations': {
             'type': int,
@@ -423,7 +480,8 @@ class ai(PythonRunner):
 
         mode = self.run_opts.get('mode', 'summarize')
         model = self.run_opts.get('model', 'gpt-4o-mini')
-        encrypt_pii = self.run_opts.get('encrypt_pii', True)
+        sensitive = self.run_opts.get('sensitive', True)
+        sensitive_list = self.run_opts.get('sensitive_list')
 
         # Get results from previous runs
         results = self._previous_results or self.results
@@ -437,30 +495,37 @@ class ai(PythonRunner):
 
         yield Info(message=f"Starting AI analysis in '{mode}' mode using {model}")
 
-        # Initialize PII encryptor
-        pii_encryptor = PIIEncryptor()
+        # Load custom sensitive patterns if provided
+        custom_patterns = []
+        if sensitive_list:
+            custom_patterns = load_sensitive_patterns(sensitive_list)
+            if custom_patterns:
+                yield Info(message=f"Loaded {len(custom_patterns)} custom sensitive patterns")
+
+        # Initialize sensitive data encryptor
+        encryptor = SensitiveDataEncryptor(custom_patterns=custom_patterns)
 
         # Format context for LLM
         context_text = ""
         if results:
             context_text = format_results_for_llm(results)
-            if encrypt_pii:
-                context_text = pii_encryptor.encrypt_pii(context_text)
-                yield Info(message=f"PII encrypted: {len(pii_encryptor.pii_map)} sensitive values masked")
+            if sensitive:
+                context_text = encryptor.encrypt(context_text)
+                yield Info(message=f"Sensitive data encrypted: {len(encryptor.pii_map)} values masked")
 
         if targets:
             targets_text = f"\n\n## Targets\n{', '.join(targets)}"
-            if encrypt_pii:
-                targets_text = pii_encryptor.encrypt_pii(targets_text)
+            if sensitive:
+                targets_text = encryptor.encrypt(targets_text)
             context_text += targets_text
 
         # Route to appropriate mode handler
         if mode == 'summarize':
-            yield from self._mode_summarize(context_text, model, pii_encryptor, results, targets)
+            yield from self._mode_summarize(context_text, model, encryptor, results, targets)
         elif mode == 'suggest':
-            yield from self._mode_suggest(context_text, model, pii_encryptor, results, targets)
+            yield from self._mode_suggest(context_text, model, encryptor, results, targets)
         elif mode == 'attack':
-            yield from self._mode_attack(context_text, model, pii_encryptor, results, targets)
+            yield from self._mode_attack(context_text, model, encryptor, results, targets)
         else:
             yield Error(message=f"Unknown mode: {mode}. Use: summarize, suggest, or attack")
 
@@ -468,7 +533,7 @@ class ai(PythonRunner):
         self,
         context_text: str,
         model: str,
-        pii_encryptor: PIIEncryptor,
+        encryptor: SensitiveDataEncryptor,
         results: List[Any],
         targets: List[str]
     ) -> Generator:
@@ -497,11 +562,12 @@ Identify key findings, potential attack paths, and prioritize by severity."""
                 model=model,
                 system_prompt=system_prompt,
                 temperature=float(self.run_opts.get('temperature', 0.7)),
+                verbose=self.run_opts.get('verbose', False),
             )
 
-            # Decrypt PII in response
-            if self.run_opts.get('encrypt_pii', True):
-                response = pii_encryptor.decrypt_pii(response)
+            # Decrypt sensitive data in response
+            if self.run_opts.get('sensitive', True):
+                response = encryptor.decrypt(response)
 
             yield Tag(
                 name='ai_summary',
@@ -518,7 +584,7 @@ Identify key findings, potential attack paths, and prioritize by severity."""
         self,
         context_text: str,
         model: str,
-        pii_encryptor: PIIEncryptor,
+        encryptor: SensitiveDataEncryptor,
         results: List[Any],
         targets: List[str]
     ) -> Generator:
@@ -550,11 +616,12 @@ Provide actionable commands with reasoning for each suggestion."""
                 model=model,
                 system_prompt=system_prompt,
                 temperature=float(self.run_opts.get('temperature', 0.7)),
+                verbose=self.run_opts.get('verbose', False),
             )
 
-            # Decrypt PII in response
-            if self.run_opts.get('encrypt_pii', True):
-                response = pii_encryptor.decrypt_pii(response)
+            # Decrypt sensitive data in response
+            if self.run_opts.get('sensitive', True):
+                response = encryptor.decrypt(response)
 
             # Extract suggested commands
             commands = self._extract_commands(response)
@@ -628,7 +695,7 @@ Provide actionable commands with reasoning for each suggestion."""
         self,
         context_text: str,
         model: str,
-        pii_encryptor: PIIEncryptor,
+        encryptor: SensitiveDataEncryptor,
         results: List[Any],
         targets: List[str]
     ) -> Generator:
@@ -648,12 +715,18 @@ Provide actionable commands with reasoning for each suggestion."""
             'targets': targets,
         }
 
+        # Encrypt targets for prompts if sensitive data encryption enabled
+        sensitive = self.run_opts.get('sensitive', True)
+        targets_str = ', '.join(targets)
+        if sensitive:
+            targets_str = encryptor.encrypt(targets_str)
+
         # Initial prompt - if no results, start with recon
         if not results and targets:
             prompt = f"""You are starting authorized penetration testing on these targets:
 
 ## Targets
-{', '.join(targets)}
+{targets_str}
 
 ## Instructions
 Start with reconnaissance to identify attack surface. Respond with a JSON action."""
@@ -664,7 +737,7 @@ Start with reconnaissance to identify attack surface. Respond with a JSON action
 {context_text}
 
 ## Targets (Scope)
-{', '.join(targets)}
+{targets_str}
 
 ## Instructions
 Analyze the findings and plan your first attack. Respond with a JSON action."""
@@ -679,11 +752,12 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                     model=model,
                     system_prompt=SYSTEM_PROMPTS['attack'],
                     temperature=0.3,  # Lower temperature for attack mode
+                    verbose=self.run_opts.get('verbose', False),
                 )
 
-                # Decrypt PII
-                if self.run_opts.get('encrypt_pii', True):
-                    response = pii_encryptor.decrypt_pii(response)
+                # Decrypt sensitive data
+                if self.run_opts.get('sensitive', True):
+                    response = encryptor.decrypt(response)
 
                 # Parse action from response
                 action = self._parse_attack_action(response)
@@ -717,7 +791,11 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                     # Scope check - target must be in or match one of our targets
                     if not self._is_in_scope(target, targets):
                         yield Warning(message=f"Target {target} is out of scope, skipping")
-                        prompt = f"Target {target} was out of scope. Only test: {', '.join(targets)}. Choose another action.\n\nContext:\n{json.dumps(attack_context)}"
+                        # Encrypt context for LLM prompt if sensitive encryption enabled
+                        encrypted_context = json.dumps(attack_context)
+                        if sensitive:
+                            encrypted_context = encryptor.encrypt(encrypted_context)
+                        prompt = f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
                         continue
 
                     yield Info(message=f"Executing: {command}")
@@ -740,14 +818,23 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                         'output': result_output[:2000]
                     })
 
+                    # Encrypt command output for LLM prompt if sensitive encryption enabled
+                    encrypted_output = result_output[:4000]
+                    encrypted_command = command
+                    encrypted_context = json.dumps(attack_context)
+                    if sensitive:
+                        encrypted_output = encryptor.encrypt(encrypted_output)
+                        encrypted_command = encryptor.encrypt(encrypted_command)
+                        encrypted_context = encryptor.encrypt(encrypted_context)
+
                     prompt = f"""Command executed:
-{command}
+{encrypted_command}
 
 Output:
-{result_output[:4000]}
+{encrypted_output}
 
 Previous context:
-{json.dumps(attack_context)}
+{encrypted_context}
 
 Analyze the output and decide next action (execute, validate, or complete)."""
 
@@ -779,10 +866,15 @@ Analyze the output and decide next action (execute, validate, or complete)."""
                         }
                     )
 
+                    # Encrypt context for LLM prompt if sensitive encryption enabled
+                    encrypted_context = json.dumps(attack_context)
+                    if sensitive:
+                        encrypted_context = encryptor.encrypt(encrypted_context)
+
                     prompt = f"""Vulnerability validated: {vuln_name}
 
 Context:
-{json.dumps(attack_context)}
+{encrypted_context}
 
 Continue testing or mark complete if all attack paths are exhausted."""
 
@@ -794,7 +886,11 @@ Continue testing or mark complete if all attack paths are exhausted."""
                         category='ai',
                         extra_data=attack_context
                     )
-                    prompt = f"Report noted. Continue with next action.\n\nContext:\n{json.dumps(attack_context)}"
+                    # Encrypt context for LLM prompt if sensitive encryption enabled
+                    encrypted_context = json.dumps(attack_context)
+                    if sensitive:
+                        encrypted_context = encryptor.encrypt(encrypted_context)
+                    prompt = f"Report noted. Continue with next action.\n\nContext:\n{encrypted_context}"
 
                 else:
                     yield Warning(message=f"Unknown action type: {action_type}")
@@ -803,7 +899,11 @@ Continue testing or mark complete if all attack paths are exhausted."""
             except Exception as e:
                 yield Error(message=f"Attack iteration {iteration + 1} failed: {str(e)}")
                 attack_context['failed_attacks'].append(str(e))
-                prompt = f"Previous action failed with error: {str(e)}. Try a different approach.\n\nContext:\n{json.dumps(attack_context)}"
+                # Encrypt context for LLM prompt if sensitive encryption enabled
+                encrypted_context = json.dumps(attack_context)
+                if sensitive:
+                    encrypted_context = encryptor.encrypt(encrypted_context)
+                prompt = f"Previous action failed with error: {str(e)}. Try a different approach.\n\nContext:\n{encrypted_context}"
 
         # Final summary if we hit max iterations
         if attack_context['iteration'] >= max_iterations:
