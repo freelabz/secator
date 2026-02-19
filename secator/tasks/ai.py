@@ -342,6 +342,7 @@ Format EACH suggestion as a single secator command:
 secator x <task> <target> [--option value]
 ```
 
+ALWAYS use secator commands, never raw tool commands (e.g., 'secator x nmap' not 'nmap').
 ONLY use options that exist for the task. When in doubt, check the task file.
 Provide 3-5 specific commands with brief reasoning for each.
 Include the actual target from the findings, not placeholders.""",
@@ -360,6 +361,7 @@ SECATOR REFERENCE (verify tasks/options before using):
 - Configs: https://github.com/freelabz/secator/tree/main/secator/configs
 
 IMPORTANT RULES:
+- ALWAYS prefer secator commands over raw tool commands (e.g., use 'secator x nmap <target>' instead of 'nmap <target>')
 - Only test targets explicitly provided as inputs
 - Document every action taken
 - Stop if you encounter out-of-scope systems
@@ -409,6 +411,7 @@ You can also use pre-built workflows:
 
 Suggest 2-3 initial commands to start the assessment.
 Format each as: secator x <task> <target> [options]
+ALWAYS use secator commands, never raw tool commands.
 ONLY use options that exist for the task."""
 }
 
