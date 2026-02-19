@@ -820,7 +820,8 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                         prompt = f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
                         continue
 
-                    yield Info(message=f"Executing: {command}")
+                    if verbose:
+                        yield Info(message=f"[CMD] {command}")
 
                     if dry_run:
                         yield Tag(
@@ -833,6 +834,9 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                         result_output = "[DRY RUN] Command not executed"
                     else:
                         result_output = self._execute_command(command)
+
+                    if verbose:
+                        yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
 
                     attack_context['successful_attacks'].append({
                         'command': command,
