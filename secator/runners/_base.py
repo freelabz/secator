@@ -19,7 +19,7 @@ from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progre
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
-from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update, autodetect_type)
+from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update, autodetect_type, sanitize_folder_name)
 from secator.tree import build_runner_tree
 from secator.loader import get_configs_by_type
 
@@ -378,7 +378,8 @@ class Runner:
 	def reports_folder(self):
 		if self._reports_folder and Path(self._reports_folder).exists():
 			return self._reports_folder
-		_base = f'{CONFIG.dirs.reports}/{self.workspace_name}/{self.config.type}s'
+		workspace_folder = sanitize_folder_name(self.workspace_name)
+		_base = f'{CONFIG.dirs.reports}/{workspace_folder}/{self.config.type}s'
 		_id = get_task_folder_id(_base)
 		path = Path(f'{_base}/{_id}')
 		path_inputs = path / '.inputs'
@@ -700,6 +701,7 @@ class Runner:
 		"""Check for duplicates and mark items as duplicates."""
 		if not self.enable_duplicate_check:
 			return
+		start_time = time()
 		self.debug('running duplicate check', sub='end')
 		# dupe_count = 0
 		import concurrent.futures
@@ -712,6 +714,8 @@ class Runner:
 		# 	duplicates_str = '\n\t'.join(duplicates)
 		# 	self.debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='duplicates', verbose=True)
 		# self.debug(f'duplicate check completed: {dupe_count} found', sub='duplicates')
+		total_time = time() - start_time
+		self.debug(f'duplicate check completed in {total_time:.2f} seconds', sub='end')
 
 	def check_duplicate(self, item):
 		"""Check if an item is a duplicate in the list of results and mark it like so.

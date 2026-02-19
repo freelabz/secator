@@ -191,6 +191,7 @@ class MongodbAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
+		'tags'
 	]
 
 
