@@ -190,23 +190,41 @@ def _strip_json_from_response(text: str) -> str:
     if not text:
         return text
 
-    # Remove JSON code blocks
+    # Remove JSON code blocks first
     text = re.sub(r"```(?:json)?\s*\{[^`]*\}\s*```", "", text, flags=re.DOTALL)
 
-    # Remove standalone JSON objects (but be careful not to strip too much)
-    # Only remove if it looks like a complete JSON action
-    text = re.sub(
-        r'\{\s*"action"\s*:\s*"[^"]*"[^}]*\}',
-        "",
-        text,
-        flags=re.DOTALL
-    )
+    # Find and remove JSON objects with proper brace matching
+    result = []
+    i = 0
+    while i < len(text):
+        if text[i] == '{':
+            # Check if this looks like an action JSON (has "action" key nearby)
+            lookahead = text[i:i+50]
+            if '"action"' in lookahead:
+                # Find matching closing brace
+                brace_count = 0
+                start = i
+                while i < len(text):
+                    if text[i] == '{':
+                        brace_count += 1
+                    elif text[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            i += 1
+                            break
+                    i += 1
+                # JSON block removed, continue
+                continue
+        result.append(text[i])
+        i += 1
+
+    text = ''.join(result)
 
     # Clean up extra whitespace
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()
 
-    return text if text else "(action only)"
+    return text if text else ""
 
 
 def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
