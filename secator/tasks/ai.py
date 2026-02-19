@@ -733,8 +733,8 @@ Identify key findings, potential attack paths, and prioritize by severity."""
             if self.run_opts.get("sensitive", True):
                 response = encryptor.decrypt(response)
 
-            if verbose:
-                yield Info(message=f"[AGENT] {_truncate(response)}")
+            # Always show AI response (contains valuable analysis)
+            yield Info(message=f"[AGENT] {_truncate(response)}")
 
             yield Tag(
                 name="ai_summary",
@@ -798,8 +798,8 @@ Provide actionable commands with reasoning for each suggestion."""
             if self.run_opts.get("sensitive", True):
                 response = encryptor.decrypt(response)
 
-            if verbose:
-                yield Info(message=f"[AGENT] {_truncate(response)}")
+            # Always show AI response (contains valuable suggestions)
+            yield Info(message=f"[AGENT] {_truncate(response)}")
 
             # Extract suggested commands
             commands = self._extract_commands(response)
@@ -957,8 +957,8 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                 if self.run_opts.get("sensitive", True):
                     response = encryptor.decrypt(response)
 
-                if verbose:
-                    yield Info(message=f"[AGENT] {_truncate(response)}")
+                # Always show AI response (contains reasoning and actions)
+                yield Info(message=f"[AGENT] {_truncate(response)}")
 
                 # Parse action from response
                 action = self._parse_attack_action(response)
