@@ -1,0 +1,17 @@
+# go/testdata/workflows/test_workflow.yaml
+type: workflow
+name: test_workflow
+description: Test workflow for Go PoC
+input_types:
+  - url
+
+tasks:
+  httpx:
+    tech_detect: true
+
+  nuclei:
+    targets_:
+      - url.url
+    severity:
+      - critical
+      - high
