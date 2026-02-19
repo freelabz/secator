@@ -556,6 +556,11 @@ Provide a brief assessment and initial steps."""
 Identify key findings, potential attack paths, and prioritize by severity."""
             system_prompt = SYSTEM_PROMPTS['summarize']
 
+        verbose = self.run_opts.get('verbose', False)
+
+        if verbose:
+            yield Info(message=f"[PROMPT] {_truncate(prompt)}")
+
         try:
             response = get_llm_response(
                 prompt=prompt,
@@ -568,6 +573,9 @@ Identify key findings, potential attack paths, and prioritize by severity."""
             # Decrypt sensitive data in response
             if self.run_opts.get('sensitive', True):
                 response = encryptor.decrypt(response)
+
+            if verbose:
+                yield Info(message=f"[AGENT] {_truncate(response)}")
 
             yield Tag(
                 name='ai_summary',
