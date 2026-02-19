@@ -656,7 +656,7 @@ class Command(Runner):
 
 					# Check memory usage from collected stats
 					if self.memory_limit_mb and self.memory_limit_mb != -1:
-						total_mem = sum(stat_item.extra_data.get('memory_info', {}).get('rss', 0) / 1024 / 1024 for stat_item in stats_items)  # noqa: E501
+						total_mem = sum(stat_item.memory for stat_item in stats_items)
 						if total_mem > self.memory_limit_mb:
 							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
 							if self.monitor_queue is not None:
@@ -708,7 +708,7 @@ class Command(Runner):
 			total_mem += mem_rss
 			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
 			net_conns = info.get('net_connections') or []
-			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+			# extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
 				name=name,
 				pid=pid,
@@ -716,7 +716,7 @@ class Command(Runner):
 				memory=mem_rss,
 				memory_limit=self.memory_limit_mb,
 				net_conns=len(net_conns),
-				extra_data=extra_data
+				# extra_data=extra_data
 			)
 		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
 		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
