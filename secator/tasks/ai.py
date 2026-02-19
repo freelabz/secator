@@ -717,6 +717,7 @@ Provide actionable commands with reasoning for each suggestion."""
         """Execute reactive attack loop to exploit vulnerabilities."""
         max_iterations = int(self.run_opts.get('max_iterations', 10))
         dry_run = self.run_opts.get('dry_run', False)
+        verbose = self.run_opts.get('verbose', False)
 
         yield Info(message=f"Starting attack mode (max {max_iterations} iterations, dry_run={dry_run})")
         yield Info(message=f"Scope restricted to: {', '.join(targets)}")
@@ -762,6 +763,9 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
             yield Info(message=f"Attack iteration {iteration + 1}/{max_iterations}")
 
             try:
+                if verbose:
+                    yield Info(message=f"[PROMPT] {_truncate(prompt)}")
+
                 response = get_llm_response(
                     prompt=prompt,
                     model=model,
@@ -773,6 +777,9 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                 # Decrypt sensitive data
                 if self.run_opts.get('sensitive', True):
                     response = encryptor.decrypt(response)
+
+                if verbose:
+                    yield Info(message=f"[AGENT] {_truncate(response)}")
 
                 # Parse action from response
                 action = self._parse_attack_action(response)
