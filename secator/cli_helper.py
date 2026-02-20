@@ -27,6 +27,7 @@ PROFILES_STR = ','.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_typ
 DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_DRIVERS])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
+WORKSPACE_DEFAULT_STR = CONFIG.workspace.default if CONFIG.workspace.default else 'default'
 EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_EXPORTERS])
 
 CLI_OUTPUT_OPTS = {
@@ -44,7 +45,7 @@ CLI_OUTPUT_OPTS = {
 }
 
 CLI_EXEC_OPTS = {
-	'workspace': {'type': str, 'default': 'default', 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws', 'shell_complete': complete_workspaces},  # noqa: E501
+	'workspace': {'type': str, 'default': WORKSPACE_DEFAULT_STR, 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws', 'shell_complete': complete_workspaces},  # noqa: E501
 	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf', 'shell_complete': complete_profiles},  # noqa: E501
 	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR, 'shell_complete': complete_drivers},  # noqa: E501
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
@@ -256,6 +257,7 @@ def register_runner(cli_endpoint, config):
 		drivers = driver.split(',') if driver else []
 		drivers = list(set(CONFIG.drivers.defaults + drivers))
 		supported_drivers = AVAILABLE_DRIVERS
+		context['drivers'] = []
 		for driver in drivers:
 			if driver in supported_drivers:
 				if not ADDONS_ENABLED[driver]:
@@ -267,13 +269,14 @@ def register_runner(cli_endpoint, config):
 					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
 					sys.exit(1)
 				hooks.append(driver_hooks)
+				context['drivers'].append(driver)
 			else:
 				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
 				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
 				console.print(f'Supported drivers: {supported_drivers_str}')
 				sys.exit(1)
 
-		if driver == 'api':
+		if 'api' in context['drivers']:
 			try:
 				from secator.hooks.api import get_workspace_name
 				workspace_name = get_workspace_name(context.get('workspace_id'))

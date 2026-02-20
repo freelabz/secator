@@ -49,7 +49,7 @@ dependencies = [
   'requests < 3',
   'rich < 14',
   'rich-click < 1.7',
-  'click < 8.2.0', 
+  'click < 8.2.2',
   'psutil < 7',
   'retry < 1',
   'tldextract < 6',

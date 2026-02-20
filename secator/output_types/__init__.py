@@ -1,4 +1,6 @@
 __all__ = [
+	'Action',
+	'AI',
 	'Domain',
 	'Error',
 	'OutputType',
@@ -17,6 +19,8 @@ __all__ = [
 	'Warning',
 ]
 from secator.output_types._base import OutputType
+from secator.output_types.action import Action
+from secator.output_types.ai import AI
 from secator.output_types.progress import Progress
 from secator.output_types.ip import Ip
 from secator.output_types.exploit import Exploit
@@ -38,7 +42,7 @@ from secator.output_types.domain import Domain
 
 
 EXECUTION_TYPES = [
-	Target, Progress, Info, Warning, Error, State
+	Target, Progress, Info, Warning, Error, State, Action, AI
 ]
 STAT_TYPES = [
 	Stat
