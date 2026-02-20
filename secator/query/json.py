@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
+from secator.utils import sanitize_folder_name
 
 
 OPERATORS = {
@@ -58,7 +59,14 @@ class JsonBackend(QueryBackend):
 
     def __init__(self, workspace_id: str, config: Optional[dict] = None):
         super().__init__(workspace_id, config)
-        self.reports_dir = Path(config.get('reports_dir', CONFIG.dirs.reports)) if config else Path(CONFIG.dirs.reports)
+        reports_dir = config.get('reports_dir', CONFIG.dirs.reports) if config else CONFIG.dirs.reports
+        self.reports_dir = Path(reports_dir).expanduser()
+
+    def get_base_query(self) -> dict:
+        """No base query needed for JSON - workspace filtering is done by directory."""
+        # Don't filter by _context fields since local JSON files may not have them
+        # Workspace filtering is implicit (we only load from the workspace directory)
+        return {}
 
     def _get_workspace_path(self) -> Path:
         """Get path to workspace reports directory."""

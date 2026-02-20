@@ -33,7 +33,9 @@ class QueryEngine:
         elif 'mongodb' in drivers:
             return MongoDBBackend(self.workspace_id)
         else:
-            return JsonBackend(self.workspace_id)
+            # For JSON backend, use workspace_name for directory (reports are saved by name)
+            workspace_name = self.context.get('workspace_name', self.workspace_id)
+            return JsonBackend(workspace_name)
 
     def search(self, query: dict, limit: int = 100, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Search for findings matching query."""
