@@ -177,6 +177,11 @@ feroxbuster:
 gospider:
   depth, concurrent, delay, timeout, proxy, header, js
 
+=== OPTION FORMATS ===
+
+header: Use format "key1:value1;;key2:value2" for multiple headers
+  Example: header="Authorization:Bearer token;;X-Custom:value"
+
 NOTE: Do NOT use options not listed above. They will be rejected.
 """
 
