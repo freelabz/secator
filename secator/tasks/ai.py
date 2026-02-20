@@ -655,6 +655,7 @@ class ai(PythonRunner):
 
         mode = self.run_opts.get("mode", "summarize")
         model = self.run_opts.get("model", "gpt-4o-mini")
+        api_base = self.run_opts.get("api_base", None)
         sensitive = self.run_opts.get("sensitive", True)
         sensitive_list = self.run_opts.get("sensitive_list")
 
@@ -703,15 +704,15 @@ class ai(PythonRunner):
         # Route to appropriate mode handler
         if mode == "summarize":
             yield from self._mode_summarize(
-                context_text, model, encryptor, results, targets
+                context_text, model, encryptor, results, targets, api_base
             )
         elif mode == "suggest":
             yield from self._mode_suggest(
-                context_text, model, encryptor, results, targets
+                context_text, model, encryptor, results, targets, api_base
             )
         elif mode == "attack":
             yield from self._mode_attack(
-                context_text, model, encryptor, results, targets
+                context_text, model, encryptor, results, targets, api_base
             )
         else:
             yield Error(
@@ -725,6 +726,7 @@ class ai(PythonRunner):
         encryptor: SensitiveDataEncryptor,
         results: List[Any],
         targets: List[str],
+        api_base: str = None,
     ) -> Generator:
         """Summarize results and identify attack paths."""
         custom_prompt = self.run_opts.get("prompt", "")
@@ -792,6 +794,7 @@ Identify key findings, potential attack paths, and prioritize by severity."""
         encryptor: SensitiveDataEncryptor,
         results: List[Any],
         targets: List[str],
+        api_base: str = None,
     ) -> Generator:
         """Suggest next secator tasks to run."""
         run_suggestions = self.run_opts.get("run", False)
@@ -925,6 +928,7 @@ Provide actionable commands with reasoning for each suggestion."""
         encryptor: SensitiveDataEncryptor,
         results: List[Any],
         targets: List[str],
+        api_base: str = None,
     ) -> Generator:
         """Execute reactive attack loop to exploit vulnerabilities."""
         max_iterations = int(self.run_opts.get("max_iterations", 10))
