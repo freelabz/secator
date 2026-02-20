@@ -256,3 +256,22 @@ class TestQueryOperators(unittest.TestCase):
         # $regex
         self.assertTrue(match_query(item, {'url': {'$regex': r'example\.com'}}))
         self.assertFalse(match_query(item, {'url': {'$regex': r'other\.com'}}))
+
+
+class TestMongoDBBackend(unittest.TestCase):
+
+    def test_mongodb_backend_instantiation(self):
+        from secator.query.mongodb import MongoDBBackend
+
+        backend = MongoDBBackend(workspace_id='ws123')
+        self.assertEqual(backend.workspace_id, 'ws123')
+        self.assertEqual(backend.name, 'mongodb')
+
+    def test_mongodb_backend_base_query_includes_tagged(self):
+        from secator.query.mongodb import MongoDBBackend
+
+        backend = MongoDBBackend(workspace_id='ws123')
+        base = backend.get_base_query()
+
+        self.assertEqual(base['_tagged'], True)
+        self.assertEqual(base['_context.workspace_id'], 'ws123')
