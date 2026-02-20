@@ -1,7 +1,7 @@
 # secator/query/_base.py
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 class QueryBackend(ABC):
@@ -9,12 +9,14 @@ class QueryBackend(ABC):
 
     name: str = "base"
 
+    DEFAULT_LIMIT = 100
+
     PROTECTED_FIELDS = [
         "_context.workspace_id",
         "_context.workspace_duplicate",
     ]
 
-    def __init__(self, workspace_id: str, config: dict = None):
+    def __init__(self, workspace_id: str, config: Optional[dict] = None):
         self.workspace_id = workspace_id
         self.config = config or {}
 
@@ -39,8 +41,10 @@ class QueryBackend(ABC):
 
         return merged
 
-    def search(self, query: dict, limit: int = 100) -> List[Dict[str, Any]]:
+    def search(self, query: dict, limit: int = None) -> List[Dict[str, Any]]:
         """Execute query with enforced base query."""
+        if limit is None:
+            limit = self.DEFAULT_LIMIT
         safe_query = self._merge_query(query)
         return self._execute_search(safe_query, limit)
 
@@ -49,7 +53,12 @@ class QueryBackend(ABC):
         """Backend-specific search implementation."""
         pass
 
-    @abstractmethod
     def count(self, query: dict) -> int:
-        """Count matching findings."""
+        """Count matching findings with enforced base query."""
+        safe_query = self._merge_query(query)
+        return self._execute_count(safe_query)
+
+    @abstractmethod
+    def _execute_count(self, query: dict) -> int:
+        """Backend-specific count implementation."""
         pass
