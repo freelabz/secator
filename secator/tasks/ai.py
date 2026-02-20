@@ -13,9 +13,10 @@ from typing import Any, Dict, Generator, List, Optional
 
 import click
 
+from dataclasses import fields
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Action, Error, Info, Tag, Vulnerability, Warning
+from secator.output_types import Action, Error, Info, Tag, Vulnerability, Warning, FINDING_TYPES
 from secator.runners import PythonRunner
 
 logger = logging.getLogger(__name__)
@@ -260,6 +261,115 @@ def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
                 formatted.append(f"  - {str(item)}")
 
     return "\n".join(formatted)
+
+
+def get_output_types_schema() -> str:
+    """Generate schema description of output types for LLM."""
+    schema_lines = []
+
+    excluded_fields = ['extra_data', 'tags', 'is_false_positive', 'is_acknowledged']
+    for output_type in FINDING_TYPES:
+        type_name = output_type.get_name()
+        type_fields = [
+            f.name for f in fields(output_type)
+            if not f.name.startswith('_') and f.name not in excluded_fields
+        ]
+        fields_str = ', '.join(type_fields[:10])  # Limit fields shown
+        schema_lines.append(f"- {type_name}: {fields_str}")
+
+    schema_lines.append("\nCommon fields (all types): _type, _source, _context, is_false_positive, tags, extra_data")
+
+    return '\n'.join(schema_lines)
+
+
+def parse_intent_response(response: str) -> Optional[Dict[str, Any]]:
+    """Parse intent analysis response from LLM."""
+    # Try direct JSON parse
+    try:
+        return json.loads(response)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to extract from code block
+    json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Try to find raw JSON object
+    json_match = re.search(r'\{[^{}]*"mode"[^{}]*\}', response, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group())
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+INTENT_ANALYSIS_PROMPT = """You are a penetration testing assistant analyzing user requests.
+
+Given the user's prompt and optional targets, determine:
+1. Which mode to use (summarize, suggest, or attack)
+2. What workspace queries to run to fetch relevant data
+
+## Available Output Types
+
+{output_types_schema}
+
+## Query Operators
+
+- Direct match: {{"field": "value"}}
+- Regex: {{"field": {{"$regex": "pattern"}}}}
+- Contains: {{"field": {{"$contains": "substring"}}}}
+- Comparison: {{"field": {{"$gt|$gte|$lt|$lte": value}}}}
+- In list: {{"field": {{"$in": ["a", "b"]}}}}
+- Not equal: {{"field": {{"$ne": value}}}}
+- Nested fields: {{"_context.workspace_name": "value"}}
+
+## Response Format (JSON)
+
+{{
+    "mode": "summarize|suggest|attack",
+    "queries": [
+        {{"_type": "vulnerability", "severity": {{"$in": ["critical", "high"]}}}},
+        {{"_type": "url", "url": {{"$contains": "login"}}}}
+    ],
+    "reasoning": "Brief explanation of why this mode and these queries"
+}}
+
+Respond with ONLY the JSON object, no additional text."""
+
+
+def analyze_intent(
+    prompt: str,
+    targets: List[str],
+    model: str = 'gpt-4o-mini',
+    verbose: bool = False
+) -> Optional[Dict[str, Any]]:
+    """Phase 1: Analyze user intent and generate queries."""
+    user_message = f"Prompt: {prompt}"
+    if targets:
+        user_message += f"\nTargets: {', '.join(targets)}"
+
+    system_prompt = INTENT_ANALYSIS_PROMPT.format(
+        output_types_schema=get_output_types_schema()
+    )
+
+    response = get_llm_response(
+        prompt=user_message,
+        model=model,
+        system_prompt=system_prompt,
+        temperature=0.3,
+        verbose=verbose
+    )
+
+    if not response:
+        return None
+
+    return parse_intent_response(response)
 
 
 def get_llm_response(
