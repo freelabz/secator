@@ -275,3 +275,22 @@ class TestMongoDBBackend(unittest.TestCase):
 
         self.assertEqual(base['_tagged'], True)
         self.assertEqual(base['_context.workspace_id'], 'ws123')
+
+
+class TestApiBackend(unittest.TestCase):
+
+    def test_api_backend_instantiation(self):
+        from secator.query.api import ApiBackend
+
+        backend = ApiBackend(workspace_id='ws123')
+        self.assertEqual(backend.workspace_id, 'ws123')
+        self.assertEqual(backend.name, 'api')
+
+    def test_api_backend_base_query_includes_tagged(self):
+        from secator.query.api import ApiBackend
+
+        backend = ApiBackend(workspace_id='ws123')
+        base = backend.get_base_query()
+
+        self.assertEqual(base['_tagged'], True)
+        self.assertEqual(base['_context.workspace_id'], 'ws123')
