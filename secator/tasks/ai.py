@@ -9,7 +9,7 @@ import signal
 import subprocess
 import time
 from dataclasses import asdict
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import click
 
@@ -51,6 +51,8 @@ TOOL_RATE_FLAGS = {
 
 def add_rate_limit(command: str, rate: int) -> str:
     """Add rate limit to command based on tool."""
+    if rate <= 0:
+        return command
     for tool, flag_template in TOOL_RATE_FLAGS.items():
         if f'secator x {tool}' in command or f' {tool} ' in command:
             # Check if rate flag already present
@@ -71,7 +73,7 @@ def check_action_safety(
     action: dict,
     auto_yes: bool,
     in_ci: bool
-) -> tuple:
+) -> Tuple[bool, str]:
     """Check if action is safe to run, prompt if needed.
 
     Returns:
@@ -782,15 +784,26 @@ class ai(PythonRunner):
     install_cmd = "pip install litellm"
 
     opts = {
+        "prompt": {
+            "type": str,
+            "default": "",
+            "short": "p",
+            "help": "Natural language prompt for AI analysis",
+        },
         "mode": {
             "type": str,
-            "default": "summarize",
-            "help": "Operation mode: summarize, suggest, or attack",
+            "default": "",
+            "help": "Force operation mode: summarize, suggest, or attack (auto-detected if not set)",
         },
         "model": {
             "type": str,
             "default": "gpt-4o-mini",
             "help": "LLM model to use (via LiteLLM)",
+        },
+        "intent_model": {
+            "type": str,
+            "default": "gpt-4o-mini",
+            "help": "LLM model for intent analysis (Phase 1)",
         },
         'api_base': {
             'type': str,
@@ -839,12 +852,6 @@ class ai(PythonRunner):
             "short": "v",
             "help": "Show verbose LLM debug output",
         },
-        "prompt": {
-            "type": str,
-            "default": None,
-            "short": "p",
-            "help": "Additional instructions to include in the initial prompt",
-        },
     }
 
     def __init__(self, inputs=[], **run_opts):
@@ -863,17 +870,68 @@ class ai(PythonRunner):
             )
             return
 
-        mode = self.run_opts.get("mode", "summarize")
+        # Extract options
+        prompt = self.run_opts.get("prompt", "")
+        mode_override = self.run_opts.get("mode", "")
         model = self.run_opts.get("model", "gpt-4o-mini")
+        intent_model = self.run_opts.get("intent_model", "gpt-4o-mini")
         api_base = self.run_opts.get("api_base", None)
         sensitive = self.run_opts.get("sensitive", True)
         sensitive_list = self.run_opts.get("sensitive_list")
+        verbose = self.run_opts.get("verbose", False)
+
+        # Get workspace context
+        workspace_id = self.context.get("workspace_id") if self.context else None
+
+        # Targets are from self.inputs
+        targets = self.inputs
+
+        # Phase 1: Intent Analysis
+        queries = [{}]
+        if prompt and not mode_override:
+            yield Info(message="Analyzing intent...")
+            intent = analyze_intent(
+                prompt=prompt,
+                targets=targets,
+                model=intent_model,
+                verbose=verbose
+            )
+            if intent:
+                mode = intent.get("mode", "summarize")
+                queries = intent.get("queries", [{}])
+                yield Info(message=f"Mode: {mode}, Queries: {len(queries)}")
+            else:
+                yield Warning(message="Could not analyze intent, defaulting to summarize mode")
+                mode = "summarize"
+        else:
+            mode = mode_override or "summarize"
 
         # Get results from previous runs
         results = self._previous_results or self.results
 
-        # Targets are from self.inputs
-        targets = self.inputs
+        # Fetch workspace results if workspace_id available
+        if workspace_id:
+            from secator.query import QueryEngine
+            yield Info(message=f"Fetching results from workspace {workspace_id}...")
+            engine = QueryEngine(workspace_id, context=self.context)
+
+            for query in queries:
+                query_results = engine.search(query, limit=100)
+                results.extend(query_results)
+
+            # Deduplicate by _uuid
+            seen_uuids = set()
+            unique_results = []
+            for r in results:
+                uuid = r.get("_uuid") if isinstance(r, dict) else getattr(r, "_uuid", None)
+                if uuid is None:
+                    uuid = id(r)
+                if uuid not in seen_uuids:
+                    seen_uuids.add(uuid)
+                    unique_results.append(r)
+            results = unique_results
+
+            yield Info(message=f"Fetched {len(results)} results from workspace")
 
         if not results and not targets:
             yield Warning(
@@ -1356,6 +1414,36 @@ Context:
                         )
                         if cli_opts:
                             cli_cmd += f" {cli_opts}"
+
+                        # Safety check for execute actions
+                        auto_yes = self.run_opts.get("yes", False)
+                        in_ci = _is_ci()
+                        action_for_safety = {
+                            "command": cli_cmd,
+                            "destructive": action.get("destructive", False),
+                            "aggressive": action.get("aggressive", False),
+                            "reasoning": action.get("reasoning", ""),
+                        }
+                        should_run, modified_cmd = check_action_safety(
+                            action_for_safety, auto_yes=auto_yes, in_ci=in_ci
+                        )
+
+                        if not should_run:
+                            yield Info(message=f"Skipped: {cli_cmd}")
+                            encrypted_context = json.dumps(attack_context)
+                            if sensitive:
+                                encrypted_context = encryptor.encrypt(encrypted_context)
+                            prompt = (
+                                f"User skipped action: {cli_cmd}. Choose another action.\n\nContext:\n{encrypted_context}"
+                                + custom_prompt_suffix
+                            )
+                            continue
+
+                        # Update command if modified (e.g., rate limiting added)
+                        if modified_cmd != cli_cmd:
+                            cli_cmd = modified_cmd
+                            yield Info(message=f"Command modified to: {cli_cmd}")
+
                         yield Info(message=f"Started [bold red]{cli_cmd}[/]")
 
                         if dry_run:
@@ -1436,6 +1524,35 @@ Analyze the results and decide next action (execute, validate, stop, or complete
                                 + custom_prompt_suffix
                             )
                             continue
+
+                        # Safety check for shell commands
+                        auto_yes = self.run_opts.get("yes", False)
+                        in_ci = _is_ci()
+                        action_for_safety = {
+                            "command": command,
+                            "destructive": action.get("destructive", False),
+                            "aggressive": action.get("aggressive", False),
+                            "reasoning": action.get("reasoning", ""),
+                        }
+                        should_run, modified_cmd = check_action_safety(
+                            action_for_safety, auto_yes=auto_yes, in_ci=in_ci
+                        )
+
+                        if not should_run:
+                            yield Info(message=f"Skipped: {command}")
+                            encrypted_context = json.dumps(attack_context)
+                            if sensitive:
+                                encrypted_context = encryptor.encrypt(encrypted_context)
+                            prompt = (
+                                f"User skipped command: {command}. Choose another action.\n\nContext:\n{encrypted_context}"
+                                + custom_prompt_suffix
+                            )
+                            continue
+
+                        # Update command if modified (e.g., rate limiting added)
+                        if modified_cmd != command:
+                            command = modified_cmd
+                            yield Info(message=f"Command modified to: {command}")
 
                         yield Info(message=f"[CMD] {command}")
 

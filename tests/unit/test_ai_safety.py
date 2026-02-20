@@ -1,7 +1,6 @@
 # tests/unit/test_ai_safety.py
 
 import unittest
-from unittest import mock
 
 
 class TestSafetyFlags(unittest.TestCase):
@@ -38,6 +37,33 @@ class TestSafetyFlags(unittest.TestCase):
         result = add_rate_limit(cmd, 10)
 
         # Should return unchanged
+        self.assertEqual(cmd, result)
+
+    def test_add_rate_limit_sqlmap(self):
+        from secator.tasks.ai import add_rate_limit
+
+        cmd = "secator x sqlmap target.com"
+        result = add_rate_limit(cmd, 10)
+
+        # sqlmap uses delay in ms: 1000/10 = 100ms
+        self.assertIn('--delay 100', result)
+
+    def test_add_rate_limit_zero_rate(self):
+        from secator.tasks.ai import add_rate_limit
+
+        cmd = "secator x nuclei target.com"
+        result = add_rate_limit(cmd, 0)
+
+        # Should return unchanged when rate is 0
+        self.assertEqual(cmd, result)
+
+    def test_add_rate_limit_negative_rate(self):
+        from secator.tasks.ai import add_rate_limit
+
+        cmd = "secator x nuclei target.com"
+        result = add_rate_limit(cmd, -5)
+
+        # Should return unchanged when rate is negative
         self.assertEqual(cmd, result)
 
 
