@@ -1548,7 +1548,7 @@ Continue testing or mark complete if all attack paths are exhausted."""
             "print_start": False,
             "print_end": False,
             "print_target": False,
-            "sync": False,
+            "sync": self.sync,
             **opts,
         }
 
