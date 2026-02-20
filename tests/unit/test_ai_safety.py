@@ -108,3 +108,94 @@ class TestSafetyCheck(unittest.TestCase):
         should_run, cmd = check_action_safety(action, auto_yes=False, in_ci=False)
 
         self.assertTrue(should_run)
+
+
+class TestFormatExecutedCommands(unittest.TestCase):
+
+    def test_format_executed_commands_empty(self):
+        from secator.tasks.ai import format_executed_commands
+
+        context = {"successful_attacks": [], "failed_attacks": []}
+        result = format_executed_commands(context)
+
+        self.assertEqual(result, "")
+
+    def test_format_executed_commands_task(self):
+        from secator.tasks.ai import format_executed_commands
+
+        context = {
+            "successful_attacks": [
+                {"type": "task", "name": "nmap", "targets": ["192.168.1.1"]}
+            ],
+            "failed_attacks": []
+        }
+        result = format_executed_commands(context)
+
+        self.assertIn("ALREADY EXECUTED", result)
+        self.assertIn("DO NOT REPEAT", result)
+        self.assertIn("task: nmap on [192.168.1.1]", result)
+
+    def test_format_executed_commands_shell(self):
+        from secator.tasks.ai import format_executed_commands
+
+        context = {
+            "successful_attacks": [
+                {"type": "shell", "command": "curl http://target.com", "target": "target.com"}
+            ],
+            "failed_attacks": []
+        }
+        result = format_executed_commands(context)
+
+        self.assertIn("shell: curl http://target.com", result)
+        self.assertIn("target: target.com", result)
+
+    def test_format_executed_commands_with_opts(self):
+        from secator.tasks.ai import format_executed_commands
+
+        context = {
+            "successful_attacks": [
+                {
+                    "type": "task",
+                    "name": "nuclei",
+                    "targets": ["example.com"],
+                    "opts": {"severity": "critical", "rate_limit": 10}
+                }
+            ],
+            "failed_attacks": []
+        }
+        result = format_executed_commands(context)
+
+        self.assertIn("nuclei", result)
+        self.assertIn("example.com", result)
+        self.assertIn("severity=critical", result)
+
+    def test_format_executed_commands_failed(self):
+        from secator.tasks.ai import format_executed_commands
+
+        context = {
+            "successful_attacks": [],
+            "failed_attacks": [
+                {"type": "task", "name": "sqlmap", "targets": ["target.com"]}
+            ]
+        }
+        result = format_executed_commands(context)
+
+        self.assertIn("FAILED", result)
+        self.assertIn("sqlmap", result)
+
+    def test_format_executed_commands_multiple(self):
+        from secator.tasks.ai import format_executed_commands
+
+        context = {
+            "successful_attacks": [
+                {"type": "task", "name": "nmap", "targets": ["192.168.1.1"]},
+                {"type": "workflow", "name": "host_recon", "targets": ["example.com"]},
+                {"type": "shell", "command": "curl http://test.com", "target": "test.com"}
+            ],
+            "failed_attacks": []
+        }
+        result = format_executed_commands(context)
+
+        self.assertIn("task: nmap", result)
+        self.assertIn("workflow: host_recon", result)
+        self.assertIn("shell: curl", result)

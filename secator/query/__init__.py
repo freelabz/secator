@@ -27,9 +27,10 @@ class QueryEngine:
 
     def _select_backend(self) -> QueryBackend:
         """Select appropriate backend based on context."""
-        if self.context.get('api', False):
+        drivers = self.context.get('drivers', [])
+        if 'api' in drivers:
             return ApiBackend(self.workspace_id)
-        elif self.context.get('mongodb', False):
+        elif 'mongodb' in drivers:
             return MongoDBBackend(self.workspace_id)
         else:
             return JsonBackend(self.workspace_id)

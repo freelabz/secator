@@ -22,6 +22,426 @@ from secator.runners import PythonRunner
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# PROMPT TEMPLATES
+# =============================================================================
+# All prompts are defined here with named placeholders for easy customization.
+# Use .format(**kwargs) to fill in the placeholders.
+# =============================================================================
+
+SECATOR_CHEATSHEET = """
+=== SECATOR CHEATSHEET ===
+
+TASKS (secator x <tool> <target>):
+  secator x nmap <HOST> -p 1-1000        # port scan
+  secator x httpx <URL>                  # HTTP probe
+  secator x nuclei <URL> -tags cve       # vuln scan
+  secator x ffuf <URL>/FUZZ -w wordlist  # directory fuzzing
+  secator x katana <URL>                 # web crawling
+  secator x subfinder <DOMAIN>           # subdomain enum
+
+COMMON OPTIONS:
+  -rl 10                   # rate limit (req/sec)
+  -delay 1                 # delay between requests
+  -proxy http://127.0.0.1:8080
+  -pf <profile>            # aggressive, passive, all_ports, full
+  -o json                  # output format
+
+USEFUL SCANS:
+  secator s domain <DOMAIN>              # full domain recon
+  secator s domain <DOMAIN> -pf passive  # passive only
+  secator s host <HOST>                  # host recon
+
+USEFUL WORKFLOWS:
+  secator w subdomain_recon <DOMAIN>
+  secator w url_crawl <URL>
+  secator w url_fuzz <URL>
+  secator w code_scan <PATH_OR_REPO>
+
+PIPING:
+  secator x subfinder example.com | secator x httpx | secator x nuclei
+
+REFERENCE (verify options exist before using):
+  Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
+  Configs: https://github.com/freelabz/secator/tree/main/secator/configs
+
+RULES:
+  - ALWAYS use 'secator x <tool>' instead of raw tool commands
+  - ONLY use options that exist (check task file if unsure)
+"""
+
+SECATOR_LIBRARY_REFERENCE = """
+=== SECATOR RUNNERS ===
+
+RUNNER TYPES:
+- task: Single tool execution (httpx, nmap, nuclei, ffuf, katana, subfinder, etc.)
+- workflow: Multi-task pipelines (host_recon, url_crawl, subdomain_recon, etc.)
+- scan: Comprehensive scans (host, domain, url, network, subdomain)
+
+AVAILABLE TASKS:
+httpx, nmap, nuclei, ffuf, katana, subfinder, dnsx, feroxbuster, gospider,
+dalfox, arjun, gau, waybackurls, cariddi, grype, gitleaks, semgrep, trufflehog
+
+AVAILABLE WORKFLOWS:
+host_recon, subdomain_recon, url_crawl, url_fuzz, url_vuln, url_dirsearch,
+domain_recon, code_scan, cidr_recon, url_bypass, url_secrets_hunt
+
+AVAILABLE SCANS:
+host, domain, url, network, subdomain
+
+COMMON OPTIONS:
+rate_limit, timeout, delay, proxy, threads, follow_redirect, header, output_path
+
+REFERENCE (verify options exist before using):
+Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
+Configs: https://github.com/freelabz/secator/tree/main/secator/configs
+"""
+
+# -----------------------------------------------------------------------------
+# System Prompts (used as system message for LLM)
+# -----------------------------------------------------------------------------
+
+PROMPT_SUMMARIZE = """You are a senior penetration tester analyzing security scan results.
+Your task is to:
+1. Summarize the key findings from the scan results
+2. Identify potential attack paths based on discovered vulnerabilities, services, and endpoints
+3. Prioritize findings by severity and exploitability
+4. Highlight any interesting patterns or relationships between findings
+
+## Response Format
+
+Your response MUST be formatted in Markdown with the following sections:
+
+### Executive Summary
+Brief overview of findings (2-3 sentences).
+
+### Vulnerabilities
+
+For each vulnerability found, use this format:
+
+#### [Vulnerability Name]
+| Field | Value |
+|-------|-------|
+| **Severity** | critical/high/medium/low/info |
+| **Confidence** | high/medium/low |
+| **Target(s)** | URL or host where found |
+| **CVSS Score** | X.X (if available) |
+| **Provider** | Tool that found it |
+| **ID** | CVE/vulnerability ID (if available) |
+
+**Description:** Brief description of the vulnerability and its impact.
+
+**References:**
+- Link 1
+- Link 2
+
+---
+
+### Attack Paths
+Potential exploitation chains based on the findings.
+
+### Recommendations
+Prioritized next steps for deeper testing.
+
+## Guidelines
+- Use proper Markdown formatting (headers, tables, bold, lists)
+- Include ALL vulnerabilities found, grouped by severity
+- Be thorough but concise
+- Focus on actionable intelligence
+- Include actual targets/URLs from the findings, not placeholders
+- CRITICAL: ONLY report vulnerabilities that are explicitly present in the provided findings
+- DO NOT invent, assume, or speculate about vulnerabilities without evidence from the scan data
+- If there are no vulnerabilities in the findings, say so - do not fabricate findings"""
+
+PROMPT_SUGGEST = """You are a senior penetration tester recommending next steps for a security assessment.
+Based on the scan results and targets, suggest specific Secator tasks to run next.
+
+{cheatsheet}
+
+Provide 3-5 specific secator commands with brief reasoning for each.
+Include the actual target from the findings, not placeholders."""
+
+PROMPT_ATTACK = """You are an autonomous penetration testing agent conducting authorized security testing.
+
+MISSION:
+1. Analyze findings and identify exploitable vulnerabilities
+2. Execute attacks using secator runners or shell commands
+3. Validate exploits with proof-of-concept
+4. Document findings
+
+{library_reference}
+
+RULES:
+- NEVER repeat commands already executed (check "ALREADY EXECUTED" section)
+- Each iteration must try a DIFFERENT tool, target, or approach
+- Prefer secator runners (task/workflow/scan) over shell commands
+- Only test targets explicitly provided
+- Only use options that exist for the runner
+- Stop if you encounter out-of-scope systems
+- If you've exhausted all useful actions, use "complete" or "stop"
+
+RESPONSE FORMAT:
+- Respond with ONLY a JSON object, no other text
+- Do NOT include thinking, reasoning, or commentary outside the JSON
+- Put your reasoning in the "reasoning" field inside the JSON
+- Keep reasoning brief (1-2 sentences)
+
+ACTIONS:
+
+Execute secator runner:
+{{"action": "execute", "type": "task|workflow|scan", "name": "runner_name", "targets": ["target"], "opts": {{}}, "reasoning": "brief reason", "expected_outcome": "expected result"}}
+
+Execute shell command:
+{{"action": "execute", "type": "shell", "command": "curl -s http://example.com", "target": "example.com", "reasoning": "brief reason", "expected_outcome": "expected result"}}
+
+Validate vulnerability:
+{{"action": "validate", "vulnerability": "name", "target": "url", "proof": "evidence", "severity": "critical|high|medium|low|info", "reproduction_steps": ["step1", "step2"]}}
+
+Complete (when done testing):
+{{"action": "complete", "summary": "findings summary"}}
+
+Stop (when user instruction says to stop, or no actions possible):
+{{"action": "stop", "reason": "why stopping"}}"""
+
+PROMPT_INITIAL_RECON = """You are a senior penetration tester starting a new security assessment.
+Given the target(s), suggest an initial reconnaissance plan using Secator tasks.
+
+{cheatsheet}
+
+Suggest 2-3 initial commands to start the assessment.
+Format each as: secator x <task> <target> [options]"""
+
+PROMPT_INTENT_ANALYSIS = """You are a penetration testing assistant analyzing user requests.
+
+Given the user's prompt and optional targets, determine:
+1. Which mode to use (summarize, suggest, or attack)
+2. What workspace queries to run to fetch relevant data
+
+## Available Output Types
+
+{output_types_schema}
+
+## Query Operators
+
+- Direct match: {{"field": "value"}}
+- Regex: {{"field": {{"$regex": "pattern"}}}}
+- Contains: {{"field": {{"$contains": "substring"}}}}
+- Comparison: {{"field": {{"$gt|$gte|$lt|$lte": value}}}}
+- In list: {{"field": {{"$in": ["a", "b"]}}}}
+- Not equal: {{"field": {{"$ne": value}}}}
+- Nested fields: {{"_context.workspace_name": "value"}}
+
+## Response Format (JSON)
+
+{{
+    "mode": "summarize|suggest|attack",
+    "queries": [
+        {{"_type": "vulnerability", "severity": {{"$in": ["critical", "high"]}}}},
+        {{"_type": "url", "url": {{"$contains": "login"}}}}
+    ],
+    "reasoning": "Brief explanation of why this mode and these queries"
+}}
+
+Respond with ONLY the JSON object, no additional text."""
+
+# -----------------------------------------------------------------------------
+# User Prompts (used as user message content)
+# -----------------------------------------------------------------------------
+
+PROMPT_ANALYZE_TARGETS = """Analyze these targets and suggest an initial penetration testing approach:
+
+## Targets
+{targets}
+
+Provide a brief initial assessment."""
+
+PROMPT_ANALYZE_RESULTS = """Analyze the following penetration test results and provide a summary:
+
+## Targets
+{targets}
+
+## Findings
+{context}
+
+{custom_prompt}"""
+
+PROMPT_SUGGEST_TARGETS = """You are starting a new penetration test on these targets:
+
+## Targets
+{targets}
+
+Suggest 3-5 initial secator commands to start the assessment."""
+
+PROMPT_SUGGEST_RESULTS = """Based on these penetration test results, suggest specific Secator commands to run next:
+
+## Targets
+{targets}
+
+## Current Findings
+{context}
+
+Provide 3-5 specific commands with reasoning.
+
+{custom_prompt}"""
+
+PROMPT_ATTACK_START_NO_RESULTS = """You are starting authorized penetration testing on these targets:
+
+## Targets
+{targets}
+
+## Instructions
+Start with reconnaissance to identify attack surface. Respond with a JSON action."""
+
+PROMPT_ATTACK_START_WITH_RESULTS = """You are conducting authorized penetration testing.
+
+## Current Findings
+{context}
+
+## Targets (Scope)
+{targets}
+
+## Instructions
+Analyze the findings and plan your first attack. Respond with a JSON action."""
+
+PROMPT_ATTACK_ITERATION = """{action_description}
+
+Results:
+{output}
+
+{executed_commands}
+
+Analyze the results and decide next action (execute, validate, stop, or complete).
+Remember: Do NOT repeat any command from the "ALREADY EXECUTED" list above."""
+
+PROMPT_ATTACK_SHELL_RESULT = """Shell command executed:
+{command}
+
+Output:
+{output}
+
+{executed_commands}
+
+Analyze the output and decide next action (execute, validate, stop, or complete).
+Remember: Do NOT repeat any command from the "ALREADY EXECUTED" list above."""
+
+PROMPT_ATTACK_VALIDATION = """Vulnerability validated: {vuln_name}
+
+{executed_commands}
+
+Continue testing or mark complete if all attack paths are exhausted.
+Remember: Do NOT repeat any command from the "ALREADY EXECUTED" list above."""
+
+PROMPT_ATTACK_ERROR_OUT_OF_SCOPE = """Targets {out_of_scope} are out of scope. Only test: {targets}. Choose another action.
+
+{executed_commands}"""
+
+PROMPT_ATTACK_ERROR_INVALID_OPTS = """Invalid options for {exec_type} '{name}': {invalid_opts}
+
+Valid options are: {valid_opts}
+
+Please retry with valid options only.
+
+{executed_commands}"""
+
+PROMPT_ATTACK_SKIPPED = """User skipped action: {command}. Choose another action.
+
+{executed_commands}"""
+
+PROMPT_ATTACK_REPORT = """Report noted. Continue with next action.
+
+{executed_commands}"""
+
+PROMPT_ATTACK_INVALID_JSON = """Your previous response was not valid JSON and could not be parsed.
+
+Your response was:
+{response}
+
+Please respond with a valid JSON action in one of these formats:
+- {{"action": "execute", "type": "task|workflow|scan", "name": "...", "targets": [...], "opts": {{}}, "reasoning": "...", "expected_outcome": "..."}}
+- {{"action": "execute", "type": "shell", "command": "...", "target": "...", "reasoning": "...", "expected_outcome": "..."}}
+- {{"action": "validate", "vulnerability": "...", "target": "...", "proof": "...", "severity": "...", "reproduction_steps": [...]}}
+- {{"action": "complete", "summary": "..."}}
+- {{"action": "stop", "reason": "..."}}
+
+{executed_commands}"""
+
+PROMPT_ATTACK_ERROR_UNKNOWN_TYPE = """Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell.
+
+{executed_commands}"""
+
+PROMPT_ATTACK_ERROR_UNKNOWN_ACTION = """Unknown action '{action_type}'. Use: execute, validate, report, stop, or complete.
+
+{executed_commands}"""
+
+PROMPT_ATTACK_ERROR_EXCEPTION = """Previous action failed with error: {error}. Try a different approach.
+
+{executed_commands}"""
+
+
+def get_system_prompt(mode: str) -> str:
+    """Get system prompt for a given mode."""
+    prompts = {
+        "summarize": PROMPT_SUMMARIZE,
+        "suggest": PROMPT_SUGGEST.format(cheatsheet=SECATOR_CHEATSHEET),
+        "attack": PROMPT_ATTACK.format(library_reference=SECATOR_LIBRARY_REFERENCE),
+        "initial_recon": PROMPT_INITIAL_RECON.format(cheatsheet=SECATOR_CHEATSHEET),
+    }
+    return prompts.get(mode, PROMPT_SUMMARIZE)
+
+
+# =============================================================================
+# END PROMPT TEMPLATES
+# =============================================================================
+
+
+def format_executed_commands(attack_context: dict) -> str:
+    """Format executed commands for clear display in prompts.
+
+    Creates a clear list of already-executed commands that the LLM can
+    easily reference to avoid repeating actions.
+
+    Args:
+        attack_context: Dictionary containing successful_attacks and failed_attacks
+
+    Returns:
+        Formatted string listing executed commands, or empty string if none
+    """
+    executed = []
+
+    for attack in attack_context.get("successful_attacks", []):
+        if attack.get("type") == "shell":
+            cmd = attack.get("command", "")
+            target = attack.get("target", "")
+            executed.append(f"- shell: {cmd} (target: {target})")
+        else:
+            exec_type = attack.get("type", "task")
+            name = attack.get("name", "")
+            targets = attack.get("targets", [])
+            opts = attack.get("opts", {})
+            opts_str = ", ".join(f"{k}={v}" for k, v in opts.items()) if opts else ""
+            targets_str = ", ".join(targets) if targets else ""
+            if opts_str:
+                executed.append(f"- {exec_type}: {name} on [{targets_str}] with {{{opts_str}}}")
+            else:
+                executed.append(f"- {exec_type}: {name} on [{targets_str}]")
+
+    for attack in attack_context.get("failed_attacks", []):
+        if attack.get("type") == "shell":
+            cmd = attack.get("command", "")
+            executed.append(f"- shell (FAILED): {cmd}")
+        else:
+            exec_type = attack.get("type", "task")
+            name = attack.get("name", "")
+            targets = attack.get("targets", [])
+            targets_str = ", ".join(targets) if targets else ""
+            executed.append(f"- {exec_type} (FAILED): {name} on [{targets_str}]")
+
+    if not executed:
+        return ""
+
+    return "## ALREADY EXECUTED - DO NOT REPEAT THESE COMMANDS\n" + "\n".join(executed)
+
+
 def _is_ci():
     """Check if running in CI environment."""
     return any(
@@ -411,40 +831,6 @@ def parse_intent_response(response: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-INTENT_ANALYSIS_PROMPT = """You are a penetration testing assistant analyzing user requests.
-
-Given the user's prompt and optional targets, determine:
-1. Which mode to use (summarize, suggest, or attack)
-2. What workspace queries to run to fetch relevant data
-
-## Available Output Types
-
-{output_types_schema}
-
-## Query Operators
-
-- Direct match: {{"field": "value"}}
-- Regex: {{"field": {{"$regex": "pattern"}}}}
-- Contains: {{"field": {{"$contains": "substring"}}}}
-- Comparison: {{"field": {{"$gt|$gte|$lt|$lte": value}}}}
-- In list: {{"field": {{"$in": ["a", "b"]}}}}
-- Not equal: {{"field": {{"$ne": value}}}}
-- Nested fields: {{"_context.workspace_name": "value"}}
-
-## Response Format (JSON)
-
-{{
-    "mode": "summarize|suggest|attack",
-    "queries": [
-        {{"_type": "vulnerability", "severity": {{"$in": ["critical", "high"]}}}},
-        {{"_type": "url", "url": {{"$contains": "login"}}}}
-    ],
-    "reasoning": "Brief explanation of why this mode and these queries"
-}}
-
-Respond with ONLY the JSON object, no additional text."""
-
-
 def analyze_intent(
     prompt: str,
     targets: List[str],
@@ -457,7 +843,7 @@ def analyze_intent(
     if targets:
         user_message += f"\nTargets: {', '.join(targets)}"
 
-    system_prompt = INTENT_ANALYSIS_PROMPT.format(
+    system_prompt = PROMPT_INTENT_ANALYSIS.format(
         output_types_schema=get_output_types_schema()
     )
 
@@ -617,153 +1003,6 @@ def run_secator_task(name: str, targets: List[str], options: Dict = None) -> Lis
     return results
 
 
-SECATOR_CHEATSHEET = """
-=== SECATOR CHEATSHEET ===
-
-SYNTAX:
-  secator x <task> <target> [options]     # run a task (x = execute)
-  secator w <workflow> <target> [options] # run a workflow
-  secator s <scan> <target> [options]     # run a scan
-
-EXAMPLES:
-  secator x httpx example.com             # run httpx task
-  secator x nmap example.com -p 80,443    # run nmap with port option
-  secator w url_crawl https://example.com # run url crawl workflow
-  secator s host example.com              # run host scan
-  secator s domain example.com            # run domain scan
-
-INPUT TYPES:
-  example.com              # single input
-  host1,host2,host3        # comma-separated
-  hosts.txt                # file input
-
-COMMON OPTIONS:
-  -rl 10                   # rate limit (req/sec)
-  -delay 1                 # delay between requests
-  -proxy http://127.0.0.1:8080
-  -pf <profile>            # aggressive, passive, all_ports, full
-  -o json                  # output format
-
-USEFUL SCANS:
-  secator s domain <DOMAIN>              # full domain recon
-  secator s domain <DOMAIN> -pf passive  # passive only
-  secator s host <HOST>                  # host recon
-
-USEFUL WORKFLOWS:
-  secator w subdomain_recon <DOMAIN>
-  secator w url_crawl <URL>
-  secator w url_fuzz <URL>
-  secator w code_scan <PATH_OR_REPO>
-
-PIPING:
-  secator x subfinder example.com | secator x httpx | secator x nuclei
-
-REFERENCE (verify options exist before using):
-  Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
-  Configs: https://github.com/freelabz/secator/tree/main/secator/configs
-
-RULES:
-  - ALWAYS use 'secator x <tool>' instead of raw tool commands
-  - ONLY use options that exist (check task file if unsure)
-"""
-
-SECATOR_LIBRARY_REFERENCE = """
-=== SECATOR RUNNERS ===
-
-RUNNER TYPES:
-- task: Single tool execution (httpx, nmap, nuclei, ffuf, katana, subfinder, etc.)
-- workflow: Multi-task pipelines (host_recon, url_crawl, subdomain_recon, etc.)
-- scan: Comprehensive scans (host, domain, url, network, subdomain)
-
-AVAILABLE TASKS:
-httpx, nmap, nuclei, ffuf, katana, subfinder, dnsx, feroxbuster, gospider,
-dalfox, arjun, gau, waybackurls, cariddi, grype, gitleaks, semgrep, trufflehog
-
-AVAILABLE WORKFLOWS:
-host_recon, subdomain_recon, url_crawl, url_fuzz, url_vuln, url_dirsearch,
-domain_recon, code_scan, cidr_recon, url_bypass, url_secrets_hunt
-
-AVAILABLE SCANS:
-host, domain, url, network, subdomain
-
-COMMON OPTIONS:
-rate_limit, timeout, delay, proxy, threads, follow_redirect, header, output_path
-
-REFERENCE (verify options exist before using):
-Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
-Configs: https://github.com/freelabz/secator/tree/main/secator/configs
-"""
-
-SYSTEM_PROMPTS = {
-    "summarize": """You are a senior penetration tester analyzing security scan results.
-Your task is to:
-1. Summarize the key findings from the scan results
-2. Identify potential attack paths based on discovered vulnerabilities, services, and endpoints
-3. Prioritize findings by severity and exploitability
-4. Highlight any interesting patterns or relationships between findings
-
-Format your response with clear sections:
-- **Executive Summary**: Brief overview of findings
-- **Critical Findings**: High-severity issues requiring immediate attention
-- **Attack Paths**: Potential exploitation chains
-- **Recommendations**: Next steps for deeper testing
-
-Be concise but thorough. Focus on actionable intelligence.""",
-    "suggest": f"""You are a senior penetration tester recommending next steps for a security assessment.
-Based on the scan results and targets, suggest specific Secator tasks to run next.
-
-{SECATOR_CHEATSHEET}
-
-Provide 3-5 specific secator commands with brief reasoning for each.
-Include the actual target from the findings, not placeholders.""",
-    "attack": f"""You are an autonomous penetration testing agent conducting authorized security testing.
-
-MISSION:
-1. Analyze findings and identify exploitable vulnerabilities
-2. Execute attacks using secator runners or shell commands
-3. Validate exploits with proof-of-concept
-4. Document findings
-
-{SECATOR_LIBRARY_REFERENCE}
-
-RULES:
-- Prefer secator runners (task/workflow/scan) over shell commands
-- Only test targets explicitly provided
-- Only use options that exist for the runner
-- Stop if you encounter out-of-scope systems
-
-RESPONSE FORMAT:
-- Respond with ONLY a JSON object, no other text
-- Do NOT include thinking, reasoning, or commentary outside the JSON
-- Put your reasoning in the "reasoning" field inside the JSON
-- Keep reasoning brief (1-2 sentences)
-
-ACTIONS:
-
-Execute secator runner:
-{{"action": "execute", "type": "task|workflow|scan", "name": "runner_name", "targets": ["target"], "opts": {{}}, "reasoning": "brief reason", "expected_outcome": "expected result"}}
-
-Execute shell command:
-{{"action": "execute", "type": "shell", "command": "curl -s http://example.com", "target": "example.com", "reasoning": "brief reason", "expected_outcome": "expected result"}}
-
-Validate vulnerability:
-{{"action": "validate", "vulnerability": "name", "target": "url", "proof": "evidence", "severity": "critical|high|medium|low|info", "reproduction_steps": ["step1", "step2"]}}
-
-Complete (when done testing):
-{{"action": "complete", "summary": "findings summary"}}
-
-Stop (when user instruction says to stop, or no actions possible):
-{{"action": "stop", "reason": "why stopping"}}""",
-    "initial_recon": f"""You are a senior penetration tester starting a new security assessment.
-Given the target(s), suggest an initial reconnaissance plan using Secator tasks.
-
-{SECATOR_CHEATSHEET}
-
-Suggest 2-3 initial commands to start the assessment.
-Format each as: secator x <task> <target> [options]""",
-}
-
-
 @task()
 class ai(PythonRunner):
     """AI-powered penetration testing assistant using LLM.
@@ -916,12 +1155,23 @@ class ai(PythonRunner):
         # Fetch workspace results if workspace_id available
         if workspace_id:
             from secator.query import QueryEngine
-            yield Info(message=f"Fetching results from workspace {workspace_id}...")
             engine = QueryEngine(workspace_id, context=self.context)
 
+            # Map backend names to user-friendly display
+            backend_display = {
+                "api": "remote API",
+                "mongodb": "MongoDB",
+                "json": "local JSON",
+            }
+            backend_name = backend_display.get(engine.backend.name, engine.backend.name)
+            yield Info(message=f"Querying workspace {workspace_id} ({backend_name})...")
+
             for query in queries:
+                # Format query for display
+                query_str = json.dumps(query) if query else "{}"
                 query_results = engine.search(query, limit=100)
                 results.extend(query_results)
+                yield Info(message=f"Query: {query_str} -> {len(query_results)} results")
 
             # Deduplicate by _uuid
             seen_uuids = set()
@@ -935,7 +1185,7 @@ class ai(PythonRunner):
                     unique_results.append(r)
             results = unique_results
 
-            yield Info(message=f"Fetched {len(results)} results from workspace")
+            yield Info(message=f"Total: {len(results)} unique results from workspace")
 
         if not results and not targets:
             yield Warning(
@@ -1008,29 +1258,21 @@ class ai(PythonRunner):
             yield Info(
                 message="No previous results. Providing initial reconnaissance suggestions."
             )
-            prompt = f"""Analyze these targets and suggest an initial penetration testing approach:
-
-## Targets
-{", ".join(targets)}
-
-Provide a brief assessment and initial steps."""
-            system_prompt = SYSTEM_PROMPTS["initial_recon"]
+            prompt = PROMPT_ANALYZE_TARGETS.format(targets=", ".join(targets))
+            system_prompt = get_system_prompt("initial_recon")
         else:
-            prompt = f"""Analyze the following penetration test results and provide a summary:
-
-{context_text}
-
-Identify key findings, potential attack paths, and prioritize by severity."""
-            system_prompt = SYSTEM_PROMPTS["summarize"]
-
-        # Add custom prompt if provided
-        if custom_prompt:
-            prompt += f"\n\n## Additional Instructions\n{custom_prompt}"
+            custom_section = f"\n\n## Additional Instructions\n{custom_prompt}" if custom_prompt else ""
+            prompt = PROMPT_ANALYZE_RESULTS.format(
+                targets=", ".join(targets),
+                context=context_text,
+                custom_prompt=custom_section
+            )
+            system_prompt = get_system_prompt("summarize")
 
         verbose = self.run_opts.get("verbose", False)
 
-        if verbose:
-            yield Info(message=f"[PROMPT] {_truncate(prompt)}")
+        # Always show the user prompt being sent
+        yield Info(message=f"[PROMPT] {prompt}")
 
         try:
             response = get_llm_response(
@@ -1077,27 +1319,19 @@ Identify key findings, potential attack paths, and prioritize by severity."""
 
         # Build prompt based on whether we have results
         if not results and targets:
-            prompt = f"""You are starting a new penetration test on these targets:
-
-## Targets
-{", ".join(targets)}
-
-Suggest initial reconnaissance commands to run."""
-            system_prompt = SYSTEM_PROMPTS["initial_recon"]
+            prompt = PROMPT_SUGGEST_TARGETS.format(targets=", ".join(targets))
+            system_prompt = get_system_prompt("initial_recon")
         else:
-            prompt = f"""Based on these penetration test results, suggest specific Secator commands to run next:
+            custom_section = f"\n\n## Additional Instructions\n{custom_prompt}" if custom_prompt else ""
+            prompt = PROMPT_SUGGEST_RESULTS.format(
+                targets=", ".join(targets),
+                context=context_text,
+                custom_prompt=custom_section
+            )
+            system_prompt = get_system_prompt("suggest")
 
-{context_text}
-
-Provide actionable commands with reasoning for each suggestion."""
-            system_prompt = SYSTEM_PROMPTS["suggest"]
-
-        # Add custom prompt if provided
-        if custom_prompt:
-            prompt += f"\n\n## Additional Instructions\n{custom_prompt}"
-
-        if verbose:
-            yield Info(message=f"[PROMPT] {_truncate(prompt)}")
+        # Always show the user prompt being sent
+        yield Info(message=f"[PROMPT] {prompt}")
 
         try:
             response = get_llm_response(
@@ -1228,47 +1462,34 @@ Provide actionable commands with reasoning for each suggestion."""
         if sensitive:
             targets_str = encryptor.encrypt(targets_str)
 
-        # Initial prompt - if no results, start with recon
-        if not results and targets:
-            prompt = f"""You are starting authorized penetration testing on these targets:
-
-## Targets
-{targets_str}
-
-## Instructions
-Start with reconnaissance to identify attack surface. Respond with a JSON action."""
-        else:
-            prompt = f"""You are conducting authorized penetration testing.
-
-## Current Findings
-{context_text}
-
-## Targets (Scope)
-{targets_str}
-
-## Instructions
-Analyze the findings and plan your first attack. Respond with a JSON action."""
-
         # Create custom prompt suffix to include in all prompts
         custom_prompt_suffix = ""
         if custom_prompt:
             custom_prompt_suffix = (
                 f"\n\n## IMPORTANT - User Instructions (MUST FOLLOW)\n{custom_prompt}"
             )
-            prompt += custom_prompt_suffix
+
+        # Initial prompt - if no results, start with recon
+        if not results and targets:
+            prompt = PROMPT_ATTACK_START_NO_RESULTS.format(targets=targets_str) + custom_prompt_suffix
+        else:
+            prompt = PROMPT_ATTACK_START_WITH_RESULTS.format(
+                context=context_text,
+                targets=targets_str
+            ) + custom_prompt_suffix
 
         for iteration in range(max_iterations):
             attack_context["iteration"] = iteration + 1
             yield Info(message=f"Attack iteration {iteration + 1}/{max_iterations}")
 
             try:
-                if verbose:
-                    yield Info(message=f"[PROMPT] {_truncate(prompt)}")
+                # Always show the user prompt being sent
+                yield Info(message=f"[PROMPT] {prompt}")
 
                 response = get_llm_response(
                     prompt=prompt,
                     model=model,
-                    system_prompt=SYSTEM_PROMPTS["attack"],
+                    system_prompt=get_system_prompt("attack"),
                     temperature=0.3,  # Lower temperature for attack mode
                     api_base=api_base,
                 )
@@ -1292,28 +1513,16 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                 if not action:
                     yield Warning(message="Could not parse action from LLM response")
                     # Resend previous context with the invalid response so LLM can fix it
-                    encrypted_context = json.dumps(attack_context)
+                    executed_cmds = format_executed_commands(attack_context)
                     encrypted_response = response[:2000]
                     if sensitive:
-                        encrypted_context = encryptor.encrypt(encrypted_context)
                         encrypted_response = encryptor.encrypt(encrypted_response)
-                    prompt = (
-                        f"""Your previous response was not valid JSON and could not be parsed.
-
-Your response was:
-{encrypted_response}
-
-Please respond with a valid JSON action in one of these formats:
-- {{"action": "execute", "type": "task|workflow|scan", "name": "...", "targets": [...], "opts": {{...}}, "reasoning": "...", "expected_outcome": "..."}}
-- {{"action": "execute", "type": "shell", "command": "...", "target": "...", "reasoning": "...", "expected_outcome": "..."}}
-- {{"action": "validate", "vulnerability": "...", "target": "...", "proof": "...", "severity": "...", "reproduction_steps": [...]}}
-- {{"action": "complete", "summary": "..."}}
-- {{"action": "stop", "reason": "..."}}
-
-Current attack context:
-{encrypted_context}"""
-                        + custom_prompt_suffix
-                    )
+                        if executed_cmds:
+                            executed_cmds = encryptor.encrypt(executed_cmds)
+                    prompt = PROMPT_ATTACK_INVALID_JSON.format(
+                        response=encrypted_response,
+                        executed_commands=executed_cmds
+                    ) + custom_prompt_suffix
                     continue
 
                 action_type = action.get("action", "")
@@ -1372,13 +1581,14 @@ Current attack context:
                             yield Warning(
                                 message=f"Targets out of scope: {out_of_scope}"
                             )
-                            encrypted_context = json.dumps(attack_context)
-                            if sensitive:
-                                encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = (
-                                f"Targets {out_of_scope} are out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
-                                + custom_prompt_suffix
-                            )
+                            executed_cmds = format_executed_commands(attack_context)
+                            if sensitive and executed_cmds:
+                                executed_cmds = encryptor.encrypt(executed_cmds)
+                            prompt = PROMPT_ATTACK_ERROR_OUT_OF_SCOPE.format(
+                                out_of_scope=out_of_scope,
+                                targets=targets_str,
+                                executed_commands=executed_cmds
+                            ) + custom_prompt_suffix
                             continue
 
                         # Validate options
@@ -1390,20 +1600,16 @@ Current attack context:
                             yield Warning(
                                 message=f"Invalid options for {exec_type} '{name}': {invalid_opts}"
                             )
-                            encrypted_context = json.dumps(attack_context)
-                            if sensitive:
-                                encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = (
-                                f"""Invalid options for {exec_type} '{name}': {invalid_opts}
-
-Valid options are: {valid_opt_names}
-
-Please retry with valid options only.
-
-Context:
-{encrypted_context}"""
-                                + custom_prompt_suffix
-                            )
+                            executed_cmds = format_executed_commands(attack_context)
+                            if sensitive and executed_cmds:
+                                executed_cmds = encryptor.encrypt(executed_cmds)
+                            prompt = PROMPT_ATTACK_ERROR_INVALID_OPTS.format(
+                                exec_type=exec_type,
+                                name=name,
+                                invalid_opts=invalid_opts,
+                                valid_opts=valid_opt_names,
+                                executed_commands=executed_cmds
+                            ) + custom_prompt_suffix
                             continue
 
                         # Build CLI command with options
@@ -1434,13 +1640,13 @@ Context:
 
                         if not should_run:
                             yield Info(message=f"Skipped: {cli_cmd}")
-                            encrypted_context = json.dumps(attack_context)
-                            if sensitive:
-                                encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = (
-                                f"User skipped action: {cli_cmd}. Choose another action.\n\nContext:\n{encrypted_context}"
-                                + custom_prompt_suffix
-                            )
+                            executed_cmds = format_executed_commands(attack_context)
+                            if sensitive and executed_cmds:
+                                executed_cmds = encryptor.encrypt(executed_cmds)
+                            prompt = PROMPT_ATTACK_SKIPPED.format(
+                                command=cli_cmd,
+                                executed_commands=executed_cmds
+                            ) + custom_prompt_suffix
                             continue
 
                         # Update command if modified (e.g., rate limiting added)
@@ -1470,7 +1676,7 @@ Context:
                                 exec_type, name, action_targets, valid_opts
                             ):
                                 runner_results.append(result)
-                                yield result
+                                self.add_result(result, print=False)
 
                             # Format results for LLM context
                             result_output = format_results_for_llm(
@@ -1490,25 +1696,19 @@ Context:
                             }
                         )
 
-                        # Build next prompt
+                        # Build next prompt with executed commands section
+                        executed_cmds = format_executed_commands(attack_context)
                         encrypted_output = result_output[:4000]
-                        encrypted_context = json.dumps(attack_context)
                         if sensitive:
                             encrypted_output = encryptor.encrypt(encrypted_output)
-                            encrypted_context = encryptor.encrypt(encrypted_context)
+                            if executed_cmds:
+                                executed_cmds = encryptor.encrypt(executed_cmds)
 
-                        prompt = (
-                            f"""{exec_type.capitalize()} '{name}' executed on {action_targets}.
-
-Results:
-{encrypted_output}
-
-Previous context:
-{encrypted_context}
-
-Analyze the results and decide next action (execute, validate, stop, or complete)."""
-                            + custom_prompt_suffix
-                        )
+                        prompt = PROMPT_ATTACK_ITERATION.format(
+                            action_description=f"{exec_type.capitalize()} '{name}' executed on {action_targets}.",
+                            output=encrypted_output,
+                            executed_commands=executed_cmds
+                        ) + custom_prompt_suffix
 
                     # Handle shell commands (curl, wget, nmap direct)
                     elif exec_type == "shell":
@@ -1520,13 +1720,14 @@ Analyze the results and decide next action (execute, validate, stop, or complete
                             yield Warning(
                                 message=f"Target {target} is out of scope, skipping"
                             )
-                            encrypted_context = json.dumps(attack_context)
-                            if sensitive:
-                                encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = (
-                                f"Target {target} was out of scope. Only test: {targets_str}. Choose another action.\n\nContext:\n{encrypted_context}"
-                                + custom_prompt_suffix
-                            )
+                            executed_cmds = format_executed_commands(attack_context)
+                            if sensitive and executed_cmds:
+                                executed_cmds = encryptor.encrypt(executed_cmds)
+                            prompt = PROMPT_ATTACK_ERROR_OUT_OF_SCOPE.format(
+                                out_of_scope=target,
+                                targets=targets_str,
+                                executed_commands=executed_cmds
+                            ) + custom_prompt_suffix
                             continue
 
                         # Safety check for shell commands
@@ -1544,13 +1745,13 @@ Analyze the results and decide next action (execute, validate, stop, or complete
 
                         if not should_run:
                             yield Info(message=f"Skipped: {command}")
-                            encrypted_context = json.dumps(attack_context)
-                            if sensitive:
-                                encrypted_context = encryptor.encrypt(encrypted_context)
-                            prompt = (
-                                f"User skipped command: {command}. Choose another action.\n\nContext:\n{encrypted_context}"
-                                + custom_prompt_suffix
-                            )
+                            executed_cmds = format_executed_commands(attack_context)
+                            if sensitive and executed_cmds:
+                                executed_cmds = encryptor.encrypt(executed_cmds)
+                            prompt = PROMPT_ATTACK_SKIPPED.format(
+                                command=command,
+                                executed_commands=executed_cmds
+                            ) + custom_prompt_suffix
                             continue
 
                         # Update command if modified (e.g., rate limiting added)
@@ -1584,35 +1785,31 @@ Analyze the results and decide next action (execute, validate, stop, or complete
                             }
                         )
 
-                        # Encrypt for next prompt
+                        # Build next prompt with executed commands section
+                        executed_cmds = format_executed_commands(attack_context)
                         encrypted_output = result_output[:4000]
                         encrypted_command = command
-                        encrypted_context = json.dumps(attack_context)
                         if sensitive:
                             encrypted_output = encryptor.encrypt(encrypted_output)
                             encrypted_command = encryptor.encrypt(encrypted_command)
-                            encrypted_context = encryptor.encrypt(encrypted_context)
+                            if executed_cmds:
+                                executed_cmds = encryptor.encrypt(executed_cmds)
 
-                        prompt = (
-                            f"""Shell command executed:
-{encrypted_command}
-
-Output:
-{encrypted_output}
-
-Previous context:
-{encrypted_context}
-
-Analyze the output and decide next action (execute, validate, stop, or complete)."""
-                            + custom_prompt_suffix
-                        )
+                        prompt = PROMPT_ATTACK_SHELL_RESULT.format(
+                            command=encrypted_command,
+                            output=encrypted_output,
+                            executed_commands=executed_cmds
+                        ) + custom_prompt_suffix
 
                     else:
                         yield Warning(message=f"Unknown execute type: {exec_type}")
-                        prompt = (
-                            f"Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell."
-                            + custom_prompt_suffix
-                        )
+                        executed_cmds = format_executed_commands(attack_context)
+                        if sensitive and executed_cmds:
+                            executed_cmds = encryptor.encrypt(executed_cmds)
+                        prompt = PROMPT_ATTACK_ERROR_UNKNOWN_TYPE.format(
+                            exec_type=exec_type,
+                            executed_commands=executed_cmds
+                        ) + custom_prompt_suffix
                         continue
 
                 elif action_type == "validate":
@@ -1645,20 +1842,15 @@ Analyze the output and decide next action (execute, validate, stop, or complete)
                         },
                     )
 
-                    # Encrypt context for LLM prompt if sensitive encryption enabled
-                    encrypted_context = json.dumps(attack_context)
-                    if sensitive:
-                        encrypted_context = encryptor.encrypt(encrypted_context)
+                    # Build next prompt with executed commands section
+                    executed_cmds = format_executed_commands(attack_context)
+                    if sensitive and executed_cmds:
+                        executed_cmds = encryptor.encrypt(executed_cmds)
 
-                    prompt = (
-                        f"""Vulnerability validated: {vuln_name}
-
-Context:
-{encrypted_context}
-
-Continue testing or mark complete if all attack paths are exhausted."""
-                        + custom_prompt_suffix
-                    )
+                    prompt = PROMPT_ATTACK_VALIDATION.format(
+                        vuln_name=vuln_name,
+                        executed_commands=executed_cmds
+                    ) + custom_prompt_suffix
 
                 elif action_type == "report":
                     yield Tag(
@@ -1668,35 +1860,37 @@ Continue testing or mark complete if all attack paths are exhausted."""
                         category="ai",
                         extra_data=attack_context,
                     )
-                    # Encrypt context for LLM prompt if sensitive encryption enabled
-                    encrypted_context = json.dumps(attack_context)
-                    if sensitive:
-                        encrypted_context = encryptor.encrypt(encrypted_context)
-                    prompt = (
-                        f"Report noted. Continue with next action.\n\nContext:\n{encrypted_context}"
-                        + custom_prompt_suffix
-                    )
+                    # Build next prompt with executed commands section
+                    executed_cmds = format_executed_commands(attack_context)
+                    if sensitive and executed_cmds:
+                        executed_cmds = encryptor.encrypt(executed_cmds)
+                    prompt = PROMPT_ATTACK_REPORT.format(
+                        executed_commands=executed_cmds
+                    ) + custom_prompt_suffix
 
                 else:
                     yield Warning(message=f"Unknown action type: {action_type}")
-                    prompt = (
-                        f"Unknown action '{action_type}'. Use: execute, validate, report, stop, or complete."
-                        + custom_prompt_suffix
-                    )
+                    executed_cmds = format_executed_commands(attack_context)
+                    if sensitive and executed_cmds:
+                        executed_cmds = encryptor.encrypt(executed_cmds)
+                    prompt = PROMPT_ATTACK_ERROR_UNKNOWN_ACTION.format(
+                        action_type=action_type,
+                        executed_commands=executed_cmds
+                    ) + custom_prompt_suffix
 
             except Exception as e:
                 yield Error(
                     message=f"Attack iteration {iteration + 1} failed: {str(e)}"
                 )
                 attack_context["failed_attacks"].append(str(e))
-                # Encrypt context for LLM prompt if sensitive encryption enabled
-                encrypted_context = json.dumps(attack_context)
-                if sensitive:
-                    encrypted_context = encryptor.encrypt(encrypted_context)
-                prompt = (
-                    f"Previous action failed with error: {str(e)}. Try a different approach.\n\nContext:\n{encrypted_context}"
-                    + custom_prompt_suffix
-                )
+                # Build error prompt with executed commands
+                executed_cmds = format_executed_commands(attack_context)
+                if sensitive and executed_cmds:
+                    executed_cmds = encryptor.encrypt(executed_cmds)
+                prompt = PROMPT_ATTACK_ERROR_EXCEPTION.format(
+                    error=str(e),
+                    executed_commands=executed_cmds
+                ) + custom_prompt_suffix
 
         # Final summary if we hit max iterations
         if attack_context["iteration"] >= max_iterations:
@@ -1872,10 +2066,10 @@ Continue testing or mark complete if all attack paths are exhausted."""
 
         # Set minimal options for running embedded
         run_opts = {
-            "print_item": False,
+            "print_item": True,
             "print_line": False,
-            "print_cmd": False,
-            "print_progress": False,
+            "print_cmd": True,
+            "print_progress": True,
             "print_start": False,
             "print_end": False,
             "print_target": False,

@@ -256,6 +256,7 @@ def register_runner(cli_endpoint, config):
 		drivers = driver.split(',') if driver else []
 		drivers = list(set(CONFIG.drivers.defaults + drivers))
 		supported_drivers = AVAILABLE_DRIVERS
+		context['drivers'] = []
 		for driver in drivers:
 			if driver in supported_drivers:
 				if not ADDONS_ENABLED[driver]:
@@ -267,13 +268,14 @@ def register_runner(cli_endpoint, config):
 					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
 					sys.exit(1)
 				hooks.append(driver_hooks)
+				context['drivers'].append(driver)
 			else:
 				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
 				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
 				console.print(f'Supported drivers: {supported_drivers_str}')
 				sys.exit(1)
 
-		if driver == 'api':
+		if 'api' in context['drivers']:
 			try:
 				from secator.hooks.api import get_workspace_name
 				workspace_name = get_workspace_name(context.get('workspace_id'))
