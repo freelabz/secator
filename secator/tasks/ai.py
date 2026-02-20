@@ -23,6 +23,63 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# PROMPT LOADING UTILITIES
+# =============================================================================
+
+def load_prompt_from_file_or_text(prompt_value: str) -> Tuple[str, bool, bool]:
+    """Load prompt from file path or return as-is if it's direct text.
+
+    Args:
+        prompt_value: Either a file path or direct prompt text.
+
+    Returns:
+        Tuple of (content, is_from_file, is_markdown)
+    """
+    if not prompt_value:
+        return "", False, False
+
+    # Check if it's a file path that exists
+    expanded_path = os.path.expanduser(prompt_value)
+    if os.path.isfile(expanded_path):
+        try:
+            with open(expanded_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            is_markdown = expanded_path.lower().endswith('.md')
+            return content, True, is_markdown
+        except (IOError, OSError) as e:
+            logger.warning(f"Could not read prompt file {expanded_path}: {e}")
+            # Fall through to return as text
+            pass
+
+    return prompt_value, False, False
+
+
+def format_prompt_for_display(content: str, is_markdown: bool = False) -> str:
+    """Format prompt content for console display.
+
+    Args:
+        content: The prompt content.
+        is_markdown: Whether the content is markdown.
+
+    Returns:
+        Formatted string for display.
+    """
+    from secator.output_types.tag import is_markdown as detect_markdown, render_markdown_for_rich
+    from secator.utils import rich_to_ansi
+
+    # Auto-detect markdown if not explicitly specified
+    if not is_markdown:
+        is_markdown = detect_markdown(content)
+
+    if is_markdown:
+        # Render markdown for rich console output
+        rendered = render_markdown_for_rich(content)
+        return f"\n{rendered}"
+    else:
+        return content
+
+
+# =============================================================================
 # PROMPT TEMPLATES
 # =============================================================================
 # All prompts are defined here with named placeholders for easy customization.
@@ -1029,7 +1086,7 @@ class ai(PythonRunner):
             "type": str,
             "default": "",
             "short": "p",
-            "help": "Natural language prompt for AI analysis",
+            "help": "Natural language prompt or path to a text/markdown file",
         },
         "mode": {
             "type": str,
@@ -1112,7 +1169,10 @@ class ai(PythonRunner):
             return
 
         # Extract options
-        prompt = self.run_opts.get("prompt", "")
+        prompt_input = self.run_opts.get("prompt", "")
+        prompt, prompt_from_file, prompt_is_markdown = load_prompt_from_file_or_text(prompt_input)
+        if prompt_from_file:
+            yield Info(message=f"Loaded prompt from file: {prompt_input}")
         mode_override = self.run_opts.get("mode", "")
         model = self.run_opts.get("model", "gpt-4o-mini")
         # Use user's model for intent analysis if intent_model not explicitly set
@@ -1251,7 +1311,10 @@ class ai(PythonRunner):
         api_base: str = None,
     ) -> Generator:
         """Summarize results and identify attack paths."""
-        custom_prompt = self.run_opts.get("prompt", "")
+        custom_prompt_input = self.run_opts.get("prompt", "")
+        custom_prompt, prompt_from_file, prompt_is_markdown = load_prompt_from_file_or_text(custom_prompt_input)
+        if prompt_from_file:
+            yield Info(message=f"Loaded prompt from file: {custom_prompt_input}")
 
         # If no results but have targets, suggest initial recon
         if not results and targets:
@@ -1272,7 +1335,12 @@ class ai(PythonRunner):
         verbose = self.run_opts.get("verbose", False)
 
         # Always show the user prompt being sent
-        yield Info(message=f"[PROMPT] {prompt}")
+        # Format markdown content properly for display
+        if prompt_is_markdown and custom_prompt:
+            formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
+            yield Info(message=f"[PROMPT] {prompt}\n[CUSTOM PROMPT]{formatted_custom}")
+        else:
+            yield Info(message=f"[PROMPT] {prompt}")
 
         try:
             response = get_llm_response(
@@ -1315,7 +1383,10 @@ class ai(PythonRunner):
         auto_yes = self.run_opts.get("yes", False)
         in_ci = _is_ci()
         verbose = self.run_opts.get("verbose", False)
-        custom_prompt = self.run_opts.get("prompt", "")
+        custom_prompt_input = self.run_opts.get("prompt", "")
+        custom_prompt, prompt_from_file, prompt_is_markdown = load_prompt_from_file_or_text(custom_prompt_input)
+        if prompt_from_file:
+            yield Info(message=f"Loaded prompt from file: {custom_prompt_input}")
 
         # Build prompt based on whether we have results
         if not results and targets:
@@ -1331,7 +1402,12 @@ class ai(PythonRunner):
             system_prompt = get_system_prompt("suggest")
 
         # Always show the user prompt being sent
-        yield Info(message=f"[PROMPT] {prompt}")
+        # Format markdown content properly for display
+        if prompt_is_markdown and custom_prompt:
+            formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
+            yield Info(message=f"[PROMPT] {prompt}\n[CUSTOM PROMPT]{formatted_custom}")
+        else:
+            yield Info(message=f"[PROMPT] {prompt}")
 
         try:
             response = get_llm_response(
@@ -1440,7 +1516,14 @@ class ai(PythonRunner):
         max_iterations = int(self.run_opts.get("max_iterations", 10))
         dry_run = self.run_opts.get("dry_run", False)
         verbose = self.run_opts.get("verbose", False)
-        custom_prompt = self.run_opts.get("prompt", "")
+        custom_prompt_input = self.run_opts.get("prompt", "")
+        custom_prompt, prompt_from_file, prompt_is_markdown = load_prompt_from_file_or_text(custom_prompt_input)
+        if prompt_from_file:
+            yield Info(message=f"Loaded prompt from file: {custom_prompt_input}")
+            # Show formatted markdown content
+            if prompt_is_markdown:
+                formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
+                yield Info(message=f"[CUSTOM PROMPT]{formatted_custom}")
 
         yield Info(
             message=f"Starting attack mode (max {max_iterations} iterations, dry_run={dry_run})"

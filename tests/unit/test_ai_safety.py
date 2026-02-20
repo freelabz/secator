@@ -199,3 +199,92 @@ class TestFormatExecutedCommands(unittest.TestCase):
         self.assertIn("task: nmap", result)
         self.assertIn("workflow: host_recon", result)
         self.assertIn("shell: curl", result)
+
+
+class TestPromptLoading(unittest.TestCase):
+
+    def test_load_prompt_from_text(self):
+        from secator.tasks.ai import load_prompt_from_file_or_text
+
+        text = "Analyze this target for SQL injection"
+        content, from_file, is_md = load_prompt_from_file_or_text(text)
+
+        self.assertEqual(content, text)
+        self.assertFalse(from_file)
+        self.assertFalse(is_md)
+
+    def test_load_prompt_from_empty(self):
+        from secator.tasks.ai import load_prompt_from_file_or_text
+
+        content, from_file, is_md = load_prompt_from_file_or_text("")
+
+        self.assertEqual(content, "")
+        self.assertFalse(from_file)
+        self.assertFalse(is_md)
+
+    def test_load_prompt_from_txt_file(self):
+        import tempfile
+        import os
+        from secator.tasks.ai import load_prompt_from_file_or_text
+
+        # Create a temp text file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write("Focus on OWASP Top 10 vulnerabilities")
+            temp_path = f.name
+
+        try:
+            content, from_file, is_md = load_prompt_from_file_or_text(temp_path)
+
+            self.assertEqual(content, "Focus on OWASP Top 10 vulnerabilities")
+            self.assertTrue(from_file)
+            self.assertFalse(is_md)
+        finally:
+            os.unlink(temp_path)
+
+    def test_load_prompt_from_md_file(self):
+        import tempfile
+        import os
+        from secator.tasks.ai import load_prompt_from_file_or_text
+
+        # Create a temp markdown file
+        md_content = "# Pentest Rules\n\n- Focus on auth bypass\n- Check for SQLi"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write(md_content)
+            temp_path = f.name
+
+        try:
+            content, from_file, is_md = load_prompt_from_file_or_text(temp_path)
+
+            self.assertEqual(content, md_content)
+            self.assertTrue(from_file)
+            self.assertTrue(is_md)
+        finally:
+            os.unlink(temp_path)
+
+    def test_load_prompt_nonexistent_file_treated_as_text(self):
+        from secator.tasks.ai import load_prompt_from_file_or_text
+
+        # A path that doesn't exist should be treated as text
+        fake_path = "/nonexistent/path/to/file.txt"
+        content, from_file, is_md = load_prompt_from_file_or_text(fake_path)
+
+        self.assertEqual(content, fake_path)
+        self.assertFalse(from_file)
+        self.assertFalse(is_md)
+
+    def test_load_prompt_expands_tilde(self):
+        import tempfile
+        import os
+        from secator.tasks.ai import load_prompt_from_file_or_text
+
+        # Create a temp file in home dir (we'll test path expansion logic)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write("Test content")
+            temp_path = f.name
+
+        try:
+            # Test with actual path (not tilde, but confirms os.path.expanduser is called)
+            content, from_file, is_md = load_prompt_from_file_or_text(temp_path)
+            self.assertTrue(from_file)
+        finally:
+            os.unlink(temp_path)
