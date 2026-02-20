@@ -294,3 +294,35 @@ class TestApiBackend(unittest.TestCase):
 
         self.assertEqual(base['_tagged'], True)
         self.assertEqual(base['_context.workspace_id'], 'ws123')
+
+
+class TestQueryEngine(unittest.TestCase):
+
+    def test_query_engine_selects_json_by_default(self):
+        from secator.query import QueryEngine
+        from secator.query.json import JsonBackend
+
+        engine = QueryEngine(workspace_id='ws123', context={})
+        self.assertIsInstance(engine.backend, JsonBackend)
+
+    def test_query_engine_selects_api(self):
+        from secator.query import QueryEngine
+        from secator.query.api import ApiBackend
+
+        engine = QueryEngine(workspace_id='ws123', context={'api': True})
+        self.assertIsInstance(engine.backend, ApiBackend)
+
+    def test_query_engine_selects_mongodb(self):
+        from secator.query import QueryEngine
+        from secator.query.mongodb import MongoDBBackend
+
+        engine = QueryEngine(workspace_id='ws123', context={'mongodb': True})
+        self.assertIsInstance(engine.backend, MongoDBBackend)
+
+    def test_query_engine_api_takes_priority(self):
+        from secator.query import QueryEngine
+        from secator.query.api import ApiBackend
+
+        # When both are true, API takes priority
+        engine = QueryEngine(workspace_id='ws123', context={'api': True, 'mongodb': True})
+        self.assertIsInstance(engine.backend, ApiBackend)
