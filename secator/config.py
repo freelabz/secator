@@ -202,6 +202,8 @@ class VulnersAddon(StrictModel):
 
 class AI(StrictModel):
 	"""AI task configuration."""
+	enabled: bool = False
+	api_key: str = ''
 	default_model: str = 'gpt-4o-mini'
 	intent_model: str = 'gpt-4o-mini'
 	execution_model: str = 'gpt-4o-mini'

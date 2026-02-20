@@ -163,8 +163,17 @@ class TestAIConfig(unittest.TestCase):
 		from secator.config import Config
 		config = Config.parse()
 		self.assertIsNotNone(config.ai)
+		# Test enabled and api_key fields (following addon pattern)
+		self.assertEqual(config.ai.enabled, False)
+		self.assertEqual(config.ai.api_key, '')
+		# Test model configuration
 		self.assertEqual(config.ai.default_model, 'gpt-4o-mini')
 		self.assertEqual(config.ai.intent_model, 'gpt-4o-mini')
+		self.assertEqual(config.ai.execution_model, 'gpt-4o-mini')
+		# Test generation parameters
+		self.assertEqual(config.ai.temperature, 0.7)
+		self.assertEqual(config.ai.max_tokens, 4096)
+		# Test other settings
 		self.assertEqual(config.ai.max_results, 500)
 		self.assertEqual(config.ai.encrypt_pii, True)
 
