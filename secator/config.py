@@ -200,6 +200,17 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
+class AI(StrictModel):
+	"""AI task configuration."""
+	default_model: str = 'gpt-4o-mini'
+	intent_model: str = 'gpt-4o-mini'
+	execution_model: str = 'gpt-4o-mini'
+	temperature: float = 0.7
+	max_tokens: int = 4096
+	max_results: int = 500
+	encrypt_pii: bool = True
+
+
 class Providers(StrictModel):
 	defaults: Dict[str, str] = {
 		'cve': 'circl',
@@ -218,6 +229,7 @@ class ApiAddon(StrictModel):
 	runner_update_endpoint: str = 'runner/{runner_id}'
 	finding_create_endpoint: str = 'findings'
 	finding_update_endpoint: str = 'finding/{finding_id}'
+	finding_search_endpoint: str = 'findings/_search'
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
 
 
@@ -248,6 +260,7 @@ class SecatorConfig(StrictModel):
 	security: Security = Security()
 	providers: Providers = Providers()
 	offline_mode: bool = False
+	ai: AI = AI()
 
 
 class Config(DotMap):
