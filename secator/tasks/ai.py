@@ -37,6 +37,106 @@ def _is_ci():
     )
 
 
+TOOL_RATE_FLAGS = {
+    'nuclei': '-rl {rate}',
+    'httpx': '-rl {rate}',
+    'nmap': '--max-rate {rate}',
+    'ffuf': '-rate {rate}',
+    'feroxbuster': '--rate-limit {rate}',
+    'gobuster': '--delay {delay}ms',
+    'dirsearch': '--delay {delay}',
+    'sqlmap': '--delay {delay}',
+}
+
+
+def add_rate_limit(command: str, rate: int) -> str:
+    """Add rate limit to command based on tool."""
+    for tool, flag_template in TOOL_RATE_FLAGS.items():
+        if f'secator x {tool}' in command or f' {tool} ' in command:
+            # Check if rate flag already present
+            flag_prefix = flag_template.split()[0]
+            if flag_prefix in command:
+                return command
+
+            # Calculate delay for tools that use delay instead of rate
+            delay = max(1, int(1000 / rate)) if 'delay' in flag_template else rate
+            flag = flag_template.format(rate=rate, delay=delay)
+
+            return f"{command} {flag}"
+
+    return command
+
+
+def check_action_safety(
+    action: dict,
+    auto_yes: bool,
+    in_ci: bool
+) -> tuple:
+    """Check if action is safe to run, prompt if needed.
+
+    Returns:
+        tuple: (should_run: bool, modified_command: str)
+    """
+    destructive = action.get('destructive', False)
+    aggressive = action.get('aggressive', False)
+    command = action.get('command', '')
+
+    # Auto-approve if --yes flag or CI environment
+    if auto_yes or in_ci:
+        return True, command
+
+    # Non-destructive, non-aggressive: auto-approve
+    if not destructive and not aggressive:
+        return True, command
+
+    # Handle destructive actions
+    if destructive:
+        from secator.rich import console
+        console.print(f"[bold red]⚠ Destructive action:[/] {command}")
+        console.print(f"[dim]Reasoning: {action.get('reasoning', 'N/A')}[/]")
+
+        if not confirm_with_timeout("Execute this destructive action?", default=False):
+            return False, command
+
+    # Handle aggressive actions
+    if aggressive:
+        from secator.rich import console
+        console.print(f"[bold orange1]⚠ Aggressive action (may trigger detection):[/] {command}")
+
+        choice = _prompt_aggressive_action()
+
+        if choice == 'skip':
+            return False, command
+        elif choice == 'limit':
+            import click
+            rate_limit = click.prompt("Rate limit (requests/sec)", type=int, default=10)
+            command = add_rate_limit(command, rate_limit)
+            return True, command
+        # else: 'run' - continue as-is
+
+    return True, command
+
+
+def _prompt_aggressive_action() -> str:
+    """Prompt user for aggressive action handling."""
+    import click
+    from secator.rich import console
+
+    console.print("[R]un as-is / [S]kip / [L]imit rate: ", end='')
+
+    while True:
+        choice = click.getchar().lower()
+        if choice == 'r':
+            console.print('Run')
+            return 'run'
+        elif choice == 's':
+            console.print('Skip')
+            return 'skip'
+        elif choice == 'l':
+            console.print('Limit')
+            return 'limit'
+
+
 def confirm_with_timeout(message, default=True, timeout=None):
     """Prompt user with optional timeout."""
     if timeout is None:
