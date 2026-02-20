@@ -41,15 +41,17 @@ class QueryBackend(ABC):
 
         return merged
 
-    def search(self, query: dict, limit: int = None) -> List[Dict[str, Any]]:
+    def search(self, query: dict, limit: int = None, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Execute query with enforced base query."""
         if limit is None:
             limit = self.DEFAULT_LIMIT
+        if exclude_fields is None:
+            exclude_fields = []
         safe_query = self._merge_query(query)
-        return self._execute_search(safe_query, limit)
+        return self._execute_search(safe_query, limit, exclude_fields)
 
     @abstractmethod
-    def _execute_search(self, query: dict, limit: int) -> List[Dict[str, Any]]:
+    def _execute_search(self, query: dict, limit: int, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Backend-specific search implementation."""
         pass
 

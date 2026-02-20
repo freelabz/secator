@@ -97,13 +97,16 @@ class JsonBackend(QueryBackend):
 
         return findings
 
-    def _execute_search(self, query: dict, limit: int = 100) -> List[Dict[str, Any]]:
+    def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
         """Search findings matching query."""
         findings = self._load_all_findings()
 
         matched = []
         for finding in findings:
             if match_query(finding, query):
+                # Remove excluded fields
+                if exclude_fields:
+                    finding = {k: v for k, v in finding.items() if k not in exclude_fields}
                 matched.append(finding)
                 if len(matched) >= limit:
                     break

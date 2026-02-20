@@ -143,6 +143,10 @@ class Drivers(StrictModel):
 	defaults: List[str] = []
 
 
+class Workspace(StrictModel):
+	default: str = ''
+
+
 class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
@@ -258,6 +262,7 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
+	workspace: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()

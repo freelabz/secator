@@ -27,13 +27,18 @@ class MongoDBBackend(QueryBackend):
             self._client = get_mongodb_client()
         return self._client
 
-    def _execute_search(self, query: dict, limit: int = 100) -> List[Dict[str, Any]]:
+    def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
         """Search MongoDB for findings matching query."""
         try:
             client = self._get_client()
             db = client.main
 
-            cursor = db.findings.find(query).limit(limit)
+            # Build projection to exclude fields
+            projection = None
+            if exclude_fields:
+                projection = {field: 0 for field in exclude_fields}
+
+            cursor = db.findings.find(query, projection).limit(limit)
 
             results = []
             for doc in cursor:

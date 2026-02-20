@@ -53,16 +53,17 @@ class Action(OutputType):
 		"""Render execute action."""
 		icon = self._get_type_icon()
 		type_color = self._get_type_color()
+		icon_prefix = f'{icon} ' if icon else ''
 
 		# Build command preview
 		if self.action_type == 'shell':
 			cmd = _s(self.name)
-			s = rf'{icon} \[[bold {type_color}]SHELL[/]] [bold white]{cmd}[/]'
+			s = rf'{icon_prefix}\[[bold {type_color}]SHELL[/]] [bold white]{cmd}[/]'
 		else:
 			targets_str = ', '.join(self.targets[:3])
 			if len(self.targets) > 3:
 				targets_str += f' (+{len(self.targets) - 3})'
-			s = rf'{icon} \[[bold {type_color}]{self.action_type.upper()}[/]] [bold white]{self.name}[/] [dim]→[/] [cyan]{targets_str}[/]'
+			s = rf'{icon_prefix}\[[bold {type_color}]{self.action_type.upper()}[/]] [bold white]{self.name}[/] [dim]→[/] [cyan]{targets_str}[/]'
 
 		# Add opts if present
 		if self.opts:
@@ -73,10 +74,7 @@ class Action(OutputType):
 
 		# Add reasoning
 		if self.reasoning:
-			reasoning = _s(self.reasoning[:200])
-			if len(self.reasoning) > 200:
-				reasoning += '...'
-			s += f'\n    [dim]reason:[/] [italic]{reasoning}[/]'
+			s += f'\n    [dim]reason:[/] [italic]{_s(self.reasoning)}[/]'
 
 		return rich_to_ansi(s)
 

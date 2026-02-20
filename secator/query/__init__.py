@@ -35,9 +35,9 @@ class QueryEngine:
         else:
             return JsonBackend(self.workspace_id)
 
-    def search(self, query: dict, limit: int = 100) -> List[Dict[str, Any]]:
+    def search(self, query: dict, limit: int = 100, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Search for findings matching query."""
-        return self.backend.search(query, limit)
+        return self.backend.search(query, limit, exclude_fields)
 
     def count(self, query: dict) -> int:
         """Count findings matching query."""

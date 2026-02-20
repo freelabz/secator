@@ -47,10 +47,12 @@ class ApiBackend(QueryBackend):
         response.raise_for_status()
         return response.json()
 
-    def _execute_search(self, query: dict, limit: int = 100) -> List[Dict[str, Any]]:
+    def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
         """Search API for findings matching query."""
         try:
             endpoint = f"{self.search_endpoint}?skip=0&limit={limit}"
+            if exclude_fields:
+                endpoint += f"&exclude_fields={','.join(exclude_fields)}"
             result = self._make_request('POST', endpoint, query)
 
             if isinstance(result, list):

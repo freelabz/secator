@@ -16,7 +16,7 @@ import click
 from dataclasses import fields
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Action, Error, Info, Tag, Vulnerability, Warning, FINDING_TYPES
+from secator.output_types import Action, AI, Error, Info, Tag, Vulnerability, Warning, FINDING_TYPES
 from secator.runners import PythonRunner
 
 logger = logging.getLogger(__name__)
@@ -135,10 +135,6 @@ RUNNER TYPES:
 - workflow: Multi-task pipelines (host_recon, url_crawl, subdomain_recon, etc.)
 - scan: Comprehensive scans (host, domain, url, network, subdomain)
 
-AVAILABLE TASKS:
-httpx, nmap, nuclei, ffuf, katana, subfinder, dnsx, feroxbuster, gospider,
-dalfox, arjun, gau, waybackurls, cariddi, grype, gitleaks, semgrep, trufflehog
-
 AVAILABLE WORKFLOWS:
 host_recon, subdomain_recon, url_crawl, url_fuzz, url_vuln, url_dirsearch,
 domain_recon, code_scan, cidr_recon, url_bypass, url_secrets_hunt
@@ -146,12 +142,42 @@ domain_recon, code_scan, cidr_recon, url_bypass, url_secrets_hunt
 AVAILABLE SCANS:
 host, domain, url, network, subdomain
 
-COMMON OPTIONS:
-rate_limit, timeout, delay, proxy, threads, follow_redirect, header, output_path
+=== TASK OPTIONS (use ONLY these options) ===
 
-REFERENCE (verify options exist before using):
-Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
-Configs: https://github.com/freelabz/secator/tree/main/secator/configs
+httpx:
+  screenshot, system_chrome, headless_options, tech_detect, follow_redirect,
+  follow_host_redirects, rate_limit, threads, timeout, delay, proxy, header,
+  filter_codes, match_codes, store_responses, tls_grab, favicon, jarm, asn, cdn
+
+nmap:
+  ports, top_ports, tcp_connect, tcp_syn, udp_scan, version_detection,
+  os_detection, script, skip_host_discovery, output_path, rate_limit, timeout
+
+nuclei:
+  tags, severity, templates, exclude_tags, rate_limit, threads, timeout,
+  proxy, header, follow_redirect, retries, automatic_scan
+
+katana:
+  depth, js_crawl, headless, known_files, form_extraction, scope_in_depth,
+  extension_filter, rate_limit, timeout, delay, proxy, header
+
+ffuf:
+  wordlist, method, data, header, follow_redirect, rate_limit, threads,
+  timeout, filter_codes, match_codes, filter_size, match_size
+
+subfinder:
+  sources, rate_limit, timeout, threads, recursive
+
+dalfox:
+  crawl, method, data, header, proxy, timeout, delay, skip_bav
+
+feroxbuster:
+  wordlist, extensions, depth, threads, timeout, rate_limit, filter_codes
+
+gospider:
+  depth, concurrent, delay, timeout, proxy, header, js
+
+NOTE: Do NOT use options not listed above. They will be rejected.
 """
 
 # -----------------------------------------------------------------------------
@@ -286,7 +312,8 @@ Given the user's prompt and optional targets, determine:
 - Comparison: {{"field": {{"$gt|$gte|$lt|$lte": value}}}}
 - In list: {{"field": {{"$in": ["a", "b"]}}}}
 - Not equal: {{"field": {{"$ne": value}}}}
-- Nested fields: {{"_context.workspace_name": "value"}}
+
+NOTE: Workspace filtering is automatic. Do NOT include workspace-related fields in queries.
 
 ## Response Format (JSON)
 
@@ -396,11 +423,13 @@ PROMPT_ATTACK_ERROR_INVALID_OPTS = """Invalid options for {exec_type} '{name}': 
 
 Valid options are: {valid_opts}
 
-Please retry with valid options only.
+Please retry with valid options only. Use the SAME targets: {targets}
 
 {executed_commands}"""
 
 PROMPT_ATTACK_SKIPPED = """User skipped action: {command}. Choose another action.
+
+Use ONLY these targets: {targets}
 
 {executed_commands}"""
 
@@ -420,17 +449,25 @@ Please respond with a valid JSON action in one of these formats:
 - {{"action": "complete", "summary": "..."}}
 - {{"action": "stop", "reason": "..."}}
 
+IMPORTANT: Use ONLY these targets: {targets}
+
 {executed_commands}"""
 
 PROMPT_ATTACK_ERROR_UNKNOWN_TYPE = """Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell.
+
+Use ONLY these targets: {targets}
 
 {executed_commands}"""
 
 PROMPT_ATTACK_ERROR_UNKNOWN_ACTION = """Unknown action '{action_type}'. Use: execute, validate, report, stop, or complete.
 
+Use ONLY these targets: {targets}
+
 {executed_commands}"""
 
 PROMPT_ATTACK_ERROR_EXCEPTION = """Previous action failed with error: {error}. Try a different approach.
+
+Use ONLY these targets: {targets}
 
 {executed_commands}"""
 
@@ -961,6 +998,7 @@ def get_llm_response(
                     messages=messages,
                     temperature=temp,
                     max_tokens=int(max_tokens),
+                    api_base=api_base,
                 )
                 return response.choices[0].message.content
             except litellm.RateLimitError as e:
@@ -1080,6 +1118,7 @@ class ai(PythonRunner):
     tags = ["ai", "analysis", "pentest"]
     input_types = []  # Accept any input type
     install_cmd = "pip install litellm"
+    default_inputs = ''
 
     opts = {
         "prompt": {
@@ -1171,8 +1210,14 @@ class ai(PythonRunner):
         # Extract options
         prompt_input = self.run_opts.get("prompt", "")
         prompt, prompt_from_file, prompt_is_markdown = load_prompt_from_file_or_text(prompt_input)
-        if prompt_from_file:
-            yield Info(message=f"Loaded prompt from file: {prompt_input}")
+
+        # Always show the user's prompt if one was provided
+        if prompt:
+            if prompt_from_file:
+                yield Info(message=f"Loaded prompt from file: {prompt_input}")
+            # Display the prompt content with markdown rendering
+            yield AI(content=prompt, ai_type='prompt')
+
         mode_override = self.run_opts.get("mode", "")
         model = self.run_opts.get("model", "gpt-4o-mini")
         # Use user's model for intent analysis if intent_model not explicitly set
@@ -1229,7 +1274,8 @@ class ai(PythonRunner):
             for query in queries:
                 # Format query for display
                 query_str = json.dumps(query) if query else "{}"
-                query_results = engine.search(query, limit=100)
+                # Exclude _context field to reduce data size
+                query_results = engine.search(query, limit=100, exclude_fields=["_context"])
                 results.extend(query_results)
                 yield Info(message=f"Query: {query_str} -> {len(query_results)} results")
 
@@ -1334,13 +1380,13 @@ class ai(PythonRunner):
 
         verbose = self.run_opts.get("verbose", False)
 
-        # Always show the user prompt being sent
-        # Format markdown content properly for display
-        if prompt_is_markdown and custom_prompt:
-            formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
-            yield Info(message=f"[PROMPT] {prompt}\n[CUSTOM PROMPT]{formatted_custom}")
-        else:
-            yield Info(message=f"[PROMPT] {prompt}")
+        # Show the full prompt only in verbose mode
+        if verbose:
+            if prompt_is_markdown and custom_prompt:
+                formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
+                yield AI(content=f"{prompt}\n[CUSTOM PROMPT]{formatted_custom}", ai_type='prompt')
+            else:
+                yield AI(content=prompt, ai_type='prompt')
 
         try:
             response = get_llm_response(
@@ -1355,15 +1401,12 @@ class ai(PythonRunner):
             if self.run_opts.get("sensitive", True):
                 response = encryptor.decrypt(response)
 
-            # Always show AI response (contains valuable analysis)
-            yield Info(message=f"[AGENT] {_truncate(response)}")
-
-            yield Tag(
-                name="ai_summary",
-                value=response,
-                match="summarize",
-                category="ai",
-                extra_data={"model": model, "mode": "summarize"},
+            # Show AI response with markdown rendering
+            yield AI(
+                content=response,
+                ai_type='summary',
+                mode='summarize',
+                model=model,
             )
 
         except Exception as e:
@@ -1401,13 +1444,13 @@ class ai(PythonRunner):
             )
             system_prompt = get_system_prompt("suggest")
 
-        # Always show the user prompt being sent
-        # Format markdown content properly for display
-        if prompt_is_markdown and custom_prompt:
-            formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
-            yield Info(message=f"[PROMPT] {prompt}\n[CUSTOM PROMPT]{formatted_custom}")
-        else:
-            yield Info(message=f"[PROMPT] {prompt}")
+        # Show the full prompt only in verbose mode
+        if verbose:
+            if prompt_is_markdown and custom_prompt:
+                formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
+                yield AI(content=f"{prompt}\n[CUSTOM PROMPT]{formatted_custom}", ai_type='prompt')
+            else:
+                yield AI(content=prompt, ai_type='prompt')
 
         try:
             response = get_llm_response(
@@ -1422,22 +1465,16 @@ class ai(PythonRunner):
             if self.run_opts.get("sensitive", True):
                 response = encryptor.decrypt(response)
 
-            # Always show AI response (contains valuable suggestions)
-            yield Info(message=f"[AGENT] {_truncate(response)}")
-
             # Extract suggested commands
             commands = self._extract_commands(response)
 
-            yield Tag(
-                name="ai_suggestions",
-                value=response,
-                match="suggest",
-                category="ai",
-                extra_data={
-                    "model": model,
-                    "mode": "suggest",
-                    "suggested_commands": commands,
-                },
+            # Show AI response with markdown rendering
+            yield AI(
+                content=response,
+                ai_type='suggestion',
+                mode='suggest',
+                model=model,
+                extra_data={"suggested_commands": commands},
             )
 
             # Yield individual command suggestions
@@ -1566,8 +1603,9 @@ class ai(PythonRunner):
             yield Info(message=f"Attack iteration {iteration + 1}/{max_iterations}")
 
             try:
-                # Always show the user prompt being sent
-                yield Info(message=f"[PROMPT] {prompt}")
+                # Show the full prompt only in verbose mode
+                if verbose:
+                    yield AI(content=prompt, ai_type='prompt')
 
                 response = get_llm_response(
                     prompt=prompt,
@@ -1584,10 +1622,21 @@ class ai(PythonRunner):
                 # Parse action from response
                 action = self._parse_attack_action(response)
 
-                # Show AI reasoning (without JSON) and yield Action
-                response_text = _strip_json_from_response(response)
-                if response_text:
-                    yield Info(message=f"[AGENT] {_truncate(response_text)}")
+                # Show AI response with markdown rendering
+                # In verbose mode show full response, otherwise strip JSON
+                if verbose:
+                    response_display = response
+                else:
+                    response_display = _strip_json_from_response(response)
+
+                if response_display:
+                    yield AI(
+                        content=response_display,
+                        ai_type='response',
+                        mode='attack',
+                        model=model,
+                        extra_data={"iteration": iteration + 1},
+                    )
 
                 if action:
                     # Yield the action as a native output type
@@ -1604,6 +1653,7 @@ class ai(PythonRunner):
                             executed_cmds = encryptor.encrypt(executed_cmds)
                     prompt = PROMPT_ATTACK_INVALID_JSON.format(
                         response=encrypted_response,
+                        targets=targets_str,
                         executed_commands=executed_cmds
                     ) + custom_prompt_suffix
                     continue
@@ -1612,11 +1662,11 @@ class ai(PythonRunner):
 
                 if action_type == "complete":
                     yield Info(message="Attack loop completed")
-                    yield Tag(
-                        name="attack_summary",
-                        value=action.get("summary", "Attack sequence completed"),
-                        match="attack",
-                        category="ai",
+                    yield AI(
+                        content=action.get("summary", "Attack sequence completed"),
+                        ai_type='attack_summary',
+                        mode='attack',
+                        model=model,
                         extra_data={
                             "iterations": iteration + 1,
                             "successful_attacks": len(
@@ -1691,6 +1741,7 @@ class ai(PythonRunner):
                                 name=name,
                                 invalid_opts=invalid_opts,
                                 valid_opts=valid_opt_names,
+                                targets=targets_str,
                                 executed_commands=executed_cmds
                             ) + custom_prompt_suffix
                             continue
@@ -1728,6 +1779,7 @@ class ai(PythonRunner):
                                 executed_cmds = encryptor.encrypt(executed_cmds)
                             prompt = PROMPT_ATTACK_SKIPPED.format(
                                 command=cli_cmd,
+                                targets=targets_str,
                                 executed_commands=executed_cmds
                             ) + custom_prompt_suffix
                             continue
@@ -1833,6 +1885,7 @@ class ai(PythonRunner):
                                 executed_cmds = encryptor.encrypt(executed_cmds)
                             prompt = PROMPT_ATTACK_SKIPPED.format(
                                 command=command,
+                                targets=targets_str,
                                 executed_commands=executed_cmds
                             ) + custom_prompt_suffix
                             continue
@@ -1891,6 +1944,7 @@ class ai(PythonRunner):
                             executed_cmds = encryptor.encrypt(executed_cmds)
                         prompt = PROMPT_ATTACK_ERROR_UNKNOWN_TYPE.format(
                             exec_type=exec_type,
+                            targets=targets_str,
                             executed_commands=executed_cmds
                         ) + custom_prompt_suffix
                         continue
@@ -1958,6 +2012,7 @@ class ai(PythonRunner):
                         executed_cmds = encryptor.encrypt(executed_cmds)
                     prompt = PROMPT_ATTACK_ERROR_UNKNOWN_ACTION.format(
                         action_type=action_type,
+                        targets=targets_str,
                         executed_commands=executed_cmds
                     ) + custom_prompt_suffix
 
@@ -1972,17 +2027,18 @@ class ai(PythonRunner):
                     executed_cmds = encryptor.encrypt(executed_cmds)
                 prompt = PROMPT_ATTACK_ERROR_EXCEPTION.format(
                     error=str(e),
+                    targets=targets_str,
                     executed_commands=executed_cmds
                 ) + custom_prompt_suffix
 
         # Final summary if we hit max iterations
         if attack_context["iteration"] >= max_iterations:
             yield Warning(message=f"Max iterations ({max_iterations}) reached")
-            yield Tag(
-                name="attack_summary",
-                value="Attack loop reached maximum iterations",
-                match="attack",
-                category="ai",
+            yield AI(
+                content="Attack loop reached maximum iterations",
+                ai_type='attack_summary',
+                mode='attack',
+                model=model,
                 extra_data=attack_context,
             )
 

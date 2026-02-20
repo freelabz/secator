@@ -99,7 +99,7 @@ class Runner:
 		self.config = self._process_config(config)
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description or '')
-		self.workspace_name = context.get('workspace_name', 'default')
+		self.workspace_name = context.get('workspace_name', CONFIG.workspace.default or 'default')
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
