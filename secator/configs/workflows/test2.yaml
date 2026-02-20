@@ -1,6 +1,0 @@
-type: workflow
-name: test2
-tags: [recon, cidr, network, vuln, internal]
-
-tasks:
-  httpx:
