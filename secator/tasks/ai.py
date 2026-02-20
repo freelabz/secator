@@ -270,6 +270,8 @@ def get_llm_response(
     max_tokens: int = 4096,
     max_retries: int = 5,
     initial_delay: float = 1.0,
+    verbose: bool = False,
+    api_base: str = None,
 ) -> Optional[str]:
     """Get response from LLM using LiteLLM with exponential backoff for rate limits."""
     try:
@@ -580,6 +582,11 @@ class ai(PythonRunner):
             "default": "gpt-4o-mini",
             "help": "LLM model to use (via LiteLLM)",
         },
+        'api_base': {
+            'type': str,
+            'default': None,
+            'help': 'API base URL for local models (e.g., http://localhost:11434 for Ollama)',
+        },
         "sensitive": {
             "is_flag": True,
             "default": True,
@@ -757,6 +764,7 @@ Identify key findings, potential attack paths, and prioritize by severity."""
                 model=model,
                 system_prompt=system_prompt,
                 temperature=float(self.run_opts.get("temperature", 0.7)),
+                api_base=api_base,
             )
 
             # Decrypt sensitive data in response
@@ -821,7 +829,8 @@ Provide actionable commands with reasoning for each suggestion."""
                 prompt=prompt,
                 model=model,
                 system_prompt=system_prompt,
-                temperature=float(self.run_opts.get("temperature", 0.7)),
+                temperature=float(self.run_opts.get('temperature', 0.7)),
+                api_base=api_base,
             )
 
             # Decrypt sensitive data in response
@@ -985,6 +994,7 @@ Analyze the findings and plan your first attack. Respond with a JSON action."""
                     model=model,
                     system_prompt=SYSTEM_PROMPTS["attack"],
                     temperature=0.3,  # Lower temperature for attack mode
+                    api_base=api_base,
                 )
 
                 # Decrypt sensitive data
