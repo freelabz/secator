@@ -48,6 +48,13 @@ AI_TYPES = {
 	'summary': {'label': 'SUMMARY', 'color': 'green'},
 	'suggestion': {'label': 'SUGGESTIONS', 'color': 'cyan'},
 	'attack_summary': {'label': 'ATTACK SUMMARY', 'color': 'yellow'},
+	'task': {'label': 'TASK', 'color': 'magenta'},
+	'workflow': {'label': 'WORKFLOW', 'color': 'magenta'},
+	'scan': {'label': 'SCAN', 'color': 'magenta'},
+	'shell': {'label': 'SHELL', 'color': 'magenta'},
+	'shell_output': {'label': 'SHELL OUTPUT', 'color': 'white'},
+	'stopped': {'label': 'STOPPED', 'color': 'orange3'},
+	'report': {'label': 'REPORT', 'color': 'cyan'},
 }
 
 
@@ -86,10 +93,25 @@ class AI(OutputType):
 		if is_markdown(content):
 			md_rendered = render_markdown_for_rich(content)
 			md_indented = '\n    ' + md_rendered.replace('\n', '\n    ')
-			return rich_to_ansi(s) + md_indented.rstrip()
+			result = rich_to_ansi(s) + md_indented.rstrip()
 		elif is_short:
 			# Keep short content on same line
-			return rich_to_ansi(s + f' {_s(content)}')
+			result = rich_to_ansi(s + f' {_s(content)}')
 		else:
 			content_indented = content.replace('\n', '\n    ')
-			return rich_to_ansi(s + f'\n    {_s(content_indented)}')
+			result = rich_to_ansi(s + f'\n    {_s(content_indented)}')
+
+		# Append extra_data fields on separate lines
+		if self.extra_data:
+			for key, value in self.extra_data.items():
+				if value:  # Only show non-empty values
+					# Format value based on type
+					if isinstance(value, list):
+						value_str = ', '.join(str(v) for v in value)
+					elif isinstance(value, dict):
+						value_str = ', '.join(f'{k}={v}' for k, v in value.items())
+					else:
+						value_str = str(value)
+					result += rich_to_ansi(f'\n    [dim]{key}:[/] [italic]{_s(value_str)}[/]')
+
+		return result

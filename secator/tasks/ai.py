@@ -16,7 +16,8 @@ import click
 from dataclasses import fields
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Action, AI, Error, Info, Tag, Vulnerability, Warning, FINDING_TYPES
+from secator.output_types import AI, Error, Info, Tag, Vulnerability, Warning, FINDING_TYPES
+from secator.rich import console
 from secator.runners import PythonRunner
 
 logger = logging.getLogger(__name__)
@@ -80,110 +81,262 @@ def format_prompt_for_display(content: str, is_markdown: bool = False) -> str:
 
 
 # =============================================================================
+# DYNAMIC LIBRARY REFERENCE BUILDER
+# =============================================================================
+
+
+def build_library_reference() -> str:
+    """Build library reference dynamically from secator's registered tasks, workflows, and scans.
+
+    Returns:
+        Formatted string containing available runners and their options.
+    """
+    from secator.loader import get_configs_by_type
+
+    lines = []
+    lines.append("=== SECATOR RUNNERS ===\n")
+    lines.append("RUNNER TYPES:")
+    lines.append("- task: Single tool execution (use 'secator x TASK TARGET')")
+    lines.append("- workflow: Multi-task pipelines (use 'secator w WORKFLOW TARGET')")
+    lines.append("- scan: Comprehensive scans (use 'secator s SCAN TARGET')")
+    lines.append("")
+
+    # Get workflows dynamically with descriptions
+    try:
+        workflows = get_configs_by_type('workflow')
+        if workflows:
+            lines.append("=== AVAILABLE WORKFLOWS ===\n")
+            workflow_names = [w.name for w in sorted(workflows, key=lambda x: x.name)]
+            lines.append(", ".join(workflow_names))
+            lines.append("")
+    except Exception:
+        pass
+
+    # Get scans dynamically with descriptions
+    try:
+        scans = get_configs_by_type('scan')
+        if scans:
+            lines.append("=== AVAILABLE SCANS ===\n")
+            scan_names = [s.name for s in sorted(scans, key=lambda x: x.name)]
+            lines.append(", ".join(scan_names))
+            lines.append("")
+    except Exception:
+        pass
+
+    # Get profiles dynamically
+    try:
+        profiles = get_configs_by_type('profile')
+        if profiles:
+            lines.append("=== AVAILABLE PROFILES ===\n")
+            profile_names = [p.name for p in sorted(profiles, key=lambda x: x.name)]
+            lines.append(", ".join(profile_names))
+            lines.append("")
+    except Exception:
+        pass
+
+    # Get tasks and their options dynamically
+    lines.append("=== AVAILABLE TASKS ===\n")
+
+    try:
+        from secator.loader import discover_tasks
+        from secator.definitions import OPT_NOT_SUPPORTED
+
+        tasks = discover_tasks()
+        # Focus on commonly used security tasks
+        priority_tasks = ['httpx', 'nmap', 'nuclei', 'katana', 'ffuf', 'subfinder',
+                          'dalfox', 'feroxbuster', 'gospider', 'dirsearch', 'gau',
+                          'waybackurls', 'dnsx', 'masscan', 'rustscan', 'testssl']
+
+        for task_cls in sorted(tasks, key=lambda t: (t.__name__ not in priority_tasks, t.__name__)):
+            task_name = task_cls.__name__
+
+            # Get task description from docstring
+            task_desc = (task_cls.__doc__ or "").strip().split('\n')[0] or "No description"
+
+            # Get task-specific options
+            task_opts = list(getattr(task_cls, 'opts', {}).keys())
+
+            # Get generic options that this task supports (from opt_key_map)
+            opt_key_map = getattr(task_cls, 'opt_key_map', {})
+            supported_generic = [k for k, v in opt_key_map.items() if v != OPT_NOT_SUPPORTED]
+
+            # Combine all options
+            all_opts = sorted(set(task_opts + supported_generic))
+
+            lines.append(f"{task_name}: {task_desc}")
+            if all_opts:
+                opts_str = ", ".join(all_opts)
+                lines.append(f"  options: {opts_str}")
+            lines.append("")
+    except Exception:
+        pass
+
+    # Add option format notes
+    lines.append("=== OPTION FORMATS ===\n")
+    lines.append("header: Use format 'key1:value1;;key2:value2' for multiple headers")
+    lines.append("  Example: header='Authorization:Bearer token;;X-Custom:value'")
+    lines.append("")
+    lines.append("NOTE: Do NOT use options not listed above. They will be rejected.")
+
+    return "\n".join(lines)
+
+
+def get_library_reference() -> str:
+    """Get the library reference, using cached version if available.
+
+    Returns:
+        Library reference string.
+    """
+    # Use a module-level cache to avoid rebuilding on every call
+    if not hasattr(get_library_reference, '_cache'):
+        get_library_reference._cache = build_library_reference()
+    return get_library_reference._cache
+
+
+def build_wordlists_reference() -> str:
+    """Build wordlists reference from CONFIG.wordlists.
+
+    Returns:
+        Formatted wordlists reference string.
+    """
+    from secator.config import CONFIG
+
+    lines = ["USING WORDLISTS:"]
+    lines.append("Use predefined wordlists by name with the 'wordlist' option. Available wordlists:")
+
+    # Add templates (predefined wordlists)
+    if CONFIG.wordlists.templates:
+        for name in CONFIG.wordlists.templates.keys():
+            lines.append(f"  - {name}")
+
+    # Add defaults info
+    if CONFIG.wordlists.defaults:
+        lines.append("\nDefault wordlists by type:")
+        for wl_type, wl_name in CONFIG.wordlists.defaults.items():
+            lines.append(f"  - {wl_type}: {wl_name}")
+
+    lines.append("\nExample usage:")
+    lines.append('{"action": "execute", "type": "task", "name": "feroxbuster", "targets": ["http://example.com"], "opts": {"wordlist": "bo0m_fuzz"}, "reasoning": "...", "expected_outcome": "..."}')
+
+    return "\n".join(lines)
+
+
+def get_wordlists_reference() -> str:
+    """Get the wordlists reference, using cached version if available.
+
+    Returns:
+        Wordlists reference string.
+    """
+    if not hasattr(get_wordlists_reference, '_cache'):
+        get_wordlists_reference._cache = build_wordlists_reference()
+    return get_wordlists_reference._cache
+
+
+# =============================================================================
 # PROMPT TEMPLATES
 # =============================================================================
 # All prompts are defined here with named placeholders for easy customization.
 # Use .format(**kwargs) to fill in the placeholders.
 # =============================================================================
 
-SECATOR_CHEATSHEET = """
-=== SECATOR CHEATSHEET ===
 
-TASKS (secator x <tool> <target>):
-  secator x nmap <HOST> -p 1-1000        # port scan
-  secator x httpx <URL>                  # HTTP probe
-  secator x nuclei <URL> -tags cve       # vuln scan
-  secator x ffuf <URL>/FUZZ -w wordlist  # directory fuzzing
-  secator x katana <URL>                 # web crawling
-  secator x subfinder <DOMAIN>           # subdomain enum
+def build_cheatsheet() -> str:
+    """Build cheatsheet dynamically from secator's registered tasks, workflows, and scans.
 
-COMMON OPTIONS:
-  -rl 10                   # rate limit (req/sec)
-  -delay 1                 # delay between requests
-  -proxy http://127.0.0.1:8080
-  -pf <profile>            # aggressive, passive, all_ports, full
-  -o json                  # output format
+    Returns:
+        Formatted cheatsheet string.
+    """
+    from secator.loader import get_configs_by_type
 
-USEFUL SCANS:
-  secator s domain <DOMAIN>              # full domain recon
-  secator s domain <DOMAIN> -pf passive  # passive only
-  secator s host <HOST>                  # host recon
+    lines = []
+    lines.append("=== SECATOR CHEATSHEET ===\n")
 
-USEFUL WORKFLOWS:
-  secator w subdomain_recon <DOMAIN>
-  secator w url_crawl <URL>
-  secator w url_fuzz <URL>
-  secator w code_scan <PATH_OR_REPO>
+    # Task examples (static - these are example commands)
+    lines.append("TASKS (secator x <tool> <target>):")
+    lines.append("  secator x nmap <HOST> -p 1-1000        # port scan")
+    lines.append("  secator x httpx <URL>                  # HTTP probe")
+    lines.append("  secator x nuclei <URL> -tags cve       # vuln scan")
+    lines.append("  secator x ffuf <URL>/FUZZ -w wordlist  # directory fuzzing")
+    lines.append("  secator x katana <URL>                 # web crawling")
+    lines.append("  secator x subfinder <DOMAIN>           # subdomain enum")
+    lines.append("")
 
-PIPING:
-  secator x subfinder example.com | secator x httpx | secator x nuclei
+    # Common options (static - these are examples)
+    lines.append("COMMON OPTIONS:")
+    lines.append("  -rl 10                   # rate limit (req/sec)")
+    lines.append("  -delay 1                 # delay between requests")
+    lines.append("  -proxy http://127.0.0.1:8080")
+    lines.append("  -pf <profile>            # use a profile")
+    lines.append("  -o json                  # output format")
+    lines.append("")
 
-REFERENCE (verify options exist before using):
-  Tasks: https://github.com/freelabz/secator/tree/main/secator/tasks
-  Configs: https://github.com/freelabz/secator/tree/main/secator/configs
+    # Available tasks (dynamic)
+    try:
+        tasks = get_configs_by_type('task')
+        task_names = sorted([t.name for t in tasks])
+        if task_names:
+            lines.append("AVAILABLE TASKS:")
+            lines.append(f"  {', '.join(task_names)}")
+            lines.append("")
+    except Exception:
+        pass
 
-RULES:
-  - ALWAYS use 'secator x <tool>' instead of raw tool commands
-  - ONLY use options that exist (check task file if unsure)
-"""
+    # Available scans (dynamic)
+    try:
+        scans = get_configs_by_type('scan')
+        scan_names = sorted([s.name for s in scans])
+        if scan_names:
+            lines.append("AVAILABLE SCANS:")
+            for name in scan_names:
+                lines.append(f"  secator s {name} <TARGET>")
+            lines.append("")
+    except Exception:
+        pass
 
-SECATOR_LIBRARY_REFERENCE = """
-=== SECATOR RUNNERS ===
+    # Available workflows (dynamic)
+    try:
+        workflows = get_configs_by_type('workflow')
+        workflow_names = sorted([w.name for w in workflows])
+        if workflow_names:
+            lines.append("AVAILABLE WORKFLOWS:")
+            for name in workflow_names:
+                lines.append(f"  secator w {name} <TARGET>")
+            lines.append("")
+    except Exception:
+        pass
 
-RUNNER TYPES:
-- task: Single tool execution (httpx, nmap, nuclei, ffuf, katana, subfinder, etc.)
-- workflow: Multi-task pipelines (host_recon, url_crawl, subdomain_recon, etc.)
-- scan: Comprehensive scans (host, domain, url, network, subdomain)
+    # Available profiles (dynamic)
+    try:
+        profiles = get_configs_by_type('profile')
+        profile_names = sorted([p.name for p in profiles])
+        if profile_names:
+            lines.append("AVAILABLE PROFILES:")
+            lines.append(f"  {', '.join(profile_names)}")
+            lines.append("")
+    except Exception:
+        pass
 
-AVAILABLE WORKFLOWS:
-host_recon, subdomain_recon, url_crawl, url_fuzz, url_vuln, url_dirsearch,
-domain_recon, code_scan, cidr_recon, url_bypass, url_secrets_hunt
+    # Piping and reference (static)
+    lines.append("RULES:")
+    lines.append("  - ALWAYS use 'secator x <tool>' instead of raw tool commands")
+    lines.append("  - ONLY use options that exist (check task file if unsure)")
 
-AVAILABLE SCANS:
-host, domain, url, network, subdomain
+    return "\n".join(lines)
 
-=== TASK OPTIONS (use ONLY these options) ===
 
-httpx:
-  screenshot, system_chrome, headless_options, tech_detect, follow_redirect,
-  follow_host_redirects, rate_limit, threads, timeout, delay, proxy, header,
-  filter_codes, match_codes, store_responses, tls_grab, favicon, jarm, asn, cdn
+def get_cheatsheet() -> str:
+    """Get the cheatsheet, using cached version if available.
 
-nmap:
-  ports, top_ports, tcp_connect, tcp_syn, udp_scan, version_detection,
-  os_detection, script, skip_host_discovery, output_path, rate_limit, timeout
+    Returns:
+        Cheatsheet string.
+    """
+    if not hasattr(get_cheatsheet, '_cache'):
+        get_cheatsheet._cache = build_cheatsheet()
+    return get_cheatsheet._cache
 
-nuclei:
-  tags, severity, templates, exclude_tags, rate_limit, threads, timeout,
-  proxy, header, follow_redirect, retries, automatic_scan
 
-katana:
-  depth, js_crawl, headless, known_files, form_extraction, scope_in_depth,
-  extension_filter, rate_limit, timeout, delay, proxy, header
 
-ffuf:
-  wordlist, method, data, header, follow_redirect, rate_limit, threads,
-  timeout, filter_codes, match_codes, filter_size, match_size
-
-subfinder:
-  sources, rate_limit, timeout, threads, recursive
-
-dalfox:
-  crawl, method, data, header, proxy, timeout, delay, skip_bav
-
-feroxbuster:
-  wordlist, extensions, depth, threads, timeout, rate_limit, filter_codes
-
-gospider:
-  depth, concurrent, delay, timeout, proxy, header, js
-
-=== OPTION FORMATS ===
-
-header: Use format "key1:value1;;key2:value2" for multiple headers
-  Example: header="Authorization:Bearer token;;X-Custom:value"
-
-NOTE: Do NOT use options not listed above. They will be rejected.
-"""
+# SECATOR_LIBRARY_REFERENCE is now dynamically generated by get_library_reference()
 
 # -----------------------------------------------------------------------------
 # System Prompts (used as system message for LLM)
@@ -262,17 +415,19 @@ MISSION:
 RULES:
 - NEVER repeat commands already executed (check "ALREADY EXECUTED" section)
 - Each iteration must try a DIFFERENT tool, target, or approach
-- Prefer secator runners (task/workflow/scan) over shell commands
-- Only test targets explicitly provided
+- By DEFAULT, prefer single TASKS over workflows/scans (less intrusive, more targeted)
+- Only use workflows/scans when user explicitly requests "comprehensive", "full", or "deep" recon
+- Prefer secator runners over raw shell commands
 - Only use options that exist for the runner
-- Stop if you encounter out-of-scope systems
 - If you've exhausted all useful actions, use "complete" or "stop"
 
 RESPONSE FORMAT:
-- Respond with ONLY a JSON object, no other text
-- Do NOT include thinking, reasoning, or commentary outside the JSON
-- Put your reasoning in the "reasoning" field inside the JSON
+- FIRST: Provide a brief analysis of the current situation (1-3 sentences)
+- THEN: Respond with a JSON array of actions: [{{"action": ...}}, {{"action": ...}}]
+- You can include MULTIPLE execute actions to run in sequence
+- Put your reasoning in the "reasoning" field inside each action
 - Keep reasoning brief (1-2 sentences)
+- All actions will be executed sequentially and results reported back to you
 
 ACTIONS:
 
@@ -289,7 +444,71 @@ Complete (when done testing):
 {{"action": "complete", "summary": "findings summary"}}
 
 Stop (when user instruction says to stop, or no actions possible):
-{{"action": "stop", "reason": "why stopping"}}"""
+{{"action": "stop", "reason": "why stopping"}}
+
+EXAMPLE MULTI-ACTION RESPONSE:
+[
+  {{"action": "execute", "type": "task", "name": "httpx", "targets": ["example.com"], "opts": {{}}, "reasoning": "Probe for live hosts", "expected_outcome": "List of live URLs"}},
+  {{"action": "execute", "type": "task", "name": "nuclei", "targets": ["http://example.com"], "opts": {{"templates": "cves"}}, "reasoning": "Scan for known CVEs", "expected_outcome": "CVE findings"}}
+]
+
+USING PROFILES:
+To apply profiles (e.g., aggressive, stealth, passive), use the "profiles" key in opts:
+{{"action": "execute", "type": "task", "name": "nuclei", "targets": ["http://example.com"], "opts": {{"profiles": ["aggressive"]}}, "reasoning": "...", "expected_outcome": "..."}}
+
+{wordlists_reference}"""
+
+PROMPT_ATTACK_SHELL_ONLY = """You are an autonomous penetration testing agent conducting authorized security testing.
+
+MISSION:
+1. Analyze findings and identify exploitable vulnerabilities
+2. Execute attacks using shell commands (curl, nmap, httpx, wget, etc.)
+3. Validate exploits with proof-of-concept
+4. Document findings
+
+RULES:
+- NEVER repeat commands already executed (check "ALREADY EXECUTED" section)
+- Each iteration must try a DIFFERENT tool, target, or approach
+- Use standard security tools via shell commands
+- If you've exhausted all useful actions, use "complete" or "stop"
+
+RESPONSE FORMAT:
+- FIRST: Provide a brief analysis of the current situation (1-3 sentences)
+- THEN: Respond with a JSON array of actions: [{{"action": ...}}, {{"action": ...}}]
+- You can include MULTIPLE execute actions to run in sequence
+- Put your reasoning in the "reasoning" field inside each action
+- Keep reasoning brief (1-2 sentences)
+- All actions will be executed sequentially and results reported back to you
+
+ACTIONS:
+
+Execute shell command:
+{{"action": "execute", "type": "shell", "command": "curl -s http://example.com", "target": "example.com", "reasoning": "brief reason", "expected_outcome": "expected result"}}
+
+Validate vulnerability:
+{{"action": "validate", "vulnerability": "name", "target": "url", "proof": "evidence", "severity": "critical|high|medium|low|info", "reproduction_steps": ["step1", "step2"]}}
+
+Complete (when done testing):
+{{"action": "complete", "summary": "findings summary"}}
+
+Stop (when user instruction says to stop, or no actions possible):
+{{"action": "stop", "reason": "why stopping"}}
+
+EXAMPLE MULTI-ACTION RESPONSE:
+[
+  {{"action": "execute", "type": "shell", "command": "nmap -sV -p- example.com", "target": "example.com", "reasoning": "Full port scan", "expected_outcome": "Open ports and services"}},
+  {{"action": "execute", "type": "shell", "command": "curl -I http://example.com", "target": "example.com", "reasoning": "Check HTTP headers", "expected_outcome": "Server headers"}}
+]
+
+COMMON SHELL COMMANDS:
+- curl: HTTP requests, API testing
+- nmap: Port scanning, service detection
+- httpx: HTTP probing, tech detection
+- wget: File download, web requests
+- nikto: Web vulnerability scanning
+- sqlmap: SQL injection testing
+- gobuster/ffuf: Directory fuzzing
+- nuclei: Vulnerability scanning"""
 
 PROMPT_INITIAL_RECON = """You are a senior penetration tester starting a new security assessment.
 Given the target(s), suggest an initial reconnaissance plan using Secator tasks.
@@ -303,7 +522,8 @@ PROMPT_INTENT_ANALYSIS = """You are a penetration testing assistant analyzing us
 
 Given the user's prompt and optional targets, determine:
 1. Which mode to use (summarize, suggest, or attack)
-2. What workspace queries to run to fetch relevant data
+2. Whether workspace data is needed (e.g., if user asks about previous results, findings, or wants to analyze workspace data)
+3. What workspace queries to run to fetch relevant data (only if use_workspace is true)
 
 ## Available Output Types
 
@@ -324,12 +544,29 @@ NOTE: Workspace filtering is automatic. Do NOT include workspace-related fields 
 
 {{
     "mode": "summarize|suggest|attack",
+    "use_workspace": true|false,
     "queries": [
         {{"_type": "vulnerability", "severity": {{"$in": ["critical", "high"]}}}},
         {{"_type": "url", "url": {{"$contains": "login"}}}}
     ],
     "reasoning": "Brief explanation of why this mode and these queries"
 }}
+
+IMPORTANT: Default use_workspace to FALSE. Only set to true if the user EXPLICITLY asks for workspace data.
+
+Set use_workspace to TRUE only when user explicitly:
+- Says "workspace", "previous results", "existing findings", "what we found", "our data"
+- Asks to "summarize results", "analyze findings", "review what we have"
+- References data from previous scans explicitly
+
+Set use_workspace to FALSE (default) when:
+- User provides targets (URLs, domains, IPs) to scan
+- User asks to run tools, scans, or attacks on targets
+- User doesn't explicitly mention workspace/previous data
+- User says "scan", "test", "attack", "enumerate", "fuzz", etc.
+
+Example: "Scan http://example.com with nuclei" -> use_workspace: false
+Example: "Summarize the vulnerabilities we found" -> use_workspace: true
 
 Respond with ONLY the JSON object, no additional text."""
 
@@ -386,7 +623,7 @@ PROMPT_ATTACK_START_WITH_RESULTS = """You are conducting authorized penetration 
 ## Current Findings
 {context}
 
-## Targets (Scope)
+## Targets
 {targets}
 
 ## Instructions
@@ -398,9 +635,10 @@ Results:
 {output}
 
 {executed_commands}
+{user_instructions}
 
-Analyze the results and decide next action (execute, validate, stop, or complete).
-Remember: Do NOT repeat any command from the "ALREADY EXECUTED" list above."""
+## Instruction
+Analyze the results and decide next actions. You can return multiple execute actions as a JSON array."""
 
 PROMPT_ATTACK_SHELL_RESULT = """Shell command executed:
 {command}
@@ -409,44 +647,72 @@ Output:
 {output}
 
 {executed_commands}
+{user_instructions}
 
-Analyze the output and decide next action (execute, validate, stop, or complete).
-Remember: Do NOT repeat any command from the "ALREADY EXECUTED" list above."""
+## Instruction
+Analyze the output and decide next actions. You can return multiple execute actions as a JSON array."""
+
+PROMPT_ATTACK_BATCH_RESULTS = """## Batch Execution Results
+
+The following {action_count} actions were executed:
+
+{batch_results}
+
+{executed_commands}
+{user_instructions}
+
+## Instruction
+FIRST, provide your analysis (this will be shown to the user):
+- Summarize what was found in each command's output
+- If there were ERRORS, explain what went wrong and how to fix it
+- Highlight any interesting findings or vulnerabilities
+
+THEN, provide your next actions as a JSON array.
+If a command failed due to invalid options or wordlists, retry with corrected parameters."""
 
 PROMPT_ATTACK_VALIDATION = """Vulnerability validated: {vuln_name}
 
 {executed_commands}
+{user_instructions}
 
-Continue testing or mark complete if all attack paths are exhausted.
-Remember: Do NOT repeat any command from the "ALREADY EXECUTED" list above."""
-
-PROMPT_ATTACK_ERROR_OUT_OF_SCOPE = """Targets {out_of_scope} are out of scope. Only test: {targets}. Choose another action.
-
-{executed_commands}"""
+## Instruction
+Continue testing or mark complete if all attack paths are exhausted."""
 
 PROMPT_ATTACK_ERROR_INVALID_OPTS = """Invalid options for {exec_type} '{name}': {invalid_opts}
 
 Valid options are: {valid_opts}
 
-Please retry with valid options only. Use the SAME targets: {targets}
+{executed_commands}
+{user_instructions}
 
-{executed_commands}"""
+## Instruction
+Please retry with valid options only. Use the SAME targets: {targets}"""
 
-PROMPT_ATTACK_SKIPPED = """User skipped action: {command}. Choose another action.
+PROMPT_ATTACK_SKIPPED = """User skipped action: {command}.
 
-Use ONLY these targets: {targets}
+{executed_commands}
+{user_instructions}
 
-{executed_commands}"""
+## Instruction
+Choose another action. Use ONLY these targets: {targets}"""
 
-PROMPT_ATTACK_REPORT = """Report noted. Continue with next action.
+PROMPT_ATTACK_REPORT = """Report noted.
 
-{executed_commands}"""
+{executed_commands}
+{user_instructions}
+
+## Instruction
+Continue with next action."""
 
 PROMPT_ATTACK_INVALID_JSON = """Your previous response was not valid JSON and could not be parsed.
 
 Your response was:
 {response}
 
+{executed_commands}
+{user_instructions}
+
+## Instruction
 Please respond with a valid JSON action in one of these formats:
 - {{"action": "execute", "type": "task|workflow|scan", "name": "...", "targets": [...], "opts": {{}}, "reasoning": "...", "expected_outcome": "..."}}
 - {{"action": "execute", "type": "shell", "command": "...", "target": "...", "reasoning": "...", "expected_outcome": "..."}}
@@ -454,37 +720,144 @@ Please respond with a valid JSON action in one of these formats:
 - {{"action": "complete", "summary": "..."}}
 - {{"action": "stop", "reason": "..."}}
 
-IMPORTANT: Use ONLY these targets: {targets}
+IMPORTANT: Use ONLY these targets: {targets}"""
 
-{executed_commands}"""
+PROMPT_ATTACK_ERROR_UNKNOWN_TYPE = """Unknown execute type '{exec_type}'.
 
-PROMPT_ATTACK_ERROR_UNKNOWN_TYPE = """Unknown execute type '{exec_type}'. Use: task, workflow, scan, or shell.
+{executed_commands}
+{user_instructions}
 
-Use ONLY these targets: {targets}
+## Instruction
+Use: task, workflow, scan, or shell. Use ONLY these targets: {targets}"""
 
-{executed_commands}"""
+PROMPT_ATTACK_ERROR_UNKNOWN_ACTION = """Unknown action '{action_type}'.
 
-PROMPT_ATTACK_ERROR_UNKNOWN_ACTION = """Unknown action '{action_type}'. Use: execute, validate, report, stop, or complete.
+{executed_commands}
+{user_instructions}
 
-Use ONLY these targets: {targets}
+## Instruction
+Use: execute, validate, report, stop, or complete. Use ONLY these targets: {targets}"""
 
-{executed_commands}"""
+PROMPT_ATTACK_ERROR_EXCEPTION = """Previous action failed with error: {error}.
 
-PROMPT_ATTACK_ERROR_EXCEPTION = """Previous action failed with error: {error}. Try a different approach.
+{executed_commands}
+{user_instructions}
 
-Use ONLY these targets: {targets}
+## Instruction
+Try a different approach. Use ONLY these targets: {targets}"""
 
-{executed_commands}"""
+PROMPT_VULN_PROOF_OF_CONCEPT = """A vulnerability was discovered by {tool_name}:
+
+Vulnerability: {vuln_name}
+Severity: {severity}
+Target: {target}
+Provider: {provider}
+Description: {description}
+
+Based on the scan results below, provide a proof of concept and reproduction steps for this vulnerability.
+
+Scan Output:
+{scan_output}
+
+RESPONSE FORMAT:
+Respond with ONLY a JSON object:
+{{"proof_of_concept": "detailed proof showing the vulnerability exists", "reproduction_steps": ["step1", "step2", ...], "impact": "potential impact description", "remediation": "suggested fix"}}"""
+
+PROMPT_VULN_BATCH_PROOF_OF_CONCEPT = """The following vulnerabilities were discovered during a security scan.
+For EACH vulnerability, provide a proof of concept and reproduction steps.
+
+## Vulnerabilities
+
+{vulnerabilities_list}
+
+## Scan Output (for context)
+
+{scan_output}
+
+## Response Format
+
+Respond with ONLY a JSON array, one object per vulnerability in the SAME ORDER as listed above:
+[
+  {{"id": 0, "proof_of_concept": "...", "reproduction_steps": ["step1", ...], "impact": "...", "remediation": "..."}},
+  {{"id": 1, "proof_of_concept": "...", "reproduction_steps": ["step1", ...], "impact": "...", "remediation": "..."}}
+]
+
+IMPORTANT: Include the "id" field matching the vulnerability index (0, 1, 2, ...) to ensure correct mapping."""
+
+PROMPT_ATTACK_FINAL_SUMMARY = """You are a senior penetration tester summarizing an automated security assessment.
+
+## Targets
+{targets}
+
+## Commands Executed
+{executed_commands}
+
+## Raw Findings
+{findings}
+
+Based on the above data, provide a comprehensive summary in Markdown format:
+
+### Executive Summary
+Brief overview of what was tested and key findings (2-3 sentences).
+
+### Interesting URLs
+List URLs that warrant further investigation (login pages, admin panels, API endpoints, file uploads, etc.):
+- URL and why it's interesting
+
+### Vulnerabilities Found
+List any vulnerabilities or security issues discovered:
+- Vulnerability name, severity, target, and brief description
+
+### Technologies Detected
+List interesting technologies that could be attack vectors:
+- Technology and potential security implications
+
+### Recommended Next Steps
+Suggest 3-5 specific commands or approaches to continue the assessment:
+- `command` - reasoning
+
+Keep the summary concise but actionable. Focus on findings that could lead to exploitation."""
+
+PROMPT_ATTACK_CONTINUE = """The attack run has {reason}.
+
+{executed_commands}
+
+Summary so far:
+- Iterations completed: {iterations}
+- Successful attacks: {successful_count}
+- Validated vulnerabilities: {vuln_count}
+{user_instructions}
+
+## Instruction
+The user has provided additional instructions: {user_query}
+
+Continue the attack with this new direction. Use ONLY these targets: {targets}"""
 
 
-def get_system_prompt(mode: str) -> str:
-    """Get system prompt for a given mode."""
-    prompts = {
-        "summarize": PROMPT_SUMMARIZE,
-        "suggest": PROMPT_SUGGEST.format(cheatsheet=SECATOR_CHEATSHEET),
-        "attack": PROMPT_ATTACK.format(library_reference=SECATOR_LIBRARY_REFERENCE),
-        "initial_recon": PROMPT_INITIAL_RECON.format(cheatsheet=SECATOR_CHEATSHEET),
-    }
+def get_system_prompt(mode: str, disable_secator: bool = False) -> str:
+    """Get system prompt for a given mode.
+
+    Args:
+        mode: The operation mode (summarize, suggest, attack, initial_recon)
+        disable_secator: If True, use shell-only prompts without secator references
+    """
+    if disable_secator:
+        prompts = {
+            "summarize": PROMPT_SUMMARIZE,
+            "suggest": PROMPT_SUMMARIZE,  # No suggestions without secator
+            "attack": PROMPT_ATTACK_SHELL_ONLY,
+            "initial_recon": PROMPT_SUMMARIZE,
+        }
+    else:
+        prompts = {
+            "summarize": PROMPT_SUMMARIZE,
+            "suggest": PROMPT_SUGGEST.format(cheatsheet=get_cheatsheet()),
+            "attack": PROMPT_ATTACK.format(
+                library_reference=get_library_reference(),
+                wordlists_reference=get_wordlists_reference()
+            ),
+            "initial_recon": PROMPT_INITIAL_RECON.format(cheatsheet=get_cheatsheet()),
+        }
     return prompts.get(mode, PROMPT_SUMMARIZE)
 
 
@@ -525,9 +898,15 @@ def format_executed_commands(attack_context: dict) -> str:
                 executed.append(f"- {exec_type}: {name} on [{targets_str}]")
 
     for attack in attack_context.get("failed_attacks", []):
-        if attack.get("type") == "shell":
+        if isinstance(attack, str):
+            # Legacy string format - just show the error
+            executed.append(f"- (FAILED): {attack}")
+        elif attack.get("type") == "shell":
             cmd = attack.get("command", "")
             executed.append(f"- shell (FAILED): {cmd}")
+        elif attack.get("type") == "error":
+            error = attack.get("error", "unknown error")
+            executed.append(f"- (ERROR): {error}")
         else:
             exec_type = attack.get("type", "task")
             name = attack.get("name", "")
@@ -539,6 +918,152 @@ def format_executed_commands(attack_context: dict) -> str:
         return ""
 
     return "## ALREADY EXECUTED - DO NOT REPEAT THESE COMMANDS\n" + "\n".join(executed)
+
+
+def format_attack_summary(attack_context: dict) -> str:
+    """Format attack context as a markdown summary.
+
+    Args:
+        attack_context: Dictionary containing attack loop state
+
+    Returns:
+        Formatted markdown string
+    """
+    lines = []
+    lines.append("## Attack Summary\n")
+
+    # Statistics
+    iterations = attack_context.get("iteration", 0)
+    successful = attack_context.get("successful_attacks", [])
+    failed = attack_context.get("failed_attacks", [])
+    validated = attack_context.get("validated_vulns", [])
+    targets = attack_context.get("targets", [])
+
+    lines.append("### Statistics\n")
+    lines.append(f"- **Iterations:** {iterations}")
+    lines.append(f"- **Targets:** {', '.join(targets) if targets else 'None'}")
+    lines.append(f"- **Successful executions:** {len(successful)}")
+    lines.append(f"- **Failed executions:** {len(failed)}")
+    lines.append(f"- **Validated vulnerabilities:** {len(validated)}")
+    lines.append("")
+
+    # Successful attacks
+    if successful:
+        lines.append("### Executed Commands\n")
+        for i, attack in enumerate(successful, 1):
+            attack_type = attack.get("type", "unknown")
+            if attack_type == "shell":
+                cmd = attack.get("command", "")
+                target = attack.get("target", "")
+                lines.append(f"{i}. **Shell:** `{cmd}`")
+                if target:
+                    lines.append(f"   - Target: {target}")
+            else:
+                name = attack.get("name", "")
+                attack_targets = attack.get("targets", [])
+                result_count = attack.get("result_count", 0)
+                lines.append(f"{i}. **{attack_type.capitalize()}:** `{name}`")
+                lines.append(f"   - Targets: {', '.join(attack_targets) if attack_targets else 'None'}")
+                lines.append(f"   - Results: {result_count}")
+        lines.append("")
+
+    # Validated vulnerabilities
+    if validated:
+        lines.append("### Validated Vulnerabilities\n")
+        for vuln in validated:
+            name = vuln.get("name", "Unknown")
+            severity = vuln.get("severity", "unknown")
+            target = vuln.get("target", "")
+            lines.append(f"- **{name}** ({severity})")
+            if target:
+                lines.append(f"  - Target: {target}")
+        lines.append("")
+
+    # Failed attacks
+    if failed:
+        lines.append("### Failed Executions\n")
+        for attack in failed:
+            if isinstance(attack, str):
+                lines.append(f"- {attack}")
+            elif attack.get("type") == "error":
+                error = attack.get("error", "unknown error")
+                lines.append(f"- Error: {error}")
+            else:
+                attack_type = attack.get("type", "unknown")
+                name = attack.get("name", "")
+                lines.append(f"- {attack_type}: {name}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_attack_summary_with_llm(
+    attack_context: dict,
+    model: str,
+    api_base: str = None,
+    temperature: float = 0.5,
+) -> str:
+    """Generate a comprehensive attack summary using LLM.
+
+    Args:
+        attack_context: Dictionary containing attack loop state
+        model: LLM model to use
+        api_base: Optional API base URL
+        temperature: LLM temperature
+
+    Returns:
+        Formatted markdown summary from LLM
+    """
+    targets = attack_context.get("targets", [])
+    successful = attack_context.get("successful_attacks", [])
+
+    # Format executed commands
+    executed_lines = []
+    for attack in successful:
+        attack_type = attack.get("type", "unknown")
+        if attack_type == "shell":
+            cmd = attack.get("command", "")
+            executed_lines.append(f"- Shell: `{cmd}`")
+        else:
+            name = attack.get("name", "")
+            attack_targets = attack.get("targets", [])
+            executed_lines.append(f"- {attack_type}: `{name}` on {', '.join(attack_targets)}")
+
+    # Collect all findings from successful attacks
+    findings_lines = []
+    for attack in successful:
+        output = attack.get("output", "")
+        if output and output != "No findings available.":
+            attack_type = attack.get("type", "unknown")
+            name = attack.get("name", "")
+            findings_lines.append(f"### {attack_type}: {name}")
+            # Truncate very long outputs
+            if len(output) > 3000:
+                output = output[:3000] + "\n... (truncated)"
+            findings_lines.append(output)
+            findings_lines.append("")
+
+    # Build prompt
+    prompt = PROMPT_ATTACK_FINAL_SUMMARY.format(
+        targets=", ".join(targets),
+        executed_commands="\n".join(executed_lines) if executed_lines else "None",
+        findings="\n".join(findings_lines) if findings_lines else "No findings captured.",
+    )
+
+    try:
+        response = get_llm_response(
+            prompt=prompt,
+            model=model,
+            system_prompt="You are a penetration testing expert providing actionable security summaries.",
+            temperature=temperature,
+            api_base=api_base,
+            max_tokens=2000,
+        )
+        return response
+    except Exception as e:
+        logger.warning(f"Failed to generate LLM summary: {e}")
+        # Fall back to basic summary
+        return format_attack_summary(attack_context)
 
 
 def _is_ci():
@@ -812,20 +1337,39 @@ def _strip_json_from_response(text: str) -> str:
     if not text:
         return text
 
-    # Remove JSON code blocks first
+    # Remove JSON code blocks first (both objects and arrays)
     text = re.sub(r"```(?:json)?\s*\{[^`]*\}\s*```", "", text, flags=re.DOTALL)
+    text = re.sub(r"```(?:json)?\s*\[[^`]*\]\s*```", "", text, flags=re.DOTALL)
 
-    # Find and remove JSON objects with proper brace matching
+    # Find and remove JSON arrays and objects with proper bracket/brace matching
     result = []
     i = 0
     while i < len(text):
-        if text[i] == "{":
+        # Handle JSON arrays
+        if text[i] == "[":
+            # Check if this looks like an action JSON array (has "action" key nearby)
+            lookahead = text[i : i + 100]
+            if '"action"' in lookahead:
+                # Find matching closing bracket
+                bracket_count = 0
+                while i < len(text):
+                    if text[i] == "[":
+                        bracket_count += 1
+                    elif text[i] == "]":
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            i += 1
+                            break
+                    i += 1
+                # JSON array removed, continue
+                continue
+        # Handle JSON objects
+        elif text[i] == "{":
             # Check if this looks like an action JSON (has "action" key nearby)
             lookahead = text[i : i + 50]
             if '"action"' in lookahead:
                 # Find matching closing brace
                 brace_count = 0
-                start = i
                 while i < len(text):
                     if text[i] == "{":
                         brace_count += 1
@@ -849,7 +1393,7 @@ def _strip_json_from_response(text: str) -> str:
     return text if text else ""
 
 
-def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
+def format_results_for_llm(results: List[Any]) -> str:
     """Format secator results into a structured prompt for the LLM."""
     if not results:
         return "No previous results available."
@@ -857,31 +1401,328 @@ def format_results_for_llm(results: List[Any], max_items: int = 100) -> str:
     formatted = []
     result_types: Dict[str, List] = {}
 
-    # Group results by type
-    for result in results[:max_items]:
-        result_type = getattr(result, "_type", "unknown")
-        if result_type not in result_types:
-            result_types[result_type] = []
-        result_types[result_type].append(result)
+    # Get valid finding type names for filtering
+    finding_types_tuple = tuple(FINDING_TYPES)
+    finding_type_names = {ft.get_name() for ft in FINDING_TYPES}
+
+    for result in results:
+        # Handle OutputType instances
+        if isinstance(result, finding_types_tuple):
+            result_type = getattr(result, "_type", "unknown")
+            if result_type not in result_types:
+                result_types[result_type] = []
+            result_types[result_type].append(result)
+        # Handle dictionaries (from workspace/JSON queries)
+        elif isinstance(result, dict):
+            result_type = result.get("_type", "unknown")
+            # Skip non-finding types
+            if result_type not in finding_type_names:
+                continue
+            if result_type not in result_types:
+                result_types[result_type] = []
+            result_types[result_type].append(result)
+
+    # Return early if no findings after filtering
+    if not result_types:
+        return "No findings available."
 
     for rtype, items in result_types.items():
-        formatted.append(f"\n## {rtype.upper()} ({len(items)} items)")
-        for item in items[:20]:  # Limit per type
+        formatted.append(f"[{rtype.upper()}:{len(items)}]")
+        for item in items:
             try:
-                if hasattr(item, "__dict__"):
-                    # Filter out internal fields
+                if isinstance(item, dict):
+                    # Filter out internal fields from dictionary
+                    data = {
+                        k: v
+                        for k, v in item.items()
+                        if not k.startswith("_") and v
+                    }
+                    formatted.append(json.dumps(data, default=str, separators=(',', ':')))
+                elif hasattr(item, "__dict__"):
+                    # Filter out internal fields, compact JSON output
                     data = {
                         k: v
                         for k, v in asdict(item).items()
                         if not k.startswith("_") and v
                     }
-                    formatted.append(f"  - {json.dumps(data, default=str)}")
+                    formatted.append(json.dumps(data, default=str, separators=(',', ':')))
                 else:
-                    formatted.append(f"  - {str(item)}")
+                    formatted.append(str(item))
             except Exception:
-                formatted.append(f"  - {str(item)}")
+                formatted.append(str(item))
 
     return "\n".join(formatted)
+
+
+def enrich_vulnerability_with_poc(
+    vuln: 'Vulnerability',
+    scan_output: str,
+    tool_name: str,
+    model: str,
+    api_base: str = None,
+    temperature: float = 0.3,
+) -> 'Vulnerability':
+    """Ask AI to generate proof of concept for a vulnerability.
+
+    Args:
+        vuln: The vulnerability to enrich
+        scan_output: The raw scan output for context
+        tool_name: Name of the tool that found the vulnerability
+        model: LLM model to use
+        api_base: Optional API base URL
+        temperature: LLM temperature
+
+    Returns:
+        Enriched vulnerability with proof_of_concept in extra_data
+    """
+    try:
+        import litellm
+
+        prompt = PROMPT_VULN_PROOF_OF_CONCEPT.format(
+            tool_name=tool_name,
+            vuln_name=vuln.name,
+            severity=vuln.severity,
+            target=vuln.matched_at,
+            provider=vuln.provider,
+            description=vuln.description or "No description provided",
+            scan_output=scan_output[:4000],  # Limit output size
+        )
+
+        kwargs = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": 1000,
+        }
+        if api_base:
+            kwargs["api_base"] = api_base
+
+        response = litellm.completion(**kwargs)
+        response_text = response.choices[0].message.content.strip()
+
+        # Parse JSON response - try multiple approaches
+        poc_data = None
+
+        # Try direct JSON parse first
+        try:
+            poc_data = json.loads(response_text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to extract from markdown code block
+        if poc_data is None:
+            # Match code block and extract content between ```json and ```
+            code_block_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', response_text)
+            if code_block_match:
+                try:
+                    poc_data = json.loads(code_block_match.group(1).strip())
+                except json.JSONDecodeError:
+                    pass
+
+        # Try to find JSON object by matching braces
+        if poc_data is None and '{' in response_text:
+            # Find the first { and try to extract the full JSON object
+            start_idx = response_text.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(response_text)):
+                    if response_text[i] == '{':
+                        brace_count += 1
+                    elif response_text[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i + 1
+                            break
+                if end_idx > start_idx:
+                    try:
+                        poc_data = json.loads(response_text[start_idx:end_idx])
+                    except json.JSONDecodeError:
+                        pass
+
+        # Merge into extra_data
+        if not vuln.extra_data:
+            vuln.extra_data = {}
+
+        if poc_data:
+            vuln.extra_data["proof_of_concept"] = poc_data.get("proof_of_concept", "")
+            vuln.extra_data["reproduction_steps"] = poc_data.get("reproduction_steps", [])
+            vuln.extra_data["impact"] = poc_data.get("impact", "")
+            vuln.extra_data["remediation"] = poc_data.get("remediation", "")
+            vuln.extra_data["ai_enriched"] = True
+        else:
+            # If not valid JSON, store raw response as proof
+            vuln.extra_data["proof_of_concept"] = response_text
+            vuln.extra_data["ai_enriched"] = True
+
+    except Exception as e:
+        logger.warning(f"Failed to enrich vulnerability with PoC: {e}")
+        if not vuln.extra_data:
+            vuln.extra_data = {}
+        vuln.extra_data["poc_error"] = str(e)
+
+    return vuln
+
+
+def batch_enrich_vulnerabilities_with_poc(
+    vulnerabilities: List['Vulnerability'],
+    scan_output: str,
+    tool_name: str,
+    model: str,
+    api_base: str = None,
+    temperature: float = 0.3,
+) -> List['Vulnerability']:
+    """Ask AI to generate proof of concept for multiple vulnerabilities in a single call.
+
+    Args:
+        vulnerabilities: List of vulnerabilities to enrich
+        scan_output: The raw scan output for context
+        tool_name: Name of the tool that found the vulnerabilities
+        model: LLM model to use
+        api_base: Optional API base URL
+        temperature: LLM temperature
+
+    Returns:
+        List of enriched vulnerabilities with proof_of_concept in extra_data
+    """
+    if not vulnerabilities:
+        return vulnerabilities
+
+    # If only one vulnerability, use the single enrichment function
+    if len(vulnerabilities) == 1:
+        return [enrich_vulnerability_with_poc(
+            vulnerabilities[0], scan_output, tool_name, model, api_base, temperature
+        )]
+
+    try:
+        import litellm
+
+        # Build vulnerability list for the prompt
+        vuln_lines = []
+        for i, vuln in enumerate(vulnerabilities):
+            vuln_lines.append(
+                f"[{i}] {vuln.name}\n"
+                f"    Severity: {vuln.severity}\n"
+                f"    Target: {vuln.matched_at}\n"
+                f"    Provider: {vuln.provider}\n"
+                f"    Description: {vuln.description or 'No description'}"
+            )
+
+        prompt = PROMPT_VULN_BATCH_PROOF_OF_CONCEPT.format(
+            vulnerabilities_list="\n\n".join(vuln_lines),
+            scan_output=scan_output[:6000],  # Larger limit for batch
+        )
+
+        kwargs = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": 2000 + (500 * len(vulnerabilities)),  # Scale with count
+        }
+        if api_base:
+            kwargs["api_base"] = api_base
+
+        response = litellm.completion(**kwargs)
+        response_text = response.choices[0].message.content.strip()
+
+        # Parse JSON array response
+        poc_list = None
+
+        # Try direct JSON parse first
+        try:
+            poc_list = json.loads(response_text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to extract from markdown code block
+        if poc_list is None:
+            code_block_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', response_text)
+            if code_block_match:
+                try:
+                    poc_list = json.loads(code_block_match.group(1).strip())
+                except json.JSONDecodeError:
+                    pass
+
+        # Try to find JSON array by matching brackets
+        if poc_list is None and '[' in response_text:
+            start_idx = response_text.find('[')
+            if start_idx != -1:
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(response_text)):
+                    if response_text[i] == '[':
+                        bracket_count += 1
+                    elif response_text[i] == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i + 1
+                            break
+                if end_idx > start_idx:
+                    try:
+                        poc_list = json.loads(response_text[start_idx:end_idx])
+                    except json.JSONDecodeError:
+                        pass
+
+        # Enrich vulnerabilities with parsed data
+        if poc_list and isinstance(poc_list, list):
+            # Create lookup by id
+            poc_by_id = {}
+            for poc in poc_list:
+                if isinstance(poc, dict) and 'id' in poc:
+                    poc_by_id[poc['id']] = poc
+
+            for i, vuln in enumerate(vulnerabilities):
+                if not vuln.extra_data:
+                    vuln.extra_data = {}
+
+                # Try to find by id, fallback to index
+                poc_data = poc_by_id.get(i) or (poc_list[i] if i < len(poc_list) else None)
+
+                if poc_data and isinstance(poc_data, dict):
+                    vuln.extra_data["proof_of_concept"] = poc_data.get("proof_of_concept", "")
+                    vuln.extra_data["reproduction_steps"] = poc_data.get("reproduction_steps", [])
+                    vuln.extra_data["impact"] = poc_data.get("impact", "")
+                    vuln.extra_data["remediation"] = poc_data.get("remediation", "")
+                    vuln.extra_data["ai_enriched"] = True
+                else:
+                    vuln.extra_data["ai_enriched"] = False
+                    vuln.extra_data["poc_error"] = "No PoC data in batch response"
+        else:
+            # Batch parsing failed, mark all as not enriched
+            for vuln in vulnerabilities:
+                if not vuln.extra_data:
+                    vuln.extra_data = {}
+                vuln.extra_data["ai_enriched"] = False
+                vuln.extra_data["poc_error"] = "Failed to parse batch response"
+
+    except Exception as e:
+        logger.warning(f"Failed to batch enrich vulnerabilities with PoC: {e}")
+        for vuln in vulnerabilities:
+            if not vuln.extra_data:
+                vuln.extra_data = {}
+            vuln.extra_data["poc_error"] = str(e)
+
+    return vulnerabilities
+
+
+def prompt_user_for_continuation() -> Optional[str]:
+    """Prompt the user for the next query to continue the attack.
+
+    Returns:
+        User's query string or None if they want to stop
+    """
+    try:
+        print()  # New line for better formatting
+        user_input = click.prompt(
+            click.style("🤖 Run finished. Enter next query (or 'quit' to stop)", fg="cyan"),
+            default="",
+            show_default=False,
+        )
+        if user_input.lower() in ('quit', 'exit', 'stop', 'q', ''):
+            return None
+        return user_input.strip()
+    except (click.Abort, EOFError, KeyboardInterrupt):
+        return None
 
 
 def get_output_types_schema() -> str:
@@ -1105,21 +1946,9 @@ def run_secator_task(name: str, targets: List[str], options: Dict = None) -> Lis
 
 @task()
 class ai(PythonRunner):
-    """AI-powered penetration testing assistant using LLM.
+    """AI-powered penetration testing assistant using LLM."""
 
-    Modes:
-        - summarize: Analyze results and identify attack paths
-        - suggest: Recommend next secator tasks to run (with optional execution)
-        - attack: Autonomous attack loop with proof-of-concept validation
-
-    Examples:
-        secator x ai example.com --mode summarize    # Analyze target
-        secator w host_recon example.com | secator x ai --mode suggest  # Get suggestions
-        secator x ai example.com --mode suggest --run  # Run suggested tasks
-        secator x ai example.com --mode attack --dry-run  # Dry-run attack
-    """
-
-    output_types = [Vulnerability, Tag, Info, Warning, Error]
+    output_types = [Vulnerability, Tag, Info, Warning, Error, AI]
     tags = ["ai", "analysis", "pentest"]
     input_types = []  # Accept any input type
     install_cmd = "pip install litellm"
@@ -1139,17 +1968,17 @@ class ai(PythonRunner):
         },
         "model": {
             "type": str,
-            "default": "gpt-4o-mini",
+            "default": CONFIG.ai.default_model,
             "help": "LLM model to use (via LiteLLM)",
         },
         "intent_model": {
             "type": str,
-            "default": "",
+            "default": CONFIG.ai.intent_model,
             "help": "LLM model for intent analysis (Phase 1). Defaults to --model if not set.",
         },
         'api_base': {
             'type': str,
-            'default': None,
+            'default': CONFIG.ai.api_base,
             'help': 'API base URL for local models (e.g., http://localhost:11434 for Ollama)',
         },
         "sensitive": {
@@ -1194,6 +2023,11 @@ class ai(PythonRunner):
             "short": "v",
             "help": "Show verbose LLM debug output",
         },
+        "disable_secator": {
+            "is_flag": True,
+            "default": False,
+            "help": "Disable secator runners (task/workflow/scan), use only shell commands",
+        },
     }
 
     def __init__(self, inputs=[], **run_opts):
@@ -1224,13 +2058,18 @@ class ai(PythonRunner):
             yield AI(content=prompt, ai_type='prompt')
 
         mode_override = self.run_opts.get("mode", "")
-        model = self.run_opts.get("model", "gpt-4o-mini")
-        # Use user's model for intent analysis if intent_model not explicitly set
+        model = self.run_opts.get("model")
         intent_model = self.run_opts.get("intent_model") or model
-        api_base = self.run_opts.get("api_base", None)
+        api_base = self.run_opts.get("api_base")
         sensitive = self.run_opts.get("sensitive", True)
         sensitive_list = self.run_opts.get("sensitive_list")
         verbose = self.run_opts.get("verbose", False)
+
+        # Show model info
+        model_info = f"Using model: {model}"
+        if api_base:
+            model_info += f" (API: {api_base})"
+        yield Info(message=model_info)
 
         # Get workspace context
         workspace_id = self.context.get("workspace_id") if self.context else None
@@ -1240,6 +2079,7 @@ class ai(PythonRunner):
 
         # Phase 1: Intent Analysis
         queries = [{}]
+        use_workspace = False  # Default to NOT using workspace unless explicitly requested
         if prompt and not mode_override:
             yield Info(message=f"Analyzing intent using {intent_model}...")
             intent = analyze_intent(
@@ -1251,8 +2091,9 @@ class ai(PythonRunner):
             )
             if intent:
                 mode = intent.get("mode", "summarize")
+                use_workspace = intent.get("use_workspace", False)
                 queries = intent.get("queries", [{}])
-                yield Info(message=f"Mode: {mode}, Queries: {len(queries)}")
+                yield Info(message=f"Mode: {mode}, Use workspace: {use_workspace}, Queries: {len(queries)}")
             else:
                 yield Warning(message="Could not analyze intent, defaulting to summarize mode")
                 mode = "summarize"
@@ -1262,8 +2103,8 @@ class ai(PythonRunner):
         # Get results from previous runs
         results = self._previous_results or self.results
 
-        # Fetch workspace results if workspace_id available
-        if workspace_id:
+        # Fetch workspace results if workspace_id available and use_workspace is True
+        if workspace_id and use_workspace:
             from secator.query import QueryEngine
             engine = QueryEngine(workspace_id, context=self.context)
 
@@ -1274,8 +2115,24 @@ class ai(PythonRunner):
                 "json": "local JSON",
             }
             backend_name = backend_display.get(engine.backend.name, engine.backend.name)
-            yield Info(message=f"Querying workspace {workspace_id} ({backend_name})...")
-
+            # For JSON backend, show the path being searched
+            if engine.backend.name == "json":
+                from secator.query.json import JsonBackend
+                if isinstance(engine.backend, JsonBackend):
+                    workspace_path = engine.backend._get_workspace_path()
+                    yield Info(message=f"Querying workspace '{workspace_id}' from {workspace_path}")
+                    if not workspace_path.exists():
+                        yield Warning(message=f"Workspace path does not exist: {workspace_path}")
+                        # Show available workspaces
+                        reports_dir = engine.backend.reports_dir
+                        if reports_dir.exists():
+                            available = [d.name for d in reports_dir.iterdir() if d.is_dir()]
+                            if available:
+                                yield Info(message=f"Available workspaces: {', '.join(available)}")
+            else:
+                yield Info(message=f"Querying workspace {workspace_id} ({backend_name})...")
+            if not queries:
+                queries = [{}]
             for query in queries:
                 # Format query for display
                 query_str = json.dumps(query) if query else "{}"
@@ -1298,9 +2155,11 @@ class ai(PythonRunner):
 
             yield Info(message=f"Total: {len(results)} unique results from workspace")
 
+        # Check if we have enough context to proceed
+        # We need at least targets or results (prompt alone is not enough)
         if not results and not targets:
             yield Warning(
-                message="No results or targets available for AI analysis. Provide targets as input."
+                message="No results or targets available for AI analysis. Provide targets as input or use a workspace with results."
             )
             return
 
@@ -1345,7 +2204,7 @@ class ai(PythonRunner):
             )
         elif mode == "attack":
             yield from self._mode_attack(
-                context_text, model, encryptor, results, targets, api_base
+                context_text, model, encryptor, results, targets, api_base, use_workspace
             )
         else:
             yield Error(
@@ -1553,11 +2412,14 @@ class ai(PythonRunner):
         results: List[Any],
         targets: List[str],
         api_base: str = None,
+        use_workspace: bool = False,
     ) -> Generator:
         """Execute reactive attack loop to exploit vulnerabilities."""
         max_iterations = int(self.run_opts.get("max_iterations", 10))
         dry_run = self.run_opts.get("dry_run", False)
         verbose = self.run_opts.get("verbose", False)
+        temperature = float(self.run_opts.get("temperature", 0.7))
+        disable_secator = self.run_opts.get("disable_secator", False)
         custom_prompt_input = self.run_opts.get("prompt", "")
         custom_prompt, prompt_from_file, prompt_is_markdown = load_prompt_from_file_or_text(custom_prompt_input)
         if prompt_from_file:
@@ -1570,7 +2432,6 @@ class ai(PythonRunner):
         yield Info(
             message=f"Starting attack mode (max {max_iterations} iterations, dry_run={dry_run})"
         )
-        yield Info(message=f"Scope restricted to: {', '.join(targets)}")
 
         # Build attack context
         attack_context = {
@@ -1581,6 +2442,9 @@ class ai(PythonRunner):
             "targets": targets,
         }
 
+        # Track enriched vulnerabilities to avoid duplicates
+        enriched_vuln_ids = set()
+
         # Encrypt targets for prompts if sensitive data encryption enabled
         sensitive = self.run_opts.get("sensitive", True)
         targets_str = ", ".join(targets)
@@ -1588,14 +2452,20 @@ class ai(PythonRunner):
             targets_str = encryptor.encrypt(targets_str)
 
         # Create custom prompt suffix to include in all prompts
+        # Encrypt if sensitive mode enabled for consistency with executed commands
         custom_prompt_suffix = ""
         if custom_prompt:
+            prompt_text = custom_prompt
+            if sensitive:
+                prompt_text = encryptor.encrypt(prompt_text)
             custom_prompt_suffix = (
-                f"\n\n## IMPORTANT - User Instructions (MUST FOLLOW)\n{custom_prompt}"
+                f"\n\n## IMPORTANT - User Instructions (MUST FOLLOW)\n{prompt_text}"
             )
 
-        # Initial prompt - if no results, start with recon
-        if not results and targets:
+        # Initial prompt - if no workspace data requested, skip "Current Findings" as it only contains execution info
+        if not use_workspace:
+            prompt = PROMPT_ATTACK_START_NO_RESULTS.format(targets=targets_str) + custom_prompt_suffix
+        elif not results:
             prompt = PROMPT_ATTACK_START_NO_RESULTS.format(targets=targets_str) + custom_prompt_suffix
         else:
             prompt = PROMPT_ATTACK_START_WITH_RESULTS.format(
@@ -1603,20 +2473,28 @@ class ai(PythonRunner):
                 targets=targets_str
             ) + custom_prompt_suffix
 
+        # Show master prompt (system prompt) in verbose mode - only once at start
+        if verbose:
+            system_prompt = get_system_prompt("attack", disable_secator=disable_secator)
+            yield AI(content=system_prompt, ai_type='prompt')
+
+        if disable_secator:
+            yield Info(message="Secator runners disabled - using shell commands only")
+
         for iteration in range(max_iterations):
             attack_context["iteration"] = iteration + 1
             yield Info(message=f"Attack iteration {iteration + 1}/{max_iterations}")
 
             try:
-                # Show the full prompt only in verbose mode
+                # Show the user prompt only in verbose mode
                 if verbose:
                     yield AI(content=prompt, ai_type='prompt')
 
                 response = get_llm_response(
                     prompt=prompt,
                     model=model,
-                    system_prompt=get_system_prompt("attack"),
-                    temperature=0.3,  # Lower temperature for attack mode
+                    system_prompt=get_system_prompt("attack", disable_secator=disable_secator),
+                    temperature=temperature,
                     api_base=api_base,
                 )
 
@@ -1624,8 +2502,8 @@ class ai(PythonRunner):
                 if self.run_opts.get("sensitive", True):
                     response = encryptor.decrypt(response)
 
-                # Parse action from response
-                action = self._parse_attack_action(response)
+                # Parse actions from response (now returns list)
+                actions = self._parse_attack_actions(response)
 
                 # Show AI response with markdown rendering
                 # In verbose mode show full response, otherwise strip JSON
@@ -1643,12 +2521,8 @@ class ai(PythonRunner):
                         extra_data={"iteration": iteration + 1},
                     )
 
-                if action:
-                    # Yield the action as a native output type
-                    yield Action.from_dict(action)
-
-                if not action:
-                    yield Warning(message="Could not parse action from LLM response")
+                if not actions:
+                    yield Warning(message="Could not parse actions from LLM response")
                     # Resend previous context with the invalid response so LLM can fix it
                     executed_cmds = format_executed_commands(attack_context)
                     encrypted_response = response[:2000]
@@ -1659,373 +2533,449 @@ class ai(PythonRunner):
                     prompt = PROMPT_ATTACK_INVALID_JSON.format(
                         response=encrypted_response,
                         targets=targets_str,
-                        executed_commands=executed_cmds
-                    ) + custom_prompt_suffix
+                        executed_commands=executed_cmds,
+                        user_instructions=custom_prompt_suffix
+                    )
                     continue
 
-                action_type = action.get("action", "")
+                # Separate terminal actions (complete, stop) from executable actions
+                terminal_action = None
+                executable_actions = []
+                for action in actions:
+                    action_type = action.get("action", "")
+                    if action_type in ("complete", "stop"):
+                        terminal_action = action
+                        break  # Terminal action stops processing
+                    else:
+                        executable_actions.append(action)
 
-                if action_type == "complete":
-                    yield Info(message="Attack loop completed")
-                    yield AI(
-                        content=action.get("summary", "Attack sequence completed"),
-                        ai_type='attack_summary',
-                        mode='attack',
-                        model=model,
-                        extra_data={
-                            "iterations": iteration + 1,
-                            "successful_attacks": len(
-                                attack_context["successful_attacks"]
-                            ),
-                            "validated_vulns": len(attack_context["validated_vulns"]),
-                        },
-                    )
-                    break
+                # If we have a terminal action with no executable actions, handle it
+                if terminal_action and not executable_actions:
+                    action_type = terminal_action.get("action", "")
+                    if action_type == "complete":
+                        yield Info(message="Attack loop completed")
+                        yield Info(message="Generating comprehensive attack summary...")
+                        full_summary = generate_attack_summary_with_llm(
+                            attack_context,
+                            model=model,
+                            api_base=api_base,
+                            temperature=temperature,
+                        )
+                        yield AI(
+                            content=full_summary,
+                            ai_type='attack_summary',
+                            mode='attack',
+                            model=model,
+                        )
 
-                elif action_type == "stop":
-                    reason = action.get("reason", "No reason provided")
-                    yield Warning(message=f"Attack loop stopped: {reason}")
-                    yield Tag(
-                        name="attack_stopped",
-                        value=reason,
-                        match="attack",
-                        category="ai",
-                        extra_data={
-                            "iterations": iteration + 1,
-                            "successful_attacks": len(
-                                attack_context["successful_attacks"]
-                            ),
-                            "validated_vulns": len(attack_context["validated_vulns"]),
-                        },
-                    )
-                    break
+                        user_query = prompt_user_for_continuation()
+                        if user_query is None:
+                            yield Info(message="User chose to stop. Ending attack loop.")
+                            break
 
-                elif action_type == "execute":
-                    exec_type = action.get("type", "shell")
+                        executed_cmds = format_executed_commands(attack_context)
+                        if sensitive and executed_cmds:
+                            executed_cmds = encryptor.encrypt(executed_cmds)
+                        prompt = PROMPT_ATTACK_CONTINUE.format(
+                            reason="completed its initial objectives",
+                            executed_commands=executed_cmds,
+                            iterations=iteration + 1,
+                            successful_count=len(attack_context["successful_attacks"]),
+                            vuln_count=len(attack_context["validated_vulns"]),
+                            user_query=user_query,
+                            targets=targets_str,
+                            user_instructions=custom_prompt_suffix
+                        )
+                        yield Info(message=f"Continuing attack with new query: {user_query}")
+                        continue
 
-                    # Handle secator runners (task, workflow, scan)
-                    if exec_type in ("task", "workflow", "scan"):
-                        name = action.get("name", "")
-                        action_targets = action.get("targets", []) or targets
-                        opts = action.get("opts", {})
+                    elif action_type == "stop":
+                        reason = terminal_action.get("reason", "No reason provided")
+                        yield AI(
+                            content=reason,
+                            ai_type='stopped',
+                            mode='attack',
+                            extra_data={
+                                "iterations": iteration + 1,
+                                "successful_attacks": len(attack_context["successful_attacks"]),
+                                "validated_vulns": len(attack_context["validated_vulns"]),
+                            },
+                        )
 
-                        # Scope check - all targets must be in scope
-                        out_of_scope = [
-                            t
-                            for t in action_targets
-                            if not self._is_in_scope(t, targets)
-                        ]
-                        if out_of_scope:
-                            yield Warning(
-                                message=f"Targets out of scope: {out_of_scope}"
+                        user_query = prompt_user_for_continuation()
+                        if user_query is None:
+                            yield Info(message="User chose to stop. Ending attack loop.")
+                            break
+
+                        executed_cmds = format_executed_commands(attack_context)
+                        if sensitive and executed_cmds:
+                            executed_cmds = encryptor.encrypt(executed_cmds)
+                        prompt = PROMPT_ATTACK_CONTINUE.format(
+                            reason=f"stopped ({reason})",
+                            executed_commands=executed_cmds,
+                            iterations=iteration + 1,
+                            successful_count=len(attack_context["successful_attacks"]),
+                            vuln_count=len(attack_context["validated_vulns"]),
+                            user_query=user_query,
+                            targets=targets_str,
+                            user_instructions=custom_prompt_suffix
+                        )
+                        yield Info(message=f"Continuing attack with new query: {user_query}")
+                        continue
+
+                # Process executable actions and collect batch results
+                if len(executable_actions) > 1:
+                    yield Info(message=f"Processing batch of {len(executable_actions)} actions...")
+
+                batch_results = []  # Collect results for batch prompt
+                skip_remaining = False
+
+                for action_idx, action in enumerate(executable_actions):
+                    if skip_remaining:
+                        break
+
+                    action_type = action.get("action", "")
+                    action_num = action_idx + 1
+
+                    if action_type == "execute":
+                        exec_type = action.get("type", "shell")
+
+                        # Handle secator runners (task, workflow, scan)
+                        if exec_type in ("task", "workflow", "scan"):
+                            if disable_secator:
+                                yield Warning(
+                                    message=f"[{action_num}/{len(executable_actions)}] Secator runners disabled. Rejecting {exec_type} '{action.get('name', '')}'."
+                                )
+                                batch_results.append({
+                                    "action": f"{exec_type} '{action.get('name', '')}'",
+                                    "status": "rejected",
+                                    "output": "Secator runners are disabled. Use shell commands instead."
+                                })
+                                continue
+
+                            name = action.get("name", "")
+                            action_targets = action.get("targets", []) or targets
+                            opts = action.get("opts", {})
+
+                            valid_opts, invalid_opts, valid_opt_names = (
+                                self._validate_runner_opts(exec_type, name, opts)
                             )
-                            executed_cmds = format_executed_commands(attack_context)
-                            if sensitive and executed_cmds:
-                                executed_cmds = encryptor.encrypt(executed_cmds)
-                            prompt = PROMPT_ATTACK_ERROR_OUT_OF_SCOPE.format(
-                                out_of_scope=out_of_scope,
-                                targets=targets_str,
-                                executed_commands=executed_cmds
-                            ) + custom_prompt_suffix
-                            continue
 
-                        # Validate options
-                        valid_opts, invalid_opts, valid_opt_names = (
-                            self._validate_runner_opts(exec_type, name, opts)
-                        )
+                            if invalid_opts:
+                                yield Warning(
+                                    message=f"[{action_num}/{len(executable_actions)}] Invalid options for {exec_type} '{name}': {invalid_opts}"
+                                )
+                                batch_results.append({
+                                    "action": f"{exec_type} '{name}'",
+                                    "status": "error",
+                                    "output": f"Invalid options: {invalid_opts}. Valid options: {valid_opt_names}"
+                                })
+                                continue
 
-                        if invalid_opts:
-                            yield Warning(
-                                message=f"Invalid options for {exec_type} '{name}': {invalid_opts}"
+                            cli_opts = " ".join(
+                                f"--{k.replace('_', '-')} {v}"
+                                if v is not True
+                                else f"--{k.replace('_', '-')}"
+                                for k, v in valid_opts.items()
                             )
-                            executed_cmds = format_executed_commands(attack_context)
-                            if sensitive and executed_cmds:
-                                executed_cmds = encryptor.encrypt(executed_cmds)
-                            prompt = PROMPT_ATTACK_ERROR_INVALID_OPTS.format(
-                                exec_type=exec_type,
-                                name=name,
-                                invalid_opts=invalid_opts,
-                                valid_opts=valid_opt_names,
-                                targets=targets_str,
-                                executed_commands=executed_cmds
-                            ) + custom_prompt_suffix
-                            continue
+                            cli_cmd = f"secator {exec_type[0]} {name} {','.join(action_targets)}"
+                            if cli_opts:
+                                cli_cmd += f" {cli_opts}"
 
-                        # Build CLI command with options
-                        cli_opts = " ".join(
-                            f"--{k.replace('_', '-')} {v}"
-                            if v is not True
-                            else f"--{k.replace('_', '-')}"
-                            for k, v in valid_opts.items()
-                        )
-                        cli_cmd = (
-                            f"secator {exec_type[0]} {name} {','.join(action_targets)}"
-                        )
-                        if cli_opts:
-                            cli_cmd += f" {cli_opts}"
+                            auto_yes = self.run_opts.get("yes", False)
+                            in_ci = _is_ci()
+                            action_for_safety = {
+                                "command": cli_cmd,
+                                "destructive": action.get("destructive", False),
+                                "aggressive": action.get("aggressive", False),
+                                "reasoning": action.get("reasoning", ""),
+                            }
+                            should_run, modified_cmd = check_action_safety(
+                                action_for_safety, auto_yes=auto_yes, in_ci=in_ci
+                            )
 
-                        # Safety check for execute actions
-                        auto_yes = self.run_opts.get("yes", False)
-                        in_ci = _is_ci()
-                        action_for_safety = {
-                            "command": cli_cmd,
-                            "destructive": action.get("destructive", False),
-                            "aggressive": action.get("aggressive", False),
-                            "reasoning": action.get("reasoning", ""),
-                        }
-                        should_run, modified_cmd = check_action_safety(
-                            action_for_safety, auto_yes=auto_yes, in_ci=in_ci
-                        )
+                            if not should_run:
+                                yield Info(message=f"[{action_num}/{len(executable_actions)}] Skipped: {cli_cmd}")
+                                batch_results.append({
+                                    "action": cli_cmd,
+                                    "status": "skipped",
+                                    "output": "User declined to run this command."
+                                })
+                                continue
 
-                        if not should_run:
-                            yield Info(message=f"Skipped: {cli_cmd}")
-                            executed_cmds = format_executed_commands(attack_context)
-                            if sensitive and executed_cmds:
-                                executed_cmds = encryptor.encrypt(executed_cmds)
-                            prompt = PROMPT_ATTACK_SKIPPED.format(
-                                command=cli_cmd,
-                                targets=targets_str,
-                                executed_commands=executed_cmds
-                            ) + custom_prompt_suffix
-                            continue
+                            if modified_cmd != cli_cmd:
+                                cli_cmd = modified_cmd
+                                yield Info(message=f"Command modified to: {cli_cmd}")
 
-                        # Update command if modified (e.g., rate limiting added)
-                        if modified_cmd != cli_cmd:
-                            cli_cmd = modified_cmd
-                            yield Info(message=f"Command modified to: {cli_cmd}")
-
-                        yield Info(message=f"Started [bold red]{cli_cmd}[/]")
-
-                        if dry_run:
-                            yield Tag(
-                                name="dry_run_runner",
-                                value=f"{exec_type}/{name}",
-                                match=", ".join(action_targets),
-                                category="attack",
+                            reasoning = action.get("reasoning", "")
+                            yield AI(
+                                content=cli_cmd,
+                                ai_type=exec_type,
+                                mode='attack',
                                 extra_data={
-                                    "reasoning": action.get("reasoning", ""),
+                                    "reasoning": reasoning,
+                                    "targets": action_targets,
                                     "opts": valid_opts,
+                                    "batch_action": f"{action_num}/{len(executable_actions)}",
                                 },
                             )
-                            result_output = f"[DRY RUN] {exec_type.capitalize()} '{name}' not executed"
-                            runner_results = []
-                        else:
-                            # Execute the runner and collect results
-                            runner_results = []
-                            for result in self._execute_secator_runner(
-                                exec_type, name, action_targets, valid_opts
-                            ):
-                                runner_results.append(result)
-                                self.add_result(result, print=False)
 
-                            # Format results for LLM context
-                            result_output = format_results_for_llm(
-                                runner_results, max_items=50
-                            )
+                            if dry_run:
+                                result_output = f"[DRY RUN] {exec_type.capitalize()} '{name}' not executed"
+                                runner_results = []
+                                errors = []
+                            else:
+                                runner_results = []
+                                vulnerabilities = []
+                                errors = []
+                                for result in self._execute_secator_runner(
+                                    exec_type, name, action_targets, valid_opts
+                                ):
+                                    runner_results.append(result)
+                                    if isinstance(result, Vulnerability):
+                                        vulnerabilities.append(result)
+                                    elif isinstance(result, Error):
+                                        errors.append(result.message)
+                                    else:
+                                        self.add_result(result, print=False)
 
-                        if verbose:
-                            yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
+                                result_output = format_results_for_llm(runner_results)
 
-                        attack_context["successful_attacks"].append(
-                            {
+                                # Include errors in output so AI can learn from them
+                                if errors:
+                                    error_text = "\n".join(f"ERROR: {e}" for e in errors)
+                                    result_output = f"{error_text}\n\n{result_output}" if result_output else error_text
+
+                                if vulnerabilities:
+                                    yield Info(message=f"Generating proof of concept for {len(vulnerabilities)} vulnerabilities...")
+                                    enriched_vulns = batch_enrich_vulnerabilities_with_poc(
+                                        vulnerabilities=vulnerabilities,
+                                        scan_output=result_output,
+                                        tool_name=name,
+                                        model=model,
+                                        api_base=api_base,
+                                        temperature=temperature,
+                                    )
+                                    for enriched in enriched_vulns:
+                                        self.add_result(enriched, print=True)
+                                        yield enriched
+
+                            if verbose:
+                                yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
+
+                            # Determine status based on errors
+                            action_status = "error" if errors else "success"
+                            attack_context["successful_attacks"].append({
                                 "type": exec_type,
                                 "name": name,
                                 "targets": action_targets,
                                 "result_count": len(runner_results),
                                 "output": result_output[:2000],
+                                "errors": errors,
+                            })
+
+                            batch_results.append({
+                                "action": f"{exec_type.capitalize()} '{name}' on {action_targets}",
+                                "status": action_status,
+                                "output": result_output[:2000],
+                                "result_count": len(runner_results),
+                                "errors": errors,
+                            })
+
+                        elif exec_type == "shell":
+                            command = action.get("command", "")
+                            target = action.get("target", "")
+
+                            auto_yes = self.run_opts.get("yes", False)
+                            in_ci = _is_ci()
+                            action_for_safety = {
+                                "command": command,
+                                "destructive": action.get("destructive", False),
+                                "aggressive": action.get("aggressive", False),
+                                "reasoning": action.get("reasoning", ""),
                             }
-                        )
-
-                        # Build next prompt with executed commands section
-                        executed_cmds = format_executed_commands(attack_context)
-                        encrypted_output = result_output[:4000]
-                        if sensitive:
-                            encrypted_output = encryptor.encrypt(encrypted_output)
-                            if executed_cmds:
-                                executed_cmds = encryptor.encrypt(executed_cmds)
-
-                        prompt = PROMPT_ATTACK_ITERATION.format(
-                            action_description=f"{exec_type.capitalize()} '{name}' executed on {action_targets}.",
-                            output=encrypted_output,
-                            executed_commands=executed_cmds
-                        ) + custom_prompt_suffix
-
-                    # Handle shell commands (curl, wget, nmap direct)
-                    elif exec_type == "shell":
-                        command = action.get("command", "")
-                        target = action.get("target", "")
-
-                        # Scope check
-                        if target and not self._is_in_scope(target, targets):
-                            yield Warning(
-                                message=f"Target {target} is out of scope, skipping"
+                            should_run, modified_cmd = check_action_safety(
+                                action_for_safety, auto_yes=auto_yes, in_ci=in_ci
                             )
-                            executed_cmds = format_executed_commands(attack_context)
-                            if sensitive and executed_cmds:
-                                executed_cmds = encryptor.encrypt(executed_cmds)
-                            prompt = PROMPT_ATTACK_ERROR_OUT_OF_SCOPE.format(
-                                out_of_scope=target,
-                                targets=targets_str,
-                                executed_commands=executed_cmds
-                            ) + custom_prompt_suffix
-                            continue
 
-                        # Safety check for shell commands
-                        auto_yes = self.run_opts.get("yes", False)
-                        in_ci = _is_ci()
-                        action_for_safety = {
-                            "command": command,
-                            "destructive": action.get("destructive", False),
-                            "aggressive": action.get("aggressive", False),
-                            "reasoning": action.get("reasoning", ""),
-                        }
-                        should_run, modified_cmd = check_action_safety(
-                            action_for_safety, auto_yes=auto_yes, in_ci=in_ci
-                        )
+                            if not should_run:
+                                yield Info(message=f"[{action_num}/{len(executable_actions)}] Skipped: {command}")
+                                batch_results.append({
+                                    "action": command,
+                                    "status": "skipped",
+                                    "output": "User declined to run this command."
+                                })
+                                continue
 
-                        if not should_run:
-                            yield Info(message=f"Skipped: {command}")
-                            executed_cmds = format_executed_commands(attack_context)
-                            if sensitive and executed_cmds:
-                                executed_cmds = encryptor.encrypt(executed_cmds)
-                            prompt = PROMPT_ATTACK_SKIPPED.format(
-                                command=command,
-                                targets=targets_str,
-                                executed_commands=executed_cmds
-                            ) + custom_prompt_suffix
-                            continue
+                            if modified_cmd != command:
+                                command = modified_cmd
+                                yield Info(message=f"Command modified to: {command}")
 
-                        # Update command if modified (e.g., rate limiting added)
-                        if modified_cmd != command:
-                            command = modified_cmd
-                            yield Info(message=f"Command modified to: {command}")
+                            reasoning = action.get("reasoning", "")
 
-                        yield Info(message=f"[CMD] {command}")
+                            # Display reasoning like secator workflow task descriptions
+                            console.print("")
+                            if reasoning:
+                                console.print(f"🔧 [bold gold3]{reasoning} ...[/]")
 
-                        if dry_run:
-                            yield Tag(
-                                name="dry_run_command",
-                                value=command,
-                                match=target,
-                                category="attack",
-                                extra_data={"reasoning": action.get("reasoning", "")},
+                            # Display shell command like secator tasks (⚡ prefix)
+                            console.print(f"⚡ [bold green]{command}[/]")
+
+                            # Save AI record for shell command (without printing)
+                            shell_ai = AI(
+                                content=command,
+                                ai_type='shell',
+                                mode='attack',
+                                extra_data={
+                                    "reasoning": reasoning,
+                                    "target": target,
+                                    "batch_action": f"{action_num}/{len(executable_actions)}",
+                                },
                             )
-                            result_output = "[DRY RUN] Command not executed"
-                        else:
-                            result_output = self._execute_command(command)
+                            self.add_result(shell_ai, print=False)
 
-                        if verbose:
-                            yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
+                            if dry_run:
+                                result_output = "[DRY RUN] Command not executed"
+                            else:
+                                result_output = self._execute_command(command)
 
-                        attack_context["successful_attacks"].append(
-                            {
+                            # Show output inline (truncated to 1000 chars)
+                            truncated_output = result_output[:1000] + ("..." if len(result_output) > 1000 else "")
+                            console.print(truncated_output)
+
+                            # Save AI record for shell output (without printing)
+                            output_ai = AI(
+                                content=truncated_output,
+                                ai_type='shell_output',
+                                mode='attack',
+                            )
+                            self.add_result(output_ai, print=False)
+
+                            attack_context["successful_attacks"].append({
                                 "type": "shell",
                                 "command": command,
                                 "target": target,
                                 "output": result_output[:2000],
-                            }
-                        )
+                            })
 
-                        # Build next prompt with executed commands section
-                        executed_cmds = format_executed_commands(attack_context)
-                        encrypted_output = result_output[:4000]
-                        encrypted_command = command
-                        if sensitive:
-                            encrypted_output = encryptor.encrypt(encrypted_output)
-                            encrypted_command = encryptor.encrypt(encrypted_command)
-                            if executed_cmds:
-                                executed_cmds = encryptor.encrypt(executed_cmds)
+                            batch_results.append({
+                                "action": f"Shell: {command}",
+                                "status": "success",
+                                "output": result_output[:2000],
+                            })
 
-                        prompt = PROMPT_ATTACK_SHELL_RESULT.format(
-                            command=encrypted_command,
-                            output=encrypted_output,
-                            executed_commands=executed_cmds
-                        ) + custom_prompt_suffix
+                        else:
+                            yield Warning(message=f"[{action_num}/{len(executable_actions)}] Unknown execute type: {exec_type}")
+                            batch_results.append({
+                                "action": f"Unknown type: {exec_type}",
+                                "status": "error",
+                                "output": f"Unknown execute type: {exec_type}"
+                            })
 
-                    else:
-                        yield Warning(message=f"Unknown execute type: {exec_type}")
-                        executed_cmds = format_executed_commands(attack_context)
-                        if sensitive and executed_cmds:
-                            executed_cmds = encryptor.encrypt(executed_cmds)
-                        prompt = PROMPT_ATTACK_ERROR_UNKNOWN_TYPE.format(
-                            exec_type=exec_type,
-                            targets=targets_str,
-                            executed_commands=executed_cmds
-                        ) + custom_prompt_suffix
-                        continue
+                    elif action_type == "validate":
+                        vuln_name = action.get("vulnerability", "Unknown")
+                        target = action.get("target", "")
+                        proof = action.get("proof", "")
+                        severity = action.get("severity", "medium")
+                        steps = action.get("reproduction_steps", [])
 
-                elif action_type == "validate":
-                    vuln_name = action.get("vulnerability", "Unknown")
-                    target = action.get("target", "")
-                    proof = action.get("proof", "")
-                    severity = action.get("severity", "medium")
-                    steps = action.get("reproduction_steps", [])
-
-                    attack_context["validated_vulns"].append(
-                        {
+                        attack_context["validated_vulns"].append({
                             "name": vuln_name,
                             "severity": severity,
                             "target": target,
-                        }
-                    )
+                        })
 
-                    yield Vulnerability(
-                        name=vuln_name,
-                        matched_at=target,
-                        severity=severity,
-                        confidence="high",
-                        description=f"AI-validated vulnerability: {vuln_name}",
-                        provider="ai",
-                        extra_data={
-                            "proof_of_concept": proof,
-                            "reproduction_steps": steps,
-                            "ai_validated": True,
-                            "model": model,
-                        },
-                    )
+                        yield Vulnerability(
+                            name=vuln_name,
+                            matched_at=target,
+                            severity=severity,
+                            confidence="high",
+                            description=f"AI-validated vulnerability: {vuln_name}",
+                            provider="ai",
+                            extra_data={
+                                "proof_of_concept": proof,
+                                "reproduction_steps": steps,
+                                "ai_validated": True,
+                                "model": model,
+                            },
+                        )
 
-                    # Build next prompt with executed commands section
+                        batch_results.append({
+                            "action": f"Validate: {vuln_name}",
+                            "status": "validated",
+                            "output": f"Vulnerability '{vuln_name}' validated at {target} (severity: {severity})"
+                        })
+
+                    elif action_type == "report":
+                        yield AI(
+                            content=action.get("content", ""),
+                            ai_type='report',
+                            mode='attack',
+                            extra_data=attack_context,
+                        )
+                        batch_results.append({
+                            "action": "Report",
+                            "status": "generated",
+                            "output": action.get("content", "")[:500]
+                        })
+
+                    else:
+                        yield Warning(message=f"[{action_num}/{len(executable_actions)}] Unknown action type: {action_type}")
+                        batch_results.append({
+                            "action": f"Unknown: {action_type}",
+                            "status": "error",
+                            "output": f"Unknown action type: {action_type}"
+                        })
+
+                # Build batch results prompt for next iteration
+                if batch_results:
+                    # Format batch results for LLM
+                    batch_results_text = ""
+                    for idx, result in enumerate(batch_results, 1):
+                        batch_results_text += f"\n### Action {idx}: {result['action']}\n"
+                        batch_results_text += f"**Status:** {result['status']}\n"
+                        if result.get('errors'):
+                            batch_results_text += "**Errors (fix these in next attempt):**\n"
+                            for err in result['errors']:
+                                batch_results_text += f"  - {err}\n"
+                        if result.get('result_count'):
+                            batch_results_text += f"**Results:** {result['result_count']} items\n"
+                        batch_results_text += f"**Output:**\n```\n{result['output'][:1500]}\n```\n"
+
                     executed_cmds = format_executed_commands(attack_context)
-                    if sensitive and executed_cmds:
-                        executed_cmds = encryptor.encrypt(executed_cmds)
+                    if sensitive:
+                        batch_results_text = encryptor.encrypt(batch_results_text)
+                        if executed_cmds:
+                            executed_cmds = encryptor.encrypt(executed_cmds)
 
-                    prompt = PROMPT_ATTACK_VALIDATION.format(
-                        vuln_name=vuln_name,
-                        executed_commands=executed_cmds
-                    ) + custom_prompt_suffix
-
-                elif action_type == "report":
-                    yield Tag(
-                        name="attack_report",
-                        value=action.get("content", ""),
-                        match="attack",
-                        category="ai",
-                        extra_data=attack_context,
+                    prompt = PROMPT_ATTACK_BATCH_RESULTS.format(
+                        action_count=len(batch_results),
+                        batch_results=batch_results_text,
+                        executed_commands=executed_cmds,
+                        user_instructions=custom_prompt_suffix
                     )
-                    # Build next prompt with executed commands section
-                    executed_cmds = format_executed_commands(attack_context)
-                    if sensitive and executed_cmds:
-                        executed_cmds = encryptor.encrypt(executed_cmds)
-                    prompt = PROMPT_ATTACK_REPORT.format(
-                        executed_commands=executed_cmds
-                    ) + custom_prompt_suffix
-
                 else:
-                    yield Warning(message=f"Unknown action type: {action_type}")
+                    # No executable actions and no terminal - shouldn't happen but handle gracefully
                     executed_cmds = format_executed_commands(attack_context)
                     if sensitive and executed_cmds:
                         executed_cmds = encryptor.encrypt(executed_cmds)
                     prompt = PROMPT_ATTACK_ERROR_UNKNOWN_ACTION.format(
-                        action_type=action_type,
+                        action_type="none",
                         targets=targets_str,
-                        executed_commands=executed_cmds
-                    ) + custom_prompt_suffix
+                        executed_commands=executed_cmds,
+                        user_instructions=custom_prompt_suffix
+                    )
 
             except Exception as e:
                 yield Error(
                     message=f"Attack iteration {iteration + 1} failed: {str(e)}"
                 )
-                attack_context["failed_attacks"].append(str(e))
+                attack_context["failed_attacks"].append({
+                    "type": "error",
+                    "name": "exception",
+                    "error": str(e),
+                    "targets": [],
+                })
                 # Build error prompt with executed commands
                 executed_cmds = format_executed_commands(attack_context)
                 if sensitive and executed_cmds:
@@ -2033,18 +2983,26 @@ class ai(PythonRunner):
                 prompt = PROMPT_ATTACK_ERROR_EXCEPTION.format(
                     error=str(e),
                     targets=targets_str,
-                    executed_commands=executed_cmds
-                ) + custom_prompt_suffix
+                    executed_commands=executed_cmds,
+                    user_instructions=custom_prompt_suffix
+                )
 
         # Final summary if we hit max iterations
         if attack_context["iteration"] >= max_iterations:
             yield Warning(message=f"Max iterations ({max_iterations}) reached")
+            # Generate comprehensive attack summary using LLM
+            yield Info(message="Generating comprehensive attack summary...")
+            full_summary = generate_attack_summary_with_llm(
+                attack_context,
+                model=model,
+                api_base=api_base,
+                temperature=temperature,
+            )
             yield AI(
-                content="Attack loop reached maximum iterations",
+                content=full_summary,
                 ai_type='attack_summary',
                 mode='attack',
                 model=model,
-                extra_data=attack_context,
             )
 
     def _extract_commands(self, text: str) -> List[str]:
@@ -2066,18 +3024,55 @@ class ai(PythonRunner):
                     commands.append(cmd)
         return commands
 
-    def _parse_attack_action(self, response: str) -> Optional[Dict]:
-        """Parse JSON action from LLM response."""
+    def _parse_attack_actions(self, response: str) -> List[Dict]:
+        """Parse JSON action(s) from LLM response. Returns list of actions."""
+        def _normalize_to_list(parsed):
+            """Convert parsed JSON to list of actions."""
+            if isinstance(parsed, list):
+                return [a for a in parsed if isinstance(a, dict) and "action" in a]
+            elif isinstance(parsed, dict) and "action" in parsed:
+                return [parsed]
+            return []
+
+        # Try direct parse (array or object)
         try:
-            return json.loads(response)
+            parsed = json.loads(response)
+            actions = _normalize_to_list(parsed)
+            if actions:
+                return actions
         except json.JSONDecodeError:
             pass
 
-        # Try to find JSON in code blocks
+        # Try to find JSON array in code blocks
+        json_match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", response, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group(1))
+                actions = _normalize_to_list(parsed)
+                if actions:
+                    return actions
+            except json.JSONDecodeError:
+                pass
+
+        # Try to find JSON object in code blocks
         json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
         if json_match:
             try:
-                return json.loads(json_match.group(1))
+                parsed = json.loads(json_match.group(1))
+                actions = _normalize_to_list(parsed)
+                if actions:
+                    return actions
+            except json.JSONDecodeError:
+                pass
+
+        # Try to find raw JSON array
+        json_match = re.search(r'\[\s*\{.*?"action".*?\}\s*\]', response, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                actions = _normalize_to_list(parsed)
+                if actions:
+                    return actions
             except json.JSONDecodeError:
                 pass
 
@@ -2085,23 +3080,14 @@ class ai(PythonRunner):
         json_match = re.search(r'\{[^{}]*"action"[^{}]*\}', response, re.DOTALL)
         if json_match:
             try:
-                return json.loads(json_match.group())
+                parsed = json.loads(json_match.group())
+                actions = _normalize_to_list(parsed)
+                if actions:
+                    return actions
             except json.JSONDecodeError:
                 pass
 
-        return None
-
-    def _is_in_scope(self, target: str, scope_list: List[str]) -> bool:
-        """Check if target is within defined scope."""
-        if not scope_list:
-            return True
-        target_lower = target.lower()
-        for scope_item in scope_list:
-            scope_lower = scope_item.lower()
-            # Check if target contains or matches scope item
-            if scope_lower in target_lower or target_lower in scope_lower:
-                return True
-        return False
+        return []
 
     def _execute_command(self, command: str) -> str:
         """Execute a command and return output."""
@@ -2119,6 +3105,10 @@ class ai(PythonRunner):
                 timeout=120,
             )
             output = result.stdout + result.stderr
+
+            # Normalize whitespace: collapse 3+ consecutive newlines to 2
+            output = re.sub(r'\n{3,}', '\n\n', output)
+            output = output.strip()
 
             # If secator command failed, append help output
             if result.returncode != 0 and command.startswith("secator "):
@@ -2176,6 +3166,10 @@ class ai(PythonRunner):
             config_opts = get_config_options(config)
             valid_opt_names = [s.replace("-", "_") for s in config_opts.keys()]
 
+            # Add common runner options that are always valid
+            common_opts = ["profiles"]
+            valid_opt_names.extend(common_opts)
+
             # Separate valid and invalid options
             valid_opts = {}
             invalid_opts = []
@@ -2214,8 +3208,8 @@ class ai(PythonRunner):
             "print_line": False,
             "print_cmd": True,
             "print_progress": True,
-            "print_start": False,
-            "print_end": False,
+            "print_start": True,
+            "print_end": True,
             "print_target": False,
             "sync": self.sync,
             **opts,

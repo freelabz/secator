@@ -208,9 +208,10 @@ class AI(StrictModel):
 	"""AI task configuration."""
 	enabled: bool = False
 	api_key: str = ''
-	default_model: str = 'gpt-4o-mini'
-	intent_model: str = 'gpt-4o-mini'
-	execution_model: str = 'gpt-4o-mini'
+	api_base: str = ''
+	default_model: str = 'claude-sonnet-4-6'
+	intent_model: str = ''  # defaults to default_model if unset
+	execution_model: str = ''  # defaults to default_model if unset
 	temperature: float = 0.7
 	max_tokens: int = 4096
 	max_results: int = 500
