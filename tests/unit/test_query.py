@@ -87,3 +87,172 @@ class TestQueryBackendBase(unittest.TestCase):
         self.assertEqual(backend.last_count_query['is_false_positive'], False)
         # User field should still be preserved
         self.assertEqual(backend.last_count_query['_type'], 'vulnerability')
+
+
+class TestJsonBackend(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile
+        import json
+        from pathlib import Path
+
+        self.temp_dir = tempfile.mkdtemp()
+        self.workspace_id = 'test_workspace'
+        self.workspace_dir = Path(self.temp_dir) / self.workspace_id / 'tasks' / '0'
+        self.workspace_dir.mkdir(parents=True)
+
+        # Create test report.json
+        self.test_data = {
+            "info": {"name": "test"},
+            "results": {
+                "vulnerability": [
+                    {
+                        "_type": "vulnerability",
+                        "name": "SQL Injection",
+                        "severity": "critical",
+                        "matched_at": "http://example.com/login",
+                        "is_false_positive": False,
+                        "_context": {
+                            "workspace_id": self.workspace_id,
+                            "workspace_duplicate": False
+                        }
+                    },
+                    {
+                        "_type": "vulnerability",
+                        "name": "XSS",
+                        "severity": "medium",
+                        "matched_at": "http://example.com/search",
+                        "is_false_positive": False,
+                        "_context": {
+                            "workspace_id": self.workspace_id,
+                            "workspace_duplicate": False
+                        }
+                    }
+                ],
+                "url": [
+                    {
+                        "_type": "url",
+                        "url": "http://example.com/login",
+                        "status_code": 200,
+                        "is_false_positive": False,
+                        "_context": {
+                            "workspace_id": self.workspace_id,
+                            "workspace_duplicate": False
+                        }
+                    }
+                ]
+            }
+        }
+
+        with open(self.workspace_dir / 'report.json', 'w') as f:
+            json.dump(self.test_data, f)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_json_backend_search_by_type(self):
+        from secator.query.json import JsonBackend
+
+        backend = JsonBackend(
+            workspace_id=self.workspace_id,
+            config={'reports_dir': self.temp_dir}
+        )
+
+        results = backend.search({'_type': 'vulnerability'})
+
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r['_type'] == 'vulnerability' for r in results))
+
+    def test_json_backend_search_with_operator(self):
+        from secator.query.json import JsonBackend
+
+        backend = JsonBackend(
+            workspace_id=self.workspace_id,
+            config={'reports_dir': self.temp_dir}
+        )
+
+        results = backend.search({
+            '_type': 'vulnerability',
+            'severity': {'$in': ['critical', 'high']}
+        })
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['name'], 'SQL Injection')
+
+    def test_json_backend_search_contains(self):
+        from secator.query.json import JsonBackend
+
+        backend = JsonBackend(
+            workspace_id=self.workspace_id,
+            config={'reports_dir': self.temp_dir}
+        )
+
+        results = backend.search({
+            '_type': 'vulnerability',
+            'matched_at': {'$contains': 'login'}
+        })
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['name'], 'SQL Injection')
+
+    def test_json_backend_count(self):
+        from secator.query.json import JsonBackend
+
+        backend = JsonBackend(
+            workspace_id=self.workspace_id,
+            config={'reports_dir': self.temp_dir}
+        )
+
+        count = backend.count({'_type': 'vulnerability'})
+        self.assertEqual(count, 2)
+
+
+class TestQueryOperators(unittest.TestCase):
+
+    def test_get_nested_field(self):
+        from secator.query.json import get_nested_field
+
+        item = {
+            '_context': {
+                'workspace_id': 'ws123',
+                'nested': {'deep': 'value'}
+            },
+            'name': 'test'
+        }
+
+        self.assertEqual(get_nested_field(item, 'name'), 'test')
+        self.assertEqual(get_nested_field(item, '_context.workspace_id'), 'ws123')
+        self.assertEqual(get_nested_field(item, '_context.nested.deep'), 'value')
+        self.assertIsNone(get_nested_field(item, 'nonexistent'))
+
+    def test_match_query_direct_match(self):
+        from secator.query.json import match_query
+
+        item = {'_type': 'url', 'status_code': 200}
+
+        self.assertTrue(match_query(item, {'_type': 'url'}))
+        self.assertTrue(match_query(item, {'status_code': 200}))
+        self.assertFalse(match_query(item, {'_type': 'vulnerability'}))
+
+    def test_match_query_operators(self):
+        from secator.query.json import match_query
+
+        item = {'severity': 'critical', 'cvss_score': 9.5, 'url': 'http://example.com/login'}
+
+        # $in
+        self.assertTrue(match_query(item, {'severity': {'$in': ['critical', 'high']}}))
+        self.assertFalse(match_query(item, {'severity': {'$in': ['low', 'medium']}}))
+
+        # $contains
+        self.assertTrue(match_query(item, {'url': {'$contains': 'login'}}))
+        self.assertFalse(match_query(item, {'url': {'$contains': 'admin'}}))
+
+        # $gt, $gte, $lt, $lte
+        self.assertTrue(match_query(item, {'cvss_score': {'$gt': 9.0}}))
+        self.assertTrue(match_query(item, {'cvss_score': {'$gte': 9.5}}))
+        self.assertFalse(match_query(item, {'cvss_score': {'$lt': 9.0}}))
+
+        # $regex
+        self.assertTrue(match_query(item, {'url': {'$regex': r'example\.com'}}))
+        self.assertFalse(match_query(item, {'url': {'$regex': r'other\.com'}}))
