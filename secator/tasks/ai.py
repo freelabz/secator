@@ -449,7 +449,8 @@ def analyze_intent(
     prompt: str,
     targets: List[str],
     model: str = 'gpt-4o-mini',
-    verbose: bool = False
+    verbose: bool = False,
+    api_base: str = None
 ) -> Optional[Dict[str, Any]]:
     """Phase 1: Analyze user intent and generate queries."""
     user_message = f"Prompt: {prompt}"
@@ -465,7 +466,8 @@ def analyze_intent(
         model=model,
         system_prompt=system_prompt,
         temperature=0.3,
-        verbose=verbose
+        verbose=verbose,
+        api_base=api_base
     )
 
     if not response:
@@ -802,8 +804,8 @@ class ai(PythonRunner):
         },
         "intent_model": {
             "type": str,
-            "default": "gpt-4o-mini",
-            "help": "LLM model for intent analysis (Phase 1)",
+            "default": "",
+            "help": "LLM model for intent analysis (Phase 1). Defaults to --model if not set.",
         },
         'api_base': {
             'type': str,
@@ -874,7 +876,8 @@ class ai(PythonRunner):
         prompt = self.run_opts.get("prompt", "")
         mode_override = self.run_opts.get("mode", "")
         model = self.run_opts.get("model", "gpt-4o-mini")
-        intent_model = self.run_opts.get("intent_model", "gpt-4o-mini")
+        # Use user's model for intent analysis if intent_model not explicitly set
+        intent_model = self.run_opts.get("intent_model") or model
         api_base = self.run_opts.get("api_base", None)
         sensitive = self.run_opts.get("sensitive", True)
         sensitive_list = self.run_opts.get("sensitive_list")
@@ -889,12 +892,13 @@ class ai(PythonRunner):
         # Phase 1: Intent Analysis
         queries = [{}]
         if prompt and not mode_override:
-            yield Info(message="Analyzing intent...")
+            yield Info(message=f"Analyzing intent using {intent_model}...")
             intent = analyze_intent(
                 prompt=prompt,
                 targets=targets,
                 model=intent_model,
-                verbose=verbose
+                verbose=verbose,
+                api_base=api_base
             )
             if intent:
                 mode = intent.get("mode", "summarize")
