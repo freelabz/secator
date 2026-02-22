@@ -83,7 +83,7 @@ class trufflehog(Command):
     }
     output_types = [Tag, Info]
     ignore_return_code = True
-    install_version = 'v3.91.0'
+    install_version = 'v3.93.4'
     install_cmd = (
         f'git clone https://github.com/trufflesecurity/trufflehog.git '
         f'{CONFIG.dirs.share}/trufflehog_[install_version] || true && '
