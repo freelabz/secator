@@ -214,6 +214,7 @@ class ApiAddon(StrictModel):
 	key: str = ''
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
+	timeout: int = 60
 	runner_create_endpoint: str = 'runners'
 	runner_update_endpoint: str = 'runner/{runner_id}'
 	finding_create_endpoint: str = 'findings'
