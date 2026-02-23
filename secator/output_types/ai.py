@@ -95,9 +95,9 @@ class Ai(OutputType):
 		# Build header with robot icon
 		s = rf'\[[bold {color}]{label}[/]]'
 
-		# Build usage info string for response type (dimmed, at end)
+		# Build usage info string (dimmed, at end) for response and prompt types
 		usage_str = ''
-		if self.ai_type == 'response':
+		if self.ai_type in ('response', 'prompt'):
 			tokens = self.extra_data.get('tokens')
 			cost = self.extra_data.get('cost')
 			if tokens or cost:
@@ -105,9 +105,9 @@ class Ai(OutputType):
 				if tokens:
 					# Format tokens in K format (e.g., 8.8k)
 					if tokens >= 1000:
-						parts.append(f'⬆{tokens/1000:.1f}k tokens')
+						parts.append(f'{tokens/1000:.1f}k tokens')
 					else:
-						parts.append(f'⬆{tokens} tokens')
+						parts.append(f'{tokens} tokens')
 				if cost:
 					parts.append(f'${cost:.4f}')
 				usage_str = ' '.join(parts)

@@ -1989,6 +1989,9 @@ def analyze_intent(
         verbose: Enable verbose output
         api_base: Optional API base URL
         encryptor: Optional encryptor for sensitive data
+
+    Returns:
+        Dict with intent info and '_usage' key containing token/cost info
     """
     # Encrypt sensitive data if encryptor provided
     if encryptor:
@@ -2003,19 +2006,26 @@ def analyze_intent(
         output_types_schema=get_output_types_schema()
     )
 
-    response = get_llm_response(
+    llm_result = get_llm_response(
         prompt=user_message,
         model=model,
         system_prompt=system_prompt,
         temperature=0.3,
         verbose=verbose,
-        api_base=api_base
+        api_base=api_base,
+        return_usage=True,
     )
 
-    if not response:
+    if not llm_result:
         return None
 
-    return parse_intent_response(response)
+    response = llm_result["content"] if isinstance(llm_result, dict) else llm_result
+    usage_info = llm_result.get("usage") if isinstance(llm_result, dict) else None
+
+    result = parse_intent_response(response)
+    if result and usage_info:
+        result["_usage"] = usage_info
+    return result
 
 
 def get_llm_response(
@@ -2319,13 +2329,6 @@ class ai(PythonRunner):
         prompt_input = self.run_opts.get("prompt", "")
         prompt, prompt_from_file, prompt_is_markdown = load_prompt_from_file_or_text(prompt_input)
 
-        # Always show the user's prompt if one was provided
-        if prompt:
-            if prompt_from_file:
-                yield Info(message=f"Loaded prompt from file: {prompt_input}")
-            # Display the prompt content with markdown rendering
-            yield Ai(content=prompt, ai_type='prompt')
-
         mode_override = self.run_opts.get("mode", "")
         model = self.run_opts.get("model")
         intent_model = self.run_opts.get("intent_model") or model
@@ -2361,8 +2364,8 @@ class ai(PythonRunner):
         # Phase 1: Intent Analysis
         queries = [{}]
         use_workspace = False  # Default to NOT using workspace unless explicitly requested
+        intent_usage = None
         if prompt and not mode_override:
-            yield Info(message=f"Analyzing intent using {intent_model}...")
             intent = analyze_intent(
                 prompt=prompt,
                 targets=targets,
@@ -2375,12 +2378,24 @@ class ai(PythonRunner):
                 mode = intent.get("mode", "summarize")
                 use_workspace = intent.get("use_workspace", False)
                 queries = intent.get("queries", [{}])
+                intent_usage = intent.get("_usage")
                 yield Info(message=f"Mode: {mode}, Use workspace: {use_workspace}, Queries: {len(queries)}")
             else:
                 yield Warning(message="Could not analyze intent, defaulting to summarize mode")
                 mode = "summarize"
         else:
             mode = mode_override or "summarize"
+
+        # Show the user's prompt with usage info (after intent analysis)
+        if prompt:
+            if prompt_from_file:
+                yield Info(message=f"Loaded prompt from file: {prompt_input}")
+            # Build extra_data with usage info if available
+            prompt_extra = {}
+            if intent_usage:
+                prompt_extra["tokens"] = intent_usage.get("total_tokens")
+                prompt_extra["cost"] = intent_usage.get("cost")
+            yield Ai(content=prompt, ai_type='prompt', extra_data=prompt_extra)
 
         # Get results from previous runs
         results = self._previous_results or self.results
