@@ -1396,7 +1396,15 @@ class SensitiveDataEncryptor:
         # First replace full placeholders (e.g., [HOST:a07963bdcb1f])
         for placeholder, original in self.pii_map.items():
             result = result.replace(placeholder, original)
-        # Then replace bare hashes (e.g., a07963bdcb1f) that LLM might extract incorrectly
+
+        # Then replace placeholders without brackets (e.g., HOST:a07963bdcb1f)
+        # LLM sometimes strips the square brackets from placeholders
+        for placeholder, original in self.pii_map.items():
+            # Convert [TYPE:hash] to TYPE:hash
+            no_brackets = placeholder[1:-1]  # Remove [ and ]
+            result = result.replace(no_brackets, original)
+
+        # Finally replace bare hashes (e.g., a07963bdcb1f) that LLM might extract
         for hash_value, original in self.hash_map.items():
             result = result.replace(hash_value, original)
         return result
