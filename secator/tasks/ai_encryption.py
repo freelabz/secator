@@ -2,7 +2,7 @@
 """Sensitive data encryption for AI prompts."""
 import hashlib
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # PII patterns - order matters (specific before general)
 PII_PATTERNS = {
@@ -17,9 +17,31 @@ PII_PATTERNS = {
 
 
 class SensitiveDataEncryptor:
-    """Encrypt sensitive data using SHA-256 hashing with salt."""
+    """Encrypt sensitive data using SHA-256 hashing with salt.
 
-    def __init__(self, salt: str = "secator_pii_salt", custom_patterns: List[str] = None):
+    This class provides reversible encryption of sensitive data (PII) in text
+    by replacing matches with hashed placeholders. The original values can be
+    restored using the decrypt method.
+
+    Attributes:
+        salt: Salt string used for hashing to ensure unique placeholders.
+        pii_map: Mapping of placeholders to original values.
+        hash_map: Mapping of bare hashes to original values.
+        custom_patterns: List of compiled regex patterns for custom PII types.
+    """
+
+    def __init__(
+        self,
+        salt: str = "secator_pii_salt",
+        custom_patterns: Optional[List[str]] = None
+    ) -> None:
+        """Initialize the encryptor with optional salt and custom patterns.
+
+        Args:
+            salt: Salt string used for hashing. Defaults to "secator_pii_salt".
+            custom_patterns: Optional list of regex patterns or literal strings
+                to match as custom PII types. Lines starting with '#' are ignored.
+        """
         self.salt = salt
         self.pii_map: Dict[str, str] = {}  # placeholder -> original
         self.hash_map: Dict[str, str] = {}  # bare hash -> original

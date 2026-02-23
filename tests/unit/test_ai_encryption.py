@@ -1,12 +1,13 @@
 # tests/unit/test_ai_encryption.py
+import re
 import unittest
+
+from secator.tasks.ai_encryption import SensitiveDataEncryptor
 
 
 class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_encrypt_host(self):
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
-
         encryptor = SensitiveDataEncryptor()
         original = "http://testphp.vulnweb.com/page"
         encrypted = encryptor.encrypt(original)
@@ -15,8 +16,6 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
         self.assertNotIn("vulnweb.com", encrypted)
 
     def test_decrypt_restores_original(self):
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
-
         encryptor = SensitiveDataEncryptor()
         original = "http://example.com:8080/path?query=value"
         encrypted = encryptor.encrypt(original)
@@ -25,9 +24,6 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
         self.assertEqual(decrypted, original)
 
     def test_decrypt_bare_hash(self):
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
-        import re
-
         encryptor = SensitiveDataEncryptor()
         original = "testphp.vulnweb.com"
         encrypted = encryptor.encrypt(original)

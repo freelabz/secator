@@ -43,15 +43,15 @@ tasks:
   _group/crawl:
     xurlfind3r:
       description: Crawl URLs from passive sources
-      if: "'xurlfind3r' in opts.crawlers and not opts.active"
+      if: "'xurlfind3r' in opts.crawlers and opts.passive"
 
     urlfinder:
       description: Crawl URLs from passive sources
-      if: "'urlfinder' in opts.crawlers and not opts.active"
+      if: "'urlfinder' in opts.crawlers and opts.passive"
 
     gau:
       description: Crawl URLs from passive sources
-      if: "'gau' in opts.crawlers and not opts.active"
+      if: "'gau' in opts.crawlers and opts.passive"
 
     katana:
       description: Crawl URLs
