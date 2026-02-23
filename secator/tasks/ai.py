@@ -1545,6 +1545,47 @@ def _truncate(text: str, max_length: int = 2000) -> str:
     return text[:max_length] + "\n... (truncated)"
 
 
+def _strip_hallucinations(text: str) -> str:
+    """Strip hallucinated content after JSON array.
+
+    LLMs sometimes produce: "analysis + JSON + hallucinated TOOL:/Status:/Output: sections"
+    This keeps only the valid part: analysis + JSON array.
+    """
+    if not text:
+        return text
+
+    # Find the JSON array (starts with [ and contains "action")
+    # and return everything up to and including the closing ]
+    bracket_start = -1
+    for i, char in enumerate(text):
+        if char == '[':
+            lookahead = text[i:i + 100]
+            if '"action"' in lookahead:
+                bracket_start = i
+                break
+
+    if bracket_start == -1:
+        return text  # No JSON array found, return as-is
+
+    # Find matching closing bracket
+    bracket_count = 0
+    bracket_end = -1
+    for i in range(bracket_start, len(text)):
+        if text[i] == '[':
+            bracket_count += 1
+        elif text[i] == ']':
+            bracket_count -= 1
+            if bracket_count == 0:
+                bracket_end = i
+                break
+
+    if bracket_end == -1:
+        return text  # Malformed JSON, return as-is
+
+    # Return only: text before JSON + JSON array (strip everything after)
+    return text[:bracket_end + 1].strip()
+
+
 def _strip_json_from_response(text: str) -> str:
     """Strip JSON blocks from response, keeping only the text/reasoning."""
     if not text:
@@ -2862,18 +2903,19 @@ class ai(PythonRunner):
                 if self.run_opts.get("sensitive", True):
                     response = encryptor.decrypt(response)
 
-                # Add assistant response to history
-                chat_history.add_assistant(response)
+                # Add assistant response to history (strip hallucinated content)
+                clean_response = _strip_hallucinations(response)
+                chat_history.add_assistant(clean_response)
 
                 # Parse actions from response (now returns list)
                 actions = self._parse_attack_actions(response)
 
                 # Show AI response with markdown rendering
-                # In verbose mode show full response, otherwise strip JSON
+                # In verbose mode show clean response (analysis + JSON), otherwise strip JSON
                 if verbose:
-                    response_display = response
+                    response_display = clean_response
                 else:
-                    response_display = _strip_json_from_response(response)
+                    response_display = _strip_json_from_response(clean_response)
 
                 # Build extra_data with iteration and usage info
                 extra_data = {"iteration": iteration + 1, "max_iterations": max_iterations}
