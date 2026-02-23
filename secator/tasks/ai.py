@@ -464,14 +464,18 @@ When vulnerabilities are found by Secator tools:
 3. IF NOT EXPLOITABLE: Don't waste time - continue with other analysis
 
 RESPONSE FORMAT:
-- FIRST: Provide a brief analysis of the current situation (1-3 sentences)
-- THEN: Respond with a JSON array of actions: [{{"action": ...}}, {{"action": ...}}]
-- You can include MULTIPLE execute actions to run in sequence
-- Put your reasoning in the "reasoning" field inside each action
+- FIRST: Brief analysis (1-3 sentences MAX)
+- THEN: JSON array of actions: [{{"action": ...}}, {{"action": ...}}]
+- Put reasoning in the "reasoning" field inside each action
 - Keep reasoning brief (1-2 sentences)
-- All actions will be executed sequentially and results reported back to you
-- DO NOT echo or repeat previous tool outputs - they are already in the chat history
-- DO NOT include "TOOL:" or "Status:" sections - just provide analysis and JSON actions
+
+CRITICAL - DO NOT DO THESE THINGS:
+- NEVER invent or predict command outputs - you don't know what commands will return until they're executed
+- NEVER include "TOOL:", "Status:", "Output:", "Action N:" narrative sections
+- NEVER write fake execution logs or simulated results
+- NEVER echo previous tool outputs - they're in chat history
+- Your response should be: brief analysis + JSON actions. NOTHING ELSE.
+- The system will execute your actions and report results back. Wait for real results.
 
 ACTIONS:
 
@@ -569,14 +573,18 @@ When vulnerabilities are found:
 3. IF NOT EXPLOITABLE: Continue with other analysis
 
 RESPONSE FORMAT:
-- FIRST: Provide a brief analysis of the current situation (1-3 sentences)
-- THEN: Respond with a JSON array of actions: [{{"action": ...}}, {{"action": ...}}]
-- You can include MULTIPLE execute actions to run in sequence
-- Put your reasoning in the "reasoning" field inside each action
+- FIRST: Brief analysis (1-3 sentences MAX)
+- THEN: JSON array of actions: [{{"action": ...}}, {{"action": ...}}]
+- Put reasoning in the "reasoning" field inside each action
 - Keep reasoning brief (1-2 sentences)
-- All actions will be executed sequentially and results reported back to you
-- DO NOT echo or repeat previous tool outputs - they are already in the chat history
-- DO NOT include "TOOL:" or "Status:" sections - just provide analysis and JSON actions
+
+CRITICAL - DO NOT DO THESE THINGS:
+- NEVER invent or predict command outputs - you don't know what commands will return until they're executed
+- NEVER include "TOOL:", "Status:", "Output:", "Action N:" narrative sections
+- NEVER write fake execution logs or simulated results
+- NEVER echo previous tool outputs - they're in chat history
+- Your response should be: brief analysis + JSON actions. NOTHING ELSE.
+- The system will execute your actions and report results back. Wait for real results.
 
 ACTIONS:
 
