@@ -1,6 +1,6 @@
 __all__ = [
 	'Action',
-	'AI',
+	'Ai',
 	'Domain',
 	'Error',
 	'OutputType',
@@ -20,7 +20,7 @@ __all__ = [
 ]
 from secator.output_types._base import OutputType
 from secator.output_types.action import Action
-from secator.output_types.ai import AI
+from secator.output_types.ai import Ai
 from secator.output_types.progress import Progress
 from secator.output_types.ip import Ip
 from secator.output_types.exploit import Exploit
@@ -42,12 +42,12 @@ from secator.output_types.domain import Domain
 
 
 EXECUTION_TYPES = [
-	Target, Progress, Info, Warning, Error, State, Action, AI
+	Target, Progress, Info, Warning, Error, State, Action
 ]
 STAT_TYPES = [
 	Stat
 ]
 FINDING_TYPES = [
-	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain
+	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain, Ai
 ]
 OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES

@@ -59,7 +59,7 @@ AI_TYPES = {
 
 
 @dataclass
-class AI(OutputType):
+class Ai(OutputType):
 	"""Output type for AI-generated content with markdown support."""
 	content: str
 	ai_type: str = field(default='response')  # prompt, response, summary, suggestion, attack_summary

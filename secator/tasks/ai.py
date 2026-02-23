@@ -16,7 +16,7 @@ import click
 from dataclasses import fields
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import AI, Error, Info, Tag, Vulnerability, Warning, FINDING_TYPES
+from secator.output_types import Ai, Error, Info, Tag, Vulnerability, Warning, FINDING_TYPES
 from secator.rich import console
 from secator.runners import PythonRunner
 
@@ -230,6 +230,29 @@ def get_wordlists_reference() -> str:
     if not hasattr(get_wordlists_reference, '_cache'):
         get_wordlists_reference._cache = build_wordlists_reference()
     return get_wordlists_reference._cache
+
+
+def get_output_types_reference() -> str:
+    """Get the available output types for query actions.
+
+    Dynamically generates the list from FINDING_TYPES so new types
+    are automatically included.
+
+    Returns:
+        Formatted output types reference string.
+    """
+    type_names = [c.get_name() for c in FINDING_TYPES]
+    lines = ["Available _type values for queries:"]
+    for name in sorted(type_names):
+        if name == "ai":
+            lines.append(f'- "{name}" - Previous AI conversations and analysis (use this to get context from earlier discussions)')
+        else:
+            lines.append(f'- "{name}"')
+    lines.append("")
+    lines.append('IMPORTANT: When querying AI conversation history, use "_type": "ai" (NOT "a_i" or "A_I").')
+    lines.append("Example to get previous AI context:")
+    lines.append('{{"action": "query", "query": {{"_type": "ai"}}, "result_key": "previous_context", "reasoning": "Get context from previous AI analysis"}}')
+    return "\n".join(lines)
 
 
 # =============================================================================
@@ -473,22 +496,7 @@ Query workspace for existing findings. Requires -ws flag.
 
 Query operators: $in, $regex, $contains, $gt, $gte, $lt, $lte, $ne
 
-Available _type values for queries:
-- "ai" - Previous AI conversations and analysis (use this to get context from earlier discussions)
-- "vulnerability" - Confirmed vulnerabilities
-- "exploit" - Exploitation attempts
-- "port" - Open ports discovered
-- "url" - URLs discovered
-- "subdomain" - Subdomains discovered
-- "ip" - IP addresses
-- "domain" - Domains
-- "tag" - Tags/labels
-- "certificate" - SSL certificates
-- "user_account" - User accounts discovered
-
-IMPORTANT: When querying AI conversation history, use "_type": "ai" (NOT "a_i" or "A_I").
-Example to get previous AI context:
-{{"action": "query", "query": {{"_type": "ai"}}, "result_key": "previous_context", "reasoning": "Get context from previous AI analysis"}}
+{output_types_reference}
 
 ### output_type
 Convert findings to structured Secator output types.
@@ -936,7 +944,8 @@ def get_system_prompt(mode: str, disable_secator: bool = False) -> str:
             "suggest": PROMPT_SUGGEST.format(cheatsheet=get_cheatsheet()),
             "attack": PROMPT_ATTACK.format(
                 library_reference=get_library_reference(),
-                wordlists_reference=get_wordlists_reference()
+                wordlists_reference=get_wordlists_reference(),
+                output_types_reference=get_output_types_reference()
             ),
             "initial_recon": PROMPT_INITIAL_RECON.format(cheatsheet=get_cheatsheet()),
         }
@@ -2143,7 +2152,7 @@ def run_secator_task(name: str, targets: List[str], options: Dict = None) -> Lis
 class ai(PythonRunner):
     """AI-powered penetration testing assistant using LLM."""
 
-    output_types = [Vulnerability, Tag, Info, Warning, Error, AI]
+    output_types = [Vulnerability, Tag, Info, Warning, Error, Ai]
     tags = ["ai", "analysis", "pentest"]
     input_types = []  # Accept any input type
     install_cmd = "pip install litellm"
@@ -2260,7 +2269,7 @@ class ai(PythonRunner):
             if prompt_from_file:
                 yield Info(message=f"Loaded prompt from file: {prompt_input}")
             # Display the prompt content with markdown rendering
-            yield AI(content=prompt, ai_type='prompt')
+            yield Ai(content=prompt, ai_type='prompt')
 
         mode_override = self.run_opts.get("mode", "")
         model = self.run_opts.get("model")
@@ -2453,9 +2462,9 @@ class ai(PythonRunner):
         if verbose:
             if prompt_is_markdown and custom_prompt:
                 formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
-                yield AI(content=f"{prompt}\n[CUSTOM PROMPT]{formatted_custom}", ai_type='prompt')
+                yield Ai(content=f"{prompt}\n[CUSTOM PROMPT]{formatted_custom}", ai_type='prompt')
             else:
-                yield AI(content=prompt, ai_type='prompt')
+                yield Ai(content=prompt, ai_type='prompt')
 
         try:
             response = get_llm_response(
@@ -2471,7 +2480,7 @@ class ai(PythonRunner):
                 response = encryptor.decrypt(response)
 
             # Show AI response with markdown rendering
-            yield AI(
+            yield Ai(
                 content=response,
                 ai_type='summary',
                 mode='summarize',
@@ -2517,9 +2526,9 @@ class ai(PythonRunner):
         if verbose:
             if prompt_is_markdown and custom_prompt:
                 formatted_custom = format_prompt_for_display(custom_prompt, is_markdown=True)
-                yield AI(content=f"{prompt}\n[CUSTOM PROMPT]{formatted_custom}", ai_type='prompt')
+                yield Ai(content=f"{prompt}\n[CUSTOM PROMPT]{formatted_custom}", ai_type='prompt')
             else:
-                yield AI(content=prompt, ai_type='prompt')
+                yield Ai(content=prompt, ai_type='prompt')
 
         try:
             response = get_llm_response(
@@ -2538,7 +2547,7 @@ class ai(PythonRunner):
             commands = self._extract_commands(response)
 
             # Show AI response with markdown rendering
-            yield AI(
+            yield Ai(
                 content=response,
                 ai_type='suggestion',
                 mode='suggest',
@@ -2699,7 +2708,7 @@ class ai(PythonRunner):
         # Show master prompt (system prompt) in verbose mode - only once at start
         if verbose:
             system_prompt = get_system_prompt("attack", disable_secator=disable_secator)
-            yield AI(content=system_prompt, ai_type='prompt')
+            yield Ai(content=system_prompt, ai_type='prompt')
 
         if disable_secator:
             yield Info(message="Secator runners disabled - using shell commands only")
@@ -2727,7 +2736,7 @@ class ai(PythonRunner):
             try:
                 # Show the user prompt only in verbose mode
                 if verbose:
-                    yield AI(content=prompt, ai_type='prompt')
+                    yield Ai(content=prompt, ai_type='prompt')
 
                 response = get_llm_response(
                     prompt=prompt,
@@ -2752,7 +2761,7 @@ class ai(PythonRunner):
                     response_display = _strip_json_from_response(response)
 
                 if response_display:
-                    yield AI(
+                    yield Ai(
                         content=response_display,
                         ai_type='response',
                         mode='attack',
@@ -2950,7 +2959,7 @@ class ai(PythonRunner):
                 api_base=ctx.api_base,
                 temperature=ctx.temperature,
             )
-            yield AI(
+            yield Ai(
                 content=full_summary,
                 ai_type='attack_summary',
                 mode='attack',
@@ -3112,7 +3121,7 @@ class ai(PythonRunner):
         Yields:
             AI output type with report content
         """
-        yield AI(
+        yield Ai(
             content=action.get("content", ""),
             ai_type='report',
             mode='attack',
@@ -3142,7 +3151,7 @@ class ai(PythonRunner):
             api_base=ctx.api_base,
             temperature=ctx.temperature,
         )
-        yield AI(
+        yield Ai(
             content=full_summary,
             ai_type='attack_summary',
             mode='attack',
@@ -3169,7 +3178,7 @@ class ai(PythonRunner):
             AI output with stop reason
         """
         reason = action.get("reason", "No reason provided")
-        yield AI(
+        yield Ai(
             content=reason,
             ai_type='stopped',
             mode='attack',
@@ -3307,7 +3316,7 @@ class ai(PythonRunner):
         default = action.get("default", options[0] if options else "")
 
         # Display the question
-        yield AI(
+        yield Ai(
             content=question,
             ai_type="prompt",
             mode="attack",
@@ -3691,7 +3700,7 @@ class ai(PythonRunner):
 
             # Display command if not skipped/error
             if result["status"] not in ("skipped", "error"):
-                yield AI(
+                yield Ai(
                     content=result.get("cli_cmd", ""),
                     ai_type=exec_type,
                     mode='attack',
@@ -3748,7 +3757,7 @@ class ai(PythonRunner):
                 console.print(f"⚡ [bold green]{result['command']}[/]")
 
                 # Save AI records
-                shell_ai = AI(
+                shell_ai = Ai(
                     content=result["command"],
                     ai_type='shell',
                     mode='attack',
@@ -3764,7 +3773,7 @@ class ai(PythonRunner):
                 truncated = result["output"][:1000] + ("..." if len(result["output"]) > 1000 else "")
                 console.print(truncated)
 
-                output_ai = AI(
+                output_ai = Ai(
                     content=truncated,
                     ai_type='shell_output',
                     mode='attack',
