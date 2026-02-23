@@ -1374,6 +1374,23 @@ class ActionContext:
     in_ci: bool = False
 
 
+# =============================================================================
+# ACTION HANDLER REGISTRY
+# =============================================================================
+
+ACTION_HANDLERS = {
+    "execute": "_handle_execute",
+    "validate": "_handle_validate",
+    "complete": "_handle_complete",
+    "stop": "_handle_stop",
+    "report": "_handle_report",
+    # Phase 2 placeholders (not implemented yet):
+    # "query": "_handle_query",
+    # "output_type": "_handle_output_type",
+    # "prompt": "_handle_prompt",
+}
+
+
 def load_sensitive_patterns(file_path: str) -> List[str]:
     """Load sensitive patterns from a file (one pattern per line)."""
     patterns = []
