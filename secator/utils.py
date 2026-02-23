@@ -387,7 +387,7 @@ def rich_to_ansi(text):
 	"""
 	try:
 		from rich.console import Console
-		tmp_console = Console(file=None, highlight=False)
+		tmp_console = Console(file=None, highlight=False, force_terminal=True)
 		with tmp_console.capture() as capture:
 			tmp_console.print(text, end='', soft_wrap=True)
 		return capture.get()
