@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.26.0](https://github.com/freelabz/secator/compare/v0.25.7...v0.26.0) (2026-02-23)
+
+
+### Features
+
+* **config:** add timeout parameter to ApiAddon and update API request handling ([#939](https://github.com/freelabz/secator/issues/939)) ([8ca7aea](https://github.com/freelabz/secator/commit/8ca7aea6a46fbaeed556a991fe6ef97a1776ee45))
+
+
+### Bug Fixes
+
+* nmap dns + ids / headless tags + confidence tracking + workspace folder name fix ([#936](https://github.com/freelabz/secator/issues/936)) ([2a34a9a](https://github.com/freelabz/secator/commit/2a34a9a3bc2a50d8314ba6ebe22b482a7d9ee4ff))
+
 ## [0.25.7](https://github.com/freelabz/secator/compare/v0.25.6...v0.25.7) (2026-02-08)
 
 
