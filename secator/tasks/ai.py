@@ -3234,6 +3234,130 @@ class ai(PythonRunner):
 
         yield from handler(action, ctx)
 
+    def _handle_validate(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Handle validate action - record validated vulnerability.
+
+        Args:
+            action: Validate action with vulnerability details
+            ctx: ActionContext (unused but required for interface)
+
+        Yields:
+            Vulnerability output type
+        """
+        vuln_name = action.get("vulnerability", "Unknown")
+        target = action.get("target", "")
+        proof = action.get("proof", "")
+        severity = action.get("severity", "medium")
+        steps = action.get("reproduction_steps", [])
+
+        ctx.attack_context["validated_vulns"].append({
+            "name": vuln_name,
+            "severity": severity,
+            "target": target,
+        })
+
+        yield Vulnerability(
+            name=vuln_name,
+            matched_at=target,
+            severity=severity,
+            confidence="high",
+            description=f"AI-validated vulnerability: {vuln_name}",
+            provider="ai",
+            extra_data={
+                "proof_of_concept": proof,
+                "reproduction_steps": steps,
+                "ai_validated": True,
+                "model": ctx.model,
+            },
+        )
+
+    def _handle_report(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Handle report action - yield AI report output.
+
+        Args:
+            action: Report action with content
+            ctx: ActionContext with attack_context
+
+        Yields:
+            AI output type with report content
+        """
+        yield AI(
+            content=action.get("content", ""),
+            ai_type='report',
+            mode='attack',
+            extra_data=ctx.attack_context,
+        )
+
+    def _handle_complete(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Handle complete action - generate summary and prompt for continuation.
+
+        Args:
+            action: Complete action (summary field optional)
+            ctx: ActionContext with full state
+
+        Yields:
+            Info, AI outputs for summary
+
+        Returns via context_update:
+            'continue_prompt' if user wants to continue
+            'should_break' if user wants to stop
+        """
+        yield Info(message="Attack loop completed")
+        yield Info(message="Generating comprehensive attack summary...")
+
+        full_summary = generate_attack_summary_with_llm(
+            ctx.attack_context,
+            model=ctx.model,
+            api_base=ctx.api_base,
+            temperature=ctx.temperature,
+        )
+        yield AI(
+            content=full_summary,
+            ai_type='attack_summary',
+            mode='attack',
+            model=ctx.model,
+        )
+
+        # Prompt user for continuation (stored in attack_context for caller to handle)
+        user_query = prompt_user_for_continuation()
+        if user_query is None:
+            yield Info(message="User chose to stop. Ending attack loop.")
+            ctx.attack_context["_should_break"] = True
+        else:
+            ctx.attack_context["_continue_query"] = user_query
+            yield Info(message=f"Continuing attack with new query: {user_query}")
+
+    def _handle_stop(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Handle stop action - display reason and prompt for continuation.
+
+        Args:
+            action: Stop action with reason
+            ctx: ActionContext with full state
+
+        Yields:
+            AI output with stop reason
+        """
+        reason = action.get("reason", "No reason provided")
+        yield AI(
+            content=reason,
+            ai_type='stopped',
+            mode='attack',
+            extra_data={
+                "iterations": ctx.attack_context.get("iteration", 0),
+                "successful_attacks": len(ctx.attack_context.get("successful_attacks", [])),
+                "validated_vulns": len(ctx.attack_context.get("validated_vulns", [])),
+            },
+        )
+
+        user_query = prompt_user_for_continuation()
+        if user_query is None:
+            yield Info(message="User chose to stop. Ending attack loop.")
+            ctx.attack_context["_should_break"] = True
+        else:
+            ctx.attack_context["_continue_query"] = user_query
+            ctx.attack_context["_stop_reason"] = reason
+            yield Info(message=f"Continuing attack with new query: {user_query}")
+
     def _execute_command(self, command: str) -> str:
         """Execute a command and return output."""
         try:
