@@ -2205,6 +2205,11 @@ class ai(PythonRunner):
             "default": None,
             "help": "Prompt user for direction every N iterations (default: min(max_iterations/2, 5))",
         },
+        "summary_model": {
+            "type": str,
+            "default": "claude-haiku-4-5",
+            "help": "Model for summarizing chat history (default: claude-haiku-4-5)",
+        },
         "temperature": {
             "type": float,
             "default": 0.7,
