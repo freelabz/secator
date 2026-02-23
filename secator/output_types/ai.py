@@ -44,17 +44,17 @@ def render_markdown_for_rich(text: str) -> str:
 # AI content type configurations
 AI_TYPES = {
 	'prompt': {'label': 'USER PROMPT', 'color': 'blue'},
-	'response': {'label': 'AGENT', 'color': 'red'},
-	'summary': {'label': 'SUMMARY', 'color': 'green'},
-	'suggestion': {'label': 'SUGGESTIONS', 'color': 'cyan'},
-	'attack_summary': {'label': 'ATTACK SUMMARY', 'color': 'yellow'},
-	'task': {'label': 'TASK', 'color': 'magenta'},
-	'workflow': {'label': 'WORKFLOW', 'color': 'magenta'},
-	'scan': {'label': 'SCAN', 'color': 'magenta'},
-	'shell': {'label': 'SHELL', 'color': 'magenta'},
+	'response': {'label': 'AI RESPONSE', 'color': 'red'},
+	'summary': {'label': 'AI SUMMARY', 'color': 'green'},
+	'suggestion': {'label': 'AI SUGGESTION', 'color': 'cyan'},
+	'attack_summary': {'label': 'AI ATTACK SUMMARY', 'color': 'yellow'},
+	'task': {'label': 'RUN TASK', 'color': 'magenta'},
+	'workflow': {'label': 'RUN WORKFLOW', 'color': 'magenta'},
+	'scan': {'label': 'RUN SCAN', 'color': 'magenta'},
+	'shell': {'label': 'RUN SHELL', 'color': 'magenta'},
 	'shell_output': {'label': 'SHELL OUTPUT', 'color': 'white'},
-	'stopped': {'label': 'STOPPED', 'color': 'orange3'},
-	'report': {'label': 'REPORT', 'color': 'cyan'},
+	'stopped': {'label': 'AI STOP', 'color': 'orange3'},
+	'report': {'label': 'AI REPORT', 'color': 'cyan'}
 }
 
 
@@ -93,7 +93,7 @@ class Ai(OutputType):
 				label = f'{label} {iteration}'
 
 		# Build header with robot icon
-		s = rf'🤖 \[[bold {color}]{label}[/]]'
+		s = rf'\[[bold {color}]{label}[/]]'
 
 		# Build usage info string for response type (dimmed, at end)
 		usage_str = ''
@@ -124,19 +124,19 @@ class Ai(OutputType):
 			md_rendered = render_markdown_for_rich(content)
 			md_indented = '\n    ' + md_rendered.replace('\n', '\n    ')
 			result = header + md_indented.rstrip()
+			if usage_str:
+				result += ' ' + rich_to_ansi(f'[dim]{usage_str}[/]')
 			if display_extra:
 				for k, v in display_extra.items():
 					result += '\n    ' + rich_to_ansi(f'[bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]')
-			if usage_str:
-				result += '\n    ' + rich_to_ansi(f'[dim]{usage_str}[/]')
 			return result
 
 		# Build full Rich markup string, then convert once
 		content_indented = content.replace('\n', '\n    ')
 		s += f' {_s(content_indented)}'
+		if usage_str:
+			s += f' [dim]{usage_str}[/]'
 		if display_extra:
 			for k, v in display_extra.items():
 				s += f'\n    [bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]'
-		if usage_str:
-			s += f'\n    [dim]{usage_str}[/]'
 		return rich_to_ansi(s)
