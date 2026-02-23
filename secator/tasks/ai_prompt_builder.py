@@ -61,3 +61,32 @@ class PromptBuilder:
             "history": history.to_messages(),
             "query": self.build_loop_query(iteration, max_iterations),
         }
+
+    def encrypt_prompt(self, prompt: Dict, encryptor) -> Dict:
+        """Encrypt sensitive fields in the prompt.
+
+        Args:
+            prompt: Full prompt dict with system, user, history, query
+            encryptor: SensitiveDataEncryptor instance
+
+        Returns:
+            Encrypted prompt dict
+        """
+        encrypted = prompt.copy()
+
+        # System prompt doesn't contain sensitive data - skip
+        # User prompt has targets/instructions - encrypt
+        encrypted["user"] = encryptor.encrypt(prompt["user"])
+
+        # Query has iteration info - encrypt
+        encrypted["query"] = encryptor.encrypt(prompt["query"])
+
+        # History has all conversation - encrypt each message content
+        encrypted["history"] = []
+        for msg in prompt["history"]:
+            encrypted["history"].append({
+                "role": msg["role"],
+                "content": encryptor.encrypt(msg["content"])
+            })
+
+        return encrypted

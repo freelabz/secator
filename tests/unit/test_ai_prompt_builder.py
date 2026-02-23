@@ -57,3 +57,50 @@ class TestPromptBuilder(unittest.TestCase):
         self.assertIn("user", prompt)
         self.assertIn("history", prompt)
         self.assertIn("query", prompt)
+
+
+class TestPromptBuilderEncryption(unittest.TestCase):
+
+    def test_encrypt_prompt_encrypts_all_fields(self):
+        from secator.tasks.ai_prompt_builder import PromptBuilder
+        from unittest.mock import MagicMock
+
+        # Mock encryptor
+        encryptor = MagicMock()
+        encryptor.encrypt.side_effect = lambda x: f"ENCRYPTED({x})"
+
+        builder = PromptBuilder()
+        prompt = {
+            "system": "System prompt",
+            "user": "User prompt with target.com",
+            "history": [{"role": "assistant", "content": "Found vuln"}],
+            "query": "Iteration 1/10"
+        }
+
+        encrypted = builder.encrypt_prompt(prompt, encryptor)
+
+        # All string fields should be encrypted
+        self.assertIn("ENCRYPTED", encrypted["user"])
+        self.assertIn("ENCRYPTED", encrypted["query"])
+        # History content should be encrypted
+        self.assertIn("ENCRYPTED", encrypted["history"][0]["content"])
+
+    def test_encrypt_prompt_skips_system(self):
+        from secator.tasks.ai_prompt_builder import PromptBuilder
+        from unittest.mock import MagicMock
+
+        encryptor = MagicMock()
+        encryptor.encrypt.side_effect = lambda x: f"ENCRYPTED({x})"
+
+        builder = PromptBuilder()
+        prompt = {
+            "system": "System prompt - no sensitive data",
+            "user": "Target: secret.com",
+            "history": [],
+            "query": "Query"
+        }
+
+        encrypted = builder.encrypt_prompt(prompt, encryptor)
+
+        # System prompt should NOT be encrypted (no sensitive data)
+        self.assertEqual(encrypted["system"], "System prompt - no sensitive data")
