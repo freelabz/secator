@@ -2906,10 +2906,6 @@ class ai(PythonRunner):
                     action["_action_num"] = action_num
                     action["_total_actions"] = total_actions
 
-                    # Log action preview before execution
-                    action_preview = self._format_action_preview(action)
-                    yield Info(message=f"[{action_num}/{total_actions}] {action_preview}")
-
                     # Dispatch to handler
                     for result in self._dispatch_action(action, ctx):
                         yield result
@@ -4004,55 +4000,6 @@ class ai(PythonRunner):
             workspace_name=workspace_name,
             drivers=drivers,
         )
-
-    def _format_action_preview(self, action: Dict) -> str:
-        """Format action for preview logging before execution.
-
-        Args:
-            action: Action dictionary
-
-        Returns:
-            Human-readable preview string
-        """
-        action_type = action.get("action", "unknown")
-
-        if action_type == "execute":
-            exec_type = action.get("type", "task")
-            if exec_type == "shell":
-                command = action.get("command", "unknown")
-                # Truncate long commands
-                if len(command) > 60:
-                    command = command[:57] + "..."
-                return f"Execute shell: {command}"
-            else:
-                name = action.get("name", "unknown")
-                targets = action.get("targets", [])
-                targets_str = ", ".join(targets[:3])
-                if len(targets) > 3:
-                    targets_str += f" (+{len(targets) - 3} more)"
-                return f"Execute {exec_type} '{name}' on {targets_str}" if targets_str else f"Execute {exec_type} '{name}'"
-
-        elif action_type == "query":
-            query = action.get("query", {})
-            query_str = ", ".join(f"{k}={v}" for k, v in list(query.items())[:3])
-            if len(query) > 3:
-                query_str += "..."
-            return f"Query workspace: {{{query_str}}}" if query_str else "Query workspace"
-
-        elif action_type == "validate":
-            vuln = action.get("vulnerability", "unknown")
-            target = action.get("target", "")
-            return f"Validate vulnerability '{vuln}' on {target}" if target else f"Validate vulnerability '{vuln}'"
-
-        elif action_type == "complete":
-            return "Complete attack session"
-
-        elif action_type == "stop":
-            reason = action.get("reason", "")
-            return f"Stop: {reason}" if reason else "Stop attack"
-
-        else:
-            return f"Action: {action_type}"
 
     def _format_batch_results(self, batch_results: list) -> str:
         """Format batch results for LLM prompt.
