@@ -83,35 +83,39 @@ class Ai(OutputType):
 		label = type_config['label']
 		color = type_config['color']
 
+		# For 'response' type, include iteration in header
+		if self.ai_type == 'response' and 'iteration' in self.extra_data:
+			iteration = self.extra_data.get('iteration', '')
+			max_iter = self.extra_data.get('max_iterations', '')
+			if max_iter:
+				label = f'{label} {iteration}/{max_iter}'
+			else:
+				label = f'{label} {iteration}'
+
 		# Build header with robot icon
 		s = rf'🤖 \[[bold {color}]{label}[/]]'
 
+		# Filter out iteration fields from extra_data display
+		display_extra = {k: v for k, v in self.extra_data.items()
+						 if k not in ('iteration', 'max_iterations')}
+
 		# Render content with markdown support
 		content = self.content
-		is_short = len(content) < 100 and '\n' not in content
-
 		if is_markdown(content):
+			# Markdown is pre-rendered to ANSI by render_markdown_for_rich
+			header = rich_to_ansi(s)
 			md_rendered = render_markdown_for_rich(content)
 			md_indented = '\n    ' + md_rendered.replace('\n', '\n    ')
-			result = rich_to_ansi(s) + md_indented.rstrip()
-		elif is_short:
-			# Keep short content on same line
-			result = rich_to_ansi(s + f' {_s(content)}')
-		else:
-			content_indented = content.replace('\n', '\n    ')
-			result = rich_to_ansi(s + f'\n    {_s(content_indented)}')
+			result = header + md_indented.rstrip()
+			if display_extra:
+				for k, v in display_extra.items():
+					result += '\n    ' + rich_to_ansi(f'[bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]')
+			return result
 
-		# Append extra_data fields on separate lines
-		if self.extra_data:
-			for key, value in self.extra_data.items():
-				if value:  # Only show non-empty values
-					# Format value based on type
-					if isinstance(value, list):
-						value_str = ', '.join(str(v) for v in value)
-					elif isinstance(value, dict):
-						value_str = ', '.join(f'{k}={v}' for k, v in value.items())
-					else:
-						value_str = str(value)
-					result += rich_to_ansi(f'\n    [dim]{key}:[/] [italic]{_s(value_str)}[/]')
-
-		return result
+		# Build full Rich markup string, then convert once
+		content_indented = content.replace('\n', '\n    ')
+		s += f' {_s(content_indented)}'
+		if display_extra:
+			for k, v in display_extra.items():
+				s += f'\n    [bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]'
+		return rich_to_ansi(s)

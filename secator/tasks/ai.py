@@ -2835,7 +2835,7 @@ class ai(PythonRunner):
                         ai_type='response',
                         mode='attack',
                         model=model,
-                        extra_data={"iteration": iteration + 1},
+                        extra_data={"iteration": iteration + 1, "max_iterations": max_iterations},
                     )
 
                 if not actions:
