@@ -2028,8 +2028,13 @@ def get_llm_response(
     initial_delay: float = 1.0,
     verbose: bool = False,
     api_base: str = None,
+    return_usage: bool = False,
 ) -> Optional[str]:
-    """Get response from LLM using LiteLLM with exponential backoff for rate limits."""
+    """Get response from LLM using LiteLLM with exponential backoff for rate limits.
+
+    Args:
+        return_usage: If True, return dict with 'content' and 'usage' keys instead of just content
+    """
     try:
         import litellm
 
@@ -2063,7 +2068,8 @@ def get_llm_response(
                     api_base=api_base,
                 )
 
-                # Show token usage and cost
+                # Extract token usage and cost
+                usage_info = None
                 if hasattr(response, 'usage') and response.usage:
                     usage = response.usage
                     prompt_tokens = getattr(usage, 'prompt_tokens', 0)
@@ -2073,15 +2079,27 @@ def get_llm_response(
                     # Try to get cost estimate
                     try:
                         cost = litellm.completion_cost(completion_response=response)
-                        cost_str = f", cost: ${cost:.4f}" if cost else ""
                     except Exception:
-                        cost_str = ""
+                        cost = None
 
-                    console.print(
-                        f"[dim]📊 Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total{cost_str}[/]"
-                    )
+                    usage_info = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                        "cost": cost,
+                    }
 
-                return response.choices[0].message.content
+                    # Only print to console if not returning usage
+                    if not return_usage:
+                        cost_str = f", cost: ${cost:.4f}" if cost else ""
+                        console.print(
+                            f"[dim]📊 Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total{cost_str}[/]"
+                        )
+
+                content = response.choices[0].message.content
+                if return_usage:
+                    return {"content": content, "usage": usage_info}
+                return content
             except litellm.RateLimitError as e:
                 last_exception = e
                 if attempt < max_retries - 1:
@@ -2806,13 +2824,16 @@ class ai(PythonRunner):
                 if verbose:
                     yield Ai(content=prompt, ai_type='prompt')
 
-                response = get_llm_response(
+                llm_result = get_llm_response(
                     prompt=prompt,
                     model=model,
                     system_prompt=get_system_prompt("attack", disable_secator=disable_secator),
                     temperature=temperature,
                     api_base=api_base,
+                    return_usage=True,
                 )
+                response = llm_result["content"] if isinstance(llm_result, dict) else llm_result
+                usage_info = llm_result.get("usage") if isinstance(llm_result, dict) else None
 
                 # Decrypt sensitive data
                 if self.run_opts.get("sensitive", True):
@@ -2831,13 +2852,19 @@ class ai(PythonRunner):
                 else:
                     response_display = _strip_json_from_response(response)
 
+                # Build extra_data with iteration and usage info
+                extra_data = {"iteration": iteration + 1, "max_iterations": max_iterations}
+                if usage_info:
+                    extra_data["tokens"] = usage_info.get("total_tokens")
+                    extra_data["cost"] = usage_info.get("cost")
+
                 if response_display:
                     yield Ai(
                         content=response_display,
                         ai_type='response',
                         mode='attack',
                         model=model,
-                        extra_data={"iteration": iteration + 1, "max_iterations": max_iterations},
+                        extra_data=extra_data,
                     )
 
                 if not actions:

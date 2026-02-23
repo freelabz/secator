@@ -95,9 +95,26 @@ class Ai(OutputType):
 		# Build header with robot icon
 		s = rf'🤖 \[[bold {color}]{label}[/]]'
 
-		# Filter out iteration fields from extra_data display
+		# Build usage info string for response type (dimmed, at end)
+		usage_str = ''
+		if self.ai_type == 'response':
+			tokens = self.extra_data.get('tokens')
+			cost = self.extra_data.get('cost')
+			if tokens or cost:
+				parts = []
+				if tokens:
+					# Format tokens in K format (e.g., 8.8k)
+					if tokens >= 1000:
+						parts.append(f'⬆{tokens/1000:.1f}k tokens')
+					else:
+						parts.append(f'⬆{tokens} tokens')
+				if cost:
+					parts.append(f'${cost:.4f}')
+				usage_str = ' '.join(parts)
+
+		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
-						 if k not in ('iteration', 'max_iterations')}
+						 if k not in ('iteration', 'max_iterations', 'tokens', 'cost')}
 
 		# Render content with markdown support
 		content = self.content
@@ -110,6 +127,8 @@ class Ai(OutputType):
 			if display_extra:
 				for k, v in display_extra.items():
 					result += '\n    ' + rich_to_ansi(f'[bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]')
+			if usage_str:
+				result += '\n    ' + rich_to_ansi(f'[dim]{usage_str}[/]')
 			return result
 
 		# Build full Rich markup string, then convert once
@@ -118,4 +137,6 @@ class Ai(OutputType):
 		if display_extra:
 			for k, v in display_extra.items():
 				s += f'\n    [bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]'
+		if usage_str:
+			s += f'\n    [dim]{usage_str}[/]'
 		return rich_to_ansi(s)
