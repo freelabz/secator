@@ -421,6 +421,22 @@ RULES:
 - Only use options that exist for the runner
 - If you've exhausted all useful actions, use "complete" or "stop"
 
+WORKSPACE QUERIES:
+- When querying workspace data, be SPECIFIC to avoid context window overflow
+- Use fine-grained queries: filter by type (vulnerability, url, port), severity, or target
+- Example: query only critical/high vulnerabilities, or only URLs for a specific host
+- Avoid querying "all results" - instead query what's relevant for your current analysis
+
+HANDLING VULNERABILITIES:
+When vulnerabilities are found by Secator tools:
+1. CHECK FOR FALSE POSITIVES: If a vulnerability was reported on a very wide version range (e.g., "nginx < 99.0"), it's likely a false positive - skip it
+2. IF MARKED EXPLOITABLE (has 'exploitable' tag or associated exploits in results):
+   - Download and read exploit code (use curl to fetch from exploit-db, GitHub, etc.)
+   - Figure out a simple reproduction command (e.g., a curl command)
+   - Run the exploit - mark this as a DESTRUCTIVE action: {{"destructive": true}}
+   - Use "validate" action only after successful exploitation with actual proof
+3. IF NOT EXPLOITABLE: Don't waste time - continue with other analysis
+
 RESPONSE FORMAT:
 - FIRST: Provide a brief analysis of the current situation (1-3 sentences)
 - THEN: Respond with a JSON array of actions: [{{"action": ...}}, {{"action": ...}}]
@@ -437,8 +453,8 @@ Execute secator runner:
 Execute shell command:
 {{"action": "execute", "type": "shell", "command": "curl -s http://example.com", "target": "example.com", "reasoning": "brief reason", "expected_outcome": "expected result"}}
 
-Validate vulnerability:
-{{"action": "validate", "vulnerability": "name", "target": "url", "proof": "evidence", "severity": "critical|high|medium|low|info", "reproduction_steps": ["step1", "step2"]}}
+Validate vulnerability (ONLY use when you have confirmed a vulnerability with actual proof and reproduction steps):
+{{"action": "validate", "vulnerability": "name", "target": "url", "proof": "actual evidence from output", "severity": "critical|high|medium|low|info", "reproduction_steps": ["step1", "step2"]}}
 
 Complete (when done testing):
 {{"action": "complete", "summary": "findings summary"}}
@@ -472,6 +488,21 @@ RULES:
 - Use standard security tools via shell commands
 - If you've exhausted all useful actions, use "complete" or "stop"
 
+WORKSPACE QUERIES:
+- When querying workspace data, be SPECIFIC to avoid context window overflow
+- Use fine-grained queries: filter by type (vulnerability, url, port), severity, or target
+- Avoid querying "all results" - instead query what's relevant for your current analysis
+
+HANDLING VULNERABILITIES:
+When vulnerabilities are found:
+1. CHECK FOR FALSE POSITIVES: If reported on a very wide version range, it's likely false positive - skip it
+2. IF MARKED EXPLOITABLE (has 'exploitable' tag or associated exploits):
+   - Download and read exploit code (curl from exploit-db, GitHub, etc.)
+   - Figure out a simple reproduction command (e.g., a curl command)
+   - Run the exploit - mark as DESTRUCTIVE: {{"destructive": true}}
+   - Use "validate" action only after successful exploitation with actual proof
+3. IF NOT EXPLOITABLE: Continue with other analysis
+
 RESPONSE FORMAT:
 - FIRST: Provide a brief analysis of the current situation (1-3 sentences)
 - THEN: Respond with a JSON array of actions: [{{"action": ...}}, {{"action": ...}}]
@@ -485,8 +516,8 @@ ACTIONS:
 Execute shell command:
 {{"action": "execute", "type": "shell", "command": "curl -s http://example.com", "target": "example.com", "reasoning": "brief reason", "expected_outcome": "expected result"}}
 
-Validate vulnerability:
-{{"action": "validate", "vulnerability": "name", "target": "url", "proof": "evidence", "severity": "critical|high|medium|low|info", "reproduction_steps": ["step1", "step2"]}}
+Validate vulnerability (ONLY use when you have confirmed a vulnerability with actual proof and reproduction steps):
+{{"action": "validate", "vulnerability": "name", "target": "url", "proof": "actual evidence from output", "severity": "critical|high|medium|low|info", "reproduction_steps": ["step1", "step2"]}}
 
 Complete (when done testing):
 {{"action": "complete", "summary": "findings summary"}}
@@ -1846,6 +1877,25 @@ def get_llm_response(
                     max_tokens=int(max_tokens),
                     api_base=api_base,
                 )
+
+                # Show token usage and cost
+                if hasattr(response, 'usage') and response.usage:
+                    usage = response.usage
+                    prompt_tokens = getattr(usage, 'prompt_tokens', 0)
+                    completion_tokens = getattr(usage, 'completion_tokens', 0)
+                    total_tokens = getattr(usage, 'total_tokens', 0)
+
+                    # Try to get cost estimate
+                    try:
+                        cost = litellm.completion_cost(completion_response=response)
+                        cost_str = f", cost: ${cost:.4f}" if cost else ""
+                    except Exception:
+                        cost_str = ""
+
+                    console.print(
+                        f"[dim]📊 Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total{cost_str}[/]"
+                    )
+
                 return response.choices[0].message.content
             except litellm.RateLimitError as e:
                 last_exception = e
@@ -2027,6 +2077,11 @@ class ai(PythonRunner):
             "is_flag": True,
             "default": False,
             "help": "Disable secator runners (task/workflow/scan), use only shell commands",
+        },
+        "dangerous": {
+            "is_flag": True,
+            "default": False,
+            "help": "Allow AI to run ANY shell command (DANGEROUS - use with caution)",
         },
     }
 
@@ -2746,19 +2801,12 @@ class ai(PythonRunner):
                                     error_text = "\n".join(f"ERROR: {e}" for e in errors)
                                     result_output = f"{error_text}\n\n{result_output}" if result_output else error_text
 
+                                # Yield vulnerabilities as-is (AI should triage and validate if exploitable)
                                 if vulnerabilities:
-                                    yield Info(message=f"Generating proof of concept for {len(vulnerabilities)} vulnerabilities...")
-                                    enriched_vulns = batch_enrich_vulnerabilities_with_poc(
-                                        vulnerabilities=vulnerabilities,
-                                        scan_output=result_output,
-                                        tool_name=name,
-                                        model=model,
-                                        api_base=api_base,
-                                        temperature=temperature,
-                                    )
-                                    for enriched in enriched_vulns:
-                                        self.add_result(enriched, print=True)
-                                        yield enriched
+                                    yield Info(message=f"Found {len(vulnerabilities)} potential vulnerabilities - check for false positives, prioritize exploitable ones")
+                                    for vuln in vulnerabilities:
+                                        self.add_result(vuln, print=True)
+                                        yield vuln
 
                             if verbose:
                                 yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
@@ -3092,10 +3140,62 @@ class ai(PythonRunner):
     def _execute_command(self, command: str) -> str:
         """Execute a command and return output."""
         try:
-            # Security: only allow specific commands
-            allowed_prefixes = ["secator ", "curl ", "wget ", "nmap ", "httpx "]
-            if not any(command.startswith(p) for p in allowed_prefixes):
-                return f"Command not allowed: {command}. Only secator, curl, wget, nmap, httpx commands permitted."
+            dangerous = self.run_opts.get("dangerous", False)
+
+            # Security: only allow specific commands (unless dangerous mode)
+            if not dangerous:
+                # Allowed pentest tools by category:
+                # - Secator: secator
+                # - HTTP/Web: curl, wget, httpx, whatweb, wafw00f
+                # - Crawling: katana, gospider, hakrawler
+                # - Fuzzing: ffuf, feroxbuster, gobuster, dirsearch, wfuzz
+                # - Port scanning: nmap, masscan, rustscan
+                # - DNS: dig, host, nslookup, dnsx, subfinder, amass
+                # - SQLi: sqlmap, ghauri
+                # - XSS: dalfox, xsstrike
+                # - LFI/RCE: commix, lfisuite
+                # - Credentials: hydra, medusa, crackmapexec, netexec
+                # - Nuclei/Templates: nuclei
+                # - SSL/TLS: sslscan, testssl, sslyze
+                # - CMS: wpscan, droopescan, joomscan
+                # - Git: git, gitleaks, trufflehog
+                # - Misc: jq, grep, awk, sed, cat, head, tail, echo, whoami, id, uname
+                allowed_prefixes = [
+                    # Secator
+                    "secator ",
+                    # HTTP/Web
+                    "curl ", "wget ", "httpx ", "whatweb ", "wafw00f ",
+                    # Crawling
+                    "katana ", "gospider ", "hakrawler ",
+                    # Fuzzing
+                    "ffuf ", "feroxbuster ", "gobuster ", "dirsearch ", "wfuzz ",
+                    # Port scanning
+                    "nmap ", "masscan ", "rustscan ",
+                    # DNS
+                    "dig ", "host ", "nslookup ", "dnsx ", "subfinder ", "amass ",
+                    # SQLi
+                    "sqlmap ", "ghauri ",
+                    # XSS
+                    "dalfox ", "xsstrike ",
+                    # LFI/RCE
+                    "commix ",
+                    # Credentials
+                    "hydra ", "medusa ", "crackmapexec ", "netexec ", "cme ",
+                    # Nuclei
+                    "nuclei ",
+                    # SSL/TLS
+                    "sslscan ", "testssl ", "sslyze ",
+                    # CMS
+                    "wpscan ", "droopescan ", "joomscan ",
+                    # Git
+                    "git ", "gitleaks ", "trufflehog ",
+                    # Misc utilities
+                    "jq ", "grep ", "awk ", "sed ", "cat ", "head ", "tail ",
+                    "echo ", "whoami ", "id ", "uname ", "ping ", "traceroute ",
+                ]
+                if not any(command.startswith(p) for p in allowed_prefixes):
+                    allowed_tools = ", ".join(sorted(set(p.strip() for p in allowed_prefixes)))
+                    return f"Command not allowed: {command}.\nAllowed tools: {allowed_tools}\nUse --dangerous flag to allow any command."
 
             result = subprocess.run(
                 command,
