@@ -1387,10 +1387,10 @@ ACTION_HANDLERS = {
     "complete": "_handle_complete",
     "stop": "_handle_stop",
     "report": "_handle_report",
-    # Phase 2 placeholders (not implemented yet):
-    # "query": "_handle_query",
-    # "output_type": "_handle_output_type",
-    # "prompt": "_handle_prompt",
+    # Phase 2:
+    "query": "_handle_query",
+    "output_type": "_handle_output_type",
+    "prompt": "_handle_prompt",
 }
 
 # =============================================================================

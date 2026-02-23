@@ -46,5 +46,26 @@ class TestOutputTypeMap(unittest.TestCase):
             self.assertIn(t, OUTPUT_TYPE_MAP)
 
 
+class TestActionHandlers(unittest.TestCase):
+
+    def test_action_handlers_has_query(self):
+        from secator.tasks.ai import ACTION_HANDLERS
+
+        self.assertIn('query', ACTION_HANDLERS)
+        self.assertEqual(ACTION_HANDLERS['query'], '_handle_query')
+
+    def test_action_handlers_has_output_type(self):
+        from secator.tasks.ai import ACTION_HANDLERS
+
+        self.assertIn('output_type', ACTION_HANDLERS)
+        self.assertEqual(ACTION_HANDLERS['output_type'], '_handle_output_type')
+
+    def test_action_handlers_has_prompt(self):
+        from secator.tasks.ai import ACTION_HANDLERS
+
+        self.assertIn('prompt', ACTION_HANDLERS)
+        self.assertEqual(ACTION_HANDLERS['prompt'], '_handle_prompt')
+
+
 if __name__ == '__main__':
     unittest.main()
