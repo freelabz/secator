@@ -3358,6 +3358,317 @@ class ai(PythonRunner):
             ctx.attack_context["_stop_reason"] = reason
             yield Info(message=f"Continuing attack with new query: {user_query}")
 
+    def _execute_runner(
+        self,
+        action: Dict,
+        ctx: 'ActionContext',
+        action_num: int,
+        total_actions: int
+    ) -> Dict:
+        """Execute a secator runner (task/workflow/scan) and return batch result.
+
+        Args:
+            action: Execute action with type, name, targets, opts
+            ctx: ActionContext with execution state
+            action_num: Current action number in batch
+            total_actions: Total actions in batch
+
+        Returns:
+            Dict with action, status, output, result_count, errors for batch results
+        """
+        exec_type = action.get("type", "task")
+        name = action.get("name", "")
+        action_targets = action.get("targets", []) or ctx.targets
+        opts = action.get("opts", {})
+
+        # Validate options
+        valid_opts, invalid_opts, valid_opt_names = self._validate_runner_opts(
+            exec_type, name, opts
+        )
+
+        if invalid_opts:
+            return {
+                "action": f"{exec_type} '{name}'",
+                "status": "error",
+                "output": f"Invalid options: {invalid_opts}. Valid options: {valid_opt_names}",
+                "warning": f"[{action_num}/{total_actions}] Invalid options for {exec_type} '{name}': {invalid_opts}"
+            }
+
+        # Build CLI command for display and safety check
+        cli_opts = " ".join(
+            f"--{k.replace('_', '-')} {v}" if v is not True else f"--{k.replace('_', '-')}"
+            for k, v in valid_opts.items()
+        )
+        cli_cmd = f"secator {exec_type[0]} {name} {','.join(action_targets)}"
+        if cli_opts:
+            cli_cmd += f" {cli_opts}"
+
+        # Safety check
+        action_for_safety = {
+            "command": cli_cmd,
+            "destructive": action.get("destructive", False),
+            "aggressive": action.get("aggressive", False),
+            "reasoning": action.get("reasoning", ""),
+        }
+        should_run, modified_cmd = check_action_safety(
+            action_for_safety, auto_yes=ctx.auto_yes, in_ci=ctx.in_ci
+        )
+
+        if not should_run:
+            return {
+                "action": cli_cmd,
+                "status": "skipped",
+                "output": "User declined to run this command.",
+                "info": f"[{action_num}/{total_actions}] Skipped: {cli_cmd}"
+            }
+
+        if modified_cmd != cli_cmd:
+            cli_cmd = modified_cmd
+
+        # Prepare result structure
+        result = {
+            "action": f"{exec_type.capitalize()} '{name}' on {action_targets}",
+            "cli_cmd": cli_cmd,
+            "reasoning": action.get("reasoning", ""),
+            "exec_type": exec_type,
+            "name": name,
+            "targets": action_targets,
+            "opts": valid_opts,
+            "batch_action": f"{action_num}/{total_actions}",
+        }
+
+        if ctx.dry_run:
+            result["status"] = "dry_run"
+            result["output"] = f"[DRY RUN] {exec_type.capitalize()} '{name}' not executed"
+            result["result_count"] = 0
+            result["errors"] = []
+            result["results"] = []
+            result["vulnerabilities"] = []
+        else:
+            runner_results = []
+            vulnerabilities = []
+            errors = []
+
+            for r in self._execute_secator_runner(exec_type, name, action_targets, valid_opts):
+                runner_results.append(r)
+                if isinstance(r, Vulnerability):
+                    vulnerabilities.append(r)
+                elif isinstance(r, Error):
+                    errors.append(r.message)
+
+            result_output = format_results_for_llm(runner_results)
+            if errors:
+                error_text = "\n".join(f"ERROR: {e}" for e in errors)
+                result_output = f"{error_text}\n\n{result_output}" if result_output else error_text
+
+            result["status"] = "error" if errors else "success"
+            result["output"] = result_output[:2000]
+            result["result_count"] = len(runner_results)
+            result["errors"] = errors
+            result["results"] = runner_results
+            result["vulnerabilities"] = vulnerabilities
+
+        return result
+
+    def _execute_shell(
+        self,
+        action: Dict,
+        ctx: 'ActionContext',
+        action_num: int,
+        total_actions: int
+    ) -> Dict:
+        """Execute a shell command and return batch result.
+
+        Args:
+            action: Execute action with command and target
+            ctx: ActionContext with execution state
+            action_num: Current action number in batch
+            total_actions: Total actions in batch
+
+        Returns:
+            Dict with action, status, output for batch results
+        """
+        command = action.get("command", "")
+        target = action.get("target", "")
+        reasoning = action.get("reasoning", "")
+
+        # Safety check
+        action_for_safety = {
+            "command": command,
+            "destructive": action.get("destructive", False),
+            "aggressive": action.get("aggressive", False),
+            "reasoning": reasoning,
+        }
+        should_run, modified_cmd = check_action_safety(
+            action_for_safety, auto_yes=ctx.auto_yes, in_ci=ctx.in_ci
+        )
+
+        if not should_run:
+            return {
+                "action": command,
+                "status": "skipped",
+                "output": "User declined to run this command.",
+                "info": f"[{action_num}/{total_actions}] Skipped: {command}"
+            }
+
+        if modified_cmd != command:
+            command = modified_cmd
+
+        result = {
+            "action": f"Shell: {command}",
+            "command": command,
+            "target": target,
+            "reasoning": reasoning,
+            "batch_action": f"{action_num}/{total_actions}",
+        }
+
+        if ctx.dry_run:
+            result["status"] = "dry_run"
+            result["output"] = "[DRY RUN] Command not executed"
+        else:
+            output = self._execute_command(command)
+            result["status"] = "success"
+            result["output"] = output[:2000]
+
+        return result
+
+    def _handle_execute(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Handle execute action - delegate to runner or shell execution.
+
+        Args:
+            action: Execute action with type (task/workflow/scan/shell)
+            ctx: ActionContext with execution state
+
+        Yields:
+            Info, Warning, AI, Vulnerability outputs
+
+        Note:
+            Stores batch_result in action['_result'] for caller to collect
+        """
+        exec_type = action.get("type", "shell")
+        action_num = action.get("_action_num", 1)
+        total_actions = action.get("_total_actions", 1)
+
+        if exec_type in ("task", "workflow", "scan"):
+            if ctx.disable_secator:
+                yield Warning(
+                    message=f"[{action_num}/{total_actions}] Secator runners disabled. Rejecting {exec_type} '{action.get('name', '')}'."
+                )
+                action["_result"] = {
+                    "action": f"{exec_type} '{action.get('name', '')}'",
+                    "status": "rejected",
+                    "output": "Secator runners are disabled. Use shell commands instead."
+                }
+                return
+
+            result = self._execute_runner(action, ctx, action_num, total_actions)
+
+            # Handle warnings/info from result
+            if result.get("warning"):
+                yield Warning(message=result["warning"])
+            if result.get("info"):
+                yield Info(message=result["info"])
+
+            # Display command if not skipped/error
+            if result["status"] not in ("skipped", "error"):
+                yield AI(
+                    content=result.get("cli_cmd", ""),
+                    ai_type=exec_type,
+                    mode='attack',
+                    extra_data={
+                        "reasoning": result.get("reasoning", ""),
+                        "targets": result.get("targets", []),
+                        "opts": result.get("opts", {}),
+                        "batch_action": result.get("batch_action", ""),
+                    },
+                )
+
+                # Yield vulnerabilities
+                for vuln in result.get("vulnerabilities", []):
+                    self.add_result(vuln, print=True)
+                    yield vuln
+
+                if result.get("vulnerabilities"):
+                    yield Info(
+                        message=f"Found {len(result['vulnerabilities'])} potential vulnerabilities - check for false positives"
+                    )
+
+                # Add non-vuln results
+                for r in result.get("results", []):
+                    if not isinstance(r, Vulnerability):
+                        self.add_result(r, print=False)
+
+                if ctx.verbose:
+                    yield Info(message=f"[OUTPUT] {_truncate(result.get('output', ''))}")
+
+            # Update attack context
+            if result["status"] not in ("skipped", "rejected"):
+                ctx.attack_context["successful_attacks"].append({
+                    "type": exec_type,
+                    "name": action.get("name", ""),
+                    "targets": result.get("targets", []),
+                    "result_count": result.get("result_count", 0),
+                    "output": result.get("output", "")[:2000],
+                    "errors": result.get("errors", []),
+                })
+
+            action["_result"] = result
+
+        elif exec_type == "shell":
+            result = self._execute_shell(action, ctx, action_num, total_actions)
+
+            if result.get("info"):
+                yield Info(message=result["info"])
+
+            if result["status"] not in ("skipped",):
+                # Display like secator tasks
+                console.print("")
+                if result.get("reasoning"):
+                    console.print(f"🔧 [bold gold3]{result['reasoning']} ...[/]")
+                console.print(f"⚡ [bold green]{result['command']}[/]")
+
+                # Save AI records
+                shell_ai = AI(
+                    content=result["command"],
+                    ai_type='shell',
+                    mode='attack',
+                    extra_data={
+                        "reasoning": result.get("reasoning", ""),
+                        "target": result.get("target", ""),
+                        "batch_action": result.get("batch_action", ""),
+                    },
+                )
+                self.add_result(shell_ai, print=False)
+
+                # Show output
+                truncated = result["output"][:1000] + ("..." if len(result["output"]) > 1000 else "")
+                console.print(truncated)
+
+                output_ai = AI(
+                    content=truncated,
+                    ai_type='shell_output',
+                    mode='attack',
+                )
+                self.add_result(output_ai, print=False)
+
+                # Update attack context
+                ctx.attack_context["successful_attacks"].append({
+                    "type": "shell",
+                    "command": result["command"],
+                    "target": result.get("target", ""),
+                    "output": result["output"][:2000],
+                })
+
+            action["_result"] = result
+
+        else:
+            yield Warning(message=f"[{action_num}/{total_actions}] Unknown execute type: {exec_type}")
+            action["_result"] = {
+                "action": f"Unknown type: {exec_type}",
+                "status": "error",
+                "output": f"Unknown execute type: {exec_type}"
+            }
+
     def _execute_command(self, command: str) -> str:
         """Execute a command and return output."""
         try:
