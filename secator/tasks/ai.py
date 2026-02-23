@@ -3669,6 +3669,69 @@ class ai(PythonRunner):
                 "output": f"Unknown execute type: {exec_type}"
             }
 
+    def _build_action_context(
+        self,
+        targets: list,
+        model: str,
+        encryptor: 'SensitiveDataEncryptor',
+        api_base: str = None,
+        attack_context: dict = None,
+        custom_prompt_suffix: str = "",
+    ) -> 'ActionContext':
+        """Build ActionContext from run_opts and parameters.
+
+        Args:
+            targets: List of targets
+            model: LLM model name
+            encryptor: SensitiveDataEncryptor instance
+            api_base: Optional API base URL
+            attack_context: Optional existing attack context dict
+            custom_prompt_suffix: Custom prompt to append to all prompts
+
+        Returns:
+            Populated ActionContext instance
+        """
+        return ActionContext(
+            targets=targets,
+            model=model,
+            api_base=api_base,
+            temperature=float(self.run_opts.get("temperature", 0.7)),
+            encryptor=encryptor,
+            sensitive=self.run_opts.get("sensitive", True),
+            dry_run=self.run_opts.get("dry_run", False),
+            verbose=self.run_opts.get("verbose", False),
+            dangerous=self.run_opts.get("dangerous", False),
+            disable_secator=self.run_opts.get("disable_secator", False),
+            max_iterations=int(self.run_opts.get("max_iterations", 10)),
+            attack_context=attack_context or {},
+            custom_prompt_suffix=custom_prompt_suffix,
+            auto_yes=self.run_opts.get("yes", False),
+            in_ci=_is_ci(),
+        )
+
+    def _format_batch_results(self, batch_results: list) -> str:
+        """Format batch results for LLM prompt.
+
+        Args:
+            batch_results: List of result dicts from action handlers
+
+        Returns:
+            Formatted markdown string for LLM
+        """
+        text = ""
+        for idx, result in enumerate(batch_results, 1):
+            text += f"\n### Action {idx}: {result.get('action', 'Unknown')}\n"
+            text += f"**Status:** {result.get('status', 'unknown')}\n"
+            if result.get('errors'):
+                text += "**Errors (fix these in next attempt):**\n"
+                for err in result['errors']:
+                    text += f"  - {err}\n"
+            if result.get('result_count'):
+                text += f"**Results:** {result['result_count']} items\n"
+            output = result.get('output', 'No output')[:1500]
+            text += f"**Output:**\n```\n{output}\n```\n"
+        return text
+
     def _execute_command(self, command: str) -> str:
         """Execute a command and return output."""
         try:
