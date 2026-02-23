@@ -2,8 +2,6 @@
 from dataclasses import dataclass, field
 from typing import Callable, List, Dict
 
-from secator.tasks.ai import get_llm_response
-
 
 SUMMARIZATION_PROMPT = """Summarize the following attack session history concisely.
 Focus on:
@@ -37,6 +35,9 @@ def create_llm_summarizer(
         Callable that takes messages and returns summary string
     """
     def summarizer(messages: List[Dict[str, str]]) -> str:
+        # Import here to avoid circular import
+        from secator.tasks.ai import get_llm_response
+
         # Format messages for prompt
         history_text = ""
         for msg in messages:
