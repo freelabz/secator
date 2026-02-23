@@ -3820,6 +3820,11 @@ class ai(PythonRunner):
         Returns:
             Populated ActionContext instance
         """
+        # Get workspace context from self.context
+        workspace_id = self.context.get("workspace_id") if self.context else None
+        workspace_name = self.context.get("workspace_name") if self.context else None
+        drivers = self.context.get("drivers", []) if self.context else []
+
         return ActionContext(
             targets=targets,
             model=model,
@@ -3836,6 +3841,9 @@ class ai(PythonRunner):
             custom_prompt_suffix=custom_prompt_suffix,
             auto_yes=self.run_opts.get("yes", False),
             in_ci=_is_ci(),
+            workspace_id=workspace_id,
+            workspace_name=workspace_name,
+            drivers=drivers,
         )
 
     def _format_batch_results(self, batch_results: list) -> str:
