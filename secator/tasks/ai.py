@@ -632,8 +632,9 @@ PROMPT_INTENT_ANALYSIS = """You are a penetration testing assistant analyzing us
 
 Given the user's prompt and optional targets, determine:
 1. Which mode to use (summarize, suggest, or attack)
-2. Whether workspace data is needed (e.g., if user asks about previous results, findings, or wants to analyze workspace data)
-3. What workspace queries to run to fetch relevant data (only if use_workspace is true)
+2. Extract any targets mentioned in the prompt (if no targets provided via -t flag)
+3. Whether workspace data is needed (e.g., if user asks about previous results, findings, or wants to analyze workspace data)
+4. What workspace queries to run to fetch relevant data (only if use_workspace is true)
 
 ## Available Output Types
 
@@ -654,6 +655,7 @@ NOTE: Workspace filtering is automatic. Do NOT include workspace-related fields 
 
 {{
     "mode": "summarize|suggest|attack",
+    "targets": ["extracted.target.com", "192.168.1.1"],
     "use_workspace": true|false,
     "queries": [
         {{"_type": "vulnerability", "severity": {{"$in": ["critical", "high"]}}}},
@@ -661,6 +663,19 @@ NOTE: Workspace filtering is automatic. Do NOT include workspace-related fields 
     ],
     "reasoning": "Brief explanation of why this mode and these queries"
 }}
+
+## Target Extraction
+
+Extract targets from the prompt if no explicit targets provided. Look for:
+- Domain names: example.com, sub.domain.org
+- URLs: http://example.com, https://api.example.com/path
+- IP addresses: 192.168.1.1, 10.0.0.0/24
+- Hostnames: my-server.local
+
+Examples:
+- "Attack jahmyst.synology.me" -> targets: ["jahmyst.synology.me"]
+- "Scan http://test.com and 192.168.1.1" -> targets: ["http://test.com", "192.168.1.1"]
+- "What vulnerabilities did we find?" -> targets: [] (no targets, workspace query)
 
 IMPORTANT: Default use_workspace to FALSE. Only set to true if the user EXPLICITLY asks for workspace data.
 
@@ -2432,6 +2447,11 @@ class ai(PythonRunner):
                 use_workspace = intent.get("use_workspace", False)
                 queries = intent.get("queries", [{}])
                 intent_usage = intent.get("_usage")
+                # Use extracted targets if none provided via -t flag
+                extracted_targets = intent.get("targets", [])
+                if not targets and extracted_targets:
+                    targets = extracted_targets
+                    yield Info(message=f"Extracted targets from prompt: {', '.join(targets)}")
                 yield Info(message=f"Mode: {mode}, Use workspace: {use_workspace}, Queries: {len(queries)}")
             else:
                 yield Warning(message="Could not analyze intent, defaulting to summarize mode")
