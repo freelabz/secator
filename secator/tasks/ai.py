@@ -442,6 +442,7 @@ RULES:
 - Each iteration must try a DIFFERENT tool, target, or approach
 - By DEFAULT, prefer single TASKS over workflows/scans (less intrusive, more targeted)
 - Only use workflows/scans when user explicitly requests "comprehensive", "full", or "deep" recon
+- NOISY TASKS: Some tasks make many HTTP requests (nuclei, dalfox, ffuf, feroxbuster, cariddi, katana, gospider, hakrawler, x8, and other crawlers/fuzzers). Use these ONLY if user asks for comprehensive/full recon, OR with very constrained arguments (e.g., a specific nuclei template, a short custom wordlist)
 - Prefer secator runners over raw shell commands
 - Only use options that exist for the runner
 - If you've exhausted all useful actions, use "complete" or "stop"
@@ -549,6 +550,7 @@ RULES:
 - NEVER repeat commands already executed (check "ALREADY EXECUTED" section)
 - Each iteration must try a DIFFERENT tool, target, or approach
 - Use standard security tools via shell commands
+- NOISY TOOLS: Some tools make many HTTP requests (nuclei, dalfox, ffuf, feroxbuster, gobuster, nikto, wfuzz, and other crawlers/fuzzers). Use these ONLY if user asks for comprehensive/full recon, OR with very constrained arguments (e.g., a specific template, a short custom wordlist)
 - If you've exhausted all useful actions, use "complete" or "stop"
 
 WORKSPACE QUERIES:
@@ -4200,10 +4202,11 @@ class ai(PythonRunner):
             "print_line": False,
             "print_cmd": True,
             "print_progress": True,
-            "print_start": True,
-            "print_end": True,
+            "print_start": False,
+            "print_end": False,
             "print_target": False,
             "sync": self.sync,
+            "enable_reports": False,
             **opts,
         }
 
