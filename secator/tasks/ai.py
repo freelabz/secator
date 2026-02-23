@@ -3163,6 +3163,60 @@ class ai(PythonRunner):
         except Exception as e:
             yield Error(message=f"Failed to create {output_type}: {e}")
 
+    def _handle_prompt(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Handle prompt action - ask user for direction.
+
+        Args:
+            action: Prompt action with question and options
+            ctx: ActionContext with mode flags
+
+        Yields:
+            AI prompt output and Info/Warning about selection
+        """
+        question = action.get("question", "")
+        options = action.get("options", [])
+        default = action.get("default", options[0] if options else "")
+
+        # Display the question
+        yield AI(
+            content=question,
+            ai_type="prompt",
+            mode="attack",
+            extra_data={"options": options, "default": default},
+        )
+
+        # Check if interactive mode
+        if ctx.in_ci or ctx.auto_yes:
+            yield Info(message=f"Auto-selecting: {default} (non-interactive mode)")
+            ctx.attack_context["user_response"] = default
+            return
+
+        # Interactive prompt
+        try:
+            from rich.prompt import Prompt
+
+            # Build choices display
+            choices_display = " / ".join(f"[{i+1}] {opt}" for i, opt in enumerate(options))
+
+            response = Prompt.ask(
+                f"[bold cyan]Choose[/] ({choices_display})",
+                choices=[str(i+1) for i in range(len(options))] + options,
+                default="1",
+            )
+
+            # Convert number to option if needed
+            if response.isdigit() and 1 <= int(response) <= len(options):
+                selected = options[int(response) - 1]
+            else:
+                selected = response
+
+            ctx.attack_context["user_response"] = selected
+            yield Info(message=f"User selected: {selected}")
+
+        except Exception as e:
+            yield Warning(message=f"Prompt failed: {e}, using default: {default}")
+            ctx.attack_context["user_response"] = default
+
     def _execute_runner(
         self,
         action: Dict,

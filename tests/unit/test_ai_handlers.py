@@ -188,5 +188,76 @@ class TestActionHandlers(unittest.TestCase):
         self.assertEqual(ACTION_HANDLERS['prompt'], '_handle_prompt')
 
 
+class TestHandlePrompt(unittest.TestCase):
+
+    def test_handle_prompt_ci_mode_auto_select(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            in_ci=True,
+            attack_context={},
+        )
+        action = {
+            'action': 'prompt',
+            'question': 'How to proceed?',
+            'options': ['Option A', 'Option B'],
+            'default': 'Option A',
+        }
+
+        results = list(ai_instance._handle_prompt(action, ctx))
+
+        # Should yield AI prompt and Info about auto-selection
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]._type, 'ai')
+        self.assertEqual(results[1]._type, 'info')
+        self.assertIn('Auto-selecting', results[1].message)
+        self.assertEqual(ctx.attack_context['user_response'], 'Option A')
+
+    def test_handle_prompt_auto_yes_mode(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            auto_yes=True,
+            attack_context={},
+        )
+        action = {
+            'action': 'prompt',
+            'question': 'How to proceed?',
+            'options': ['First', 'Second'],
+            'default': 'Second',
+        }
+
+        results = list(ai_instance._handle_prompt(action, ctx))
+
+        self.assertEqual(ctx.attack_context['user_response'], 'Second')
+
+    def test_handle_prompt_uses_first_option_when_no_default(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            in_ci=True,
+            attack_context={},
+        )
+        action = {
+            'action': 'prompt',
+            'question': 'Choose one',
+            'options': ['Alpha', 'Beta'],
+        }
+
+        results = list(ai_instance._handle_prompt(action, ctx))
+
+        # Should use first option as default
+        self.assertEqual(ctx.attack_context['user_response'], 'Alpha')
+
+
 if __name__ == '__main__':
     unittest.main()
