@@ -3722,8 +3722,12 @@ class ai(PythonRunner):
         return PROMPT_ATTACK_CONTINUE.format(
             reason="received new instructions from user",
             executed_commands=executed_cmds,
+            iterations=ctx.attack_context.get("iteration", 0),
+            successful_count=len(ctx.attack_context.get("successful_attacks", [])),
+            vuln_count=len(ctx.attack_context.get("validated_vulns", [])),
+            user_query=new_instructions,
             targets=targets_str,
-            user_instructions=new_instructions
+            user_instructions=""
         )
 
     def _build_iteration_prompt(
