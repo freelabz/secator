@@ -1963,9 +1963,24 @@ def analyze_intent(
     targets: List[str],
     model: str = 'gpt-4o-mini',
     verbose: bool = False,
-    api_base: str = None
+    api_base: str = None,
+    encryptor: 'SensitiveDataEncryptor' = None,
 ) -> Optional[Dict[str, Any]]:
-    """Phase 1: Analyze user intent and generate queries."""
+    """Phase 1: Analyze user intent and generate queries.
+
+    Args:
+        prompt: User prompt
+        targets: List of targets
+        model: LLM model to use
+        verbose: Enable verbose output
+        api_base: Optional API base URL
+        encryptor: Optional encryptor for sensitive data
+    """
+    # Encrypt sensitive data if encryptor provided
+    if encryptor:
+        prompt = encryptor.encrypt(prompt)
+        targets = [encryptor.encrypt(t) for t in targets]
+
     user_message = f"Prompt: {prompt}"
     if targets:
         user_message += f"\nTargets: {', '.join(targets)}"
@@ -2298,6 +2313,18 @@ class ai(PythonRunner):
         # Targets are from self.inputs
         targets = self.inputs
 
+        # Load custom sensitive patterns if provided (needed early for intent analysis)
+        custom_patterns = []
+        if sensitive_list:
+            custom_patterns = load_sensitive_patterns(sensitive_list)
+            if custom_patterns:
+                yield Info(
+                    message=f"Loaded {len(custom_patterns)} custom sensitive patterns"
+                )
+
+        # Initialize sensitive data encryptor early (for intent analysis encryption)
+        encryptor = SensitiveDataEncryptor(custom_patterns=custom_patterns)
+
         # Phase 1: Intent Analysis
         queries = [{}]
         use_workspace = False  # Default to NOT using workspace unless explicitly requested
@@ -2308,7 +2335,8 @@ class ai(PythonRunner):
                 targets=targets,
                 model=intent_model,
                 verbose=verbose,
-                api_base=api_base
+                api_base=api_base,
+                encryptor=encryptor if sensitive else None,
             )
             if intent:
                 mode = intent.get("mode", "summarize")
@@ -2385,18 +2413,6 @@ class ai(PythonRunner):
             return
 
         yield Info(message=f"Starting AI analysis in '{mode}' mode using {model}")
-
-        # Load custom sensitive patterns if provided
-        custom_patterns = []
-        if sensitive_list:
-            custom_patterns = load_sensitive_patterns(sensitive_list)
-            if custom_patterns:
-                yield Info(
-                    message=f"Loaded {len(custom_patterns)} custom sensitive patterns"
-                )
-
-        # Initialize sensitive data encryptor
-        encryptor = SensitiveDataEncryptor(custom_patterns=custom_patterns)
 
         # Format context for LLM
         context_text = ""
