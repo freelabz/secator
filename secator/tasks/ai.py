@@ -8,7 +8,7 @@ import re
 import signal
 import subprocess
 import time
-from dataclasses import asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import click
@@ -1338,6 +1338,40 @@ class SensitiveDataEncryptor:
         for hash_value, original in self.hash_map.items():
             result = result.replace(hash_value, original)
         return result
+
+
+# =============================================================================
+# DATA STRUCTURES
+# =============================================================================
+
+@dataclass
+class ActionResult:
+    """Result of executing an action."""
+    success: bool
+    output: str
+    errors: list = field(default_factory=list)
+    results: list = field(default_factory=list)  # OutputType instances
+    context_update: dict = field(default_factory=dict)  # What to add to attack_context
+
+
+@dataclass
+class ActionContext:
+    """Shared context for action execution."""
+    targets: list
+    model: str
+    api_base: str = None
+    temperature: float = 0.7
+    encryptor: 'SensitiveDataEncryptor' = None
+    sensitive: bool = True
+    dry_run: bool = False
+    verbose: bool = False
+    dangerous: bool = False
+    disable_secator: bool = False
+    max_iterations: int = 10
+    attack_context: dict = field(default_factory=dict)
+    custom_prompt_suffix: str = ""
+    auto_yes: bool = False
+    in_ci: bool = False
 
 
 def load_sensitive_patterns(file_path: str) -> List[str]:
