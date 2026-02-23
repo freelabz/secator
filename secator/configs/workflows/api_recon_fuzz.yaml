@@ -1,0 +1,92 @@
+type: workflow
+name: api_recon_fuzz
+alias: api_recon_fuzz
+description: API reconnaissance and fuzzing
+long_description: |
+  Discovers and fuzzes API endpoints from a given base URL.
+  Crawls the target to identify potential API routes, performs directory/path fuzzing
+  on common API patterns, extracts and fuzzes parameters, probes endpoints, and
+  optionally scans discovered endpoints with nuclei and hunts for secrets in responses.
+tags: [http, api, fuzz, recon, secrets]
+input_types:
+  - url
+
+options:
+  nuclei:
+    is_flag: True
+    default: False
+    help: Run nuclei on discovered API endpoints (slow)
+
+  hunt_secrets:
+    is_flag: True
+    help: Hunt secrets in HTTP responses (trufflehog, cariddi)
+    default: False
+    short: hs
+
+tasks:
+  _group/crawl:
+    katana:
+      description: Crawl target to discover API-like endpoints
+
+    gospider:
+      description: Crawl target with an alternative engine
+
+    cariddi:
+      description: Hunt API-style endpoints and patterns
+      info: True
+      secrets: True
+      errors: True
+      juicy_extensions: 1
+      juicy_endpoints: True
+      if: opts.hunt_secrets
+
+  urlparser:
+    description: Extract base URLs for API endpoints
+    include: [url_root, url_base]
+    targets_:
+      - type: target
+        field: name
+      - type: url
+        field: url
+
+  _group/extract_params:
+    arjun:
+      description: Extract parameters from candidate API base URLs
+      wordlist: http_params
+      targets_:
+        - type: tag
+          field: value
+          condition: item.name == 'url_base'
+
+  ffuf:
+    description: Fuzz common API paths
+    wordlist: https://raw.githubusercontent.com/z5jt/API-documentation-Wordlist/refs/heads/main/API-Documentation-Wordlist/api-documentation-endpoint.txt
+    auto_calibration: true
+    follow_redirect: true
+    targets_:
+      - type: tag
+        field: '{value}/FUZZ'
+        condition: item.name == 'url_root' and not item.value.lower().endswith(('.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.otf', '.map'))
+
+  httpx:
+    description: Probe discovered API endpoints
+    tech_detect: True
+    filter_duplicates: True
+
+  nuclei:
+    description: Scan discovered API endpoints for vulnerabilities
+    exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
+    targets_:
+      - type: url
+        field: url
+        condition: item.status_code != 0
+    if: opts.nuclei
+
+  trufflehog:
+    description: Find secrets in HTTP responses
+    targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+    if: opts.hunt_secrets
+
