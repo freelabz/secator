@@ -2590,6 +2590,16 @@ class ai(PythonRunner):
                 f"\n\n## IMPORTANT - User Instructions (MUST FOLLOW)\n{prompt_text}"
             )
 
+        # Build action context for dispatch system
+        ctx = self._build_action_context(
+            targets=targets,
+            model=model,
+            encryptor=encryptor,
+            api_base=api_base,
+            attack_context=attack_context,
+            custom_prompt_suffix=custom_prompt_suffix,
+        )
+
         # Initial prompt - if no workspace data requested, skip "Current Findings" as it only contains execution info
         if not use_workspace:
             prompt = PROMPT_ATTACK_START_NO_RESULTS.format(targets=targets_str) + custom_prompt_suffix
@@ -2652,7 +2662,7 @@ class ai(PythonRunner):
                 if not actions:
                     yield Warning(message="Could not parse actions from LLM response")
                     # Resend previous context with the invalid response so LLM can fix it
-                    executed_cmds = format_executed_commands(attack_context)
+                    executed_cmds = format_executed_commands(ctx.attack_context)
                     encrypted_response = response[:2000]
                     if sensitive:
                         encrypted_response = encryptor.encrypt(encrypted_response)
@@ -2679,76 +2689,33 @@ class ai(PythonRunner):
 
                 # If we have a terminal action with no executable actions, handle it
                 if terminal_action and not executable_actions:
-                    action_type = terminal_action.get("action", "")
-                    if action_type == "complete":
-                        yield Info(message="Attack loop completed")
-                        yield Info(message="Generating comprehensive attack summary...")
-                        full_summary = generate_attack_summary_with_llm(
-                            attack_context,
-                            model=model,
-                            api_base=api_base,
-                            temperature=temperature,
-                        )
-                        yield AI(
-                            content=full_summary,
-                            ai_type='attack_summary',
-                            mode='attack',
-                            model=model,
-                        )
+                    # Dispatch terminal action
+                    for result in self._dispatch_action(terminal_action, ctx):
+                        yield result
 
-                        user_query = prompt_user_for_continuation()
-                        if user_query is None:
-                            yield Info(message="User chose to stop. Ending attack loop.")
-                            break
+                    # Check if we should break or continue
+                    if ctx.attack_context.get("_should_break"):
+                        break
 
-                        executed_cmds = format_executed_commands(attack_context)
+                    if ctx.attack_context.get("_continue_query"):
+                        user_query = ctx.attack_context.pop("_continue_query")
+                        stop_reason = ctx.attack_context.pop("_stop_reason", None)
+
+                        executed_cmds = format_executed_commands(ctx.attack_context)
                         if sensitive and executed_cmds:
                             executed_cmds = encryptor.encrypt(executed_cmds)
+
+                        reason_text = f"stopped ({stop_reason})" if stop_reason else "completed its initial objectives"
                         prompt = PROMPT_ATTACK_CONTINUE.format(
-                            reason="completed its initial objectives",
+                            reason=reason_text,
                             executed_commands=executed_cmds,
                             iterations=iteration + 1,
-                            successful_count=len(attack_context["successful_attacks"]),
-                            vuln_count=len(attack_context["validated_vulns"]),
+                            successful_count=len(ctx.attack_context["successful_attacks"]),
+                            vuln_count=len(ctx.attack_context["validated_vulns"]),
                             user_query=user_query,
                             targets=targets_str,
                             user_instructions=custom_prompt_suffix
                         )
-                        yield Info(message=f"Continuing attack with new query: {user_query}")
-                        continue
-
-                    elif action_type == "stop":
-                        reason = terminal_action.get("reason", "No reason provided")
-                        yield AI(
-                            content=reason,
-                            ai_type='stopped',
-                            mode='attack',
-                            extra_data={
-                                "iterations": iteration + 1,
-                                "successful_attacks": len(attack_context["successful_attacks"]),
-                                "validated_vulns": len(attack_context["validated_vulns"]),
-                            },
-                        )
-
-                        user_query = prompt_user_for_continuation()
-                        if user_query is None:
-                            yield Info(message="User chose to stop. Ending attack loop.")
-                            break
-
-                        executed_cmds = format_executed_commands(attack_context)
-                        if sensitive and executed_cmds:
-                            executed_cmds = encryptor.encrypt(executed_cmds)
-                        prompt = PROMPT_ATTACK_CONTINUE.format(
-                            reason=f"stopped ({reason})",
-                            executed_commands=executed_cmds,
-                            iterations=iteration + 1,
-                            successful_count=len(attack_context["successful_attacks"]),
-                            vuln_count=len(attack_context["validated_vulns"]),
-                            user_query=user_query,
-                            targets=targets_str,
-                            user_instructions=custom_prompt_suffix
-                        )
-                        yield Info(message=f"Continuing attack with new query: {user_query}")
                         continue
 
                 # Process executable actions and collect batch results
@@ -2756,314 +2723,28 @@ class ai(PythonRunner):
                     yield Info(message=f"Processing batch of {len(executable_actions)} actions...")
 
                 batch_results = []  # Collect results for batch prompt
-                skip_remaining = False
 
                 for action_idx, action in enumerate(executable_actions):
-                    if skip_remaining:
-                        break
-
-                    action_type = action.get("action", "")
                     action_num = action_idx + 1
 
-                    if action_type == "execute":
-                        exec_type = action.get("type", "shell")
+                    # Inject action numbering for handlers
+                    action["_action_num"] = action_num
+                    action["_total_actions"] = len(executable_actions)
 
-                        # Handle secator runners (task, workflow, scan)
-                        if exec_type in ("task", "workflow", "scan"):
-                            if disable_secator:
-                                yield Warning(
-                                    message=f"[{action_num}/{len(executable_actions)}] Secator runners disabled. Rejecting {exec_type} '{action.get('name', '')}'."
-                                )
-                                batch_results.append({
-                                    "action": f"{exec_type} '{action.get('name', '')}'",
-                                    "status": "rejected",
-                                    "output": "Secator runners are disabled. Use shell commands instead."
-                                })
-                                continue
+                    # Dispatch to handler
+                    for result in self._dispatch_action(action, ctx):
+                        yield result
 
-                            name = action.get("name", "")
-                            action_targets = action.get("targets", []) or targets
-                            opts = action.get("opts", {})
-
-                            valid_opts, invalid_opts, valid_opt_names = (
-                                self._validate_runner_opts(exec_type, name, opts)
-                            )
-
-                            if invalid_opts:
-                                yield Warning(
-                                    message=f"[{action_num}/{len(executable_actions)}] Invalid options for {exec_type} '{name}': {invalid_opts}"
-                                )
-                                batch_results.append({
-                                    "action": f"{exec_type} '{name}'",
-                                    "status": "error",
-                                    "output": f"Invalid options: {invalid_opts}. Valid options: {valid_opt_names}"
-                                })
-                                continue
-
-                            cli_opts = " ".join(
-                                f"--{k.replace('_', '-')} {v}"
-                                if v is not True
-                                else f"--{k.replace('_', '-')}"
-                                for k, v in valid_opts.items()
-                            )
-                            cli_cmd = f"secator {exec_type[0]} {name} {','.join(action_targets)}"
-                            if cli_opts:
-                                cli_cmd += f" {cli_opts}"
-
-                            auto_yes = self.run_opts.get("yes", False)
-                            in_ci = _is_ci()
-                            action_for_safety = {
-                                "command": cli_cmd,
-                                "destructive": action.get("destructive", False),
-                                "aggressive": action.get("aggressive", False),
-                                "reasoning": action.get("reasoning", ""),
-                            }
-                            should_run, modified_cmd = check_action_safety(
-                                action_for_safety, auto_yes=auto_yes, in_ci=in_ci
-                            )
-
-                            if not should_run:
-                                yield Info(message=f"[{action_num}/{len(executable_actions)}] Skipped: {cli_cmd}")
-                                batch_results.append({
-                                    "action": cli_cmd,
-                                    "status": "skipped",
-                                    "output": "User declined to run this command."
-                                })
-                                continue
-
-                            if modified_cmd != cli_cmd:
-                                cli_cmd = modified_cmd
-                                yield Info(message=f"Command modified to: {cli_cmd}")
-
-                            reasoning = action.get("reasoning", "")
-                            yield AI(
-                                content=cli_cmd,
-                                ai_type=exec_type,
-                                mode='attack',
-                                extra_data={
-                                    "reasoning": reasoning,
-                                    "targets": action_targets,
-                                    "opts": valid_opts,
-                                    "batch_action": f"{action_num}/{len(executable_actions)}",
-                                },
-                            )
-
-                            if dry_run:
-                                result_output = f"[DRY RUN] {exec_type.capitalize()} '{name}' not executed"
-                                runner_results = []
-                                errors = []
-                            else:
-                                runner_results = []
-                                vulnerabilities = []
-                                errors = []
-                                for result in self._execute_secator_runner(
-                                    exec_type, name, action_targets, valid_opts
-                                ):
-                                    runner_results.append(result)
-                                    if isinstance(result, Vulnerability):
-                                        vulnerabilities.append(result)
-                                    elif isinstance(result, Error):
-                                        errors.append(result.message)
-                                    else:
-                                        self.add_result(result, print=False)
-
-                                result_output = format_results_for_llm(runner_results)
-
-                                # Include errors in output so AI can learn from them
-                                if errors:
-                                    error_text = "\n".join(f"ERROR: {e}" for e in errors)
-                                    result_output = f"{error_text}\n\n{result_output}" if result_output else error_text
-
-                                # Yield vulnerabilities as-is (AI should triage and validate if exploitable)
-                                if vulnerabilities:
-                                    yield Info(message=f"Found {len(vulnerabilities)} potential vulnerabilities - check for false positives, prioritize exploitable ones")
-                                    for vuln in vulnerabilities:
-                                        self.add_result(vuln, print=True)
-                                        yield vuln
-
-                            if verbose:
-                                yield Info(message=f"[OUTPUT] {_truncate(result_output)}")
-
-                            # Determine status based on errors
-                            action_status = "error" if errors else "success"
-                            attack_context["successful_attacks"].append({
-                                "type": exec_type,
-                                "name": name,
-                                "targets": action_targets,
-                                "result_count": len(runner_results),
-                                "output": result_output[:2000],
-                                "errors": errors,
-                            })
-
-                            batch_results.append({
-                                "action": f"{exec_type.capitalize()} '{name}' on {action_targets}",
-                                "status": action_status,
-                                "output": result_output[:2000],
-                                "result_count": len(runner_results),
-                                "errors": errors,
-                            })
-
-                        elif exec_type == "shell":
-                            command = action.get("command", "")
-                            target = action.get("target", "")
-
-                            auto_yes = self.run_opts.get("yes", False)
-                            in_ci = _is_ci()
-                            action_for_safety = {
-                                "command": command,
-                                "destructive": action.get("destructive", False),
-                                "aggressive": action.get("aggressive", False),
-                                "reasoning": action.get("reasoning", ""),
-                            }
-                            should_run, modified_cmd = check_action_safety(
-                                action_for_safety, auto_yes=auto_yes, in_ci=in_ci
-                            )
-
-                            if not should_run:
-                                yield Info(message=f"[{action_num}/{len(executable_actions)}] Skipped: {command}")
-                                batch_results.append({
-                                    "action": command,
-                                    "status": "skipped",
-                                    "output": "User declined to run this command."
-                                })
-                                continue
-
-                            if modified_cmd != command:
-                                command = modified_cmd
-                                yield Info(message=f"Command modified to: {command}")
-
-                            reasoning = action.get("reasoning", "")
-
-                            # Display reasoning like secator workflow task descriptions
-                            console.print("")
-                            if reasoning:
-                                console.print(f"🔧 [bold gold3]{reasoning} ...[/]")
-
-                            # Display shell command like secator tasks (⚡ prefix)
-                            console.print(f"⚡ [bold green]{command}[/]")
-
-                            # Save AI record for shell command (without printing)
-                            shell_ai = AI(
-                                content=command,
-                                ai_type='shell',
-                                mode='attack',
-                                extra_data={
-                                    "reasoning": reasoning,
-                                    "target": target,
-                                    "batch_action": f"{action_num}/{len(executable_actions)}",
-                                },
-                            )
-                            self.add_result(shell_ai, print=False)
-
-                            if dry_run:
-                                result_output = "[DRY RUN] Command not executed"
-                            else:
-                                result_output = self._execute_command(command)
-
-                            # Show output inline (truncated to 1000 chars)
-                            truncated_output = result_output[:1000] + ("..." if len(result_output) > 1000 else "")
-                            console.print(truncated_output)
-
-                            # Save AI record for shell output (without printing)
-                            output_ai = AI(
-                                content=truncated_output,
-                                ai_type='shell_output',
-                                mode='attack',
-                            )
-                            self.add_result(output_ai, print=False)
-
-                            attack_context["successful_attacks"].append({
-                                "type": "shell",
-                                "command": command,
-                                "target": target,
-                                "output": result_output[:2000],
-                            })
-
-                            batch_results.append({
-                                "action": f"Shell: {command}",
-                                "status": "success",
-                                "output": result_output[:2000],
-                            })
-
-                        else:
-                            yield Warning(message=f"[{action_num}/{len(executable_actions)}] Unknown execute type: {exec_type}")
-                            batch_results.append({
-                                "action": f"Unknown type: {exec_type}",
-                                "status": "error",
-                                "output": f"Unknown execute type: {exec_type}"
-                            })
-
-                    elif action_type == "validate":
-                        vuln_name = action.get("vulnerability", "Unknown")
-                        target = action.get("target", "")
-                        proof = action.get("proof", "")
-                        severity = action.get("severity", "medium")
-                        steps = action.get("reproduction_steps", [])
-
-                        attack_context["validated_vulns"].append({
-                            "name": vuln_name,
-                            "severity": severity,
-                            "target": target,
-                        })
-
-                        yield Vulnerability(
-                            name=vuln_name,
-                            matched_at=target,
-                            severity=severity,
-                            confidence="high",
-                            description=f"AI-validated vulnerability: {vuln_name}",
-                            provider="ai",
-                            extra_data={
-                                "proof_of_concept": proof,
-                                "reproduction_steps": steps,
-                                "ai_validated": True,
-                                "model": model,
-                            },
-                        )
-
-                        batch_results.append({
-                            "action": f"Validate: {vuln_name}",
-                            "status": "validated",
-                            "output": f"Vulnerability '{vuln_name}' validated at {target} (severity: {severity})"
-                        })
-
-                    elif action_type == "report":
-                        yield AI(
-                            content=action.get("content", ""),
-                            ai_type='report',
-                            mode='attack',
-                            extra_data=attack_context,
-                        )
-                        batch_results.append({
-                            "action": "Report",
-                            "status": "generated",
-                            "output": action.get("content", "")[:500]
-                        })
-
-                    else:
-                        yield Warning(message=f"[{action_num}/{len(executable_actions)}] Unknown action type: {action_type}")
-                        batch_results.append({
-                            "action": f"Unknown: {action_type}",
-                            "status": "error",
-                            "output": f"Unknown action type: {action_type}"
-                        })
+                    # Collect batch result from handler
+                    if "_result" in action:
+                        batch_results.append(action["_result"])
 
                 # Build batch results prompt for next iteration
                 if batch_results:
                     # Format batch results for LLM
-                    batch_results_text = ""
-                    for idx, result in enumerate(batch_results, 1):
-                        batch_results_text += f"\n### Action {idx}: {result['action']}\n"
-                        batch_results_text += f"**Status:** {result['status']}\n"
-                        if result.get('errors'):
-                            batch_results_text += "**Errors (fix these in next attempt):**\n"
-                            for err in result['errors']:
-                                batch_results_text += f"  - {err}\n"
-                        if result.get('result_count'):
-                            batch_results_text += f"**Results:** {result['result_count']} items\n"
-                        batch_results_text += f"**Output:**\n```\n{result['output'][:1500]}\n```\n"
+                    batch_results_text = self._format_batch_results(batch_results)
 
-                    executed_cmds = format_executed_commands(attack_context)
+                    executed_cmds = format_executed_commands(ctx.attack_context)
                     if sensitive:
                         batch_results_text = encryptor.encrypt(batch_results_text)
                         if executed_cmds:
@@ -3077,7 +2758,7 @@ class ai(PythonRunner):
                     )
                 else:
                     # No executable actions and no terminal - shouldn't happen but handle gracefully
-                    executed_cmds = format_executed_commands(attack_context)
+                    executed_cmds = format_executed_commands(ctx.attack_context)
                     if sensitive and executed_cmds:
                         executed_cmds = encryptor.encrypt(executed_cmds)
                     prompt = PROMPT_ATTACK_ERROR_UNKNOWN_ACTION.format(
@@ -3091,14 +2772,14 @@ class ai(PythonRunner):
                 yield Error(
                     message=f"Attack iteration {iteration + 1} failed: {str(e)}"
                 )
-                attack_context["failed_attacks"].append({
+                ctx.attack_context["failed_attacks"].append({
                     "type": "error",
                     "name": "exception",
                     "error": str(e),
                     "targets": [],
                 })
                 # Build error prompt with executed commands
-                executed_cmds = format_executed_commands(attack_context)
+                executed_cmds = format_executed_commands(ctx.attack_context)
                 if sensitive and executed_cmds:
                     executed_cmds = encryptor.encrypt(executed_cmds)
                 prompt = PROMPT_ATTACK_ERROR_EXCEPTION.format(
@@ -3109,21 +2790,21 @@ class ai(PythonRunner):
                 )
 
         # Final summary if we hit max iterations
-        if attack_context["iteration"] >= max_iterations:
+        if ctx.attack_context["iteration"] >= max_iterations:
             yield Warning(message=f"Max iterations ({max_iterations}) reached")
             # Generate comprehensive attack summary using LLM
             yield Info(message="Generating comprehensive attack summary...")
             full_summary = generate_attack_summary_with_llm(
-                attack_context,
-                model=model,
-                api_base=api_base,
-                temperature=temperature,
+                ctx.attack_context,
+                model=ctx.model,
+                api_base=ctx.api_base,
+                temperature=ctx.temperature,
             )
             yield AI(
                 content=full_summary,
                 ai_type='attack_summary',
                 mode='attack',
-                model=model,
+                model=ctx.model,
             )
 
     def _extract_commands(self, text: str) -> List[str]:
