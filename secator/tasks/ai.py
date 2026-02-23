@@ -3335,6 +3335,10 @@ class ai(PythonRunner):
         query = action.get("query", {})
         result_key = action.get("result_key", "query_results")
 
+        # Decrypt query values if sensitive mode (LLM sends encrypted placeholders)
+        if ctx.sensitive and ctx.encryptor:
+            query = self._decrypt_query(query, ctx.encryptor)
+
         # Display query as Ai item
         import json
         query_str = json.dumps(query, indent=2) if query else "{}"
@@ -3413,6 +3417,25 @@ class ai(PythonRunner):
             lines.append(f"  ... and {len(results) - 20} more")
 
         return "\n".join(lines)
+
+    def _decrypt_query(self, query: Dict, encryptor: 'SensitiveDataEncryptor') -> Dict:
+        """Recursively decrypt all string values in a query dict.
+
+        Args:
+            query: Query dict with potentially encrypted values
+            encryptor: Encryptor to decrypt values
+
+        Returns:
+            Query dict with decrypted values
+        """
+        if isinstance(query, str):
+            return encryptor.decrypt(query)
+        elif isinstance(query, dict):
+            return {k: self._decrypt_query(v, encryptor) for k, v in query.items()}
+        elif isinstance(query, list):
+            return [self._decrypt_query(item, encryptor) for item in query]
+        else:
+            return query
 
     def _handle_output_type(self, action: Dict, ctx: 'ActionContext') -> Generator:
         """Handle output_type action - convert output to structured type.
