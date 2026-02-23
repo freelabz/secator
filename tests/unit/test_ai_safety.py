@@ -288,3 +288,66 @@ class TestPromptLoading(unittest.TestCase):
             self.assertTrue(from_file)
         finally:
             os.unlink(temp_path)
+
+
+class TestSensitiveDataEncryptor(unittest.TestCase):
+
+    def test_encrypt_and_decrypt_host(self):
+        from secator.tasks.ai import SensitiveDataEncryptor
+
+        encryptor = SensitiveDataEncryptor()
+        original = "http://testphp.vulnweb.com/page"
+        encrypted = encryptor.encrypt(original)
+
+        # Should contain placeholder
+        self.assertIn("[HOST:", encrypted)
+        self.assertNotIn("vulnweb.com", encrypted)
+
+        # Decrypt should restore original
+        decrypted = encryptor.decrypt(encrypted)
+        self.assertEqual(decrypted, original)
+
+    def test_decrypt_placeholder_without_brackets(self):
+        """Test LLM stripping brackets from placeholders."""
+        from secator.tasks.ai import SensitiveDataEncryptor
+
+        encryptor = SensitiveDataEncryptor()
+        original = "testphp.vulnweb.com"
+        encrypted = encryptor.encrypt(original)
+
+        # Extract the placeholder without brackets (simulate LLM behavior)
+        # [HOST:a07963bdcb1f] -> HOST:a07963bdcb1f
+        no_brackets = encrypted[1:-1]
+
+        # Decrypt should handle this format
+        decrypted = encryptor.decrypt(no_brackets)
+        self.assertEqual(decrypted, original)
+
+    def test_decrypt_bare_hash(self):
+        """Test decrypting bare hash without type prefix."""
+        from secator.tasks.ai import SensitiveDataEncryptor
+
+        encryptor = SensitiveDataEncryptor()
+        original = "testphp.vulnweb.com"
+        encrypted = encryptor.encrypt(original)
+
+        # Extract just the hash (e.g., from [HOST:a07963bdcb1f] get a07963bdcb1f)
+        import re
+        match = re.search(r'\[HOST:([a-f0-9]+)\]', encrypted)
+        self.assertIsNotNone(match)
+        bare_hash = match.group(1)
+
+        # Decrypt should handle bare hash
+        decrypted = encryptor.decrypt(bare_hash)
+        self.assertEqual(decrypted, original)
+
+    def test_encrypt_preserves_url_structure(self):
+        """Test that URL structure is preserved after encryption/decryption."""
+        from secator.tasks.ai import SensitiveDataEncryptor
+
+        encryptor = SensitiveDataEncryptor()
+        original = "http://example.com:8080/path?query=value"
+        encrypted = encryptor.encrypt(original)
+        decrypted = encryptor.decrypt(encrypted)
+
+        self.assertEqual(decrypted, original)
