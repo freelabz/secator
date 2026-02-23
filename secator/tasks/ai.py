@@ -473,6 +473,23 @@ Query workspace for existing findings. Requires -ws flag.
 
 Query operators: $in, $regex, $contains, $gt, $gte, $lt, $lte, $ne
 
+Available _type values for queries:
+- "ai" - Previous AI conversations and analysis (use this to get context from earlier discussions)
+- "vulnerability" - Confirmed vulnerabilities
+- "exploit" - Exploitation attempts
+- "port" - Open ports discovered
+- "url" - URLs discovered
+- "subdomain" - Subdomains discovered
+- "ip" - IP addresses
+- "domain" - Domains
+- "tag" - Tags/labels
+- "certificate" - SSL certificates
+- "user_account" - User accounts discovered
+
+IMPORTANT: When querying AI conversation history, use "_type": "ai" (NOT "a_i" or "A_I").
+Example to get previous AI context:
+{{"action": "query", "query": {{"_type": "ai"}}, "result_key": "previous_context", "reasoning": "Get context from previous AI analysis"}}
+
 ### output_type
 Convert findings to structured Secator output types.
 {{
