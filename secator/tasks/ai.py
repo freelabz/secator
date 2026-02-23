@@ -101,6 +101,16 @@ def call_llm(
     """Call litellm completion and return response with usage."""
     import litellm
 
+    # Suppress debug output unless 'litellm' is in CONFIG.debug
+    if "litellm" not in CONFIG.debug:
+        litellm.suppress_debug_info = True
+        litellm.set_verbose = False
+        litellm.json_logs = True
+        # Suppress litellm logger debug output
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+        logging.getLogger("litellm").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+
     response = litellm.completion(
         model=model,
         messages=messages,
@@ -181,7 +191,7 @@ class ai(PythonRunner):
                     encryptor: Optional[SensitiveDataEncryptor]) -> Generator:
         """Run attack loop."""
         max_iter = int(self.run_opts.get("max_iterations", 10))
-        temp, api_base = self.run_opts.get("temperature", 0.7), self.run_opts.get("api_base")
+        temp, api_base = float(self.run_opts.get("temperature", 0.7)), self.run_opts.get("api_base")
         dry_run, verbose = self.run_opts.get("dry_run", False), self.run_opts.get("verbose", False)
 
         history = ChatHistory()

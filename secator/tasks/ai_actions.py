@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional
 
 from secator.output_types import Ai, Error, Info, Warning
+from secator.template import TemplateLoader
 
 
 @dataclass
@@ -79,8 +80,7 @@ def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
 
     try:
         from secator.runners import Task
-        task_cls = Task.get_task_class(name)
-
+        tpl = TemplateLoader(input={'type': 'task', 'name': name})
         run_opts = {
             "print_item": False,
             "print_line": False,
@@ -90,7 +90,7 @@ def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
             **opts,
         }
 
-        task = task_cls(targets, **run_opts)
+        task = Task(tpl, targets, run_opts=run_opts)
         results = []
         for item in task:
             results.append(item)
@@ -122,6 +122,7 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
     """
     name = action.get("name", "")
     targets = action.get("targets", ctx.targets)
+    opts = action.get("opts", {})
 
     if ctx.encryptor:
         targets = [ctx.encryptor.decrypt(t) for t in targets]
@@ -134,7 +135,17 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 
     try:
         from secator.runners import Workflow
-        workflow = Workflow(targets, name=name, sync=True)
+        tpl = TemplateLoader(name=f'workflows/{name}')
+        run_opts = {
+            "print_item": False,
+            "print_line": False,
+            "print_cmd": False,
+            "print_progress": False,
+            "sync": True,
+            **opts,
+        }
+
+        workflow = Workflow(tpl, targets, run_opts=run_opts)
         results = []
         for item in workflow:
             results.append(item)
