@@ -2873,10 +2873,59 @@ class ai(PythonRunner):
                     user_instructions=custom_prompt_suffix
                 )
 
-        # Final summary if we hit max iterations
-        if ctx.attack_context["iteration"] >= max_iterations:
-            yield Warning(message=f"Max iterations ({max_iterations}) reached")
-            # Generate comprehensive attack summary using LLM
+        # End-of-loop continuation
+        should_generate_summary = True
+
+        while not ctx.in_ci and not ctx.auto_yes:
+            yield from self._prompt_continuation(ctx)
+
+            continuation_result = ctx.attack_context.get('_continuation_result', 'stop')
+
+            if continuation_result == 'stop':
+                break
+            elif continuation_result == 'continue':
+                # Run another batch of iterations
+                yield Info(message=f"Continuing for {prompt_iterations} more iterations...")
+                for extra_iteration in range(prompt_iterations):
+                    ctx.attack_context["iteration"] += 1
+                    yield Info(message=f"Extra iteration {extra_iteration + 1}/{prompt_iterations}")
+
+                    # Run one iteration of the attack loop
+                    try:
+                        response = get_llm_response(
+                            prompt=prompt,
+                            model=model,
+                            system_prompt=get_system_prompt("attack", disable_secator=disable_secator),
+                            temperature=temperature,
+                            api_base=api_base,
+                        )
+                        if sensitive:
+                            response = encryptor.decrypt(response)
+
+                        actions = self._parse_attack_actions(response)
+                        if actions:
+                            for action in actions:
+                                action_type = action.get("action", "")
+                                if action_type in ("complete", "stop"):
+                                    should_generate_summary = True
+                                    break
+                                for result in self._dispatch_action(action, ctx):
+                                    yield result
+                    except Exception as e:
+                        yield Warning(message=f"Continuation iteration failed: {e}")
+
+            elif continuation_result == 'change':
+                new_instructions = self._get_new_instructions(ctx)
+                if new_instructions:
+                    custom_prompt_suffix = new_instructions
+                    prompt = self._build_continuation_prompt(ctx, new_instructions, encryptor, sensitive)
+                    yield Info(message=f"New instructions applied: {new_instructions}")
+                    continue
+            else:
+                break
+
+        # Generate final summary
+        if should_generate_summary:
             yield Info(message="Generating comprehensive attack summary...")
             full_summary = generate_attack_summary_with_llm(
                 ctx.attack_context,
@@ -3381,6 +3430,36 @@ class ai(PythonRunner):
             return Prompt.ask("[bold cyan]New instructions[/]")
         except Exception:
             return ""
+
+    def _build_continuation_prompt(
+        self, ctx: 'ActionContext', new_instructions: str,
+        encryptor: 'SensitiveDataEncryptor', sensitive: bool
+    ) -> str:
+        """Build prompt for continuation with new instructions.
+
+        Args:
+            ctx: ActionContext with attack context
+            new_instructions: User's new instructions
+            encryptor: Encryptor for sensitive data
+            sensitive: Whether to encrypt
+
+        Returns:
+            Formatted prompt string
+        """
+        executed_cmds = format_executed_commands(ctx.attack_context)
+        if sensitive and executed_cmds:
+            executed_cmds = encryptor.encrypt(executed_cmds)
+
+        targets_str = ", ".join(ctx.targets)
+        if sensitive:
+            targets_str = encryptor.encrypt(targets_str)
+
+        return PROMPT_ATTACK_CONTINUE.format(
+            reason="received new instructions from user",
+            executed_commands=executed_cmds,
+            targets=targets_str,
+            user_instructions=new_instructions
+        )
 
     def _execute_runner(
         self,
