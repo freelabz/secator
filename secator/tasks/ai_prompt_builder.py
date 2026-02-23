@@ -1,6 +1,6 @@
 """Prompt builder for AI attack mode."""
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from secator.tasks.ai_history import ChatHistory
 
@@ -49,7 +49,7 @@ class PromptBuilder:
         history: ChatHistory,
         iteration: int,
         max_iterations: int,
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """Build the complete prompt structure.
 
         Returns:
