@@ -769,6 +769,26 @@ def workspace_list():
 	console.print(table)
 
 
+@workspace.command('use')
+@click.argument('name')
+def workspace_use(name):
+	"""Use a workspace (set as default)."""
+	CONFIG.set('workspace.default', name)
+	config = CONFIG.validate()
+	if config:
+		CONFIG.save()
+		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
+	else:
+		console.print(Error(message='Invalid config, not saving it.'))
+
+
+@workspace.command('current')
+def workspace_current():
+	"""Show current default workspace."""
+	current = CONFIG.workspace.default or 'default'
+	console.print(f'Current workspace: [bold gold3]{current}[/]')
+
+
 #----------#
 # PROFILES #
 #----------#
