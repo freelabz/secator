@@ -2174,6 +2174,11 @@ class ai(PythonRunner):
             "default": 10,
             "help": "Maximum attack loop iterations (attack mode only)",
         },
+        "prompt_iterations": {
+            "type": int,
+            "default": None,
+            "help": "Prompt user for direction every N iterations (default: min(max_iterations/2, 5))",
+        },
         "temperature": {
             "type": float,
             "default": 0.7,

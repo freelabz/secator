@@ -259,5 +259,18 @@ class TestHandlePrompt(unittest.TestCase):
         self.assertEqual(ctx.attack_context['user_response'], 'Alpha')
 
 
+class TestPromptIterations(unittest.TestCase):
+
+    def test_prompt_iterations_option_exists(self):
+        from secator.tasks.ai import ai
+
+        self.assertIn('prompt_iterations', ai.opts)
+
+    def test_prompt_iterations_default_is_none(self):
+        from secator.tasks.ai import ai
+
+        self.assertIsNone(ai.opts['prompt_iterations']['default'])
+
+
 if __name__ == '__main__':
     unittest.main()
