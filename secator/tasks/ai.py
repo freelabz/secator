@@ -2710,16 +2710,27 @@ class ai(PythonRunner):
         # Get summary model (default to claude-haiku-4-5)
         summary_model = self.run_opts.get("summary_model", "claude-haiku-4-5")
 
-        # Initial prompt - if no workspace data requested, skip "Current Findings" as it only contains execution info
-        if not use_workspace:
-            prompt = PROMPT_ATTACK_START_NO_RESULTS.format(targets=targets_str) + custom_prompt_suffix
-        elif not results:
-            prompt = PROMPT_ATTACK_START_NO_RESULTS.format(targets=targets_str) + custom_prompt_suffix
+        # Build initial prompt using PromptBuilder
+        # Include context in instructions if workspace data is available
+        if use_workspace and results:
+            combined_instructions = f"## Current Findings\n{context_text}\n\n{custom_prompt}" if custom_prompt else f"## Current Findings\n{context_text}"
         else:
-            prompt = PROMPT_ATTACK_START_WITH_RESULTS.format(
-                context=context_text,
-                targets=targets_str
-            ) + custom_prompt_suffix
+            combined_instructions = custom_prompt if custom_prompt else ""
+
+        full_prompt = prompt_builder.build_full_prompt(
+            targets=targets,
+            instructions=combined_instructions,
+            history=chat_history,
+            iteration=1,
+            max_iterations=max_iterations,
+        )
+
+        # Encrypt at the edge if sensitive mode
+        if sensitive:
+            full_prompt = prompt_builder.encrypt_prompt(full_prompt, encryptor)
+
+        # Format for LLM
+        prompt = prompt_builder.format_prompt_for_llm(full_prompt)
 
         # Show master prompt (system prompt) in verbose mode - only once at start
         if verbose:
