@@ -1,5 +1,6 @@
 # tests/unit/test_ai_history.py
 import unittest
+from unittest.mock import patch
 
 
 class TestChatHistory(unittest.TestCase):
@@ -94,3 +95,43 @@ class TestChatHistorySummarization(unittest.TestCase):
         # Should be unchanged - only 2 messages, less than keep_last
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[0]["role"], "assistant")
+
+
+class TestLLMSummarizer(unittest.TestCase):
+
+    @patch('secator.tasks.ai_history.get_llm_response')
+    def test_create_llm_summarizer_calls_llm(self, mock_llm):
+        from secator.tasks.ai_history import create_llm_summarizer
+
+        mock_llm.return_value = "Summary: Found 2 vulns"
+
+        summarizer = create_llm_summarizer(model="gpt-4o-mini")
+        messages = [
+            {"role": "assistant", "content": "Running nmap"},
+            {"role": "tool", "content": "Port 80 open"},
+        ]
+
+        result = summarizer(messages)
+
+        self.assertEqual(result, "Summary: Found 2 vulns")
+        mock_llm.assert_called_once()
+
+    @patch('secator.tasks.ai_history.get_llm_response')
+    def test_summarizer_formats_messages_for_prompt(self, mock_llm):
+        from secator.tasks.ai_history import create_llm_summarizer
+
+        mock_llm.return_value = "Summary"
+
+        summarizer = create_llm_summarizer(model="gpt-4o-mini")
+        messages = [
+            {"role": "assistant", "content": "Action 1"},
+            {"role": "tool", "content": "Result 1"},
+        ]
+
+        summarizer(messages)
+
+        # Check prompt contains the messages
+        call_args = mock_llm.call_args
+        prompt = call_args.kwargs.get('prompt') or call_args[1].get('prompt') or call_args[0][0]
+        self.assertIn("Action 1", prompt)
+        self.assertIn("Result 1", prompt)

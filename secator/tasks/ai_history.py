@@ -2,6 +2,61 @@
 from dataclasses import dataclass, field
 from typing import Callable, List, Dict
 
+from secator.tasks.ai import get_llm_response
+
+
+SUMMARIZATION_PROMPT = """Summarize the following attack session history concisely.
+Focus on:
+- Commands/tools executed
+- Key findings (vulnerabilities, open ports, services)
+- Errors or failures
+- Current attack progress
+
+Keep the summary under 500 words. Use markdown formatting.
+
+## History to summarize:
+
+{history}
+
+## Summary:"""
+
+
+def create_llm_summarizer(
+    model: str,
+    api_base: str = None,
+    temperature: float = 0.3,
+) -> Callable[[List[Dict[str, str]]], str]:
+    """Create a summarizer function that uses an LLM.
+
+    Args:
+        model: LLM model name
+        api_base: Optional API base URL
+        temperature: LLM temperature (default: 0.3 for factual summaries)
+
+    Returns:
+        Callable that takes messages and returns summary string
+    """
+    def summarizer(messages: List[Dict[str, str]]) -> str:
+        # Format messages for prompt
+        history_text = ""
+        for msg in messages:
+            role = msg["role"].upper()
+            content = msg["content"]
+            history_text += f"**{role}:**\n{content}\n\n"
+
+        prompt = SUMMARIZATION_PROMPT.format(history=history_text)
+
+        summary = get_llm_response(
+            prompt=prompt,
+            model=model,
+            api_base=api_base,
+            temperature=temperature,
+        )
+
+        return summary
+
+    return summarizer
+
 
 @dataclass
 class ChatHistory:
