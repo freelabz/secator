@@ -462,6 +462,40 @@ Complete (when done testing):
 Stop (when user instruction says to stop, or no actions possible):
 {{"action": "stop", "reason": "why stopping"}}
 
+### query
+Query workspace for existing findings. Requires -ws flag.
+{{
+  "action": "query",
+  "query": {{"_type": "vulnerability", "severity": {{"$in": ["critical", "high"]}}}},
+  "result_key": "critical_vulns",
+  "reasoning": "why you need this data"
+}}
+
+Query operators: $in, $regex, $contains, $gt, $gte, $lt, $lte, $ne
+
+### output_type
+Convert findings to structured Secator output types.
+{{
+  "action": "output_type",
+  "output_type": "vulnerability|port|url|subdomain|ip|exploit|tag",
+  "fields": {{
+    "name": "required for most types",
+    "severity": "critical|high|medium|low|info",
+    "matched_at": "where it was found"
+  }},
+  "reasoning": "why creating this output"
+}}
+
+### prompt
+Ask user for direction (auto-selects default in CI/auto mode).
+{{
+  "action": "prompt",
+  "question": "What should I do?",
+  "options": ["Option A", "Option B", "Option C"],
+  "default": "Option A",
+  "reasoning": "why user input needed"
+}}
+
 EXAMPLE MULTI-ACTION RESPONSE:
 [
   {{"action": "execute", "type": "task", "name": "httpx", "targets": ["example.com"], "opts": {{}}, "reasoning": "Probe for live hosts", "expected_outcome": "List of live URLs"}},
@@ -1429,7 +1463,7 @@ MODE_CONFIG = {
     "attack": {
         "iterative": True,
         "system_prompt_key": "attack",
-        "allowed_actions": ["execute", "validate", "complete", "stop", "report"],
+        "allowed_actions": ["execute", "validate", "complete", "stop", "report", "query", "output_type", "prompt"],
     },
 }
 
