@@ -345,5 +345,24 @@ class TestPromptContinuation(unittest.TestCase):
         self.assertEqual(result, 'continue')
 
 
+class TestGetNewInstructions(unittest.TestCase):
+
+    def test_get_new_instructions_ci_mode_returns_empty(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            in_ci=True,
+            attack_context={},
+        )
+
+        result = ai_instance._get_new_instructions(ctx)
+
+        # In CI mode, can't get user input, return empty
+        self.assertEqual(result, "")
+
+
 if __name__ == '__main__':
     unittest.main()

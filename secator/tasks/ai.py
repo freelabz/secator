@@ -3340,6 +3340,24 @@ class ai(PythonRunner):
         else:
             return "change"
 
+    def _get_new_instructions(self, ctx: 'ActionContext') -> str:
+        """Get new instructions from user.
+
+        Args:
+            ctx: ActionContext with mode flags
+
+        Returns:
+            User's new instructions or empty string in CI mode
+        """
+        if ctx.in_ci or ctx.auto_yes:
+            return ""
+
+        try:
+            from rich.prompt import Prompt
+            return Prompt.ask("[bold cyan]New instructions[/]")
+        except Exception:
+            return ""
+
     def _execute_runner(
         self,
         action: Dict,
