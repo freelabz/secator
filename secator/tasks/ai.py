@@ -469,6 +469,8 @@ RESPONSE FORMAT:
 - Put your reasoning in the "reasoning" field inside each action
 - Keep reasoning brief (1-2 sentences)
 - All actions will be executed sequentially and results reported back to you
+- DO NOT echo or repeat previous tool outputs - they are already in the chat history
+- DO NOT include "TOOL:" or "Status:" sections - just provide analysis and JSON actions
 
 ACTIONS:
 
@@ -571,6 +573,8 @@ RESPONSE FORMAT:
 - Put your reasoning in the "reasoning" field inside each action
 - Keep reasoning brief (1-2 sentences)
 - All actions will be executed sequentially and results reported back to you
+- DO NOT echo or repeat previous tool outputs - they are already in the chat history
+- DO NOT include "TOOL:" or "Status:" sections - just provide analysis and JSON actions
 
 ACTIONS:
 
@@ -2162,6 +2166,7 @@ def run_secator_task(name: str, targets: List[str], options: Dict = None) -> Lis
         "print_start": False,
         "print_end": False,
         "print_target": False,
+        "output": "",
         "sync": True,
         **options,
     }
