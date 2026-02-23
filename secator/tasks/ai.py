@@ -2897,17 +2897,16 @@ class ai(PythonRunner):
                     # Add tool results to history
                     chat_history.add_tool(batch_results_text)
 
-                    executed_cmds = format_executed_commands(ctx.attack_context)
-                    if sensitive:
-                        batch_results_text = encryptor.encrypt(batch_results_text)
-                        if executed_cmds:
-                            executed_cmds = encryptor.encrypt(executed_cmds)
-
-                    prompt = PROMPT_ATTACK_BATCH_RESULTS.format(
-                        action_count=len(batch_results),
-                        batch_results=batch_results_text,
-                        executed_commands=executed_cmds,
-                        user_instructions=custom_prompt_suffix
+                    # Build prompt for next iteration using PromptBuilder
+                    prompt = self._build_iteration_prompt(
+                        prompt_builder=prompt_builder,
+                        chat_history=chat_history,
+                        targets=targets,
+                        instructions=combined_instructions,
+                        iteration=iteration + 1,
+                        max_iterations=max_iterations,
+                        encryptor=encryptor,
+                        sensitive=sensitive,
                     )
                 else:
                     # No executable actions and no terminal - shouldn't happen but handle gracefully
@@ -3543,6 +3542,45 @@ class ai(PythonRunner):
             targets=targets_str,
             user_instructions=new_instructions
         )
+
+    def _build_iteration_prompt(
+        self,
+        prompt_builder: 'PromptBuilder',
+        chat_history: 'ChatHistory',
+        targets: List[str],
+        instructions: str,
+        iteration: int,
+        max_iterations: int,
+        encryptor: 'SensitiveDataEncryptor',
+        sensitive: bool,
+    ) -> str:
+        """Build prompt for an attack iteration.
+
+        Args:
+            prompt_builder: PromptBuilder instance
+            chat_history: ChatHistory with conversation so far
+            targets: List of targets
+            instructions: User instructions
+            iteration: Current iteration number
+            max_iterations: Maximum iterations
+            encryptor: Encryptor for sensitive data
+            sensitive: Whether to encrypt
+
+        Returns:
+            Formatted prompt string ready for LLM
+        """
+        full_prompt = prompt_builder.build_full_prompt(
+            targets=targets,
+            instructions=instructions,
+            history=chat_history,
+            iteration=iteration,
+            max_iterations=max_iterations,
+        )
+
+        if sensitive:
+            full_prompt = prompt_builder.encrypt_prompt(full_prompt, encryptor)
+
+        return prompt_builder.format_prompt_for_llm(full_prompt)
 
     def _execute_runner(
         self,
