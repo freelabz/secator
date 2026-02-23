@@ -3229,9 +3229,23 @@ class ai(PythonRunner):
             formatted = self._format_query_results(results)
             ctx.attack_context[result_key] = formatted
 
+            # Set _result for batch processing so results are sent back to LLM
+            action["_result"] = {
+                "action": "query",
+                "status": "success",
+                "result_count": len(results),
+                "output": f"Query results stored in '{result_key}':\n{formatted}",
+            }
+
             yield Info(message=f"Query returned {len(results)} results (stored in {result_key})")
 
         except Exception as e:
+            action["_result"] = {
+                "action": "query",
+                "status": "failed",
+                "errors": [str(e)],
+                "output": f"Query failed: {e}",
+            }
             yield Error(message=f"Query failed: {e}")
 
     def _format_query_results(self, results: List[Dict]) -> str:
