@@ -1372,6 +1372,9 @@ class ActionContext:
     custom_prompt_suffix: str = ""
     auto_yes: bool = False
     in_ci: bool = False
+    workspace_id: Optional[str] = None
+    workspace_name: Optional[str] = None
+    drivers: List[str] = field(default_factory=list)
 
 
 # =============================================================================
