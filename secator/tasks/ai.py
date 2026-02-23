@@ -3125,6 +3125,44 @@ class ai(PythonRunner):
 
         return "\n".join(lines)
 
+    def _handle_output_type(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Handle output_type action - convert output to structured type.
+
+        Args:
+            action: Action with output_type and fields
+            ctx: ActionContext (unused but required for interface)
+
+        Yields:
+            OutputType instance or Warning/Error
+        """
+        output_type = action.get("output_type", "").lower()
+        fields_data = action.get("fields", {})
+
+        # Validate output type
+        if output_type not in OUTPUT_TYPE_MAP:
+            valid_types = list(OUTPUT_TYPE_MAP.keys())
+            yield Warning(message=f"Unknown output_type: {output_type}. Valid: {valid_types}")
+            return
+
+        # Import and create instance
+        try:
+            class_name = OUTPUT_TYPE_MAP[output_type]
+
+            # Import from secator.output_types
+            from secator import output_types
+            OutputClass = getattr(output_types, class_name)
+
+            # Add source metadata
+            fields_data['_source'] = 'ai'
+
+            instance = OutputClass(**fields_data)
+            yield instance
+
+        except TypeError as e:
+            yield Error(message=f"Invalid fields for {output_type}: {e}")
+        except Exception as e:
+            yield Error(message=f"Failed to create {output_type}: {e}")
+
     def _execute_runner(
         self,
         action: Dict,

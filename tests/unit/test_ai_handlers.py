@@ -104,6 +104,69 @@ class TestHandleQuery(unittest.TestCase):
             self.assertIn('vulns', ctx.attack_context)
 
 
+class TestHandleOutputType(unittest.TestCase):
+
+    def test_handle_output_type_unknown_type(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(targets=['target.com'], model='gpt-4')
+        action = {
+            'action': 'output_type',
+            'output_type': 'invalid_type',
+            'fields': {},
+        }
+
+        results = list(ai_instance._handle_output_type(action, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'warning')
+        self.assertIn('Unknown', results[0].message)
+
+    def test_handle_output_type_vulnerability(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(targets=['target.com'], model='gpt-4')
+        action = {
+            'action': 'output_type',
+            'output_type': 'vulnerability',
+            'fields': {
+                'name': 'SQL Injection',
+                'severity': 'high',
+                'matched_at': 'https://target.com/login',
+            },
+        }
+
+        results = list(ai_instance._handle_output_type(action, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'vulnerability')
+        self.assertEqual(results[0].name, 'SQL Injection')
+        self.assertEqual(results[0].severity, 'high')
+
+    def test_handle_output_type_port(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(targets=['target.com'], model='gpt-4')
+        action = {
+            'action': 'output_type',
+            'output_type': 'port',
+            'fields': {
+                'port': 443,
+                'ip': '192.168.1.1',
+                'service_name': 'https',
+            },
+        }
+
+        results = list(ai_instance._handle_output_type(action, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'port')
+        self.assertEqual(results[0].port, 443)
+
+
 class TestActionHandlers(unittest.TestCase):
 
     def test_action_handlers_has_query(self):
