@@ -464,29 +464,20 @@ When vulnerabilities are found by Secator tools:
 3. IF NOT EXPLOITABLE: Don't waste time - continue with other analysis
 
 RESPONSE FORMAT:
-Your response must be EXACTLY this format:
+Your response must be EXACTLY:
 1. Brief analysis (1-3 sentences MAX)
 2. JSON array of actions
 
-Example correct response:
+Example:
 ```
 Found a login form. Testing for SQL injection.
 
 [{{"action": "execute", "type": "shell", "command": "curl ...", "reasoning": "test SQLi"}}]
 ```
 
-CRITICAL - FORBIDDEN PATTERNS:
-The system sends you results in "### Action N:" / "**Status:**" / "**Output:**" format.
-NEVER reproduce this format in your response. NEVER write:
-- "Action 1: shell" or "Action 2: query"
-- "Status: success" or "Status: failed"
-- "Output:" followed by fake results
-- "TOOL:" sections
-- Predicted/invented command outputs
-
-If you write ANY of these patterns, you are hallucinating. STOP and output ONLY:
-1. Brief analysis
-2. JSON array
+CRITICAL: The system executes your actions and returns results as JSON.
+NEVER predict or invent command outputs. NEVER include "TOOL:", "Output:", or fake execution logs.
+Your job: analyze results, decide next actions, output JSON. That's it.
 
 ACTIONS:
 
@@ -584,29 +575,20 @@ When vulnerabilities are found:
 3. IF NOT EXPLOITABLE: Continue with other analysis
 
 RESPONSE FORMAT:
-Your response must be EXACTLY this format:
+Your response must be EXACTLY:
 1. Brief analysis (1-3 sentences MAX)
 2. JSON array of actions
 
-Example correct response:
+Example:
 ```
 Found a login form. Testing for SQL injection.
 
 [{{"action": "execute", "type": "shell", "command": "curl ...", "reasoning": "test SQLi"}}]
 ```
 
-CRITICAL - FORBIDDEN PATTERNS:
-The system sends you results in "### Action N:" / "**Status:**" / "**Output:**" format.
-NEVER reproduce this format in your response. NEVER write:
-- "Action 1: shell" or "Action 2: query"
-- "Status: success" or "Status: failed"
-- "Output:" followed by fake results
-- "TOOL:" sections
-- Predicted/invented command outputs
-
-If you write ANY of these patterns, you are hallucinating. STOP and output ONLY:
-1. Brief analysis
-2. JSON array
+CRITICAL: The system executes your actions and returns results as JSON.
+NEVER predict or invent command outputs. NEVER include "TOOL:", "Output:", or fake execution logs.
+Your job: analyze results, decide next actions, output JSON. That's it.
 
 ACTIONS:
 
@@ -4094,27 +4076,31 @@ class ai(PythonRunner):
         )
 
     def _format_batch_results(self, batch_results: list) -> str:
-        """Format batch results for LLM prompt.
+        """Format batch results for LLM prompt as JSON.
 
         Args:
             batch_results: List of result dicts from action handlers
 
         Returns:
-            Formatted markdown string for LLM
+            JSON string for LLM
         """
-        text = ""
-        for idx, result in enumerate(batch_results, 1):
-            text += f"\n### Action {idx}: {result.get('action', 'Unknown')}\n"
-            text += f"**Status:** {result.get('status', 'unknown')}\n"
-            if result.get('errors'):
-                text += "**Errors (fix these in next attempt):**\n"
-                for err in result['errors']:
-                    text += f"  - {err}\n"
-            if result.get('result_count'):
-                text += f"**Results:** {result['result_count']} items\n"
-            output = result.get('output', 'No output')[:1500]
-            text += f"**Output:**\n```\n{output}\n```\n"
-        return text
+        import json
+        results = []
+        for result in batch_results:
+            r = {
+                "action": result.get("action", "unknown"),
+                "status": result.get("status", "unknown"),
+            }
+            if result.get("errors"):
+                r["errors"] = result["errors"]
+            if result.get("result_count"):
+                r["result_count"] = result["result_count"]
+            # Truncate output to save tokens
+            output = result.get("output", "")
+            if output:
+                r["output"] = output[:1500]
+            results.append(r)
+        return json.dumps(results, indent=2)
 
     def _execute_command(self, command: str) -> str:
         """Execute a command and return output."""
