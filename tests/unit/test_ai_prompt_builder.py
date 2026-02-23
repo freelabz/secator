@@ -104,3 +104,48 @@ class TestPromptBuilderEncryption(unittest.TestCase):
 
         # System prompt should NOT be encrypted (no sensitive data)
         self.assertEqual(encrypted["system"], "System prompt - no sensitive data")
+
+
+class TestFormatPromptForLLM(unittest.TestCase):
+
+    def test_format_prompt_for_llm_combines_sections(self):
+        from secator.tasks.ai_prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        prompt = {
+            "system": "You are an agent.",
+            "user": "## Targets\n- target.com",
+            "history": [
+                {"role": "assistant", "content": "Running scan"},
+                {"role": "tool", "content": "Port 80 open"}
+            ],
+            "query": "Iteration 1/10."
+        }
+
+        formatted = builder.format_prompt_for_llm(prompt)
+
+        # Should be a single string with all parts
+        self.assertIsInstance(formatted, str)
+        self.assertIn("You are an agent", formatted)
+        self.assertIn("target.com", formatted)
+        self.assertIn("Running scan", formatted)
+        self.assertIn("Port 80 open", formatted)
+        self.assertIn("Iteration 1/10", formatted)
+
+    def test_format_prompt_for_llm_empty_history(self):
+        from secator.tasks.ai_prompt_builder import PromptBuilder
+
+        builder = PromptBuilder()
+        prompt = {
+            "system": "System",
+            "user": "User",
+            "history": [],
+            "query": "Query"
+        }
+
+        formatted = builder.format_prompt_for_llm(prompt)
+
+        # Should not have history section header when empty
+        self.assertIn("System", formatted)
+        self.assertIn("User", formatted)
+        self.assertIn("Query", formatted)

@@ -90,3 +90,39 @@ class PromptBuilder:
             })
 
         return encrypted
+
+    def format_prompt_for_llm(self, prompt: Dict) -> str:
+        """Format the structured prompt into a single string for LLM.
+
+        Args:
+            prompt: Dict with system, user, history, query
+
+        Returns:
+            Formatted string prompt
+        """
+        parts = []
+
+        # System prompt
+        parts.append(prompt["system"])
+        parts.append("")  # blank line
+
+        # User prompt
+        parts.append(prompt["user"])
+        parts.append("")
+
+        # History (if any)
+        if prompt["history"]:
+            parts.append("## Chat History")
+            parts.append("")
+            for msg in prompt["history"]:
+                role = msg["role"].upper()
+                content = msg["content"]
+                parts.append(f"**{role}:**")
+                parts.append(content)
+                parts.append("")
+
+        # Current query
+        parts.append("## Current Task")
+        parts.append(prompt["query"])
+
+        return "\n".join(parts)
