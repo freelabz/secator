@@ -50,3 +50,47 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(messages[0]["role"], "assistant")
         self.assertEqual(messages[1]["role"], "tool")
         self.assertEqual(messages[2]["role"], "assistant")
+
+
+class TestChatHistorySummarization(unittest.TestCase):
+
+    def test_summarize_keeps_last_n_messages(self):
+        from secator.tasks.ai_history import ChatHistory
+
+        history = ChatHistory()
+        # Add 6 messages (3 iterations worth)
+        history.add_assistant("Iteration 1 response")
+        history.add_tool("Iteration 1 results")
+        history.add_assistant("Iteration 2 response")
+        history.add_tool("Iteration 2 results")
+        history.add_assistant("Iteration 3 response")
+        history.add_tool("Iteration 3 results")
+
+        # Mock summarizer that just returns "Summary"
+        def mock_summarizer(messages):
+            return "Summary of previous iterations"
+
+        history.summarize(summarizer=mock_summarizer, keep_last=4)
+
+        messages = history.to_messages()
+        # Should have: 1 summary + 4 kept messages = 5
+        self.assertEqual(len(messages), 5)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("Summary", messages[0]["content"])
+
+    def test_summarize_no_op_when_few_messages(self):
+        from secator.tasks.ai_history import ChatHistory
+
+        history = ChatHistory()
+        history.add_assistant("Response 1")
+        history.add_tool("Results 1")
+
+        def mock_summarizer(messages):
+            return "Should not be called"
+
+        history.summarize(summarizer=mock_summarizer, keep_last=4)
+
+        messages = history.to_messages()
+        # Should be unchanged - only 2 messages, less than keep_last
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["role"], "assistant")
