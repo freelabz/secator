@@ -1394,6 +1394,24 @@ ACTION_HANDLERS = {
 }
 
 # =============================================================================
+# OUTPUT TYPE MAPPING
+# =============================================================================
+
+OUTPUT_TYPE_MAP = {
+    "vulnerability": "Vulnerability",
+    "exploit": "Exploit",
+    "port": "Port",
+    "url": "Url",
+    "subdomain": "Subdomain",
+    "ip": "Ip",
+    "domain": "Domain",
+    "tag": "Tag",
+    "record": "Record",
+    "certificate": "Certificate",
+    "user_account": "UserAccount",
+}
+
+# =============================================================================
 # MODE CONFIGURATION
 # =============================================================================
 
