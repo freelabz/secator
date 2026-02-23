@@ -3603,14 +3603,14 @@ class ai(PythonRunner):
 
         return prompt_builder.format_prompt_for_llm(full_prompt)
 
-    def _execute_runner(
+    def _prepare_runner(
         self,
         action: Dict,
         ctx: 'ActionContext',
         action_num: int,
         total_actions: int
     ) -> Dict:
-        """Execute a secator runner (task/workflow/scan) and return batch result.
+        """Prepare runner execution - validate opts, build command, do safety check.
 
         Args:
             action: Execute action with type, name, targets, opts
@@ -3619,7 +3619,9 @@ class ai(PythonRunner):
             total_actions: Total actions in batch
 
         Returns:
-            Dict with action, status, output, result_count, errors for batch results
+            Dict with either:
+            - Preview info (cli_cmd, reasoning, etc.) if ready to execute
+            - Early return result with "_early_return": True if should skip/error
         """
         exec_type = action.get("type", "task")
         name = action.get("name", "")
@@ -3633,6 +3635,7 @@ class ai(PythonRunner):
 
         if invalid_opts:
             return {
+                "_early_return": True,
                 "action": f"{exec_type} '{name}'",
                 "status": "error",
                 "output": f"Invalid options: {invalid_opts}. Valid options: {valid_opt_names}",
@@ -3661,6 +3664,7 @@ class ai(PythonRunner):
 
         if not should_run:
             return {
+                "_early_return": True,
                 "action": cli_cmd,
                 "status": "skipped",
                 "output": "User declined to run this command.",
@@ -3670,9 +3674,8 @@ class ai(PythonRunner):
         if modified_cmd != cli_cmd:
             cli_cmd = modified_cmd
 
-        # Prepare result structure
-        result = {
-            "action": f"{exec_type.capitalize()} '{name}' on {action_targets}",
+        # Return preview info for Ai output before execution
+        return {
             "cli_cmd": cli_cmd,
             "reasoning": action.get("reasoning", ""),
             "exec_type": exec_type,
@@ -3680,6 +3683,32 @@ class ai(PythonRunner):
             "targets": action_targets,
             "opts": valid_opts,
             "batch_action": f"{action_num}/{total_actions}",
+        }
+
+    def _run_prepared_runner(self, preview: Dict, ctx: 'ActionContext') -> Dict:
+        """Execute a prepared runner and return results.
+
+        Args:
+            preview: Preview info from _prepare_runner
+            ctx: ActionContext with execution state
+
+        Returns:
+            Dict with action, status, output, result_count, errors for batch results
+        """
+        exec_type = preview["exec_type"]
+        name = preview["name"]
+        action_targets = preview["targets"]
+        valid_opts = preview["opts"]
+
+        result = {
+            "action": f"{exec_type.capitalize()} '{name}' on {action_targets}",
+            "cli_cmd": preview["cli_cmd"],
+            "reasoning": preview["reasoning"],
+            "exec_type": exec_type,
+            "name": name,
+            "targets": action_targets,
+            "opts": valid_opts,
+            "batch_action": preview["batch_action"],
         }
 
         if ctx.dry_run:
@@ -3806,45 +3835,51 @@ class ai(PythonRunner):
                 }
                 return
 
-            result = self._execute_runner(action, ctx, action_num, total_actions)
+            # Phase 1: Prepare (validate, build command, safety check)
+            preview = self._prepare_runner(action, ctx, action_num, total_actions)
 
-            # Handle warnings/info from result
-            if result.get("warning"):
-                yield Warning(message=result["warning"])
-            if result.get("info"):
-                yield Info(message=result["info"])
+            # Handle early returns (validation error or user declined)
+            if preview.get("_early_return"):
+                if preview.get("warning"):
+                    yield Warning(message=preview["warning"])
+                if preview.get("info"):
+                    yield Info(message=preview["info"])
+                action["_result"] = preview
+                return
 
-            # Display command if not skipped/error
-            if result["status"] not in ("skipped", "error"):
-                yield Ai(
-                    content=result.get("cli_cmd", ""),
-                    ai_type=exec_type,
-                    mode='attack',
-                    extra_data={
-                        "reasoning": result.get("reasoning", ""),
-                        "targets": result.get("targets", []),
-                        "opts": result.get("opts", {}),
-                        "batch_action": result.get("batch_action", ""),
-                    },
+            # Phase 2: Display command BEFORE execution
+            yield Ai(
+                content=preview.get("cli_cmd", ""),
+                ai_type=exec_type,
+                mode='attack',
+                extra_data={
+                    "reasoning": preview.get("reasoning", ""),
+                    "targets": preview.get("targets", []),
+                    "opts": preview.get("opts", {}),
+                    "batch_action": preview.get("batch_action", ""),
+                },
+            )
+
+            # Phase 3: Execute
+            result = self._run_prepared_runner(preview, ctx)
+
+            # Yield vulnerabilities
+            for vuln in result.get("vulnerabilities", []):
+                self.add_result(vuln, print=True)
+                yield vuln
+
+            if result.get("vulnerabilities"):
+                yield Info(
+                    message=f"Found {len(result['vulnerabilities'])} potential vulnerabilities - check for false positives"
                 )
 
-                # Yield vulnerabilities
-                for vuln in result.get("vulnerabilities", []):
-                    self.add_result(vuln, print=True)
-                    yield vuln
+            # Add non-vuln results
+            for r in result.get("results", []):
+                if not isinstance(r, Vulnerability):
+                    self.add_result(r, print=False)
 
-                if result.get("vulnerabilities"):
-                    yield Info(
-                        message=f"Found {len(result['vulnerabilities'])} potential vulnerabilities - check for false positives"
-                    )
-
-                # Add non-vuln results
-                for r in result.get("results", []):
-                    if not isinstance(r, Vulnerability):
-                        self.add_result(r, print=False)
-
-                if ctx.verbose:
-                    yield Info(message=f"[OUTPUT] {_truncate(result.get('output', ''))}")
+            if ctx.verbose:
+                yield Info(message=f"[OUTPUT] {_truncate(result.get('output', ''))}")
 
             # Update attack context
             if result["status"] not in ("skipped", "rejected"):
