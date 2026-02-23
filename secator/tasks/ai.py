@@ -2604,6 +2604,14 @@ class ai(PythonRunner):
     ) -> Generator:
         """Execute reactive attack loop to exploit vulnerabilities."""
         max_iterations = int(self.run_opts.get("max_iterations", 10))
+
+        # Calculate prompt_iterations default
+        prompt_iterations = self.run_opts.get("prompt_iterations")
+        if prompt_iterations is None:
+            prompt_iterations = min(max_iterations // 2, 5)
+        else:
+            prompt_iterations = int(prompt_iterations)
+
         dry_run = self.run_opts.get("dry_run", False)
         verbose = self.run_opts.get("verbose", False)
         temperature = float(self.run_opts.get("temperature", 0.7))
@@ -2682,6 +2690,22 @@ class ai(PythonRunner):
         for iteration in range(max_iterations):
             attack_context["iteration"] = iteration + 1
             yield Info(message=f"Attack iteration {iteration + 1}/{max_iterations}")
+
+            # Periodic checkpoint (skip first iteration, skip in CI/auto_yes)
+            if iteration > 0 and prompt_iterations > 0 and iteration % prompt_iterations == 0:
+                if not ctx.in_ci and not ctx.auto_yes:
+                    yield from self._prompt_checkpoint(iteration + 1, max_iterations, ctx)
+
+                    checkpoint_result = ctx.attack_context.get('_checkpoint_result', 'continue')
+
+                    if checkpoint_result == 'stop':
+                        yield Info(message="User requested stop at checkpoint")
+                        break
+                    elif checkpoint_result == 'change':
+                        new_instructions = self._get_new_instructions(ctx)
+                        if new_instructions:
+                            custom_prompt_suffix = new_instructions
+                            yield Info(message=f"New instructions: {new_instructions}")
 
             try:
                 # Show the user prompt only in verbose mode
