@@ -113,7 +113,8 @@ class TestLLMSummarizer(unittest.TestCase):
 
         result = summarizer(messages)
 
-        self.assertEqual(result, "Summary: Found 2 vulns")
+        self.assertIn("Summary: Found 2 vulns", result)
+        self.assertTrue(result.startswith("## Summary of previous iterations"))
         mock_llm.assert_called_once()
 
     @patch('secator.tasks.ai_history.get_llm_response')

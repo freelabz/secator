@@ -53,7 +53,7 @@ def create_llm_summarizer(
             temperature=temperature,
         )
 
-        return summary
+        return f"## Summary of previous iterations\n\n{summary}"
 
     return summarizer
 
