@@ -3210,6 +3210,30 @@ class ai(PythonRunner):
 
         return []
 
+    def _dispatch_action(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Dispatch action to appropriate handler.
+
+        Args:
+            action: Action dictionary with 'action' key
+            ctx: ActionContext with shared execution state
+
+        Yields:
+            Results from the handler
+        """
+        action_type = action.get("action", "")
+        handler_name = ACTION_HANDLERS.get(action_type)
+
+        if not handler_name:
+            yield Warning(message=f"Unknown action type: {action_type}")
+            return
+
+        handler = getattr(self, handler_name, None)
+        if not handler:
+            yield Warning(message=f"Handler not implemented: {handler_name}")
+            return
+
+        yield from handler(action, ctx)
+
     def _execute_command(self, command: str) -> str:
         """Execute a command and return output."""
         try:
