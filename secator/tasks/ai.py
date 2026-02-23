@@ -4010,12 +4010,19 @@ class ai(PythonRunner):
 
         if action_type == "execute":
             exec_type = action.get("type", "task")
-            name = action.get("name", "unknown")
-            targets = action.get("targets", [])
-            targets_str = ", ".join(targets[:3])
-            if len(targets) > 3:
-                targets_str += f" (+{len(targets) - 3} more)"
-            return f"Execute {exec_type} '{name}' on {targets_str}" if targets_str else f"Execute {exec_type} '{name}'"
+            if exec_type == "shell":
+                command = action.get("command", "unknown")
+                # Truncate long commands
+                if len(command) > 60:
+                    command = command[:57] + "..."
+                return f"Execute shell: {command}"
+            else:
+                name = action.get("name", "unknown")
+                targets = action.get("targets", [])
+                targets_str = ", ".join(targets[:3])
+                if len(targets) > 3:
+                    targets_str += f" (+{len(targets) - 3} more)"
+                return f"Execute {exec_type} '{name}' on {targets_str}" if targets_str else f"Execute {exec_type} '{name}'"
 
         elif action_type == "query":
             query = action.get("query", {})
