@@ -19,6 +19,8 @@ from secator.decorators import task
 from secator.output_types import Ai, Error, Info, Tag, Vulnerability, Warning, FINDING_TYPES
 from secator.rich import console
 from secator.runners import PythonRunner
+from secator.tasks.ai_history import ChatHistory, create_llm_summarizer
+from secator.tasks.ai_prompt_builder import PromptBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -2698,6 +2700,15 @@ class ai(PythonRunner):
             attack_context=attack_context,
             custom_prompt_suffix=custom_prompt_suffix,
         )
+
+        # Initialize chat history for this attack session
+        chat_history = ChatHistory()
+
+        # Initialize prompt builder
+        prompt_builder = PromptBuilder(disable_secator=disable_secator)
+
+        # Get summary model (default to claude-haiku-4-5)
+        summary_model = self.run_opts.get("summary_model", "claude-haiku-4-5")
 
         # Initial prompt - if no workspace data requested, skip "Current Findings" as it only contains execution info
         if not use_workspace:
