@@ -1390,6 +1390,28 @@ ACTION_HANDLERS = {
     # "prompt": "_handle_prompt",
 }
 
+# =============================================================================
+# MODE CONFIGURATION
+# =============================================================================
+
+MODE_CONFIG = {
+    "summarize": {
+        "iterative": False,
+        "system_prompt_key": "summarize",
+        "response_type": "summary",
+    },
+    "suggest": {
+        "iterative": False,
+        "system_prompt_key": "suggest",
+        "response_type": "suggestion",
+    },
+    "attack": {
+        "iterative": True,
+        "system_prompt_key": "attack",
+        "allowed_actions": ["execute", "validate", "complete", "stop", "report"],
+    },
+}
+
 
 def load_sensitive_patterns(file_path: str) -> List[str]:
     """Load sensitive patterns from a file (one pattern per line)."""
