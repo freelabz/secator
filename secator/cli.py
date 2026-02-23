@@ -992,7 +992,7 @@ def process_query(query, fields=None):
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('-f', '--format', "_format", type=str, default='', help=f'Format output, comma-separated of: <output_type> or <output_type>.<field>. [bold]Allowed output types[/]: {", ".join(FINDING_TYPES_LOWER)}')  # noqa: E501
 @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
-@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('-w', '-ws', '--workspace', type=str, default=CONFIG.workspace.default, help='Filter by workspace name')
 @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
 @click.pass_context
 def report_show(ctx, report_query, output, runner_type, time_delta, _format, query, workspace, unified):
