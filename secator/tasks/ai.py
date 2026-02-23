@@ -2504,6 +2504,9 @@ class ai(PythonRunner):
             if not queries:
                 queries = [{}]
             for query in queries:
+                # Decrypt query values if sensitive mode (queries from intent analysis may have encrypted values)
+                if sensitive:
+                    query = self._decrypt_query(query, encryptor)
                 # Format query for display
                 query_str = json.dumps(query) if query else "{}"
                 # Exclude _context field to reduce data size
@@ -4085,7 +4088,7 @@ class ai(PythonRunner):
 
                 # Show output
                 truncated = result["output"][:1000] + ("..." if len(result["output"]) > 1000 else "")
-                console.print(truncated)
+                console.print(f'[dim]{truncated}[/]', highlight=False)
 
                 output_ai = Ai(
                     content=truncated,
