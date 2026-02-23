@@ -99,7 +99,7 @@ class TestChatHistorySummarization(unittest.TestCase):
 
 class TestLLMSummarizer(unittest.TestCase):
 
-    @patch('secator.tasks.ai_history.get_llm_response')
+    @patch('secator.tasks.ai.get_llm_response')
     def test_create_llm_summarizer_calls_llm(self, mock_llm):
         from secator.tasks.ai_history import create_llm_summarizer
 
@@ -117,7 +117,7 @@ class TestLLMSummarizer(unittest.TestCase):
         self.assertTrue(result.startswith("## Summary of previous iterations"))
         mock_llm.assert_called_once()
 
-    @patch('secator.tasks.ai_history.get_llm_response')
+    @patch('secator.tasks.ai.get_llm_response')
     def test_summarizer_formats_messages_for_prompt(self, mock_llm):
         from secator.tasks.ai_history import create_llm_summarizer
 
