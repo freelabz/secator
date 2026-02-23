@@ -52,7 +52,8 @@ AI_TYPES = {
 	'workflow': {'label': 'RUN WORKFLOW', 'color': 'magenta'},
 	'scan': {'label': 'RUN SCAN', 'color': 'magenta'},
 	'shell': {'label': 'RUN SHELL', 'color': 'magenta'},
-	'shell_output': {'label': 'SHELL OUTPUT', 'color': 'white'},
+	'shell_output': {'label': 'SHELL OUTPUT', 'color': 'dim white'},
+	'query': {'label': 'RUN QUERY', 'color': 'magenta'},
 	'stopped': {'label': 'AI STOP', 'color': 'orange3'},
 	'report': {'label': 'AI REPORT', 'color': 'cyan'}
 }
@@ -100,14 +101,17 @@ class Ai(OutputType):
 		if self.ai_type in ('response', 'prompt'):
 			tokens = self.extra_data.get('tokens')
 			cost = self.extra_data.get('cost')
+			icon = 'arrow_up'
+			if self.ai_type == 'response':
+				icon = 'arrow_down'
 			if tokens or cost:
 				parts = []
 				if tokens:
 					# Format tokens in K format (e.g., 8.8k)
 					if tokens >= 1000:
-						parts.append(f'{tokens/1000:.1f}k tokens')
+						parts.append(f' • :{icon}: {tokens/1000:.1f}k tokens')
 					else:
-						parts.append(f'{tokens} tokens')
+						parts.append(f' • {tokens} tokens')
 				if cost:
 					parts.append(f'${cost:.4f}')
 				usage_str = ' '.join(parts)
@@ -115,6 +119,14 @@ class Ai(OutputType):
 		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
 						 if k not in ('iteration', 'max_iterations', 'tokens', 'cost')}
+
+		# Build suffix (usage + extra_data) as Rich markup
+		suffix = ''
+		if usage_str:
+			suffix += f' [dim blue]{usage_str}[/]'
+		if display_extra:
+			for k, v in display_extra.items():
+				suffix += f'\n    [bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]'
 
 		# Render content with markdown support
 		content = self.content
@@ -124,19 +136,12 @@ class Ai(OutputType):
 			md_rendered = render_markdown_for_rich(content)
 			md_indented = '\n    ' + md_rendered.replace('\n', '\n    ')
 			result = header + md_indented.rstrip()
-			if usage_str:
-				result += ' ' + rich_to_ansi(f'[dim]{usage_str}[/]')
-			if display_extra:
-				for k, v in display_extra.items():
-					result += '\n    ' + rich_to_ansi(f'[bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]')
+			if suffix:
+				result += rich_to_ansi(suffix)
 			return result
 
 		# Build full Rich markup string, then convert once
 		content_indented = content.replace('\n', '\n    ')
 		s += f' {_s(content_indented)}'
-		if usage_str:
-			s += f' [dim]{usage_str}[/]'
-		if display_extra:
-			for k, v in display_extra.items():
-				s += f'\n    [bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]'
+		s += suffix
 		return rich_to_ansi(s)

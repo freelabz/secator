@@ -3335,6 +3335,19 @@ class ai(PythonRunner):
         query = action.get("query", {})
         result_key = action.get("result_key", "query_results")
 
+        # Display query as Ai item
+        import json
+        query_str = json.dumps(query, indent=2) if query else "{}"
+        yield Ai(
+            content=query_str,
+            ai_type='query',
+            mode='attack',
+            extra_data={
+                "reasoning": action.get("reasoning", ""),
+                "result_key": result_key,
+            }
+        )
+
         # Check workspace context
         if not ctx.workspace_id:
             yield Warning(message="Query action requires workspace context (-ws flag)")
