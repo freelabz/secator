@@ -310,5 +310,40 @@ class TestPromptCheckpoint(unittest.TestCase):
         self.assertEqual(result, 'stop')
 
 
+class TestPromptContinuation(unittest.TestCase):
+
+    def test_prompt_continuation_ci_mode_returns_stop(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            in_ci=True,
+            attack_context={},
+        )
+
+        results = list(ai_instance._prompt_continuation(ctx))
+
+        # In CI mode, default is "Stop and generate report"
+        self.assertEqual(len(results), 2)
+        self.assertEqual(ctx.attack_context.get('_continuation_result'), 'stop')
+
+    def test_prompt_continuation_continue_response(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            in_ci=True,
+            attack_context={'user_response': 'Continue with more iterations'},
+        )
+
+        result = ai_instance._parse_continuation_response(ctx)
+
+        self.assertEqual(result, 'continue')
+
+
 if __name__ == '__main__':
     unittest.main()

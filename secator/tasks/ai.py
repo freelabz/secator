@@ -3299,6 +3299,47 @@ class ai(PythonRunner):
         else:
             return "continue"
 
+    def _prompt_continuation(self, ctx: 'ActionContext') -> Generator:
+        """Prompt user for continuation after loop ends.
+
+        Args:
+            ctx: ActionContext with mode flags
+
+        Yields:
+            AI and Info outputs from _handle_prompt
+        """
+        continuation_action = {
+            "action": "prompt",
+            "question": "Attack loop completed. What would you like to do?",
+            "options": [
+                "Continue with more iterations",
+                "Provide new instructions",
+                "Stop and generate report"
+            ],
+            "default": "Stop and generate report",
+        }
+
+        yield from self._handle_prompt(continuation_action, ctx)
+
+        # Parse response and store result
+        result = self._parse_continuation_response(ctx)
+        ctx.attack_context['_continuation_result'] = result
+
+    def _parse_continuation_response(self, ctx: 'ActionContext') -> str:
+        """Parse continuation response into action.
+
+        Returns:
+            'continue', 'stop', or 'change'
+        """
+        user_response = ctx.attack_context.get("user_response", "Stop")
+
+        if "Stop" in user_response:
+            return "stop"
+        elif "Continue" in user_response:
+            return "continue"
+        else:
+            return "change"
+
     def _execute_runner(
         self,
         action: Dict,
