@@ -272,5 +272,43 @@ class TestPromptIterations(unittest.TestCase):
         self.assertIsNone(ai.opts['prompt_iterations']['default'])
 
 
+class TestPromptCheckpoint(unittest.TestCase):
+
+    def test_prompt_checkpoint_returns_continue(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            in_ci=True,
+            attack_context={},
+        )
+
+        # In CI mode, should auto-select and return "continue"
+        results = list(ai_instance._prompt_checkpoint(5, 10, ctx))
+
+        # Should yield AI prompt and Info
+        self.assertEqual(len(results), 2)
+        self.assertEqual(ctx.attack_context.get('_checkpoint_result'), 'continue')
+
+    def test_prompt_checkpoint_stop_response(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            in_ci=True,
+            attack_context={'user_response': 'Stop and summarize'},
+        )
+
+        # Simulate stop selection
+        ctx.attack_context['user_response'] = 'Stop and summarize'
+        result = ai_instance._parse_checkpoint_response(ctx)
+
+        self.assertEqual(result, 'stop')
+
+
 if __name__ == '__main__':
     unittest.main()

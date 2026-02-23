@@ -3256,6 +3256,49 @@ class ai(PythonRunner):
             yield Warning(message=f"Prompt failed: {e}, using default: {default}")
             ctx.attack_context["user_response"] = default
 
+    def _prompt_checkpoint(self, iteration: int, max_iterations: int, ctx: 'ActionContext') -> Generator:
+        """Prompt user at periodic checkpoint.
+
+        Args:
+            iteration: Current iteration number (1-indexed)
+            max_iterations: Total max iterations
+            ctx: ActionContext with mode flags
+
+        Yields:
+            AI and Info outputs from _handle_prompt
+        """
+        checkpoint_action = {
+            "action": "prompt",
+            "question": f"Checkpoint at iteration {iteration}/{max_iterations}. How should I proceed?",
+            "options": [
+                "Continue attacking",
+                "Change direction",
+                "Stop and summarize"
+            ],
+            "default": "Continue attacking",
+        }
+
+        yield from self._handle_prompt(checkpoint_action, ctx)
+
+        # Parse response and store result
+        result = self._parse_checkpoint_response(ctx)
+        ctx.attack_context['_checkpoint_result'] = result
+
+    def _parse_checkpoint_response(self, ctx: 'ActionContext') -> str:
+        """Parse checkpoint response into action.
+
+        Returns:
+            'continue', 'stop', or 'change'
+        """
+        user_response = ctx.attack_context.get("user_response", "Continue attacking")
+
+        if "Stop" in user_response:
+            return "stop"
+        elif "Change" in user_response:
+            return "change"
+        else:
+            return "continue"
+
     def _execute_runner(
         self,
         action: Dict,
