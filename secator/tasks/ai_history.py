@@ -37,7 +37,7 @@ def create_llm_summarizer(
     """
     def summarizer(messages: List[Dict[str, str]]) -> str:
         # Import here to avoid circular import
-        from secator.tasks.ai import get_llm_response
+        from secator.tasks.ai import call_llm
 
         # Format messages for prompt
         history_text = ""
@@ -48,14 +48,11 @@ def create_llm_summarizer(
 
         prompt = SUMMARIZATION_PROMPT.format(history=history_text)
 
-        summary = get_llm_response(
-            prompt=prompt,
-            model=model,
-            api_base=api_base,
-            temperature=temperature,
-        )
+        # Build messages for call_llm
+        llm_messages = [{"role": "user", "content": prompt}]
+        result = call_llm(llm_messages, model, temperature, api_base)
 
-        return f"## Summary of previous iterations\n\n{summary}"
+        return f"## Summary of previous iterations\n\n{result['content']}"
 
     return summarizer
 

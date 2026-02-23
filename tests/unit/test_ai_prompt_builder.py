@@ -10,7 +10,7 @@ class TestPromptBuilder(unittest.TestCase):
         builder = PromptBuilder()
         system_prompt = builder.build_system_prompt()
 
-        self.assertIn("penetration testing", system_prompt.lower())
+        self.assertIn("security testing", system_prompt.lower())
         self.assertIn("action", system_prompt.lower())
 
     def test_build_user_prompt(self):

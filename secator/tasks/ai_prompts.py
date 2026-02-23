@@ -39,22 +39,16 @@ Answer questions using workspace data. Use query action to fetch data."""
 
 def get_tools_list() -> str:
     """Get comma-separated list of available tasks."""
-    try:
-        from secator.loader import discover_tasks
-        tasks = discover_tasks()
-        return ", ".join(sorted(t.__name__ for t in tasks))
-    except Exception:
-        return "nmap, httpx, nuclei, ffuf, katana, subfinder"
+    from secator.loader import discover_tasks
+    tasks = discover_tasks()
+    return ", ".join(sorted(t.__name__ for t in tasks))
 
 
 def get_workflows_list() -> str:
     """Get comma-separated list of available workflows."""
-    try:
-        from secator.loader import get_configs_by_type
-        workflows = get_configs_by_type('workflow')
-        return ", ".join(sorted(w.name for w in workflows))
-    except Exception:
-        return "host_recon, subdomain_recon, url_crawl"
+    from secator.loader import get_configs_by_type
+    workflows = get_configs_by_type('workflow')
+    return ", ".join(sorted(w.name for w in workflows))
 
 
 def get_system_prompt(mode: str) -> str:

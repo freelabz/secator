@@ -1,7 +1,7 @@
 # tests/unit/test_ai_new.py
 import unittest
 
-from secator.tasks.ai_new import ai, parse_actions, strip_json_from_response
+from secator.tasks.ai import ai, parse_actions, strip_json_from_response
 
 
 class TestAiTask(unittest.TestCase):

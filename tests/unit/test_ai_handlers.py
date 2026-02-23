@@ -1,367 +1,250 @@
 # tests/unit/test_ai_handlers.py
+"""Tests for AI action handlers and context."""
 
 import unittest
 from dataclasses import fields
 
 
 class TestActionContext(unittest.TestCase):
+    """Tests for the ActionContext dataclass."""
 
-    def test_action_context_has_workspace_fields(self):
-        from secator.tasks.ai import ActionContext
+    def test_action_context_has_required_fields(self):
+        from secator.tasks.ai_actions import ActionContext
 
         field_names = [f.name for f in fields(ActionContext)]
 
+        self.assertIn('targets', field_names)
+        self.assertIn('model', field_names)
+        self.assertIn('encryptor', field_names)
+        self.assertIn('dry_run', field_names)
+        self.assertIn('auto_yes', field_names)
         self.assertIn('workspace_id', field_names)
-        self.assertIn('workspace_name', field_names)
-        self.assertIn('drivers', field_names)
+        self.assertIn('attack_context', field_names)
 
-    def test_action_context_workspace_defaults(self):
-        from secator.tasks.ai import ActionContext
+    def test_action_context_defaults(self):
+        from secator.tasks.ai_actions import ActionContext
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
 
+        self.assertEqual(ctx.targets, ['target.com'])
+        self.assertEqual(ctx.model, 'gpt-4')
+        self.assertIsNone(ctx.encryptor)
+        self.assertFalse(ctx.dry_run)
+        self.assertFalse(ctx.auto_yes)
         self.assertIsNone(ctx.workspace_id)
-        self.assertIsNone(ctx.workspace_name)
-        self.assertEqual(ctx.drivers, [])
+        self.assertEqual(ctx.attack_context, {})
 
+    def test_action_context_with_all_params(self):
+        from secator.tasks.ai_actions import ActionContext
+        from secator.tasks.ai_encryption import SensitiveDataEncryptor
 
-class TestOutputTypeMap(unittest.TestCase):
-
-    def test_output_type_map_exists(self):
-        from secator.tasks.ai import OUTPUT_TYPE_MAP
-
-        self.assertIsInstance(OUTPUT_TYPE_MAP, dict)
-
-    def test_output_type_map_has_vulnerability(self):
-        from secator.tasks.ai import OUTPUT_TYPE_MAP
-
-        self.assertIn('vulnerability', OUTPUT_TYPE_MAP)
-        self.assertEqual(OUTPUT_TYPE_MAP['vulnerability'], 'Vulnerability')
-
-    def test_output_type_map_has_all_finding_types(self):
-        from secator.tasks.ai import OUTPUT_TYPE_MAP
-
-        expected = ['vulnerability', 'port', 'url', 'subdomain', 'ip', 'exploit', 'tag']
-        for t in expected:
-            self.assertIn(t, OUTPUT_TYPE_MAP)
-
-
-class TestHandleQuery(unittest.TestCase):
-
-    def test_handle_query_no_workspace(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        ai_instance = AITask.__new__(AITask)
+        encryptor = SensitiveDataEncryptor()
         ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
-            workspace_id=None,
-        )
-        action = {'action': 'query', 'query': {'_type': 'vulnerability'}}
-
-        results = list(ai_instance._handle_query(action, ctx))
-
-        # Should yield Warning about missing workspace
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]._type, 'warning')
-        self.assertIn('workspace', results[0].message.lower())
-
-    def test_handle_query_success(self):
-        from unittest.mock import Mock, patch
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        # Setup mock - patch at source module where QueryEngine is imported from
-        with patch('secator.query.QueryEngine') as mock_engine_class:
-            mock_engine = Mock()
-            mock_engine.search.return_value = [
-                {'_type': 'vulnerability', 'name': 'SQLi'},
-                {'_type': 'vulnerability', 'name': 'XSS'},
-            ]
-            mock_engine_class.return_value = mock_engine
-
-            ai_instance = AITask.__new__(AITask)
-            ctx = ActionContext(
-                targets=['target.com'],
-                model='gpt-4',
-                workspace_id='ws123',
-                workspace_name='test_ws',
-                attack_context={},
-            )
-            action = {
-                'action': 'query',
-                'query': {'_type': 'vulnerability'},
-                'result_key': 'vulns',
-            }
-
-            results = list(ai_instance._handle_query(action, ctx))
-
-            # Should yield Info with result count
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0]._type, 'info')
-            self.assertIn('2', results[0].message)
-
-            # Should store in attack_context
-            self.assertIn('vulns', ctx.attack_context)
-
-
-class TestHandleOutputType(unittest.TestCase):
-
-    def test_handle_output_type_unknown_type(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(targets=['target.com'], model='gpt-4')
-        action = {
-            'action': 'output_type',
-            'output_type': 'invalid_type',
-            'fields': {},
-        }
-
-        results = list(ai_instance._handle_output_type(action, ctx))
-
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]._type, 'warning')
-        self.assertIn('Unknown', results[0].message)
-
-    def test_handle_output_type_vulnerability(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(targets=['target.com'], model='gpt-4')
-        action = {
-            'action': 'output_type',
-            'output_type': 'vulnerability',
-            'fields': {
-                'name': 'SQL Injection',
-                'severity': 'high',
-                'matched_at': 'https://target.com/login',
-            },
-        }
-
-        results = list(ai_instance._handle_output_type(action, ctx))
-
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]._type, 'vulnerability')
-        self.assertEqual(results[0].name, 'SQL Injection')
-        self.assertEqual(results[0].severity, 'high')
-
-    def test_handle_output_type_port(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(targets=['target.com'], model='gpt-4')
-        action = {
-            'action': 'output_type',
-            'output_type': 'port',
-            'fields': {
-                'port': 443,
-                'ip': '192.168.1.1',
-                'service_name': 'https',
-            },
-        }
-
-        results = list(ai_instance._handle_output_type(action, ctx))
-
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]._type, 'port')
-        self.assertEqual(results[0].port, 443)
-
-
-class TestActionHandlers(unittest.TestCase):
-
-    def test_action_handlers_has_query(self):
-        from secator.tasks.ai import ACTION_HANDLERS
-
-        self.assertIn('query', ACTION_HANDLERS)
-        self.assertEqual(ACTION_HANDLERS['query'], '_handle_query')
-
-    def test_action_handlers_has_output_type(self):
-        from secator.tasks.ai import ACTION_HANDLERS
-
-        self.assertIn('output_type', ACTION_HANDLERS)
-        self.assertEqual(ACTION_HANDLERS['output_type'], '_handle_output_type')
-
-    def test_action_handlers_has_prompt(self):
-        from secator.tasks.ai import ACTION_HANDLERS
-
-        self.assertIn('prompt', ACTION_HANDLERS)
-        self.assertEqual(ACTION_HANDLERS['prompt'], '_handle_prompt')
-
-
-class TestHandlePrompt(unittest.TestCase):
-
-    def test_handle_prompt_ci_mode_auto_select(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
-            in_ci=True,
-            attack_context={},
-        )
-        action = {
-            'action': 'prompt',
-            'question': 'How to proceed?',
-            'options': ['Option A', 'Option B'],
-            'default': 'Option A',
-        }
-
-        results = list(ai_instance._handle_prompt(action, ctx))
-
-        # Should yield AI prompt and Info about auto-selection
-        self.assertEqual(len(results), 2)
-        self.assertEqual(results[0]._type, 'ai')
-        self.assertEqual(results[1]._type, 'info')
-        self.assertIn('Auto-selecting', results[1].message)
-        self.assertEqual(ctx.attack_context['user_response'], 'Option A')
-
-    def test_handle_prompt_auto_yes_mode(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
+            targets=['a.com', 'b.com'],
+            model='claude-3',
+            encryptor=encryptor,
+            dry_run=True,
             auto_yes=True,
-            attack_context={},
+            workspace_id='ws123',
+            attack_context={'key': 'value'}
         )
-        action = {
-            'action': 'prompt',
-            'question': 'How to proceed?',
-            'options': ['First', 'Second'],
-            'default': 'Second',
-        }
 
-        results = list(ai_instance._handle_prompt(action, ctx))
-
-        self.assertEqual(ctx.attack_context['user_response'], 'Second')
-
-    def test_handle_prompt_uses_first_option_when_no_default(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
-            in_ci=True,
-            attack_context={},
-        )
-        action = {
-            'action': 'prompt',
-            'question': 'Choose one',
-            'options': ['Alpha', 'Beta'],
-        }
-
-        results = list(ai_instance._handle_prompt(action, ctx))
-
-        # Should use first option as default
-        self.assertEqual(ctx.attack_context['user_response'], 'Alpha')
+        self.assertEqual(ctx.targets, ['a.com', 'b.com'])
+        self.assertEqual(ctx.model, 'claude-3')
+        self.assertIsNotNone(ctx.encryptor)
+        self.assertTrue(ctx.dry_run)
+        self.assertTrue(ctx.auto_yes)
+        self.assertEqual(ctx.workspace_id, 'ws123')
+        self.assertEqual(ctx.attack_context, {'key': 'value'})
 
 
-class TestPromptIterations(unittest.TestCase):
+class TestDispatchAction(unittest.TestCase):
+    """Tests for the dispatch_action function."""
 
-    def test_prompt_iterations_option_exists(self):
+    def test_dispatch_unknown_action(self):
+        from secator.tasks.ai_actions import ActionContext, dispatch_action
+
+        ctx = ActionContext(targets=['target.com'], model='gpt-4')
+        action = {'action': 'unknown_action_type'}
+
+        results = list(dispatch_action(action, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'warning')
+        self.assertIn('Unknown action', results[0].message)
+
+    def test_dispatch_done_action(self):
+        from secator.tasks.ai_actions import ActionContext, dispatch_action
+
+        ctx = ActionContext(targets=['target.com'], model='gpt-4')
+        action = {'action': 'done', 'reason': 'Test complete'}
+
+        results = list(dispatch_action(action, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'ai')
+        self.assertIn('Test complete', results[0].content)
+        self.assertTrue(ctx.attack_context.get('_should_stop'))
+
+    def test_dispatch_task_dry_run(self):
+        from secator.tasks.ai_actions import ActionContext, dispatch_action
+
+        ctx = ActionContext(targets=['target.com'], model='gpt-4', dry_run=True)
+        action = {'action': 'task', 'name': 'nmap', 'targets': ['192.168.1.1']}
+
+        results = list(dispatch_action(action, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'info')
+        self.assertIn('DRY RUN', results[0].message)
+        self.assertIn('nmap', results[0].message)
+
+    def test_dispatch_workflow_dry_run(self):
+        from secator.tasks.ai_actions import ActionContext, dispatch_action
+
+        ctx = ActionContext(targets=['target.com'], model='gpt-4', dry_run=True)
+        action = {'action': 'workflow', 'name': 'host_recon', 'targets': ['example.com']}
+
+        results = list(dispatch_action(action, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'info')
+        self.assertIn('DRY RUN', results[0].message)
+        self.assertIn('host_recon', results[0].message)
+
+    def test_dispatch_shell_dry_run(self):
+        from secator.tasks.ai_actions import ActionContext, dispatch_action
+
+        ctx = ActionContext(targets=['target.com'], model='gpt-4', dry_run=True)
+        action = {'action': 'shell', 'command': 'curl http://example.com'}
+
+        results = list(dispatch_action(action, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'info')
+        self.assertIn('DRY RUN', results[0].message)
+        self.assertIn('curl', results[0].message)
+
+    def test_dispatch_query_no_workspace(self):
+        from secator.tasks.ai_actions import ActionContext, dispatch_action
+
+        ctx = ActionContext(targets=['target.com'], model='gpt-4', workspace_id=None)
+        action = {'action': 'query', 'type': 'vulnerability', 'filter': {}}
+
+        results = list(dispatch_action(action, ctx))
+
+        # Should yield AI query message and Warning about no workspace
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[1]._type, 'warning')
+        self.assertIn('workspace', results[1].message.lower())
+
+
+class TestAITask(unittest.TestCase):
+    """Tests for the ai task class."""
+
+    def test_ai_task_has_required_opts(self):
         from secator.tasks.ai import ai
 
-        self.assertIn('prompt_iterations', ai.opts)
+        required_opts = ['prompt', 'mode', 'model', 'api_base', 'sensitive',
+                         'max_iterations', 'temperature', 'dry_run', 'yes', 'verbose']
+        for opt in required_opts:
+            self.assertIn(opt, ai.opts, f"Missing opt: {opt}")
 
-    def test_prompt_iterations_default_is_none(self):
+    def test_ai_task_output_types(self):
+        from secator.tasks.ai import ai
+        from secator.output_types import Ai, Error, Info, Warning, Vulnerability
+
+        self.assertIn(Ai, ai.output_types)
+        self.assertIn(Error, ai.output_types)
+        self.assertIn(Info, ai.output_types)
+        self.assertIn(Warning, ai.output_types)
+        self.assertIn(Vulnerability, ai.output_types)
+
+    def test_ai_task_tags(self):
         from secator.tasks.ai import ai
 
-        self.assertIsNone(ai.opts['prompt_iterations']['default'])
+        self.assertIn('ai', ai.tags)
+        self.assertIn('pentest', ai.tags)
 
 
-class TestPromptCheckpoint(unittest.TestCase):
+class TestParseActions(unittest.TestCase):
+    """Tests for the parse_actions function."""
 
-    def test_prompt_checkpoint_returns_continue(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
+    def test_parse_actions_code_block(self):
+        from secator.tasks.ai import parse_actions
 
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
-            in_ci=True,
-            attack_context={},
-        )
+        response = '''Here is my analysis:
+```json
+[{"action": "task", "name": "nmap"}]
+```
+'''
+        actions = parse_actions(response)
 
-        # In CI mode, should auto-select and return "continue"
-        results = list(ai_instance._prompt_checkpoint(5, 10, ctx))
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]['action'], 'task')
+        self.assertEqual(actions[0]['name'], 'nmap')
 
-        # Should yield AI prompt and Info
-        self.assertEqual(len(results), 2)
-        self.assertEqual(ctx.attack_context.get('_checkpoint_result'), 'continue')
+    def test_parse_actions_raw_json(self):
+        from secator.tasks.ai import parse_actions
 
-    def test_prompt_checkpoint_stop_response(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
+        response = '''Let me scan the target.
+[{"action": "shell", "command": "curl http://example.com"}]
+'''
+        actions = parse_actions(response)
 
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
-            in_ci=True,
-            attack_context={'user_response': 'Stop and summarize'},
-        )
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]['action'], 'shell')
 
-        # Simulate stop selection
-        ctx.attack_context['user_response'] = 'Stop and summarize'
-        result = ai_instance._parse_checkpoint_response(ctx)
+    def test_parse_actions_empty(self):
+        from secator.tasks.ai import parse_actions
 
-        self.assertEqual(result, 'stop')
+        response = "This response has no actions."
+        actions = parse_actions(response)
 
+        self.assertEqual(actions, [])
 
-class TestPromptContinuation(unittest.TestCase):
+    def test_parse_actions_invalid_json(self):
+        from secator.tasks.ai import parse_actions
 
-    def test_prompt_continuation_ci_mode_returns_stop(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
+        response = "```json\n[{invalid json}]\n```"
+        actions = parse_actions(response)
 
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
-            in_ci=True,
-            attack_context={},
-        )
-
-        results = list(ai_instance._prompt_continuation(ctx))
-
-        # In CI mode, default is "Stop and generate report"
-        self.assertEqual(len(results), 2)
-        self.assertEqual(ctx.attack_context.get('_continuation_result'), 'stop')
-
-    def test_prompt_continuation_continue_response(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
-
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
-            in_ci=True,
-            attack_context={'user_response': 'Continue with more iterations'},
-        )
-
-        result = ai_instance._parse_continuation_response(ctx)
-
-        self.assertEqual(result, 'continue')
+        self.assertEqual(actions, [])
 
 
-class TestGetNewInstructions(unittest.TestCase):
+class TestStripJsonFromResponse(unittest.TestCase):
+    """Tests for the strip_json_from_response function."""
 
-    def test_get_new_instructions_ci_mode_returns_empty(self):
-        from secator.tasks.ai import ai as AITask, ActionContext
+    def test_strip_code_block(self):
+        from secator.tasks.ai import strip_json_from_response
 
-        ai_instance = AITask.__new__(AITask)
-        ctx = ActionContext(
-            targets=['target.com'],
-            model='gpt-4',
-            in_ci=True,
-            attack_context={},
-        )
+        text = '''Here is my reasoning.
+```json
+[{"action": "task"}]
+```
+And more text.'''
+        result = strip_json_from_response(text)
 
-        result = ai_instance._get_new_instructions(ctx)
+        self.assertNotIn('```', result)
+        self.assertNotIn('"action"', result)
+        self.assertIn('reasoning', result)
+        self.assertIn('more text', result)
 
-        # In CI mode, can't get user input, return empty
-        self.assertEqual(result, "")
+    def test_strip_raw_json(self):
+        from secator.tasks.ai import strip_json_from_response
+
+        text = 'Some text [{"action": "done"}] more text'
+        result = strip_json_from_response(text)
+
+        self.assertNotIn('"action"', result)
+        self.assertIn('Some text', result)
+        self.assertIn('more text', result)
+
+    def test_strip_empty(self):
+        from secator.tasks.ai import strip_json_from_response
+
+        self.assertEqual(strip_json_from_response(""), "")
+        self.assertEqual(strip_json_from_response(None), "")
 
 
 if __name__ == '__main__':

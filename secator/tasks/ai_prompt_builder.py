@@ -24,8 +24,8 @@ class PromptBuilder:
 
     def build_system_prompt(self) -> str:
         """Build the system prompt with role and action schemas."""
-        from secator.tasks.ai import get_system_prompt
-        return get_system_prompt("attack", disable_secator=self.disable_secator)
+        from secator.tasks.ai_prompts import get_system_prompt
+        return get_system_prompt("attack")
 
     def build_user_prompt(self, targets: List[str], instructions: str = "") -> str:
         """Build the user prompt with targets and instructions."""
