@@ -2805,13 +2805,9 @@ class ai(PythonRunner):
         if sensitive:
             full_prompt = prompt_builder.encrypt_prompt(full_prompt, encryptor)
 
-        # Format for LLM
+        # Format for LLM (and debug version for verbose)
         prompt = prompt_builder.format_prompt_for_llm(full_prompt)
-
-        # Show master prompt (system prompt) in verbose mode - only once at start
-        if verbose:
-            system_prompt = get_system_prompt("attack", disable_secator=disable_secator)
-            yield Ai(content=system_prompt, ai_type='prompt')
+        debug_prompt = prompt_builder.format_iteration_for_debug(full_prompt)
 
         if disable_secator:
             yield Info(message="Secator runners disabled - using shell commands only")
@@ -2847,9 +2843,9 @@ class ai(PythonRunner):
                         chat_history.summarize(summarizer=summarizer, keep_last=4)
 
             try:
-                # Show the user prompt only in verbose mode
+                # Show debug prompt (history + query) in verbose mode
                 if verbose:
-                    yield Ai(content=prompt, ai_type='prompt')
+                    yield Ai(content=debug_prompt, ai_type='prompt')
 
                 llm_result = get_llm_response(
                     prompt=prompt,
@@ -2984,7 +2980,7 @@ class ai(PythonRunner):
                     chat_history.add_tool(batch_results_text)
 
                     # Build prompt for next iteration using PromptBuilder
-                    prompt = self._build_iteration_prompt(
+                    prompt, debug_prompt = self._build_iteration_prompt(
                         prompt_builder=prompt_builder,
                         chat_history=chat_history,
                         targets=targets,
@@ -3652,7 +3648,7 @@ class ai(PythonRunner):
         max_iterations: int,
         encryptor: 'SensitiveDataEncryptor',
         sensitive: bool,
-    ) -> str:
+    ) -> tuple:
         """Build prompt for an attack iteration.
 
         Args:
@@ -3666,7 +3662,8 @@ class ai(PythonRunner):
             sensitive: Whether to encrypt
 
         Returns:
-            Formatted prompt string ready for LLM
+            Tuple of (formatted_prompt, debug_prompt) where debug_prompt
+            contains only history + current query for verbose debugging
         """
         full_prompt = prompt_builder.build_full_prompt(
             targets=targets,
@@ -3679,7 +3676,10 @@ class ai(PythonRunner):
         if sensitive:
             full_prompt = prompt_builder.encrypt_prompt(full_prompt, encryptor)
 
-        return prompt_builder.format_prompt_for_llm(full_prompt)
+        return (
+            prompt_builder.format_prompt_for_llm(full_prompt),
+            prompt_builder.format_iteration_for_debug(full_prompt),
+        )
 
     def _prepare_runner(
         self,

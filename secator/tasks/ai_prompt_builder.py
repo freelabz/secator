@@ -126,3 +126,29 @@ class PromptBuilder:
         parts.append(prompt["query"])
 
         return "\n".join(parts)
+
+    def format_iteration_for_debug(self, prompt: Dict) -> str:
+        """Format just the iteration content (history + query) for debugging.
+
+        Args:
+            prompt: Dict with system, user, history, query
+
+        Returns:
+            Formatted string with only history and current query
+        """
+        parts = []
+
+        # History (if any)
+        if prompt["history"]:
+            parts.append("## Chat History")
+            for msg in prompt["history"]:
+                role = msg["role"].upper()
+                content = msg["content"]
+                parts.append(f"**{role}:** {content[:500]}..." if len(content) > 500 else f"**{role}:** {content}")
+
+        # Current query
+        parts.append("")
+        parts.append("## Current Task")
+        parts.append(prompt["query"])
+
+        return "\n".join(parts)
