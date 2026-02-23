@@ -3060,6 +3060,71 @@ class ai(PythonRunner):
             ctx.attack_context["_stop_reason"] = reason
             yield Info(message=f"Continuing attack with new query: {user_query}")
 
+    def _handle_query(self, action: Dict, ctx: 'ActionContext') -> Generator:
+        """Handle query action - fetch workspace results.
+
+        Args:
+            action: Query action with MongoDB-style query
+            ctx: ActionContext with workspace info
+
+        Yields:
+            Info or Warning/Error outputs
+        """
+        query = action.get("query", {})
+        result_key = action.get("result_key", "query_results")
+
+        # Check workspace context
+        if not ctx.workspace_id:
+            yield Warning(message="Query action requires workspace context (-ws flag)")
+            return
+
+        # Execute query
+        try:
+            from secator.query import QueryEngine
+            engine = QueryEngine(ctx.workspace_id, {
+                'workspace_name': ctx.workspace_name,
+                'drivers': ctx.drivers,
+            })
+            results = engine.search(query, limit=100)
+
+            # Format results for context
+            formatted = self._format_query_results(results)
+            ctx.attack_context[result_key] = formatted
+
+            yield Info(message=f"Query returned {len(results)} results (stored in {result_key})")
+
+        except Exception as e:
+            yield Error(message=f"Query failed: {e}")
+
+    def _format_query_results(self, results: List[Dict]) -> str:
+        """Format query results as string for LLM context.
+
+        Args:
+            results: List of result dictionaries
+
+        Returns:
+            Formatted string representation
+        """
+        if not results:
+            return "No results found."
+
+        lines = [f"Found {len(results)} results:"]
+        for i, r in enumerate(results[:20], 1):  # Limit to 20 for context
+            rtype = r.get('_type', 'unknown')
+            if rtype == 'vulnerability':
+                lines.append(f"  {i}. [{r.get('severity', '?')}] {r.get('name', '?')} @ {r.get('matched_at', '?')}")
+            elif rtype == 'port':
+                lines.append(f"  {i}. {r.get('ip', '?')}:{r.get('port', '?')} ({r.get('service_name', '?')})")
+            elif rtype == 'url':
+                lines.append(f"  {i}. {r.get('url', '?')} [{r.get('status_code', '?')}]")
+            else:
+                lines.append(f"  {i}. [{rtype}] {str(r)[:80]}")
+
+        if len(results) > 20:
+            lines.append(f"  ... and {len(results) - 20} more")
+
+        return "\n".join(lines)
+
     def _execute_runner(
         self,
         action: Dict,

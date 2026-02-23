@@ -46,6 +46,64 @@ class TestOutputTypeMap(unittest.TestCase):
             self.assertIn(t, OUTPUT_TYPE_MAP)
 
 
+class TestHandleQuery(unittest.TestCase):
+
+    def test_handle_query_no_workspace(self):
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        ai_instance = AITask.__new__(AITask)
+        ctx = ActionContext(
+            targets=['target.com'],
+            model='gpt-4',
+            workspace_id=None,
+        )
+        action = {'action': 'query', 'query': {'_type': 'vulnerability'}}
+
+        results = list(ai_instance._handle_query(action, ctx))
+
+        # Should yield Warning about missing workspace
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'warning')
+        self.assertIn('workspace', results[0].message.lower())
+
+    def test_handle_query_success(self):
+        from unittest.mock import Mock, patch
+        from secator.tasks.ai import ai as AITask, ActionContext
+
+        # Setup mock - patch at source module where QueryEngine is imported from
+        with patch('secator.query.QueryEngine') as mock_engine_class:
+            mock_engine = Mock()
+            mock_engine.search.return_value = [
+                {'_type': 'vulnerability', 'name': 'SQLi'},
+                {'_type': 'vulnerability', 'name': 'XSS'},
+            ]
+            mock_engine_class.return_value = mock_engine
+
+            ai_instance = AITask.__new__(AITask)
+            ctx = ActionContext(
+                targets=['target.com'],
+                model='gpt-4',
+                workspace_id='ws123',
+                workspace_name='test_ws',
+                attack_context={},
+            )
+            action = {
+                'action': 'query',
+                'query': {'_type': 'vulnerability'},
+                'result_key': 'vulns',
+            }
+
+            results = list(ai_instance._handle_query(action, ctx))
+
+            # Should yield Info with result count
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]._type, 'info')
+            self.assertIn('2', results[0].message)
+
+            # Should store in attack_context
+            self.assertIn('vulns', ctx.attack_context)
+
+
 class TestActionHandlers(unittest.TestCase):
 
     def test_action_handlers_has_query(self):
