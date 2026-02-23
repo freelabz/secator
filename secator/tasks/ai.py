@@ -2766,6 +2766,9 @@ class ai(PythonRunner):
                 if self.run_opts.get("sensitive", True):
                     response = encryptor.decrypt(response)
 
+                # Add assistant response to history
+                chat_history.add_assistant(response)
+
                 # Parse actions from response (now returns list)
                 actions = self._parse_attack_actions(response)
 
@@ -2869,6 +2872,9 @@ class ai(PythonRunner):
                 if batch_results:
                     # Format batch results for LLM
                     batch_results_text = self._format_batch_results(batch_results)
+
+                    # Add tool results to history
+                    chat_history.add_tool(batch_results_text)
 
                     executed_cmds = format_executed_commands(ctx.attack_context)
                     if sensitive:
