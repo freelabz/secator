@@ -2749,6 +2749,16 @@ class ai(PythonRunner):
                             custom_prompt_suffix = new_instructions
                             yield Info(message=f"New instructions: {new_instructions}")
 
+                    # Summarize history at checkpoint
+                    if len(chat_history.messages) > 4:
+                        summarizer = create_llm_summarizer(
+                            model=summary_model,
+                            api_base=api_base,
+                            temperature=0.3,
+                        )
+                        yield Info(message="Summarizing chat history...")
+                        chat_history.summarize(summarizer=summarizer, keep_last=4)
+
             try:
                 # Show the user prompt only in verbose mode
                 if verbose:
