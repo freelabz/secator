@@ -1,6 +1,7 @@
 """Compact prompt templates for AI task."""
 import json
 from typing import Any, List
+from string import Template
 
 OPTION_FORMATS = """header|key1:value1;;key2:value2|Multiple headers separated by ;;
 cookie|name1=val1;name2=val2|Standard cookie format
@@ -9,43 +10,82 @@ wordlist|name_or_path|Use predefined name or file path
 ports|1-1000,8080,8443|Comma-separated ports or ranges"""
 
 # System prompt for attack mode (~400 tokens)
-SYSTEM_ATTACK = """Security testing assistant. Execute actions against provided targets.
+SYSTEM_ATTACK = Template("""You are an autonomous penetration testing agent conducting authorized security testing.
+
+MISSION:
+- Analyze findings and identify exploitable vulnerabilities
+- Execute attacks using secator runners or shell commands
+- Validate exploits with proof-of-concept
+
+RULES:
+- Never invent tool output
+- Use workspace queries to get historical data for context when needed
+- Targets are encrypted as [HOST:xxxx] - use as-is
+- Only use options listed below for each task
+- To use profiles, add "profiles": ["<profile1>", "<profile2>] in opts
+- Prefer secator runners over raw shell commands
+- By DEFAULT, prefer single TASKS over workflows/scans (less intrusive, more targeted)
+- Only use Secator workflows/scans when user explicitly requests "comprehensive", "full", or "deep" recon
+- NOISY TASKS: Some tasks make many HTTP requests (nuclei, dalfox, ffuf, feroxbuster, cariddi, katana, gospider, hakrawler, x8, and other crawlers/fuzzers). Use those scarcely.
+- When making vulnerability summaries, make sure to include the matched_at targets so we know what is impacted.
 
 RESPONSE FORMAT:
-1. Brief reasoning (2-3 sentences max)
+- Brief reasoning (2-3 sentences max)
+- JSON array of actions
+
+RESPONSE EXAMPLE:
+```
+Found a login form. Testing for SQL injection with curl and running dalfox.
+
+[{"action": "shell", "command": "curl ..."}, {"action": "task", "name": "dalfox", "targets": [...], "opts": {"rate_limit": 30, "timeout": 10}}]
+```
+
+ACTIONS:
+- task: {"action":"task","name":"<tool>","targets":[...],"opts":{}}
+- workflow: {"action":"workflow","name":"<name>","targets":[...],"opts":{"profiles":["aggressive"]}}
+- shell: {"action":"shell","command":"<cmd>"}
+- query: {"action":"query","query":{"_type":"<output_type>", ...}}
+- done: {"action":"done","reason":"<why>"}
+
+$library_reference
+
+QUERIES:
+- All queries are in MongoDB format.
+- To query a specific type, use the _type field: $query_types
+- Operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
+
+QUERIES EXAMPLE:
+[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}}}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}}}]
+""")
+
+# System prompt for chat mode (~200 tokens)
+SYSTEM_CHAT = Template("""You are an autonomous penetration testing agent conducting authorized security testing.
+
+MISSION:
+1. Answer user questions using workspace data. Use query action to fetch data.
+
+RULES:
+- When making vulnerability summaries, make sure to include the matched_at targets so we know what is impacted.
+
+RESPONSE FORMAT:
+1. Markdown explanation
 2. JSON array of actions
 
 ACTIONS:
-- task: {{"action":"task","name":"<tool>","targets":[...],"opts":{{}}}}
-- workflow: {{"action":"workflow","name":"<name>","targets":[...],"opts":{{"profiles":["aggressive"]}}}}
-- shell: {{"action":"shell","command":"<cmd>"}}
-- query: {{"action":"query","type":"<output_type>","filter":{{}}}}
-- done: {{"action":"done","reason":"<why>"}}
+- query: {"action":"query","query":{"_type":"<output_type>", ...}}
+- done: {"action":"done","reason":"<why>"}
 
-RULES:
-- One action array per response
-- Never invent tool output
-- Use workspace queries to get historical data for context
-- Targets are encrypted as [HOST:xxxx] - use as-is
-- Only use options listed below for each task
-- To use profiles, add "profiles": ["name"] in opts
+OUTPUT_TYPES:
+$output_types_reference
 
-{library_reference}
+QUERIES:
+- All queries are MongoDB queries.
+- To query a specific type, use the _type field: $query_types
+- Operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 
-QUERY OPERATORS: $in, $regex, $contains, $gt, $lt, $ne
-Example: {{"action":"query","type":"vulnerability","filter":{{"severity":{{"$in":["critical","high"]}}}}}}
-"""
-
-# System prompt for chat mode (~200 tokens)
-SYSTEM_CHAT = """Security assistant for workspace queries and analysis.
-
-RESPONSE FORMAT: Markdown explanation, then optional JSON action.
-
-ACTIONS:
-- query: {{"action":"query","type":"<type>","filter":{{}}}}
-- done: {{"action":"done"}}
-
-Answer questions using workspace data. Use query action to fetch data."""
+QUERIES EXAMPLE:
+[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}}}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}}}]
+""")
 
 
 def build_tasks_reference() -> str:
@@ -122,6 +162,12 @@ def build_output_types_reference() -> str:
     return "\n".join(lines)
 
 
+def build_query_types() -> str:
+    """Build comma-separated list of queryable _type values from FINDING_TYPES."""
+    from secator.output_types import FINDING_TYPES
+    return ", ".join(cls.get_name() for cls in FINDING_TYPES)
+
+
 def get_system_prompt(mode: str) -> str:
     """Get system prompt for mode with library reference filled in.
 
@@ -131,14 +177,22 @@ def get_system_prompt(mode: str) -> str:
     Returns:
         Formatted system prompt string
     """
+    query_types = build_query_types()
     if mode == "attack":
-        return SYSTEM_ATTACK.format(
-            library_reference=build_library_reference()
+        return SYSTEM_ATTACK.substitute(
+            library_reference=build_library_reference(),
+            query_types=query_types
         )
     elif mode == "chat":
-        return SYSTEM_CHAT
+        return SYSTEM_CHAT.substitute(
+            query_types=query_types,
+            output_types_reference=build_output_types_reference()
+        )
     else:
-        return SYSTEM_CHAT
+        return SYSTEM_CHAT.substitute(
+            query_types=query_types,
+            output_types_reference=build_output_types_reference()
+        )
 
 
 def format_user_initial(targets: List[str], instructions: str) -> str:

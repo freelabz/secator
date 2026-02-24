@@ -100,6 +100,27 @@ def parse_actions(response: str) -> List[Dict]:
 		except json.JSONDecodeError:
 			pass
 
+	# Try single JSON object with "action" key
+	match = re.search(r'\{[\s\S]*?"action"[\s\S]*?\}', response)
+	if match:
+		try:
+			text = response[match.start():]
+			depth = 0
+			end = 0
+			for i, c in enumerate(text):
+				if c == '{':
+					depth += 1
+				elif c == '}':
+					depth -= 1
+					if depth == 0:
+						end = i + 1
+						break
+			obj = json.loads(text[:end])
+			if isinstance(obj, dict):
+				return [obj]
+		except json.JSONDecodeError:
+			pass
+
 	return []
 
 
@@ -250,7 +271,8 @@ class ai(PythonRunner):
 			auto_yes=self.run_opts.get("yes", False),
 			workspace_id=self.context.get("workspace_id") if self.context else None)
 
-		for iteration in range(max_iter):
+		iteration = 0
+		while iteration < max_iter:
 			yield Info(message=f"Iteration {iteration + 1}/{max_iter}")
 
 			try:
@@ -284,12 +306,6 @@ class ai(PythonRunner):
 				# Add to history
 				history.add_assistant(response)
 
-				# If no actions, warn and continue
-				if not actions:
-					yield Warning(message="Could not parse actions")
-					history.add_user("Could not parse your actions. Please provide valid JSON actions.")
-					continue
-
 				# Execute actions
 				for action in actions:
 					action_type = action.get("action", "")
@@ -312,31 +328,28 @@ class ai(PythonRunner):
 						tool_result = encryptor.encrypt(tool_result)
 					history.add_user(tool_result)
 
-					# Check for done
+					# Done action: prompt user for continuation
 					if action_type == "done":
-						return
+						try:
+							user_input = console.input("[bold cyan]You[/] [dim](enter to exit)[/]: ")
+							if not user_input.strip():
+								return
+							user_msg = encryptor.encrypt(user_input) if encryptor else user_input
+							history.add_user(user_msg)
+							yield Ai(content=user_input, ai_type="prompt")
+							max_iter = max(max_iter, iteration + 2)
+							continue
+						except (KeyboardInterrupt, EOFError):
+							return
 
-				# Continue to next iteration
-				if mode == "attack":
-					# Attack mode: auto-continue
+					# Continue action
 					continue_msg = format_continue(iteration + 1, max_iter)
 					history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
-				else:
-					# Chat mode: prompt user for next input
-					try:
-						user_input = console.input("[bold cyan]You[/] [dim](enter to exit)[/]: ")
-						if not user_input.strip():
-							yield Info(message="Chat ended")
-							return
-						user_msg = encryptor.encrypt(user_input) if encryptor else user_input
-						history.add_user(user_msg)
-						yield Ai(content=user_input, ai_type="prompt")
-					except (KeyboardInterrupt, EOFError):
-						yield Info(message="Chat ended")
-						return
 
 			except Exception as e:
 				yield Error(message=f"Iteration failed: {e}")
 				logger.exception(f"{mode} iteration error")
+
+			iteration += 1
 
 		yield Info(message=f"Reached max iterations ({max_iter})")

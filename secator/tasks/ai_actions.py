@@ -192,14 +192,10 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
     """Query workspace for findings.
 
     Args:
-        action: Action dict with type and filter
+        action: Action dict with query (MongoDB query dict)
         ctx: Action context
     """
-    query_filter = action.get("filter", {})
-    output_type = action.get("type", "")
-
-    if output_type:
-        query_filter["_type"] = output_type
+    query_filter = action.get("query", {})
 
     # Decrypt query values
     if ctx.encryptor:
