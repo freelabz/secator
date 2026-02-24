@@ -316,9 +316,22 @@ class ai(PythonRunner):
 					if action_type == "done":
 						return
 
-				# Continue message for next iteration
-				continue_msg = format_continue(iteration + 1, max_iter)
-				history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
+				# Continue to next iteration
+				if mode == "attack":
+					# Attack mode: auto-continue
+					continue_msg = format_continue(iteration + 1, max_iter)
+					history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
+				else:
+					# Chat mode: prompt user for next input
+					try:
+						user_input = console.input("[bold cyan]You:[/] ")
+						if not user_input.strip():
+							return
+						user_msg = encryptor.encrypt(user_input) if encryptor else user_input
+						history.add_user(user_msg)
+						yield Ai(content=user_input, ai_type="prompt")
+					except (KeyboardInterrupt, EOFError):
+						return
 
 			except Exception as e:
 				yield Error(message=f"Iteration failed: {e}")
