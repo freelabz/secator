@@ -231,8 +231,7 @@ class ai(PythonRunner):
 	def _run_loop(self, mode: str, prompt: str, targets: List[str], model: str,
 				  encryptor: Optional[SensitiveDataEncryptor]) -> Generator:
 		"""Run unified loop for both attack and chat modes."""
-		# Chat mode uses fewer iterations (queries only), attack mode uses more
-		max_iter = int(self.run_opts.get("max_iterations", 10)) if mode == "attack" else 3
+		max_iter = int(self.run_opts.get("max_iterations", 10))
 		temp = float(self.run_opts.get("temperature", 0.7))
 		api_base = self.run_opts.get("api_base")
 		dry_run = self.run_opts.get("dry_run", False)
