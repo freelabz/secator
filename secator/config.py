@@ -124,15 +124,15 @@ class HTTP(StrictModel):
 
 
 class Tasks(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Workflows(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Scans(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Profiles(StrictModel):

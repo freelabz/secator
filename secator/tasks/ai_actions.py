@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional
 
-from secator.output_types import Ai, Error, Info, Warning, OutputType
+from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
 
 
@@ -80,25 +80,19 @@ def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
         from secator.runners import Task
         tpl = TemplateLoader(input={'type': 'task', 'name': name})
         run_opts = {
-            "print_item": False,
+            "print_item": True,
             "print_line": False,
-            "print_cmd": False,
+            "print_cmd": True,
+            "print_description": True,
             "print_progress": False,
+            "enable_reports": False,
             "exporters": [],
             "sync": True,
             **opts,
         }
 
         task = Task(tpl, targets, run_opts=run_opts)
-        for item in task:
-            if item not in FINDING_TYPES + [Info, Warning, Error]:
-                continue
-            result = item.toDict()
-            result.pop('_context')
-            result.pop('_uuid')
-            result.pop('_related')
-            result.pop('_duplicate')
-            yield result
+        yield from task
 
     except Exception as e:
         yield Error(message=f"Task {name} failed: {e}")
@@ -135,21 +129,14 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
             "print_start": True,
             "print_end": True,
             "print_progress": False,
+            "enable_reports": False,
             "exporters": [],
             "sync": True,
             **opts,
         }
 
         workflow = Workflow(tpl, targets, run_opts=run_opts)
-        for item in workflow:
-            if item not in FINDING_TYPES + [Info, Warning, Error]:
-                continue
-            result = item.toDict()
-            result.pop('_context')
-            result.pop('_uuid')
-            result.pop('_related')
-            result.pop('_duplicate')
-            yield result
+        yield from workflow
 
     except Exception as e:
         yield Error(message=f"Workflow {name} failed: {e}")

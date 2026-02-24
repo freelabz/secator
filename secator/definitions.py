@@ -36,7 +36,7 @@ STATE_COLORS = {
 
 # Available drivers and exporters
 AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api']
-AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'markdown', 'table', 'txt']
 
 # Vocab
 ALIVE = 'alive'

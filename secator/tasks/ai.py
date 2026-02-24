@@ -7,9 +7,10 @@ from typing import Dict, Generator, List, Optional
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Ai, Error, Info, Warning, Vulnerability, FINDING_TYPES
+from secator.output_types import Ai, Stat, Progress, Error, Info, Warning, State, Vulnerability, FINDING_TYPES, OutputType
 from secator.runners import PythonRunner
 from secator.rich import console
+from secator.utils import format_object
 from secator.tasks.ai_actions import ActionContext, dispatch_action
 from secator.tasks.ai_encryption import SensitiveDataEncryptor
 from secator.tasks.ai_history import ChatHistory
@@ -44,6 +45,7 @@ def init_llm():
 
 	class LLMCallbackHandler(CustomLogger):
 		"""Custom handler for logging LLM calls."""
+		_last_message_count = 0
 
 		def log_pre_api_call(self, model, messages, kwargs):
 			if "litellm" not in CONFIG.debug:
@@ -53,7 +55,13 @@ def init_llm():
 			MAX_LEN = 2000
 			role_styles = {"system": "blue", "user": "green", "assistant": "red"}
 			message_count = len(messages)
+			new_start = self._last_message_count
+			self._last_message_count = message_count
+			if new_start > 0:
+				console.print(f"[dim]... {new_start} previous message(s) hidden ...[/]")
 			for count, msg in enumerate(messages, 1):
+				if count <= new_start:
+					continue
 				role = msg.get("role", "unknown").upper()
 				content = msg.get("content", "")
 				style = role_styles.get(msg.get("role", ""), "white")
@@ -281,6 +289,12 @@ class ai(PythonRunner):
 				response = result["content"]
 				usage = result.get("usage", {})
 
+				# Handle empty response
+				if not response:
+					yield Warning(message="LLM returned empty response")
+					iteration += 1
+					continue
+
 				# Decrypt response
 				if encryptor:
 					response = encryptor.decrypt(response)
@@ -298,6 +312,7 @@ class ai(PythonRunner):
 						model=model,
 						extra_data={
 							"iteration": iteration + 1,
+							"max_iterations": max_iter,
 							"tokens": usage.get("tokens") if usage else None,
 							"cost": usage.get("cost") if usage else None,
 						},
@@ -307,17 +322,24 @@ class ai(PythonRunner):
 				history.add_assistant(response)
 
 				# Execute actions
+				yield Info(message=f"Executing {len(actions)} actions ...")
 				for action in actions:
 					action_type = action.get("action", "")
+					yield Info(message=f"Running action {format_object(action)}")
 					action_results = []
-
 					for item in dispatch_action(action, ctx):
+						if isinstance(item, (Stat, Progress, State)):
+							continue
+						if isinstance(item, OutputType):
+							self.add_result(item, print=False)  # only for Secator findings
+							item = item.toDict()
+							item.pop('_context', None)
+							item.pop('_uuid', None)
+							item.pop('_related', None)
 						action_results.append(item)
-						# Don't yield query results directly - they go to history for LLM
-						if action_type != "query":
-							yield item
 
 					# Build tool result for history (compact JSON)
+					yield Info(f"Adding {len(action_results)} action results to next iteration ...")
 					tool_result = format_tool_result(
 						action.get("name", action_type),
 						"success",
@@ -342,9 +364,9 @@ class ai(PythonRunner):
 						except (KeyboardInterrupt, EOFError):
 							return
 
-					# Continue action
-					continue_msg = format_continue(iteration + 1, max_iter)
-					history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
+				# Continue action
+				continue_msg = format_continue(iteration + 1, max_iter)
+				history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
 
 			except Exception as e:
 				yield Error(message=f"Iteration failed: {e}")

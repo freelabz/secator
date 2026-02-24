@@ -3,6 +3,7 @@ __all__ = [
 	'CsvExporter',
 	'GdriveExporter',
 	'JsonExporter',
+	'MarkdownExporter',
 	'TableExporter',
 	'TxtExporter'
 ]
@@ -10,5 +11,6 @@ from secator.exporters.console import ConsoleExporter
 from secator.exporters.csv import CsvExporter
 from secator.exporters.gdrive import GdriveExporter
 from secator.exporters.json import JsonExporter
+from secator.exporters.markdown import MarkdownExporter
 from secator.exporters.table import TableExporter
 from secator.exporters.txt import TxtExporter

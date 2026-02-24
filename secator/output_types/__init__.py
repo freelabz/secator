@@ -19,7 +19,6 @@ __all__ = [
 	'Warning',
 ]
 from secator.output_types._base import OutputType
-from secator.output_types.action import Action
 from secator.output_types.ai import Ai
 from secator.output_types.progress import Progress
 from secator.output_types.ip import Ip
@@ -42,7 +41,7 @@ from secator.output_types.domain import Domain
 
 
 EXECUTION_TYPES = [
-	Target, Progress, Info, Warning, Error, State, Action
+	Target, Progress, Info, Warning, Error, State
 ]
 STAT_TYPES = [
 	Stat
