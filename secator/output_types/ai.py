@@ -126,7 +126,7 @@ class Ai(OutputType):
 				line += f' and options{format_object(opts, "yellow")}'
 			if results is not None:
 				line += f' [yellow]{_s(results)} results[/]'
-			return rich_to_ansi(f'[on gray19]{line} [/]')
+			return '\n' + rich_to_ansi(f'[on gray19]{line} [/]')
 
 		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
@@ -158,7 +158,7 @@ class Ai(OutputType):
 		if is_markdown(content):
 			# Markdown rendered inside a Rich Panel with header as title
 			title = s + suffix
-			return render_markdown_for_rich(content, title=title).rstrip()
+			return '\n' + render_markdown_for_rich(content, title=title).rstrip()
 
 		# Build full Rich markup string, then convert once
 		content_indented = content.replace('\n', '\n    ')
@@ -167,4 +167,4 @@ class Ai(OutputType):
 		else:
 			s += f' {_s(content_indented)}'
 		s += suffix
-		return rich_to_ansi(s)
+		return '\n' + rich_to_ansi(s)
