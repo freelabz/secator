@@ -63,7 +63,7 @@ def init_llm():
 				if count <= new_start:
 					continue
 				role = msg.get("role", "unknown").upper()
-				content = msg.get("content", "")
+				content = msg.get("content", "").strip()
 				style = role_styles.get(msg.get("role", ""), "white")
 				if len(content) > MAX_LEN:
 					content = content[:MAX_LEN] + f"\n\n... ({len(content) - MAX_LEN} chars truncated)"
@@ -209,6 +209,208 @@ def call_llm(
 	return {"content": content, "usage": usage}
 
 
+def _interactive_menu(options, title="Select an option"):
+	"""Display an interactive menu with arrow-key navigation and inline typing.
+
+	Args:
+		options: List of dicts with keys:
+			- label: Display text
+			- description: Optional dim description below the label
+			- input: If True, this option accepts typed input (shown inline)
+		title: Menu title
+
+	Returns:
+		tuple: (index, value) where value is typed text for input options, or None.
+		None: if user pressed Escape or Ctrl+C.
+	"""
+	import sys
+	import tty
+	import termios
+	from io import StringIO
+
+	fd = sys.stdin.fileno()
+	old_settings = termios.tcgetattr(fd)
+	selected = 0
+	typed = ""
+	in_input_mode = False
+
+	def _read_key():
+		"""Read a single keypress, handling escape sequences."""
+		ch = sys.stdin.read(1)
+		if ch == '\x1b':
+			ch2 = sys.stdin.read(1)
+			if ch2 == '[':
+				ch3 = sys.stdin.read(1)
+				if ch3 == 'A':
+					return 'up'
+				elif ch3 == 'B':
+					return 'down'
+			return 'escape'
+		elif ch == '\r' or ch == '\n':
+			return 'enter'
+		elif ch == '\x03':
+			return 'ctrl_c'
+		elif ch == '\x04':
+			return 'ctrl_d'
+		elif ch == '\x7f' or ch == '\x08':
+			return 'backspace'
+		else:
+			return ch
+
+	def _render():
+		"""Render the menu to a string using Rich."""
+		from rich.console import Console as RichConsole
+		buf = StringIO()
+		render_console = RichConsole(file=buf, force_terminal=True, width=console.width)
+		render_console.print(f"[dim]{'─' * 40}[/]")
+		render_console.print(f"[bold]{title}[/]\n")
+		for i, opt in enumerate(options):
+			is_selected = i == selected
+			prefix = "[bold cyan]❯[/]" if is_selected else " "
+			num = f"[bold]{i + 1}.[/]"
+			if opt.get("input"):
+				if is_selected and in_input_mode:
+					label = f"{prefix} {num} [bold]{typed}[/][dim]▎[/]"
+				elif is_selected:
+					label = f"{prefix} {num} [bold]{opt['label']}[/]"
+				else:
+					label = f"{prefix} {num} [dim]{opt['label']}[/]"
+			else:
+				if is_selected:
+					label = f"{prefix} {num} [bold]{opt['label']}[/]"
+				else:
+					label = f"{prefix} {num} [dim]{opt['label']}[/]"
+			render_console.print(label)
+			if opt.get("description") and not (opt.get("input") and in_input_mode):
+				render_console.print(f"     [gray27]{opt['description']}[/]")
+		render_console.print(f"\n[dim]{'─' * 40}[/]")
+		return buf.getvalue()
+
+	# Count total lines for clearing
+	def _line_count(text):
+		return text.count('\n')
+
+	output = ""
+	try:
+		tty.setraw(fd)
+		# Initial render
+		output = _render().replace('\n', '\r\n')
+		sys.stderr.write(output)
+		sys.stderr.flush()
+
+		while True:
+			key = _read_key()
+			prev_output = output
+
+			if key == 'ctrl_c' or key == 'escape':
+				# Clear menu
+				lines = _line_count(prev_output)
+				sys.stderr.write(f"\033[{lines}A\033[J")
+				sys.stderr.flush()
+				return None
+
+			elif key == 'up' and not in_input_mode:
+				selected = (selected - 1) % len(options)
+
+			elif key == 'down' and not in_input_mode:
+				selected = (selected + 1) % len(options)
+
+			elif key == 'enter':
+				opt = options[selected]
+				if opt.get("input") and not in_input_mode:
+					in_input_mode = True
+					typed = ""
+				elif opt.get("input") and in_input_mode:
+					lines = _line_count(prev_output)
+					sys.stderr.write(f"\033[{lines}A\033[J")
+					sys.stderr.flush()
+					if typed.strip():
+						return (selected, typed.strip())
+					return None
+				else:
+					lines = _line_count(prev_output)
+					sys.stderr.write(f"\033[{lines}A\033[J")
+					sys.stderr.flush()
+					return (selected, None)
+
+			elif key == 'backspace' and in_input_mode:
+				typed = typed[:-1]
+
+			elif in_input_mode and len(key) == 1 and key.isprintable():
+				typed += key
+
+			elif not in_input_mode and key.isdigit():
+				idx = int(key) - 1
+				if 0 <= idx < len(options):
+					selected = idx
+
+			# Re-render
+			lines = _line_count(prev_output)
+			sys.stderr.write(f"\033[{lines}A\033[J")
+			output = _render().replace('\n', '\r\n')
+			sys.stderr.write(output)
+			sys.stderr.flush()
+
+	except (KeyboardInterrupt, EOFError):
+		lines = _line_count(output) if output else 0
+		if lines:
+			sys.stderr.write(f"\033[{lines}A\033[J")
+			sys.stderr.flush()
+		return None
+	finally:
+		termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
+def _prompt_user(history, encryptor=None, mode="chat"):
+	"""Prompt user for follow-up input.
+
+	Returns:
+		tuple: (action, value) where action is 'continue', 'follow_up', or 'summarize'.
+		None: to exit.
+	"""
+	try:
+		if mode == "attack":
+			options = [
+				{"label": "Continue attacking", "description": "Continue for N more iterations"},
+				{"label": "Summarize", "description": "Get a summary of findings so far"},
+				{"label": "Something else", "description": "Send custom instructions", "input": True},
+				{"label": "Exit"},
+			]
+			result = _interactive_menu(options, title="What's next?")
+			if result is None:
+				return None
+			idx, value = result
+			if idx == 0:  # Continue attacking
+				from rich.prompt import IntPrompt
+				n = IntPrompt.ask("[bold cyan]Number of iterations[/]", default=5)
+				return ("continue", n)
+			if idx == 1:  # Summarize
+				return ("summarize", None)
+			if idx == 2:  # Exit
+				return None
+			if idx == 3:  # Something else
+				user_msg = encryptor.encrypt(value) if encryptor else value
+				history.add_user(user_msg)
+				return ("follow_up", value)
+		else:
+			options = [
+				{"label": "Exit"},
+				{"label": "Something else", "description": "Send custom instructions", "input": True},
+			]
+			result = _interactive_menu(options, title="What's next?")
+			if result is None:
+				return None
+			idx, value = result
+			if idx == 0:  # Exit
+				return None
+			if idx == 1:  # Something else
+				user_msg = encryptor.encrypt(value) if encryptor else value
+				history.add_user(user_msg)
+				return ("follow_up", value)
+	except (KeyboardInterrupt, EOFError):
+		return None
+
+
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
@@ -280,6 +482,7 @@ class ai(PythonRunner):
 			workspace_id=self.context.get("workspace_id") if self.context else None)
 
 		iteration = 0
+		done = False
 		while iteration < max_iter:
 			yield Info(message=f"Iteration {iteration + 1}/{max_iter}")
 
@@ -325,10 +528,10 @@ class ai(PythonRunner):
 				yield Info(message=f"Executing {len(actions)} actions ...")
 				for action in actions:
 					action_type = action.get("action", "")
-					yield Info(message=f"Running action {format_object(action)}")
+					yield Info(message=f"Running action {format_object(action, 'yellow')}")
 					action_results = []
 					for item in dispatch_action(action, ctx):
-						if isinstance(item, (Stat, Progress, State)):
+						if isinstance(item, (Stat, Progress, State, Info)):
 							continue
 						if isinstance(item, OutputType):
 							self.add_result(item, print=False)  # only for Secator findings
@@ -352,25 +555,44 @@ class ai(PythonRunner):
 
 					# Done action: prompt user for continuation
 					if action_type == "done":
-						try:
-							user_input = console.input("[bold cyan]You[/] [dim](enter to exit)[/]: ")
-							if not user_input.strip():
-								return
-							user_msg = encryptor.encrypt(user_input) if encryptor else user_input
-							history.add_user(user_msg)
-							yield Ai(content=user_input, ai_type="prompt")
-							max_iter = max(max_iter, iteration + 2)
-							continue
-						except (KeyboardInterrupt, EOFError):
-							return
+						done = True
+
+				# Prompt user for continuation
+				if done or (iteration + 1 == max_iter):
+					if (iteration + 1 == max_iter):
+						yield Info(message=f"Reached max iterations ({max_iter}). Following up with user.")
+					elif follow_up:
+						yield Info(message=f"Following up with user.")
+					result = _prompt_user(history, encryptor, mode)
+					if result is None:
+						return
+					action, value = result
+					if action == "continue":
+						max_iter += max_iter
+						continue_msg = format_continue(iteration + 1, max_iter)
+						history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
+					elif action == "summarize":
+						summary_msg = "Summarize all findings so far and provide a final report."
+						history.add_user(encryptor.encrypt(summary_msg) if encryptor else summary_msg)
+						yield Ai(content=summary_msg, ai_type="prompt")
+						max_iter += max_iter
+					elif action == "follow_up":
+						max_iter += max_iter
+						yield Ai(content=value, ai_type="prompt")
+					elif action == "exit":
+						return
+					continue
 
 				# Continue action
 				continue_msg = format_continue(iteration + 1, max_iter)
 				history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
 
 			except Exception as e:
+				import litellm
 				yield Error(message=f"Iteration failed: {e}")
 				logger.exception(f"{mode} iteration error")
+				if isinstance(e, litellm.exceptions.APIError) and not isinstance(e, litellm.RateLimitError):
+					return
 
 			iteration += 1
 

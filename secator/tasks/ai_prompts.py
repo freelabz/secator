@@ -39,7 +39,7 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 - Prefer secator runners over raw shell commands
 - By DEFAULT, prefer single TASKS over workflows/scans (less intrusive, more targeted)
 - Only use workflows/scans when user explicitly requests "comprehensive", "full", or "deep" recon
-- NOISY TASKS: Some tasks make many HTTP requests (nuclei, dalfox, ffuf, feroxbuster, cariddi, katana, gospider, hakrawler, x8, and other crawlers/fuzzers). Use those scarcely.
+- NOISY TASKS: Some tasks make many HTTP requests (nuclei, dalfox, ffuf, feroxbuster, cariddi, katana, gospider, hakrawler, x8, and other crawlers/fuzzers). Use those scarcely and only when really needed.
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
 
 ### TEMPLATE
