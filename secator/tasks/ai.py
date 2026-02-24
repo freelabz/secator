@@ -324,13 +324,15 @@ class ai(PythonRunner):
 				else:
 					# Chat mode: prompt user for next input
 					try:
-						user_input = console.input("[bold cyan]You:[/] ")
+						user_input = console.input("[bold cyan]You[/] [dim](enter to exit)[/]: ")
 						if not user_input.strip():
+							yield Info(message="Chat ended")
 							return
 						user_msg = encryptor.encrypt(user_input) if encryptor else user_input
 						history.add_user(user_msg)
 						yield Ai(content=user_input, ai_type="prompt")
 					except (KeyboardInterrupt, EOFError):
+						yield Info(message="Chat ended")
 						return
 
 			except Exception as e:
