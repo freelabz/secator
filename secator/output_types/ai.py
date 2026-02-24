@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s, format_token_count
+from secator.utils import rich_to_ansi, rich_escape as _s, format_token_count, format_object
 
 
 def is_markdown(text: str) -> bool:
@@ -48,11 +48,11 @@ AI_TYPES = {
 	'prompt': {'label': '❯', 'color': 'red'},
 	'response': {'label': '🧠', 'color': 'white'},
 	'chat_compacted': {'label': '📦', 'color': 'orange3'},
-	'task': {'label': '☐', 'color': 'magenta'},
-	'workflow': {'label': '☐', 'color': 'magenta'},
-	'shell': {'label': '☐', 'color': 'magenta'},
-	'shell_output': {'label': '🐚', 'color': 'dim white'},
-	'query': {'label': '❓', 'color': 'magenta'},
+	'task': {'label': '⚙', 'color': 'magenta'},
+	'workflow': {'label': '⛓', 'color': 'magenta'},
+	'shell': {'label': '▶', 'color': 'magenta'},
+	'shell_output': {'label': '◀', 'color': 'dim white'},
+	'query': {'label': '🔍', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
 }
 
@@ -110,6 +110,24 @@ class Ai(OutputType):
 					parts.append(f' - ${cost:.4f}')
 				usage_str = ' '.join(parts)
 
+		# Action types
+		ACTION_TYPES = ('task', 'workflow', 'shell', 'query', 'stopped')
+		if self.ai_type in ACTION_TYPES:
+			action_label = self.ai_type
+			if self.ai_type == 'stopped':
+				action_label = 'done'
+			line = f' {s} Running [bold red]{action_label}[/] [bold blue]{_s(self.content)}[/]'
+			targets = self.extra_data.get('targets')
+			opts = self.extra_data.get('opts')
+			results = self.extra_data.get('results')
+			if targets:
+				line += f' with targets{format_object(targets, "cyan")}'
+			if opts:
+				line += f' and options{format_object(opts, "yellow")}'
+			if results is not None:
+				line += f' [yellow]{_s(results)} results[/]'
+			return rich_to_ansi(f'[on gray19]{line} [/]')
+
 		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
 						 if k not in ('iteration', 'max_iterations', 'tokens', 'cost')}
@@ -119,8 +137,21 @@ class Ai(OutputType):
 		if usage_str:
 			suffix += f' [gray42]{usage_str}[/]'
 		if display_extra:
-			for k, v in display_extra.items():
-				suffix += f'\n    [bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]'
+			parts = [f'[bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]' for k, v in display_extra.items()]
+			suffix += f'  {", ".join(parts)}'
+
+		# Shell output: dim text in a panel
+		if self.ai_type == 'shell_output':
+			from rich.panel import Panel
+			from rich.text import Text
+			from rich.console import Console
+			from io import StringIO
+			buf = StringIO()
+			render_console = Console(file=buf, force_terminal=True, width=120)
+			text = Text(self.content, style="gray42")
+			panel = Panel(text, title=f"{s}", title_align="left", border_style="gray42", padding=(0, 1))
+			render_console.print(panel)
+			return buf.getvalue().rstrip()
 
 		# Render content with markdown support
 		content = self.content
@@ -132,7 +163,7 @@ class Ai(OutputType):
 		# Build full Rich markup string, then convert once
 		content_indented = content.replace('\n', '\n    ')
 		if self.ai_type == 'prompt':
-			s = f'[on grey23] {s} {_s(content_indented)} [/]'
+			s = f'[on gray19] {s} {_s(content_indented)} [/]'
 		else:
 			s += f' {_s(content_indented)}'
 		s += suffix

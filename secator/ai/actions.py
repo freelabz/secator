@@ -95,7 +95,7 @@ def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
         yield Info(message=f"[DRY RUN] Would run task: {name} on {targets}")
         return
 
-    yield Ai(content=f"Running task: {name}", ai_type="task", extra_data={"targets": targets})
+    yield Ai(content=name, ai_type="task", extra_data={"targets": targets, "opts": opts})
 
     try:
         from secator.runners import Task
@@ -137,7 +137,7 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
         yield Info(message=f"[DRY RUN] Would run workflow: {name} on {targets}")
         return
 
-    yield Ai(content=f"Running workflow: {name}", ai_type="workflow", extra_data={"targets": targets})
+    yield Ai(content=name, ai_type="workflow", extra_data={"targets": targets, "opts": opts})
 
     try:
         from secator.runners import Workflow
@@ -179,7 +179,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
         yield Info(message=f"[DRY RUN] Would run: {command}")
         return
 
-    yield Ai(content=f"Running: {command}", ai_type="shell")
+    yield Ai(content=command, ai_type="shell")
 
     try:
         result = subprocess.run(
@@ -220,8 +220,9 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
         engine = ctx.get_query_engine()
         results = engine.search(query_filter, limit=limit)
         yield Ai(
-            content=f"Query: {query_str} --> {len(results)} results",
-            ai_type="query"
+            content=query_str,
+            ai_type="query",
+            extra_data={"results": len(results)}
         )
         for result in results:
             result.pop('_context', None)
@@ -232,8 +233,9 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 
     except Exception as e:
         yield Ai(
-            content=f"Query: {query_str} --> failed",
-            ai_type="query"
+            content=query_str,
+            ai_type="query",
+            extra_data={"results": "failed"}
         )
         yield Error.from_exception(e)
 
@@ -246,7 +248,7 @@ def _handle_done(action: Dict, ctx: ActionContext) -> Generator:
         ctx: Action context
     """
     reason = action.get("reason", "completed")
-    yield Ai(content=f"Done: {reason}", ai_type="stopped")
+    yield Ai(content=reason, ai_type="stopped")
 
 
 def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:

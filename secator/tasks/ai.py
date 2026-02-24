@@ -191,7 +191,7 @@ class ai(PythonRunner):
 				yield Info(message=f"Executing {len(actions)} actions ...")
 				for action in actions:
 					action_type = action.get("action", "")
-					yield Info(message=f"Running action {format_object(action, 'yellow')}")
+					# yield Info(message=f"Running action {format_object(action, 'yellow')}")
 					action_results = []
 					for item in dispatch_action(action, ctx):
 						if isinstance(item, (Stat, Progress, State, Info)):
@@ -208,7 +208,7 @@ class ai(PythonRunner):
 							ctx.results.append(item)
 
 					# Build tool result for history (compact JSON)
-					yield Info(f"Action returned {len(action_results)} results")
+					# yield Info(f"Action returned {len(action_results)} results")
 					tool_result = format_tool_result(
 						action.get("name", action_type),
 						"success",
