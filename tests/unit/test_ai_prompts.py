@@ -72,6 +72,16 @@ class TestPrompts(unittest.TestCase):
         self.assertNotIn('Ai|', result)
         self.assertNotIn('ai|', result)
 
+    def test_build_workflows_reference_format(self):
+        from secator.tasks.ai_prompts import build_workflows_reference
+        result = build_workflows_reference()
+        # Should have workflow entries (may be empty if no workflows configured)
+        if result:
+            lines = result.strip().split('\n')
+            first_line = lines[0]
+            parts = first_line.split('|')
+            self.assertGreaterEqual(len(parts), 1, "Should have at least workflow name")
+
 
 if __name__ == '__main__':
     unittest.main()

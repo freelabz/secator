@@ -78,6 +78,17 @@ def build_tasks_reference() -> str:
     return "\n".join(lines)
 
 
+def build_workflows_reference() -> str:
+    """Build compact workflow reference: name|description."""
+    from secator.loader import get_configs_by_type
+    workflows = get_configs_by_type('workflow')
+    lines = []
+    for w in sorted(workflows, key=lambda x: x.name):
+        desc = getattr(w, 'description', '') or ''
+        lines.append(f"{w.name}|{desc}")
+    return "\n".join(lines)
+
+
 def get_system_prompt(mode: str) -> str:
     """Get system prompt for mode with tools/workflows filled in.
 
