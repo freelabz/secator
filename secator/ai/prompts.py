@@ -32,6 +32,7 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 
 ### CONSTRAINTS
 - Keep responses concise: max 100 lines. Be direct and actionable.
+- Never invent details, rely on the user data
 - Never invent tool output
 - Use workspace queries to get historical data for context when needed
 - Targets are encrypted as [HOST:xxxx] - use as-is
@@ -89,6 +90,7 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 
 ### CONSTRAINTS
 - Keep responses concise: max 100 lines. Be direct and actionable.
+- Don't invent things, rely on the user data.
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
 
 ### TEMPLATE

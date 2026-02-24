@@ -1,6 +1,7 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task - simplified implementation."""
 import random
+from pathlib import Path
 from typing import Generator, List, Optional
 
 from time import sleep
@@ -50,6 +51,8 @@ class ai(PythonRunner):
 			return
 
 		prompt = self.run_opts.get("prompt", "")
+		if prompt and Path(prompt).is_file():
+			prompt = Path(prompt).read_text().strip()
 		model = self.run_opts.get("model")
 		intent_model = self.run_opts.get("intent_model")
 		api_base = self.run_opts.get("api_base")
@@ -223,7 +226,7 @@ class ai(PythonRunner):
 					if action_type == "done":
 						done = True
 
-				# If the last action was a query, allow one more iteration
+				# If the last action was a query (and not in a query-only loop), allow one more iteration
 				if actions and actions[-1].get("action") == "query":
 					max_iter += 1
 
