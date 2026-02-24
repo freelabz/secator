@@ -183,9 +183,8 @@ def call_llm(
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
-	output_types = [Vulnerability, Info, Warning, Error, Ai]
+	output_types = FINDING_TYPES + [Info, Warning, Error]
 	tags = ["ai", "analysis", "pentest"]
-	output_types = FINDING_TYPES
 	install_cmd = "pip install litellm"
 	default_inputs = ''
 	opts = {
@@ -296,7 +295,8 @@ class ai(PythonRunner):
 					action_results = []
 					for item in dispatch_action(action, ctx):
 						action_results.append(item)
-						yield item
+						if action_type != "query":
+							yield item
 
 					# Build tool result for history (compact JSON)
 					tool_result = format_tool_result(
@@ -325,7 +325,7 @@ class ai(PythonRunner):
 	def _run_chat(self, prompt: str, targets: List[str], model: str,
 				  encryptor: Optional[SensitiveDataEncryptor]) -> Generator:
 		"""Run chat mode for Q&A."""
-		temp, api_base = self.run_opts.get("temperature", 0.7), self.run_opts.get("api_base")
+		temp, api_base = float(self.run_opts.get("temperature", 0.7)), self.run_opts.get("api_base")
 		history = ChatHistory()
 		history.add_system(get_system_prompt("chat"))
 		user_msg = format_user_initial(targets, prompt)

@@ -128,10 +128,10 @@ class TestDispatchAction(unittest.TestCase):
 
         results = list(dispatch_action(action, ctx))
 
-        # Should yield AI query message and Warning about no workspace
-        self.assertEqual(len(results), 2)
-        self.assertEqual(results[1]._type, 'warning')
-        self.assertIn('workspace', results[1].message.lower())
+        # Should yield Warning about no workspace
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]._type, 'warning')
+        self.assertIn('workspace', results[0].message.lower())
 
 
 class TestAITask(unittest.TestCase):

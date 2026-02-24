@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional
 
-from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
+from secator.output_types import Ai, Error, Info, Warning, OutputType
 from secator.template import TemplateLoader
 
 
@@ -205,11 +205,6 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
     if ctx.encryptor:
         query_filter = _decrypt_dict(query_filter, ctx.encryptor)
 
-    yield Ai(
-        content=f"Query: {json.dumps(query_filter, separators=(',', ':'))}",
-        ai_type="query"
-    )
-
     if not ctx.workspace_id:
         yield Warning(message="No workspace available for query")
         return
@@ -219,7 +214,11 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
         from secator.output_types import OUTPUT_TYPES
         engine = QueryEngine(ctx.workspace_id)
         results = engine.search(query_filter, limit=50)
-        yield Info(message=f"Query returned {len(results)} results")
+        query_str = json.dumps(query_filter, separators=(',', ':'))
+        yield Ai(
+	        content=f"Query: {query_str} --> {len(results)} results",
+	        ai_type="query"
+	    )
         for result in results:
             result.pop('_context')
             result.pop('_uuid')
@@ -228,7 +227,11 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
             yield result
 
     except Exception as e:
-        yield Error(message=f"Query failed: {e}")
+        yield Ai(
+	        content=f"Query: {query_str} --> failed",
+	        ai_type="query"
+	    )
+        yield Error.from_exception(e)
 
 
 def _handle_done(action: Dict, ctx: ActionContext) -> Generator:
