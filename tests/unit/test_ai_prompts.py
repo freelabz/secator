@@ -111,6 +111,21 @@ class TestPrompts(unittest.TestCase):
         result = build_output_types_reference()
         self.assertIn('vulnerability|', result)
 
+    def test_option_formats_has_header(self):
+        from secator.tasks.ai_prompts import OPTION_FORMATS
+        self.assertIn('header|', OPTION_FORMATS)
+        self.assertIn(';;', OPTION_FORMATS)  # Header format hint
+
+    def test_build_library_reference_has_all_sections(self):
+        from secator.tasks.ai_prompts import build_library_reference
+        result = build_library_reference()
+        self.assertIn('TASKS:', result)
+        self.assertIn('WORKFLOWS:', result)
+        self.assertIn('PROFILES:', result)
+        self.assertIn('WORDLISTS:', result)
+        self.assertIn('OUTPUT_TYPES:', result)
+        self.assertIn('OPTION_FORMATS:', result)
+
 
 if __name__ == '__main__':
     unittest.main()

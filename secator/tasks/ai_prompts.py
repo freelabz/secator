@@ -2,6 +2,12 @@
 import json
 from typing import Any, List
 
+OPTION_FORMATS = """header|key1:value1;;key2:value2|Multiple headers separated by ;;
+cookie|name1=val1;name2=val2|Standard cookie format
+proxy|http://host:port|HTTP/SOCKS proxy URL
+wordlist|name_or_path|Use predefined name or file path
+ports|1-1000,8080,8443|Comma-separated ports or ranges"""
+
 # System prompt for attack mode (~400 tokens)
 SYSTEM_ATTACK = """Security testing assistant. Execute actions against provided targets.
 
@@ -198,3 +204,16 @@ def format_continue(iteration: int, max_iterations: int) -> str:
         "max": max_iterations,
         "instruction": "continue"
     }, separators=(',', ':'))
+
+
+def build_library_reference() -> str:
+    """Build complete library reference in compact format."""
+    sections = [
+        "TASKS:\n" + build_tasks_reference(),
+        "WORKFLOWS:\n" + build_workflows_reference(),
+        "PROFILES:\n" + build_profiles_reference(),
+        "WORDLISTS:\n" + build_wordlists_reference(),
+        "OUTPUT_TYPES:\n" + build_output_types_reference(),
+        "OPTION_FORMATS:\n" + OPTION_FORMATS,
+    ]
+    return "\n\n".join(sections)
