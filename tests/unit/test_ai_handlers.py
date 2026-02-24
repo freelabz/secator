@@ -19,7 +19,6 @@ class TestActionContext(unittest.TestCase):
         self.assertIn('dry_run', field_names)
         self.assertIn('auto_yes', field_names)
         self.assertIn('workspace_id', field_names)
-        self.assertIn('attack_context', field_names)
 
     def test_action_context_defaults(self):
         from secator.tasks.ai_actions import ActionContext
@@ -32,7 +31,6 @@ class TestActionContext(unittest.TestCase):
         self.assertFalse(ctx.dry_run)
         self.assertFalse(ctx.auto_yes)
         self.assertIsNone(ctx.workspace_id)
-        self.assertEqual(ctx.attack_context, {})
 
     def test_action_context_with_all_params(self):
         from secator.tasks.ai_actions import ActionContext
@@ -46,7 +44,6 @@ class TestActionContext(unittest.TestCase):
             dry_run=True,
             auto_yes=True,
             workspace_id='ws123',
-            attack_context={'key': 'value'}
         )
 
         self.assertEqual(ctx.targets, ['a.com', 'b.com'])
@@ -55,7 +52,6 @@ class TestActionContext(unittest.TestCase):
         self.assertTrue(ctx.dry_run)
         self.assertTrue(ctx.auto_yes)
         self.assertEqual(ctx.workspace_id, 'ws123')
-        self.assertEqual(ctx.attack_context, {'key': 'value'})
 
 
 class TestDispatchAction(unittest.TestCase):
@@ -84,7 +80,6 @@ class TestDispatchAction(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]._type, 'ai')
         self.assertIn('Test complete', results[0].content)
-        self.assertTrue(ctx.attack_context.get('_should_stop'))
 
     def test_dispatch_task_dry_run(self):
         from secator.tasks.ai_actions import ActionContext, dispatch_action

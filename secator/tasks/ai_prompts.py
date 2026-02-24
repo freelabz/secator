@@ -19,11 +19,13 @@ ACTIONS:
 RULES:
 - One action array per response
 - Never invent tool output
-- Use query to check results before concluding
+- Use workspace queries to get historical workspace data to get more context if needed
 - Targets are encrypted as [HOST:xxxx] - use as-is
 
 TOOLS: {tools}
-WORKFLOWS: {workflows}"""
+WORKFLOWS: {workflows}
+WORKSPACE QUERIES: "type" can be any of "url", "vulnerability", "tag", "ip", "ai", "user_account", "domain", "subdomain"
+"""
 
 # System prompt for chat mode (~200 tokens)
 SYSTEM_CHAT = """Security assistant for workspace queries and analysis.
@@ -41,7 +43,7 @@ def get_tools_list() -> str:
     """Get comma-separated list of available tasks."""
     from secator.loader import discover_tasks
     tasks = discover_tasks()
-    return ", ".join(sorted(t.__name__ for t in tasks))
+    return ", ".join(sorted(t.__name__ for t in tasks if t.__name__ != "Ai"))
 
 
 def get_workflows_list() -> str:
@@ -87,14 +89,14 @@ def format_user_initial(targets: List[str], instructions: str) -> str:
     }, separators=(',', ':'))
 
 
-def format_tool_result(name: str, status: str, count: int, sample: Any) -> str:
+def format_tool_result(name: str, status: str, count: int, results: Any) -> str:
     """Format tool result as compact JSON.
 
     Args:
         name: Tool/task name
         status: Execution status (success/error)
         count: Number of results
-        sample: Sample of results (will be truncated to 3 items if list)
+        results: Full results from the action
 
     Returns:
         Compact JSON string
@@ -103,7 +105,7 @@ def format_tool_result(name: str, status: str, count: int, sample: Any) -> str:
         "task": name,
         "status": status,
         "count": count,
-        "sample": sample[:3] if isinstance(sample, list) else sample
+        "results": results
     }, separators=(',', ':'), default=str)
 
 

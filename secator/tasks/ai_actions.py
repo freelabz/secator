@@ -1,10 +1,10 @@
 """Action handlers for AI task."""
 import json
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional
 
-from secator.output_types import Ai, Error, Info, Warning
+from secator.output_types import Ai, Error, Info, Warning, OutputType
 from secator.template import TemplateLoader
 
 
@@ -19,7 +19,6 @@ class ActionContext:
         dry_run: If True, show actions without executing
         auto_yes: If True, auto-accept prompts
         workspace_id: Optional workspace ID for queries
-        attack_context: Mutable dict for tracking attack state
     """
     targets: List[str]
     model: str
@@ -27,7 +26,6 @@ class ActionContext:
     dry_run: bool = False
     auto_yes: bool = False
     workspace_id: Optional[str] = None
-    attack_context: Dict = field(default_factory=dict)
 
 
 def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
@@ -86,31 +84,17 @@ def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
             "print_line": False,
             "print_cmd": False,
             "print_progress": False,
+            "exporters": [],
             "sync": True,
             **opts,
         }
 
         task = Task(tpl, targets, run_opts=run_opts)
-        results = []
         for item in task:
-            results.append(item)
             yield item
-
-        # Track in attack context
-        ctx.attack_context.setdefault("successful_attacks", []).append({
-            "type": "task",
-            "name": name,
-            "targets": targets,
-            "result_count": len(results)
-        })
 
     except Exception as e:
         yield Error(message=f"Task {name} failed: {e}")
-        ctx.attack_context.setdefault("failed_attacks", []).append({
-            "type": "task",
-            "name": name,
-            "error": str(e)
-        })
 
 
 def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
@@ -137,26 +121,21 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
         from secator.runners import Workflow
         tpl = TemplateLoader(name=f'workflows/{name}')
         run_opts = {
-            "print_item": False,
+            "print_item": True,
             "print_line": False,
-            "print_cmd": False,
+            "print_cmd": True,
+            "print_description": True,
+            "print_start": True,
+            "print_end": True,
             "print_progress": False,
+            "exporters": [],
             "sync": True,
             **opts,
         }
 
         workflow = Workflow(tpl, targets, run_opts=run_opts)
-        results = []
         for item in workflow:
-            results.append(item)
             yield item
-
-        ctx.attack_context.setdefault("successful_attacks", []).append({
-            "type": "workflow",
-            "name": name,
-            "targets": targets,
-            "result_count": len(results)
-        })
 
     except Exception as e:
         yield Error(message=f"Workflow {name} failed: {e}")
@@ -189,13 +168,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
             timeout=60
         )
         output = result.stdout or result.stderr or "(no output)"
-        yield Ai(content=output[:2000], ai_type="shell_output")
-
-        ctx.attack_context.setdefault("successful_attacks", []).append({
-            "type": "shell",
-            "command": command,
-            "output": output[:500]
-        })
+        yield Ai(content=output, ai_type="shell_output")
 
     except Exception as e:
         yield Error(message=f"Shell command failed: {e}")
@@ -229,12 +202,16 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 
     try:
         from secator.query import QueryEngine
+        from secator.output_types import OUTPUT_TYPES
         engine = QueryEngine(ctx.workspace_id)
         results = engine.search(query_filter, limit=50)
         yield Info(message=f"Query returned {len(results)} results")
-
-        # Store for next iteration
-        ctx.attack_context["_query_results"] = results
+        for result in results:
+            result.pop('_context')
+            result.pop('_uuid')
+            result.pop('_related')
+            result.pop('_duplicate')
+            yield result
 
     except Exception as e:
         yield Error(message=f"Query failed: {e}")
@@ -249,7 +226,6 @@ def _handle_done(action: Dict, ctx: ActionContext) -> Generator:
     """
     reason = action.get("reason", "completed")
     yield Ai(content=f"Done: {reason}", ai_type="stopped")
-    ctx.attack_context["_should_stop"] = True
 
 
 def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:

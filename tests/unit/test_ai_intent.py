@@ -81,17 +81,17 @@ class TestFormatToolResult(unittest.TestCase):
         self.assertEqual(data['task'], 'nmap')
         self.assertEqual(data['status'], 'success')
         self.assertEqual(data['count'], 5)
-        self.assertEqual(len(data['sample']), 2)
+        self.assertEqual(len(data['results']), 2)
 
-    def test_format_tool_result_truncates_sample(self):
+    def test_format_tool_result_full_results(self):
         import json
         from secator.tasks.ai_prompts import format_tool_result
 
         result = format_tool_result('scan', 'success', 10, [1, 2, 3, 4, 5])
         data = json.loads(result)
 
-        # Should only include first 3 items
-        self.assertEqual(len(data['sample']), 3)
+        # Should include all results
+        self.assertEqual(len(data['results']), 5)
 
 
 class TestFormatContinue(unittest.TestCase):

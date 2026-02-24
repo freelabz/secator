@@ -45,8 +45,6 @@ class TestActionDispatch(unittest.TestCase):
         results = list(dispatch_action(action, ctx))
 
         self.assertTrue(len(results) > 0)
-        # Should set _should_stop flag
-        self.assertTrue(ctx.attack_context.get("_should_stop"))
 
     def test_dispatch_unknown_action(self):
         action = {"action": "unknown_action"}
@@ -71,7 +69,6 @@ class TestActionDispatch(unittest.TestCase):
         self.assertFalse(ctx.dry_run)
         self.assertFalse(ctx.auto_yes)
         self.assertIsNone(ctx.encryptor)
-        self.assertIsInstance(ctx.attack_context, dict)
 
 
 if __name__ == '__main__':
