@@ -100,6 +100,16 @@ def build_profiles_reference() -> str:
     return "\n".join(lines)
 
 
+def build_wordlists_reference() -> str:
+    """Build compact wordlists reference from CONFIG."""
+    from secator.config import CONFIG
+    lines = []
+    if CONFIG.wordlists.templates:
+        for name in sorted(CONFIG.wordlists.templates.keys()):
+            lines.append(name)
+    return "\n".join(lines)
+
+
 def get_system_prompt(mode: str) -> str:
     """Get system prompt for mode with tools/workflows filled in.
 

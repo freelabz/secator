@@ -91,6 +91,12 @@ class TestPrompts(unittest.TestCase):
             parts = first_line.split('|')
             self.assertGreaterEqual(len(parts), 1, "Should have at least profile name")
 
+    def test_build_wordlists_reference_format(self):
+        from secator.tasks.ai_prompts import build_wordlists_reference
+        result = build_wordlists_reference()
+        # Should return string (may be empty if no wordlists configured)
+        self.assertIsInstance(result, str)
+
 
 if __name__ == '__main__':
     unittest.main()
