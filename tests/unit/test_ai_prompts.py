@@ -27,7 +27,7 @@ class TestPrompts(unittest.TestCase):
     def test_get_system_prompt_attack(self):
         prompt = get_system_prompt("attack")
         self.assertIn("task", prompt)
-        self.assertIn("TOOLS:", prompt)
+        self.assertIn("TASKS:", prompt)
 
     def test_get_system_prompt_chat(self):
         prompt = get_system_prompt("chat")
@@ -125,6 +125,21 @@ class TestPrompts(unittest.TestCase):
         self.assertIn('WORDLISTS:', result)
         self.assertIn('OUTPUT_TYPES:', result)
         self.assertIn('OPTION_FORMATS:', result)
+
+    def test_get_system_prompt_attack_has_library_reference(self):
+        from secator.tasks.ai_prompts import get_system_prompt
+        prompt = get_system_prompt("attack")
+        # Should have all library reference sections
+        self.assertIn('TASKS:', prompt)
+        self.assertIn('WORKFLOWS:', prompt)
+        self.assertIn('PROFILES:', prompt)
+        self.assertIn('OUTPUT_TYPES:', prompt)
+        self.assertIn('OPTION_FORMATS:', prompt)
+        # Should have query operators
+        self.assertIn('$in', prompt)
+        self.assertIn('$regex', prompt)
+        # Should have profiles usage hint
+        self.assertIn('profiles', prompt)
 
 
 if __name__ == '__main__':

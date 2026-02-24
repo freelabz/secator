@@ -17,7 +17,7 @@ RESPONSE FORMAT:
 
 ACTIONS:
 - task: {{"action":"task","name":"<tool>","targets":[...],"opts":{{}}}}
-- workflow: {{"action":"workflow","name":"<name>","targets":[...]}}
+- workflow: {{"action":"workflow","name":"<name>","targets":[...],"opts":{{"profiles":["aggressive"]}}}}
 - shell: {{"action":"shell","command":"<cmd>"}}
 - query: {{"action":"query","type":"<output_type>","filter":{{}}}}
 - done: {{"action":"done","reason":"<why>"}}
@@ -25,12 +25,15 @@ ACTIONS:
 RULES:
 - One action array per response
 - Never invent tool output
-- Use workspace queries to get historical workspace data to get more context if needed
+- Use workspace queries to get historical data for context
 - Targets are encrypted as [HOST:xxxx] - use as-is
+- Only use options listed below for each task
+- To use profiles, add "profiles": ["name"] in opts
 
-TOOLS: {tools}
-WORKFLOWS: {workflows}
-WORKSPACE QUERIES: "type" can be any of "url", "vulnerability", "tag", "ip", "ai", "user_account", "domain", "subdomain"
+{library_reference}
+
+QUERY OPERATORS: $in, $regex, $contains, $gt, $lt, $ne
+Example: {{"action":"query","type":"vulnerability","filter":{{"severity":{{"$in":["critical","high"]}}}}}}
 """
 
 # System prompt for chat mode (~200 tokens)
@@ -134,7 +137,7 @@ def build_output_types_reference() -> str:
 
 
 def get_system_prompt(mode: str) -> str:
-    """Get system prompt for mode with tools/workflows filled in.
+    """Get system prompt for mode with library reference filled in.
 
     Args:
         mode: Either "attack" or "chat"
@@ -144,8 +147,7 @@ def get_system_prompt(mode: str) -> str:
     """
     if mode == "attack":
         return SYSTEM_ATTACK.format(
-            tools=get_tools_list(),
-            workflows=get_workflows_list()
+            library_reference=build_library_reference()
         )
     elif mode == "chat":
         return SYSTEM_CHAT
