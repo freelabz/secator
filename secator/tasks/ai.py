@@ -34,7 +34,7 @@ def init_llm():
 	import litellm
 	from litellm.integrations.custom_logger import CustomLogger
 
-	# Suppress debug output unless 'litellm' is in CONFIG.debug
+	# Suppress litellm's own debug logs unless 'litellm.debug' is explicitly set
 	if "litellm.debug" not in CONFIG.debug:
 		litellm.suppress_debug_info = True
 		litellm.set_verbose = False
@@ -52,6 +52,7 @@ def init_llm():
 				return
 			from rich.markdown import Markdown
 			from rich.panel import Panel
+			from rich.text import Text
 			MAX_LEN = 2000
 			role_styles = {"system": "blue", "user": "green", "assistant": "red"}
 			message_count = len(messages)
@@ -67,8 +68,10 @@ def init_llm():
 				style = role_styles.get(msg.get("role", ""), "white")
 				if len(content) > MAX_LEN:
 					content = content[:MAX_LEN] + f"\n\n... ({len(content) - MAX_LEN} chars truncated)"
+				# Use Markdown for assistant responses, Text for everything else
+				renderable = Markdown(content) if msg.get("role") == "assistant" else Text(content)
 				console.print(Panel(
-					Markdown(content),
+					renderable,
 					title=f"[bold {style}]{role}[/] [dim]({count}/{message_count})[/]",
 					border_style=style
 				))
@@ -282,7 +285,7 @@ def _interactive_menu(options, title="Select an option"):
 					label = f"{prefix} {num} [dim]{opt['label']}[/]"
 			render_console.print(label)
 			if opt.get("description") and not (opt.get("input") and in_input_mode):
-				render_console.print(f"     [gray27]{opt['description']}[/]")
+				render_console.print(f"     [gray35]{opt['description']}[/]")
 		render_console.print(f"\n[dim]{'─' * 40}[/]")
 		return buf.getvalue()
 
@@ -386,12 +389,12 @@ def _prompt_user(history, encryptor=None, mode="chat"):
 				return ("continue", n)
 			if idx == 1:  # Summarize
 				return ("summarize", None)
-			if idx == 2:  # Exit
-				return None
-			if idx == 3:  # Something else
+			if idx == 2:  # Something else
 				user_msg = encryptor.encrypt(value) if encryptor else value
 				history.add_user(user_msg)
 				return ("follow_up", value)
+			if idx == 3:  # Exit
+				return None
 		else:
 			options = [
 				{"label": "Exit"},
@@ -484,7 +487,8 @@ class ai(PythonRunner):
 		iteration = 0
 		done = False
 		while iteration < max_iter:
-			yield Info(message=f"Iteration {iteration + 1}/{max_iter}")
+			iteration += 1
+			yield Info(message=f"Iteration {iteration}/{max_iter}")
 
 			try:
 				# Call LLM
@@ -514,7 +518,7 @@ class ai(PythonRunner):
 						mode=mode,
 						model=model,
 						extra_data={
-							"iteration": iteration + 1,
+							"iteration": iteration,
 							"max_iterations": max_iter,
 							"tokens": usage.get("tokens") if usage else None,
 							"cost": usage.get("cost") if usage else None,
@@ -558,33 +562,35 @@ class ai(PythonRunner):
 						done = True
 
 				# Prompt user for continuation
-				if done or (iteration + 1 == max_iter):
-					if (iteration + 1 == max_iter):
+				if done or (iteration == max_iter):
+					if (iteration == max_iter):
 						yield Info(message=f"Reached max iterations ({max_iter}). Following up with user.")
-					elif follow_up:
+					elif done:
 						yield Info(message=f"Following up with user.")
 					result = _prompt_user(history, encryptor, mode)
 					if result is None:
 						return
 					action, value = result
 					if action == "continue":
-						max_iter += max_iter
-						continue_msg = format_continue(iteration + 1, max_iter)
+						max_iter += value
+						done = False
+						continue_msg = format_continue(iteration, max_iter)
 						history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
 					elif action == "summarize":
+						max_iter += 1
 						summary_msg = "Summarize all findings so far and provide a final report."
 						history.add_user(encryptor.encrypt(summary_msg) if encryptor else summary_msg)
 						yield Ai(content=summary_msg, ai_type="prompt")
-						max_iter += max_iter
 					elif action == "follow_up":
-						max_iter += max_iter
+						max_iter += 1
+						done = False
 						yield Ai(content=value, ai_type="prompt")
 					elif action == "exit":
 						return
 					continue
 
 				# Continue action
-				continue_msg = format_continue(iteration + 1, max_iter)
+				continue_msg = format_continue(iteration, max_iter)
 				history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
 
 			except Exception as e:
@@ -593,7 +599,5 @@ class ai(PythonRunner):
 				logger.exception(f"{mode} iteration error")
 				if isinstance(e, litellm.exceptions.APIError) and not isinstance(e, litellm.RateLimitError):
 					return
-
-			iteration += 1
 
 		yield Info(message=f"Reached max iterations ({max_iter})")
