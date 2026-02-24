@@ -48,20 +48,6 @@ ACTIONS:
 Answer questions using workspace data. Use query action to fetch data."""
 
 
-def get_tools_list() -> str:
-    """Get comma-separated list of available tasks."""
-    from secator.loader import discover_tasks
-    tasks = discover_tasks()
-    return ", ".join(sorted(t.__name__ for t in tasks if t.__name__ != "Ai"))
-
-
-def get_workflows_list() -> str:
-    """Get comma-separated list of available workflows."""
-    from secator.loader import get_configs_by_type
-    workflows = get_configs_by_type('workflow')
-    return ", ".join(sorted(w.name for w in workflows))
-
-
 def build_tasks_reference() -> str:
     """Build compact task reference: name|description|options."""
     from secator.loader import discover_tasks
