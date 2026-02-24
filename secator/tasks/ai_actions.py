@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional
 
-from secator.output_types import Ai, Error, Info, Warning, OutputType
+from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
 
 
@@ -91,7 +91,14 @@ def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
 
         task = Task(tpl, targets, run_opts=run_opts)
         for item in task:
-            yield item
+            if item not in FINDING_TYPES + [Info, Warning, Error]:
+                continue
+            result = item.toDict()
+            result.pop('_context')
+            result.pop('_uuid')
+            result.pop('_related')
+            result.pop('_duplicate')
+            yield result
 
     except Exception as e:
         yield Error(message=f"Task {name} failed: {e}")
@@ -135,7 +142,14 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 
         workflow = Workflow(tpl, targets, run_opts=run_opts)
         for item in workflow:
-            yield item
+            if item not in FINDING_TYPES + [Info, Warning, Error]:
+                continue
+            result = item.toDict()
+            result.pop('_context')
+            result.pop('_uuid')
+            result.pop('_related')
+            result.pop('_duplicate')
+            yield result
 
     except Exception as e:
         yield Error(message=f"Workflow {name} failed: {e}")

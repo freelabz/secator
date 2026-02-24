@@ -18,6 +18,57 @@ from secator.tasks.ai_prompts import (
 
 logger = logging.getLogger(__name__)
 
+# Module-level state for litellm initialization
+_llm_initialized = False
+_llm_handler = None
+
+
+def init_llm():
+	"""Initialize litellm once (singleton pattern to avoid callback accumulation)."""
+	global _llm_initialized, _llm_handler
+
+	if _llm_initialized:
+		return
+
+	import litellm
+	from litellm.integrations.custom_logger import CustomLogger
+
+	# Suppress debug output unless 'litellm' is in CONFIG.debug
+	if "litellm.debug" not in CONFIG.debug:
+		litellm.suppress_debug_info = True
+		litellm.set_verbose = False
+		litellm.json_logs = True
+		logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+		logging.getLogger("litellm").setLevel(logging.WARNING)
+		logging.getLogger("httpx").setLevel(logging.WARNING)
+
+	class LLMCallbackHandler(CustomLogger):
+		"""Custom handler for logging LLM calls."""
+
+		def log_pre_api_call(self, model, messages, kwargs):
+			if "litellm" not in CONFIG.debug:
+				return
+			from rich.markdown import Markdown
+			from rich.panel import Panel
+			MAX_LEN = 2000
+			role_styles = {"system": "blue", "user": "green", "assistant": "red"}
+			message_count = len(messages)
+			for count, msg in enumerate(messages, 1):
+				role = msg.get("role", "unknown").upper()
+				content = msg.get("content", "")
+				style = role_styles.get(msg.get("role", ""), "white")
+				if len(content) > MAX_LEN:
+					content = content[:MAX_LEN] + f"\n\n... ({len(content) - MAX_LEN} chars truncated)"
+				console.print(Panel(
+					Markdown(content),
+					title=f"[bold {style}]{role}[/] [dim]({count}/{message_count})[/]",
+					border_style=style
+				))
+
+	_llm_handler = LLMCallbackHandler()
+	litellm.callbacks = [_llm_handler]
+	_llm_initialized = True
+
 
 def parse_actions(response: str) -> List[Dict]:
 	"""Extract JSON action array from LLM response."""
@@ -101,50 +152,9 @@ def call_llm(
 ) -> Dict:
 	"""Call litellm completion and return response with usage."""
 	import litellm
-	from litellm.integrations.custom_logger import CustomLogger
 
-	# Suppress debug output unless 'litellm' is in CONFIG.debug
-	if "litellm" not in CONFIG.debug:
-		litellm.suppress_debug_info = True
-		litellm.set_verbose = False
-		litellm.json_logs = True
-		# Suppress litellm logger debug output
-		logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-		logging.getLogger("litellm").setLevel(logging.WARNING)
-		logging.getLogger("httpx").setLevel(logging.WARNING)
-
-	# class MyCustomHandler(CustomLogger):
-	# 	def log_pre_api_call(self, model, messages, kwargs):
-	# 		from rich.markdown import Markdown
-	# 		from rich.panel import Panel
-	# 		MAX_LEN = 2000
-	# 		role_styles = {"system": "blue", "user": "green", "assistant": "red"}
-	# 		for msg in messages:
-	# 			role = msg.get("role", "unknown").upper()
-	# 			content = msg.get("content", "")
-	# 			style = role_styles.get(msg.get("role", ""), "white")
-	# 			if len(content) > MAX_LEN:
-	# 				content = content[:MAX_LEN] + f"\n\n... ({len(content) - MAX_LEN} chars truncated)"
-	# 			console.print(Panel(Markdown(content), title=f"[bold {style}]{role}[/]", border_style=style))
-
-	# 	def log_success_event(self, kwargs, response_obj, start_time, end_time):
-	# 		# Track cost from callback
-	# 		response_cost = kwargs.get("response_cost", 0)
-	# 		input_tokens = kwargs.get("input_tokens", 0)
-	# 		output_tokens = kwargs.get("output_tokens", 0)
-	# 		duration = (end_time - start_time).total_seconds()
-
-	# 		cost_str = f"${response_cost:.6f}" if response_cost else "N/A"
-	# 		console.print(
-	# 			f"[dim]LLM call: {input_tokens} in / {output_tokens} out tokens | "
-	# 			f"Cost: {cost_str} | Time: {duration:.2f}s[/]"
-	# 		)
-
-	# 	def log_failure_event(self, kwargs, response_obj, start_time, end_time):
-	# 		console.print(f"[red]LLM call failed: {response_obj}[/]")
-
-	# custom_handler = MyCustomHandler()
-	# litellm.callbacks = [custom_handler]
+	# Initialize litellm once (avoids callback accumulation)
+	init_llm()
 
 	response = litellm.completion(
 		model=model,
@@ -242,8 +252,6 @@ class ai(PythonRunner):
 
 		for iteration in range(max_iter):
 			yield Info(message=f"Iteration {iteration + 1}/{max_iter}")
-			for message in history.to_messages():
-				print(message.get("role", "unknown").upper() + ": " + str(len(message.get("content", ""))))
 
 			try:
 				# Call LLM
@@ -279,18 +287,12 @@ class ai(PythonRunner):
 
 				if not actions:
 					yield Warning(message="Could not parse actions")
+					history.add_user("Could not parse your actions")
 					continue
 
 				# Execute actions
 				for action in actions:
 					action_type = action.get("action", "")
-
-					# Check for done
-					if action_type == "done":
-						yield from dispatch_action(action, ctx)
-						yield Info(message="Attack completed")
-						return
-
 					action_results = []
 					for item in dispatch_action(action, ctx):
 						action_results.append(item)
@@ -306,6 +308,10 @@ class ai(PythonRunner):
 					if encryptor:
 						tool_result = encryptor.encrypt(tool_result)
 					history.add_user(tool_result)
+
+					# Check for done
+					if action_type == "done":
+						return
 
 				continue_msg = format_continue(iteration + 1, max_iter)
 				history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
