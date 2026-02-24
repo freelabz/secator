@@ -70,7 +70,7 @@ def build_tasks_reference() -> str:
 
         # Get generic options that this task supports
         opt_key_map = getattr(task_cls, 'opt_key_map', {})
-        generic_opts = [k for k, v in opt_key_map.items() if v != OPT_NOT_SUPPORTED]
+        generic_opts = [k for k, v in opt_key_map.items() if v is not None and v != OPT_NOT_SUPPORTED]
 
         all_opts = ",".join(sorted(set(task_opts + generic_opts)))
         lines.append(f"{name}|{desc}|{all_opts}")
