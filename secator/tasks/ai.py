@@ -5,6 +5,8 @@ import logging
 import re
 from typing import Dict, Generator, List, Optional
 
+from time import sleep
+
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.output_types import Ai, Stat, Progress, Error, Info, Warning, State, Vulnerability, FINDING_TYPES, OutputType
@@ -597,7 +599,9 @@ class ai(PythonRunner):
 			except Exception as e:
 				import litellm
 				if isinstance(e, litellm.RateLimitError):
-					yield Warning(message="Rate limit exceeded - will retry in the next iteration")
+					yield Warning(message="Rate limit exceeded - waiting 5s and retry in the next iteration")
+					iteration -= 1
+					sleep(5)
 					continue
 				yield Error.from_exception(e)
 				if isinstance(e, litellm.exceptions.APIError):
