@@ -1,7 +1,7 @@
 """Action handlers for AI task."""
 import json
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional
 
 from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
@@ -27,6 +27,26 @@ class ActionContext:
     auto_yes: bool = False
     verbose: bool = False
     workspace_id: Optional[str] = None
+    scan_id: Optional[str] = None
+    workflow_id: Optional[str] = None
+    task_id: Optional[str] = None
+    scope: str = "workspace"
+    results: Optional[List[Dict]] = None
+    _query_engine: Any = field(default=None, repr=False)
+
+    def get_query_engine(self):
+        """Get or create a QueryEngine (cached for reuse across queries)."""
+        if self._query_engine is None:
+            from secator.query import QueryEngine
+            query_context = {}
+            if self.scope == "current":
+                query_context['results'] = self.results or []
+                for key in ('scan_id', 'workflow_id', 'task_id'):
+                    value = getattr(self, key, None)
+                    if value:
+                        query_context[key] = value
+            self._query_engine = QueryEngine(self.workspace_id or "", context=query_context)
+        return self._query_engine
 
 
 def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
@@ -177,44 +197,44 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 
 
 def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
-    """Query workspace for findings.
+    """Query workspace or current results for findings.
 
     Args:
         action: Action dict with query (MongoDB query dict)
-        ctx: Action context
+        ctx: Action context (scope='current' passes results to QueryEngine in-memory)
     """
     query_filter = action.get("query", {})
+    limit = action.get("limit", 50)
 
     # Decrypt query values
     if ctx.encryptor:
         query_filter = _decrypt_dict(query_filter, ctx.encryptor)
 
-    if not ctx.workspace_id:
+    query_str = json.dumps(query_filter, separators=(',', ':'))
+
+    if ctx.scope != "current" and not ctx.workspace_id:
         yield Warning(message="No workspace available for query")
         return
 
     try:
-        from secator.query import QueryEngine
-        from secator.output_types import OUTPUT_TYPES
-        engine = QueryEngine(ctx.workspace_id)
-        results = engine.search(query_filter, limit=50)
-        query_str = json.dumps(query_filter, separators=(',', ':'))
+        engine = ctx.get_query_engine()
+        results = engine.search(query_filter, limit=limit)
         yield Ai(
-	        content=f"Query: {query_str} --> {len(results)} results",
-	        ai_type="query"
-	    )
+            content=f"Query: {query_str} --> {len(results)} results",
+            ai_type="query"
+        )
         for result in results:
-            result.pop('_context')
-            result.pop('_uuid')
-            result.pop('_related')
-            result.pop('_duplicate')
+            result.pop('_context', None)
+            result.pop('_uuid', None)
+            result.pop('_related', None)
+            result.pop('_duplicate', None)
             yield result
 
     except Exception as e:
         yield Ai(
-	        content=f"Query: {query_str} --> failed",
-	        ai_type="query"
-	    )
+            content=f"Query: {query_str} --> failed",
+            ai_type="query"
+        )
         yield Error.from_exception(e)
 
 

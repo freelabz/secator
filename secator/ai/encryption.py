@@ -1,4 +1,4 @@
-# secator/tasks/ai_encryption.py
+# secator/ai/encryption.py
 """Sensitive data encryption for AI prompts."""
 import hashlib
 import re

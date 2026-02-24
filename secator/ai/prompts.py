@@ -1,6 +1,6 @@
 """Compact prompt templates for AI task."""
 import json
-from typing import Any, List
+from typing import Any, Dict, List
 from string import Template
 
 OPTION_FORMATS = """header|key1:value1;;key2:value2|Multiple headers separated by ;;
@@ -31,6 +31,7 @@ Queryable types: $query_types
 Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 
 ### CONSTRAINTS
+- Keep responses concise: max 100 lines. Be direct and actionable.
 - Never invent tool output
 - Use workspace queries to get historical data for context when needed
 - Targets are encrypted as [HOST:xxxx] - use as-is
@@ -47,8 +48,10 @@ Brief reasoning (2-3 sentences max), then a JSON array of actions:
 - task: {"action":"task","name":"<tool>","targets":[...],"opts":{}}
 - workflow: {"action":"workflow","name":"<name>","targets":[...],"opts":{"profiles":["aggressive"]}}
 - shell: {"action":"shell","command":"<cmd>"}
-- query: {"action":"query","query":{"_type":"<output_type>", ...}}
+- query: {"action":"query","query":{"_type":"<output_type>", ...},"limit":50}
 - done: {"action":"done","reason":"<why>"}
+
+Note: "limit" is a top-level field on the query action, NOT inside the "query" filter.
 
 ### EXAMPLES
 Attack example:
@@ -60,7 +63,7 @@ Found a login form. Testing for SQL injection with curl and running dalfox.
 
 Query example:
 ```
-[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}}}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}}}]
+[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50}]
 ```
 """)
 
@@ -85,12 +88,15 @@ Queryable types: $query_types
 Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 
 ### CONSTRAINTS
+- Keep responses concise: max 100 lines. Be direct and actionable.
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
 
 ### TEMPLATE
 Markdown explanation, then a JSON array of actions:
-- query: {"action":"query","query":{"_type":"<output_type>", ...}}
+- query: {"action":"query","query":{"_type":"<output_type>", ...},"limit":50}
 - done: {"action":"done","reason":"<why>"}
+
+Note: "limit" is a top-level field on the query action, NOT inside the "query" filter.
 
 ### EXAMPLES
 ```
@@ -100,7 +106,7 @@ Markdown explanation, then a JSON array of actions:
 ### VULN_ID + VULN_NAME [VULN_SEVERITY + VULN_CVSS_SCORE]
 <TABLE with FIELD + DETAIL with CVSS Score, EPSS Score, CVSS Vector, Targets, Tags, Description References>
 
-[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}}}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}}}]
+[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50}]
 ```
 """)
 
@@ -212,20 +218,25 @@ def get_system_prompt(mode: str) -> str:
         )
 
 
-def format_user_initial(targets: List[str], instructions: str) -> str:
+def format_user_initial(targets: List[str], instructions: str, previous_results: List[Dict] = None) -> str:
     """Format initial user message as compact JSON.
 
     Args:
         targets: List of target hosts/URLs
         instructions: User instructions for the task
+        previous_results: Optional list of result dicts from upstream tasks
 
     Returns:
         Compact JSON string (no whitespace)
     """
-    return json.dumps({
+    msg = {
         "targets": targets,
-        "instructions": instructions or "Conduct security testing."
-    }, separators=(',', ':'))
+        "instructions": instructions or "Conduct security testing.",
+    }
+    if previous_results:
+        msg["previous_results"] = previous_results
+        msg["instructions"] += " Analyze the previous results and use them as context."
+    return json.dumps(msg, separators=(',', ':'), default=str)
 
 
 def format_tool_result(name: str, status: str, count: int, results: Any) -> str:

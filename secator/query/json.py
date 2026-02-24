@@ -58,8 +58,10 @@ class JsonBackend(QueryBackend):
 
 	name = "json"
 
-	def __init__(self, workspace_id: str, config: Optional[dict] = None):
-		super().__init__(workspace_id, config)
+	def __init__(self, workspace_id: str, config: Optional[dict] = None, context: Optional[dict] = None, results: Optional[list] = None):
+		super().__init__(workspace_id, config, context=context)
+		self._results = results
+		self._findings_cache = None
 		reports_dir = config.get('reports_dir', CONFIG.dirs.reports) if config else CONFIG.dirs.reports
 		self.reports_dir = Path(reports_dir).expanduser()
 
@@ -76,7 +78,11 @@ class JsonBackend(QueryBackend):
 		return self.reports_dir / workspace_folder
 
 	def _load_all_findings(self) -> List[Dict[str, Any]]:
-		"""Load all findings from workspace JSON files."""
+		"""Load all findings from workspace JSON files, or return pre-loaded/cached results."""
+		if self._results is not None:
+			return self._results
+		if self._findings_cache is not None:
+			return self._findings_cache
 		findings = []
 		workspace_path = self._get_workspace_path()
 		debug(f'Looking for reports in: {workspace_path}', sub='query.json')
@@ -115,6 +121,7 @@ class JsonBackend(QueryBackend):
 						continue
 
 		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
+		self._findings_cache = findings
 		return findings
 
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:

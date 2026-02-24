@@ -213,7 +213,7 @@ class AI(StrictModel):
 	intent_model: str = 'claude-haiku-4-5'  # fast model for intent analysis
 	execution_model: str = ''  # defaults to default_model if unset
 	temperature: float = 0.7
-	max_tokens: int = 4096
+	max_tokens: int = 30000
 	max_results: int = 500
 	encrypt_pii: bool = True
 

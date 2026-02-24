@@ -10,10 +10,10 @@ from secator.config import CONFIG, ROOT_FOLDER
 # Globals
 VERSION = version('secator')
 ASCII = rf"""
-			 __            
+			 __
    ________  _________ _/ /_____  _____
   / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/
- (__  /  __/ /__/ /_/ / /_/ /_/ / /    
+ (__  /  __/ /__/ /_/ / /_/ /_/ / /
 /____/\___/\___/\__,_/\__/\____/_/     v{VERSION}
 
 			freelabz.com
@@ -33,6 +33,20 @@ STATE_COLORS = {
 	'FAILURE': 'bold red',
 	'REVOKED': 'bold magenta'
 }
+
+# LLM
+LLM_SPINNER_MESSAGES = [
+	"Consulting the hive mind...",
+	"Asking the AI overlords...",
+	"Summoning digital spirits...",
+	"Brewing some cyber coffee...",
+	"Hacking the mainframe... just kidding",
+	"Teaching electrons to think...",
+	"Rolling digital dice...",
+	"Whispering to the neural network...",
+	"Poking the language model...",
+	"Reticulating splines...",
+]
 
 # Available drivers and exporters
 AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api']

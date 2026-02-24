@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s
+from secator.utils import rich_to_ansi, rich_escape as _s, format_token_count
 
 
 def is_markdown(text: str) -> bool:
@@ -45,19 +45,15 @@ def render_markdown_for_rich(text: str, title: str = '') -> str:
 
 # AI content type configurations
 AI_TYPES = {
-	'prompt': {'label': '❯', 'color': 'blue'},
-	'response': {'label': '🧠', 'color': 'red'},
-	'summary': {'label': '🧠', 'color': 'white'},
-	'suggestion': {'label': '🧠', 'color': 'cyan'},
-	'attack_summary': {'label': '🧠', 'color': 'yellow'},
+	'prompt': {'label': '❯', 'color': 'red'},
+	'response': {'label': '🧠', 'color': 'white'},
+	'chat_compacted': {'label': '📦', 'color': 'orange3'},
 	'task': {'label': '☐', 'color': 'magenta'},
 	'workflow': {'label': '☐', 'color': 'magenta'},
-	'scan': {'label': '☐', 'color': 'magenta'},
 	'shell': {'label': '☐', 'color': 'magenta'},
 	'shell_output': {'label': '🐚', 'color': 'dim white'},
 	'query': {'label': '❓', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
-	'report': {'label': 'AI REPORT', 'color': 'cyan'}
 }
 
 
@@ -109,11 +105,7 @@ class Ai(OutputType):
 			if tokens or cost:
 				parts = []
 				if tokens:
-					# Format tokens in K format (e.g., 8.8k)
-					if tokens >= 1000:
-						parts.append(f' • :{icon}: {tokens/1000:.1f}k tokens')
-					else:
-						parts.append(f' • {tokens} tokens')
+					parts.append(f' • {format_token_count(tokens, icon=icon)}')
 				if cost:
 					parts.append(f' - ${cost:.4f}')
 				usage_str = ' '.join(parts)

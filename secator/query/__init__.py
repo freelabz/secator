@@ -29,13 +29,14 @@ class QueryEngine:
         """Select appropriate backend based on context."""
         drivers = self.context.get('drivers', [])
         if 'api' in drivers:
-            return ApiBackend(self.workspace_id)
+            return ApiBackend(self.workspace_id, context=self.context)
         elif 'mongodb' in drivers:
-            return MongoDBBackend(self.workspace_id)
+            return MongoDBBackend(self.workspace_id, context=self.context)
         else:
             # For JSON backend, use workspace_name for directory (reports are saved by name)
             workspace_name = self.context.get('workspace_name', self.workspace_id)
-            return JsonBackend(workspace_name)
+            results = self.context.get('results')
+            return JsonBackend(workspace_name, context=self.context, results=results)
 
     def search(self, query: dict, limit: int = 100, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Search for findings matching query."""

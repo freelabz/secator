@@ -14,8 +14,8 @@ class ApiBackend(QueryBackend):
 
     name = "api"
 
-    def __init__(self, workspace_id: str, config: Optional[dict] = None):
-        super().__init__(workspace_id, config)
+    def __init__(self, workspace_id: str, config: Optional[dict] = None, context: Optional[dict] = None):
+        super().__init__(workspace_id, config, context=context)
         self.api_url = CONFIG.addons.api.url
         self.api_key = CONFIG.addons.api.key
         self.header_name = CONFIG.addons.api.header_name
