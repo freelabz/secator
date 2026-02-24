@@ -110,6 +110,23 @@ def build_wordlists_reference() -> str:
     return "\n".join(lines)
 
 
+def build_output_types_reference() -> str:
+    """Build compact output types reference: name|queryable_fields."""
+    from secator.output_types import FINDING_TYPES
+    lines = []
+    for cls in FINDING_TYPES:
+        name = cls.get_name()
+        if hasattr(cls, '__dataclass_fields__'):
+            fields = ",".join(
+                f.name for f in cls.__dataclass_fields__.values()
+                if not f.name.startswith('_')
+            )
+        else:
+            fields = ""
+        lines.append(f"{name}|{fields}")
+    return "\n".join(lines)
+
+
 def get_system_prompt(mode: str) -> str:
     """Get system prompt for mode with tools/workflows filled in.
 

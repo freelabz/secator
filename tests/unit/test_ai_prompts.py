@@ -97,6 +97,20 @@ class TestPrompts(unittest.TestCase):
         # Should return string (may be empty if no wordlists configured)
         self.assertIsInstance(result, str)
 
+    def test_build_output_types_reference_format(self):
+        from secator.tasks.ai_prompts import build_output_types_reference
+        result = build_output_types_reference()
+        lines = result.strip().split('\n')
+        self.assertTrue(len(lines) > 0)
+        first_line = lines[0]
+        parts = first_line.split('|')
+        self.assertEqual(len(parts), 2, f"Expected 2 parts (name|fields), got: {first_line}")
+
+    def test_build_output_types_reference_has_vulnerability(self):
+        from secator.tasks.ai_prompts import build_output_types_reference
+        result = build_output_types_reference()
+        self.assertIn('vulnerability|', result)
+
 
 if __name__ == '__main__':
     unittest.main()
