@@ -75,7 +75,7 @@ class httpx(Http):
 	}
 	item_loaders = [JSONSerializer()]
 	install_pre = {'apk': ['chromium']}
-	install_version = 'v1.7.0'
+	install_version = 'v1.8.1'
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@[install_version]'
 	github_handle = 'projectdiscovery/httpx'
 	install_binary_name = 'httpx-toolkit'  # Rename to avoid conflict with Python httpx library
