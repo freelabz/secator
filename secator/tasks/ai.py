@@ -251,8 +251,7 @@ class ai(PythonRunner):
 			workspace_id=self.context.get("workspace_id") if self.context else None)
 
 		for iteration in range(max_iter):
-			if mode == "attack":
-				yield Info(message=f"Iteration {iteration + 1}/{max_iter}")
+			yield Info(message=f"Iteration {iteration + 1}/{max_iter}")
 
 			try:
 				# Call LLM
@@ -276,7 +275,7 @@ class ai(PythonRunner):
 						mode=mode,
 						model=model,
 						extra_data={
-							"iteration": iteration + 1 if mode == "attack" else None,
+							"iteration": iteration + 1,
 							"tokens": usage.get("tokens") if usage else None,
 							"cost": usage.get("cost") if usage else None,
 						},
@@ -285,15 +284,11 @@ class ai(PythonRunner):
 				# Add to history
 				history.add_assistant(response)
 
-				# If no actions, handle based on mode
+				# If no actions, warn and continue
 				if not actions:
-					if mode == "attack":
-						yield Warning(message="Could not parse actions")
-						history.add_user("Could not parse your actions. Please provide valid JSON actions.")
-						continue
-					else:
-						# Chat mode without actions - just return
-						return
+					yield Warning(message="Could not parse actions")
+					history.add_user("Could not parse your actions. Please provide valid JSON actions.")
+					continue
 
 				# Execute actions
 				for action in actions:
@@ -322,13 +317,11 @@ class ai(PythonRunner):
 						return
 
 				# Continue message for next iteration
-				if mode == "attack":
-					continue_msg = format_continue(iteration + 1, max_iter)
-					history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
+				continue_msg = format_continue(iteration + 1, max_iter)
+				history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
 
 			except Exception as e:
 				yield Error(message=f"Iteration failed: {e}")
 				logger.exception(f"{mode} iteration error")
 
-		if mode == "attack":
-			yield Info(message=f"Reached max iterations ({max_iter})")
+		yield Info(message=f"Reached max iterations ({max_iter})")
