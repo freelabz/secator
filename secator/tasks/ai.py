@@ -265,7 +265,8 @@ def _interactive_menu(options, title="Select an option"):
 		from rich.console import Console as RichConsole
 		buf = StringIO()
 		render_console = RichConsole(file=buf, force_terminal=True, width=console.width)
-		render_console.print(f"[dim]{'─' * 40}[/]")
+		w = console.width
+		render_console.print(f"[dim]{'─' * w}[/]")
 		render_console.print(f"[bold]{title}[/]\n")
 		for i, opt in enumerate(options):
 			is_selected = i == selected
@@ -286,7 +287,7 @@ def _interactive_menu(options, title="Select an option"):
 			render_console.print(label)
 			if opt.get("description") and not (opt.get("input") and in_input_mode):
 				render_console.print(f"     [gray35]{opt['description']}[/]")
-		render_console.print(f"\n[dim]{'─' * 40}[/]")
+		render_console.print(f"\n[dim]{'─' * w}[/]")
 		return buf.getvalue()
 
 	# Count total lines for clearing
@@ -431,7 +432,6 @@ class ai(PythonRunner):
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"yes": {"is_flag": True, "default": False, "short": "y", "help": "Auto-accept"},
-		"verbose": {"is_flag": True, "default": False, "short": "v", "help": "Verbose"},
 	}
 
 	def yielder(self) -> Generator:
@@ -482,6 +482,7 @@ class ai(PythonRunner):
 		ctx = ActionContext(
 			targets=targets, model=model, encryptor=encryptor, dry_run=dry_run,
 			auto_yes=self.run_opts.get("yes", False),
+			verbose=verbose,
 			workspace_id=self.context.get("workspace_id") if self.context else None)
 
 		iteration = 0
@@ -595,9 +596,12 @@ class ai(PythonRunner):
 
 			except Exception as e:
 				import litellm
-				yield Error(message=f"Iteration failed: {e}")
-				logger.exception(f"{mode} iteration error")
-				if isinstance(e, litellm.exceptions.APIError) and not isinstance(e, litellm.RateLimitError):
+				if isinstance(e, litellm.RateLimitError):
+					yield Warning(message="Rate limit exceeded - will retry in the next iteration")
+					return
+				yield Error.from_exception(e)
+				if isinstance(e, litellm.exceptions.APIError):
+					yield Error(message="API error occurred. Stopping.")
 					return
 
 		yield Info(message=f"Reached max iterations ({max_iter})")

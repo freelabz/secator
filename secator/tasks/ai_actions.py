@@ -25,6 +25,7 @@ class ActionContext:
     encryptor: Any = None
     dry_run: bool = False
     auto_yes: bool = False
+    verbose: bool = False
     workspace_id: Optional[str] = None
 
 
@@ -81,7 +82,7 @@ def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
         tpl = TemplateLoader(input={'type': 'task', 'name': name})
         run_opts = {
             "print_item": True,
-            "print_line": False,
+            "print_line": ctx.verbose,
             "print_cmd": True,
             "print_description": True,
             "print_progress": False,
@@ -123,7 +124,7 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
         tpl = TemplateLoader(name=f'workflows/{name}')
         run_opts = {
             "print_item": True,
-            "print_line": False,
+            "print_line": ctx.verbose,
             "print_cmd": True,
             "print_description": True,
             "print_start": True,
