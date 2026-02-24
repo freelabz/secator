@@ -89,6 +89,17 @@ def build_workflows_reference() -> str:
     return "\n".join(lines)
 
 
+def build_profiles_reference() -> str:
+    """Build compact profiles reference: name|description."""
+    from secator.loader import get_configs_by_type
+    profiles = get_configs_by_type('profile')
+    lines = []
+    for p in sorted(profiles, key=lambda x: x.name):
+        desc = getattr(p, 'description', '') or ''
+        lines.append(f"{p.name}|{desc}")
+    return "\n".join(lines)
+
+
 def get_system_prompt(mode: str) -> str:
     """Get system prompt for mode with tools/workflows filled in.
 

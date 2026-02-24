@@ -82,6 +82,15 @@ class TestPrompts(unittest.TestCase):
             parts = first_line.split('|')
             self.assertGreaterEqual(len(parts), 1, "Should have at least workflow name")
 
+    def test_build_profiles_reference_format(self):
+        from secator.tasks.ai_prompts import build_profiles_reference
+        result = build_profiles_reference()
+        if result:
+            lines = result.strip().split('\n')
+            first_line = lines[0]
+            parts = first_line.split('|')
+            self.assertGreaterEqual(len(parts), 1, "Should have at least profile name")
+
 
 if __name__ == '__main__':
     unittest.main()
