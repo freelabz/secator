@@ -598,7 +598,7 @@ class ai(PythonRunner):
 				import litellm
 				if isinstance(e, litellm.RateLimitError):
 					yield Warning(message="Rate limit exceeded - will retry in the next iteration")
-					return
+					continue
 				yield Error.from_exception(e)
 				if isinstance(e, litellm.exceptions.APIError):
 					yield Error(message="API error occurred. Stopping.")
