@@ -54,6 +54,24 @@ class TestPrompts(unittest.TestCase):
         # Should be compact JSON
         self.assertNotIn("\n", result)
 
+    def test_build_tasks_reference_format(self):
+        from secator.tasks.ai_prompts import build_tasks_reference
+        result = build_tasks_reference()
+        # Should be pipe-delimited format
+        lines = result.strip().split('\n')
+        self.assertTrue(len(lines) > 0)
+        # Each line should have name|description|options format
+        first_line = lines[0]
+        parts = first_line.split('|')
+        self.assertEqual(len(parts), 3, f"Expected 3 parts (name|desc|opts), got: {first_line}")
+
+    def test_build_tasks_reference_excludes_ai(self):
+        from secator.tasks.ai_prompts import build_tasks_reference
+        result = build_tasks_reference()
+        # Should not include the Ai task itself
+        self.assertNotIn('Ai|', result)
+        self.assertNotIn('ai|', result)
+
 
 if __name__ == '__main__':
     unittest.main()

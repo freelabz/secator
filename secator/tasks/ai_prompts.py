@@ -53,6 +53,31 @@ def get_workflows_list() -> str:
     return ", ".join(sorted(w.name for w in workflows))
 
 
+def build_tasks_reference() -> str:
+    """Build compact task reference: name|description|options."""
+    from secator.loader import discover_tasks
+    from secator.definitions import OPT_NOT_SUPPORTED
+
+    lines = []
+    for task_cls in sorted(discover_tasks(), key=lambda t: t.__name__):
+        if task_cls.__name__.lower() == "ai":
+            continue
+        name = task_cls.__name__
+        desc = (task_cls.__doc__ or "").strip().split('\n')[0][:50]
+
+        # Get task-specific options
+        task_opts = list(getattr(task_cls, 'opts', {}).keys())
+
+        # Get generic options that this task supports
+        opt_key_map = getattr(task_cls, 'opt_key_map', {})
+        generic_opts = [k for k, v in opt_key_map.items() if v != OPT_NOT_SUPPORTED]
+
+        all_opts = ",".join(sorted(set(task_opts + generic_opts)))
+        lines.append(f"{name}|{desc}|{all_opts}")
+
+    return "\n".join(lines)
+
+
 def get_system_prompt(mode: str) -> str:
     """Get system prompt for mode with tools/workflows filled in.
 
