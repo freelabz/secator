@@ -70,7 +70,7 @@ class feroxbuster(HttpFuzzer):
 	install_cmd_pre = {
 		'*': ['curl', 'bash']
 	}
-	install_version = 'v2.11.0'
+	install_version = 'v2.13.1'
 	install_cmd = (
 		f'cd /tmp && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash -s {CONFIG.dirs.bin}'  # noqa: E501
 	)

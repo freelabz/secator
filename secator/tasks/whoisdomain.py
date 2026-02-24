@@ -16,7 +16,7 @@ class whoisdomain(Command):
 	output_types = [Domain]
 	item_loaders = [JSONSerializer()]
 	version_flag = '-V'
-	install_version = '1.20230906.1'
+	install_version = '1.20250220.2'
 	install_cmd_pre = {'*': ['whois']}
 	install_cmd = 'pipx install whoisdomain==[install_version] --force'
 	install_github_bin = False
