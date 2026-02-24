@@ -228,6 +228,7 @@ def _interactive_menu(options, title="Select an option"):
 		tuple: (index, value) where value is typed text for input options, or None.
 		None: if user pressed Escape or Ctrl+C.
 	"""
+	import os
 	import sys
 	import tty
 	import termios
@@ -241,16 +242,31 @@ def _interactive_menu(options, title="Select an option"):
 
 	def _read_key():
 		"""Read a single keypress, handling escape sequences."""
-		ch = sys.stdin.read(1)
+		ch = os.read(fd, 1).decode()
 		if ch == '\x1b':
-			ch2 = sys.stdin.read(1)
-			if ch2 == '[':
-				ch3 = sys.stdin.read(1)
-				if ch3 == 'A':
-					return 'up'
-				elif ch3 == 'B':
-					return 'down'
-			return 'escape'
+			# Try to read more bytes (escape sequence)
+			buf = os.read(fd, 10).decode()
+			if not buf:
+				return 'escape'
+			seq = ch + buf
+			if seq == '\x1b[A':
+				return 'up'
+			elif seq == '\x1b[B':
+				return 'down'
+			elif seq == '\x1b[C':
+				return 'right'
+			elif seq == '\x1b[D':
+				return 'left'
+			elif seq == '\x1bOA':
+				return 'up'
+			elif seq == '\x1bOB':
+				return 'down'
+			elif seq == '\x1bOC':
+				return 'right'
+			elif seq == '\x1bOD':
+				return 'left'
+			# Ctrl+arrows, Shift+arrows, Alt+arrows, etc. — ignore
+			return 'ignore'
 		elif ch == '\r' or ch == '\n':
 			return 'enter'
 		elif ch == '\x03':
@@ -269,7 +285,7 @@ def _interactive_menu(options, title="Select an option"):
 		render_console = RichConsole(file=buf, force_terminal=True, width=console.width)
 		w = console.width
 		render_console.print(f"[dim]{'─' * w}[/]")
-		render_console.print(f"[bold]{title}[/]\n")
+		render_console.print(f"[bold white]{title}[/]\n")
 		for i, opt in enumerate(options):
 			is_selected = i == selected
 			prefix = "[bold cyan]❯[/]" if is_selected else " "
@@ -288,7 +304,7 @@ def _interactive_menu(options, title="Select an option"):
 					label = f"{prefix} {num} [dim]{opt['label']}[/]"
 			render_console.print(label)
 			if opt.get("description") and not (opt.get("input") and in_input_mode):
-				render_console.print(f"     [gray35]{opt['description']}[/]")
+				render_console.print(f"     [gray42]{opt['description']}[/]")
 		render_console.print(f"\n[dim]{'─' * w}[/]")
 		return buf.getvalue()
 
@@ -308,12 +324,24 @@ def _interactive_menu(options, title="Select an option"):
 			key = _read_key()
 			prev_output = output
 
-			if key == 'ctrl_c' or key == 'escape':
-				# Clear menu
+			if key == 'ctrl_c':
+				# Clear menu and exit
 				lines = _line_count(prev_output)
 				sys.stderr.write(f"\033[{lines}A\033[J")
 				sys.stderr.flush()
 				return None
+
+			elif key == 'escape':
+				if in_input_mode:
+					# Go back to menu selection
+					in_input_mode = False
+					typed = ""
+				else:
+					# Exit menu
+					lines = _line_count(prev_output)
+					sys.stderr.write(f"\033[{lines}A\033[J")
+					sys.stderr.flush()
+					return None
 
 			elif key == 'up' and not in_input_mode:
 				selected = (selected - 1) % len(options)
@@ -375,10 +403,14 @@ def _prompt_user(history, encryptor=None, mode="chat"):
 		None: to exit.
 	"""
 	try:
+		other_mode = "chat" if mode == "attack" else "attack"
+		switch_label = f"Switch to {other_mode} mode"
 		if mode == "attack":
 			options = [
 				{"label": "Continue attacking", "description": "Continue for N more iterations"},
 				{"label": "Summarize", "description": "Get a summary of findings so far"},
+				{"label": "Show raw", "description": "Print last response as copyable text"},
+				{"label": switch_label, "description": "Change mode with a new prompt", "input": True},
 				{"label": "Something else", "description": "Send custom instructions", "input": True},
 				{"label": "Exit"},
 			]
@@ -392,27 +424,37 @@ def _prompt_user(history, encryptor=None, mode="chat"):
 				return ("continue", n)
 			if idx == 1:  # Summarize
 				return ("summarize", None)
+			if idx == 2:  # Show raw
+				return ("show_raw", None)
+			if idx == 3:  # Switch mode
+				return ("switch_mode", value)
+			if idx == 4:  # Something else
+				user_msg = encryptor.encrypt(value) if encryptor else value
+				history.add_user(user_msg)
+				return ("follow_up", value)
+			if idx == 5:  # Exit
+				return None
+		else:
+			options = [
+				{"label": "Show raw", "description": "Print last response as copyable text"},
+				{"label": switch_label, "description": "Change mode with a new prompt", "input": True},
+				{"label": "Something else", "description": "Send custom instructions", "input": True},
+				{"label": "Exit"},
+			]
+			result = _interactive_menu(options, title="What's next?")
+			if result is None:
+				return None
+			idx, value = result
+			if idx == 0:  # Show raw
+				return ("show_raw", None)
+			if idx == 1:  # Switch mode
+				return ("switch_mode", value)
 			if idx == 2:  # Something else
 				user_msg = encryptor.encrypt(value) if encryptor else value
 				history.add_user(user_msg)
 				return ("follow_up", value)
 			if idx == 3:  # Exit
 				return None
-		else:
-			options = [
-				{"label": "Exit"},
-				{"label": "Something else", "description": "Send custom instructions", "input": True},
-			]
-			result = _interactive_menu(options, title="What's next?")
-			if result is None:
-				return None
-			idx, value = result
-			if idx == 0:  # Exit
-				return None
-			if idx == 1:  # Something else
-				user_msg = encryptor.encrypt(value) if encryptor else value
-				history.add_user(user_msg)
-				return ("follow_up", value)
 	except (KeyboardInterrupt, EOFError):
 		return None
 
@@ -495,7 +537,27 @@ class ai(PythonRunner):
 
 			try:
 				# Call LLM
-				result = call_llm(history.to_messages(), model, temp, api_base)
+				import random
+				_spinners = [
+					"Consulting the hive mind...",
+					"Asking the AI overlords...",
+					"Summoning digital spirits...",
+					"Brewing some cyber coffee...",
+					"Hacking the mainframe... just kidding",
+					"Teaching electrons to think...",
+					"Rolling digital dice...",
+					"Whispering to the neural network...",
+					"Poking the language model...",
+					"Reticulating splines...",
+				]
+				messages = history.to_messages()
+				est_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+				if est_tokens >= 1000:
+					token_str = f":arrow_up:{est_tokens/1000:.1f}k tokens"
+				else:
+					token_str = f":arrow_up:{est_tokens} tokens"
+				with console.status(f"[bold orange3]{random.choice(_spinners)}[/] [gray42] • {token_str}[/]", spinner="dots"):
+					result = call_llm(messages, model, temp, api_base)
 				response = result["content"]
 				usage = result.get("usage", {})
 
@@ -570,10 +632,15 @@ class ai(PythonRunner):
 						yield Info(message=f"Reached max iterations ({max_iter}). Following up with user.")
 					elif done:
 						yield Info(message=f"Following up with user.")
-					result = _prompt_user(history, encryptor, mode)
-					if result is None:
-						return
-					action, value = result
+					while True:
+						result = _prompt_user(history, encryptor, mode)
+						if result is None:
+							return
+						action, value = result
+						if action == "show_raw":
+							console.print(f"\n{response}\n")
+							continue
+						break
 					if action == "continue":
 						max_iter += value
 						done = False
@@ -586,7 +653,17 @@ class ai(PythonRunner):
 						yield Ai(content=summary_msg, ai_type="prompt")
 					elif action == "follow_up":
 						max_iter += 1
+						done = True
+						yield Ai(content=value, ai_type="prompt")
+					elif action == "switch_mode":
+						other_mode = "chat" if mode == "attack" else "attack"
+						mode = other_mode
+						history.add_system(get_system_prompt(mode))
+						user_msg = encryptor.encrypt(value) if encryptor else value
+						history.add_user(user_msg)
+						max_iter += 1
 						done = False
+						yield Info(message=f"Switched to {mode} mode")
 						yield Ai(content=value, ai_type="prompt")
 					elif action == "exit":
 						return

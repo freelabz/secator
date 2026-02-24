@@ -29,32 +29,34 @@ def is_markdown(text: str) -> bool:
 	return False
 
 
-def render_markdown_for_rich(text: str) -> str:
-	"""Render Markdown text for rich console output."""
+def render_markdown_for_rich(text: str, title: str = '') -> str:
+	"""Render Markdown text for rich console output, wrapped in a Panel."""
 	from rich.console import Console
 	from rich.markdown import Markdown
+	from rich.panel import Panel
 	from io import StringIO
 
 	console = Console(file=StringIO(), force_terminal=True, width=120)
 	md = Markdown(text)
-	console.print(md)
+	panel = Panel(md, title=title, title_align="left", border_style="dim", padding=(1, 2))
+	console.print(panel)
 	return console.file.getvalue()
 
 
 # AI content type configurations
 AI_TYPES = {
-	'prompt': {'label': 'USER PROMPT', 'color': 'blue'},
-	'response': {'label': 'AI RESPONSE', 'color': 'red'},
-	'summary': {'label': 'AI SUMMARY', 'color': 'green'},
-	'suggestion': {'label': 'AI SUGGESTION', 'color': 'cyan'},
-	'attack_summary': {'label': 'AI ATTACK SUMMARY', 'color': 'yellow'},
-	'task': {'label': 'RUN TASK', 'color': 'magenta'},
-	'workflow': {'label': 'RUN WORKFLOW', 'color': 'magenta'},
-	'scan': {'label': 'RUN SCAN', 'color': 'magenta'},
-	'shell': {'label': 'RUN SHELL', 'color': 'magenta'},
-	'shell_output': {'label': 'SHELL OUTPUT', 'color': 'dim white'},
-	'query': {'label': 'RUN QUERY', 'color': 'magenta'},
-	'stopped': {'label': 'AI STOP', 'color': 'orange3'},
+	'prompt': {'label': '❯', 'color': 'blue'},
+	'response': {'label': '🧠', 'color': 'red'},
+	'summary': {'label': '🧠', 'color': 'white'},
+	'suggestion': {'label': '🧠', 'color': 'cyan'},
+	'attack_summary': {'label': '🧠', 'color': 'yellow'},
+	'task': {'label': '☐', 'color': 'magenta'},
+	'workflow': {'label': '☐', 'color': 'magenta'},
+	'scan': {'label': '☐', 'color': 'magenta'},
+	'shell': {'label': '☐', 'color': 'magenta'},
+	'shell_output': {'label': '🐚', 'color': 'dim white'},
+	'query': {'label': '❓', 'color': 'magenta'},
+	'stopped': {'label': '🛑', 'color': 'orange3'},
 	'report': {'label': 'AI REPORT', 'color': 'cyan'}
 }
 
@@ -89,12 +91,12 @@ class Ai(OutputType):
 			iteration = self.extra_data.get('iteration', '')
 			max_iter = self.extra_data.get('max_iterations', '')
 			if max_iter:
-				label = f'{label} {iteration}/{max_iter}'
+				label = f'{label} [gray42]({iteration}/{max_iter})[/]'
 			else:
-				label = f'{label} {iteration}'
+				label = f'{label} [gray42]({iteration})[/]'
 
 		# Build header with robot icon
-		s = rf'\[[bold {color}]{label}[/]]'
+		s = rf'[bold {color}]{label}[/]'
 
 		# Build usage info string (dimmed, at end) for response and prompt types
 		usage_str = ''
@@ -113,7 +115,7 @@ class Ai(OutputType):
 					else:
 						parts.append(f' • {tokens} tokens')
 				if cost:
-					parts.append(f'${cost:.4f}')
+					parts.append(f' - ${cost:.4f}')
 				usage_str = ' '.join(parts)
 
 		# Filter out internal fields from extra_data display
@@ -123,7 +125,7 @@ class Ai(OutputType):
 		# Build suffix (usage + extra_data) as Rich markup
 		suffix = ''
 		if usage_str:
-			suffix += f' [dim blue]{usage_str}[/]'
+			suffix += f' [gray42]{usage_str}[/]'
 		if display_extra:
 			for k, v in display_extra.items():
 				suffix += f'\n    [bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]'
@@ -131,17 +133,15 @@ class Ai(OutputType):
 		# Render content with markdown support
 		content = self.content
 		if is_markdown(content):
-			# Markdown is pre-rendered to ANSI by render_markdown_for_rich
-			header = rich_to_ansi(s)
-			md_rendered = render_markdown_for_rich(content)
-			md_indented = '\n    ' + md_rendered.replace('\n', '\n    ')
-			result = header + md_indented.rstrip()
-			if suffix:
-				result += rich_to_ansi(suffix)
-			return result
+			# Markdown rendered inside a Rich Panel with header as title
+			title = s + suffix
+			return render_markdown_for_rich(content, title=title).rstrip()
 
 		# Build full Rich markup string, then convert once
 		content_indented = content.replace('\n', '\n    ')
-		s += f' {_s(content_indented)}'
+		if self.ai_type == 'prompt':
+			s = f'[on grey23] {s} {_s(content_indented)} [/]'
+		else:
+			s += f' {_s(content_indented)}'
 		s += suffix
 		return rich_to_ansi(s)
