@@ -147,12 +147,10 @@ class TestAITask(unittest.TestCase):
 
     def test_ai_task_output_types(self):
         from secator.tasks.ai import ai
-        from secator.output_types import Ai, Error, Info, Warning, Vulnerability
+        from secator.output_types import Ai, Vulnerability
 
+        # AI task uses FINDING_TYPES which includes Ai and Vulnerability
         self.assertIn(Ai, ai.output_types)
-        self.assertIn(Error, ai.output_types)
-        self.assertIn(Info, ai.output_types)
-        self.assertIn(Warning, ai.output_types)
         self.assertIn(Vulnerability, ai.output_types)
 
     def test_ai_task_tags(self):

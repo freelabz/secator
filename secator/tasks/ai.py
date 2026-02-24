@@ -183,7 +183,7 @@ def call_llm(
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
-	output_types = FINDING_TYPES + [Info, Warning, Error]
+	output_types = FINDING_TYPES
 	tags = ["ai", "analysis", "pentest"]
 	install_cmd = "pip install litellm"
 	default_inputs = ''
@@ -220,42 +220,44 @@ class ai(PythonRunner):
 		if self.run_opts.get("sensitive", True):
 			encryptor = SensitiveDataEncryptor()
 
-		# Route to mode
-		if mode == "attack":
-			yield from self._run_attack(prompt, targets, model, encryptor)
-		else:
-			yield from self._run_chat(prompt, targets, model, encryptor)
+		# Run unified loop for both modes
+		yield from self._run_loop(mode, prompt, targets, model, encryptor)
 
 	def _detect_mode(self, prompt: str) -> str:
 		"""Detect mode from prompt keywords."""
 		keywords = ["attack", "exploit", "scan", "test", "pentest", "hack", "fuzz", "enumerate"]
 		return "attack" if any(kw in prompt.lower() for kw in keywords) else "chat"
 
-	def _run_attack(self, prompt: str, targets: List[str], model: str,
-					encryptor: Optional[SensitiveDataEncryptor]) -> Generator:
-		"""Run attack loop."""
-		max_iter = int(self.run_opts.get("max_iterations", 10))
-		temp, api_base = float(self.run_opts.get("temperature", 0.7)), self.run_opts.get("api_base")
-		dry_run, verbose = self.run_opts.get("dry_run", False), self.run_opts.get("verbose", False)
+	def _run_loop(self, mode: str, prompt: str, targets: List[str], model: str,
+				  encryptor: Optional[SensitiveDataEncryptor]) -> Generator:
+		"""Run unified loop for both attack and chat modes."""
+		# Chat mode uses fewer iterations (queries only), attack mode uses more
+		max_iter = int(self.run_opts.get("max_iterations", 10)) if mode == "attack" else 3
+		temp = float(self.run_opts.get("temperature", 0.7))
+		api_base = self.run_opts.get("api_base")
+		dry_run = self.run_opts.get("dry_run", False)
+		verbose = self.run_opts.get("verbose", False)
 
+		# Initialize chat history with appropriate system prompt
 		history = ChatHistory()
-		history.add_system(get_system_prompt("attack"))
+		history.add_system(get_system_prompt(mode))
 		user_msg = format_user_initial(targets, prompt)
 		history.add_user(encryptor.encrypt(user_msg) if encryptor else user_msg)
-		yield Ai(content=prompt or "Starting attack...", ai_type="prompt")
+		yield Ai(content=prompt or f"Starting {mode}...", ai_type="prompt")
 
+		# Create action context
 		ctx = ActionContext(
 			targets=targets, model=model, encryptor=encryptor, dry_run=dry_run,
 			auto_yes=self.run_opts.get("yes", False),
 			workspace_id=self.context.get("workspace_id") if self.context else None)
 
 		for iteration in range(max_iter):
-			yield Info(message=f"Iteration {iteration + 1}/{max_iter}")
+			if mode == "attack":
+				yield Info(message=f"Iteration {iteration + 1}/{max_iter}")
 
 			try:
 				# Call LLM
 				result = call_llm(history.to_messages(), model, temp, api_base)
-
 				response = result["content"]
 				usage = result.get("usage", {})
 
@@ -272,10 +274,10 @@ class ai(PythonRunner):
 					yield Ai(
 						content=display_text,
 						ai_type="response",
-						mode="attack",
+						mode=mode,
 						model=model,
 						extra_data={
-							"iteration": iteration + 1,
+							"iteration": iteration + 1 if mode == "attack" else None,
 							"tokens": usage.get("tokens") if usage else None,
 							"cost": usage.get("cost") if usage else None,
 						},
@@ -284,17 +286,24 @@ class ai(PythonRunner):
 				# Add to history
 				history.add_assistant(response)
 
+				# If no actions, handle based on mode
 				if not actions:
-					yield Warning(message="Could not parse actions")
-					history.add_user("Could not parse your actions")
-					continue
+					if mode == "attack":
+						yield Warning(message="Could not parse actions")
+						history.add_user("Could not parse your actions. Please provide valid JSON actions.")
+						continue
+					else:
+						# Chat mode without actions - just return
+						return
 
 				# Execute actions
 				for action in actions:
 					action_type = action.get("action", "")
 					action_results = []
+
 					for item in dispatch_action(action, ctx):
 						action_results.append(item)
+						# Don't yield query results directly - they go to history for LLM
 						if action_type != "query":
 							yield item
 
@@ -313,44 +322,14 @@ class ai(PythonRunner):
 					if action_type == "done":
 						return
 
-				continue_msg = format_continue(iteration + 1, max_iter)
-				history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
+				# Continue message for next iteration
+				if mode == "attack":
+					continue_msg = format_continue(iteration + 1, max_iter)
+					history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
 
 			except Exception as e:
 				yield Error(message=f"Iteration failed: {e}")
-				logger.exception("Attack iteration error")
+				logger.exception(f"{mode} iteration error")
 
-		yield Info(message=f"Reached max iterations ({max_iter})")
-
-	def _run_chat(self, prompt: str, targets: List[str], model: str,
-				  encryptor: Optional[SensitiveDataEncryptor]) -> Generator:
-		"""Run chat mode for Q&A."""
-		temp, api_base = float(self.run_opts.get("temperature", 0.7)), self.run_opts.get("api_base")
-		history = ChatHistory()
-		history.add_system(get_system_prompt("chat"))
-		user_msg = format_user_initial(targets, prompt)
-		history.add_user(encryptor.encrypt(user_msg) if encryptor else user_msg)
-		yield Ai(content=prompt, ai_type="prompt")
-
-		try:
-			result = call_llm(history.to_messages(), model, temp, api_base)
-
-			response = result["content"]
-			usage = result.get("usage", {})
-
-			if encryptor:
-				response = encryptor.decrypt(response)
-
-			yield Ai(
-				content=response,
-				ai_type="response",
-				mode="chat",
-				model=model,
-				extra_data={
-					"tokens": usage.get("tokens") if usage else None,
-					"cost": usage.get("cost") if usage else None,
-				},
-			)
-
-		except Exception as e:
-			yield Error(message=f"Chat failed: {e}")
+		if mode == "attack":
+			yield Info(message=f"Reached max iterations ({max_iter})")
