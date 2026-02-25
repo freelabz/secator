@@ -134,7 +134,6 @@ class ai(PythonRunner):
 		scope = "current" if previous_results else "workspace"
 		ctx = ActionContext(
 			targets=targets, model=model, encryptor=encryptor, dry_run=dry_run,
-			auto_yes=self.run_opts.get("yes", False),
 			verbose=verbose,
 			workspace_id=self.context.get("workspace_id") if self.context else None,
 			scan_id=self.context.get("scan_id") if self.context else None,

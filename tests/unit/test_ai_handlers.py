@@ -17,7 +17,6 @@ class TestActionContext(unittest.TestCase):
         self.assertIn('model', field_names)
         self.assertIn('encryptor', field_names)
         self.assertIn('dry_run', field_names)
-        self.assertIn('auto_yes', field_names)
         self.assertIn('workspace_id', field_names)
 
     def test_action_context_defaults(self):
@@ -29,7 +28,6 @@ class TestActionContext(unittest.TestCase):
         self.assertEqual(ctx.model, 'gpt-4')
         self.assertIsNone(ctx.encryptor)
         self.assertFalse(ctx.dry_run)
-        self.assertFalse(ctx.auto_yes)
         self.assertIsNone(ctx.workspace_id)
 
     def test_action_context_with_all_params(self):
@@ -42,7 +40,6 @@ class TestActionContext(unittest.TestCase):
             model='claude-3',
             encryptor=encryptor,
             dry_run=True,
-            auto_yes=True,
             workspace_id='ws123',
         )
 
@@ -50,7 +47,6 @@ class TestActionContext(unittest.TestCase):
         self.assertEqual(ctx.model, 'claude-3')
         self.assertIsNotNone(ctx.encryptor)
         self.assertTrue(ctx.dry_run)
-        self.assertTrue(ctx.auto_yes)
         self.assertEqual(ctx.workspace_id, 'ws123')
 
 

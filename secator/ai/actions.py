@@ -17,14 +17,12 @@ class ActionContext:
         model: LLM model name
         encryptor: Optional SensitiveDataEncryptor instance
         dry_run: If True, show actions without executing
-        auto_yes: If True, auto-accept prompts
         workspace_id: Optional workspace ID for queries
     """
     targets: List[str]
     model: str
     encryptor: Any = None
     dry_run: bool = False
-    auto_yes: bool = False
     verbose: bool = False
     workspace_id: Optional[str] = None
     scan_id: Optional[str] = None

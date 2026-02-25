@@ -67,7 +67,6 @@ class TestActionDispatch(unittest.TestCase):
         self.assertEqual(ctx.targets, ["example.com"])
         self.assertEqual(ctx.model, "gpt-4")
         self.assertFalse(ctx.dry_run)
-        self.assertFalse(ctx.auto_yes)
         self.assertIsNone(ctx.encryptor)
 
 
