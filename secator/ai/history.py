@@ -57,7 +57,7 @@ class ChatHistory:
         """Estimate token count (1 token ~ 4 chars)."""
         return sum(len(m.get("content", "")) for m in self.messages) // 4
 
-    def maybe_summarize(self, model: str, api_base: Optional[str] = None,
+    def maybe_summarize(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
                         threshold: int = 30000) -> Tuple[bool, int, int]:
         """Summarize history if estimated token count exceeds threshold.
 
@@ -73,11 +73,11 @@ class ChatHistory:
         if old_tokens <= threshold:
             return False, old_tokens, old_tokens
 
-        self._summarize_with_llm(model, api_base, threshold)
+        self._summarize_with_llm(model, api_base, api_key, threshold)
         new_tokens = self.est_tokens()
         return True, old_tokens, new_tokens
 
-    def _summarize_with_llm(self, model: str, api_base: Optional[str] = None,
+    def _summarize_with_llm(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
                             threshold: int = 30000) -> None:
         """Summarize non-system messages using an LLM, keeping the initial system prompt intact."""
         if len(self.messages) <= 2:
@@ -105,7 +105,7 @@ class ChatHistory:
         from secator.utils import format_token_count
         token_str = format_token_count(self.est_tokens(), icon='arrow_up')
         with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
-            result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base)
+            result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key)
 
         self.messages = []
         if initial_system:

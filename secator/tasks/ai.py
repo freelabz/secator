@@ -1,5 +1,6 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task - simplified implementation."""
+import os
 import random
 from pathlib import Path
 from typing import Generator, List, Optional
@@ -8,7 +9,7 @@ from time import sleep
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import LLM_SPINNER_MESSAGES
+from secator.definitions import ADDONS_ENABLED, LLM_SPINNER_MESSAGES
 from secator.output_types import (
 	Ai, Stat, Progress, Error, Info, Warning, State, FINDING_TYPES, OutputType
 )
@@ -22,6 +23,9 @@ from secator.ai.prompts import get_system_prompt, format_user_initial, format_to
 from secator.ai.utils import call_llm, parse_actions, strip_json_from_response, prompt_user
 
 
+DEFAULT_API_KEY = CONFIG.addons.ai.api_key or os.environ.get('ANTHROPIC_API_KEY', '')
+
+
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
@@ -33,6 +37,7 @@ class ai(PythonRunner):
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
+		"api_key": {"type": str, "default": DEFAULT_API_KEY, "help": "API key for LLM provider"},
 		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "help": "API base URL"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
 		"max_iterations": {"type": int, "default": 10, "help": "Max iterations"},
@@ -46,10 +51,8 @@ class ai(PythonRunner):
 
 	def yielder(self) -> Generator:
 		"""Execute AI task."""
-		try:
-			import litellm  # noqa
-		except ImportError:
-			yield Error(message="litellm required. Install: pip install litellm")
+		if not ADDONS_ENABLED['ai']:
+			yield Error(message='Missing ai addon: please run "secator install addons ai".')
 			return
 
 		prompt = self.run_opts.get("prompt", "")
@@ -58,8 +61,9 @@ class ai(PythonRunner):
 		model = self.run_opts.get("model")
 		intent_model = self.run_opts.get("intent_model")
 		api_base = self.run_opts.get("api_base")
+		api_key = self.run_opts.get("api_key")
 		targets = self.inputs
-		mode = self.run_opts.get("mode", "") or self._detect_mode(prompt, intent_model, api_base)
+		mode = self.run_opts.get("mode", "") or self._detect_mode(prompt, intent_model, api_base, api_key)
 
 		yield Info(message=f"Using model: {model}, mode: {mode}")
 
@@ -84,7 +88,7 @@ class ai(PythonRunner):
 		# Run unified loop for both modes
 		yield from self._run_loop(mode, prompt, targets, model, encryptor, previous_results)
 
-	def _detect_mode(self, prompt: str, intent_model: str, api_base: str = None) -> str:
+	def _detect_mode(self, prompt: str, intent_model: str, api_base: str = None, api_key: str = None) -> str:
 		"""Detect mode using a fast LLM call for intent analysis."""
 		if not prompt:
 			return "chat"
@@ -97,7 +101,7 @@ class ai(PythonRunner):
 				f"Prompt: {prompt}"
 			)}]
 			with console.status("[bold orange3]Detecting intent...[/]", spinner="dots"):
-				result = call_llm(messages, intent_model, temperature=0.3, api_base=api_base)
+				result = call_llm(messages, intent_model, temperature=0.3, api_base=api_base, api_key=api_key)
 			mode = result["content"].strip().lower()
 			if mode in ("attack", "chat"):
 				console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
@@ -111,6 +115,8 @@ class ai(PythonRunner):
 		"""Run unified loop for both attack and chat modes."""
 		max_iter = int(self.run_opts.get("max_iterations", 10))
 		temp = float(self.run_opts.get("temperature", 0.7))
+		api_key = self.run_opts.get("api_key")
+		yield Info(message=f"API Key: {api_key}")
 		api_base = self.run_opts.get("api_base")
 		max_tokens = int(self.run_opts.get("max_tokens", CONFIG.addons.ai.max_tokens))
 		dry_run = self.run_opts.get("dry_run", False)
@@ -145,7 +151,8 @@ class ai(PythonRunner):
 
 			try:
 				# Auto-summarize if token count exceeds threshold
-				summarized, old_tokens, new_tokens = history.maybe_summarize(model, api_base, threshold=max_tokens)
+				summarized, old_tokens, new_tokens = history.maybe_summarize(
+					model, api_base=api_base, api_key=api_key, threshold=max_tokens)
 				if summarized:
 					yield Ai(
 						content=f"Chat history compacted: {old_tokens} -> {new_tokens} estimated tokens",
@@ -157,7 +164,7 @@ class ai(PythonRunner):
 				token_str = format_token_count(history.est_tokens(), icon='arrow_up')
 				msg = f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/] [gray42] • {token_str}[/]"
 				with console.status(msg, spinner="dots"):
-					result = call_llm(messages, model, temp, api_base)
+					result = call_llm(messages, model, temp, api_base, api_key)
 				response = result["content"]
 				usage = result.get("usage", {})
 

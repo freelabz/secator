@@ -15,14 +15,20 @@ _llm_initialized = False
 _llm_handler = None
 
 
-def init_llm():
+def init_llm(api_key: Optional[str] = None):
 	"""Initialize litellm once (singleton pattern to avoid callback accumulation)."""
 	global _llm_initialized, _llm_handler
+
+	import litellm
+
+	# Set API key if provided (can be called multiple times)
+	if api_key:
+		litellm.api_key = api_key
 
 	if _llm_initialized:
 		return
 
-	import litellm
+
 	from litellm.integrations.custom_logger import CustomLogger
 
 	# Suppress litellm's own debug logs unless 'litellm.debug' is explicitly set
@@ -77,12 +83,13 @@ def call_llm(
 	model: str,
 	temperature: float = 0.7,
 	api_base: Optional[str] = None,
+	api_key: Optional[str] = None,
 ) -> Dict:
 	"""Call litellm completion and return response with usage."""
 	import litellm
 
 	# Initialize litellm once (avoids callback accumulation)
-	init_llm()
+	init_llm(api_key=api_key)
 
 	response = litellm.completion(
 		model=model,
