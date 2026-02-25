@@ -179,7 +179,8 @@ for addon, module in [
 	('redis', 'redis'),
 	('dev', 'flake8'),
 	('trace', 'memray'),
-	('build', 'hatch')
+	('build', 'hatch'),
+	('ai', 'litellm')
 ]:
 	ADDONS_ENABLED[addon] = is_importable(module)
 

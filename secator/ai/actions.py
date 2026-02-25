@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional
 
-from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
+from secator.output_types import Ai, Error, Info, Warning
 from secator.template import TemplateLoader
 
 

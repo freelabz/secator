@@ -1709,6 +1709,19 @@ def install_build():
 	)
 
 
+@addons.command('ai')
+def install_ai():
+	"Install AI addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[ai]',
+		title='AI addon',
+		next_steps=[
+			'Run [bold green4]secator config set addons.ai.default_model <MODEL>[/] to set default model.',
+			'Run [bold green4]secator x ai <TARGET> -p "your prompt"[/] to run AI-powered pentesting.',
+		]
+	)
+
+
 @install.group()
 def langs():
 	"Install languages."

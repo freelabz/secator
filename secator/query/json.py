@@ -58,7 +58,8 @@ class JsonBackend(QueryBackend):
 
 	name = "json"
 
-	def __init__(self, workspace_id: str, config: Optional[dict] = None, context: Optional[dict] = None, results: Optional[list] = None):
+	def __init__(self, workspace_id: str, config: Optional[dict] = None,
+				 context: Optional[dict] = None, results: Optional[list] = None):
 		super().__init__(workspace_id, config, context=context)
 		self._results = results
 		self._findings_cache = None

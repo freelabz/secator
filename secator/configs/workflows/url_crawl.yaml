@@ -96,3 +96,6 @@ tasks:
         field: value
         condition: item.name == 'email_address'
       if: opts.hunt_secrets and not opts.passive
+  ai:
+    description: Make an AI-powered analysis
+    prompt: Analyze the previous results

@@ -59,10 +59,10 @@ class QueryBackend(ABC):
             exclude_fields = []
         safe_query = self._merge_query(query)
         debug_ctx = {k: v for k, v in self.context.items() if k != 'results'}
-        debug(f'context', sub=f'query.{self.name}', obj=debug_ctx)
+        debug('context', sub=f'query.{self.name}', obj=debug_ctx)
         if hasattr(self, '_results') and self._results is not None:
             debug(f'{len(self._results)} pre-loaded results', sub=f'query.{self.name}')
-        debug(f'search', sub=f'query.{self.name}', obj=safe_query)
+        debug('search', sub=f'query.{self.name}', obj=safe_query)
         results = self._execute_search(safe_query, limit, exclude_fields)
         debug(f'{len(results)} results', sub=f'query.{self.name}')
         return results

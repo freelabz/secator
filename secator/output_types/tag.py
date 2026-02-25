@@ -77,7 +77,8 @@ class Tag(OutputType):
 			small_content = True
 
 		# Check if this is an AI-generated summary (don't crop these)
-		is_ai_content = self.category == 'ai' or self.name in ('ai_summary', 'ai_suggestions', 'attack_summary', 'attack_report')
+		ai_names = ('ai_summary', 'ai_suggestions', 'attack_summary', 'attack_report')
+		is_ai_content = self.category == 'ai' or self.name in ai_names
 
 		if small_content:
 			s += f' [bold orange4]{content}[/]'

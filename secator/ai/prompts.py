@@ -1,4 +1,5 @@
 """Compact prompt templates for AI task."""
+# flake8: noqa: E501
 import json
 from typing import Any, Dict, List
 from string import Template

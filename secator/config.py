@@ -204,14 +204,13 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
-class AI(StrictModel):
-	"""AI task configuration."""
+class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
 	api_base: str = ''
 	default_model: str = 'claude-sonnet-4-6'
-	intent_model: str = 'claude-haiku-4-5'  # fast model for intent analysis
-	execution_model: str = ''  # defaults to default_model if unset
+	intent_model: str = 'claude-haiku-4-5'
+	execution_model: str = ''
 	temperature: float = 0.7
 	max_tokens: int = 30000
 	max_results: int = 500
@@ -248,6 +247,7 @@ class Addons(StrictModel):
 	mongodb: MongodbAddon = MongodbAddon()
 	vulners: VulnersAddon = VulnersAddon()
 	api: ApiAddon = ApiAddon()
+	ai: AiAddon = AiAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -269,7 +269,6 @@ class SecatorConfig(StrictModel):
 	security: Security = Security()
 	providers: Providers = Providers()
 	offline_mode: bool = False
-	ai: AI = AI()
 
 
 class Config(DotMap):

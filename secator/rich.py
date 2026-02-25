@@ -155,7 +155,6 @@ class InteractiveMenu:
 
 	def show(self):
 		"""Display the menu and handle input. Returns (index, value) or None."""
-		import os
 		import sys
 		import tty
 		import termios

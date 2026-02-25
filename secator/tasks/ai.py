@@ -9,10 +9,12 @@ from time import sleep
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import LLM_SPINNER_MESSAGES
-from secator.output_types import Ai, Stat, Progress, Error, Info, Warning, State, Vulnerability, FINDING_TYPES, OutputType
+from secator.output_types import (
+	Ai, Stat, Progress, Error, Info, Warning, State, FINDING_TYPES, OutputType
+)
 from secator.runners import PythonRunner
-from secator.rich import console, InteractiveMenu
-from secator.utils import format_object, format_token_count
+from secator.rich import console
+from secator.utils import format_token_count
 from secator.ai.actions import ActionContext, dispatch_action
 from secator.ai.encryption import SensitiveDataEncryptor
 from secator.ai.history import ChatHistory
@@ -30,15 +32,15 @@ class ai(PythonRunner):
 	opts = {
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
-		"model": {"type": str, "default": CONFIG.ai.default_model, "help": "LLM model"},
-		"api_base": {"type": str, "default": CONFIG.ai.api_base, "help": "API base URL"},
+		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
+		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "help": "API base URL"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
 		"max_iterations": {"type": int, "default": 10, "help": "Max iterations"},
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"yes": {"is_flag": True, "default": False, "short": "y", "help": "Auto-accept"},
-		"intent_model": {"type": str, "default": CONFIG.ai.intent_model, "help": "Model for intent detection"},
-		"max_tokens": {"type": int, "default": CONFIG.ai.max_tokens, "help": "Max tokens before compacting history"},
+		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
+		"max_tokens": {"type": int, "default": CONFIG.addons.ai.max_tokens, "help": "Max tokens before compacting history"},
 		"interactive": {"is_flag": True, "default": True, "help": "Prompt user for follow-up after completion"},
 	}
 
@@ -110,7 +112,7 @@ class ai(PythonRunner):
 		max_iter = int(self.run_opts.get("max_iterations", 10))
 		temp = float(self.run_opts.get("temperature", 0.7))
 		api_base = self.run_opts.get("api_base")
-		max_tokens = int(self.run_opts.get("max_tokens", CONFIG.ai.max_tokens))
+		max_tokens = int(self.run_opts.get("max_tokens", CONFIG.addons.ai.max_tokens))
 		dry_run = self.run_opts.get("dry_run", False)
 		verbose = self.run_opts.get("verbose", False)
 		interactive = self.run_opts.get("interactive", True)
@@ -153,7 +155,8 @@ class ai(PythonRunner):
 				# Call LLM
 				messages = history.to_messages()
 				token_str = format_token_count(history.est_tokens(), icon='arrow_up')
-				with console.status(f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/] [gray42] • {token_str}[/]", spinner="dots"):
+				msg = f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/] [gray42] • {token_str}[/]"
+				with console.status(msg, spinner="dots"):
 					result = call_llm(messages, model, temp, api_base)
 				response = result["content"]
 				usage = result.get("usage", {})
@@ -240,7 +243,7 @@ class ai(PythonRunner):
 					if (iteration == max_iter):
 						yield Info(message=f"Reached max iterations ({max_iter}). Following up with user.")
 					elif done:
-						yield Info(message=f"Following up with user.")
+						yield Info(message="Following up with user.")
 					while True:
 						result = prompt_user(history, encryptor, mode)
 						if result is None:
