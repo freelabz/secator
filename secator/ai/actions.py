@@ -28,6 +28,7 @@ class ActionContext:
     scan_id: Optional[str] = None
     workflow_id: Optional[str] = None
     task_id: Optional[str] = None
+    drivers: List[str] = field(default_factory=list)
     scope: str = "workspace"
     results: Optional[List[Dict]] = None
     _query_engine: Any = field(default=None, repr=False)
@@ -36,7 +37,7 @@ class ActionContext:
         """Get or create a QueryEngine (cached for reuse across queries)."""
         if self._query_engine is None:
             from secator.query import QueryEngine
-            query_context = {}
+            query_context = {"drivers": self.drivers}
             if self.scope == "current":
                 query_context['results'] = self.results or []
                 for key in ('scan_id', 'workflow_id', 'task_id'):

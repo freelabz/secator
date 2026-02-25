@@ -7,6 +7,8 @@ from typing import Generator, List, Optional
 
 from time import sleep
 
+from pydantic.functional_validators import InstanceOf
+
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import ADDONS_ENABLED, LLM_SPINNER_MESSAGES
@@ -14,7 +16,7 @@ from secator.output_types import (
 	Ai, Stat, Progress, Error, Info, Warning, State, FINDING_TYPES, OutputType
 )
 from secator.runners import PythonRunner
-from secator.rich import console
+from secator.rich import console, maybe_status
 from secator.utils import format_token_count
 from secator.ai.actions import ActionContext, dispatch_action
 from secator.ai.encryption import SensitiveDataEncryptor
@@ -36,7 +38,7 @@ class ai(PythonRunner):
 	opts = {
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
-		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
+		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model", "choices": ["claude-sonnet-4-6", "claude-haiku-4-5"]},
 		"api_key": {"type": str, "default": DEFAULT_API_KEY, "help": "API key for LLM provider"},
 		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "help": "API base URL"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
@@ -100,7 +102,7 @@ class ai(PythonRunner):
 				"Respond with ONLY the single word 'attack' or 'chat'.\n\n"
 				f"Prompt: {prompt}"
 			)}]
-			with console.status("[bold orange3]Detecting intent...[/]", spinner="dots"):
+			with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 				result = call_llm(messages, intent_model, temperature=0.3, api_base=api_base, api_key=api_key)
 			mode = result["content"].strip().lower()
 			if mode in ("attack", "chat"):
@@ -135,12 +137,14 @@ class ai(PythonRunner):
 		ctx = ActionContext(
 			targets=targets, model=model, encryptor=encryptor, dry_run=dry_run,
 			verbose=verbose,
+			drivers=self.context.get("drivers") if self.context else [],
 			workspace_id=self.context.get("workspace_id") if self.context else None,
 			scan_id=self.context.get("scan_id") if self.context else None,
 			workflow_id=self.context.get("workflow_id") if self.context else None,
 			task_id=self.context.get("task_id") if self.context else None,
 			scope=scope,
 			results=previous_results or [])
+		yield Info(message=repr(ctx))
 
 		iteration = 0
 		done = False
@@ -162,7 +166,7 @@ class ai(PythonRunner):
 				messages = history.to_messages()
 				token_str = format_token_count(history.est_tokens(), icon='arrow_up')
 				msg = f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/] [gray42] • {token_str}[/]"
-				with console.status(msg, spinner="dots"):
+				with maybe_status(msg, spinner="dots"):
 					result = call_llm(messages, model, temp, api_base, api_key)
 				response = result["content"]
 				usage = result.get("usage", {})
@@ -210,6 +214,9 @@ class ai(PythonRunner):
 							continue
 						if isinstance(item, Ai):
 							self.add_result(item)
+							# Feed shell output back to the LLM
+							if item.ai_type == "shell_output":
+								action_results.append({"output": item.content})
 							continue
 						if isinstance(item, OutputType):
 							self.add_result(item, print=False)  # only for Secator findings

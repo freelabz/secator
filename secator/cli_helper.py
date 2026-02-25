@@ -95,6 +95,7 @@ def decorate_command_options(opts):
 			conf.pop('pre_process', None)
 			conf.pop('requires_sudo', None)
 			conf.pop('prefix', None)
+			choices = conf.pop('choices', None)
 			applies_to = conf.pop('applies_to', None)
 			default_from = conf.pop('default_from', None)
 			reverse = conf.pop('reverse', False)
@@ -115,6 +116,9 @@ def decorate_command_options(opts):
 				conf['help'] += rf' \[[dim]{applies_to_str}[/]]'
 			if default_from:
 				conf['help'] += rf' \[[dim]default from: [dim yellow3]{default_from}[/][/]]'
+			if choices:
+				choices_str = ', '.join([f'[dim yellow3]{c}[/]' for c in choices])
+				conf['help'] += rf' \[[dim]choices: {choices_str}[/]]'
 			args = [long, short]
 			if internal_name:
 				args.append(internal_name)

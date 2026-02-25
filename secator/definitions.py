@@ -1,11 +1,16 @@
 #!/usr/bin/python
 
 import os
+import sys
 
 from importlib.metadata import version
 
 from secator.config import CONFIG, ROOT_FOLDER
 
+# Detect if running inside a worker process (Celery or Airflow)
+IN_WORKER = bool(
+	sys.argv and ('secator.celery.app' in sys.argv or 'worker' in sys.argv)
+) or bool(os.environ.get('AIRFLOW_CTX_DAG_ID'))
 
 # Globals
 VERSION = version('secator')

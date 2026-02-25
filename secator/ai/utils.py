@@ -217,6 +217,9 @@ def prompt_user(history, encryptor=None, mode="chat"):
 		tuple: (action, value) where action is 'continue', 'follow_up', or 'summarize'.
 		None: to exit.
 	"""
+	from secator.definitions import IN_WORKER
+	if IN_WORKER:
+		return ("exit", None)
 	from secator.rich import InteractiveMenu
 
 	try:

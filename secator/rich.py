@@ -1,4 +1,5 @@
 import operator
+from contextlib import nullcontext
 from pathlib import Path
 
 import yaml
@@ -7,6 +8,14 @@ from rich.table import Table
 
 console = Console(stderr=True, record=True)
 console_stdout = Console(record=True)
+
+
+def maybe_status(*args, **kwargs):
+	"""Return console.status() normally, or nullcontext() when running in a worker."""
+	from secator.definitions import IN_WORKER
+	if IN_WORKER:
+		return nullcontext()
+	return console.status(*args, **kwargs)
 # handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
 
 
