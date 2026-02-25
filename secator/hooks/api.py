@@ -33,6 +33,7 @@ API_FINDING_CREATE_ENDPOINT = CONFIG.addons.api.finding_create_endpoint
 API_FINDING_UPDATE_ENDPOINT = CONFIG.addons.api.finding_update_endpoint
 API_WORKSPACE_GET_ENDPOINT = CONFIG.addons.api.workspace_get_endpoint
 FORCE_SSL = CONFIG.addons.api.force_ssl
+API_TIMEOUT = CONFIG.addons.api.timeout
 
 
 def get_runner_dbg(runner):
@@ -55,6 +56,7 @@ def _make_request(method, endpoint, data=None):
 	if API_KEY:
 		headers["Authorization"] = f"{API_HEADER_NAME} {API_KEY}"
 	verify = FORCE_SSL
+	timeout = API_TIMEOUT
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
@@ -67,7 +69,7 @@ def _make_request(method, endpoint, data=None):
 		data=json_data,
 		headers=headers,
 		verify=verify,
-		timeout=30
+		timeout=timeout
 	)
 	result = response.json()
 	debug('API response', sub='hooks.api', verbose=True, obj=result)
