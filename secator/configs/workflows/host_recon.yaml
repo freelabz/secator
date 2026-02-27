@@ -35,6 +35,11 @@ options:
     help: Passive only (no requests to targets)
     short: ps
 
+  ssh_audit:
+    is_flag: True
+    default: False
+    help: Audit SSH port
+
 tasks:
 
   _group:
@@ -64,53 +69,79 @@ tasks:
       condition: port.host in targets and opts.scanners
     if: not opts.passive
 
-  sshaudit:
-    description: Audit SSH port
-    targets_:
-    - type: port
-      field: host
-      condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
-    if: not opts.passive
-
-  _group/1:
-    httpx:
-      description: Probe HTTP services on open ports
-      tech_detect: True
+  _group/audit_ports:
+    nc/tcp:
+      description: Grab banners from open TCP ports
+      port_:
+      - type: port
+        field: port
+        condition: port.ip in targets
       targets_:
-        - type: port
-          field: '{host}:{port}'
+      - type: port
+        field: ip
+        # condition: port.protocol == 'TCP'
       if: not opts.passive
 
-    searchsploit:
-      description: Search for related exploits
-      targets_:
-        - type: port
-          field: '{host}:{port}~{service_name}'
-          condition: len(item.service_name.split('/')) > 1
-      if: "'searchsploit' in opts.exploiters"
+    # nc/udp:
+    #   description: Grab banners from open UDP ports
+    #   udp: true
+    #   port_:
+    #   - type: port
+    #     field: port
+    #     condition: port.host in targets
+    #   targets_:
+    #   - type: port
+    #     field: host
+    #     # condition: port.protocol == 'UDP'
+    #   if: not opts.passive
 
-    search_vulns:
-      description: Search for related exploits
+    sshaudit:
+      description: Audit SSH port
       targets_:
-        - type: port
-          field: '{host}:{port}~{service_name}'
-          condition: len(item.service_name.split('/')) > 1
-        - type: vulnerability
-          field: '{matched_at}~{id}'
-          condition: item.id
-      if: "'search_vulns' in opts.exploiters"
+      - type: port
+        field: host
+        condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
+      if: not opts.passive and opts.ssh_audit
 
-  _group/2:
-    nuclei/network:
-      description: Scan network and SSL vulnerabilities
-      tags: [network, ssl]
-      if: opts.nuclei and not opts.passive
+  # _group/1:
+  #   httpx:
+  #     description: Probe HTTP services on open ports
+  #     tech_detect: True
+  #     targets_:
+  #       - type: port
+  #         field: '{host}:{port}'
+  #     if: not opts.passive
 
-    nuclei/url:
-      description: Search for vulnerabilities on alive HTTP services
-      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
-      targets_:
-        - type: url
-          field: url
-          condition: item.status_code != 0
-      if: opts.nuclei and not opts.passive
+  #   searchsploit:
+  #     description: Search for related exploits
+  #     targets_:
+  #       - type: port
+  #         field: '{host}:{port}~{service_name}'
+  #         condition: len(item.service_name.split('/')) > 1
+  #     if: "'searchsploit' in opts.exploiters"
+
+  #   search_vulns:
+  #     description: Search for related exploits
+  #     targets_:
+  #       - type: port
+  #         field: '{host}:{port}~{service_name}'
+  #         condition: len(item.service_name.split('/')) > 1
+  #       - type: vulnerability
+  #         field: '{matched_at}~{id}'
+  #         condition: item.id
+  #     if: "'search_vulns' in opts.exploiters"
+
+  # _group/2:
+  #   nuclei/network:
+  #     description: Scan network and SSL vulnerabilities
+  #     tags: [network, ssl]
+  #     if: opts.nuclei and not opts.passive
+
+  #   nuclei/url:
+  #     description: Search for vulnerabilities on alive HTTP services
+  #     exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
+  #     targets_:
+  #       - type: url
+  #         field: url
+  #         condition: item.status_code != 0
+  #     if: opts.nuclei and not opts.passive
