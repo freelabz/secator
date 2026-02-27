@@ -199,7 +199,8 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 			console.print(Error(message='Missing dev addon: please run "secator install addons dev".'))
 			sys.exit(1)
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
-		cmd = f'{Path(sys.executable).parent / "watchmedo"} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
+		watchmedo_path = shutil.which('watchmedo') or str(Path(sys.executable).parent / 'watchmedo')
+		cmd = f'{watchmedo_path} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
 
 	if use_command_runner:
 		ret = Command.execute(cmd, name='secator_worker', cwd=Path(sys.executable).parent)
