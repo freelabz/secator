@@ -17,6 +17,7 @@ INPUTS_TASKS = {
 	'gf': 'http://localhost:3000?q=test',
     'gitleaks': str(ROOT_FOLDER),
 	'gospider': 'https://danielmiessler.com/',
+	'gungnir': 'example.com',
 	'grype': 'redis:7.4.1',
     'httpx': 'http://localhost:3000/',
 	'h8mail': 'test@test.com',
