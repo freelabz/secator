@@ -27,7 +27,7 @@ options:
   crawlers:
     type: list
     help: "Crawlers to use (comma-separated) (passive: xurlfind3r, urlfinder, gau; active: katana, gospider, cariddi)"
-    default: ['xurlfind3r', 'katana']
+    default: ["xurlfind3r", "katana"]
     internal: True
 
   hunt_secrets:
@@ -75,27 +75,24 @@ tasks:
     tech_detect: True
     filter_duplicates: True
     targets_:
-    - target.name
-    - type: url
-      field: url
-      condition: not url.verified
+      - target.name
+      - type: url
+        field: url
+        condition: not url.verified
     if: not opts.passive
 
   _group/data_hunt:
     trufflehog:
       description: Find secrets in HTTP responses
       targets_:
-      - type: url
-        field: stored_response_path
-        condition: item.stored_response_path != ''
+        - type: url
+          field: stored_response_path
+          condition: item.stored_response_path != ''
       if: opts.hunt_secrets and not opts.passive
     maigret:
       description: Hunt email addresses found
       targets_:
-      - type: tag
-        field: value
-        condition: item.name == 'email_address'
+        - type: tag
+          field: value
+          condition: item.name == 'email_address'
       if: opts.hunt_secrets and not opts.passive
-  ai:
-    description: Make an AI-powered analysis
-    prompt: Analyze the previous results
