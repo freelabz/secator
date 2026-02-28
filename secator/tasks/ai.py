@@ -118,7 +118,6 @@ class ai(PythonRunner):
 		max_iter = int(self.run_opts.get("max_iterations", 10))
 		temp = float(self.run_opts.get("temperature", 0.7))
 		api_key = self.run_opts.get("api_key")
-		yield Info(message=f"API Key: {api_key}")
 		api_base = self.run_opts.get("api_base")
 		max_tokens = int(self.run_opts.get("max_tokens", CONFIG.addons.ai.max_tokens))
 		dry_run = self.run_opts.get("dry_run", False)
