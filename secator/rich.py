@@ -1,4 +1,5 @@
 import operator
+from contextlib import nullcontext
 from pathlib import Path
 
 import yaml
@@ -7,6 +8,14 @@ from rich.table import Table
 
 console = Console(stderr=True, record=True)
 console_stdout = Console(record=True)
+
+
+def maybe_status(*args, **kwargs):
+	"""Return console.status() normally, or nullcontext() when running in a worker."""
+	from secator.definitions import IN_WORKER
+	if IN_WORKER:
+		return nullcontext()
+	return console.status(*args, **kwargs)
 # handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
 
 
@@ -52,6 +61,191 @@ FORMATTERS = {
 	'match': lambda match: f'[link={match}]{match}[/]' if match else '',
 	'_source': lambda source: f'[bold gold3]{source}[/]'
 }
+
+
+class InteractiveMenu:
+	"""Interactive terminal menu with arrow-key navigation and inline typing.
+
+	Usage:
+		result = InteractiveMenu("What's next?", [
+			{"label": "Continue", "description": "Keep going"},
+			{"label": "Custom input", "input": True},
+			{"label": "Exit"},
+		]).show()
+
+	Returns:
+		tuple: (index, value) where value is typed text for input options, or None.
+		None: if user pressed Escape or Ctrl+C.
+	"""
+
+	def __init__(self, title, options):
+		self.title = title
+		self.options = options
+		self.selected = 0
+		self.typed = ""
+		self.in_input_mode = False
+
+	def _read_key(self, fd):
+		"""Read a single keypress, handling escape sequences."""
+		import os
+		ch = os.read(fd, 1).decode()
+		if ch == '\x1b':
+			buf = os.read(fd, 10).decode()
+			if not buf:
+				return 'escape'
+			seq = ch + buf
+			if seq == '\x1b[A':
+				return 'up'
+			elif seq == '\x1b[B':
+				return 'down'
+			elif seq == '\x1b[C':
+				return 'right'
+			elif seq == '\x1b[D':
+				return 'left'
+			elif seq == '\x1bOA':
+				return 'up'
+			elif seq == '\x1bOB':
+				return 'down'
+			elif seq == '\x1bOC':
+				return 'right'
+			elif seq == '\x1bOD':
+				return 'left'
+			# Ctrl+arrows, Shift+arrows, Alt+arrows, etc. — ignore
+			return 'ignore'
+		elif ch == '\r' or ch == '\n':
+			return 'enter'
+		elif ch == '\x03':
+			return 'ctrl_c'
+		elif ch == '\x04':
+			return 'ctrl_d'
+		elif ch == '\x7f' or ch == '\x08':
+			return 'backspace'
+		else:
+			return ch
+
+	def _render(self):
+		"""Render the menu to a string using Rich."""
+		from io import StringIO
+		buf = StringIO()
+		render_console = Console(file=buf, force_terminal=True, width=console.width)
+		w = console.width
+		render_console.print(f"[dim]{'─' * w}[/]")
+		render_console.print(f"[bold white]{self.title}[/]\n")
+		for i, opt in enumerate(self.options):
+			is_selected = i == self.selected
+			prefix = "[bold cyan]❯[/]" if is_selected else " "
+			num = f"[bold]{i + 1}.[/]"
+			if opt.get("input"):
+				if is_selected and self.in_input_mode:
+					label = f"{prefix} {num} [bold]{self.typed}[/][dim]▎[/]"
+				elif is_selected:
+					label = f"{prefix} {num} [bold]{opt['label']}[/]"
+				else:
+					label = f"{prefix} {num} [dim]{opt['label']}[/]"
+			else:
+				if is_selected:
+					label = f"{prefix} {num} [bold]{opt['label']}[/]"
+				else:
+					label = f"{prefix} {num} [dim]{opt['label']}[/]"
+			render_console.print(label)
+			if opt.get("description") and not (opt.get("input") and self.in_input_mode):
+				render_console.print(f"     [gray42]{opt['description']}[/]")
+		render_console.print(f"\n[dim]{'─' * w}[/]")
+		return buf.getvalue()
+
+	def _line_count(self, text):
+		return text.count('\n')
+
+	def _clear_and_exit(self, output):
+		import sys
+		lines = self._line_count(output)
+		sys.stderr.write(f"\033[{lines}A\033[J")
+		sys.stderr.flush()
+
+	def show(self):
+		"""Display the menu and handle input. Returns (index, value) or None."""
+		import sys
+		import tty
+		import termios
+
+		fd = sys.stdin.fileno()
+		old_settings = termios.tcgetattr(fd)
+		self.selected = 0
+		self.typed = ""
+		self.in_input_mode = False
+		output = ""
+
+		try:
+			tty.setraw(fd)
+			output = self._render().replace('\n', '\r\n')
+			sys.stderr.write(output)
+			sys.stderr.flush()
+
+			while True:
+				key = self._read_key(fd)
+				prev_output = output
+
+				if key == 'ctrl_c':
+					self._clear_and_exit(prev_output)
+					return None
+
+				elif key == 'escape':
+					if self.in_input_mode:
+						self.in_input_mode = False
+						self.typed = ""
+					else:
+						self._clear_and_exit(prev_output)
+						return None
+
+				elif key == 'up' and not self.in_input_mode:
+					self.selected = (self.selected - 1) % len(self.options)
+
+				elif key == 'down' and not self.in_input_mode:
+					self.selected = (self.selected + 1) % len(self.options)
+
+				elif key == 'enter':
+					opt = self.options[self.selected]
+					if opt.get("input") and not self.in_input_mode:
+						self.in_input_mode = True
+						self.typed = ""
+					elif opt.get("input") and self.in_input_mode:
+						self._clear_and_exit(prev_output)
+						if self.typed.strip():
+							return (self.selected, self.typed.strip())
+						return None
+					else:
+						self._clear_and_exit(prev_output)
+						return (self.selected, None)
+
+				elif key == 'backspace' and self.in_input_mode:
+					self.typed = self.typed[:-1]
+
+				elif self.in_input_mode and len(key) == 1 and key.isprintable():
+					self.typed += key
+
+				elif not self.in_input_mode and key.isdigit():
+					idx = int(key) - 1
+					if 0 <= idx < len(self.options):
+						self.selected = idx
+
+				# Re-render
+				lines = self._line_count(prev_output)
+				sys.stderr.write(f"\033[{lines}A\033[J")
+				output = self._render().replace('\n', '\r\n')
+				sys.stderr.write(output)
+				sys.stderr.flush()
+
+		except (KeyboardInterrupt, EOFError):
+			lines = self._line_count(output) if output else 0
+			if lines:
+				sys.stderr.write(f"\033[{lines}A\033[J")
+				sys.stderr.flush()
+			return None
+		finally:
+			termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+			# Flush any buffered input (e.g. stray \r from raw mode)
+			# to prevent it leaking into subsequent prompts
+			termios.tcflush(fd, termios.TCIFLUSH)
 
 
 def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):

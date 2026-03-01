@@ -1,19 +1,24 @@
 #!/usr/bin/python
 
 import os
+import sys
 
 from importlib.metadata import version
 
 from secator.config import CONFIG, ROOT_FOLDER
 
+# Detect if running inside a worker process (Celery or Airflow)
+IN_WORKER = bool(
+	sys.argv and ('secator.celery.app' in sys.argv or 'worker' in sys.argv)
+) or bool(os.environ.get('AIRFLOW_CTX_DAG_ID'))
 
 # Globals
 VERSION = version('secator')
 ASCII = rf"""
-			 __            
+			 __
    ________  _________ _/ /_____  _____
   / ___/ _ \/ ___/ __ `/ __/ __ \/ ___/
- (__  /  __/ /__/ /_/ / /_/ /_/ / /    
+ (__  /  __/ /__/ /_/ / /_/ /_/ / /
 /____/\___/\___/\__,_/\__/\____/_/     v{VERSION}
 
 			freelabz.com
@@ -34,9 +39,23 @@ STATE_COLORS = {
 	'REVOKED': 'bold magenta'
 }
 
+# LLM
+LLM_SPINNER_MESSAGES = [
+	"Consulting the hive mind...",
+	"Asking the AI overlords...",
+	"Summoning digital spirits...",
+	"Brewing some cyber coffee...",
+	"Hacking the mainframe... just kidding",
+	"Teaching electrons to think...",
+	"Rolling digital dice...",
+	"Whispering to the neural network...",
+	"Poking the language model...",
+	"Reticulating splines...",
+]
+
 # Available drivers and exporters
 AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api']
-AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'table', 'txt']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'markdown', 'table', 'txt']
 
 # Vocab
 ALIVE = 'alive'
@@ -165,7 +184,8 @@ for addon, module in [
 	('redis', 'redis'),
 	('dev', 'flake8'),
 	('trace', 'memray'),
-	('build', 'hatch')
+	('build', 'hatch'),
+	('ai', 'litellm')
 ]:
 	ADDONS_ENABLED[addon] = is_importable(module)
 

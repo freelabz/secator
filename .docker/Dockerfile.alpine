@@ -22,6 +22,7 @@ RUN pipx install --pip-args="--no-cache-dir" . && \
     secator install addons gcs && \
     secator install addons mongodb && \
     secator install addons redis && \
+    secator install addons ai && \
     secator install addons dev
 
 

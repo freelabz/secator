@@ -1,0 +1,13 @@
+[1mdiff --git a/secator/cli.py b/secator/cli.py[m
+[1mindex 3877be8..828b469 100644[m
+[1m--- a/secator/cli.py[m
+[1m+++ b/secator/cli.py[m
+[36m@@ -992,7 +992,7 @@[m [mdef process_query(query, fields=None):[m
+ @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501[m
+ @click.option('-f', '--format', "_format", type=str, default='', help=f'Format output, comma-separated of: <output_type> or <output_type>.<field>. [bold]Allowed output types[/]: {", ".join(FINDING_TYPES_LOWER)}')  # noqa: E501[m
+ @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')[m
+[31m-@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')[m
+[32m+[m[32m@click.option('-w', '-ws', '--workspace', type=str, default=CONFIG.workspace.default, help='Filter by workspace name')[m
+ @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501[m
+ @click.pass_context[m
+ def report_show(ctx, report_query, output, runner_type, time_delta, _format, query, workspace, unified):[m

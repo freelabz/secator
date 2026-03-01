@@ -80,7 +80,8 @@ def _make_request(method, endpoint, data=None):
 
 
 def update_runner(self):
-	self.context['driver'] = 'api'
+	if 'api' not in self.context.get('drivers', []):
+		self.context.setdefault('drivers', []).append('api')
 	runner_type = self.config.type
 	update = self.toDict()
 	chunk = update.get('chunk')
@@ -122,7 +123,8 @@ def update_runner(self):
 
 def update_finding(self, item):
 	"""Update finding state via API."""
-	self.context['driver'] = 'api'
+	if 'api' not in self.context.get('drivers', []):
+		self.context.setdefault('drivers', []).append('api')
 	if type(item) not in FINDING_TYPES:
 		return item
 

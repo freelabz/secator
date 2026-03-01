@@ -199,7 +199,8 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 			console.print(Error(message='Missing dev addon: please run "secator install addons dev".'))
 			sys.exit(1)
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
-		cmd = f'{Path(sys.executable).parent / "watchmedo"} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
+		watchmedo_path = shutil.which('watchmedo') or str(Path(sys.executable).parent / 'watchmedo')
+		cmd = f'{watchmedo_path} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
 
 	if use_command_runner:
 		ret = Command.execute(cmd, name='secator_worker', cwd=Path(sys.executable).parent)
@@ -769,6 +770,26 @@ def workspace_list():
 	console.print(table)
 
 
+@workspace.command('use')
+@click.argument('name')
+def workspace_use(name):
+	"""Use a workspace (set as default)."""
+	CONFIG.set('workspace.default', name)
+	config = CONFIG.validate()
+	if config:
+		CONFIG.save()
+		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
+	else:
+		console.print(Error(message='Invalid config, not saving it.'))
+
+
+@workspace.command('current')
+def workspace_current():
+	"""Show current default workspace."""
+	current = CONFIG.workspace.default or 'default'
+	console.print(f'Current workspace: [bold gold3]{current}[/]')
+
+
 #----------#
 # PROFILES #
 #----------#
@@ -972,7 +993,7 @@ def process_query(query, fields=None):
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('-f', '--format', "_format", type=str, default='', help=f'Format output, comma-separated of: <output_type> or <output_type>.<field>. [bold]Allowed output types[/]: {", ".join(FINDING_TYPES_LOWER)}')  # noqa: E501
 @click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
-@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('-w', '-ws', '--workspace', type=str, default=CONFIG.workspace.default, help='Filter by workspace name')
 @click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
 @click.pass_context
 def report_show(ctx, report_query, output, runner_type, time_delta, _format, query, workspace, unified):
@@ -1685,6 +1706,19 @@ def install_build():
 			'Run [bold green4]secator u publish pypi[/] to publish the PyPI package.',
 			'Run [bold green4]secator u build docker[/] to build the Docker image.',
 			'Run [bold green4]secator u publish docker[/] to publish the Docker image.',
+		]
+	)
+
+
+@addons.command('ai')
+def install_ai():
+	"Install AI addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[ai]',
+		title='AI addon',
+		next_steps=[
+			'Run [bold green4]secator config set addons.ai.default_model <MODEL>[/] to set default model.',
+			'Run [bold green4]secator x ai <TARGET> -p "your prompt"[/] to run AI-powered pentesting.',
 		]
 	)
 

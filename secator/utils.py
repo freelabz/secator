@@ -387,7 +387,7 @@ def rich_to_ansi(text):
 	"""
 	try:
 		from rich.console import Console
-		tmp_console = Console(file=None, highlight=False)
+		tmp_console = Console(file=None, highlight=False, force_terminal=True)
 		with tmp_console.capture() as capture:
 			tmp_console.print(text, end='', soft_wrap=True)
 		return capture.get()
@@ -965,6 +965,22 @@ def parse_raw_http_request(raw_request):
 		'headers': headers,
 		'data': body
 	}
+
+
+def format_token_count(tokens, icon=''):
+	"""Format a token count as a human-readable string (e.g., '8.5k tokens').
+
+	Args:
+		tokens: Number of tokens.
+		icon: Optional Rich emoji icon prefix (e.g., 'arrow_up', 'arrow_down').
+
+	Returns:
+		str: Formatted token string.
+	"""
+	prefix = f':{icon}: ' if icon else ''
+	if tokens >= 1000:
+		return f'{prefix}{tokens/1000:.1f}k tokens'
+	return f'{prefix}{tokens} tokens'
 
 
 def format_object(obj, color='magenta', skip_keys=[], predicate=lambda x: True):
