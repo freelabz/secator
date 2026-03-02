@@ -209,16 +209,10 @@ def get_system_prompt(mode: str) -> str:
             library_reference=build_library_reference(),
             query_types=query_types
         )
-    elif mode == "chat":
-        return SYSTEM_CHAT.substitute(
-            query_types=query_types,
-            output_types_reference=build_output_types_reference()
-        )
-    else:
-        return SYSTEM_CHAT.substitute(
-            query_types=query_types,
-            output_types_reference=build_output_types_reference()
-        )
+    return SYSTEM_CHAT.substitute(
+        query_types=query_types,
+        output_types_reference=build_output_types_reference()
+    )
 
 
 def format_user_initial(targets: List[str], instructions: str, previous_results: List[Dict] = None) -> str:

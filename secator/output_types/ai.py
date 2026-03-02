@@ -30,16 +30,19 @@ def is_markdown(text: str) -> bool:
 
 
 def render_markdown_for_rich(text: str, title: str = '') -> str:
-	"""Render Markdown text for rich console output, wrapped in a Panel."""
+	"""Render Markdown text for rich console output, optionally in a Panel."""
 	from rich.console import Console
 	from rich.markdown import Markdown
-	from rich.panel import Panel
 	from io import StringIO
 
 	console = Console(file=StringIO(), force_terminal=True, width=120)
 	md = Markdown(text)
-	panel = Panel(md, title=title, title_align="left", border_style="dim", padding=(1, 2))
-	console.print(panel)
+	if title:
+		from rich.panel import Panel
+		panel = Panel(md, title=title, title_align="left", border_style="dim", padding=(1, 2))
+		console.print(panel)
+	else:
+		console.print(md)
 	return console.file.getvalue()
 
 
@@ -55,6 +58,8 @@ AI_TYPES = {
 	'query': {'label': '🔍', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
 }
+
+ACTION_TYPES = ('task', 'workflow', 'shell', 'query', 'stopped')
 
 
 @dataclass
@@ -111,7 +116,6 @@ class Ai(OutputType):
 				usage_str = ' '.join(parts)
 
 		# Action types
-		ACTION_TYPES = ('task', 'workflow', 'shell', 'query', 'stopped')
 		if self.ai_type in ACTION_TYPES:
 			action_label = self.ai_type
 			if self.ai_type == 'stopped':

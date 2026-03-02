@@ -11,7 +11,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import ADDONS_ENABLED, LLM_SPINNER_MESSAGES
 from secator.output_types import (
-	Ai, Stat, Progress, Error, Info, Warning, State, FINDING_TYPES, OutputType
+	Ai, Stat, Progress, Error, Info, Warning, State, FINDING_TYPES, OutputType, INTERNAL_FIELDS
 )
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
@@ -21,6 +21,11 @@ from secator.ai.encryption import SensitiveDataEncryptor
 from secator.ai.history import ChatHistory
 from secator.ai.prompts import get_system_prompt, format_user_initial, format_tool_result, format_continue
 from secator.ai.utils import call_llm, parse_actions, strip_json_from_response, prompt_user
+
+
+def _maybe_encrypt(text, encryptor):
+	"""Encrypt text if encryptor is available, otherwise return as-is."""
+	return encryptor.encrypt(text) if encryptor else text
 
 
 DEFAULT_API_KEY = CONFIG.addons.ai.api_key or os.environ.get('ANTHROPIC_API_KEY', '')
@@ -80,10 +85,8 @@ class ai(PythonRunner):
 				continue
 			if hasattr(r, 'toDict'):
 				d = r.toDict()
-				d.pop('_context', None)
-				d.pop('_uuid', None)
-				d.pop('_related', None)
-				d.pop('_duplicate', None)
+				for f in INTERNAL_FIELDS:
+					d.pop(f, None)
 				previous_results.append(d)
 
 		# Run unified loop for both modes
@@ -122,12 +125,13 @@ class ai(PythonRunner):
 		dry_run = self.run_opts.get("dry_run", False)
 		verbose = self.run_opts.get("verbose", False)
 		interactive = self.run_opts.get("interactive", True)
+		import litellm
 
 		# Initialize chat history with appropriate system prompt
 		history = ChatHistory()
 		history.add_system(get_system_prompt(mode))
 		user_msg = format_user_initial(targets, prompt, previous_results=previous_results or [])
-		history.add_user(encryptor.encrypt(user_msg) if encryptor else user_msg)
+		history.add_user(_maybe_encrypt(user_msg, encryptor))
 		yield Ai(content=prompt or f"Starting {mode}...", ai_type="prompt")
 
 		# Create action context
@@ -148,7 +152,6 @@ class ai(PythonRunner):
 		done = False
 		while iteration < max_iter:
 			iteration += 1
-			# yield Info(message=f"Iteration {iteration}/{max_iter}")
 
 			try:
 				# Auto-summarize if token count exceeds threshold
@@ -172,7 +175,6 @@ class ai(PythonRunner):
 				# Handle empty response
 				if not response:
 					yield Warning(message="LLM returned empty response")
-					iteration += 1
 					continue
 
 				# Decrypt response
@@ -205,7 +207,6 @@ class ai(PythonRunner):
 				yield Info(message=f"Executing {len(actions)} actions ...")
 				for action in actions:
 					action_type = action.get("action", "")
-					# yield Info(message=f"Running action {format_object(action, 'yellow')}")
 					action_results = []
 					for item in dispatch_action(action, ctx):
 						if isinstance(item, (Stat, Progress, State, Info)):
@@ -218,22 +219,20 @@ class ai(PythonRunner):
 							continue
 						if isinstance(item, OutputType):
 							self.add_result(item, print=False)  # only for Secator findings
-							item = item.toDict(exclude=['_context', '_uuid', '_related'])
+							item = item.toDict(exclude=list(INTERNAL_FIELDS))
 						action_results.append(item)
 						# Keep ctx.results in sync for scope='current' queries
 						if ctx.scope == "current":
 							ctx.results.append(item)
 
 					# Build tool result for history (compact JSON)
-					# yield Info(f"Action returned {len(action_results)} results")
 					tool_result = format_tool_result(
 						action.get("name", action_type),
 						"success",
 						len(action_results),
 						action_results
 					)
-					if encryptor:
-						tool_result = encryptor.encrypt(tool_result)
+					tool_result = _maybe_encrypt(tool_result, encryptor)
 					history.add_user(tool_result)
 
 					# Done action: prompt user for continuation
@@ -268,11 +267,11 @@ class ai(PythonRunner):
 						max_iter += value
 						done = False
 						continue_msg = format_continue(iteration, max_iter)
-						history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
+						history.add_user(_maybe_encrypt(continue_msg, encryptor))
 					elif action == "summarize":
 						max_iter += 1
 						summary_msg = "Summarize all findings so far and provide a final report."
-						history.add_user(encryptor.encrypt(summary_msg) if encryptor else summary_msg)
+						history.add_user(_maybe_encrypt(summary_msg, encryptor))
 						yield Ai(content=summary_msg, ai_type="prompt")
 					elif action == "follow_up":
 						max_iter += 1
@@ -282,7 +281,7 @@ class ai(PythonRunner):
 						other_mode = "chat" if mode == "attack" else "attack"
 						mode = other_mode
 						history.add_system(get_system_prompt(mode))
-						user_msg = encryptor.encrypt(value) if encryptor else value
+						user_msg = _maybe_encrypt(value, encryptor)
 						history.add_user(user_msg)
 						max_iter += 1
 						done = False
@@ -294,10 +293,9 @@ class ai(PythonRunner):
 
 				# Continue action
 				continue_msg = format_continue(iteration, max_iter)
-				history.add_user(encryptor.encrypt(continue_msg) if encryptor else continue_msg)
+				history.add_user(_maybe_encrypt(continue_msg, encryptor))
 
 			except Exception as e:
-				import litellm
 				if isinstance(e, litellm.RateLimitError):
 					yield Warning(message="Rate limit exceeded - waiting 5s and retry in the next iteration")
 					iteration -= 1

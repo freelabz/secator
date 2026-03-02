@@ -9,7 +9,7 @@ class TestActionContext(unittest.TestCase):
     """Tests for the ActionContext dataclass."""
 
     def test_action_context_has_required_fields(self):
-        from secator.tasks.ai_actions import ActionContext
+        from secator.ai.actions import ActionContext
 
         field_names = [f.name for f in fields(ActionContext)]
 
@@ -20,7 +20,7 @@ class TestActionContext(unittest.TestCase):
         self.assertIn('workspace_id', field_names)
 
     def test_action_context_defaults(self):
-        from secator.tasks.ai_actions import ActionContext
+        from secator.ai.actions import ActionContext
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
 
@@ -31,8 +31,8 @@ class TestActionContext(unittest.TestCase):
         self.assertIsNone(ctx.workspace_id)
 
     def test_action_context_with_all_params(self):
-        from secator.tasks.ai_actions import ActionContext
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.actions import ActionContext
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         ctx = ActionContext(
@@ -54,7 +54,7 @@ class TestDispatchAction(unittest.TestCase):
     """Tests for the dispatch_action function."""
 
     def test_dispatch_unknown_action(self):
-        from secator.tasks.ai_actions import ActionContext, dispatch_action
+        from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
         action = {'action': 'unknown_action_type'}
@@ -66,7 +66,7 @@ class TestDispatchAction(unittest.TestCase):
         self.assertIn('Unknown action', results[0].message)
 
     def test_dispatch_done_action(self):
-        from secator.tasks.ai_actions import ActionContext, dispatch_action
+        from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
         action = {'action': 'done', 'reason': 'Test complete'}
@@ -78,7 +78,7 @@ class TestDispatchAction(unittest.TestCase):
         self.assertIn('Test complete', results[0].content)
 
     def test_dispatch_task_dry_run(self):
-        from secator.tasks.ai_actions import ActionContext, dispatch_action
+        from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4', dry_run=True)
         action = {'action': 'task', 'name': 'nmap', 'targets': ['192.168.1.1']}
@@ -91,7 +91,7 @@ class TestDispatchAction(unittest.TestCase):
         self.assertIn('nmap', results[0].message)
 
     def test_dispatch_workflow_dry_run(self):
-        from secator.tasks.ai_actions import ActionContext, dispatch_action
+        from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4', dry_run=True)
         action = {'action': 'workflow', 'name': 'host_recon', 'targets': ['example.com']}
@@ -104,7 +104,7 @@ class TestDispatchAction(unittest.TestCase):
         self.assertIn('host_recon', results[0].message)
 
     def test_dispatch_shell_dry_run(self):
-        from secator.tasks.ai_actions import ActionContext, dispatch_action
+        from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4', dry_run=True)
         action = {'action': 'shell', 'command': 'curl http://example.com'}
@@ -117,7 +117,7 @@ class TestDispatchAction(unittest.TestCase):
         self.assertIn('curl', results[0].message)
 
     def test_dispatch_query_no_workspace(self):
-        from secator.tasks.ai_actions import ActionContext, dispatch_action
+        from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4', workspace_id=None)
         action = {'action': 'query', 'type': 'vulnerability', 'filter': {}}

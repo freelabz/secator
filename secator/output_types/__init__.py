@@ -1,5 +1,4 @@
 __all__ = [
-	'Action',
 	'Ai',
 	'Domain',
 	'Error',
@@ -13,7 +12,6 @@ __all__ = [
 	'State',
 	'Subdomain',
 	'Url',
-	'UrlParam',
 	'UserAccount',
 	'Vulnerability',
 	'Warning',
@@ -50,3 +48,4 @@ FINDING_TYPES = [
 	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain, Ai
 ]
 OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES
+INTERNAL_FIELDS = ('_context', '_uuid', '_related', '_duplicate')

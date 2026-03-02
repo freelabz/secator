@@ -16,7 +16,7 @@ class TestQueryBackendBase(unittest.TestCase):
                 super().__init__(workspace_id, config)
                 self.last_count_query = None
 
-            def _execute_search(self, query, limit):
+            def _execute_search(self, query, limit, exclude_fields=None):
                 return []
 
             def _execute_count(self, query):
@@ -309,20 +309,20 @@ class TestQueryEngine(unittest.TestCase):
         from secator.query import QueryEngine
         from secator.query.api import ApiBackend
 
-        engine = QueryEngine(workspace_id='ws123', context={'api': True})
+        engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api']})
         self.assertIsInstance(engine.backend, ApiBackend)
 
     def test_query_engine_selects_mongodb(self):
         from secator.query import QueryEngine
         from secator.query.mongodb import MongoDBBackend
 
-        engine = QueryEngine(workspace_id='ws123', context={'mongodb': True})
+        engine = QueryEngine(workspace_id='ws123', context={'drivers': ['mongodb']})
         self.assertIsInstance(engine.backend, MongoDBBackend)
 
-    def test_query_engine_api_takes_priority(self):
+    def test_query_engine_mongodb_takes_priority(self):
         from secator.query import QueryEngine
-        from secator.query.api import ApiBackend
+        from secator.query.mongodb import MongoDBBackend
 
-        # When both are true, API takes priority
-        engine = QueryEngine(workspace_id='ws123', context={'api': True, 'mongodb': True})
-        self.assertIsInstance(engine.backend, ApiBackend)
+        # When both are available, MongoDB takes priority
+        engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
+        self.assertIsInstance(engine.backend, MongoDBBackend)

@@ -74,7 +74,7 @@ class nmap(ReconPort):
 
 		# Misc
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path', 'internal': True, 'display': False},  # noqa: E501
-		'debug': {'is_flag': True, 'short': 'd', 'default': False, 'help': 'Enable debug mode'},
+		'debug': {'is_flag': True, 'default': False, 'help': 'Enable debug mode'},
 		'verbose_output': {'is_flag': True, 'short': 'vo', 'default': False, 'help': 'Enable verbose mode'},
 		'timing': {'type': int, 'short': 'T', 'default': None, 'help': 'Timing template (0: paranoid, 1: sneaky, 2: polite, 3: normal, 4: aggressive, 5: insane)'},  # noqa: E501
 	}

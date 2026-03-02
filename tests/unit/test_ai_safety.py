@@ -8,7 +8,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
     """Tests for the SensitiveDataEncryptor class."""
 
     def test_encrypt_and_decrypt_host(self):
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         original = "http://testphp.vulnweb.com/page"
@@ -24,7 +24,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_decrypt_placeholder_without_brackets(self):
         """Test LLM stripping brackets from placeholders."""
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         original = "testphp.vulnweb.com"
@@ -40,7 +40,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_decrypt_bare_hash(self):
         """Test decrypting bare hash without type prefix."""
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         original = "testphp.vulnweb.com"
@@ -58,7 +58,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_encrypt_preserves_url_structure(self):
         """Test that URL structure is preserved after encryption/decryption."""
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         original = "http://example.com:8080/path?query=value"
@@ -69,7 +69,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_encrypt_ipv4(self):
         """Test encryption of IPv4 addresses."""
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         original = "Connect to 192.168.1.100 on port 8080"
@@ -83,7 +83,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_encrypt_email(self):
         """Test encryption of email addresses."""
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         original = "Contact admin@example.com for details"
@@ -97,7 +97,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_encrypt_multiple_values(self):
         """Test encryption of multiple sensitive values."""
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         original = "Scan example.com and test.org, then check 10.0.0.1"
@@ -112,7 +112,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_custom_patterns(self):
         """Test encryption with custom patterns."""
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         custom = ["SECRET_[A-Z0-9]+"]
         encryptor = SensitiveDataEncryptor(custom_patterns=custom)
@@ -127,7 +127,7 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
 
     def test_empty_text(self):
         """Test encryption of empty text."""
-        from secator.tasks.ai_encryption import SensitiveDataEncryptor
+        from secator.ai.encryption import SensitiveDataEncryptor
 
         encryptor = SensitiveDataEncryptor()
         self.assertEqual(encryptor.encrypt(""), "")

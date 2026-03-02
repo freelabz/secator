@@ -1,8 +1,8 @@
 from collections import OrderedDict
 
 import rich_click as click
-from rich_click.rich_click import _get_rich_console
-from rich_click.rich_group import RichGroup
+from rich.console import Console
+from rich_click import RichGroup
 
 
 class ListParamType(click.ParamType):
@@ -31,7 +31,7 @@ class OrderedGroup(RichGroup):
 		def decorator(f):
 			aliases = kwargs.pop("aliases", None)
 			if aliases:
-				max_width = _get_rich_console().width
+				max_width = Console().width
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
 
@@ -62,7 +62,7 @@ class OrderedGroup(RichGroup):
 			aliases = kwargs.pop('aliases', [])
 			aliased_group = []
 			if aliases:
-				max_width = _get_rich_console().width
+				max_width = Console().width
 				aliases_str = ', '.join(f'[bold cyan]{alias}[/]' for alias in aliases)
 				padding = max_width // 4
 				f.__doc__ = f.__doc__ or '\0'.ljust(padding+1)

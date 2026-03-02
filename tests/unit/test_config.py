@@ -162,20 +162,20 @@ class TestAIConfig(unittest.TestCase):
 	def test_ai_config_defaults(self):
 		from secator.config import Config
 		config = Config.parse()
-		self.assertIsNotNone(config.ai)
+		ai = config.addons.ai
+		self.assertIsNotNone(ai)
 		# Test enabled and api_key fields (following addon pattern)
-		self.assertEqual(config.ai.enabled, False)
-		self.assertEqual(config.ai.api_key, '')
+		self.assertEqual(ai.enabled, False)
+		self.assertEqual(ai.api_key, '')
 		# Test model configuration
-		self.assertEqual(config.ai.default_model, 'gpt-4o-mini')
-		self.assertEqual(config.ai.intent_model, 'gpt-4o-mini')
-		self.assertEqual(config.ai.execution_model, 'gpt-4o-mini')
+		self.assertEqual(ai.default_model, 'claude-sonnet-4-6')
+		self.assertEqual(ai.intent_model, 'claude-haiku-4-5')
 		# Test generation parameters
-		self.assertEqual(config.ai.temperature, 0.7)
-		self.assertEqual(config.ai.max_tokens, 4096)
+		self.assertEqual(ai.temperature, 0.7)
+		self.assertEqual(ai.max_tokens, 30000)
 		# Test other settings
-		self.assertEqual(config.ai.max_results, 500)
-		self.assertEqual(config.ai.encrypt_pii, True)
+		self.assertEqual(ai.max_results, 500)
+		self.assertEqual(ai.encrypt_pii, True)
 
 	def test_api_finding_search_endpoint(self):
 		from secator.config import Config

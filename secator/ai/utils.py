@@ -12,12 +12,24 @@ logger = logging.getLogger(__name__)
 
 # Module-level state for litellm initialization
 _llm_initialized = False
-_llm_handler = None
+
+
+def _find_matching_bracket(text: str, start: int, open_char: str, close_char: str) -> int:
+	"""Find position after the matching closing bracket, starting from `start`."""
+	depth = 0
+	for i in range(start, len(text)):
+		if text[i] == open_char:
+			depth += 1
+		elif text[i] == close_char:
+			depth -= 1
+			if depth == 0:
+				return i + 1
+	return start
 
 
 def init_llm(api_key: Optional[str] = None):
 	"""Initialize litellm once (singleton pattern to avoid callback accumulation)."""
-	global _llm_initialized, _llm_handler
+	global _llm_initialized
 
 	import litellm
 
@@ -72,8 +84,7 @@ def init_llm(api_key: Optional[str] = None):
 					border_style=style
 				))
 
-	_llm_handler = LLMCallbackHandler()
-	litellm.callbacks = [_llm_handler]
+	litellm.callbacks = [LLMCallbackHandler()]
 	_llm_initialized = True
 
 
@@ -128,18 +139,8 @@ def parse_actions(response: str) -> List[Dict]:
 	match = re.search(r'\[[\s\S]*?"action"[\s\S]*?\]', response)
 	if match:
 		try:
-			# Find matching brackets
 			text = response[match.start():]
-			depth = 0
-			end = 0
-			for i, c in enumerate(text):
-				if c == '[':
-					depth += 1
-				elif c == ']':
-					depth -= 1
-					if depth == 0:
-						end = i + 1
-						break
+			end = _find_matching_bracket(text, 0, '[', ']')
 			return json.loads(text[:end])
 		except json.JSONDecodeError:
 			pass
@@ -149,16 +150,7 @@ def parse_actions(response: str) -> List[Dict]:
 	if match:
 		try:
 			text = response[match.start():]
-			depth = 0
-			end = 0
-			for i, c in enumerate(text):
-				if c == '{':
-					depth += 1
-				elif c == '}':
-					depth -= 1
-					if depth == 0:
-						end = i + 1
-						break
+			end = _find_matching_bracket(text, 0, '{', '}')
 			obj = json.loads(text[:end])
 			if isinstance(obj, dict):
 				return [obj]
@@ -181,17 +173,7 @@ def strip_json_from_response(text: str) -> str:
 	i = 0
 	while i < len(text):
 		if text[i] == '[':
-			# Find matching bracket first
-			depth = 0
-			end = i
-			for j in range(i, len(text)):
-				if text[j] == '[':
-					depth += 1
-				elif text[j] == ']':
-					depth -= 1
-					if depth == 0:
-						end = j + 1
-						break
+			end = _find_matching_bracket(text, i, '[', ']')
 
 			# Extract the bracketed content
 			bracketed = text[i:end]
@@ -226,53 +208,55 @@ def prompt_user(history, encryptor=None, mode="chat"):
 		switch_label = f"Switch to {other_mode} mode"
 		if mode == "attack":
 			options = [
-				{"label": "Continue attacking", "description": "Continue for N more iterations"},
-				{"label": "Summarize", "description": "Get a summary of findings so far"},
-				{"label": "Show raw", "description": "Print last response as copyable text"},
-				{"label": switch_label, "description": "Change mode with a new prompt", "input": True},
-				{"label": "Something else", "description": "Send custom instructions", "input": True},
-				{"label": "Exit"},
+				{"label": "Continue attacking", "description": "Continue for N more iterations", "action": "continue"},
+				{"label": "Summarize", "description": "Get a summary of findings so far", "action": "summarize"},
+				{"label": "Show raw", "description": "Print last response as copyable text", "action": "show_raw"},
+				{"label": switch_label, "description": "Change mode with a new prompt", "input": True, "action": "switch_mode"},
+				{"label": "Something else", "description": "Send custom instructions", "input": True, "action": "follow_up"},
+				{"label": "Exit", "action": "exit"},
 			]
 			result = InteractiveMenu("What's next?", options).show()
 			if result is None:
 				return None
 			idx, value = result
-			if idx == 0:  # Continue attacking
+			action = options[idx].get("action")
+			if action == "continue":
 				from rich.prompt import IntPrompt
 				n = IntPrompt.ask("[bold cyan]Number of iterations[/]", default=5)
 				return ("continue", n)
-			if idx == 1:  # Summarize
+			if action == "summarize":
 				return ("summarize", None)
-			if idx == 2:  # Show raw
+			if action == "show_raw":
 				return ("show_raw", None)
-			if idx == 3:  # Switch mode
+			if action == "switch_mode":
 				return ("switch_mode", value)
-			if idx == 4:  # Something else
+			if action == "follow_up":
 				user_msg = encryptor.encrypt(value) if encryptor else value
 				history.add_user(user_msg)
 				return ("follow_up", value)
-			if idx == 5:  # Exit
+			if action == "exit":
 				return None
 		else:
 			options = [
-				{"label": "Show raw", "description": "Print last response as copyable text"},
-				{"label": switch_label, "description": "Change mode with a new prompt", "input": True},
-				{"label": "Something else", "description": "Send custom instructions", "input": True},
-				{"label": "Exit"},
+				{"label": "Show raw", "description": "Print last response as copyable text", "action": "show_raw"},
+				{"label": switch_label, "description": "Change mode with a new prompt", "input": True, "action": "switch_mode"},
+				{"label": "Something else", "description": "Send custom instructions", "input": True, "action": "follow_up"},
+				{"label": "Exit", "action": "exit"},
 			]
 			result = InteractiveMenu("What's next?", options).show()
 			if result is None:
 				return None
 			idx, value = result
-			if idx == 0:  # Show raw
+			action = options[idx].get("action")
+			if action == "show_raw":
 				return ("show_raw", None)
-			if idx == 1:  # Switch mode
+			if action == "switch_mode":
 				return ("switch_mode", value)
-			if idx == 2:  # Something else
+			if action == "follow_up":
 				user_msg = encryptor.encrypt(value) if encryptor else value
 				history.add_user(user_msg)
 				return ("follow_up", value)
-			if idx == 3:  # Exit
+			if action == "exit":
 				return None
 	except (KeyboardInterrupt, EOFError):
 		return None

@@ -1,7 +1,7 @@
 # tests/unit/test_ai_prompts.py
 import unittest
 
-from secator.tasks.ai_prompts import (
+from secator.ai.prompts import (
     SYSTEM_ATTACK,
     SYSTEM_CHAT,
     get_system_prompt,
@@ -14,15 +14,15 @@ from secator.tasks.ai_prompts import (
 class TestPrompts(unittest.TestCase):
 
     def test_system_attack_has_actions(self):
-        self.assertIn("task", SYSTEM_ATTACK)
-        self.assertIn("workflow", SYSTEM_ATTACK)
-        self.assertIn("shell", SYSTEM_ATTACK)
-        self.assertIn("query", SYSTEM_ATTACK)
-        self.assertIn("done", SYSTEM_ATTACK)
+        self.assertIn("task", SYSTEM_ATTACK.template)
+        self.assertIn("workflow", SYSTEM_ATTACK.template)
+        self.assertIn("shell", SYSTEM_ATTACK.template)
+        self.assertIn("query", SYSTEM_ATTACK.template)
+        self.assertIn("done", SYSTEM_ATTACK.template)
 
     def test_system_chat_has_query(self):
-        self.assertIn("query", SYSTEM_CHAT)
-        self.assertIn("done", SYSTEM_CHAT)
+        self.assertIn("query", SYSTEM_CHAT.template)
+        self.assertIn("done", SYSTEM_CHAT.template)
 
     def test_get_system_prompt_attack(self):
         prompt = get_system_prompt("attack")
@@ -55,7 +55,7 @@ class TestPrompts(unittest.TestCase):
         self.assertNotIn("\n", result)
 
     def test_build_tasks_reference_format(self):
-        from secator.tasks.ai_prompts import build_tasks_reference
+        from secator.ai.prompts import build_tasks_reference
         result = build_tasks_reference()
         # Should be pipe-delimited format
         lines = result.strip().split('\n')
@@ -66,14 +66,14 @@ class TestPrompts(unittest.TestCase):
         self.assertEqual(len(parts), 3, f"Expected 3 parts (name|desc|opts), got: {first_line}")
 
     def test_build_tasks_reference_excludes_ai(self):
-        from secator.tasks.ai_prompts import build_tasks_reference
+        from secator.ai.prompts import build_tasks_reference
         result = build_tasks_reference()
         # Should not include the Ai task itself
         self.assertNotIn('Ai|', result)
         self.assertNotIn('ai|', result)
 
     def test_build_workflows_reference_format(self):
-        from secator.tasks.ai_prompts import build_workflows_reference
+        from secator.ai.prompts import build_workflows_reference
         result = build_workflows_reference()
         # Should have workflow entries (may be empty if no workflows configured)
         if result:
@@ -83,7 +83,7 @@ class TestPrompts(unittest.TestCase):
             self.assertGreaterEqual(len(parts), 1, "Should have at least workflow name")
 
     def test_build_profiles_reference_format(self):
-        from secator.tasks.ai_prompts import build_profiles_reference
+        from secator.ai.prompts import build_profiles_reference
         result = build_profiles_reference()
         if result:
             lines = result.strip().split('\n')
@@ -92,13 +92,13 @@ class TestPrompts(unittest.TestCase):
             self.assertGreaterEqual(len(parts), 1, "Should have at least profile name")
 
     def test_build_wordlists_reference_format(self):
-        from secator.tasks.ai_prompts import build_wordlists_reference
+        from secator.ai.prompts import build_wordlists_reference
         result = build_wordlists_reference()
         # Should return string (may be empty if no wordlists configured)
         self.assertIsInstance(result, str)
 
     def test_build_output_types_reference_format(self):
-        from secator.tasks.ai_prompts import build_output_types_reference
+        from secator.ai.prompts import build_output_types_reference
         result = build_output_types_reference()
         lines = result.strip().split('\n')
         self.assertTrue(len(lines) > 0)
@@ -107,17 +107,17 @@ class TestPrompts(unittest.TestCase):
         self.assertEqual(len(parts), 2, f"Expected 2 parts (name|fields), got: {first_line}")
 
     def test_build_output_types_reference_has_vulnerability(self):
-        from secator.tasks.ai_prompts import build_output_types_reference
+        from secator.ai.prompts import build_output_types_reference
         result = build_output_types_reference()
         self.assertIn('vulnerability|', result)
 
     def test_option_formats_has_header(self):
-        from secator.tasks.ai_prompts import OPTION_FORMATS
+        from secator.ai.prompts import OPTION_FORMATS
         self.assertIn('header|', OPTION_FORMATS)
         self.assertIn(';;', OPTION_FORMATS)  # Header format hint
 
     def test_build_library_reference_has_all_sections(self):
-        from secator.tasks.ai_prompts import build_library_reference
+        from secator.ai.prompts import build_library_reference
         result = build_library_reference()
         self.assertIn('TASKS:', result)
         self.assertIn('WORKFLOWS:', result)
@@ -127,7 +127,7 @@ class TestPrompts(unittest.TestCase):
         self.assertIn('OPTION_FORMATS:', result)
 
     def test_get_system_prompt_attack_has_library_reference(self):
-        from secator.tasks.ai_prompts import get_system_prompt
+        from secator.ai.prompts import get_system_prompt
         prompt = get_system_prompt("attack")
         # Should have all library reference sections
         self.assertIn('TASKS:', prompt)

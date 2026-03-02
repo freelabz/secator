@@ -1,43 +1,9 @@
-import re
 import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
+from secator.output_types.ai import is_markdown, render_markdown_for_rich
 from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
-
-
-def is_markdown(text: str) -> bool:
-	"""Detect if text contains Markdown formatting."""
-	if not text or len(text) < 10:
-		return False
-
-	markdown_patterns = [
-		r'^#{1,6}\s+',          # Headers: # Header
-		r'\*\*[^*]+\*\*',       # Bold: **text**
-		r'^\s*[-*+]\s+',        # Unordered lists: - item
-		r'^\s*\d+\.\s+',        # Ordered lists: 1. item
-		r'^\s*>\s+',            # Blockquotes: > quote
-		r'`[^`]+`',             # Inline code: `code`
-		r'```',                 # Code blocks: ```
-		r'\[.+\]\(.+\)',        # Links: [text](url)
-	]
-
-	for pattern in markdown_patterns:
-		if re.search(pattern, text, re.MULTILINE):
-			return True
-	return False
-
-
-def render_markdown_for_rich(text: str) -> str:
-	"""Render Markdown text for rich console output."""
-	from rich.console import Console
-	from rich.markdown import Markdown
-	from io import StringIO
-
-	console = Console(file=StringIO(), force_terminal=True, width=120)
-	md = Markdown(text)
-	console.print(md)
-	return console.file.getvalue()
 
 
 @dataclass

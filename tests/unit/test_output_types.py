@@ -63,7 +63,7 @@ class TestTagMarkdown(unittest.TestCase):
 		self.assertIn("Executive Summary", repr_str)
 
 
-class TestOutputTypes:
+class TestOutputTypes(unittest.TestCase):
 	def test_merge_with(self):
 		vuln1 = Vulnerability(name='CVE-2025-53020', severity='high', confidence='high', matched_at='2025-01-01')
 		vuln2 = Vulnerability(name='CVE-2025-53020', severity='medium', confidence='medium', matched_at='2025-01-02')

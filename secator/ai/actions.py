@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional
 
-from secator.output_types import Ai, Error, Info, Warning
+from secator.output_types import Ai, Error, Info, Warning, INTERNAL_FIELDS
 from secator.template import TemplateLoader
 
 
@@ -75,30 +75,37 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
         yield Warning(message=f"Unknown action: {action_type}")
 
 
-def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
-    """Execute a secator task.
+def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
+    """Execute a secator task or workflow.
 
     Args:
         action: Action dict with name, targets, opts
         ctx: Action context
+        runner_type: Either "task" or "workflow"
     """
     name = action.get("name", "")
     targets = action.get("targets", ctx.targets)
     opts = action.get("opts", {})
 
-    # Decrypt targets if encryptor present
     if ctx.encryptor:
         targets = [ctx.encryptor.decrypt(t) for t in targets]
 
     if ctx.dry_run:
-        yield Info(message=f"[DRY RUN] Would run task: {name} on {targets}")
+        yield Info(message=f"[DRY RUN] Would run {runner_type}: {name} on {targets}")
         return
 
-    yield Ai(content=name, ai_type="task", extra_data={"targets": targets, "opts": opts})
+    yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts})
 
     try:
-        from secator.runners import Task
-        tpl = TemplateLoader(input={'type': 'task', 'name': name})
+        if runner_type == "task":
+            from secator.runners import Task
+            tpl = TemplateLoader(input={'type': 'task', 'name': name})
+            runner_cls = Task
+        else:
+            from secator.runners import Workflow
+            tpl = TemplateLoader(name=f'workflows/{name}')
+            runner_cls = Workflow
+
         run_opts = {
             "print_item": True,
             "print_line": ctx.verbose,
@@ -110,56 +117,25 @@ def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
             "sync": True,
             **opts,
         }
+        if runner_type == "workflow":
+            run_opts["print_start"] = True
+            run_opts["print_end"] = True
 
-        task = Task(tpl, targets, run_opts=run_opts)
-        yield from task
+        runner = runner_cls(tpl, targets, run_opts=run_opts)
+        yield from runner
 
     except Exception as e:
-        yield Error(message=f"Task {name} failed: {e}")
+        yield Error(message=f"{runner_type.title()} {name} failed: {e}")
+
+
+def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
+    """Execute a secator task."""
+    yield from _run_runner(action, ctx, "task")
 
 
 def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
-    """Execute a secator workflow.
-
-    Args:
-        action: Action dict with name, targets
-        ctx: Action context
-    """
-    name = action.get("name", "")
-    targets = action.get("targets", ctx.targets)
-    opts = action.get("opts", {})
-
-    if ctx.encryptor:
-        targets = [ctx.encryptor.decrypt(t) for t in targets]
-
-    if ctx.dry_run:
-        yield Info(message=f"[DRY RUN] Would run workflow: {name} on {targets}")
-        return
-
-    yield Ai(content=name, ai_type="workflow", extra_data={"targets": targets, "opts": opts})
-
-    try:
-        from secator.runners import Workflow
-        tpl = TemplateLoader(name=f'workflows/{name}')
-        run_opts = {
-            "print_item": True,
-            "print_line": ctx.verbose,
-            "print_cmd": True,
-            "print_description": True,
-            "print_start": True,
-            "print_end": True,
-            "print_progress": False,
-            "enable_reports": False,
-            "exporters": [],
-            "sync": True,
-            **opts,
-        }
-
-        workflow = Workflow(tpl, targets, run_opts=run_opts)
-        yield from workflow
-
-    except Exception as e:
-        yield Error(message=f"Workflow {name} failed: {e}")
+    """Execute a secator workflow."""
+    yield from _run_runner(action, ctx, "workflow")
 
 
 def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
@@ -224,11 +200,8 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
             extra_data={"results": len(results)}
         )
         for result in results:
-            result.pop('_context', None)
-            result.pop('_uuid', None)
-            result.pop('_related', None)
-            result.pop('_duplicate', None)
-            yield result
+            clean = {k: v for k, v in result.items() if k not in INTERNAL_FIELDS}
+            yield clean
 
     except Exception as e:
         yield Ai(
@@ -267,7 +240,12 @@ def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:
         elif isinstance(v, dict):
             result[k] = _decrypt_dict(v, encryptor)
         elif isinstance(v, list):
-            result[k] = [encryptor.decrypt(i) if isinstance(i, str) else i for i in v]
+            result[k] = [
+                encryptor.decrypt(i) if isinstance(i, str)
+                else _decrypt_dict(i, encryptor) if isinstance(i, dict)
+                else i
+                for i in v
+            ]
         else:
             result[k] = v
     return result

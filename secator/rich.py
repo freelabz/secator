@@ -39,7 +39,7 @@ def status_to_color(value):
 		return value
 	if value < 400:
 		value = f'[bold green]{value}[/]'
-	elif value in [400, 499]:
+	elif 400 <= value < 500:
 		value = f'[bold dark_orange]{value}[/]'
 	elif value >= 500:
 		value = f'[bold red3]{value}[/]'
@@ -288,15 +288,6 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 			key_str = key
 			if not key.startswith('_'):
 				key_str = ' '.join(key.split('_')).title()
-			# TODO: remove this as it's not needed anymore
-			# no_wrap = key in ['url', 'reference', 'references', 'matched_at']
-			# overflow = None if no_wrap else 'fold'
-			# print('key: ', key_str, 'overflow: ', overflow, 'no_wrap: ', no_wrap)
-			# table.add_column(
-			# 	key_str,
-			# 	overflow=overflow,
-			# 	min_width=10,
-			# 	no_wrap=no_wrap)
 			table.add_column(key_str)
 
 	if not keys:
@@ -311,8 +302,8 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		values = []
 		if keys:
 			for key in keys:
-				value = getattr(item, key) if keys else item
-				value = FORMATTERS.get(key, lambda x: x)(value) if keys else item
+				value = getattr(item, key)
+				value = FORMATTERS.get(key, lambda x: x)(value)
 				if isinstance(value, dict) or isinstance(value, list):
 					value = yaml.dump(value)
 				elif isinstance(value, int) or isinstance(value, float):

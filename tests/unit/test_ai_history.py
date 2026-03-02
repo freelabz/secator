@@ -1,7 +1,7 @@
 # tests/unit/test_ai_history.py
 import unittest
 
-from secator.tasks.ai_history import ChatHistory
+from secator.ai.history import ChatHistory
 
 
 class TestChatHistory(unittest.TestCase):
