@@ -28,7 +28,6 @@ def init_llm(api_key: Optional[str] = None):
 	if _llm_initialized:
 		return
 
-
 	from litellm.integrations.custom_logger import CustomLogger
 
 	# Suppress litellm's own debug logs unless 'litellm.debug' is explicitly set

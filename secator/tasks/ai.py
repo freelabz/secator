@@ -7,8 +7,6 @@ from typing import Generator, List, Optional
 
 from time import sleep
 
-from pydantic.functional_validators import InstanceOf
-
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import ADDONS_ENABLED, LLM_SPINNER_MESSAGES
@@ -38,7 +36,8 @@ class ai(PythonRunner):
 	opts = {
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
-		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model", "choices": ["claude-sonnet-4-6", "claude-haiku-4-5"]},
+		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model",
+			"choices": ["claude-sonnet-4-6", "claude-haiku-4-5"]},
 		"api_key": {"type": str, "default": DEFAULT_API_KEY, "help": "API key for LLM provider"},
 		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "help": "API base URL"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
