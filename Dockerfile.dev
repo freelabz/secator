@@ -25,7 +25,8 @@ ENV TERM="xterm-256color"
 ENV SECATOR_SECURITY_PROMPT_SUDO_PASSWORD="0"
 
 COPY --chown=secator:secator . .
-RUN pip install --no-cache-dir -e ".[dev]" && \
+RUN pip install --no-cache-dir pipx && \
+    pip install --no-cache-dir -e ".[dev]" && \
     secator install addons worker && \
     secator install addons mongodb && \
     secator install addons redis && \
