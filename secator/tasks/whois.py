@@ -16,11 +16,11 @@ class whois(Command):
 	input_types = [HOST]
 	output_types = [Domain]
 	version_flag = '-V'
-	install_version = 'v1.15.7'
-	install_cmd = 'go install -v github.com/likexian/whois/cmd/whois@[install_version]'
-	install_github_bin = False
+	install_version = 'v1.0.0'
+	# fork of likexian/whois, upstream PR: https://github.com/likexian/whois/pull/63
+	install_cmd = 'go install -v github.com/freelabz/whois/cmd/whois@[install_version]'
 	install_binary_name = 'whois-go'  # rename to avoid conflicts with whois binary
-	github_handle = 'likexian/whois'
+	github_handle = 'freelabz/whois'
 	ignore_return_code = True
 
 	@staticmethod
