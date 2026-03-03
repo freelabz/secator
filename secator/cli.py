@@ -703,7 +703,7 @@ def config_edit(resume):
 	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
 	if not tmp_config.exists() or not resume:
 		shutil.copyfile(config_path, tmp_config)
-	click.edit(filename=tmp_config)
+	click.edit(filename=str(tmp_config))
 	config = Config.parse(path=tmp_config)
 	if config:
 		config.save(config_path)

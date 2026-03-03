@@ -15,6 +15,7 @@ from secator.definitions import (CIDR_RANGE, DELAY, DEPTH, EMAIL,
 from secator.loader import get_configs_by_type
 from secator.output_types import EXECUTION_TYPES, STAT_TYPES
 from secator.runners import Command, Task
+from secator.runners.python import PythonRunner
 from secator.rich import console
 from secator.utils import load_fixture, debug, traceback_as_string
 
@@ -70,6 +71,7 @@ INPUTS_TASKS = {
 	PATH: '.',
 	DOCKER_IMAGE: 'redis:latest',
 	GIT_REPOSITORY: 'https://github.com/freelabz/secator',
+	'ai': 'example.com',
 	'gf': 'http://testphp.vulnweb.com/hpp?pp=1',
 	'maigret': 'Linus__Torvalds',
 	'searchsploit': 'apache',
@@ -124,7 +126,17 @@ META_OPTS = {
 	'wafw00f.output_path': load_fixture('wafw00f_output', FIXTURES_DIR, only_path=True),
 	'testssl.output_path': load_fixture('testssl_output', FIXTURES_DIR, only_path=True),
 	'ssh_audit.output_path': load_fixture('ssh_audit_output', FIXTURES_DIR, only_path=True),
-	'x8.wordlist': 'http_params'
+	'x8.wordlist': 'http_params',
+}
+
+# PythonRunner task-specific test options (keyed by task name)
+PYTHON_RUNNER_OPTS = {
+	'ai': {
+		'mode': 'attack',
+		'interactive': False,
+		'sensitive': False,
+		'prompt': 'Run a full reconnaissance on this target',
+	},
 }
 
 
@@ -142,7 +154,72 @@ def mock_subprocess_popen(output_list):
 
 
 @contextlib.contextmanager
+def mock_litellm_completion(responses):
+	"""Mock litellm.completion and subprocess calls for PythonRunner tests.
+
+	Mocks LLM API calls to return fixture responses in sequence, and also mocks
+	subprocess.Popen/run so that task/workflow/shell actions don't hit the network.
+
+	Args:
+		responses: List of response content strings.
+	"""
+	if not isinstance(responses, list):
+		responses = [responses]
+	mock_responses = []
+	for content in responses:
+		mock_resp = unittest.mock.MagicMock()
+		mock_resp.choices = [unittest.mock.MagicMock()]
+		mock_resp.choices[0].message.content = content
+		mock_resp.usage = None
+		mock_responses.append(mock_resp)
+
+	mock_run = unittest.mock.MagicMock(stdout='mock output', stderr='', returncode=0)
+	patch_llm = unittest.mock.patch('litellm.completion', side_effect=mock_responses)
+	patch_run = unittest.mock.patch('subprocess.run', return_value=mock_run)
+	with patch_llm, mock_subprocess_popen([]), patch_run:
+		yield
+
+
+@contextlib.contextmanager
+def _mock_python_runner(cls, inputs, opts, fixture, method):
+	"""Mock a PythonRunner task using fixture data and class-defined mock context.
+
+	PythonRunner tasks can define a get_mock_context(fixture) classmethod that returns
+	a context manager for mocking their external dependencies (e.g. LLM API calls).
+	"""
+	# Filter opts: only pass opts defined by the task class + standard runner opts
+	task_opts = set(getattr(cls, 'opts', {}).keys())
+	runner_meta = {
+		'print_item', 'print_line', 'print_cmd', 'print_description', 'print_progress',
+		'print_start', 'print_end', 'print_json', 'print_raw', 'enable_reports', 'sync',
+	}
+	filtered_opts = {k: v for k, v in opts.items() if k in task_opts or k in runner_meta}
+
+	# Merge task-specific PythonRunner test opts
+	task_name = cls.__name__
+	filtered_opts.update(PYTHON_RUNNER_OPTS.get(task_name, {}))
+
+	mock_ctx = cls.get_mock_context(fixture) if hasattr(cls, 'get_mock_context') else contextlib.nullcontext()
+	with mock_ctx:
+		runner = cls(inputs, **filtered_opts)
+		if method == 'run':
+			yield cls(inputs, **filtered_opts).run()
+		elif method == 'si':
+			yield cls.si([], inputs, **filtered_opts)
+		elif method in ['s', 'delay']:
+			yield getattr(cls, method)(inputs, **filtered_opts)
+		else:
+			yield runner
+
+
+@contextlib.contextmanager
 def mock_command(cls, inputs=[], opts={}, fixture=None, method=''):
+	# PythonRunner tasks use their own mock strategy (no subprocess to mock)
+	if issubclass(cls, PythonRunner):
+		with _mock_python_runner(cls, inputs, opts, fixture, method) as runner:
+			yield runner
+		return
+
 	mocks = []
 	if isinstance(fixture, dict):
 		fixture = [fixture]

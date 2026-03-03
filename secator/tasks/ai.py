@@ -55,6 +55,12 @@ class ai(PythonRunner):
 		"interactive": {"is_flag": True, "default": True, "help": "Prompt user for follow-up after completion"},
 	}
 
+	@classmethod
+	def get_mock_context(cls, fixture):
+		"""Return a context manager that mocks LLM calls with fixture data."""
+		from secator.utils_test import mock_litellm_completion
+		return mock_litellm_completion(fixture)
+
 	def yielder(self) -> Generator:
 		"""Execute AI task."""
 		if not ADDONS_ENABLED['ai']:
