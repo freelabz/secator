@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Secator is a Python-based security assessment automation framework ("the pentester's swiss knife") that integrates 40+ security tools into a unified CLI. It provides standardized input/output across tools, workflow composition via YAML, and distributed execution via Celery or Airflow.
 
+## Prerequisites
+
+Before running any `secator` command (including tests, installs, and task execution), activate the virtualenv:
+
+```bash
+source /home/jahmyst/Workspace/secator/.venv/bin/activate
+```
+
 ## Common Commands
 
 ```bash
@@ -96,6 +104,14 @@ Standardized result models in `secator/output_types/`:
 3. Add test cases in `tests/integration/inputs.py` and `outputs.py`
 4. Run: `secator test integration --test test_workflows --workflows <NAME>`
 
-## Linting
+## Testing & Linting
+
+Always use `secator` commands to run tests (not `pytest` directly):
+
+```bash
+secator test lint                                    # Run flake8 linting
+secator test unit                                    # Run all unit tests
+secator test unit --test <test_name_or_regex>         # Run specific unit test(s)
+```
 
 Flake8 config (`.flake8`): max-line-length=120, ignores W191, E101, E128, E265, W605

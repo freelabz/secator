@@ -40,9 +40,9 @@ class getasn(Command):
 	opt_value_map = {
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
-	install_version = 'latest'
+	install_version = 'v1.0.0'
+	# fork of Vulnpire/getasn, upstream PR: https://github.com/Vulnpire/getasn/pull/1
 	install_cmd = 'go install github.com/freelabz/getasn@[install_version]'
-	install_github_bin = False
 	github_handle = 'freelabz/getasn'
 	proxychains = False
 	proxy_socks5 = True

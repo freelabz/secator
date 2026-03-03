@@ -17,10 +17,10 @@ class jswhois(Command):
 	file_flag = None
 	input_chunk_size = 1
 	version_flag = '-V'
-	install_version = '69af013b99d49191c9674cde2e2b57986f6b6bf8'
-	install_cmd = 'go install -v github.com/jschauma/jswhois@[install_version]'
-	install_github_bin = False
-	github_handle = 'jschauma/jswhois'
+	install_version = 'v1.0.0'
+	# fork of jschauma/jswhois, upstream PR: https://github.com/jschauma/jswhois/pull/7
+	install_cmd = 'go install -v github.com/freelabz/jswhois@[install_version]'
+	github_handle = 'freelabz/jswhois'
 
 	@staticmethod
 	def on_json_loaded(self, item):
