@@ -41,9 +41,9 @@ class getasn(Command):
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
 	install_version = 'latest'
-	install_cmd = 'go install github.com/Vulnpire/getasn@[install_version]'
+	install_cmd = 'go install github.com/freelabz/getasn@[install_version]'
 	install_github_bin = False
-	github_handle = 'Vulnpire/getasn'
+	github_handle = 'freelabz/getasn'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = False
