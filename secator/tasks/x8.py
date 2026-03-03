@@ -56,7 +56,7 @@ class x8(HttpParamsFuzzer):
 	}
 	install_version = 'v4.3.1'
 	# fork of Sh1Yo/x8, upstream PR: https://github.com/Sh1Yo/x8/pull/67
-	install_cmd = 'cargo install x8@[install_version_strip] --force'
+	install_cmd = 'cargo install --git https://github.com/freelabz/x8 --tag [install_version] x8 --force'
 	github_handle = 'freelabz/x8'
 	proxychains = False
 	proxy_socks5 = False
