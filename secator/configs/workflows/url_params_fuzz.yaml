@@ -63,14 +63,14 @@ tasks:
         field: value
         condition: item.name == 'url_base'
       if: "'arjun' in opts.fuzzers"
-    # x8:
-    #   description: Bruteforce URL params
-    #   wordlist: http_params
-    #   targets_:
-    #   - type: tag
-    #     field: '{value}/'
-    #     condition: item.name == 'url_base'
-    #   if: "'x8' in opts.fuzzers"
+    x8:
+      description: Bruteforce URL params
+      wordlist: http_params
+      targets_:
+      - type: tag
+        field: '{value}/'
+        condition: item.name == 'url_base'
+      if: "'x8' in opts.fuzzers"
 
   ffuf:
     description: Fuzz URL params
