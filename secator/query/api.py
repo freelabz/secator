@@ -5,8 +5,10 @@ from typing import List, Dict, Any, Optional
 
 import requests
 
+from secator.output_types import Warning
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
+from secator.rich import console
 
 
 class ApiBackend(QueryBackend):
@@ -63,7 +65,8 @@ class ApiBackend(QueryBackend):
                 return result['results']
 
             return []
-        except Exception:
+        except Exception as e:
+            console.print(Warning(message=f"API search failed: {e}"))
             return []
 
     def _execute_count(self, query: dict) -> int:
@@ -76,5 +79,6 @@ class ApiBackend(QueryBackend):
                 return result['total']
 
             return 0
-        except Exception:
+        except Exception as e:
+            console.print(Warning(message=f"API count failed: {e}"))
             return 0

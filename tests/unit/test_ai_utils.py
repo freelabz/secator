@@ -168,5 +168,139 @@ class TestCallLLM(unittest.TestCase):
         )
 
 
+class TestParseActions(unittest.TestCase):
+    """Tests for parse_actions - all LLM response formats."""
+
+    def test_json_array_in_code_block(self):
+        """Standard format: ```json [...] ```"""
+        response = 'Some reasoning.\n\n```json\n[{"action":"task","name":"nmap","targets":["example.com"]}]\n```'
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["action"], "task")
+        self.assertEqual(actions[0]["name"], "nmap")
+
+    def test_code_block_multiple_actions(self):
+        response = '```json\n[{"action":"shell","command":"echo hi"},{"action":"done","reason":"ok"}]\n```'
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 2)
+        self.assertEqual(actions[0]["action"], "shell")
+        self.assertEqual(actions[1]["action"], "done")
+
+    def test_raw_json_array(self):
+        """JSON array without code block."""
+        response = 'Reasoning text.\n\n[{"action":"task","name":"httpx","targets":["example.com"],"opts":{}}]'
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["name"], "httpx")
+
+    def test_raw_json_array_multiline(self):
+        response = ('Reasoning.\n\n[{"action":"task","name":"nmap","targets":["example.com"]},\n'
+                     '{"action":"done","reason":"finished"}]')
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 2)
+
+    def test_individual_json_objects_bullet_list(self):
+        """LLM outputs individual JSON objects as bullet points (not wrapped in array)."""
+        response = (
+            '1. Install wafw00f\n2. Conduct scans\n\nActions\n\n'
+            '• task: {"action":"task","name":"wafw00f","targets":["vulnweb.com"],"opts":{}}\n'
+            '• task: {"action":"task","name":"nmap","targets":["vulnweb.com"],"opts":{"ports":"1-1000"}}\n'
+            '• done: {"action":"done","reason":"Continuing."}\n'
+        )
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 3)
+        self.assertEqual(actions[0]["name"], "wafw00f")
+        self.assertEqual(actions[1]["name"], "nmap")
+        self.assertEqual(actions[2]["action"], "done")
+
+    def test_individual_json_objects_newline_separated(self):
+        """JSON objects on separate lines without any prefix."""
+        response = (
+            'Analysis complete.\n\n'
+            '{"action":"shell","command":"curl -s http://example.com"}\n'
+            '{"action":"done","reason":"done"}\n'
+        )
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 2)
+        self.assertEqual(actions[0]["action"], "shell")
+        self.assertEqual(actions[1]["action"], "done")
+
+    def test_single_json_object(self):
+        """Only one action, not in an array."""
+        response = 'Quick check.\n\n{"action":"done","reason":"nothing to do"}'
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["reason"], "nothing to do")
+
+    def test_nested_targets_not_confused_for_action_array(self):
+        """Targets array like ["vulnweb.com"] should not be returned as actions."""
+        response = (
+            'Running scan.\n\n'
+            '• {"action":"task","name":"nmap","targets":["vulnweb.com"],"opts":{}}\n'
+        )
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 1)
+        self.assertIsInstance(actions[0], dict)
+        self.assertEqual(actions[0]["action"], "task")
+
+    def test_code_block_with_non_action_array(self):
+        """Code block containing a non-action array should not match."""
+        response = '```json\n["vulnweb.com", "example.com"]\n```'
+        actions = parse_actions(response)
+        self.assertEqual(actions, [])
+
+    def test_no_actions_in_response(self):
+        """Plain text response with no JSON."""
+        response = 'I will analyze the target and provide recommendations.'
+        actions = parse_actions(response)
+        self.assertEqual(actions, [])
+
+    def test_empty_response(self):
+        actions = parse_actions('')
+        self.assertEqual(actions, [])
+
+    def test_actions_with_nested_opts(self):
+        """Actions with complex nested opts."""
+        response = '[{"action":"task","name":"nuclei","targets":["example.com"],"opts":{"template_id":"cves","severity":"critical,high"}}]'
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["opts"]["severity"], "critical,high")
+
+    def test_mixed_text_and_code_block(self):
+        """Realistic LLM output: reasoning + code block."""
+        response = (
+            '## Port Scanning\n\n'
+            'Found web services. Running vulnerability scan.\n\n'
+            '```json\n'
+            '[{"action":"task","name":"nuclei","targets":["example.com"],"opts":{"template_id":"cves"}},'
+            '{"action":"query","query":{"_type":"vulnerability"},"limit":10}]\n'
+            '```\n'
+        )
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 2)
+        self.assertEqual(actions[0]["action"], "task")
+        self.assertEqual(actions[1]["action"], "query")
+
+    def test_invalid_json_returns_empty(self):
+        """Malformed JSON should not crash."""
+        response = '```json\n[{"action":"task", broken json}]\n```'
+        actions = parse_actions(response)
+        self.assertEqual(actions, [])
+
+    def test_markdown_numbered_json_objects(self):
+        """LLM outputs numbered JSON objects in markdown."""
+        response = (
+            'Plan:\n\n'
+            '1. {"action":"shell","command":"whoami"}\n'
+            '2. {"action":"task","name":"httpx","targets":["example.com"],"opts":{}}\n'
+            '3. {"action":"done","reason":"recon complete"}\n'
+        )
+        actions = parse_actions(response)
+        self.assertEqual(len(actions), 3)
+        self.assertEqual(actions[0]["command"], "whoami")
+        self.assertEqual(actions[1]["name"], "httpx")
+        self.assertEqual(actions[2]["reason"], "recon complete")
+
+
 if __name__ == '__main__':
     unittest.main()

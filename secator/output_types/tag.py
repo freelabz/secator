@@ -2,7 +2,6 @@ import time
 from dataclasses import dataclass, field
 
 from secator.output_types import OutputType
-from secator.output_types.ai import is_markdown, render_markdown_for_rich
 from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 
 
@@ -41,11 +40,7 @@ class Tag(OutputType):
 		small_content = False
 		if len(content) < 100:
 			small_content = True
-
-		# Check if this is an AI-generated summary (don't crop these)
-		ai_names = ('ai_summary', 'ai_suggestions', 'attack_summary', 'attack_report')
-		is_ai_content = self.category == 'ai' or self.name in ai_names
-
+		# content_xs = trim_string(content, max_length=50).replace('\n', '/')
 		if small_content:
 			s += f' [bold orange4]{content}[/]'
 		if self.match != content:
@@ -54,30 +49,18 @@ class Tag(OutputType):
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:incoming_envelope:[/]'
 		if not small_content:
-			# Check if content is Markdown
-			if is_markdown(content):
-				# Render Markdown content - don't crop AI summaries
-				md_rendered = render_markdown_for_rich(content)
-				# Indent the markdown output
-				md_indented = '\n    ' + md_rendered.replace('\n', '\n    ')
-				return rich_to_ansi(s) + md_indented.rstrip()
-			else:
-				sep = ' '
-				# Don't crop AI-generated content
-				if not is_ai_content:
-					content = trim_string(content, max_length=1000)
-				content = content.replace('\n', '\n    ')
-				sep = '\n    '
-				ed += f'\n    [bold red]value[/]:{sep}[yellow]{_s(content)}[/]'
+			sep = ' '
+			content = trim_string(content, max_length=1000)
+			content = content.replace('\n', '\n    ')
+			sep = '\n    '
+			ed += f'\n    [bold red]value[/]:{sep}[yellow]{_s(content)}[/]'
 		if self.extra_data:
 			for k, v in self.extra_data.items():
 				sep = ' '
 				if not v:
 					continue
 				if isinstance(v, str):
-					# Don't crop AI-generated content
-					if not is_ai_content:
-						v = trim_string(v, max_length=1000)
+					v = trim_string(v, max_length=1000)
 					if len(v) > 1000:
 						v = v.replace('\n', '\n' + sep)
 						sep = '\n    '

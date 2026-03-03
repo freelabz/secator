@@ -42,8 +42,10 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 - Prefer secator runners over raw shell commands
 - By DEFAULT, prefer single TASKS over workflows/scans (less intrusive, more targeted)
 - Only use workflows/scans when user explicitly requests "comprehensive", "full", or "deep" recon
-- NOISY TASKS: Some tasks make many HTTP requests (nuclei, dalfox, ffuf, feroxbuster, cariddi, katana, gospider, hakrawler, x8, and other crawlers/fuzzers). Use those scarcely and only when really needed.
+- NOISY TASKS: Some tasks make many HTTP requests (nuclei, dalfox, ffuf, feroxbuster, cariddi, katana, gospider, hakrawler, x8, and other crawlers/fuzzers). Use those scarcely and only when really needed and other lighter options have been exhausted.
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
+- ERROR RECOVERY: If a task fails due to bad options, unsupported flags, or incorrect parameters, analyze the error, fix the options, and retry immediately. Do NOT give up after a single failure.
+- NEVER use placeholder values like "<target>", "<url>", "<your_wordlist>" in options. All values must be concrete and usable. The user cannot interact with actions - they run autonomously.
 
 ### TEMPLATE
 Brief reasoning (2-3 sentences max), then a JSON array of actions:
@@ -93,6 +95,8 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 - Keep responses concise: max 100 lines. Be direct and actionable.
 - Don't invent things, rely on the user data.
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
+- If a query fails, analyze the error and retry with corrected parameters. Do NOT give up after a single failure.
+- NEVER use placeholder values in queries. All values must be concrete and usable.
 
 ### TEMPLATE
 Markdown explanation, then a JSON array of actions:
@@ -203,6 +207,8 @@ def get_system_prompt(mode: str) -> str:
     Returns:
         Formatted system prompt string
     """
+    if mode not in ("attack", "chat"):
+        raise ValueError(f"Unsupported mode: {mode!r}. Expected 'attack' or 'chat'.")
     query_types = build_query_types()
     if mode == "attack":
         return SYSTEM_ATTACK.substitute(

@@ -6,9 +6,8 @@ import re
 from typing import Dict, List, Optional
 
 from secator.config import CONFIG
+from secator.output_types import Warning
 from secator.rich import console
-
-logger = logging.getLogger(__name__)
 
 # Module-level state for litellm initialization
 _llm_initialized = False
@@ -94,19 +93,36 @@ def call_llm(
 	temperature: float = 0.7,
 	api_base: Optional[str] = None,
 	api_key: Optional[str] = None,
+	max_retries: int = 3,
 ) -> Dict:
 	"""Call litellm completion and return response with usage."""
+	import time
 	import litellm
 
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
 
-	response = litellm.completion(
-		model=model,
-		messages=messages,
-		temperature=temperature,
-		api_base=api_base,
+	retryable = (
+		litellm.InternalServerError, litellm.RateLimitError,
+		litellm.ServiceUnavailableError, litellm.APIConnectionError,
 	)
+	for attempt in range(1, max_retries + 1):
+		try:
+			response = litellm.completion(
+				model=model,
+				messages=messages,
+				temperature=temperature,
+				api_base=api_base,
+			)
+			break
+		except retryable as e:
+			if attempt < max_retries:
+				wait = 2 ** attempt
+				console.print(Warning(
+					message=f"LLM call failed (attempt {attempt}/{max_retries}): {e}. Retrying in {wait}s..."))
+				time.sleep(wait)
+			else:
+				raise
 
 	content = response.choices[0].message.content
 	usage = None
@@ -125,13 +141,20 @@ def call_llm(
 	return {"content": content, "usage": usage}
 
 
+def _is_action_list(obj) -> bool:
+	"""Check if parsed JSON is a list of action dicts."""
+	return isinstance(obj, list) and all(isinstance(a, dict) and "action" in a for a in obj)
+
+
 def parse_actions(response: str) -> List[Dict]:
 	"""Extract JSON action array from LLM response."""
 	# Try code block first (```json ... ```)
 	match = re.search(r'```(?:json)?\s*(\[[\s\S]*?\])\s*```', response)
 	if match:
 		try:
-			return json.loads(match.group(1))
+			result = json.loads(match.group(1))
+			if _is_action_list(result):
+				return result
 		except json.JSONDecodeError:
 			pass
 
@@ -141,21 +164,25 @@ def parse_actions(response: str) -> List[Dict]:
 		try:
 			text = response[match.start():]
 			end = _find_matching_bracket(text, 0, '[', ']')
-			return json.loads(text[:end])
+			result = json.loads(text[:end])
+			if _is_action_list(result):
+				return result
 		except json.JSONDecodeError:
 			pass
 
-	# Try single JSON object with "action" key
-	match = re.search(r'\{[\s\S]*?"action"[\s\S]*?\}', response)
-	if match:
+	# Try collecting individual JSON objects with "action" key
+	actions = []
+	for match in re.finditer(r'\{"action"', response):
 		try:
 			text = response[match.start():]
 			end = _find_matching_bracket(text, 0, '{', '}')
 			obj = json.loads(text[:end])
-			if isinstance(obj, dict):
-				return [obj]
+			if isinstance(obj, dict) and "action" in obj:
+				actions.append(obj)
 		except json.JSONDecodeError:
 			pass
+	if actions:
+		return actions
 
 	return []
 
@@ -179,7 +206,7 @@ def strip_json_from_response(text: str) -> str:
 			bracketed = text[i:end]
 
 			# Only skip if it looks like a JSON action array
-			if '"action"' in bracketed and bracketed.startswith('[{'):
+			if '"action"' in bracketed and re.match(r'^\[\s*\{', bracketed):
 				i = end
 			else:
 				result.append(text[i])

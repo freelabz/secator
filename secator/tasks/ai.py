@@ -36,7 +36,6 @@ class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
 	output_types = FINDING_TYPES
 	tags = ["ai", "analysis", "pentest"]
-	install_cmd = "pip install litellm"
 	default_inputs = ''
 	opts = {
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
@@ -155,6 +154,8 @@ class ai(PythonRunner):
 		yield Info(message=repr(ctx))
 
 		iteration = 0
+		query_extensions = 0
+		max_query_extensions = 3
 		done = False
 		while iteration < max_iter:
 			iteration += 1
@@ -214,9 +215,12 @@ class ai(PythonRunner):
 				for action in actions:
 					action_type = action.get("action", "")
 					action_results = []
+					has_errors = False
 					for item in dispatch_action(action, ctx):
 						if isinstance(item, (Stat, Progress, State, Info)):
 							continue
+						if isinstance(item, Error):
+							has_errors = True
 						if isinstance(item, Ai):
 							self.add_result(item)
 							# Feed shell output back to the LLM
@@ -234,7 +238,7 @@ class ai(PythonRunner):
 					# Build tool result for history (compact JSON)
 					tool_result = format_tool_result(
 						action.get("name", action_type),
-						"success",
+						"error" if has_errors else "success",
 						len(action_results),
 						action_results
 					)
@@ -245,9 +249,10 @@ class ai(PythonRunner):
 					if action_type == "done":
 						done = True
 
-				# If the last action was a query (and not in a query-only loop), allow one more iteration
-				if actions and actions[-1].get("action") == "query":
+				# If the last action was a query, allow one more iteration (capped to prevent infinite loops)
+				if actions and actions[-1].get("action") == "query" and query_extensions < max_query_extensions:
 					max_iter += 1
+					query_extensions += 1
 
 				# Prompt user for continuation
 				if done or (iteration == max_iter):

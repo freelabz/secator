@@ -168,6 +168,9 @@ class InteractiveMenu:
 		import tty
 		import termios
 
+		if not sys.stdin.isatty():
+			return None
+
 		fd = sys.stdin.fileno()
 		old_settings = termios.tcgetattr(fd)
 		self.selected = 0
@@ -302,7 +305,7 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 		values = []
 		if keys:
 			for key in keys:
-				value = getattr(item, key)
+				value = getattr(item, key, '')
 				value = FORMATTERS.get(key, lambda x: x)(value)
 				if isinstance(value, dict) or isinstance(value, list):
 					value = yaml.dump(value)

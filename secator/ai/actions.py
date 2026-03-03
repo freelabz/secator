@@ -185,13 +185,12 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
     if ctx.encryptor:
         query_filter = _decrypt_dict(query_filter, ctx.encryptor)
 
-    query_str = json.dumps(query_filter, separators=(',', ':'))
-
     if ctx.scope != "current" and not ctx.workspace_id:
         yield Warning(message="No workspace available for query")
         return
 
     try:
+        query_str = json.dumps(query_filter, separators=(',', ':'))
         engine = ctx.get_query_engine()
         results = engine.search(query_filter, limit=limit)
         yield Ai(
@@ -205,7 +204,7 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 
     except Exception as e:
         yield Ai(
-            content=query_str,
+            content=str(query_filter),
             ai_type="query",
             extra_data={"results": "failed"}
         )

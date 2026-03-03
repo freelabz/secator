@@ -2,7 +2,9 @@
 
 from typing import List, Dict, Any, Optional
 
+from secator.output_types import Warning
 from secator.query._base import QueryBackend
+from secator.rich import console
 
 
 class MongoDBBackend(QueryBackend):
@@ -46,7 +48,8 @@ class MongoDBBackend(QueryBackend):
                 results.append(doc)
 
             return results
-        except Exception:
+        except Exception as e:
+            console.print(Warning(message=f"MongoDB search failed: {e}"))
             return []
 
     def _execute_count(self, query: dict) -> int:
@@ -55,5 +58,6 @@ class MongoDBBackend(QueryBackend):
             client = self._get_client()
             db = client.main
             return db.findings.count_documents(query)
-        except Exception:
+        except Exception as e:
+            console.print(Warning(message=f"MongoDB count failed: {e}"))
             return 0
