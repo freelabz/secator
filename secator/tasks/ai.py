@@ -131,6 +131,25 @@ class ai(PythonRunner):
 			console.print(Warning(message=f'Could not detect mode automatically: {e}. Falling back to "chat" mode.'))
 		return "chat"
 
+	def _prompt_and_redetect(self, history, encryptor, max_iter, choices, mode, api_base, api_key):
+		"""Show interactive menu and re-detect intent. Returns (mode, max_iter, items) or None."""
+		result = prompt_user(history, encryptor, max_iterations=max_iter, choices=choices, mode=mode)
+		if result is None:
+			return None
+		menu_action, extra_iters = result
+		max_iter += extra_iters
+
+		items = []
+		intent_model = self.run_opts.get("intent_model")
+		new_mode = self._detect_mode(menu_action, intent_model, api_base, api_key)
+		if new_mode != mode:
+			mode = new_mode
+			history.set_system(get_system_prompt(mode))
+			items.append(Info(message=f"Switched to {mode} mode"))
+
+		items.append(Ai(content=menu_action, ai_type="prompt"))
+		return mode, max_iter, items
+
 	def _run_loop(self, mode: str, prompt: str, targets: List[str], model: str,
 				  encryptor: Optional[SensitiveDataEncryptor], previous_results: List = None) -> Generator:
 		"""Run unified loop for both attack and chat modes."""
@@ -270,30 +289,34 @@ class ai(PythonRunner):
 				if follow_up_choices is not None or not actions or iteration == max_iter:
 					if not interactive:
 						return
-					if iteration == max_iter:
-						yield Info(message=f"Reached max iterations ({max_iter}). Following up with user.")
-					else:
-						yield Info(message="Following up with user.")
-					result = prompt_user(history, encryptor, max_iterations=max_iter, choices=follow_up_choices or [])
+					if not follow_up_choices:
+						if iteration == max_iter:
+							yield Ai(content="Max iterations reached. What should I do next?", ai_type="follow_up")
+						elif not actions:
+							yield Ai(content="No actions to execute. What should I do next?", ai_type="follow_up")
+					result = self._prompt_and_redetect(
+						history, encryptor, max_iter, follow_up_choices or [], mode, api_base, api_key)
 					if result is None:
 						return
-					menu_action, extra_iters = result
-					max_iter += extra_iters
-
-					# Re-detect intent and switch mode if needed
-					intent_model = self.run_opts.get("intent_model")
-					new_mode = self._detect_mode(menu_action, intent_model, api_base, api_key)
-					if new_mode != mode:
-						mode = new_mode
-						history.set_system(get_system_prompt(mode))
-						yield Info(message=f"Switched to {mode} mode")
-
-					yield Ai(content=menu_action, ai_type="prompt")
+					mode, max_iter, items = result
+					yield from items
 					continue
 
 				# Normal continue
 				continue_msg = format_continue(iteration, max_iter)
 				history.add_user(_maybe_encrypt(continue_msg, encryptor))
+
+			except KeyboardInterrupt:
+				if not interactive:
+					return
+				yield Warning(message="Interrupted by user.")
+				result = self._prompt_and_redetect(
+					history, encryptor, max_iter, [], mode, api_base, api_key)
+				if result is None:
+					return
+				mode, max_iter, items = result
+				yield from items
+				continue
 
 			except Exception as e:
 				if isinstance(e, litellm.RateLimitError):

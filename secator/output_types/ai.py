@@ -57,6 +57,7 @@ AI_TYPES = {
 	'shell_output': {'label': '◀', 'color': 'dim white'},
 	'query': {'label': '🔍', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
+	'follow_up': {'label': '[FOLLOW UP]', 'color': 'orange3'},
 }
 
 ACTION_TYPES = ('task', 'workflow', 'shell', 'query', 'stopped')

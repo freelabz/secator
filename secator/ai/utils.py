@@ -354,7 +354,7 @@ def setup_ai():
 		return selected
 
 
-def prompt_user(history, encryptor=None, max_iterations=10, choices=None):
+def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="chat"):
 	"""Prompt user for follow-up input via interactive menu.
 
 	Builds a unified menu with optional LLM-provided choices, plus Continue,
@@ -392,10 +392,11 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None):
 				})
 
 		# Default options (always present)
+		continue_label = f"Continue to {mode}"
 		options.extend([
 			{
-				"label": "Continue", "description": "Continue with optional instructions",
-				"input": True, "action": "continue", "default": "Continue",
+				"label": continue_label, "description": "Continue with optional instructions",
+				"input": True, "action": "continue",
 			},
 			{
 				"label": "Summarize", "description": "Get a summary of findings",
@@ -418,7 +419,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None):
 			else:
 				continue_msg = format_continue(0, max_iterations)
 				history.add_user(_maybe_encrypt(continue_msg, encryptor))
-			return (value or "Continue", max_iterations)
+			return (value or continue_label, max_iterations)
 
 		if action == "summarize":
 			history.set_system(get_system_prompt("chat"))
