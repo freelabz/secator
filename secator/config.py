@@ -213,6 +213,7 @@ class AiAddon(StrictModel):
 	execution_model: str = ''
 	temperature: float = 0.7
 	max_tokens: int = 30000
+	max_tokens_total: int = 100000
 	max_results: int = 500
 	encrypt_pii: bool = True
 
@@ -370,15 +371,15 @@ class Config(DotMap):
 				value = Path(value)
 		except ValueError:
 			pass
-		finally:
-			if set_partial:
-				if value is None or value == target[final_key]:
-					if final_key in partial:
-						del partial[final_key]
-					return
-				else:
-					partial[final_key] = value
-			target[final_key] = value
+
+		if set_partial:
+			if value is None or value == target[final_key]:
+				if final_key in partial:
+					del partial[final_key]
+				return
+			else:
+				partial[final_key] = value
+		target[final_key] = value
 
 	def unset(self, key, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.

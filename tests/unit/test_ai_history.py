@@ -1,6 +1,6 @@
 # tests/unit/test_ai_history.py
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from secator.ai.history import ChatHistory
 
@@ -15,6 +15,28 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "system")
         self.assertEqual(messages[0]["content"], "You are an assistant.")
+
+    def test_set_system_replaces_existing(self):
+        history = ChatHistory()
+        history.add_system("old prompt")
+        history.add_user("user msg")
+        history.set_system("new prompt")
+
+        messages = history.to_messages()
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[0]["content"], "new prompt")
+
+    def test_set_system_inserts_when_missing(self):
+        history = ChatHistory()
+        history.add_user("user msg")
+        history.set_system("inserted prompt")
+
+        messages = history.to_messages()
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[0]["content"], "inserted prompt")
+        self.assertEqual(messages[1]["role"], "user")
 
     def test_add_user_json(self):
         history = ChatHistory()
@@ -134,9 +156,75 @@ class TestChatHistory(unittest.TestCase):
         # System prompt preserved as first message
         self.assertEqual(messages[0]["role"], "system")
         self.assertEqual(messages[0]["content"], "You are an AI pentester.")
-        # Summary is the second message
+        # First user message preserved as second message
         self.assertEqual(messages[1]["role"], "user")
-        self.assertIn("Summary", messages[1]["content"])
+        self.assertEqual(messages[1]["content"], "x" * 200)
+        # Summary is the third message
+        self.assertEqual(messages[2]["role"], "user")
+        self.assertIn("Summary", messages[2]["content"])
+
+    def test_truncate_drops_oldest_messages(self):
+        """Truncate drops messages from index 2, keeping system and first user."""
+        history = ChatHistory()
+        history.add_system("s" * 40)    # 10 tokens
+        history.add_user("u" * 40)      # 10 tokens
+        for i in range(10):
+            history.add_user(f"msg{i} " + "x" * 200)  # ~50 tokens each
+
+        original_count = len(history.messages)
+        dropped = history.truncate(max_tokens=100)
+
+        self.assertGreater(dropped, 0)
+        self.assertEqual(len(history.messages), original_count - dropped)
+        # System prompt and first user message preserved
+        self.assertEqual(history.messages[0]["role"], "system")
+        self.assertEqual(history.messages[0]["content"], "s" * 40)
+        self.assertEqual(history.messages[1]["role"], "user")
+        self.assertEqual(history.messages[1]["content"], "u" * 40)
+        # Final token count is under limit
+        self.assertLessEqual(history.est_tokens(), 100)
+
+    def test_to_messages_with_max_tokens_total(self):
+        """to_messages with max_tokens_total truncates and returns under limit."""
+        history = ChatHistory()
+        history.add_system("s" * 40)    # 10 tokens
+        history.add_user("u" * 40)      # 10 tokens
+        for i in range(20):
+            history.add_user("x" * 400)  # 100 tokens each
+
+        self.assertGreater(history.est_tokens(), 500)
+
+        messages = history.to_messages(max_tokens_total=500)
+
+        # Token count after truncation is under the limit
+        total_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+        self.assertLessEqual(total_tokens, 500)
+        # System prompt and first user preserved
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[0]["content"], "s" * 40)
+        self.assertEqual(messages[1]["role"], "user")
+        self.assertEqual(messages[1]["content"], "u" * 40)
+
+    def test_to_messages_no_truncation_when_under_limit(self):
+        """to_messages with max_tokens_total does nothing when under limit."""
+        history = ChatHistory()
+        history.add_system("short")
+        history.add_user("msg")
+
+        messages = history.to_messages(max_tokens_total=500)
+        self.assertEqual(len(messages), 2)
+
+    def test_to_messages_no_truncation_when_zero(self):
+        """to_messages without max_tokens_total does not truncate."""
+        history = ChatHistory()
+        history.add_system("s" * 40)
+        history.add_user("u" * 40)
+        for i in range(20):
+            history.add_user("x" * 400)
+
+        messages = history.to_messages()
+        # All messages returned (no truncation)
+        self.assertEqual(len(messages), 22)
 
     def test_summarize_with_llm_few_messages(self):
         """Summarization skipped when <= 2 messages."""

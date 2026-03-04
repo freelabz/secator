@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from secator.config import CONFIG
 from secator.output_types import Warning
-from secator.rich import console
+from secator.rich import console, maybe_status
 
 # Module-level state for litellm initialization
 _llm_initialized = False
@@ -218,72 +218,230 @@ def strip_json_from_response(text: str) -> str:
 	return ''.join(result).strip()
 
 
-def prompt_user(history, encryptor=None, mode="chat"):
-	"""Prompt user for follow-up input.
+MODEL_COLORS = [
+	'cyan', 'green', 'yellow', 'magenta', 'red', 'blue',
+	'bright_cyan', 'bright_green', 'bright_yellow', 'bright_magenta',
+	'bright_red', 'bright_blue', 'orange3', 'deep_pink2', 'dark_olive_green3',
+	'medium_purple3', 'dodger_blue2', 'gold3', 'spring_green3', 'hot_pink',
+]
+
+
+def setup_ai():
+	"""Interactive search-filter-select flow for configuring AI model and API key."""
+	import litellm
+	from rich.prompt import Prompt
+
+	# Load all models, sort, build color map
+	all_models = sorted(litellm.model_list)
+	all_parts = set()
+	for m in all_models:
+		parts = m.split('/')
+		for p in parts[:-1]:
+			all_parts.add(p)
+	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
+
+	def _format_model(m, idx=None):
+		parts = m.split('/')
+		if len(parts) > 1:
+			segments = [f"[bold {part_colors[p]}]{p}[/]" for p in parts[:-1]]
+			colored = '/'.join(segments) + f"/[bold white]{parts[-1]}[/]"
+		else:
+			colored = f"[bold white]{m}[/]"
+		prefix = f"[dim]{idx:>4}[/] " if idx is not None else "  "
+		return prefix + colored
+
+	# Show current config
+	current_model = CONFIG.addons.ai.default_model
+	current_intent = CONFIG.addons.ai.intent_model
+	current_key = CONFIG.addons.ai.api_key
+	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
+	console.print()
+	console.print("[bold]  Current config:[/]")
+	console.print(f"    Model:        [bold white]{current_model or 'not set'}[/]")
+	console.print(f"    Intent model: [bold white]{current_intent or 'not set'}[/]")
+	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
+	console.print()
+
+	# Display all models numbered
+	displayed = all_models
+	suffix = ''
+	console.print(f"[bold]  Found {len(displayed)} models{suffix}:[/]")
+	for i, m in enumerate(displayed, 1):
+		console.print(_format_model(m, idx=i), highlight=False)
+
+	# Enter prompt loop
+	while True:
+		console.print()
+		choice = Prompt.ask("[bold cyan]  Filter or select (number/name, q to quit)[/]")
+
+		if not choice:
+			# Empty input: re-show current list
+			console.print(f"\n[bold]  Found {len(displayed)} models{suffix}:[/]")
+			for i, m in enumerate(displayed, 1):
+				console.print(_format_model(m, idx=i), highlight=False)
+			continue
+
+		if choice.lower() in ('q', 'quit', 'exit'):
+			return None
+
+		# Number → select from current display
+		if choice.isdigit():
+			idx = int(choice)
+			if 1 <= idx <= len(displayed):
+				selected = displayed[idx - 1]
+			else:
+				console.print(f"[bold red]  Invalid number: {idx} (valid: 1-{len(displayed)})[/]")
+				continue
+		else:
+			# Check exact match first
+			exact = [m for m in all_models if m.lower() == choice.lower()]
+			if exact:
+				selected = exact[0]
+			else:
+				# Text → filter models, re-display
+				query_lower = choice.lower()
+				filtered = [m for m in all_models if query_lower in m.lower()]
+				if not filtered:
+					console.print(f'[bold yellow]  No models matching "{choice}".[/]')
+					continue
+				if len(filtered) == 1:
+					selected = filtered[0]
+				else:
+					displayed = filtered
+					suffix = f' matching "{choice}"'
+					console.print(f"\n[bold]  Found {len(displayed)} models{suffix}:[/]")
+					for i, m in enumerate(displayed, 1):
+						console.print(_format_model(m, idx=i), highlight=False)
+					continue
+
+		# Model selected - save config
+		console.print(f"\n[bold green]  Selected: [white]{selected}[/][/]")
+		CONFIG.set('addons.ai.default_model', selected)
+		CONFIG.set('addons.ai.intent_model', selected)
+
+		# Prompt for API key if model changed or key unset
+		api_key = Prompt.ask(
+			"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
+			default=masked_key,
+			show_default=bool(masked_key),
+		)
+		if api_key and api_key != masked_key:
+			CONFIG.set('addons.ai.api_key', api_key)
+
+		config = CONFIG.validate()
+		if config:
+			CONFIG.save()
+			console.print(f"[bold green]  Default model set to [white]{selected}[/][/]")
+			console.print(f"[bold green]  Intent model set to [white]{selected}[/][/]")
+		else:
+			console.print(f"[bold yellow]  Model selected: {selected} (config validation failed, not saved)[/]")
+
+		# Verify with a simple LLM call
+		api_key = CONFIG.addons.ai.api_key
+		api_base = CONFIG.addons.ai.api_base
+		console.print()
+		try:
+			with maybe_status("[bold orange3]Verifying model connection...[/]", spinner="dots"):
+				result = call_llm(
+					[{"role": "user", "content": "Reply with only: OK"}],
+					selected, temperature=0, api_base=api_base, api_key=api_key,
+				)
+			console.print(f"[bold green]  Connection verified! Response: {result['content'].strip()}[/]")
+		except Exception as e:
+			console.print(f"[bold red]  Connection failed: {e}[/]")
+			console.print("[dim]  Check your API key and model name.[/]")
+
+		return selected
+
+
+def prompt_user(history, encryptor=None, max_iterations=10, choices=None):
+	"""Prompt user for follow-up input via interactive menu.
+
+	Builds a unified menu with optional LLM-provided choices, plus Continue,
+	Summarize, and Exit. Mutates history in-place before returning.
+
+	Args:
+		history: ChatHistory instance to mutate with user's choice.
+		encryptor: Optional SensitiveDataEncryptor for encrypting user input.
+		max_iterations: Current max iterations (used for continue message).
+		choices: Optional list of choice strings from LLM follow_up action.
 
 	Returns:
-		tuple: (action, value) where action is 'continue', 'follow_up', or 'summarize'.
+		tuple: (action, extra_iters) where action is 'continue', 'summarize',
+			or 'follow_up', and extra_iters is iterations to add.
 		None: to exit.
 	"""
 	from secator.definitions import IN_WORKER
 	if IN_WORKER:
-		return ("exit", None)
+		return None
 	from secator.rich import InteractiveMenu
+	from secator.ai.prompts import format_continue
+	from secator.ai.prompts import get_system_prompt
 
 	try:
-		other_mode = "chat" if mode == "attack" else "attack"
-		switch_label = f"Switch to {other_mode} mode"
-		if mode == "attack":
-			options = [
-				{"label": "Continue attacking", "description": "Continue for N more iterations", "action": "continue"},
-				{"label": "Summarize", "description": "Get a summary of findings so far", "action": "summarize"},
-				{"label": "Show raw", "description": "Print last response as copyable text", "action": "show_raw"},
-				{"label": switch_label, "description": "Change mode with a new prompt", "input": True, "action": "switch_mode"},
-				{"label": "Something else", "description": "Send custom instructions", "input": True, "action": "follow_up"},
-				{"label": "Exit", "action": "exit"},
-			]
-			result = InteractiveMenu("What's next?", options).show()
-			if result is None:
-				return None
-			idx, value = result
-			action = options[idx].get("action")
-			if action == "continue":
-				from rich.prompt import IntPrompt
-				n = IntPrompt.ask("[bold cyan]Number of iterations[/]", default=5)
-				return ("continue", n)
-			if action == "summarize":
-				return ("summarize", None)
-			if action == "show_raw":
-				return ("show_raw", None)
-			if action == "switch_mode":
-				return ("switch_mode", value)
-			if action == "follow_up":
-				user_msg = encryptor.encrypt(value) if encryptor else value
+		options = []
+
+		# Insert LLM-provided choices first
+		if choices:
+			for choice in choices:
+				options.append({
+					"label": choice,
+					"description": "",
+					"input": True,
+					"action": "follow_up",
+				})
+
+		# Default options (always present)
+		options.extend([
+			{
+				"label": "Continue", "description": "Continue with optional instructions",
+				"input": True, "action": "continue", "default": "Continue",
+			},
+			{
+				"label": "Summarize", "description": "Get a summary of findings",
+				"input": True, "action": "summarize", "default": "Summarize all findings so far",
+			},
+			{"label": "Exit", "action": "exit"},
+		])
+
+		result = InteractiveMenu("What's next?", options).show()
+		if result is None:
+			return None
+
+		idx, value = result
+		action = options[idx].get("action")
+
+		if action == "continue":
+			if value:
+				user_msg = _maybe_encrypt(value, encryptor)
 				history.add_user(user_msg)
-				return ("follow_up", value)
-			if action == "exit":
-				return None
-		else:
-			options = [
-				{"label": "Show raw", "description": "Print last response as copyable text", "action": "show_raw"},
-				{"label": switch_label, "description": "Change mode with a new prompt", "input": True, "action": "switch_mode"},
-				{"label": "Something else", "description": "Send custom instructions", "input": True, "action": "follow_up"},
-				{"label": "Exit", "action": "exit"},
-			]
-			result = InteractiveMenu("What's next?", options).show()
-			if result is None:
-				return None
-			idx, value = result
-			action = options[idx].get("action")
-			if action == "show_raw":
-				return ("show_raw", None)
-			if action == "switch_mode":
-				return ("switch_mode", value)
-			if action == "follow_up":
-				user_msg = encryptor.encrypt(value) if encryptor else value
-				history.add_user(user_msg)
-				return ("follow_up", value)
-			if action == "exit":
-				return None
+			else:
+				continue_msg = format_continue(0, max_iterations)
+				history.add_user(_maybe_encrypt(continue_msg, encryptor))
+			return (value or "Continue", max_iterations)
+
+		if action == "summarize":
+			history.set_system(get_system_prompt("chat"))
+			summary_msg = "Summarize all findings so far and provide a final report."
+			if value:
+				summary_msg += f" {value}"
+			history.add_user(_maybe_encrypt(summary_msg, encryptor))
+			return (summary_msg, 1)
+
+		if action == "follow_up":
+			choice_label = options[idx].get("label", "")
+			msg = choice_label
+			if value:
+				msg = f"{choice_label}: {value}"
+			history.add_user(_maybe_encrypt(msg, encryptor))
+			return (msg, 1)
+
+		# exit
+		return None
 	except (KeyboardInterrupt, EOFError):
 		return None
+
+
+def _maybe_encrypt(text, encryptor):
+	"""Encrypt text if encryptor is available, otherwise return as-is."""
+	return encryptor.encrypt(text) if encryptor else text

@@ -451,7 +451,7 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 			formatted_msg += f'\n{json.dumps(obj, indent=4, default=str)}'
 		log_hook(formatted_msg)
 
-	if not DEBUG == ['all'] and not DEBUG == ['1']:
+	if not DEBUG == ['all'] and not DEBUG == ['1'] and not DEBUG == ["*"]:
 		if not DEBUG or DEBUG == [""]:
 			return
 		if sub:

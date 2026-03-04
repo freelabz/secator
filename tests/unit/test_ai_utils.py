@@ -4,7 +4,7 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
-from secator.ai.utils import _find_matching_bracket, parse_actions, strip_json_from_response
+from secator.ai.utils import _find_matching_bracket, parse_actions
 
 
 class TestFindMatchingBracket(unittest.TestCase):

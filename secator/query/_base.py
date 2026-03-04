@@ -25,18 +25,11 @@ class QueryBackend(ABC):
 
     def get_base_query(self) -> dict:
         """Base query - ALWAYS enforced, cannot be overridden."""
-        base = {
+        return {
             "_context.workspace_id": self.workspace_id,
             "_context.workspace_duplicate": False,
             "is_false_positive": False
         }
-        # Narrow scope to current scan/workflow/task if available
-        for key in ('scan_id', 'workflow_id', 'task_id'):
-            value = self.context.get(key)
-            if value:
-                base[f"_context.{key}"] = value
-                break
-        return base
 
     def _merge_query(self, query: dict) -> dict:
         """Merge user query with base query. Base query always wins."""

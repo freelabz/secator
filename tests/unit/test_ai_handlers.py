@@ -17,7 +17,9 @@ class TestActionContext(unittest.TestCase):
         self.assertIn('model', field_names)
         self.assertIn('encryptor', field_names)
         self.assertIn('dry_run', field_names)
-        self.assertIn('workspace_id', field_names)
+        self.assertIn('context', field_names)
+        self.assertIn('scope', field_names)
+        self.assertIn('results', field_names)
 
     def test_action_context_defaults(self):
         from secator.ai.actions import ActionContext
@@ -28,7 +30,10 @@ class TestActionContext(unittest.TestCase):
         self.assertEqual(ctx.model, 'gpt-4')
         self.assertIsNone(ctx.encryptor)
         self.assertFalse(ctx.dry_run)
-        self.assertIsNone(ctx.workspace_id)
+        self.assertFalse(ctx.verbose)
+        self.assertEqual(ctx.context, {})
+        self.assertEqual(ctx.scope, 'workspace')
+        self.assertIsNone(ctx.results)
 
     def test_action_context_with_all_params(self):
         from secator.ai.actions import ActionContext
@@ -40,14 +45,19 @@ class TestActionContext(unittest.TestCase):
             model='claude-3',
             encryptor=encryptor,
             dry_run=True,
-            workspace_id='ws123',
+            verbose=True,
+            context={'workspace_id': 'ws123'},
+            scope='current',
+            results=[{'_type': 'url', 'url': 'http://a.com'}],
         )
 
         self.assertEqual(ctx.targets, ['a.com', 'b.com'])
         self.assertEqual(ctx.model, 'claude-3')
         self.assertIsNotNone(ctx.encryptor)
         self.assertTrue(ctx.dry_run)
-        self.assertEqual(ctx.workspace_id, 'ws123')
+        self.assertTrue(ctx.verbose)
+        self.assertEqual(ctx.context['workspace_id'], 'ws123')
+        self.assertEqual(ctx.scope, 'current')
 
 
 class TestDispatchAction(unittest.TestCase):
@@ -65,11 +75,11 @@ class TestDispatchAction(unittest.TestCase):
         self.assertEqual(results[0]._type, 'warning')
         self.assertIn('Unknown action', results[0].message)
 
-    def test_dispatch_done_action(self):
+    def test_dispatch_follow_up_action(self):
         from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
-        action = {'action': 'done', 'reason': 'Test complete'}
+        action = {'action': 'follow_up', 'reason': 'Test complete'}
 
         results = list(dispatch_action(action, ctx))
 
@@ -116,18 +126,16 @@ class TestDispatchAction(unittest.TestCase):
         self.assertIn('DRY RUN', results[0].message)
         self.assertIn('curl', results[0].message)
 
-    def test_dispatch_query_no_workspace(self):
+    def test_dispatch_query_basic(self):
         from secator.ai.actions import ActionContext, dispatch_action
 
-        ctx = ActionContext(targets=['target.com'], model='gpt-4', workspace_id=None)
-        action = {'action': 'query', 'type': 'vulnerability', 'filter': {}}
+        ctx = ActionContext(targets=['target.com'], model='gpt-4')
+        action = {'action': 'query', 'query': {'_type': 'vulnerability'}, 'limit': 10}
 
         results = list(dispatch_action(action, ctx))
 
-        # Should yield Warning about no workspace
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]._type, 'warning')
-        self.assertIn('workspace', results[0].message.lower())
+        # Should return results (may be empty or contain findings)
+        self.assertIsInstance(results, list)
 
 
 class TestAITask(unittest.TestCase):

@@ -1,5 +1,6 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task - simplified implementation."""
+import json
 import os
 import random
 from pathlib import Path
@@ -20,7 +21,7 @@ from secator.ai.actions import ActionContext, dispatch_action
 from secator.ai.encryption import SensitiveDataEncryptor
 from secator.ai.history import ChatHistory
 from secator.ai.prompts import get_system_prompt, format_user_initial, format_tool_result, format_continue
-from secator.ai.utils import call_llm, parse_actions, strip_json_from_response, prompt_user
+from secator.ai.utils import call_llm, setup_ai, parse_actions, strip_json_from_response, prompt_user
 
 
 def _maybe_encrypt(text, encryptor):
@@ -40,8 +41,7 @@ class ai(PythonRunner):
 	opts = {
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
-		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model",
-			"choices": ["claude-sonnet-4-6", "claude-haiku-4-5"]},
+		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
 		"api_key": {"type": str, "default": DEFAULT_API_KEY, "help": "API key for LLM provider"},
 		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "help": "API base URL"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
@@ -51,6 +51,10 @@ class ai(PythonRunner):
 		"yes": {"is_flag": True, "default": False, "short": "y", "help": "Auto-accept"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
 		"max_tokens": {"type": int, "default": CONFIG.addons.ai.max_tokens, "help": "Max tokens before compacting history"},
+		"max_tokens_total": {
+			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
+			"help": "Hard token limit - truncate oldest messages beyond this",
+		},
 		"interactive": {"is_flag": True, "default": True, "help": "Prompt user for follow-up after completion"},
 	}
 
@@ -62,6 +66,14 @@ class ai(PythonRunner):
 
 	def yielder(self) -> Generator:
 		"""Execute AI task."""
+		# Handle 'setup' input (before addon check so it works without full AI deps)
+		if self.inputs == ['setup']:
+			if not ADDONS_ENABLED['ai']:
+				yield Error(message='Missing ai addon: please run "secator install addons ai".')
+				return
+			setup_ai()
+			return
+
 		if not ADDONS_ENABLED['ai']:
 			yield Error(message='Missing ai addon: please run "secator install addons ai".')
 			return
@@ -115,8 +127,8 @@ class ai(PythonRunner):
 			if mode in ("attack", "chat"):
 				console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
 				return mode
-		except Exception:
-			pass
+		except Exception as e:
+			console.print(Warning(message=f'Could not detect mode automatically: {e}. Falling back to "chat" mode.'))
 		return "chat"
 
 	def _run_loop(self, mode: str, prompt: str, targets: List[str], model: str,
@@ -127,6 +139,7 @@ class ai(PythonRunner):
 		api_key = self.run_opts.get("api_key")
 		api_base = self.run_opts.get("api_base")
 		max_tokens = int(self.run_opts.get("max_tokens", CONFIG.addons.ai.max_tokens))
+		max_tokens_total = int(self.run_opts.get("max_tokens_total", CONFIG.addons.ai.max_tokens_total))
 		dry_run = self.run_opts.get("dry_run", False)
 		verbose = self.run_opts.get("verbose", False)
 		interactive = self.run_opts.get("interactive", True)
@@ -142,21 +155,15 @@ class ai(PythonRunner):
 		# Create action context
 		scope = "current" if previous_results else "workspace"
 		ctx = ActionContext(
-			targets=targets, model=model, encryptor=encryptor, dry_run=dry_run,
-			verbose=verbose,
-			drivers=self.context.get("drivers") if self.context else [],
-			workspace_id=self.context.get("workspace_id") if self.context else None,
-			scan_id=self.context.get("scan_id") if self.context else None,
-			workflow_id=self.context.get("workflow_id") if self.context else None,
-			task_id=self.context.get("task_id") if self.context else None,
-			scope=scope,
-			results=previous_results or [])
-		yield Info(message=repr(ctx))
+			targets=targets, model=model, encryptor=encryptor,
+			dry_run=dry_run, verbose=verbose,
+			context=self.context or {},
+			scope=scope, results=previous_results or [])
+		# yield Info(message=repr(ctx))
 
 		iteration = 0
 		query_extensions = 0
 		max_query_extensions = 3
-		done = False
 		while iteration < max_iter:
 			iteration += 1
 
@@ -171,7 +178,7 @@ class ai(PythonRunner):
 					)
 
 				# Call LLM
-				messages = history.to_messages()
+				messages = history.to_messages(max_tokens_total=max_tokens_total)
 				token_str = format_token_count(history.est_tokens(), icon='arrow_up')
 				msg = f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/] [gray42] • {token_str}[/]"
 				with maybe_status(msg, spinner="dots"):
@@ -210,27 +217,36 @@ class ai(PythonRunner):
 				# Add to history
 				history.add_assistant(response)
 
-				# Execute actions
-				yield Info(message=f"Executing {len(actions)} actions ...")
+				# Execute actions and capture follow_up
+				if len(actions) > 0:
+					yield Info(message=f"Executing {len(actions)} actions ...")
+					self.debug(json.dumps(actions, indent=4))
+				follow_up_choices = None
 				for action in actions:
 					action_type = action.get("action", "")
+					is_secator = action_type in ['task', 'workflow']
 					action_results = []
 					has_errors = False
 					for item in dispatch_action(action, ctx):
 						if isinstance(item, (Stat, Progress, State, Info)):
+							# Skip stats, progress, state, and info
 							continue
 						if isinstance(item, Error):
 							has_errors = True
 						if isinstance(item, Ai):
 							self.add_result(item)
+							# Capture choices from follow_up action
+							if item.ai_type == "follow_up":
+								follow_up_choices = (item.extra_data or {}).get("choices", [])
 							# Feed shell output back to the LLM
 							if item.ai_type == "shell_output":
 								action_results.append({"output": item.content})
 							continue
 						if isinstance(item, OutputType):
-							self.add_result(item, print=False)  # only for Secator findings
-							item = item.toDict(exclude=list(INTERNAL_FIELDS))
-						action_results.append(item)
+							self.add_result(item, print=not is_secator)  # only print non-Secator findings
+							item = item.toDict(exclude=list(INTERNAL_FIELDS))  # TODO: verify if yielding raw output would be better
+						action_results.append(item)  # TODO: verify if yielding raw output would be better
+
 						# Keep ctx.results in sync for scope='current' queries
 						if ctx.scope == "current":
 							ctx.results.append(item)
@@ -245,64 +261,37 @@ class ai(PythonRunner):
 					tool_result = _maybe_encrypt(tool_result, encryptor)
 					history.add_user(tool_result)
 
-					# Done action: prompt user for continuation
-					if action_type == "done":
-						done = True
-
 				# If the last action was a query, allow one more iteration (capped to prevent infinite loops)
 				if actions and actions[-1].get("action") == "query" and query_extensions < max_query_extensions:
 					max_iter += 1
 					query_extensions += 1
 
-				# Prompt user for continuation
-				if done or (iteration == max_iter):
+				# Show menu if follow_up, no actions, or max_iter reached
+				if follow_up_choices is not None or not actions or iteration == max_iter:
 					if not interactive:
-						if done:
-							return
-						yield Info(message=f"Reached max iterations ({max_iter}).")
 						return
-					if (iteration == max_iter):
+					if iteration == max_iter:
 						yield Info(message=f"Reached max iterations ({max_iter}). Following up with user.")
-					elif done:
+					else:
 						yield Info(message="Following up with user.")
-					while True:
-						result = prompt_user(history, encryptor, mode)
-						if result is None:
-							return
-						action, value = result
-						if action == "show_raw":
-							console.print(f"\n{response}\n")
-							continue
-						break
-					if action == "continue":
-						max_iter += value
-						done = False
-						continue_msg = format_continue(iteration, max_iter)
-						history.add_user(_maybe_encrypt(continue_msg, encryptor))
-					elif action == "summarize":
-						max_iter += 1
-						summary_msg = "Summarize all findings so far and provide a final report."
-						history.add_user(_maybe_encrypt(summary_msg, encryptor))
-						yield Ai(content=summary_msg, ai_type="prompt")
-					elif action == "follow_up":
-						max_iter += 1
-						done = True
-						yield Ai(content=value, ai_type="prompt")
-					elif action == "switch_mode":
-						other_mode = "chat" if mode == "attack" else "attack"
-						mode = other_mode
-						history.add_system(get_system_prompt(mode))
-						user_msg = _maybe_encrypt(value, encryptor)
-						history.add_user(user_msg)
-						max_iter += 1
-						done = False
-						yield Info(message=f"Switched to {mode} mode")
-						yield Ai(content=value, ai_type="prompt")
-					elif action == "exit":
+					result = prompt_user(history, encryptor, max_iterations=max_iter, choices=follow_up_choices or [])
+					if result is None:
 						return
+					menu_action, extra_iters = result
+					max_iter += extra_iters
+
+					# Re-detect intent and switch mode if needed
+					intent_model = self.run_opts.get("intent_model")
+					new_mode = self._detect_mode(menu_action, intent_model, api_base, api_key)
+					if new_mode != mode:
+						mode = new_mode
+						history.set_system(get_system_prompt(mode))
+						yield Info(message=f"Switched to {mode} mode")
+
+					yield Ai(content=menu_action, ai_type="prompt")
 					continue
 
-				# Continue action
+				# Normal continue
 				continue_msg = format_continue(iteration, max_iter)
 				history.add_user(_maybe_encrypt(continue_msg, encryptor))
 

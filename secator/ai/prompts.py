@@ -20,10 +20,10 @@ Analyze findings, identify exploitable vulnerabilities, execute attacks using se
 
 ### STEPS
 1. Analyze targets and any existing findings from previous iterations
-2. Plan an attack approach (prefer targeted tasks over broad workflows/scans)
-3. Execute actions (tasks, workflows, shell commands, or workspace queries)
-4. Analyze results from executed actions
-5. Iterate with new actions or report done when testing is complete
+2. Plan an attack approach (for instance: "recon", "targeted attack", "exploitation", "post-exploitation")
+3. Propose actions (tasks, workflows, shell commands, queries, follow up)
+4. Analyze results from executed actions --> retry tasks that failed due to invalid options or parameters
+5. Repeat 3 and 4 for the rest of the iterations, always be more and more specific with the actions you run as iterations increase
 
 ### CONTEXT
 $library_reference
@@ -33,29 +33,36 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 
 ### CONSTRAINTS
 - Keep responses concise: max 100 lines. Be direct and actionable.
-- Never invent details, rely on the user data
-- Never invent tool output
+- NEVER INVENT details, rely on the user data
+- NEVER INVENT tool output
+- ALWAYS USE options listed above for each task
+- ALWAYS PREFER single Secator tasks over workflows/scans (less intrusive, more targeted)
+- ALWAYS PREFER to use light tasks and commands (e.g: curl, nslookup, httpx, etc...) over noisy and long Secator tasks like nuclei, ffuf, or feroxbuster.
+- ONLY use Secator workflows or scans when they truly fit the task at hand, or when the user explicitly requests "comprehensive", "full", or "deep" recon
+- RETRY tasks that fails due to bad options, unsupported flags, or incorrect parameters, analyze the error, fix the options and send a corrected action item so we can re-run it.
+- NEVER use placeholders in options like "<target>", "<url>", "<your_wordlist>". All values must be concrete and usable. The user cannot interact with actions - they run autonomously.
 - Use workspace queries to get historical data for context when needed
-- Targets are encrypted as [HOST:xxxx] - use as-is
-- Only use options listed below for each task
+- PII data are encrypted as [HOST:xxxx] - use as-is (we'll decrypt it client-side)
 - To use profiles, add "profiles": ["<profile1>", "<profile2>"] in opts
-- Prefer secator runners over raw shell commands
-- By DEFAULT, prefer single TASKS over workflows/scans (less intrusive, more targeted)
-- Only use workflows/scans when user explicitly requests "comprehensive", "full", or "deep" recon
-- NOISY TASKS: Some tasks make many HTTP requests (nuclei, dalfox, ffuf, feroxbuster, cariddi, katana, gospider, hakrawler, x8, and other crawlers/fuzzers). Use those scarcely and only when really needed and other lighter options have been exhausted.
+- When finding a vulnerability, ALWAYS ASK the user what he wants to do with it using the follow_up action (see examples)
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
-- ERROR RECOVERY: If a task fails due to bad options, unsupported flags, or incorrect parameters, analyze the error, fix the options, and retry immediately. Do NOT give up after a single failure.
-- NEVER use placeholder values like "<target>", "<url>", "<your_wordlist>" in options. All values must be concrete and usable. The user cannot interact with actions - they run autonomously.
+- When in doubt about what to do next, or how to fix a failed task, use the follow_up action to ask the user for guidance instead of guessing
+- When using the follow_up action:
+    - only include choices that represent concrete pentesting direction you can acft on (e.g: specific scans to run, vulnerabilities to exploit, queries to execute).
+    - Do NOT include choices for generic advice , troubleshooting steps, or things the user would do outside secator
+    - MAXIMUM 3 well-thought options based on specific context
 
 ### TEMPLATE
-Brief reasoning (2-3 sentences max), then a JSON array of actions:
-- task: {"action":"task","name":"<tool>","targets":[...],"opts":{}}
-- workflow: {"action":"workflow","name":"<name>","targets":[...],"opts":{"profiles":["aggressive"]}}
-- shell: {"action":"shell","command":"<cmd>"}
-- query: {"action":"query","query":{"_type":"<output_type>", ...},"limit":50}
-- done: {"action":"done","reason":"<why>"}
+Brief reasoning (2-3 sentences max), then a JSON array of actions, for instance:
+[{"action":"task","name":"<tool>","targets":[...],"opts":{}},
+ {"action":"workflow","name":"<name>","targets":[...],"opts":{"profiles":["aggressive"]}},
+ {"action":"shell","command":"<cmd>"},
+ {"action":"query","query":{"_type":"<output_type>", ...},"limit":50},
+ {"action":"add_finding","_type":"<output_type>","<field>":"<value>", ...},
+]
 
-Note: "limit" is a top-level field on the query action, NOT inside the "query" filter.
+OR, if following up is needed (choices are optional):
+[{"action":"follow_up","reason":"<why>","choices":["option1","option2"]}]
 
 ### EXAMPLES
 Attack example:
@@ -65,8 +72,23 @@ Found a login form. Testing for SQL injection with curl and running dalfox.
 [{"action": "shell", "command": "curl ..."}, {"action": "task", "name": "dalfox", "targets": [...], "opts": {"rate_limit": 30, "timeout": 10}}]
 ```
 
+User prompt example:
+```
+I'm not sure in which directions to go next.
+
+[{"action": "follow_up", "reason": "Unsure about next directions", "choices": ["Continue exploring found SQLIs", "Go another direction"]}]
+```
+or
+```
+I found an exploitable vulnerability !
+
+[{"action": "follow_up", "reason": "Vulnerability found.", "choices": ["Report and continue", "Validate it", "Exploit it further", "Ignore (false positive) and continue"]}]
+```
+
 Query example:
 ```
+Querying vulnerabilities (critical, high) and URLs matching /admin regex.
+
 [{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50}]
 ```
 """)
@@ -96,14 +118,19 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 - Don't invent things, rely on the user data.
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
 - If a query fails, analyze the error and retry with corrected parameters. Do NOT give up after a single failure.
+- If you hit a limit on the number of results, use more specific queries.
 - NEVER use placeholder values in queries. All values must be concrete and usable.
 
 ### TEMPLATE
 Markdown explanation, then a JSON array of actions:
-- query: {"action":"query","query":{"_type":"<output_type>", ...},"limit":50}
-- done: {"action":"done","reason":"<why>"}
+[{"action":"query","query":{"_type":"<output_type>", ...},"limit":50},
+ {"action":"follow_up","reason":"<why>","choices":["option1","option2"]},
+ {"action":"add_finding","_type":"<output_type>", "tags": ["ai"], "<field>":"<value>", ...},
+]
 
-Note: "limit" is a top-level field on the query action, NOT inside the "query" filter.
+IMPORTANT: When in doubt about what to do next, ALWAYS use the follow_up action to ask the user for guidance instead of guessing or stopping silently.
+
+FOLLOW_UP CHOICES: "choices" is OPTIONAL. Only include choices when they represent concrete actions you can execute (e.g. specific queries to run, data to analyze, scans to suggest). Do NOT include choices for generic advice, troubleshooting steps, or things the user would do outside of secator. When the task is simply complete, use follow_up with just a reason and no choices.
 
 ### EXAMPLES
 ```
@@ -113,180 +140,197 @@ Note: "limit" is a top-level field on the query action, NOT inside the "query" f
 ### VULN_ID + VULN_NAME [VULN_SEVERITY + VULN_CVSS_SCORE]
 <TABLE with FIELD + DETAIL with CVSS Score, EPSS Score, CVSS Vector, Targets, Tags, Description References>
 
-[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50}]
+[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10},
+ {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50},
+]
 ```
 """)
 
 
 def build_tasks_reference() -> str:
-    """Build compact task reference: name|description|options."""
-    from secator.loader import discover_tasks
-    from secator.definitions import OPT_NOT_SUPPORTED
+	"""Build compact task reference: name|description|options."""
+	from secator.loader import discover_tasks
+	from secator.definitions import OPT_NOT_SUPPORTED
 
-    lines = []
-    for task_cls in sorted(discover_tasks(), key=lambda t: t.__name__):
-        if task_cls.__name__.lower() == "ai":
-            continue
-        name = task_cls.__name__
-        desc = (task_cls.__doc__ or "").strip().split('\n')[0][:50]
+	lines = []
+	for task_cls in sorted(discover_tasks(), key=lambda t: t.__name__):
+		if task_cls.__name__.lower() == "ai":
+			continue
+		name = task_cls.__name__
+		desc = (task_cls.__doc__ or "").strip().split('\n')[0][:50]
 
-        # Get task-specific options
-        task_opts = list(getattr(task_cls, 'opts', {}).keys())
+		# Get task-specific options
+		task_opts = list(getattr(task_cls, 'opts', {}).keys())
 
-        # Get generic options that this task supports
-        opt_key_map = getattr(task_cls, 'opt_key_map', {})
-        generic_opts = [k for k, v in opt_key_map.items() if v is not None and v != OPT_NOT_SUPPORTED]
+		# Get generic options that this task supports
+		opt_key_map = getattr(task_cls, 'opt_key_map', {})
+		generic_opts = [k for k, v in opt_key_map.items() if v is not None and v != OPT_NOT_SUPPORTED]
 
-        all_opts = ",".join(sorted(set(task_opts + generic_opts)))
-        lines.append(f"{name}|{desc}|{all_opts}")
+		all_opts = ",".join(sorted(set(task_opts + generic_opts)))
+		lines.append(f"{name}|{desc}|{all_opts}")
 
-    return "\n".join(lines)
+	return "\n".join(lines)
 
 
 def build_workflows_reference() -> str:
-    """Build compact workflow reference: name|description."""
-    from secator.loader import get_configs_by_type
-    workflows = get_configs_by_type('workflow')
-    lines = []
-    for w in sorted(workflows, key=lambda x: x.name):
-        desc = getattr(w, 'description', '') or ''
-        lines.append(f"{w.name}|{desc}")
-    return "\n".join(lines)
+	"""Build compact workflow reference: name|description."""
+	from secator.loader import get_configs_by_type
+	workflows = get_configs_by_type('workflow')
+	lines = []
+	for w in sorted(workflows, key=lambda x: x.name):
+		desc = getattr(w, 'description', '') or ''
+		lines.append(f"{w.name}|{desc}")
+	return "\n".join(lines)
 
 
 def build_profiles_reference() -> str:
-    """Build compact profiles reference: name|description."""
-    from secator.loader import get_configs_by_type
-    profiles = get_configs_by_type('profile')
-    lines = []
-    for p in sorted(profiles, key=lambda x: x.name):
-        desc = getattr(p, 'description', '') or ''
-        lines.append(f"{p.name}|{desc}")
-    return "\n".join(lines)
+	"""Build compact profiles reference: name|description."""
+	from secator.loader import get_configs_by_type
+	profiles = get_configs_by_type('profile')
+	lines = []
+	for p in sorted(profiles, key=lambda x: x.name):
+		desc = getattr(p, 'description', '') or ''
+		lines.append(f"{p.name}|{desc}")
+	return "\n".join(lines)
 
 
 def build_wordlists_reference() -> str:
-    """Build compact wordlists reference from CONFIG."""
-    from secator.config import CONFIG
-    lines = []
-    if CONFIG.wordlists.templates:
-        for name in sorted(CONFIG.wordlists.templates.keys()):
-            lines.append(name)
-    return "\n".join(lines)
+	"""Build compact wordlists reference from CONFIG."""
+	from secator.config import CONFIG
+	lines = []
+	if CONFIG.wordlists.templates:
+		for name in sorted(CONFIG.wordlists.templates.keys()):
+			lines.append(name)
+	return "\n".join(lines)
 
 
 def build_output_types_reference() -> str:
-    """Build compact output types reference: name|queryable_fields."""
-    from secator.output_types import FINDING_TYPES
-    lines = []
-    for cls in FINDING_TYPES:
-        name = cls.get_name()
-        if hasattr(cls, '__dataclass_fields__'):
-            fields = ",".join(
-                f.name for f in cls.__dataclass_fields__.values()
-                if not f.name.startswith('_')
-            )
-        else:
-            fields = ""
-        lines.append(f"{name}|{fields}")
-    return "\n".join(lines)
+	"""Build compact output types reference: name|queryable_fields."""
+	from secator.output_types import FINDING_TYPES
+	lines = []
+	for cls in FINDING_TYPES:
+		name = cls.get_name()
+		if hasattr(cls, '__dataclass_fields__'):
+			fields = ",".join(
+				f.name for f in cls.__dataclass_fields__.values()
+				if not f.name.startswith('_')
+			)
+		else:
+			fields = ""
+		lines.append(f"{name}|{fields}")
+	return "\n".join(lines)
 
 
 def build_query_types() -> str:
-    """Build comma-separated list of queryable _type values from FINDING_TYPES."""
-    from secator.output_types import FINDING_TYPES
-    return ", ".join(cls.get_name() for cls in FINDING_TYPES)
+	"""Build comma-separated list of queryable _type values from FINDING_TYPES."""
+	from secator.output_types import FINDING_TYPES
+	return ", ".join(cls.get_name() for cls in FINDING_TYPES)
 
 
 def get_system_prompt(mode: str) -> str:
-    """Get system prompt for mode with library reference filled in.
+	"""Get system prompt for mode with library reference filled in.
 
-    Args:
-        mode: Either "attack" or "chat"
+	Args:
+		mode: Either "attack", "chat", or "summarize"
 
-    Returns:
-        Formatted system prompt string
-    """
-    if mode not in ("attack", "chat"):
-        raise ValueError(f"Unsupported mode: {mode!r}. Expected 'attack' or 'chat'.")
-    query_types = build_query_types()
-    if mode == "attack":
-        return SYSTEM_ATTACK.substitute(
-            library_reference=build_library_reference(),
-            query_types=query_types
-        )
-    return SYSTEM_CHAT.substitute(
-        query_types=query_types,
-        output_types_reference=build_output_types_reference()
-    )
+	Returns:
+		Formatted system prompt string
+	"""
+	if mode not in ("attack", "chat"):
+		raise ValueError(f"Unsupported mode: {mode!r}. Expected 'attack' or 'chat'.")
+	query_types = build_query_types()
+	if mode == "attack":
+		return SYSTEM_ATTACK.substitute(
+			library_reference=build_library_reference(),
+			query_types=query_types
+		)
+	return SYSTEM_CHAT.substitute(
+		query_types=query_types,
+		output_types_reference=build_output_types_reference()
+	)
 
 
 def format_user_initial(targets: List[str], instructions: str, previous_results: List[Dict] = None) -> str:
-    """Format initial user message as compact JSON.
+	"""Format initial user message as compact JSON.
 
-    Args:
-        targets: List of target hosts/URLs
-        instructions: User instructions for the task
-        previous_results: Optional list of result dicts from upstream tasks
+	Args:
+		targets: List of target hosts/URLs
+		instructions: User instructions for the task
+		previous_results: Optional list of result dicts from upstream tasks
 
-    Returns:
-        Compact JSON string (no whitespace)
-    """
-    msg = {
-        "targets": targets,
-        "instructions": instructions or "Conduct security testing.",
-    }
-    if previous_results:
-        msg["previous_results"] = previous_results
-        msg["instructions"] += " Analyze the previous results and use them as context."
-    return json.dumps(msg, separators=(',', ':'), default=str)
+	Returns:
+		Compact JSON string (no whitespace)
+	"""
+	msg = {
+		"targets": targets,
+		"instructions": instructions or "Conduct security testing.",
+	}
+	if previous_results:
+		msg["previous_results"] = previous_results
+		msg["instructions"] += " Analyze the previous results and use them as context."
+	return json.dumps(msg, separators=(',', ':'), default=str)
 
 
-def format_tool_result(name: str, status: str, count: int, results: Any) -> str:
-    """Format tool result as compact JSON.
+def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = 100) -> str:
+	"""Format tool result as compact JSON, truncating results if too many.
 
-    Args:
-        name: Tool/task name
-        status: Execution status (success/error)
-        count: Number of results
-        results: Full results from the action
+	Args:
+		name: Tool/task name
+		status: Execution status (success/error)
+		count: Number of results
+		results: Full results from the action
+		max_items: Maximum number of result items to include (default 100)
 
-    Returns:
-        Compact JSON string
-    """
-    return json.dumps({
-        "task": name,
-        "status": status,
-        "count": count,
-        "results": results
-    }, separators=(',', ':'), default=str)
+	Returns:
+		Compact JSON string
+	"""
+	truncated = False
+	if isinstance(results, list) and len(results) > max_items:
+		results = results[:max_items]
+		truncated = True
+	data = {
+		"task": name,
+		"status": status,
+		"count": count,
+		"results": results,
+	}
+	if truncated:
+		data["truncated"] = True
+		data["total_count"] = count
+		from secator.rich import console
+		from secator.output_types import Warning
+		console.print(Warning(
+			message=f'Output truncated to {max_items} items.'
+			' Increase max_items to get more (but watch your context explode !)'
+		))
+	return json.dumps(data, separators=(',', ':'), default=str)
 
 
 def format_continue(iteration: int, max_iterations: int) -> str:
-    """Format continue message as compact JSON.
+	"""Format continue message as compact JSON.
 
-    Args:
-        iteration: Current iteration number
-        max_iterations: Maximum iterations allowed
+	Args:
+		iteration: Current iteration number
+		max_iterations: Maximum iterations allowed
 
-    Returns:
-        Compact JSON string
-    """
-    return json.dumps({
-        "iteration": iteration,
-        "max": max_iterations,
-        "instruction": "continue"
-    }, separators=(',', ':'))
+	Returns:
+		Compact JSON string
+	"""
+	return json.dumps({
+		"iteration": iteration,
+		"max": max_iterations,
+		"instruction": "continue"
+	}, separators=(',', ':'))
 
 
 def build_library_reference() -> str:
-    """Build complete library reference in compact format."""
-    sections = [
-        "TASKS:\n" + build_tasks_reference(),
-        "WORKFLOWS:\n" + build_workflows_reference(),
-        "PROFILES:\n" + build_profiles_reference(),
-        "WORDLISTS:\n" + build_wordlists_reference(),
-        "OUTPUT_TYPES:\n" + build_output_types_reference(),
-        "OPTION_FORMATS:\n" + OPTION_FORMATS,
-    ]
-    return "\n\n".join(sections)
+	"""Build complete library reference in compact format."""
+	sections = [
+		"TASKS:\n" + build_tasks_reference(),
+		"WORKFLOWS:\n" + build_workflows_reference(),
+		"PROFILES:\n" + build_profiles_reference(),
+		"WORDLISTS:\n" + build_wordlists_reference(),
+		"OUTPUT_TYPES:\n" + build_output_types_reference(),
+		"OPTION_FORMATS:\n" + OPTION_FORMATS,
+	]
+	return "\n\n".join(sections)

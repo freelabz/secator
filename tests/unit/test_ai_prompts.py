@@ -18,11 +18,11 @@ class TestPrompts(unittest.TestCase):
         self.assertIn("workflow", SYSTEM_ATTACK.template)
         self.assertIn("shell", SYSTEM_ATTACK.template)
         self.assertIn("query", SYSTEM_ATTACK.template)
-        self.assertIn("done", SYSTEM_ATTACK.template)
+        self.assertIn("follow_up", SYSTEM_ATTACK.template)
 
     def test_system_chat_has_query(self):
         self.assertIn("query", SYSTEM_CHAT.template)
-        self.assertIn("done", SYSTEM_CHAT.template)
+        self.assertIn("follow_up", SYSTEM_CHAT.template)
 
     def test_get_system_prompt_attack(self):
         prompt = get_system_prompt("attack")
@@ -46,6 +46,23 @@ class TestPrompts(unittest.TestCase):
         self.assertIn("success", result)
         # Should be compact JSON
         self.assertNotIn("\n", result)
+
+    def test_format_tool_result_truncates_max_items(self):
+        items = [{"port": i} for i in range(200)]
+        result = format_tool_result("nmap", "success", 200, items, max_items=50)
+        import json
+        data = json.loads(result)
+        self.assertEqual(len(data["results"]), 50)
+        self.assertTrue(data["truncated"])
+        self.assertEqual(data["total_count"], 200)
+
+    def test_format_tool_result_no_truncation_under_max_items(self):
+        items = [{"port": i} for i in range(10)]
+        result = format_tool_result("nmap", "success", 10, items, max_items=100)
+        import json
+        data = json.loads(result)
+        self.assertEqual(len(data["results"]), 10)
+        self.assertNotIn("truncated", data)
 
     def test_format_continue(self):
         result = format_continue(3, 10)

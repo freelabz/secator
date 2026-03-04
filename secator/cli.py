@@ -1717,8 +1717,8 @@ def install_ai():
 		cmd=f'{sys.executable} -m pip install secator[ai]',
 		title='AI addon',
 		next_steps=[
-			'Run [bold green4]secator config set addons.ai.default_model <MODEL>[/] to set default model.',
-			'Run [bold green4]secator x ai <TARGET> -p "your prompt"[/] to run AI-powered pentesting.',
+			'Run [bold green4]secator x ai setup[/] to configure your AI model and API key.',
+			'Run [bold green4]secator x ai -p "your prompt"[/] to run AI-powered pentesting.',
 		]
 	)
 

@@ -124,12 +124,15 @@ class Ai(OutputType):
 			targets = self.extra_data.get('targets')
 			opts = self.extra_data.get('opts')
 			results = self.extra_data.get('results')
+			limit = self.extra_data.get('limit')
 			if targets:
 				line += f' with targets{format_object(targets, "cyan")}'
 			if opts:
 				line += f' and options{format_object(opts, "yellow")}'
 			if results is not None:
-				line += f' [yellow]{_s(results)} results[/]'
+				line += f' -> [yellow]{_s(results)} results[/]'
+			if limit is not None:
+				line += f'  ([dim yellow]limit: {_s(limit)}[/])'
 			return '\n' + rich_to_ansi(f'[on gray19]{line} [/]')
 
 		# Filter out internal fields from extra_data display

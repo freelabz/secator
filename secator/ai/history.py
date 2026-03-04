@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 SUMMARIZATION_PROMPT = """Summarize the following attack session history into a compact context.
 Keep ONLY the essential information:
 - Key findings (vulnerabilities, open ports, services, credentials)
+- Action history (tasks, workflows, shell commands, queries)
 - Important tool outputs (IPs, URLs, domains, versions discovered)
 - Current attack progress and next steps
 - Errors that affected the attack path
@@ -24,90 +25,131 @@ Keep the summary under {max_words} words. Use markdown formatting.
 
 @dataclass
 class ChatHistory:
-    """Manages chat history in litellm message format.
+	"""Manages chat history in litellm message format.
 
-    This is a thin wrapper around a list of message dicts that can be
-    passed directly to litellm.completion().
+	This is a thin wrapper around a list of message dicts that can be
+	passed directly to litellm.completion().
 
-    Attributes:
-        messages: List of message dicts with 'role' and 'content' keys
-    """
+	Attributes:
+		messages: List of message dicts with 'role' and 'content' keys
+	"""
 
-    messages: List[Dict[str, str]] = field(default_factory=list)
+	messages: List[Dict[str, str]] = field(default_factory=list)
 
-    def add_system(self, content: str) -> None:
-        self.messages.append({"role": "system", "content": content})
+	def add_system(self, content: str) -> None:
+		self.messages.append({"role": "system", "content": content})
 
-    def add_user(self, content: str) -> None:
-        self.messages.append({"role": "user", "content": content})
+	def set_system(self, content: str) -> None:
+		"""Replace the first system message, or insert one at the start."""
+		for msg in self.messages:
+			if msg["role"] == "system":
+				msg["content"] = content
+				return
+		self.messages.insert(0, {"role": "system", "content": content})
 
-    def add_assistant(self, content: str) -> None:
-        self.messages.append({"role": "assistant", "content": content})
+	def add_user(self, content: str) -> None:
+		self.messages.append({"role": "user", "content": content})
 
-    def add_tool(self, content: str) -> None:
-        self.messages.append({"role": "tool", "content": content})
+	def add_assistant(self, content: str) -> None:
+		self.messages.append({"role": "assistant", "content": content})
 
-    def to_messages(self) -> List[Dict[str, str]]:
-        return self.messages.copy()
+	def add_tool(self, content: str) -> None:
+		self.messages.append({"role": "tool", "content": content})
 
-    def clear(self) -> None:
-        self.messages = []
+	def to_messages(self, max_tokens_total: int = 0) -> List[Dict[str, str]]:
+		"""Return a copy of the messages list, truncating if over max_tokens_total.
 
-    def est_tokens(self) -> int:
-        """Estimate token count (1 token ~ 4 chars)."""
-        return sum(len(m.get("content", "")) for m in self.messages) // 4
+		Args:
+			max_tokens_total: Hard token limit. If > 0, drop oldest messages
+				(keeping system prompt and first user message) until under limit.
+		"""
+		if max_tokens_total > 0:
+			self.truncate(max_tokens_total)
+		return self.messages.copy()
 
-    def maybe_summarize(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
-                        threshold: int = 30000) -> Tuple[bool, int, int]:
-        """Summarize history if estimated token count exceeds threshold.
+	def truncate(self, max_tokens: int) -> int:
+		"""Drop oldest messages (keeping system prompt and first user message) until under max_tokens.
 
-        Args:
-            model: LLM model name
-            api_base: Optional API base URL
-            threshold: Token threshold to trigger summarization
+		Returns:
+			Number of messages dropped.
+		"""
+		dropped = 0
+		while self.est_tokens() > max_tokens and len(self.messages) > 2:
+			self.messages.pop(2)
+			dropped += 1
+		if dropped:
+			from secator.rich import console
+			from secator.output_types import Warning
+			console.print(Warning(
+				message=f'Chat history truncated: dropped {dropped} messages to fit under {max_tokens} tokens.'
+			))
+		return dropped
 
-        Returns:
-            tuple: (summarized, old_tokens, new_tokens)
-        """
-        old_tokens = self.est_tokens()
-        if old_tokens <= threshold:
-            return False, old_tokens, old_tokens
+	def clear(self) -> None:
+		self.messages = []
 
-        self._summarize_with_llm(model, api_base, api_key, threshold)
-        new_tokens = self.est_tokens()
-        return True, old_tokens, new_tokens
+	def est_tokens(self) -> int:
+		"""Estimate token count (1 token ~ 4 chars)."""
+		return sum(len(m.get("content", "")) for m in self.messages) // 4
 
-    def _summarize_with_llm(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
-                            threshold: int = 30000) -> None:
-        """Summarize non-system messages using an LLM, keeping the initial system prompt intact."""
-        if len(self.messages) <= 2:
-            return
+	def maybe_summarize(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
+						threshold: int = 30000) -> Tuple[bool, int, int]:
+		"""Summarize history if estimated token count exceeds threshold.
 
-        # Preserve the initial system prompt, summarize everything else
-        system_msgs = [m for m in self.messages if m["role"] == "system"]
-        non_system_msgs = [m for m in self.messages if m["role"] != "system"]
-        initial_system = system_msgs[0] if system_msgs else None
+		Args:
+			model: LLM model name
+			api_base: Optional API base URL
+			api_key: Optional API key
+			threshold: Token threshold to trigger compaction
 
-        if not non_system_msgs:
-            return
+		Returns:
+			tuple: (compacted, old_tokens, new_tokens)
+		"""
+		old_tokens = self.est_tokens()
+		if old_tokens <= threshold:
+			return False, old_tokens, old_tokens
 
-        # Import here to avoid circular import
-        from secator.ai.utils import call_llm
-        from secator.rich import console
+		self._summarize_with_llm(model, api_base, api_key, threshold)
+		new_tokens = self.est_tokens()
+		return True, old_tokens, new_tokens
 
-        # Account for system prompt size in budget
-        system_tokens = len(initial_system["content"]) // 4 if initial_system else 0
-        remaining_budget = threshold - system_tokens
-        max_words = (remaining_budget * 60 // 100) // 2  # rough tokens-to-words ratio
+	def _summarize_with_llm(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
+							threshold: int = 30000) -> None:
+		"""Summarize non-system messages using an LLM, keeping the initial system prompt intact."""
+		if len(self.messages) <= 2:
+			return
 
-        history_text = json.dumps(non_system_msgs, indent=None)
-        prompt = SUMMARIZATION_PROMPT.format(history=history_text, max_words=max_words)
-        from secator.utils import format_token_count
-        token_str = format_token_count(self.est_tokens(), icon='arrow_up')
-        with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
-            result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key)
+		# Preserve system prompt and first user message, summarize the rest
+		system_msgs = [m for m in self.messages if m["role"] == "system"]
+		non_system_msgs = [m for m in self.messages if m["role"] != "system"]
+		initial_system = system_msgs[0] if system_msgs else None
+		first_user = non_system_msgs[0] if non_system_msgs else None
+		rest = non_system_msgs[1:] if len(non_system_msgs) > 1 else []
 
-        self.messages = []
-        if initial_system:
-            self.messages.append(initial_system)
-        self.messages.append({"role": "user", "content": f"Summary of previous iterations:\n\n{result['content']}"})
+		if not rest:
+			return
+
+		# Import here to avoid circular import
+		from secator.ai.utils import call_llm
+		from secator.rich import console
+
+		# Account for preserved messages in budget
+		preserved_tokens = sum(
+			len(m["content"]) // 4 for m in [initial_system, first_user] if m
+		)
+		remaining_budget = threshold - preserved_tokens
+		max_words = (remaining_budget * 60 // 100) // 2  # rough tokens-to-words ratio
+
+		history_text = json.dumps(rest, indent=None)
+		prompt = SUMMARIZATION_PROMPT.format(history=history_text, max_words=max_words)
+		from secator.utils import format_token_count
+		token_str = format_token_count(self.est_tokens(), icon='arrow_up')
+		with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
+			result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key)
+
+		self.messages = []
+		if initial_system:
+			self.messages.append(initial_system)
+		if first_user:
+			self.messages.append(first_user)
+		self.messages.append({"role": "user", "content": f"Summary of previous iterations:\n\n{result['content']}"})

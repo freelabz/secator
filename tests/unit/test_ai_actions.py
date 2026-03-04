@@ -5,10 +5,10 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from secator.ai.actions import (
-    ActionContext, dispatch_action, _handle_done, _handle_shell,
-    _handle_query, _run_runner, _decrypt_dict
+    ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
+    _handle_query, _handle_add_finding, _run_runner, _decrypt_dict
 )
-from secator.output_types import Ai, Error, Info, Warning
+from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
 
 class TestDecryptDict(unittest.TestCase):
@@ -70,23 +70,38 @@ class TestDecryptDict(unittest.TestCase):
         encryptor.decrypt.assert_not_called()
 
 
-class TestHandleDone(unittest.TestCase):
-    """Tests for the _handle_done action handler."""
+class TestHandleFollowUp(unittest.TestCase):
+    """Tests for the _handle_follow_up action handler."""
 
-    def test_done_with_reason(self):
+    def test_follow_up_with_reason(self):
         ctx = ActionContext(targets=["t.com"], model="m")
-        results = list(_handle_done({"action": "done", "reason": "All scanned"}, ctx))
+        results = list(_handle_follow_up({"action": "follow_up", "reason": "All scanned"}, ctx))
 
         self.assertEqual(len(results), 1)
         self.assertIsInstance(results[0], Ai)
-        self.assertEqual(results[0].ai_type, "stopped")
+        self.assertEqual(results[0].ai_type, "follow_up")
         self.assertEqual(results[0].content, "All scanned")
+        self.assertEqual(results[0].extra_data["choices"], [])
 
-    def test_done_default_reason(self):
+    def test_follow_up_default_reason(self):
         ctx = ActionContext(targets=["t.com"], model="m")
-        results = list(_handle_done({"action": "done"}, ctx))
+        results = list(_handle_follow_up({"action": "follow_up"}, ctx))
 
         self.assertEqual(results[0].content, "completed")
+        self.assertEqual(results[0].extra_data["choices"], [])
+
+    def test_follow_up_with_choices(self):
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_handle_follow_up({
+            "action": "follow_up",
+            "reason": "What next?",
+            "choices": ["Scan deeper", "Try SQL injection"],
+        }, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].ai_type, "follow_up")
+        self.assertEqual(results[0].content, "What next?")
+        self.assertEqual(results[0].extra_data["choices"], ["Scan deeper", "Try SQL injection"])
 
 
 class TestHandleShell(unittest.TestCase):
@@ -166,7 +181,7 @@ class TestHandleQuery(unittest.TestCase):
     """Tests for the _handle_query action handler."""
 
     def test_query_no_workspace(self):
-        ctx = ActionContext(targets=["t.com"], model="m", workspace_id=None)
+        ctx = ActionContext(targets=["t.com"], model="m", context={})
         results = list(_handle_query({"action": "query", "query": {}}, ctx))
 
         self.assertEqual(len(results), 1)
@@ -177,7 +192,7 @@ class TestHandleQuery(unittest.TestCase):
         """Scope='current' should work without workspace_id."""
         ctx = ActionContext(
             targets=["t.com"], model="m",
-            workspace_id=None, scope="current",
+            context={}, scope="current",
             results=[{"host": "a.com", "port": 80}]
         )
 
@@ -201,7 +216,7 @@ class TestHandleQuery(unittest.TestCase):
             {"host": "b.com", "port": 443, "_type": "port"},
         ]
         mock_get_engine.return_value = mock_engine
-        ctx = ActionContext(targets=["t.com"], model="m", workspace_id="ws1")
+        ctx = ActionContext(targets=["t.com"], model="m", context={"workspace_id": "ws1"})
 
         results = list(_handle_query(
             {"action": "query", "query": {"port": 80}, "limit": 10},
@@ -219,7 +234,7 @@ class TestHandleQuery(unittest.TestCase):
         mock_engine = MagicMock()
         mock_engine.search.side_effect = Exception("DB error")
         mock_get_engine.return_value = mock_engine
-        ctx = ActionContext(targets=["t.com"], model="m", workspace_id="ws1")
+        ctx = ActionContext(targets=["t.com"], model="m", context={"workspace_id": "ws1"})
 
         results = list(_handle_query(
             {"action": "query", "query": {}},
@@ -234,7 +249,7 @@ class TestHandleQuery(unittest.TestCase):
         encryptor.decrypt.side_effect = lambda x: x.replace("ENC_", "")
         ctx = ActionContext(
             targets=["t.com"], model="m",
-            workspace_id="ws1", encryptor=encryptor
+            context={"workspace_id": "ws1"}, encryptor=encryptor
         )
 
         with patch.object(ctx, 'get_query_engine') as mock_get_engine:
@@ -296,17 +311,17 @@ class TestRunRunner(unittest.TestCase):
 
 
 class TestGetQueryEngine(unittest.TestCase):
-    """Tests for ActionContext.get_query_engine caching."""
+    """Tests for ActionContext.get_query_engine caching and backend selection."""
 
     @patch('secator.query.QueryEngine')
-    def test_get_query_engine_caching(self, mock_qe_cls):
+    def test_caching(self, mock_qe_cls):
         """Same engine instance returned on second call."""
         mock_engine = MagicMock()
         mock_qe_cls.return_value = mock_engine
 
         ctx = ActionContext(
             targets=["t.com"], model="m",
-            workspace_id="ws1", drivers=["mongodb"]
+            context={"workspace_id": "ws1", "drivers": ["mongodb"]}
         )
         engine1 = ctx.get_query_engine()
         engine2 = ctx.get_query_engine()
@@ -314,24 +329,285 @@ class TestGetQueryEngine(unittest.TestCase):
         self.assertIs(engine1, engine2)
         mock_qe_cls.assert_called_once()
 
-    @patch('secator.query.QueryEngine')
-    def test_get_query_engine_current_scope(self, mock_qe_cls):
-        """Current scope passes results to QueryEngine context."""
-        mock_engine = MagicMock()
-        mock_qe_cls.return_value = mock_engine
+    # -- scope=current: always JsonBackend with in-memory results --
 
-        results = [{"host": "a.com"}]
+    def test_current_scope_uses_json_backend(self):
+        """scope=current always selects JsonBackend, even if drivers has mongodb."""
+        from secator.query.json import JsonBackend
+
+        results = [{"_type": "url", "url": "http://a.com"}]
         ctx = ActionContext(
             targets=["t.com"], model="m",
-            workspace_id="ws1", scope="current",
-            results=results, scan_id="scan123"
+            context={"workspace_id": "ws1", "drivers": ["mongodb"]},
+            scope="current", results=results,
         )
-        ctx.get_query_engine()
+        engine = ctx.get_query_engine()
 
-        call_kwargs = mock_qe_cls.call_args
-        context = call_kwargs[1]["context"] if "context" in call_kwargs[1] else call_kwargs[0][1]
-        self.assertEqual(context["results"], results)
-        self.assertEqual(context["scan_id"], "scan123")
+        self.assertIsInstance(engine.backend, JsonBackend)
+
+    def test_current_scope_passes_results(self):
+        """scope=current passes results to the backend."""
+        results = [{"_type": "url", "url": "http://a.com"}]
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1"},
+            scope="current", results=results,
+        )
+        engine = ctx.get_query_engine()
+
+        self.assertIs(engine.backend._results, results)
+
+    def test_current_scope_does_not_pass_drivers(self):
+        """scope=current context should not contain drivers."""
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1", "drivers": ["mongodb"]},
+            scope="current", results=[],
+        )
+        engine = ctx.get_query_engine()
+
+        self.assertEqual(engine.context.get("drivers", []), [])
+
+    def test_current_scope_search_queries_in_memory(self):
+        """scope=current queries against in-memory results."""
+        results = [
+            {"_type": "vulnerability", "name": "SQLi", "severity": "critical"},
+            {"_type": "url", "url": "http://a.com"},
+            {"_type": "vulnerability", "name": "XSS", "severity": "low"},
+        ]
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={}, scope="current", results=results,
+        )
+        engine = ctx.get_query_engine()
+        found = engine.search({"_type": "vulnerability"})
+
+        self.assertEqual(len(found), 2)
+        self.assertTrue(all(r["_type"] == "vulnerability" for r in found))
+
+    # -- scope=workspace + json (no drivers) --
+
+    def test_workspace_scope_json_backend(self):
+        """scope=workspace with no drivers selects JsonBackend."""
+        from secator.query.json import JsonBackend
+
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1"},
+        )
+        engine = ctx.get_query_engine()
+
+        self.assertIsInstance(engine.backend, JsonBackend)
+
+    def test_workspace_scope_json_no_results_preloaded(self):
+        """scope=workspace JsonBackend has no pre-loaded results."""
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1"},
+        )
+        engine = ctx.get_query_engine()
+
+        self.assertIsNone(engine.backend._results)
+
+    # -- scope=workspace + mongodb --
+
+    def test_workspace_scope_mongodb_backend(self):
+        """scope=workspace with mongodb driver selects MongoDBBackend."""
+        from secator.query.mongodb import MongoDBBackend
+
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1", "drivers": ["mongodb"]},
+        )
+        engine = ctx.get_query_engine()
+
+        self.assertIsInstance(engine.backend, MongoDBBackend)
+
+    def test_workspace_scope_mongodb_search(self):
+        """scope=workspace mongodb search calls db.findings.find."""
+        mock_cursor = MagicMock()
+        mock_cursor.__iter__ = MagicMock(return_value=iter([
+            {"_id": "abc", "_type": "vulnerability", "name": "SQLi"},
+        ]))
+        mock_cursor.limit.return_value = mock_cursor
+
+        mock_db = MagicMock()
+        mock_db.findings.find.return_value = mock_cursor
+        mock_client = MagicMock()
+        mock_client.main = mock_db
+
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1", "drivers": ["mongodb"]},
+        )
+        engine = ctx.get_query_engine()
+        engine.backend._client = mock_client
+        found = engine.search({"_type": "vulnerability"}, limit=10)
+
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["name"], "SQLi")
+        # Verify base query was merged (workspace_id, _tagged)
+        call_args = mock_db.findings.find.call_args[0][0]
+        self.assertEqual(call_args["_context.workspace_id"], "ws1")
+        self.assertTrue(call_args["_tagged"])
+
+    def test_workspace_scope_mongodb_count(self):
+        """scope=workspace mongodb count calls db.findings.count_documents."""
+        mock_db = MagicMock()
+        mock_db.findings.count_documents.return_value = 5
+        mock_client = MagicMock()
+        mock_client.main = mock_db
+
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1", "drivers": ["mongodb"]},
+        )
+        engine = ctx.get_query_engine()
+        engine.backend._client = mock_client
+        count = engine.count({"_type": "vulnerability"})
+
+        self.assertEqual(count, 5)
+        call_args = mock_db.findings.count_documents.call_args[0][0]
+        self.assertEqual(call_args["_context.workspace_id"], "ws1")
+
+    # -- scope=workspace + api --
+
+    def test_workspace_scope_api_backend(self):
+        """scope=workspace with api driver selects ApiBackend."""
+        from secator.query.api import ApiBackend
+
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1", "drivers": ["api"]},
+        )
+        engine = ctx.get_query_engine()
+
+        self.assertIsInstance(engine.backend, ApiBackend)
+
+    @patch('secator.query.api.requests.request')
+    def test_workspace_scope_api_search(self, mock_request):
+        """scope=workspace api search calls POST to search endpoint."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = [
+            {"_type": "vulnerability", "name": "SQLi"},
+        ]
+        mock_response.raise_for_status = MagicMock()
+        mock_request.return_value = mock_response
+
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1", "drivers": ["api"]},
+        )
+        engine = ctx.get_query_engine()
+        found = engine.search({"_type": "vulnerability"}, limit=10)
+
+        self.assertEqual(len(found), 1)
+        mock_request.assert_called_once()
+        # Verify POST was used
+        call_kwargs = mock_request.call_args
+        self.assertEqual(call_kwargs[1]["method"], "POST")
+
+    @patch('secator.query.api.requests.request')
+    def test_workspace_scope_api_count(self, mock_request):
+        """scope=workspace api count returns total from response."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"total": 42}
+        mock_response.raise_for_status = MagicMock()
+        mock_request.return_value = mock_response
+
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1", "drivers": ["api"]},
+        )
+        engine = ctx.get_query_engine()
+        count = engine.count({"_type": "vulnerability"})
+
+        self.assertEqual(count, 42)
+
+    # -- scope=workspace: mongodb takes priority over api --
+
+    def test_workspace_scope_mongodb_priority(self):
+        """When both mongodb and api drivers present, mongodb wins."""
+        from secator.query.mongodb import MongoDBBackend
+
+        ctx = ActionContext(
+            targets=["t.com"], model="m",
+            context={"workspace_id": "ws1", "drivers": ["api", "mongodb"]},
+        )
+        engine = ctx.get_query_engine()
+
+        self.assertIsInstance(engine.backend, MongoDBBackend)
+
+
+class TestHandleAddFinding(unittest.TestCase):
+    """Tests for the _handle_add_finding action handler."""
+
+    def test_add_vulnerability(self):
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_handle_add_finding({
+            "action": "add_finding",
+            "_type": "vulnerability",
+            "name": "SQL Injection",
+            "severity": "critical",
+            "matched_at": "http://t.com/login",
+        }, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Vulnerability)
+        self.assertEqual(results[0].name, "SQL Injection")
+        self.assertEqual(results[0].severity, "critical")
+        self.assertEqual(results[0].matched_at, "http://t.com/login")
+
+    def test_add_url(self):
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_handle_add_finding({
+            "action": "add_finding",
+            "_type": "url",
+            "url": "http://t.com/admin",
+            "status_code": 200,
+        }, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Url)
+        self.assertEqual(results[0].url, "http://t.com/admin")
+        self.assertEqual(results[0].status_code, 200)
+
+    def test_add_finding_unknown_type(self):
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_handle_add_finding({
+            "action": "add_finding",
+            "_type": "nonexistent",
+        }, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Warning)
+        self.assertIn("nonexistent", results[0].message)
+
+    def test_add_finding_invalid_fields(self):
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_handle_add_finding({
+            "action": "add_finding",
+            "_type": "vulnerability",
+            "bad_field": "value",
+        }, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Error)
+
+    def test_add_finding_decrypts_values(self):
+        encryptor = MagicMock()
+        encryptor.decrypt.side_effect = lambda x: x.replace("ENC_", "")
+        ctx = ActionContext(targets=["t.com"], model="m", encryptor=encryptor)
+        results = list(_handle_add_finding({
+            "action": "add_finding",
+            "_type": "vulnerability",
+            "name": "XSS",
+            "matched_at": "ENC_http://t.com/search",
+        }, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Vulnerability)
+        self.assertEqual(results[0].matched_at, "http://t.com/search")
 
 
 if __name__ == '__main__':

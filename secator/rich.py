@@ -88,12 +88,13 @@ class InteractiveMenu:
 	def _read_key(self, fd):
 		"""Read a single keypress, handling escape sequences."""
 		import os
-		ch = os.read(fd, 1).decode()
+		import select
+		ch = os.read(fd, 1).decode(errors='ignore')
 		if ch == '\x1b':
-			buf = os.read(fd, 10).decode()
-			if not buf:
+			# Plain ESC: no follow-up bytes within a short timeout.
+			if not select.select([fd], [], [], 0.03)[0]:
 				return 'escape'
-			seq = ch + buf
+			seq = ch + os.read(fd, 2).decode(errors='ignore')
 			if seq == '\x1b[A':
 				return 'up'
 			elif seq == '\x1b[B':
@@ -118,6 +119,8 @@ class InteractiveMenu:
 			return 'ctrl_c'
 		elif ch == '\x04':
 			return 'ctrl_d'
+		elif ch == '\t':
+			return 'tab'
 		elif ch == '\x7f' or ch == '\x08':
 			return 'backspace'
 		else:
@@ -137,7 +140,10 @@ class InteractiveMenu:
 			num = f"[bold]{i + 1}.[/]"
 			if opt.get("input"):
 				if is_selected and self.in_input_mode:
-					label = f"{prefix} {num} [bold]{self.typed}[/][dim]▎[/]"
+					if self.typed:
+						label = f"{prefix} {num} [bold]{self.typed}[/][dim]▎[/]"
+					else:
+						label = f"{prefix} {num} [gray42]{opt['label']}[/][dim]▎[/]"
 				elif is_selected:
 					label = f"{prefix} {num} [bold]{opt['label']}[/]"
 				else:
@@ -150,7 +156,11 @@ class InteractiveMenu:
 			render_console.print(label)
 			if opt.get("description") and not (opt.get("input") and self.in_input_mode):
 				render_console.print(f"     [gray42]{opt['description']}[/]")
-		render_console.print(f"\n[dim]{'─' * w}[/]")
+		if self.in_input_mode:
+			render_console.print("\n[gray42]  Enter: confirm  •  Esc: cancel[/]")
+		else:
+			render_console.print("\n[gray42]  Enter: confirm  •  Tab: edit prompt  •  Esc: exit[/]")
+		render_console.print(f"[dim]{'─' * w}[/]")
 		return buf.getvalue()
 
 	def _line_count(self, text):
@@ -209,16 +219,23 @@ class InteractiveMenu:
 				elif key == 'enter':
 					opt = self.options[self.selected]
 					if opt.get("input") and not self.in_input_mode:
-						self.in_input_mode = True
-						self.typed = ""
+						# Enter always confirms immediately; use Tab to edit
+						self._clear_and_exit(prev_output)
+						return (self.selected, None)
 					elif opt.get("input") and self.in_input_mode:
 						self._clear_and_exit(prev_output)
 						if self.typed.strip():
 							return (self.selected, self.typed.strip())
-						return None
+						return (self.selected, None)
 					else:
 						self._clear_and_exit(prev_output)
 						return (self.selected, None)
+
+				elif key == 'tab' and not self.in_input_mode:
+					opt = self.options[self.selected]
+					if opt.get("input"):
+						self.in_input_mode = True
+						self.typed = f"{opt['label']}, "
 
 				elif key == 'backspace' and self.in_input_mode:
 					self.typed = self.typed[:-1]
