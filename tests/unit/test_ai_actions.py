@@ -553,10 +553,10 @@ class TestHandleAddFinding(unittest.TestCase):
         }, ctx))
 
         self.assertEqual(len(results), 2)
-        self.assertIsInstance(results[0], Vulnerability)
-        self.assertEqual(results[0].name, "SQL Injection")
-        self.assertEqual(results[0].severity, "critical")
-        self.assertEqual(results[0].matched_at, "http://t.com/login")
+        self.assertIsInstance(results[1], Vulnerability)
+        self.assertEqual(results[1].name, "SQL Injection")
+        self.assertEqual(results[1].severity, "critical")
+        self.assertEqual(results[1].matched_at, "http://t.com/login")
 
     def test_add_url(self):
         ctx = ActionContext(targets=["t.com"], model="m")
@@ -568,9 +568,9 @@ class TestHandleAddFinding(unittest.TestCase):
         }, ctx))
 
         self.assertEqual(len(results), 2)
-        self.assertIsInstance(results[0], Url)
-        self.assertEqual(results[0].url, "http://t.com/admin")
-        self.assertEqual(results[0].status_code, 200)
+        self.assertIsInstance(results[1], Url)
+        self.assertEqual(results[1].url, "http://t.com/admin")
+        self.assertEqual(results[1].status_code, 200)
 
     def test_add_finding_unknown_type(self):
         ctx = ActionContext(targets=["t.com"], model="m")
@@ -579,7 +579,7 @@ class TestHandleAddFinding(unittest.TestCase):
             "_type": "nonexistent",
         }, ctx))
 
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(results), 1)
         self.assertIsInstance(results[0], Warning)
         self.assertIn("nonexistent", results[0].message)
 
@@ -591,7 +591,7 @@ class TestHandleAddFinding(unittest.TestCase):
             "bad_field": "value",
         }, ctx))
 
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(results), 1)
         self.assertIsInstance(results[0], Error)
 
     def test_add_finding_decrypts_values(self):
@@ -606,8 +606,8 @@ class TestHandleAddFinding(unittest.TestCase):
         }, ctx))
 
         self.assertEqual(len(results), 2)
-        self.assertIsInstance(results[0], Vulnerability)
-        self.assertEqual(results[0].matched_at, "http://t.com/search")
+        self.assertIsInstance(results[1], Vulnerability)
+        self.assertEqual(results[1].matched_at, "http://t.com/search")
 
 
 if __name__ == '__main__':
