@@ -302,5 +302,126 @@ class TestParseActions(unittest.TestCase):
         self.assertEqual(actions[2]["reason"], "recon complete")
 
 
+class TestPromptUserAllChoices(unittest.TestCase):
+    """Tests for the 'All of the above' option in prompt_user."""
+
+    @patch('secator.rich.InteractiveMenu')
+    @patch('secator.definitions.IN_WORKER', False)
+    def test_all_choices_not_shown_with_single_choice(self, mock_menu_class):
+        """All of the above should not appear with only 1 choice."""
+        from secator.ai.utils import prompt_user
+        from secator.ai.history import ChatHistory
+
+        mock_menu = MagicMock()
+        mock_menu.show.return_value = (0, "")  # Select first option
+        mock_menu_class.return_value = mock_menu
+
+        history = ChatHistory()
+        history.add_system("system")
+
+        prompt_user(history, choices=["Single choice"])
+
+        # Check options passed to InteractiveMenu
+        call_args = mock_menu_class.call_args
+        options = call_args[0][1]  # Second positional arg is options list
+        labels = [opt["label"] for opt in options]
+
+        self.assertNotIn("All of the above", labels)
+
+    @patch('secator.rich.InteractiveMenu')
+    @patch('secator.definitions.IN_WORKER', False)
+    def test_all_choices_shown_with_multiple_choices(self, mock_menu_class):
+        """All of the above should appear with 2+ choices."""
+        from secator.ai.utils import prompt_user
+        from secator.ai.history import ChatHistory
+
+        mock_menu = MagicMock()
+        mock_menu.show.return_value = (0, "")
+        mock_menu_class.return_value = mock_menu
+
+        history = ChatHistory()
+        history.add_system("system")
+
+        prompt_user(history, choices=["Choice A", "Choice B"])
+
+        call_args = mock_menu_class.call_args
+        options = call_args[0][1]
+        labels = [opt["label"] for opt in options]
+
+        self.assertIn("All of the above", labels)
+
+    @patch('secator.rich.InteractiveMenu')
+    @patch('secator.definitions.IN_WORKER', False)
+    def test_all_choices_position_after_llm_choices(self, mock_menu_class):
+        """All of the above should appear after LLM choices, before defaults."""
+        from secator.ai.utils import prompt_user
+        from secator.ai.history import ChatHistory
+
+        mock_menu = MagicMock()
+        mock_menu.show.return_value = (0, "")
+        mock_menu_class.return_value = mock_menu
+
+        history = ChatHistory()
+        history.add_system("system")
+
+        prompt_user(history, choices=["Choice A", "Choice B", "Choice C"])
+
+        call_args = mock_menu_class.call_args
+        options = call_args[0][1]
+        labels = [opt["label"] for opt in options]
+
+        # Expected order: Choice A, Choice B, Choice C, All of the above, Continue, Summarize, Exit
+        all_idx = labels.index("All of the above")
+        self.assertEqual(all_idx, 3)  # After 3 LLM choices
+
+    @patch('secator.rich.InteractiveMenu')
+    @patch('secator.definitions.IN_WORKER', False)
+    def test_all_choices_formats_message_correctly(self, mock_menu_class):
+        """Selecting All of the above should format all choices into numbered list."""
+        from secator.ai.utils import prompt_user
+        from secator.ai.history import ChatHistory
+
+        choices = ["Scan for ports", "Enumerate subdomains"]
+
+        mock_menu = MagicMock()
+        # Simulate selecting "All of the above" (index 2 with 2 choices)
+        mock_menu.show.return_value = (2, "")
+        mock_menu_class.return_value = mock_menu
+
+        history = ChatHistory()
+        history.add_system("system")
+
+        result = prompt_user(history, choices=choices, max_iterations=10)
+
+        # Check the message added to history
+        last_msg = history.messages[-1]
+        expected = "Do all of the following: 1) Scan for ports, 2) Enumerate subdomains"
+        self.assertEqual(last_msg["content"], expected)
+        self.assertEqual(result[0], expected)
+
+    @patch('secator.rich.InteractiveMenu')
+    @patch('secator.definitions.IN_WORKER', False)
+    def test_all_choices_with_extra_instructions(self, mock_menu_class):
+        """Extra user input should be appended to the message."""
+        from secator.ai.utils import prompt_user
+        from secator.ai.history import ChatHistory
+
+        choices = ["Choice A", "Choice B"]
+
+        mock_menu = MagicMock()
+        mock_menu.show.return_value = (2, "focus on main domain")
+        mock_menu_class.return_value = mock_menu
+
+        history = ChatHistory()
+        history.add_system("system")
+
+        result = prompt_user(history, choices=choices)
+
+        last_msg = history.messages[-1]
+        expected = "Do all of the following: 1) Choice A, 2) Choice B. Additional instructions: focus on main domain"
+        self.assertEqual(last_msg["content"], expected)
+        self.assertEqual(result[0], expected)
+
+
 if __name__ == '__main__':
     unittest.main()
