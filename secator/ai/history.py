@@ -57,33 +57,46 @@ class ChatHistory:
 		self.messages.append({"role": "tool", "content": content})
 
 	def to_messages(self, max_tokens_total: int = 0) -> List[Dict[str, str]]:
-		"""Return a copy of the messages list, truncating if over max_tokens_total.
+		"""Return a copy of the messages list, trimming if over max_tokens_total.
+
+		Uses litellm's trim_messages which preserves system messages and recent
+		context while removing oldest messages first.
 
 		Args:
-			max_tokens_total: Hard token limit. If > 0, drop oldest messages
-				(keeping system prompt and first user message) until under limit.
+			max_tokens_total: Hard token limit. If > 0, trim messages to fit.
 		"""
 		if max_tokens_total > 0:
-			self.truncate(max_tokens_total)
+			return self.trim(max_tokens_total)
 		return self.messages.copy()
 
-	def truncate(self, max_tokens: int) -> int:
-		"""Drop oldest messages (keeping system prompt and first user message) until under max_tokens.
+	def trim(self, max_tokens: int) -> List[Dict[str, str]]:
+		"""Trim messages to fit under max_tokens using litellm's trim_messages.
+
+		Preserves system messages and recent context, removing oldest messages first.
+		Also attempts to shorten individual messages before dropping them entirely.
+
+		Args:
+			max_tokens: Maximum token limit for the messages.
 
 		Returns:
-			Number of messages dropped.
+			Trimmed list of messages.
 		"""
-		dropped = 0
-		while self.est_tokens() > max_tokens and len(self.messages) > 2:
-			self.messages.pop(2)
-			dropped += 1
+		from litellm.utils import trim_messages
+		from secator.rich import console
+		from secator.output_types import Warning
+
+		original_count = len(self.messages)
+		trimmed = trim_messages(self.messages, max_tokens=max_tokens)
+		dropped = original_count - len(trimmed)
+
 		if dropped:
-			from secator.rich import console
-			from secator.output_types import Warning
 			console.print(Warning(
-				message=f'Chat history truncated: dropped {dropped} messages to fit under {max_tokens} tokens.'
+				message=f'Chat history trimmed: dropped {dropped} messages to fit under {max_tokens} tokens.'
 			))
-		return dropped
+
+		# Update internal state with trimmed messages
+		self.messages = trimmed
+		return trimmed
 
 	def clear(self) -> None:
 		self.messages = []

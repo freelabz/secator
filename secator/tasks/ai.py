@@ -237,7 +237,9 @@ class ai(PythonRunner):
 
 				# Execute actions and capture follow_up
 				if len(actions) > 0:
-					yield Info(message=f"Executing {len(actions)} actions ...")
+					action_str = 'actions' if len(actions) > 1 else None
+					if action_str:
+						yield Info(message=f"Executing {len(actions)} {action_str} ...")
 					self.debug(json.dumps(actions, indent=4))
 				follow_up_choices = None
 				for action in actions:
@@ -278,6 +280,11 @@ class ai(PythonRunner):
 					)
 					tool_result = _maybe_encrypt(tool_result, encryptor)
 					history.add_user(tool_result)
+
+				if len(actions) > 0:
+					action_str = 'actions' if len(actions) > 1 else None
+					if action_str:
+						yield Info(message=f"Executed {len(actions)} {action_str}.")
 
 				# If the last action was a query, allow one more iteration (capped to prevent infinite loops)
 				if actions and actions[-1].get("action") == "query" and query_extensions < max_query_extensions:

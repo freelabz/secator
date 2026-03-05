@@ -210,7 +210,6 @@ class AiAddon(StrictModel):
 	api_base: str = ''
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
-	execution_model: str = ''
 	temperature: float = 0.7
 	max_tokens: int = 30000
 	max_tokens_total: int = 100000

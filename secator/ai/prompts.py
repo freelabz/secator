@@ -23,7 +23,7 @@ Analyze findings, identify exploitable vulnerabilities, execute attacks using se
 2. Plan an attack approach (for instance: "recon", "targeted attack", "exploitation", "post-exploitation")
 3. Propose actions (tasks, workflows, shell commands, queries, follow up)
 4. Analyze results from executed actions --> retry tasks that failed due to invalid options or parameters
-5. Repeat 3 and 4 for the rest of the iterations, always be more and more specific with the actions you run as iterations increase
+6. Otherwise, repeat 3 and 4 for the rest of the iterations, always be more and more specific with the actions you run as iterations increase
 
 ### CONTEXT
 $library_reference
@@ -313,7 +313,7 @@ def format_tool_result(name: str, status: str, count: int, results: Any, max_ite
 	return json.dumps(data, separators=(',', ':'), default=str)
 
 
-def format_continue(iteration: int, max_iterations: int) -> str:
+def format_continue(iteration: int, max_iterations: int, instruction="continue") -> str:
 	"""Format continue message as compact JSON.
 
 	Args:
@@ -326,7 +326,7 @@ def format_continue(iteration: int, max_iterations: int) -> str:
 	return json.dumps({
 		"iteration": iteration,
 		"max": max_iterations,
-		"instruction": "continue"
+		"instruction": instruction
 	}, separators=(',', ':'))
 
 

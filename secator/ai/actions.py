@@ -244,6 +244,10 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 
 	try:
 		finding = cls(**finding_data)
+		yield Ai(
+			content=f'{str(finding)}',
+			ai_type="add_finding",
+		)
 		yield finding
 	except Exception as e:
 		yield Error(message=f"Failed to create {finding_type}: {e}")

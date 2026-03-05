@@ -552,7 +552,7 @@ class TestHandleAddFinding(unittest.TestCase):
             "matched_at": "http://t.com/login",
         }, ctx))
 
-        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results), 2)
         self.assertIsInstance(results[0], Vulnerability)
         self.assertEqual(results[0].name, "SQL Injection")
         self.assertEqual(results[0].severity, "critical")
@@ -567,7 +567,7 @@ class TestHandleAddFinding(unittest.TestCase):
             "status_code": 200,
         }, ctx))
 
-        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results), 2)
         self.assertIsInstance(results[0], Url)
         self.assertEqual(results[0].url, "http://t.com/admin")
         self.assertEqual(results[0].status_code, 200)
@@ -579,7 +579,7 @@ class TestHandleAddFinding(unittest.TestCase):
             "_type": "nonexistent",
         }, ctx))
 
-        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results), 2)
         self.assertIsInstance(results[0], Warning)
         self.assertIn("nonexistent", results[0].message)
 
@@ -591,7 +591,7 @@ class TestHandleAddFinding(unittest.TestCase):
             "bad_field": "value",
         }, ctx))
 
-        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results), 2)
         self.assertIsInstance(results[0], Error)
 
     def test_add_finding_decrypts_values(self):
@@ -605,7 +605,7 @@ class TestHandleAddFinding(unittest.TestCase):
             "matched_at": "ENC_http://t.com/search",
         }, ctx))
 
-        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results), 2)
         self.assertIsInstance(results[0], Vulnerability)
         self.assertEqual(results[0].matched_at, "http://t.com/search")
 

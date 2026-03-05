@@ -51,16 +51,17 @@ AI_TYPES = {
 	'prompt': {'label': '❯', 'color': 'red'},
 	'response': {'label': '🧠', 'color': 'white'},
 	'chat_compacted': {'label': '📦', 'color': 'orange3'},
-	'task': {'label': '⚙', 'color': 'magenta'},
-	'workflow': {'label': '⛓', 'color': 'magenta'},
-	'shell': {'label': '▶', 'color': 'magenta'},
+	'task': {'label': '🟢', 'color': 'magenta'},
+	'workflow': {'label': '🟢', 'color': 'magenta'},
+	'shell': {'label': '🟢', 'color': 'magenta'},
+	'add_finding': {'label': '🟢', 'color': 'magenta'},
 	'shell_output': {'label': '◀', 'color': 'dim white'},
-	'query': {'label': '🔍', 'color': 'magenta'},
+	'query': {'label': '🟢', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
 	'follow_up': {'label': '[FOLLOW UP]', 'color': 'orange3'},
 }
 
-ACTION_TYPES = ('task', 'workflow', 'shell', 'query', 'stopped')
+ACTION_TYPES = ('task', 'workflow', 'shell', 'add_finding', 'query', 'stopped')
 
 
 @dataclass
@@ -121,20 +122,35 @@ class Ai(OutputType):
 			action_label = self.ai_type
 			if self.ai_type == 'stopped':
 				action_label = 'done'
-			line = f' {s} Running [bold red]{action_label}[/] [bold blue]{_s(self.content)}[/]'
+			line = f'{s}[bold blue]{action_label.capitalize().replace('_', ' ')}[/]'
+			content = _s(self.content)
+			if self.ai_type in ['task', 'workflow', 'scan']:
+				colors = {
+					'task': 'bold gold3',
+					'workflow': 'bold dark_orange3',
+					'scan': 'bold red',
+				}
+				color = colors[self.ai_type]
+				content = f'[{color}]{content}[/]'
 			targets = self.extra_data.get('targets')
 			opts = self.extra_data.get('opts')
 			results = self.extra_data.get('results')
 			limit = self.extra_data.get('limit')
 			if targets:
-				line += f' with targets{format_object(targets, "cyan")}'
+				if len(targets) == 1:
+					content += f' on [cyan]{targets[0]}[/]'
+				else:
+					content += f' on {format_object(targets, "cyan")}'
 			if opts:
-				line += f' and options{format_object(opts, "yellow")}'
+				content += f' with opts{format_object(opts, "yellow")}'
+			line += f'({content})'
 			if results is not None:
 				line += f' -> [yellow]{_s(results)} results[/]'
 			if limit is not None:
-				line += f'  ([dim yellow]limit: {_s(limit)}[/])'
-			return '\n' + rich_to_ansi(f'[on gray19]{line} [/]')
+				line += f' ([dim yellow]limit: {_s(limit)}[/])'
+			if self.ai_type == 'prompt':
+				line = f'[on gray19]{line}[/]'
+			return '\n' + rich_to_ansi(line)
 
 		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
@@ -148,7 +164,7 @@ class Ai(OutputType):
 			parts = [f'[bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]' for k, v in display_extra.items()]
 			suffix += f'  {", ".join(parts)}'
 
-		# Shell output: dim text in a panel
+		# Shell output: dim text in a panel, truncated to 10 lines
 		if self.ai_type == 'shell_output':
 			from rich.panel import Panel
 			from rich.text import Text
@@ -156,7 +172,13 @@ class Ai(OutputType):
 			from io import StringIO
 			buf = StringIO()
 			render_console = Console(file=buf, force_terminal=True, width=120)
-			text = Text(self.content, style="gray42")
+			content = self.content
+			lines = content.split('\n')
+			max_lines = 10
+			if len(lines) > max_lines:
+				content = '\n'.join(lines[:max_lines])
+				content += f'\n... ({len(lines) - max_lines} more lines truncated)'
+			text = Text(content, style="gray42")
 			panel = Panel(text, title=f"{s}", title_align="left", border_style="gray42", padding=(0, 1))
 			render_console.print(panel)
 			return buf.getvalue().rstrip()

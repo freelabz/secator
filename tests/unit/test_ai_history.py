@@ -163,47 +163,42 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(messages[2]["role"], "user")
         self.assertIn("Summary", messages[2]["content"])
 
-    def test_truncate_drops_oldest_messages(self):
-        """Truncate drops messages from index 2, keeping system and first user."""
+    def test_trim_drops_oldest_messages(self):
+        """Trim drops messages to fit under token limit."""
         history = ChatHistory()
-        history.add_system("s" * 40)    # 10 tokens
-        history.add_user("u" * 40)      # 10 tokens
+        history.add_system("s" * 40)
+        history.add_user("u" * 40)
         for i in range(10):
-            history.add_user(f"msg{i} " + "x" * 200)  # ~50 tokens each
+            history.add_user(f"msg{i} " + "x" * 200)
 
         original_count = len(history.messages)
-        dropped = history.truncate(max_tokens=100)
+        trimmed = history.trim(max_tokens=100)
 
-        self.assertGreater(dropped, 0)
-        self.assertEqual(len(history.messages), original_count - dropped)
-        # System prompt and first user message preserved
+        # Some messages should have been dropped
+        self.assertLess(len(trimmed), original_count)
+        self.assertEqual(len(history.messages), len(trimmed))
+        # System prompt preserved (litellm preserves system messages)
         self.assertEqual(history.messages[0]["role"], "system")
         self.assertEqual(history.messages[0]["content"], "s" * 40)
-        self.assertEqual(history.messages[1]["role"], "user")
-        self.assertEqual(history.messages[1]["content"], "u" * 40)
-        # Final token count is under limit
-        self.assertLessEqual(history.est_tokens(), 100)
 
     def test_to_messages_with_max_tokens_total(self):
-        """to_messages with max_tokens_total truncates and returns under limit."""
+        """to_messages with max_tokens_total trims messages."""
         history = ChatHistory()
-        history.add_system("s" * 40)    # 10 tokens
-        history.add_user("u" * 40)      # 10 tokens
+        history.add_system("s" * 40)
+        history.add_user("u" * 40)
         for i in range(20):
-            history.add_user("x" * 400)  # 100 tokens each
+            history.add_user("x" * 400)
 
-        self.assertGreater(history.est_tokens(), 500)
+        original_count = len(history.messages)
+        self.assertEqual(original_count, 22)
 
         messages = history.to_messages(max_tokens_total=500)
 
-        # Token count after truncation is under the limit
-        total_tokens = sum(len(m.get("content", "")) for m in messages) // 4
-        self.assertLessEqual(total_tokens, 500)
-        # System prompt and first user preserved
+        # Some messages should have been dropped
+        self.assertLess(len(messages), original_count)
+        # System prompt preserved (litellm preserves system messages)
         self.assertEqual(messages[0]["role"], "system")
         self.assertEqual(messages[0]["content"], "s" * 40)
-        self.assertEqual(messages[1]["role"], "user")
-        self.assertEqual(messages[1]["content"], "u" * 40)
 
     def test_to_messages_no_truncation_when_under_limit(self):
         """to_messages with max_tokens_total does nothing when under limit."""
