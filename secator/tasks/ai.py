@@ -1,7 +1,6 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task - simplified implementation."""
 import json
-import os
 import random
 from pathlib import Path
 from typing import Generator, List, Optional
@@ -29,7 +28,7 @@ def _maybe_encrypt(text, encryptor):
 	return encryptor.encrypt(text) if encryptor else text
 
 
-DEFAULT_API_KEY = CONFIG.addons.ai.api_key or os.environ.get('ANTHROPIC_API_KEY', '')
+DEFAULT_API_KEY = CONFIG.addons.ai.api_key
 
 
 @task()
@@ -127,8 +126,8 @@ class ai(PythonRunner):
 			if mode in ("attack", "chat"):
 				console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
 				return mode
-		except Exception as e:
-			console.print(Warning(message=f'Could not detect mode automatically: {e}. Falling back to "chat" mode.'))
+		except Exception:
+			console.print(Warning(message='Could not detect mode using LLM. Falling back to "chat" mode.'))
 		return "chat"
 
 	def _prompt_and_redetect(self, history, encryptor, max_iter, choices, mode, api_base, api_key):
@@ -302,8 +301,9 @@ class ai(PythonRunner):
 					yield from items
 					continue
 
-				# Normal continue
-				continue_msg = format_continue(iteration, max_iter)
+				# STOP or CONTINUE
+				stop_or_continue = "STOP or CONTINUE based on whether the initial user request has been fulfilled"
+				continue_msg = format_continue(iteration, max_iter, stop_or_continue)
 				history.add_user(_maybe_encrypt(continue_msg, encryptor))
 
 			except KeyboardInterrupt:
@@ -324,9 +324,13 @@ class ai(PythonRunner):
 					iteration -= 1
 					sleep(5)
 					continue
-				yield Error.from_exception(e)
-				if isinstance(e, litellm.exceptions.APIError):
-					yield Error(message="API error occurred. Stopping.")
+				elif isinstance(e, litellm.AuthenticationError):
+					yield Error(message=str(e))
+					yield Error(
+						message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`'
+					)
 					return
+				yield Error.from_exception(e)
+				return
 
 		yield Info(message=f"Reached max iterations ({max_iter})")

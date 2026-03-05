@@ -6,7 +6,7 @@ import re
 from typing import Dict, List, Optional
 
 from secator.config import CONFIG
-from secator.output_types import Warning
+from secator.output_types import Warning, Error
 from secator.rich import console, maybe_status
 
 # Module-level state for litellm initialization
@@ -63,7 +63,7 @@ def init_llm(api_key: Optional[str] = None):
 			MAX_LEN = 2000
 			role_styles = {"system": "blue", "user": "green", "assistant": "red"}
 			message_count = len(messages)
-			new_start = self._last_message_count
+			new_start = self._last_message_count - 1
 			self._last_message_count = message_count
 			if new_start > 0:
 				console.print(f"[dim]... {new_start} previous message(s) hidden ...[/]")
@@ -123,6 +123,12 @@ def call_llm(
 				time.sleep(wait)
 			else:
 				raise
+		except litellm.AuthenticationError as e:
+			console.print(Error(message=e))
+			console.print(Error(
+				message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`'
+			))
+			raise
 
 	content = response.choices[0].message.content
 	usage = None
@@ -391,6 +397,15 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 					"action": "follow_up",
 				})
 
+			# Add "All of the above" when 2+ choices
+			if len(choices) >= 2:
+				options.append({
+					"label": "All of the above",
+					"description": "Run all suggested actions",
+					"input": True,
+					"action": "all_choices",
+				})
+
 		# Default options (always present)
 		continue_label = f"Continue to {mode}"
 		options.extend([
@@ -436,6 +451,14 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 				msg = f"{choice_label}: {value}"
 			history.add_user(_maybe_encrypt(msg, encryptor))
 			return (msg, 1)
+
+		if action == "all_choices":
+			numbered = [f"{i}) {c}" for i, c in enumerate(choices, 1)]
+			msg = f"Do all of the following: {', '.join(numbered)}"
+			if value:
+				msg += f". Additional instructions: {value}"
+			history.add_user(_maybe_encrypt(msg, encryptor))
+			return (msg, max_iterations)
 
 		# exit
 		return None
