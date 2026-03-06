@@ -18,7 +18,7 @@ from secator.rich import console, maybe_status
 from secator.utils import format_token_count
 from secator.ai.actions import ActionContext, dispatch_action
 from secator.ai.encryption import SensitiveDataEncryptor
-from secator.ai.history import ChatHistory
+from secator.ai.history import ChatHistory, truncate_to_tokens
 from secator.ai.prompts import get_system_prompt, format_user_initial, format_tool_result, format_continue
 from secator.ai.utils import call_llm, setup_ai, parse_actions, strip_json_from_response, prompt_user
 
@@ -277,6 +277,24 @@ class ai(PythonRunner):
 						len(action_results),
 						action_results
 					)
+
+					# Apply token budget and truncation
+					budget = history.get_action_budget(model)
+					if action_type in ("task", "workflow"):
+						# Reference existing report.json
+						fallback_path = self.reports_dir / "report.json" if self.reports_dir else None
+						tool_result = truncate_to_tokens(tool_result, budget, model, fallback_path=fallback_path)
+					elif action_type == "shell":
+						# Save shell output to .outputs/
+						output_dir = self.reports_dir / ".outputs" if self.reports_dir else None
+						tool_result = truncate_to_tokens(
+							tool_result, budget, model,
+							output_dir=output_dir,
+							result_name="shell"
+						)
+					else:
+						tool_result = truncate_to_tokens(tool_result, budget, model)
+
 					tool_result = _maybe_encrypt(tool_result, encryptor)
 					history.add_user(tool_result)
 
