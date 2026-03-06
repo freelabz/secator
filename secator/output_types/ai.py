@@ -1,7 +1,14 @@
 """AI output type for displaying prompts, responses, summaries, and suggestions."""
 import re
+import shutil
 import time
+
 from dataclasses import dataclass, field
+from io import StringIO
+from rich.panel import Panel
+from rich.text import Text
+from rich.console import Console
+from rich.markdown import Markdown
 
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, rich_escape as _s, format_token_count, format_object
@@ -31,14 +38,10 @@ def is_markdown(text: str) -> bool:
 
 def render_markdown_for_rich(text: str, title: str = '') -> str:
 	"""Render Markdown text for rich console output, optionally in a Panel."""
-	from rich.console import Console
-	from rich.markdown import Markdown
-	from io import StringIO
-
-	console = Console(file=StringIO(), force_terminal=True, width=120)
+	terminal_width = shutil.get_terminal_size().columns
+	console = Console(file=StringIO(), force_terminal=True, width=terminal_width)
 	md = Markdown(text)
 	if title:
-		from rich.panel import Panel
 		panel = Panel(md, title=title, title_align="left", border_style="dim", padding=(1, 2))
 		console.print(panel)
 	else:
@@ -166,12 +169,9 @@ class Ai(OutputType):
 
 		# Shell output: dim text in a panel, truncated to 10 lines
 		if self.ai_type == 'shell_output':
-			from rich.panel import Panel
-			from rich.text import Text
-			from rich.console import Console
-			from io import StringIO
 			buf = StringIO()
-			render_console = Console(file=buf, force_terminal=True, width=120)
+			terminal_width = shutil.get_terminal_size().columns
+			render_console = Console(file=buf, force_terminal=True, width=terminal_width)
 			content = self.content
 			lines = content.split('\n')
 			max_lines = 10
