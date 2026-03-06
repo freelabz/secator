@@ -167,7 +167,7 @@ class Ai(OutputType):
 			parts = [f'[bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]' for k, v in display_extra.items()]
 			suffix += f'  {", ".join(parts)}'
 
-		# Shell output: dim text in a panel, truncated to 3 lines
+		# Shell output: dim text in a panel, truncated to 3 lines and capped width
 		if self.ai_type == 'shell_output':
 			buf = StringIO()
 			terminal_width = shutil.get_terminal_size().columns
@@ -175,8 +175,16 @@ class Ai(OutputType):
 			content = self.content
 			lines = content.split('\n')
 			max_lines = 3
+			# Cap line width (account for panel borders and padding)
+			max_line_width = terminal_width - 6
+			capped_lines = []
+			for line in lines[:max_lines]:
+				if len(line) > max_line_width:
+					capped_lines.append(line[:max_line_width - 5] + '[...]')
+				else:
+					capped_lines.append(line)
+			content = '\n'.join(capped_lines)
 			if len(lines) > max_lines:
-				content = '\n'.join(lines[:max_lines])
 				content += f'\n… +{len(lines) - max_lines} lines'
 			text = Text(content, style="gray42")
 			panel = Panel(text, title=f"{s}", title_align="left", border_style="gray42", padding=(0, 1))
