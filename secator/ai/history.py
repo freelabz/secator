@@ -161,6 +161,34 @@ class ChatHistory:
 				total += tokens
 		return total
 
+	def get_available_tokens(self, model: str) -> int:
+		"""Return tokens available for new content.
+
+		Args:
+			model: LLM model name
+
+		Returns:
+			Available tokens (context - reservation - used)
+		"""
+		context_window = get_context_window(model)
+		usable = context_window - OUTPUT_TOKEN_RESERVATION
+		return usable - self.count_tokens(model)
+
+	def should_compact(self, model: str, threshold_pct: int = COMPACTION_THRESHOLD_PCT) -> bool:
+		"""Check if compaction needed based on % of context used.
+
+		Args:
+			model: LLM model name
+			threshold_pct: Percentage threshold (default 85)
+
+		Returns:
+			True if compaction needed
+		"""
+		context_window = get_context_window(model)
+		usable = context_window - OUTPUT_TOKEN_RESERVATION
+		used = self.count_tokens(model)
+		return used > (usable * threshold_pct / 100)
+
 	def maybe_summarize(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
 						threshold: int = 30000) -> Tuple[bool, int, int]:
 		"""Summarize history if estimated token count exceeds threshold.

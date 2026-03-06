@@ -352,6 +352,47 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(OUTPUT_TOKEN_RESERVATION, 8192)
         self.assertEqual(COMPACTION_THRESHOLD_PCT, 85)
 
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.history.litellm')
+    def test_get_available_tokens(self, mock_litellm, mock_get_ctx):
+        """get_available_tokens returns usable - used tokens."""
+        mock_get_ctx.return_value = 128000
+        mock_litellm.token_counter.return_value = 1000
+
+        history = ChatHistory()
+        history.add_user("test")
+
+        available = history.get_available_tokens("gpt-4")
+
+        # 128000 - 8192 (reservation) - 1000 (used) = 118808
+        self.assertEqual(available, 118808)
+
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.history.litellm')
+    def test_should_compact_below_threshold(self, mock_litellm, mock_get_ctx):
+        """should_compact returns False when under threshold."""
+        mock_get_ctx.return_value = 100000
+        mock_litellm.token_counter.return_value = 1000  # 1% used
+
+        history = ChatHistory()
+        history.add_user("test")
+
+        self.assertFalse(history.should_compact("gpt-4"))
+
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.history.litellm')
+    def test_should_compact_above_threshold(self, mock_litellm, mock_get_ctx):
+        """should_compact returns True when over threshold."""
+        mock_get_ctx.return_value = 100000
+        # Usable = 100000 - 8192 = 91808
+        # 85% of 91808 = 78037
+        mock_litellm.token_counter.return_value = 80000  # Over 85%
+
+        history = ChatHistory()
+        history.add_user("test")
+
+        self.assertTrue(history.should_compact("gpt-4"))
+
 
 if __name__ == '__main__':
     unittest.main()
