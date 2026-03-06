@@ -186,9 +186,11 @@ class ai(PythonRunner):
 
 			try:
 				# Auto-summarize if token count exceeds threshold
+				self.debug(f'[context] iteration {iteration}/{max_iter}, checking compaction...')
 				summarized, old_tokens, new_tokens = history.maybe_summarize(
 					model, api_base=api_base, api_key=api_key)
 				if summarized:
+					self.debug(f'[context] compacted: {old_tokens} -> {new_tokens} tokens')
 					yield Ai(
 						content=f"Chat history compacted: {old_tokens} -> {new_tokens} estimated tokens",
 						ai_type="chat_compacted",
@@ -196,7 +198,9 @@ class ai(PythonRunner):
 
 				# Call LLM
 				messages = history.to_messages(max_tokens_total=max_tokens_total)
-				token_str = format_token_count(history.count_tokens(model), icon='arrow_up')
+				token_count = history.count_tokens(model)
+				self.debug(f'[context] sending {token_count} tokens to LLM ({len(messages)} messages)')
+				token_str = format_token_count(token_count, icon='arrow_up')
 				msg = f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/] [gray42] • {token_str}[/]"
 				with maybe_status(msg, spinner="dots"):
 					result = call_llm(messages, model, temp, api_base, api_key)
@@ -280,6 +284,8 @@ class ai(PythonRunner):
 
 					# Apply token budget and truncation
 					budget = history.get_action_budget(model)
+					original_len = len(tool_result)
+					self.debug(f'[context] action "{action_type}" result: {len(action_results)} items, budget={budget} tokens')
 					if action_type in ("task", "workflow"):
 						# Reference existing report.json
 						fallback_path = Path(self.reports_folder) / "report.json" if self.reports_folder else None
@@ -294,6 +300,10 @@ class ai(PythonRunner):
 						)
 					else:
 						tool_result = truncate_to_tokens(tool_result, budget, model)
+
+					truncated = "[TRUNCATED]" in tool_result
+					if truncated:
+						self.debug(f'[context] truncated: {original_len} -> {len(tool_result)} chars')
 
 					tool_result = _maybe_encrypt(tool_result, encryptor)
 					history.add_user(tool_result)

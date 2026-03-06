@@ -8,6 +8,8 @@ from typing import Dict, List, Optional, Tuple
 
 import litellm
 
+from secator.utils import debug
+
 
 OUTPUT_TOKEN_RESERVATION = 8192  # Reserve for LLM response
 COMPACTION_THRESHOLD_PCT = 85    # Trigger compaction at 85% of usable context
@@ -25,8 +27,11 @@ def get_context_window(model: str) -> int:
     """
     try:
         info = litellm.get_model_info(model)
-        return info.get("max_input_tokens") or info.get("max_tokens", 128_000)
+        context_window = info.get("max_input_tokens") or info.get("max_tokens", 128_000)
+        debug(f'context_window={context_window}', sub='runner.ai.context', obj={'model': model})
+        return context_window
     except Exception:
+        debug('context_window=128000 (fallback)', sub='runner.ai.context', obj={'model': model})
         return 128_000  # Safe default
 
 
@@ -53,17 +58,22 @@ def truncate_to_tokens(
     """
     current = litellm.token_counter(model=model, text=content)
     if current <= max_tokens:
+        debug(f'no truncation needed: {current} <= {max_tokens} tokens', sub='runner.ai.context')
         return content
+
+    debug(f'truncating: {current} > {max_tokens} tokens', sub='runner.ai.context')
 
     # Determine file hint
     if fallback_path and fallback_path.exists():
         file_hint = f"\nFull output: {fallback_path}"
+        debug(f'using existing fallback: {fallback_path}', sub='runner.ai.context')
     elif output_dir:
         output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         fallback_path = output_dir / f"{result_name}_{timestamp}.txt"
         fallback_path.write_text(content)
         file_hint = f"\nFull output saved to: {fallback_path}"
+        debug(f'saved output to: {fallback_path}', sub='runner.ai.context')
     else:
         file_hint = ""
 
@@ -193,16 +203,22 @@ class ChatHistory:
         if not model:
             raise ValueError("Model required for token counting")
         total = 0
+        cache_hits = 0
         for msg in self.messages:
             cached = msg.get("_token_count")
             cached_model = msg.get("_token_model")
             if cached is not None and cached_model == model:
                 total += cached
+                cache_hits += 1
             else:
                 tokens = litellm.token_counter(model=model, messages=[msg])
                 msg["_token_count"] = tokens
                 msg["_token_model"] = model
                 total += tokens
+        debug(
+            f'total={total} tokens, messages={len(self.messages)}, cache_hits={cache_hits}',
+            sub='runner.ai.context'
+        )
         return total
 
     def get_available_tokens(self, model: str) -> int:
@@ -216,7 +232,13 @@ class ChatHistory:
         """
         context_window = get_context_window(model)
         usable = context_window - OUTPUT_TOKEN_RESERVATION
-        return usable - self.count_tokens(model)
+        used = self.count_tokens(model)
+        available = usable - used
+        debug(
+            f'available={available} (context={context_window}, reserved={OUTPUT_TOKEN_RESERVATION}, used={used})',
+            sub='runner.ai.context'
+        )
+        return available
 
     def should_compact(self, model: str, threshold_pct: int = COMPACTION_THRESHOLD_PCT) -> bool:
         """Check if compaction needed based on % of context used.
@@ -231,7 +253,14 @@ class ChatHistory:
         context_window = get_context_window(model)
         usable = context_window - OUTPUT_TOKEN_RESERVATION
         used = self.count_tokens(model)
-        return used > (usable * threshold_pct / 100)
+        threshold = usable * threshold_pct / 100
+        should = used > threshold
+        pct_used = (used / usable * 100) if usable > 0 else 0
+        debug(
+            f'should_compact={should} (used={used}, threshold={int(threshold)}, {pct_used:.1f}% of usable)',
+            sub='runner.ai.context'
+        )
+        return should
 
     def maybe_summarize(self, model: str, api_base: Optional[str] = None,
                         api_key: Optional[str] = None) -> Tuple[bool, int, int]:
@@ -250,10 +279,13 @@ class ChatHistory:
         """
         old_tokens = self.count_tokens(model)
         if not self.should_compact(model):
+            debug('skipping compaction: not needed', sub='runner.ai.context')
             return False, old_tokens, old_tokens
 
+        debug(f'compacting: {old_tokens} tokens', sub='runner.ai.context')
         self._summarize_with_llm(model, api_base, api_key)
         new_tokens = self.count_tokens(model)
+        debug(f'compacted: {old_tokens} -> {new_tokens} tokens', sub='runner.ai.context')
         return True, old_tokens, new_tokens
 
     def _summarize_with_llm(self, model: str, api_base: Optional[str] = None,
@@ -309,4 +341,9 @@ class ChatHistory:
             Token budget for action result
         """
         available = self.get_available_tokens(model)
-        return min(MAX_ACTION_TOKENS, available // 2)
+        budget = min(MAX_ACTION_TOKENS, available // 2)
+        debug(
+            f'action_budget={budget} (max={MAX_ACTION_TOKENS}, 50% of available={available // 2})',
+            sub='runner.ai.context'
+        )
+        return budget
