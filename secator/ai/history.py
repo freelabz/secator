@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+import litellm
+
 
 SUMMARIZATION_PROMPT = """Summarize the following attack session history into a compact context.
 Keep ONLY the essential information:
@@ -35,6 +37,7 @@ class ChatHistory:
 	"""
 
 	messages: List[Dict[str, str]] = field(default_factory=list)
+	model: Optional[str] = None
 
 	def add_system(self, content: str) -> None:
 		self.messages.append({"role": "system", "content": content})
@@ -104,6 +107,34 @@ class ChatHistory:
 	def est_tokens(self) -> int:
 		"""Estimate token count (1 token ~ 4 chars)."""
 		return sum(len(m.get("content", "")) for m in self.messages) // 4
+
+	def count_tokens(self, model: str = None) -> int:
+		"""Count tokens using litellm, with per-message caching.
+
+		Args:
+			model: LLM model name (required if self.model not set)
+
+		Returns:
+			Total token count across all messages
+
+		Raises:
+			ValueError: If no model provided and self.model not set
+		"""
+		model = model or self.model
+		if not model:
+			raise ValueError("Model required for token counting")
+		total = 0
+		for msg in self.messages:
+			cached = msg.get("_token_count")
+			cached_model = msg.get("_token_model")
+			if cached is not None and cached_model == model:
+				total += cached
+			else:
+				tokens = litellm.token_counter(model=model, messages=[msg])
+				msg["_token_count"] = tokens
+				msg["_token_model"] = model
+				total += tokens
+		return total
 
 	def maybe_summarize(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
 						threshold: int = 30000) -> Tuple[bool, int, int]:

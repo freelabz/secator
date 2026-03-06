@@ -234,5 +234,75 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(history.to_messages(), original_messages)
 
 
+    @patch('secator.ai.history.litellm')
+    def test_count_tokens_uses_litellm(self, mock_litellm):
+        """count_tokens uses litellm.token_counter for accurate counting."""
+        mock_litellm.token_counter.return_value = 42
+
+        history = ChatHistory()
+        history.add_user("test message")
+
+        tokens = history.count_tokens("gpt-4")
+
+        mock_litellm.token_counter.assert_called_once()
+        self.assertEqual(tokens, 42)
+
+    @patch('secator.ai.history.litellm')
+    def test_count_tokens_caches_result(self, mock_litellm):
+        """count_tokens caches result and reuses on second call."""
+        mock_litellm.token_counter.return_value = 100
+
+        history = ChatHistory()
+        history.add_user("test message")
+
+        # First call - should hit litellm
+        tokens1 = history.count_tokens("gpt-4")
+        # Second call - should use cache
+        tokens2 = history.count_tokens("gpt-4")
+
+        # litellm called only once due to caching
+        self.assertEqual(mock_litellm.token_counter.call_count, 1)
+        self.assertEqual(tokens1, 100)
+        self.assertEqual(tokens2, 100)
+
+    @patch('secator.ai.history.litellm')
+    def test_count_tokens_invalidates_cache_on_model_change(self, mock_litellm):
+        """count_tokens recounts when model changes."""
+        mock_litellm.token_counter.side_effect = [100, 120]
+
+        history = ChatHistory()
+        history.add_user("test message")
+
+        tokens1 = history.count_tokens("gpt-4")
+        tokens2 = history.count_tokens("claude-3")  # Different model
+
+        self.assertEqual(mock_litellm.token_counter.call_count, 2)
+        self.assertEqual(tokens1, 100)
+        self.assertEqual(tokens2, 120)
+
+    def test_count_tokens_requires_model(self):
+        """count_tokens raises ValueError when no model provided."""
+        history = ChatHistory()
+        history.add_user("test")
+
+        with self.assertRaises(ValueError) as ctx:
+            history.count_tokens()
+        self.assertIn("Model required", str(ctx.exception))
+
+    @patch('secator.ai.history.litellm')
+    def test_count_tokens_uses_instance_model(self, mock_litellm):
+        """count_tokens uses self.model when no model argument provided."""
+        mock_litellm.token_counter.return_value = 50
+
+        history = ChatHistory()
+        history.model = "gpt-4"
+        history.add_user("test")
+
+        tokens = history.count_tokens()  # No model argument
+
+        mock_litellm.token_counter.assert_called_once()
+        self.assertEqual(tokens, 50)
+
+
 if __name__ == '__main__':
     unittest.main()
