@@ -94,22 +94,6 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(messages[0]["role"], "tool")
         self.assertEqual(messages[0]["content"], "tool output here")
 
-    def test_est_tokens_empty(self):
-        history = ChatHistory()
-        self.assertEqual(history.est_tokens(), 0)
-
-    def test_est_tokens(self):
-        history = ChatHistory()
-        # 40 chars -> ~10 tokens (40 // 4)
-        history.add_user("a" * 40)
-        self.assertEqual(history.est_tokens(), 10)
-
-    def test_est_tokens_multiple_messages(self):
-        history = ChatHistory()
-        history.add_system("a" * 20)   # 5 tokens
-        history.add_user("b" * 80)     # 20 tokens
-        self.assertEqual(history.est_tokens(), 25)
-
     @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.history.litellm')
     def test_maybe_summarize_below_threshold(self, mock_litellm, mock_get_ctx):

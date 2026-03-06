@@ -177,10 +177,6 @@ class ChatHistory:
 	def clear(self) -> None:
 		self.messages = []
 
-	def est_tokens(self) -> int:
-		"""Estimate token count (1 token ~ 4 chars)."""
-		return sum(len(m.get("content", "")) for m in self.messages) // 4
-
 	def count_tokens(self, model: str = None) -> int:
 		"""Count tokens using litellm, with per-message caching.
 

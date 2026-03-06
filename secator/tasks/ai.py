@@ -197,7 +197,7 @@ class ai(PythonRunner):
 
 				# Call LLM
 				messages = history.to_messages(max_tokens_total=max_tokens_total)
-				token_str = format_token_count(history.est_tokens(), icon='arrow_up')
+				token_str = format_token_count(history.count_tokens(model), icon='arrow_up')
 				msg = f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/] [gray42] • {token_str}[/]"
 				with maybe_status(msg, spinner="dots"):
 					result = call_llm(messages, model, temp, api_base, api_key)
