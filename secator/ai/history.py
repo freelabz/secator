@@ -7,6 +7,26 @@ from typing import Dict, List, Optional, Tuple
 import litellm
 
 
+OUTPUT_TOKEN_RESERVATION = 8192  # Reserve for LLM response
+COMPACTION_THRESHOLD_PCT = 85    # Trigger compaction at 85% of usable context
+
+
+def get_context_window(model: str) -> int:
+    """Get model's context window size from litellm.
+
+    Args:
+        model: LLM model name
+
+    Returns:
+        Context window size in tokens (default 128000 on error)
+    """
+    try:
+        info = litellm.get_model_info(model)
+        return info.get("max_input_tokens") or info.get("max_tokens", 128_000)
+    except Exception:
+        return 128_000  # Safe default
+
+
 SUMMARIZATION_PROMPT = """Summarize the following attack session history into a compact context.
 Keep ONLY the essential information:
 - Key findings (vulnerabilities, open ports, services, credentials)

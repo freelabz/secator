@@ -322,6 +322,36 @@ class TestChatHistory(unittest.TestCase):
         history.count_tokens("gpt-4")
         self.assertEqual(mock_litellm.token_counter.call_count, 2)
 
+    @patch('secator.ai.history.litellm')
+    def test_get_context_window_returns_model_limit(self, mock_litellm):
+        """get_context_window returns model's max input tokens."""
+        from secator.ai.history import get_context_window
+
+        mock_litellm.get_model_info.return_value = {"max_input_tokens": 128000}
+
+        result = get_context_window("gpt-4")
+
+        mock_litellm.get_model_info.assert_called_once_with("gpt-4")
+        self.assertEqual(result, 128000)
+
+    @patch('secator.ai.history.litellm')
+    def test_get_context_window_fallback_on_error(self, mock_litellm):
+        """get_context_window returns default on error."""
+        from secator.ai.history import get_context_window
+
+        mock_litellm.get_model_info.side_effect = Exception("API error")
+
+        result = get_context_window("unknown-model")
+
+        self.assertEqual(result, 128000)  # Default fallback
+
+    def test_constants_defined(self):
+        """Verify constants are defined."""
+        from secator.ai.history import OUTPUT_TOKEN_RESERVATION, COMPACTION_THRESHOLD_PCT
+
+        self.assertEqual(OUTPUT_TOKEN_RESERVATION, 8192)
+        self.assertEqual(COMPACTION_THRESHOLD_PCT, 85)
+
 
 if __name__ == '__main__':
     unittest.main()
