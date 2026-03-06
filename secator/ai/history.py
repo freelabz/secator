@@ -237,29 +237,31 @@ class ChatHistory:
 		used = self.count_tokens(model)
 		return used > (usable * threshold_pct / 100)
 
-	def maybe_summarize(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
-						threshold: int = 30000) -> Tuple[bool, int, int]:
-		"""Summarize history if estimated token count exceeds threshold.
+	def maybe_summarize(self, model: str, api_base: Optional[str] = None,
+						api_key: Optional[str] = None) -> Tuple[bool, int, int]:
+		"""Summarize history if token usage exceeds percentage threshold.
+
+		Uses should_compact() to determine if compaction is needed based on
+		percentage of usable context (default 85%).
 
 		Args:
 			model: LLM model name
 			api_base: Optional API base URL
 			api_key: Optional API key
-			threshold: Token threshold to trigger compaction
 
 		Returns:
 			tuple: (compacted, old_tokens, new_tokens)
 		"""
-		old_tokens = self.est_tokens()
-		if old_tokens <= threshold:
+		old_tokens = self.count_tokens(model)
+		if not self.should_compact(model):
 			return False, old_tokens, old_tokens
 
-		self._summarize_with_llm(model, api_base, api_key, threshold)
-		new_tokens = self.est_tokens()
+		self._summarize_with_llm(model, api_base, api_key)
+		new_tokens = self.count_tokens(model)
 		return True, old_tokens, new_tokens
 
-	def _summarize_with_llm(self, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None,
-							threshold: int = 30000) -> None:
+	def _summarize_with_llm(self, model: str, api_base: Optional[str] = None,
+							api_key: Optional[str] = None) -> None:
 		"""Summarize non-system messages using an LLM, keeping the initial system prompt intact."""
 		if len(self.messages) <= 2:
 			return
@@ -274,21 +276,19 @@ class ChatHistory:
 		if not rest:
 			return
 
-		# Import here to avoid circular import
 		from secator.ai.utils import call_llm
 		from secator.rich import console
+		from secator.utils import format_token_count
 
-		# Account for preserved messages in budget
-		preserved_tokens = sum(
-			len(m["content"]) // 4 for m in [initial_system, first_user] if m
-		)
-		remaining_budget = threshold - preserved_tokens
-		max_words = (remaining_budget * 60 // 100) // 2  # rough tokens-to-words ratio
+		# Calculate target summary size based on available context
+		context_window = get_context_window(model)
+		usable = context_window - OUTPUT_TOKEN_RESERVATION
+		target_tokens = int(usable * 0.3)  # Target 30% of usable context
+		max_words = target_tokens // 2  # Rough tokens-to-words ratio
 
 		history_text = json.dumps(rest, indent=None)
 		prompt = SUMMARIZATION_PROMPT.format(history=history_text, max_words=max_words)
-		from secator.utils import format_token_count
-		token_str = format_token_count(self.est_tokens(), icon='arrow_up')
+		token_str = format_token_count(self.count_tokens(model), icon='arrow_up')
 		with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
 			result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key)
 

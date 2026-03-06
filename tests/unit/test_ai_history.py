@@ -110,40 +110,59 @@ class TestChatHistory(unittest.TestCase):
         history.add_user("b" * 80)     # 20 tokens
         self.assertEqual(history.est_tokens(), 25)
 
-    def test_maybe_summarize_below_threshold(self):
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.history.litellm')
+    def test_maybe_summarize_below_threshold(self, mock_litellm, mock_get_ctx):
+        """maybe_summarize returns False when under percentage threshold."""
+        mock_get_ctx.return_value = 100000
+        mock_litellm.token_counter.return_value = 1000  # Well under 85%
+
         history = ChatHistory()
         history.add_system("system prompt")
         history.add_user("short message")
 
-        summarized, old_tokens, new_tokens = history.maybe_summarize(
-            "test-model", threshold=30000)
+        summarized, old_tokens, new_tokens = history.maybe_summarize("test-model")
 
         self.assertFalse(summarized)
         self.assertEqual(old_tokens, new_tokens)
         # Messages unchanged
         self.assertEqual(len(history.to_messages()), 2)
 
+    @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')
-    def test_maybe_summarize_above_threshold(self, mock_call_llm):
+    @patch('secator.ai.history.litellm')
+    def test_maybe_summarize_above_threshold(self, mock_litellm, mock_call_llm, mock_get_ctx):
+        """maybe_summarize triggers compaction when over percentage threshold."""
+        mock_get_ctx.return_value = 100000
+        # Usable = 100000 - 8192 = 91808
+        # 85% threshold = 78037 tokens
+        # Return 2000 tokens per message (41 messages = 82000 total, over 85%)
+        # After compaction, 3 messages = 6000 total
+        mock_litellm.token_counter.return_value = 2000
         mock_call_llm.return_value = {"content": "Summary of session.", "usage": None}
 
         history = ChatHistory()
         history.add_system("system prompt")
-        # Add enough content to exceed a low threshold
+        # Add enough content to exceed threshold
         for i in range(20):
             history.add_user("x" * 200)
             history.add_assistant("y" * 200)
 
-        summarized, old_tokens, new_tokens = history.maybe_summarize(
-            "test-model", threshold=100)
+        summarized, old_tokens, new_tokens = history.maybe_summarize("test-model")
 
         self.assertTrue(summarized)
-        self.assertGreater(old_tokens, 100)
-        self.assertLess(new_tokens, old_tokens)
+        self.assertGreater(old_tokens, new_tokens)
         mock_call_llm.assert_called_once()
 
+    @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')
-    def test_summarize_preserves_system_prompt(self, mock_call_llm):
+    @patch('secator.ai.history.litellm')
+    def test_summarize_preserves_system_prompt(self, mock_litellm, mock_call_llm, mock_get_ctx):
+        """Summarization preserves system prompt and first user message."""
+        mock_get_ctx.return_value = 100000
+        # Return 4000 tokens per message (21 messages = 84000 total, over 85%)
+        # After compaction, 3 messages = 12000 total
+        mock_litellm.token_counter.return_value = 4000
         mock_call_llm.return_value = {"content": "Compact summary.", "usage": None}
 
         history = ChatHistory()
@@ -152,7 +171,7 @@ class TestChatHistory(unittest.TestCase):
             history.add_user("x" * 200)
             history.add_assistant("y" * 200)
 
-        history.maybe_summarize("test-model", threshold=100)
+        history.maybe_summarize("test-model")
 
         messages = history.to_messages()
         # System prompt preserved as first message
@@ -230,7 +249,7 @@ class TestChatHistory(unittest.TestCase):
         history.add_user("user")
 
         original_messages = history.to_messages()
-        history._summarize_with_llm("test-model", threshold=0)
+        history._summarize_with_llm("test-model")
 
         # Messages should be unchanged (skipped)
         self.assertEqual(history.to_messages(), original_messages)
@@ -498,6 +517,43 @@ class TestChatHistory(unittest.TestCase):
             saved_files = list(output_dir.glob("shell_*.txt"))
             self.assertEqual(len(saved_files), 1)
             self.assertEqual(saved_files[0].read_text(), content)
+
+
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.utils.call_llm')
+    @patch('secator.ai.history.litellm')
+    def test_maybe_summarize_uses_percentage_threshold(self, mock_litellm, mock_call_llm, mock_get_ctx):
+        """maybe_summarize uses percentage-based threshold, not fixed tokens."""
+        mock_get_ctx.return_value = 100000
+        # Usable = 100000 - 8192 = 91808
+        # 85% threshold = 78037 tokens
+        mock_litellm.token_counter.return_value = 80000  # Over 85%
+        mock_call_llm.return_value = {"content": "Summary.", "usage": None}
+
+        history = ChatHistory()
+        history.add_system("system")
+        history.add_user("user1")
+        history.add_assistant("response1")
+
+        summarized, old_tokens, new_tokens = history.maybe_summarize("gpt-4")
+
+        self.assertTrue(summarized)
+        mock_call_llm.assert_called_once()
+
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.history.litellm')
+    def test_maybe_summarize_no_threshold_param(self, mock_litellm, mock_get_ctx):
+        """maybe_summarize no longer accepts threshold parameter."""
+        mock_get_ctx.return_value = 100000
+        mock_litellm.token_counter.return_value = 1000
+
+        history = ChatHistory()
+        history.add_system("system")
+
+        # Should work without threshold param
+        summarized, _, _ = history.maybe_summarize("gpt-4")
+
+        self.assertFalse(summarized)
 
 
 if __name__ == '__main__':
