@@ -34,7 +34,7 @@ class Task(Runner):
 
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
-		self.enable_reports = True  # Task will handle reports
+		self.enable_reports = self.run_opts.get('enable_reports', True)  # Task will handle reports
 
 		# Get hooks
 		hooks = self._hooks.get(Task, {})

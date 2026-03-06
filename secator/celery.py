@@ -12,7 +12,8 @@ from celery.app import trace
 from rich.logging import RichHandler
 from retry import retry
 
-from secator.celery_signals import IN_CELERY_WORKER_PROCESS, setup_handlers
+from secator.celery_signals import setup_handlers
+from secator.definitions import IN_WORKER
 from secator.config import CONFIG
 from secator.output_types import Info
 from secator.rich import console
@@ -99,14 +100,14 @@ app.conf.update({
 	'worker_send_task_events': CONFIG.celery.worker_send_task_events
 })
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
-if IN_CELERY_WORKER_PROCESS:
+if IN_WORKER:
 	setup_handlers()
 
 
 @retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
-	if not IN_CELERY_WORKER_PROCESS:
+	if not IN_WORKER:
 		return
 	if task.no_live_updates:
 		return
@@ -176,7 +177,7 @@ def run_command(self, results, name, targets, opts={}):
 	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
 
 	# Set routing key in context
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		quiet = not CONFIG.cli.worker_command_verbose
 		opts.update({
 			'print_item': True,
@@ -199,7 +200,7 @@ def run_command(self, results, name, targets, opts={}):
 	opts['sync'] = True
 
 	# Initialize task
-	sync = not IN_CELERY_WORKER_PROCESS
+	sync = not IN_WORKER
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
 	chunk_it = task.needs_chunking(sync)
@@ -209,10 +210,10 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Chunk task if needed
 	if chunk_it:
-		if IN_CELERY_WORKER_PROCESS:
+		if IN_WORKER:
 			console.print(Info(message=f'Task {name} requires chunking'))
 		workflow = break_task(task, opts, results=results)
-		if IN_CELERY_WORKER_PROCESS:
+		if IN_WORKER:
 			console.print(Info(message=f'Task {name} successfully broken into {len(workflow)} chunks'))
 		update_state(self, task, force=True)
 		console.print(Info(message=f'Task {name} updated state, replacing task with Celery chord workflow'))
@@ -245,11 +246,11 @@ def forward_results(results):
 	elif 'results' in results:
 		results = results['results']
 
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		console.print(Info(message=f'Deduplicating {len(results)} results'))
 
 	results = flatten(results)
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		console.print(Info(message=f'Extracting uuids from {len(results)} results'))
 		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
 		uuids.extend([r for r in results if isinstance(r, str)])
@@ -257,7 +258,7 @@ def forward_results(results):
 	else:
 		results = deduplicate(results, attr='_uuid')
 
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		console.print(Info(message=f'Forwarded {len(results)} flattened and deduplicated results'))
 
 	return results
@@ -277,7 +278,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	"""
 	# Log mark_started start
 	start_time = time()
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
 
@@ -287,7 +288,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	runner.enable_hooks = enable_hooks
 
 	# Query results from db when mongodb is enabled
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
 		results = get_results(results)
 
@@ -302,11 +303,11 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	# Log total time
 	total_time = time() - start_time
 	debug(f'Runner {runner.unique_name}: finished mark_started in {total_time:.2f}s', sub='celery')
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_started in {total_time:.2f}s'))
 
 	# Return only uuids when mongodb is enabled
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
 
 	return runner.results
@@ -327,7 +328,7 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	# Log mark_completed start
 	start_time = time()
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name} has finished, running mark_completed'))
 
 	# Forward previous results
@@ -335,7 +336,7 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	runner.enable_hooks = enable_hooks
 
 	# Query results from db when mongodb is enabled
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
 		results = get_results(results)
 
@@ -350,11 +351,11 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	# Log total time
 	total_time = time() - start_time
 	debug(f'Runner {runner.unique_name}: finished mark_completed in {total_time:.2f}s', sub='celery')
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_completed in {total_time:.2f}s'))
 
 	# Return only uuids when mongodb is enabled
-	if IN_CELERY_WORKER_PROCESS and CONFIG.addons.mongodb.enabled:
+	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in runner.results]
 
 	return runner.results
@@ -468,7 +469,7 @@ def break_task(task, task_opts, results=[]):
 		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
-		if IN_CELERY_WORKER_PROCESS:
+		if IN_WORKER:
 			info = Info(message=f'Celery chunked task created ({ix + 1} / {len(chunks)}): {task_id}')
 			task.add_result(info)
 		sigs.append(sig)
@@ -477,7 +478,7 @@ def break_task(task, task_opts, results=[]):
 	task.sync = False
 	task.results = []
 	task.uuids = set()
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
 	# console.print(Info(message=f'Results: {results}'))
 
@@ -486,6 +487,6 @@ def break_task(task, task_opts, results=[]):
 		tuple(sigs),
 		mark_runner_completed.s(runner=task).set(queue='results')
 	)
-	if IN_CELERY_WORKER_PROCESS:
+	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))
 	return workflow

@@ -6,7 +6,7 @@ from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
-								 HEADER, URL, FOLLOW_REDIRECT, OPT_NOT_SUPPORTED, DATA, USER_AGENT)
+								 HEADER, URL, FOLLOW_REDIRECT, OPT_NOT_SUPPORTED, DATA, USER_AGENT, RETRIES)
 from secator.output_types import Info, Url, Warning, Tag
 from secator.tasks._categories import HttpBase
 from secator.utils import process_wordlist
@@ -33,6 +33,7 @@ class arjun(HttpBase):
 	opt_key_map = {
 		DATA: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: 't',
 		DELAY: 'd',
 		TIMEOUT: 'T',

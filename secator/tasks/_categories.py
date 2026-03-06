@@ -349,6 +349,23 @@ class Vuln(Command):
 
 		return vuln
 
+	@cache
+	@staticmethod
+	def lookup_cve_from_ghsa(ghsa_id):
+		"""Search for a GHSA and return associated CVE vulnerability data.
+
+		Args:
+			ghsa_id (str): GHSA ID in the form GHSA-*
+
+		Returns:
+			dict | None: Vulnerability data dict, or None if not found.
+		"""
+		from secator.providers.ghsa import ghsa
+		vuln = ghsa.lookup_cve(ghsa_id)
+		if vuln:
+			return vuln.toDict()
+		return None
+
 
 class VulnHttp(Vuln):
 	input_types = [HOST]

@@ -20,6 +20,7 @@ class Error(OutputType):
 	_table_fields = ['message', 'traceback']
 	_sort_by = ('_timestamp',)
 
+	@staticmethod
 	def from_exception(e, **kwargs):
 		errtype = type(e).__name__
 		if str(e):

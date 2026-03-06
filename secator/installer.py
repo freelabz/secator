@@ -19,8 +19,7 @@ import json
 from rich.table import Table
 
 from secator.config import CONFIG
-from secator.celery import IN_CELERY_WORKER_PROCESS
-from secator.definitions import OPT_NOT_SUPPORTED
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED
 from secator.output_types import Info, Warning, Error
 from secator.rich import console
 from secator.runners import Command
@@ -175,7 +174,7 @@ class PackageInstaller:
 
 		# Installer cmd
 		cmd = distribution.pm_installer
-		if CONFIG.security.auto_install_commands and IN_CELERY_WORKER_PROCESS:
+		if CONFIG.security.auto_install_commands and IN_WORKER:
 			cmd = f'flock /tmp/install.lock {cmd}'
 		if getpass.getuser() != 'root':
 			cmd = f'sudo {cmd}'

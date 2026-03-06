@@ -1,4 +1,5 @@
 __all__ = [
+	'Ai',
 	'Domain',
 	'Error',
 	'OutputType',
@@ -11,12 +12,12 @@ __all__ = [
 	'State',
 	'Subdomain',
 	'Url',
-	'UrlParam',
 	'UserAccount',
 	'Vulnerability',
 	'Warning',
 ]
 from secator.output_types._base import OutputType
+from secator.output_types.ai import Ai
 from secator.output_types.progress import Progress
 from secator.output_types.ip import Ip
 from secator.output_types.exploit import Exploit
@@ -44,6 +45,7 @@ STAT_TYPES = [
 	Stat
 ]
 FINDING_TYPES = [
-	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain
+	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain, Ai
 ]
 OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES
+INTERNAL_FIELDS = ('_context', '_uuid', '_related', '_duplicate')
