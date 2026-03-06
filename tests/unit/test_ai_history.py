@@ -1,5 +1,7 @@
 # tests/unit/test_ai_history.py
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from secator.ai.history import ChatHistory
@@ -426,6 +428,76 @@ class TestChatHistory(unittest.TestCase):
 
         # Should be 50% of available (3404), less than max (10000)
         self.assertEqual(budget, 3404)
+
+
+    @patch('secator.ai.history.litellm')
+    def test_truncate_to_tokens_no_truncation_needed(self, mock_litellm):
+        """truncate_to_tokens returns content unchanged when under budget."""
+        from secator.ai.history import truncate_to_tokens
+
+        mock_litellm.token_counter.return_value = 100
+
+        result = truncate_to_tokens("short content", 500, "gpt-4")
+
+        self.assertEqual(result, "short content")
+
+    @patch('secator.ai.history.litellm')
+    def test_truncate_to_tokens_truncates_with_marker(self, mock_litellm):
+        """truncate_to_tokens truncates and adds [TRUNCATED] marker."""
+        from secator.ai.history import truncate_to_tokens
+
+        mock_litellm.token_counter.return_value = 1000
+        content = "x" * 4000  # Long content
+
+        result = truncate_to_tokens(content, 100, "gpt-4")
+
+        self.assertIn("[TRUNCATED]", result)
+        self.assertLess(len(result), len(content))
+
+    @patch('secator.ai.history.litellm')
+    def test_truncate_to_tokens_with_fallback_path(self, mock_litellm):
+        """truncate_to_tokens includes existing file path in hint."""
+        from secator.ai.history import truncate_to_tokens
+
+        mock_litellm.token_counter.return_value = 1000
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write('{"test": true}')
+            fallback_path = Path(f.name)
+
+        try:
+            result = truncate_to_tokens("x" * 4000, 100, "gpt-4", fallback_path=fallback_path)
+
+            self.assertIn("[TRUNCATED]", result)
+            self.assertIn(str(fallback_path), result)
+            self.assertIn("grep", result)  # Shell command hint
+        finally:
+            fallback_path.unlink()
+
+    @patch('secator.ai.history.litellm')
+    def test_truncate_to_tokens_saves_shell_output(self, mock_litellm):
+        """truncate_to_tokens saves shell output to .outputs directory."""
+        from secator.ai.history import truncate_to_tokens
+
+        mock_litellm.token_counter.return_value = 1000
+        content = "shell output " * 500
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+
+            result = truncate_to_tokens(
+                content, 100, "gpt-4",
+                output_dir=output_dir,
+                result_name="shell"
+            )
+
+            self.assertIn("[TRUNCATED]", result)
+            self.assertIn("saved to:", result)
+
+            # Verify file was created
+            saved_files = list(output_dir.glob("shell_*.txt"))
+            self.assertEqual(len(saved_files), 1)
+            self.assertEqual(saved_files[0].read_text(), content)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,8 @@
 """Chat history management for AI task - litellm format."""
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import litellm
@@ -26,6 +28,51 @@ def get_context_window(model: str) -> int:
         return info.get("max_input_tokens") or info.get("max_tokens", 128_000)
     except Exception:
         return 128_000  # Safe default
+
+
+def truncate_to_tokens(
+    content: str,
+    max_tokens: int,
+    model: str,
+    fallback_path: Path = None,
+    output_dir: Path = None,
+    result_name: str = "result"
+) -> str:
+    """Truncate content to fit within token budget, with file fallback.
+
+    Args:
+        content: Content to truncate
+        max_tokens: Maximum tokens allowed
+        model: LLM model name for token counting
+        fallback_path: Existing file to reference (task/workflow report.json)
+        output_dir: Directory to save shell output (creates file)
+        result_name: Prefix for saved filename
+
+    Returns:
+        Original content if under budget, or truncated with [TRUNCATED] marker
+    """
+    current = litellm.token_counter(model=model, text=content)
+    if current <= max_tokens:
+        return content
+
+    # Determine file hint
+    if fallback_path and fallback_path.exists():
+        file_hint = f"\nFull output: {fallback_path}"
+    elif output_dir:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fallback_path = output_dir / f"{result_name}_{timestamp}.txt"
+        fallback_path.write_text(content)
+        file_hint = f"\nFull output saved to: {fallback_path}"
+    else:
+        file_hint = ""
+
+    file_hint += "\nUse shell commands to explore: grep, head, tail, jq"
+
+    # Truncate content (ratio-based with 10% safety margin)
+    ratio = max_tokens / current
+    truncate_at = int(len(content) * ratio * 0.9)
+    return content[:truncate_at] + f"\n\n[TRUNCATED]{file_hint}"
 
 
 SUMMARIZATION_PROMPT = """Summarize the following attack session history into a compact context.
