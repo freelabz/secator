@@ -43,10 +43,15 @@ class ChatHistory:
 		self.messages.append({"role": "system", "content": content})
 
 	def set_system(self, content: str) -> None:
-		"""Replace the first system message, or insert one at the start."""
+		"""Replace the first system message, or insert one at the start.
+
+		Invalidates any cached token count for the system message.
+		"""
 		for msg in self.messages:
 			if msg["role"] == "system":
 				msg["content"] = content
+				msg.pop("_token_count", None)  # Invalidate cache
+				msg.pop("_token_model", None)
 				return
 		self.messages.insert(0, {"role": "system", "content": content})
 

@@ -303,6 +303,25 @@ class TestChatHistory(unittest.TestCase):
         mock_litellm.token_counter.assert_called_once()
         self.assertEqual(tokens, 50)
 
+    @patch('secator.ai.history.litellm')
+    def test_set_system_invalidates_token_cache(self, mock_litellm):
+        """set_system invalidates cached token count for system message."""
+        mock_litellm.token_counter.return_value = 50
+
+        history = ChatHistory()
+        history.add_system("old prompt")
+
+        # Count tokens - this caches the count
+        history.count_tokens("gpt-4")
+        self.assertEqual(mock_litellm.token_counter.call_count, 1)
+
+        # Change system prompt
+        history.set_system("new longer prompt")
+
+        # Count again - should recount since cache invalidated
+        history.count_tokens("gpt-4")
+        self.assertEqual(mock_litellm.token_counter.call_count, 2)
+
 
 if __name__ == '__main__':
     unittest.main()
