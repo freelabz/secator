@@ -167,17 +167,17 @@ class Ai(OutputType):
 			parts = [f'[bold yellow]{_s(k)}[/]: [yellow]{_s(v)}[/]' for k, v in display_extra.items()]
 			suffix += f'  {", ".join(parts)}'
 
-		# Shell output: dim text in a panel, truncated to 10 lines
+		# Shell output: dim text in a panel, truncated to 3 lines
 		if self.ai_type == 'shell_output':
 			buf = StringIO()
 			terminal_width = shutil.get_terminal_size().columns
 			render_console = Console(file=buf, force_terminal=True, width=terminal_width)
 			content = self.content
 			lines = content.split('\n')
-			max_lines = 10
+			max_lines = 3
 			if len(lines) > max_lines:
 				content = '\n'.join(lines[:max_lines])
-				content += f'\n... ({len(lines) - max_lines} more lines truncated)'
+				content += f'\n… +{len(lines) - max_lines} lines'
 			text = Text(content, style="gray42")
 			panel = Panel(text, title=f"{s}", title_align="left", border_style="gray42", padding=(0, 1))
 			render_console.print(panel)
