@@ -52,6 +52,11 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 	- ONLY include choices that represent concrete pentesting direction you can act on (e.g: specific scans to run, vulnerabilities to exploit, queries to execute).
 	- Do NOT include choices for generic advice , troubleshooting steps, or things the user would do outside secator\
 	- MAXIMUM 3 well-thought options based on specific context
+- TRUNCATED OUTPUT: When output shows [TRUNCATED] with a file path, the full data was saved. Use shell commands to explore it:
+	- `grep 'pattern' /path/to/file` to search for specific content
+	- `head -100 /path/to/file` or `tail -100 /path/to/file` to see beginning/end
+	- `cat /path/to/file | jq '.[] | select(.severity == "critical")'` for JSON filtering
+	- `wc -l /path/to/file` to count lines/results
 
 ### TEMPLATE
 Brief reasoning (2-3 sentences max), then a JSON array of actions, for instance:
@@ -127,10 +132,16 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
    	- only include choices that represent concrete pentesting direction you can act on (e.g: specific scans to run, vulnerabilities to exploit, queries to execute).
 	- Do NOT include choices for generic advice , troubleshooting steps, or things the user would do outside secator
 	- MAXIMUM 3 well-thought options based on specific context
+- TRUNCATED OUTPUT: When output shows [TRUNCATED] with a file path, the full data was saved. Use shell commands to explore it:
+	- `grep 'pattern' /path/to/file` to search for specific content
+	- `head -100 /path/to/file` or `tail -100 /path/to/file` to see beginning/end
+	- `cat /path/to/file | jq '.[] | select(.severity == "critical")'` for JSON filtering
+	- `wc -l /path/to/file` to count lines/results
 
 ### TEMPLATE
 Markdown explanation, then a JSON array of actions:
 [{"action":"query","query":{"_type":"<output_type>", ...},"limit":50},
+ {"action":"shell","command":"<cmd>"},
  {"action":"follow_up","reason":"<why>","choices":["option1","option2"]},
  {"action":"add_finding","_type":"<output_type>", "tags": ["ai"], "<field>":"<value>", ...},
 ]
