@@ -393,6 +393,40 @@ class TestChatHistory(unittest.TestCase):
 
         self.assertTrue(history.should_compact("gpt-4"))
 
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.history.litellm')
+    def test_get_action_budget_caps_at_max(self, mock_litellm, mock_get_ctx):
+        """get_action_budget caps at MAX_ACTION_TOKENS when plenty available."""
+        mock_get_ctx.return_value = 200000
+        mock_litellm.token_counter.return_value = 1000  # Very little used
+
+        history = ChatHistory()
+        history.add_user("test")
+
+        budget = history.get_action_budget("gpt-4")
+
+        # Should cap at 10000 even though much more is available
+        self.assertEqual(budget, 10000)
+
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.history.litellm')
+    def test_get_action_budget_uses_half_available(self, mock_litellm, mock_get_ctx):
+        """get_action_budget uses 50% of available when constrained."""
+        mock_get_ctx.return_value = 50000
+        # Usable = 50000 - 8192 = 41808
+        # Used = 35000
+        # Available = 41808 - 35000 = 6808
+        # Half = 3404
+        mock_litellm.token_counter.return_value = 35000
+
+        history = ChatHistory()
+        history.add_user("test")
+
+        budget = history.get_action_budget("gpt-4")
+
+        # Should be 50% of available (3404), less than max (10000)
+        self.assertEqual(budget, 3404)
+
 
 if __name__ == '__main__':
     unittest.main()

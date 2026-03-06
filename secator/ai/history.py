@@ -9,6 +9,7 @@ import litellm
 
 OUTPUT_TOKEN_RESERVATION = 8192  # Reserve for LLM response
 COMPACTION_THRESHOLD_PCT = 85    # Trigger compaction at 85% of usable context
+MAX_ACTION_TOKENS = 10_000       # Hard cap per action result
 
 
 def get_context_window(model: str) -> int:
@@ -250,3 +251,19 @@ class ChatHistory:
 		if first_user:
 			self.messages.append(first_user)
 		self.messages.append({"role": "user", "content": f"Summary of previous iterations:\n\n{result['content']}"})
+
+	def get_action_budget(self, model: str) -> int:
+		"""Get max tokens allowed for a single action's combined output.
+
+		Returns the smaller of:
+		- MAX_ACTION_TOKENS (10k hard cap)
+		- 50% of available context
+
+		Args:
+			model: LLM model name
+
+		Returns:
+			Token budget for action result
+		"""
+		available = self.get_available_tokens(model)
+		return min(MAX_ACTION_TOKENS, available // 2)
