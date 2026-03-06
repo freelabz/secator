@@ -282,11 +282,11 @@ class ai(PythonRunner):
 					budget = history.get_action_budget(model)
 					if action_type in ("task", "workflow"):
 						# Reference existing report.json
-						fallback_path = self.reports_dir / "report.json" if self.reports_dir else None
+						fallback_path = self.reports_folder / "report.json" if self.reports_folder else None
 						tool_result = truncate_to_tokens(tool_result, budget, model, fallback_path=fallback_path)
 					elif action_type == "shell":
 						# Save shell output to .outputs/
-						output_dir = self.reports_dir / ".outputs" if self.reports_dir else None
+						output_dir = self.reports_folder / ".outputs" if self.reports_folder else None
 						tool_result = truncate_to_tokens(
 							tool_result, budget, model,
 							output_dir=output_dir,
