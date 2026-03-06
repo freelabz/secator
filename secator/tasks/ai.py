@@ -49,7 +49,6 @@ class ai(PythonRunner):
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"yes": {"is_flag": True, "default": False, "short": "y", "help": "Auto-accept"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
-		"max_tokens": {"type": int, "default": CONFIG.addons.ai.max_tokens, "help": "Max tokens before compacting history"},
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
 			"help": "Hard token limit - truncate oldest messages beyond this",
@@ -156,7 +155,6 @@ class ai(PythonRunner):
 		temp = float(self.run_opts.get("temperature", 0.7))
 		api_key = self.run_opts.get("api_key")
 		api_base = self.run_opts.get("api_base")
-		max_tokens = int(self.run_opts.get("max_tokens", CONFIG.addons.ai.max_tokens))
 		max_tokens_total = int(self.run_opts.get("max_tokens_total", CONFIG.addons.ai.max_tokens_total))
 		dry_run = self.run_opts.get("dry_run", False)
 		verbose = self.run_opts.get("verbose", False)
@@ -165,6 +163,7 @@ class ai(PythonRunner):
 
 		# Initialize chat history with appropriate system prompt
 		history = ChatHistory()
+		history.model = model  # Set model for token counting
 		history.add_system(get_system_prompt(mode))
 		user_msg = format_user_initial(targets, prompt, previous_results=previous_results or [])
 		history.add_user(_maybe_encrypt(user_msg, encryptor))
@@ -188,7 +187,7 @@ class ai(PythonRunner):
 			try:
 				# Auto-summarize if token count exceeds threshold
 				summarized, old_tokens, new_tokens = history.maybe_summarize(
-					model, api_base=api_base, api_key=api_key, threshold=max_tokens)
+					model, api_base=api_base, api_key=api_key)
 				if summarized:
 					yield Ai(
 						content=f"Chat history compacted: {old_tokens} -> {new_tokens} estimated tokens",
