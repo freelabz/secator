@@ -41,7 +41,7 @@ class naabu(ReconPort):
 		PROXY: lambda x: x.replace('socks5://', '')
 	}
 	item_loaders = [JSONSerializer()]
-	install_version = 'v2.3.7'
+	install_version = 'v2.4.0'
 	install_cmd = 'go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@[install_version]'
 	github_handle = 'projectdiscovery/naabu'
 	install_pre = {'apt': ['libpcap-dev'], 'apk': ['libpcap-dev', 'libc6-compat'], 'pacman|brew': ['libpcap']}
