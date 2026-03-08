@@ -4,7 +4,10 @@ import unittest
 from secator.ai.prompts import (
     SYSTEM_ATTACK,
     SYSTEM_CHAT,
+    SYSTEM_EXPLOITER,
+    MODES,
     get_system_prompt,
+    get_mode_config,
     format_user_initial,
     format_tool_result,
     format_continue,
@@ -157,6 +160,86 @@ class TestPrompts(unittest.TestCase):
         self.assertIn('$regex', prompt)
         # Should have profiles usage hint
         self.assertIn('profiles', prompt)
+
+    # === MODES dict and SYSTEM_EXPLOITER tests ===
+
+    def test_modes_dict_exists_with_expected_modes(self):
+        """Test MODES dict exists with attack, chat, exploiter modes."""
+        self.assertIn("attack", MODES)
+        self.assertIn("chat", MODES)
+        self.assertIn("exploiter", MODES)
+
+    def test_exploiter_mode_config_has_correct_allowed_actions(self):
+        """Test exploiter mode config has correct allowed_actions."""
+        exploiter_config = MODES["exploiter"]
+        expected_actions = ["task", "workflow", "shell", "add_finding"]
+        self.assertEqual(exploiter_config["allowed_actions"], expected_actions)
+
+    def test_exploiter_mode_config_has_max_iterations_5(self):
+        """Test exploiter mode config has max_iterations=5."""
+        exploiter_config = MODES["exploiter"]
+        self.assertEqual(exploiter_config["max_iterations"], 5)
+
+    def test_attack_mode_config_has_correct_allowed_actions(self):
+        """Test attack mode config has correct allowed_actions."""
+        attack_config = MODES["attack"]
+        expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding"]
+        self.assertEqual(attack_config["allowed_actions"], expected_actions)
+
+    def test_chat_mode_config_has_correct_allowed_actions(self):
+        """Test chat mode config has correct allowed_actions."""
+        chat_config = MODES["chat"]
+        expected_actions = ["query", "follow_up", "add_finding", "shell"]
+        self.assertEqual(chat_config["allowed_actions"], expected_actions)
+
+    def test_attack_and_chat_modes_have_no_max_iterations(self):
+        """Test attack and chat modes have max_iterations=None."""
+        self.assertIsNone(MODES["attack"]["max_iterations"])
+        self.assertIsNone(MODES["chat"]["max_iterations"])
+
+    def test_get_mode_config_returns_correct_mode(self):
+        """Test get_mode_config returns correct mode config."""
+        attack_config = get_mode_config("attack")
+        self.assertEqual(attack_config["system_prompt"], SYSTEM_ATTACK)
+
+        chat_config = get_mode_config("chat")
+        self.assertEqual(chat_config["system_prompt"], SYSTEM_CHAT)
+
+        exploiter_config = get_mode_config("exploiter")
+        self.assertEqual(exploiter_config["system_prompt"], SYSTEM_EXPLOITER)
+
+    def test_get_mode_config_falls_back_to_chat_for_unknown_modes(self):
+        """Test get_mode_config falls back to chat for unknown modes."""
+        unknown_config = get_mode_config("unknown_mode")
+        chat_config = get_mode_config("chat")
+        self.assertEqual(unknown_config, chat_config)
+
+    def test_get_system_prompt_works_for_exploiter_mode(self):
+        """Test get_system_prompt works for exploiter mode."""
+        prompt = get_system_prompt("exploiter")
+        self.assertIn("exploitation verification specialist", prompt)
+        self.assertIn("proof-of-concept", prompt)
+
+    def test_system_exploiter_has_expected_structure(self):
+        """Test SYSTEM_EXPLOITER template has expected structure."""
+        self.assertIn("PERSONA", SYSTEM_EXPLOITER.template)
+        self.assertIn("ACTION", SYSTEM_EXPLOITER.template)
+        self.assertIn("STEPS", SYSTEM_EXPLOITER.template)
+        self.assertIn("CONTEXT", SYSTEM_EXPLOITER.template)
+        self.assertIn("CONSTRAINTS", SYSTEM_EXPLOITER.template)
+        self.assertIn("TEMPLATE", SYSTEM_EXPLOITER.template)
+        self.assertIn("EXAMPLES", SYSTEM_EXPLOITER.template)
+
+    def test_system_exploiter_has_expected_actions(self):
+        """Test SYSTEM_EXPLOITER template mentions expected actions."""
+        self.assertIn("shell", SYSTEM_EXPLOITER.template)
+        self.assertIn("task", SYSTEM_EXPLOITER.template)
+        self.assertIn("add_finding", SYSTEM_EXPLOITER.template)
+
+    def test_get_system_prompt_raises_for_invalid_mode(self):
+        """Test get_system_prompt raises ValueError for invalid mode."""
+        with self.assertRaises(ValueError):
+            get_system_prompt("invalid_mode")
 
 
 if __name__ == '__main__':

@@ -164,6 +164,79 @@ FOLLOW_UP CHOICES: "choices" is OPTIONAL. Only include choices when they represe
 ```
 """)
 
+# System prompt for exploiter mode - focused on vulnerability verification
+SYSTEM_EXPLOITER = Template("""
+### PERSONA
+You are an exploitation verification specialist conducting authorized security testing.
+
+### ACTION
+Verify if a specific vulnerability is exploitable and document a working proof-of-concept.
+
+### STEPS
+1. Analyze the vulnerability details provided in your context
+2. Research exploitation techniques for this vulnerability type
+3. Attempt exploitation using appropriate tools or commands
+4. Document each step: command used, expected vs actual output
+5. Report success/failure with evidence
+
+### CONTEXT
+$library_reference
+
+### CONSTRAINTS
+- Focus ONLY on the vulnerability specified in your context
+- Do NOT spawn other AI subagents
+- Do NOT run broad scans or explore beyond scope
+- Be methodical - try multiple techniques if first attempt fails
+- Stop immediately if exploitation succeeds
+- Stop if exploitation is not feasible after reasonable attempts
+- NEVER INVENT output - only report actual results
+- Keep responses concise and actionable
+
+### TEMPLATE
+Brief reasoning, then JSON array of actions:
+[{"action":"shell","command":"<exploit_cmd>"},
+ {"action":"task","name":"<tool>","targets":[...],"opts":{}},
+ {"action":"add_finding","_type":"exploit","name":"...","poc":"..."}]
+
+### EXAMPLES
+```
+Attempting path traversal on Apache 2.4.49 using curl.
+
+[{"action": "shell", "command": "curl -s --path-as-is 'http://target/cgi-bin/.%2e/%2e%2e/etc/passwd'"}]
+```
+""")
+
+# Mode configurations: system prompt, allowed actions, and iteration limits
+MODES = {
+	"attack": {
+		"system_prompt": SYSTEM_ATTACK,
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding"],
+		"max_iterations": None,
+	},
+	"chat": {
+		"system_prompt": SYSTEM_CHAT,
+		"allowed_actions": ["query", "follow_up", "add_finding", "shell"],
+		"max_iterations": None,
+	},
+	"exploiter": {
+		"system_prompt": SYSTEM_EXPLOITER,
+		"allowed_actions": ["task", "workflow", "shell", "add_finding"],
+		"max_iterations": 5,
+	},
+}
+
+
+def get_mode_config(mode: str) -> dict:
+	"""Get full config for a mode.
+
+	Args:
+		mode: The mode name (attack, chat, exploiter)
+
+	Returns:
+		Mode configuration dict with system_prompt, allowed_actions, max_iterations
+	"""
+	return MODES.get(mode, MODES["chat"])
+
 
 def build_tasks_reference() -> str:
 	"""Build compact task reference: name|description|options."""
@@ -249,23 +322,32 @@ def get_system_prompt(mode: str) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
-		mode: Either "attack", "chat", or "summarize"
+		mode: One of "attack", "chat", or "exploiter"
 
 	Returns:
 		Formatted system prompt string
 	"""
-	if mode not in ("attack", "chat"):
-		raise ValueError(f"Unsupported mode: {mode!r}. Expected 'attack' or 'chat'.")
+	if mode not in MODES:
+		raise ValueError(f"Unsupported mode: {mode!r}. Expected one of {list(MODES.keys())}.")
+
+	mode_config = MODES[mode]
+	system_prompt = mode_config["system_prompt"]
 	query_types = build_query_types()
+
 	if mode == "attack":
-		return SYSTEM_ATTACK.substitute(
+		return system_prompt.substitute(
 			library_reference=build_library_reference(),
 			query_types=query_types
 		)
-	return SYSTEM_CHAT.substitute(
-		query_types=query_types,
-		output_types_reference=build_output_types_reference()
-	)
+	elif mode == "exploiter":
+		return system_prompt.substitute(
+			library_reference=build_library_reference()
+		)
+	else:  # chat mode
+		return system_prompt.substitute(
+			query_types=query_types,
+			output_types_reference=build_output_types_reference()
+		)
 
 
 def format_user_initial(targets: List[str], instructions: str, previous_results: List[Dict] = None) -> str:
