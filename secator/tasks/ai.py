@@ -3,7 +3,7 @@
 import json
 import random
 from pathlib import Path
-from typing import Generator, List, Optional
+from typing import Dict, Generator, List, Optional
 
 from time import sleep
 
@@ -26,6 +26,41 @@ from secator.ai.utils import call_llm, setup_ai, parse_actions, strip_json_from_
 def _maybe_encrypt(text, encryptor):
 	"""Encrypt text if encryptor is available, otherwise return as-is."""
 	return encryptor.encrypt(text) if encryptor else text
+
+
+def group_actions(actions: List[Dict]) -> List:
+	"""Group actions by 'group' field for batch execution.
+
+	Returns list where:
+	- Individual actions (no group) are dicts
+	- Grouped actions are lists of dicts
+	"""
+	result = []
+	groups = {}
+	group_order = []
+
+	for action in actions:
+		group = action.pop("group", None)
+		if group:
+			if group not in groups:
+				groups[group] = []
+				group_order.append(group)
+			groups[group].append(action)
+		else:
+			# Flush pending groups before sequential action
+			for g in group_order:
+				if groups[g]:
+					result.append(groups[g])
+					groups[g] = []
+			group_order = []
+			result.append(action)
+
+	# Flush remaining groups
+	for g in group_order:
+		if groups[g]:
+			result.append(groups[g])
+
+	return result
 
 
 DEFAULT_API_KEY = CONFIG.addons.ai.api_key
