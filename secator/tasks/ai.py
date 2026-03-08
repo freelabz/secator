@@ -54,6 +54,24 @@ class ai(PythonRunner):
 			"help": "Hard token limit - truncate oldest messages beyond this",
 		},
 		"interactive": {"is_flag": True, "default": True, "help": "Prompt user for follow-up after completion"},
+		"context": {
+			"type": dict,
+			"default": None,
+			"internal": True,
+			"help": "Context to pass to AI (findings, scope, objective)"
+		},
+		"internal": {
+			"is_flag": True,
+			"default": False,
+			"internal": True,
+			"help": "Mark as internal subagent (suppresses interactive prompts)"
+		},
+		"max_workers": {
+			"type": int,
+			"default": 3,
+			"internal": True,
+			"help": "Max concurrent tasks for batch execution"
+		},
 	}
 
 	@classmethod
