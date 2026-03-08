@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.0](https://github.com/freelabz/secator/compare/v0.25.7...v0.26.0) (2026-03-08)
+
+
+### Features
+
+* **config:** add timeout parameter to ApiAddon and update API request handling ([#939](https://github.com/freelabz/secator/issues/939)) ([8ca7aea](https://github.com/freelabz/secator/commit/8ca7aea6a46fbaeed556a991fe6ef97a1776ee45))
+* **tasks:** add `ai` task for ai-augmented pentests ([#940](https://github.com/freelabz/secator/issues/940)) ([7949cdf](https://github.com/freelabz/secator/commit/7949cdf9078018acf1d46a5f85e29d731259ae98))
+
+
+### Bug Fixes
+
+* **install:** migrate getasn, jswhois, whois, x8 to freelabz forks ([#941](https://github.com/freelabz/secator/issues/941)) ([6fe4cc1](https://github.com/freelabz/secator/commit/6fe4cc1aee19451f9687ebe611f7527e10883301))
+* nmap dns + ids / headless tags + confidence tracking + workspace folder name fix ([#936](https://github.com/freelabz/secator/issues/936)) ([2a34a9a](https://github.com/freelabz/secator/commit/2a34a9a3bc2a50d8314ba6ebe22b482a7d9ee4ff))
+
 ## [0.25.7](https://github.com/freelabz/secator/compare/v0.25.6...v0.25.7) (2026-02-08)
 
 
