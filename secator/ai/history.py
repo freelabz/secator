@@ -139,6 +139,27 @@ class ChatHistory:
     def add_assistant(self, content: str) -> None:
         self.messages.append({"role": "assistant", "content": content})
 
+    def add_assistant_with_tool_calls(self, content: Optional[str], tool_calls: list) -> None:
+        """Add an assistant message that includes tool calls.
+
+        Args:
+            content: Optional text content (None when LLM returns only tool calls)
+            tool_calls: List of tool call dicts from the LLM response
+        """
+        msg = {"role": "assistant", "tool_calls": tool_calls}
+        if content is not None:
+            msg["content"] = content
+        self.messages.append(msg)
+
+    def add_tool_result(self, tool_call_id: str, content: str) -> None:
+        """Add a tool result message.
+
+        Args:
+            tool_call_id: ID of the tool call this result responds to
+            content: The tool's output content
+        """
+        self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
+
     def add_tool(self, content: str) -> None:
         self.messages.append({"role": "tool", "content": content})
 

@@ -540,5 +540,85 @@ class TestChatHistory(unittest.TestCase):
         self.assertFalse(summarized)
 
 
+class TestChatHistoryToolCalling(unittest.TestCase):
+
+    def test_add_assistant_with_tool_calls(self):
+        """add_assistant_with_tool_calls stores role, content, and tool_calls."""
+        history = ChatHistory()
+        tool_calls = [{"id": "call_1", "type": "function", "function": {"name": "nmap", "arguments": "{}"}}]
+        history.add_assistant_with_tool_calls("Let me scan that.", tool_calls)
+
+        messages = history.to_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "assistant")
+        self.assertEqual(messages[0]["content"], "Let me scan that.")
+        self.assertEqual(messages[0]["tool_calls"], tool_calls)
+
+    def test_add_assistant_with_tool_calls_no_content(self):
+        """add_assistant_with_tool_calls works when content is None."""
+        history = ChatHistory()
+        tool_calls = [{"id": "call_1", "type": "function", "function": {"name": "nmap", "arguments": "{}"}}]
+        history.add_assistant_with_tool_calls(None, tool_calls)
+
+        messages = history.to_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "assistant")
+        self.assertIsNone(messages[0].get("content"))
+        self.assertEqual(messages[0]["tool_calls"], tool_calls)
+
+    def test_add_tool_result(self):
+        """add_tool_result stores role, tool_call_id, and content."""
+        history = ChatHistory()
+        history.add_tool_result("call_1", "scan complete: 3 ports open")
+
+        messages = history.to_messages()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "tool")
+        self.assertEqual(messages[0]["tool_call_id"], "call_1")
+        self.assertEqual(messages[0]["content"], "scan complete: 3 ports open")
+
+    def test_add_tool_result_preserves_order(self):
+        """Multiple tool results preserve insertion order."""
+        history = ChatHistory()
+        history.add_tool_result("call_1", "result 1")
+        history.add_tool_result("call_2", "result 2")
+
+        messages = history.to_messages()
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["tool_call_id"], "call_1")
+        self.assertEqual(messages[0]["content"], "result 1")
+        self.assertEqual(messages[1]["tool_call_id"], "call_2")
+        self.assertEqual(messages[1]["content"], "result 2")
+
+    @patch('secator.ai.history.get_context_window')
+    @patch('secator.ai.utils.call_llm')
+    @patch('secator.ai.history.litellm')
+    def test_summarize_handles_tool_messages(self, mock_litellm, mock_call_llm, mock_get_ctx):
+        """maybe_summarize works when history contains tool_calls and tool messages."""
+        mock_get_ctx.return_value = 100000
+        mock_litellm.token_counter.return_value = 2000
+        mock_call_llm.return_value = {"content": "Summary with tool results.", "usage": None}
+
+        history = ChatHistory()
+        history.add_system("system prompt")
+        history.add_user("scan target.com")
+
+        # Add several rounds with tool calling messages
+        for i in range(20):
+            tool_calls = [{"id": f"call_{i}", "type": "function",
+                           "function": {"name": "nmap", "arguments": "{}"}}]
+            history.add_assistant_with_tool_calls(None, tool_calls)
+            history.add_tool_result(f"call_{i}", f"result {i}")
+
+        summarized, old_tokens, new_tokens = history.maybe_summarize("test-model")
+
+        self.assertTrue(summarized)
+        self.assertGreater(old_tokens, new_tokens)
+        mock_call_llm.assert_called_once()
+        # After summarization, system prompt is preserved
+        messages = history.to_messages()
+        self.assertEqual(messages[0]["role"], "system")
+
+
 if __name__ == '__main__':
     unittest.main()
