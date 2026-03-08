@@ -16,7 +16,7 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.utils import format_token_count
-from secator.ai.actions import ActionContext, dispatch_action
+from secator.ai.actions import ActionContext, dispatch_action, _run_batch
 from secator.ai.encryption import SensitiveDataEncryptor
 from secator.ai.history import ChatHistory, truncate_to_tokens
 from secator.ai.prompts import get_system_prompt, get_mode_config, format_user_initial, format_tool_result, format_continue
@@ -318,39 +318,57 @@ class ai(PythonRunner):
 					if action_str:
 						yield Info(message=f"Executing {len(actions)} {action_str} ...")
 					self.debug(json.dumps(actions, indent=4))
+
+				# Group actions for batch execution
+				grouped = group_actions(actions)
+
 				follow_up_choices = None
-				for action in actions:
-					action_type = action.get("action", "")
+				for item in grouped:
+					# Determine if batch or single action
+					if isinstance(item, list):
+						action_iter = _run_batch(item, ctx)
+						is_batch = True
+					else:
+						action_iter = dispatch_action(item, ctx)
+						is_batch = False
+
+					action_type = "batch" if is_batch else item.get("action", "")
 					is_secator = action_type in ['task', 'workflow']
 					action_results = []
 					has_errors = False
-					for item in dispatch_action(action, ctx):
-						if isinstance(item, (Stat, Progress, State, Info)):
+
+					for result in action_iter:
+						if isinstance(result, (Stat, Progress, State, Info)):
 							# Skip stats, progress, state, and info
 							continue
-						if isinstance(item, Error):
+						if isinstance(result, Error):
 							has_errors = True
-						if isinstance(item, Ai):
-							self.add_result(item)
+						if isinstance(result, Ai):
+							self.add_result(result)
 							# Capture choices from follow_up action
-							if item.ai_type == "follow_up":
-								follow_up_choices = (item.extra_data or {}).get("choices", [])
+							if result.ai_type == "follow_up":
+								follow_up_choices = (result.extra_data or {}).get("choices", [])
 							# Feed shell output back to the LLM
-							if item.ai_type == "shell_output":
-								action_results.append({"output": item.content})
+							if result.ai_type == "shell_output":
+								action_results.append({"output": result.content})
 							continue
-						if isinstance(item, OutputType):
-							self.add_result(item, print=not is_secator)  # only print non-Secator findings
-							item = item.toDict(exclude=list(INTERNAL_FIELDS))  # TODO: verify if yielding raw output would be better
-						action_results.append(item)  # TODO: verify if yielding raw output would be better
+						if isinstance(result, OutputType):
+							self.add_result(result, print=not is_secator)
+							result = result.toDict(exclude=list(INTERNAL_FIELDS))
+						action_results.append(result)
 
 						# Keep ctx.results in sync for scope='current' queries
 						if ctx.scope == "current":
-							ctx.results.append(item)
+							ctx.results.append(result)
 
 					# Build tool result for history (compact JSON)
+					if is_batch:
+						action_name = f"batch({len(item)})"
+					else:
+						action_name = item.get("name", action_type)
+
 					tool_result = format_tool_result(
-						action.get("name", action_type),
+						action_name,
 						"error" if has_errors else "success",
 						len(action_results),
 						action_results
@@ -360,12 +378,10 @@ class ai(PythonRunner):
 					budget = history.get_action_budget(model)
 					original_len = len(tool_result)
 					self.debug(f'[context] action "{action_type}" result: {len(action_results)} items, budget={budget} tokens')
-					if action_type in ("task", "workflow"):
-						# Reference existing report.json
+					if action_type in ("task", "workflow", "batch"):
 						fallback_path = Path(self.reports_folder) / "report.json" if self.reports_folder else None
 						tool_result = truncate_to_tokens(tool_result, budget, model, fallback_path=fallback_path)
 					elif action_type == "shell":
-						# Save shell output to .outputs/
 						output_dir = Path(self.reports_folder) / ".outputs" if self.reports_folder else None
 						tool_result = truncate_to_tokens(
 							tool_result, budget, model,

@@ -57,6 +57,11 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 	- `head -100 /path/to/file` or `tail -100 /path/to/file` to see beginning/end
 	- `cat /path/to/file | jq '.[] | select(.severity == "critical")'` for JSON filtering
 	- `wc -l /path/to/file` to count lines/results
+- Use "group" field to run multiple independent actions in parallel:
+  Actions with the same "group" value execute concurrently, others run sequentially.
+- When finding a HIGH or CRITICAL vulnerability that needs verification, spawn an exploiter subagent:
+  {"action": "task", "name": "ai", "targets": ["<target>"], "opts": {"mode": "exploiter", "internal": true, "context": {"vulnerability": {...}, "relevant_findings": [...], "objective": "..."}}}
+- Do NOT spawn AI subagents for simple tasks - only for complex exploitation verification
 
 ### TEMPLATE
 Brief reasoning (2-3 sentences max), then a JSON array of actions, for instance:
@@ -66,6 +71,13 @@ Brief reasoning (2-3 sentences max), then a JSON array of actions, for instance:
  {"action":"query","query":{"_type":"<output_type>", ...},"limit":50},
  {"action":"add_finding","_type":"<output_type>","<field>":"<value>", ...},
 ]
+
+Parallel execution (use "group" field):
+[{"action":"task","name":"nmap","targets":["host1"],"opts":{},"group":"scan"},
+ {"action":"task","name":"nmap","targets":["host2"],"opts":{},"group":"scan"}]
+
+Subagent (for exploitation verification):
+{"action":"task","name":"ai","targets":["<target>"],"opts":{"mode":"exploiter","internal":true,"context":{"vulnerability":{...},"objective":"..."}}}
 
 OR, if following up is needed (choices are optional):
 [{"action":"follow_up","reason":"<why>","choices":["option1","option2"]}]
@@ -96,6 +108,22 @@ Query example:
 Querying vulnerabilities (critical, high) and URLs matching /admin regex.
 
 [{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50}]
+```
+
+Parallel scanning example:
+```
+Scanning 3 targets in parallel, then running nuclei.
+
+[{"action": "task", "name": "nmap", "targets": ["192.168.1.1"], "opts": {"ports": "1-1000"}, "group": "port_scan"},
+ {"action": "task", "name": "nmap", "targets": ["192.168.1.2"], "opts": {"ports": "1-1000"}, "group": "port_scan"},
+ {"action": "task", "name": "nuclei", "targets": ["192.168.1.1", "192.168.1.2"], "opts": {}}]
+```
+
+Exploitation verification example:
+```
+Found CVE-2024-1234 on Apache 2.4.49. Spawning exploiter to verify.
+
+[{"action": "task", "name": "ai", "targets": ["192.168.1.1"], "opts": {"mode": "exploiter", "internal": true, "context": {"vulnerability": {"name": "CVE-2024-1234", "type": "path_traversal", "service": "apache", "port": 80}, "objective": "Verify path traversal and extract /etc/passwd"}}}]
 ```
 """)
 
