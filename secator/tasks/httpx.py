@@ -184,7 +184,9 @@ class httpx(Http):
 		if host in self.domains:
 			return None
 		url_domain = extract_domain_info(url)
-		url_domains = extract_subdomains_from_fqdn(url_domain.fqdn, url_domain.domain, url_domain.suffix)
+		url_domains = []
+		if url_domain:
+			url_domains = extract_subdomains_from_fqdn(url_domain.fqdn, url_domain.domain, url_domain.suffix)
 		if not url_domain or host not in url_domains:
 			return None
 		self.domains.append(host)

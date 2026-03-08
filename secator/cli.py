@@ -199,7 +199,8 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 			console.print(Error(message='Missing dev addon: please run "secator install addons dev".'))
 			sys.exit(1)
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
-		cmd = f'{Path(sys.executable).parent / "watchmedo"} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
+		watchmedo_path = shutil.which('watchmedo') or str(Path(sys.executable).parent / 'watchmedo')
+		cmd = f'{watchmedo_path} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
 
 	if use_command_runner:
 		ret = Command.execute(cmd, name='secator_worker', cwd=Path(sys.executable).parent)
@@ -702,7 +703,7 @@ def config_edit(resume):
 	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
 	if not tmp_config.exists() or not resume:
 		shutil.copyfile(config_path, tmp_config)
-	click.edit(filename=tmp_config)
+	click.edit(filename=str(tmp_config))
 	config = Config.parse(path=tmp_config)
 	if config:
 		config.save(config_path)
@@ -767,6 +768,26 @@ def workspace_list():
 	for workspace, config in workspaces.items():
 		table.add_row(workspace, str(config['count']), config['path'])
 	console.print(table)
+
+
+@workspace.command('use')
+@click.argument('name')
+def workspace_use(name):
+	"""Use a workspace (set as default)."""
+	CONFIG.set('workspace.default', name)
+	config = CONFIG.validate()
+	if config:
+		CONFIG.save()
+		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
+	else:
+		console.print(Error(message='Invalid config, not saving it.'))
+
+
+@workspace.command('current')
+def workspace_current():
+	"""Show current default workspace."""
+	current = CONFIG.workspace.default or 'default'
+	console.print(f'Current workspace: [bold gold3]{current}[/]')
 
 
 #----------#
@@ -1685,6 +1706,19 @@ def install_build():
 			'Run [bold green4]secator u publish pypi[/] to publish the PyPI package.',
 			'Run [bold green4]secator u build docker[/] to build the Docker image.',
 			'Run [bold green4]secator u publish docker[/] to publish the Docker image.',
+		]
+	)
+
+
+@addons.command('ai')
+def install_ai():
+	"Install AI addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[ai]',
+		title='AI addon',
+		next_steps=[
+			'Run [bold green4]secator x ai setup[/] to configure your AI model and API key.',
+			'Run [bold green4]secator x ai -p "your prompt"[/] to run AI-powered pentesting.',
 		]
 	)
 

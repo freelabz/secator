@@ -80,6 +80,7 @@ class dalfox(HttpBase):
 				url=item['data'],
 				method=item['method'],
 				request_headers=item['request_headers'],
+				verified=True,
 				extra_data={k: v for k, v in item.items() if k not in ['type', 'severity', 'cwe', 'request_headers', 'method', 'data']}  # noqa: E501
 			)
 		yield item

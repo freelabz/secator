@@ -131,11 +131,11 @@ def update_finding(self, item):
 
 
 def find_duplicates(self):
-	from secator.celery import IN_CELERY_WORKER_PROCESS
+	from secator.definitions import IN_WORKER
 	ws_id = self.toDict().get('context', {}).get('workspace_id')
 	if not ws_id:
 		return
-	if not IN_CELERY_WORKER_PROCESS:
+	if not IN_WORKER:
 		tag_duplicates(ws_id)
 	else:
 		tag_duplicates.delay(ws_id)

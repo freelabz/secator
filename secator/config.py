@@ -124,15 +124,15 @@ class HTTP(StrictModel):
 
 
 class Tasks(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Workflows(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Scans(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Profiles(StrictModel):
@@ -141,6 +141,10 @@ class Profiles(StrictModel):
 
 class Drivers(StrictModel):
 	defaults: List[str] = []
+
+
+class Workspace(StrictModel):
+	default: str = ''
 
 
 class Payloads(StrictModel):
@@ -200,6 +204,19 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
+class AiAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+	api_base: str = ''
+	default_model: str = 'claude-sonnet-4-6'
+	intent_model: str = 'claude-haiku-4-5'
+	temperature: float = 0.7
+	max_tokens: int = 30000
+	max_tokens_total: int = 100000
+	max_results: int = 500
+	encrypt_pii: bool = True
+
+
 class Providers(StrictModel):
 	defaults: Dict[str, str] = {
 		'cve': 'circl',
@@ -219,6 +236,7 @@ class ApiAddon(StrictModel):
 	runner_update_endpoint: str = 'runner/{runner_id}'
 	finding_create_endpoint: str = 'findings'
 	finding_update_endpoint: str = 'finding/{finding_id}'
+	finding_search_endpoint: str = 'findings/_search'
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
 
 
@@ -229,6 +247,7 @@ class Addons(StrictModel):
 	mongodb: MongodbAddon = MongodbAddon()
 	vulners: VulnersAddon = VulnersAddon()
 	api: ApiAddon = ApiAddon()
+	ai: AiAddon = AiAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -245,6 +264,7 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
+	workspace: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
@@ -350,15 +370,15 @@ class Config(DotMap):
 				value = Path(value)
 		except ValueError:
 			pass
-		finally:
-			if set_partial:
-				if value is None or value == target[final_key]:
-					if final_key in partial:
-						del partial[final_key]
-					return
-				else:
-					partial[final_key] = value
-			target[final_key] = value
+
+		if set_partial:
+			if value is None or value == target[final_key]:
+				if final_key in partial:
+					del partial[final_key]
+				return
+			else:
+				partial[final_key] = value
+		target[final_key] = value
 
 	def unset(self, key, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.
