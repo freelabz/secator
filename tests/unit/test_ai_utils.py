@@ -90,6 +90,7 @@ class TestCallLLM(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Test response"
+        mock_response.choices[0].message.tool_calls = None
         mock_response.usage.total_tokens = 150
         mock_completion.return_value = mock_response
         mock_cost.return_value = 0.003
@@ -104,6 +105,7 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(result["content"], "Test response")
         self.assertEqual(result["usage"]["tokens"], 150)
         self.assertEqual(result["usage"]["cost"], 0.003)
+        self.assertEqual(result["tool_calls"], [])
         mock_completion.assert_called_once()
 
     @patch('litellm.completion')
@@ -112,6 +114,7 @@ class TestCallLLM(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Response"
+        mock_response.choices[0].message.tool_calls = None
         mock_response.usage = None
         mock_completion.return_value = mock_response
 
@@ -123,6 +126,7 @@ class TestCallLLM(unittest.TestCase):
 
         self.assertEqual(result["content"], "Response")
         self.assertIsNone(result["usage"])
+        self.assertEqual(result["tool_calls"], [])
 
     @patch('litellm.completion')
     @patch('litellm.completion_cost')
@@ -131,6 +135,7 @@ class TestCallLLM(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Response"
+        mock_response.choices[0].message.tool_calls = None
         mock_response.usage.total_tokens = 100
         mock_completion.return_value = mock_response
         mock_cost.side_effect = Exception("Unknown model")
@@ -150,6 +155,7 @@ class TestCallLLM(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "ok"
+        mock_response.choices[0].message.tool_calls = None
         mock_response.usage = None
         mock_completion.return_value = mock_response
 
@@ -166,6 +172,93 @@ class TestCallLLM(unittest.TestCase):
             temperature=0.7,
             api_base="http://localhost:8000",
         )
+
+    @patch('litellm.completion')
+    @patch('litellm.completion_cost')
+    def test_call_llm_with_tools_returns_tool_calls(self, mock_cost, mock_completion):
+        """Tools are passed to litellm.completion and tool_calls are parsed from response."""
+        # Build mock tool_call
+        mock_tc = MagicMock()
+        mock_tc.id = "call_abc123"
+        mock_tc.function.name = "run_scan"
+        mock_tc.function.arguments = '{"target": "example.com", "ports": "80,443"}'
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = None
+        mock_response.choices[0].message.tool_calls = [mock_tc]
+        mock_response.usage.total_tokens = 50
+        mock_completion.return_value = mock_response
+        mock_cost.return_value = 0.001
+
+        tools = [{"type": "function", "function": {"name": "run_scan", "parameters": {}}}]
+
+        from secator.ai.utils import call_llm
+        result = call_llm(
+            [{"role": "user", "content": "scan example.com"}],
+            "test-model",
+            tools=tools,
+        )
+
+        # Verify tools were passed to litellm.completion
+        call_kwargs = mock_completion.call_args[1]
+        self.assertEqual(call_kwargs["tools"], tools)
+
+        # Verify content is empty string when None
+        self.assertEqual(result["content"], "")
+
+        # Verify tool_calls parsed correctly
+        self.assertEqual(len(result["tool_calls"]), 1)
+        tc = result["tool_calls"][0]
+        self.assertEqual(tc["id"], "call_abc123")
+        self.assertEqual(tc["name"], "run_scan")
+        self.assertEqual(tc["arguments"], {"target": "example.com", "ports": "80,443"})
+
+    @patch('litellm.completion')
+    def test_call_llm_without_tools_returns_empty_tool_calls(self, mock_completion):
+        """Response with no tool_calls returns empty list."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Just a text response"
+        mock_response.choices[0].message.tool_calls = None
+        mock_response.usage = None
+        mock_completion.return_value = mock_response
+
+        from secator.ai.utils import call_llm
+        result = call_llm(
+            [{"role": "user", "content": "hello"}],
+            "test-model",
+        )
+
+        self.assertEqual(result["tool_calls"], [])
+        self.assertEqual(result["content"], "Just a text response")
+
+    @patch('litellm.completion')
+    def test_call_llm_tool_call_with_malformed_json(self, mock_completion):
+        """Tool call with invalid JSON arguments falls back to empty dict."""
+        mock_tc = MagicMock()
+        mock_tc.id = "call_bad"
+        mock_tc.function.name = "broken_tool"
+        mock_tc.function.arguments = "{not valid json"
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = ""
+        mock_response.choices[0].message.tool_calls = [mock_tc]
+        mock_response.usage = None
+        mock_completion.return_value = mock_response
+
+        from secator.ai.utils import call_llm
+        result = call_llm(
+            [{"role": "user", "content": "test"}],
+            "test-model",
+        )
+
+        self.assertEqual(len(result["tool_calls"]), 1)
+        tc = result["tool_calls"][0]
+        self.assertEqual(tc["id"], "call_bad")
+        self.assertEqual(tc["name"], "broken_tool")
+        self.assertEqual(tc["arguments"], {})
 
 
 class TestParseActions(unittest.TestCase):

@@ -94,6 +94,7 @@ def call_llm(
 	api_base: Optional[str] = None,
 	api_key: Optional[str] = None,
 	max_retries: int = 3,
+	tools: Optional[List[Dict]] = None,
 ) -> Dict:
 	"""Call litellm completion and return response with usage."""
 	import time
@@ -102,18 +103,22 @@ def call_llm(
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
 
+	kwargs = dict(
+		model=model,
+		messages=messages,
+		temperature=temperature,
+		api_base=api_base,
+	)
+	if tools is not None:
+		kwargs["tools"] = tools
+
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
 		litellm.ServiceUnavailableError, litellm.APIConnectionError,
 	)
 	for attempt in range(1, max_retries + 1):
 		try:
-			response = litellm.completion(
-				model=model,
-				messages=messages,
-				temperature=temperature,
-				api_base=api_base,
-			)
+			response = litellm.completion(**kwargs)
 			break
 		except retryable as e:
 			if attempt < max_retries:
@@ -130,7 +135,8 @@ def call_llm(
 			))
 			raise
 
-	content = response.choices[0].message.content
+	message = response.choices[0].message
+	content = message.content or ""
 	usage = None
 
 	if hasattr(response, 'usage') and response.usage:
@@ -144,7 +150,21 @@ def call_llm(
 			"cost": cost,
 		}
 
-	return {"content": content, "usage": usage}
+	# Parse tool calls
+	tool_calls = []
+	if hasattr(message, 'tool_calls') and message.tool_calls:
+		for tc in message.tool_calls:
+			try:
+				arguments = json.loads(tc.function.arguments)
+			except (json.JSONDecodeError, TypeError):
+				arguments = {}
+			tool_calls.append({
+				"id": tc.id,
+				"name": tc.function.name,
+				"arguments": arguments,
+			})
+
+	return {"content": content, "usage": usage, "tool_calls": tool_calls}
 
 
 def _is_action_list(obj) -> bool:
