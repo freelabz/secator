@@ -1,112 +1,63 @@
-"""Integration tests for AI subagents and batch execution."""
-import unittest
-from unittest.mock import patch, MagicMock
+"""Integration tests for tool calling flow."""
+import json
+import pytest
 
 
-class TestSubagentIntegration(unittest.TestCase):
-    """Integration tests for subagent spawning."""
+class TestToolCallFlow:
+	"""Test tool_calls are converted to actions and dispatched."""
 
-    def test_subagent_action_parsing(self):
-        """Test that spawning ai task with exploiter mode parses correctly."""
-        from secator.ai.utils import parse_actions
-        response = '[{"action": "task", "name": "ai", "targets": ["192.168.1.1"], "opts": {"mode": "exploiter", "internal": true, "context": {"vulnerability": {"name": "CVE-2024-1234"}}}}]'
-        actions = parse_actions(response)
+	def test_single_tool_call_dispatched(self):
+		from secator.ai.tools import tool_call_to_action
+		action = tool_call_to_action("run_shell", {"command": "curl http://example.com"})
+		assert action == {"action": "shell", "command": "curl http://example.com"}
 
-        self.assertEqual(len(actions), 1)
-        self.assertEqual(actions[0]["name"], "ai")
-        self.assertEqual(actions[0]["opts"]["mode"], "exploiter")
-        self.assertTrue(actions[0]["opts"]["internal"])
-        self.assertEqual(actions[0]["opts"]["context"]["vulnerability"]["name"], "CVE-2024-1234")
+	def test_multiple_tool_calls_create_batch(self):
+		from secator.ai.tools import tool_call_to_action
+		tool_calls = [
+			{"id": "c1", "name": "run_task", "arguments": {"name": "nmap", "targets": ["10.0.0.1"]}},
+			{"id": "c2", "name": "run_task", "arguments": {"name": "nmap", "targets": ["10.0.0.2"]}},
+		]
+		actions = [tool_call_to_action(tc["name"], tc["arguments"]) for tc in tool_calls]
+		assert len(actions) == 2
+		assert all(a["action"] == "task" for a in actions)
 
-    def test_subagent_action_with_rich_context(self):
-        """Test subagent action with full rich context."""
-        from secator.ai.utils import parse_actions
-        response = '''[{"action": "task", "name": "ai", "targets": ["10.0.0.1"], "opts": {
-            "mode": "exploiter", "internal": true,
-            "context": {
-                "vulnerability": {"name": "CVE-2024-1234", "type": "path_traversal", "service": "apache", "port": 80},
-                "relevant_findings": [{"_type": "port", "port": 80, "service": "http"}],
-                "objective": "Verify path traversal and extract /etc/passwd"
-            }
-        }}]'''
-        actions = parse_actions(response)
+	def test_unknown_tool_call_skipped(self):
+		from secator.ai.tools import tool_call_to_action
+		result = tool_call_to_action("nonexistent_tool", {"arg": "val"})
+		assert result is None
 
-        self.assertEqual(len(actions), 1)
-        ctx = actions[0]["opts"]["context"]
-        self.assertEqual(ctx["vulnerability"]["type"], "path_traversal")
-        self.assertEqual(len(ctx["relevant_findings"]), 1)
-        self.assertIn("Verify", ctx["objective"])
-
-
-class TestBatchIntegration(unittest.TestCase):
-    """Integration tests for batch execution."""
-
-    def test_group_and_batch_flow(self):
-        """Test that grouped actions are batched and executed correctly."""
-        from secator.ai.actions import group_actions
-        from secator.ai.actions import _run_batch, ActionContext
-
-        # Simulate LLM response with grouped actions
-        actions = [
-            {"action": "shell", "command": "echo a", "group": "test"},
-            {"action": "shell", "command": "echo b", "group": "test"},
-            {"action": "shell", "command": "echo c"},
-        ]
-
-        grouped = group_actions(actions)
-
-        # Should have: batch of 2, then 1 sequential
-        self.assertEqual(len(grouped), 2)
-        self.assertIsInstance(grouped[0], list)
-        self.assertEqual(len(grouped[0]), 2)
-        self.assertIsInstance(grouped[1], dict)
-
-        # Execute batch in dry_run mode
-        ctx = ActionContext(targets=["t.com"], model="m", dry_run=True, max_workers=2)
-        results = list(_run_batch(grouped[0], ctx))
-
-        from secator.output_types import Info
-        # Should have batch Info + 2x dry run Info
-        info_count = sum(1 for r in results if isinstance(r, Info) and 'DRY RUN' in str(getattr(r, 'message', '')))
-        self.assertEqual(info_count, 2)
-
-    def test_mixed_parallel_and_sequential(self):
-        """Test LLM response with both parallel and sequential actions."""
-        from secator.ai.actions import group_actions
-
-        actions = [
-            {"action": "task", "name": "nmap", "targets": ["host1"], "group": "recon"},
-            {"action": "task", "name": "nmap", "targets": ["host2"], "group": "recon"},
-            {"action": "task", "name": "nmap", "targets": ["host3"], "group": "recon"},
-            {"action": "task", "name": "nuclei", "targets": ["host1", "host2", "host3"]},
-            {"action": "query", "query": {"_type": "vulnerability"}},
-        ]
-
-        grouped = group_actions(actions)
-
-        # 3 nmap parallel, then nuclei sequential, then query sequential
-        self.assertEqual(len(grouped), 3)
-        self.assertIsInstance(grouped[0], list)
-        self.assertEqual(len(grouped[0]), 3)
-        self.assertIsInstance(grouped[1], dict)
-        self.assertEqual(grouped[1]["name"], "nuclei")
-        self.assertIsInstance(grouped[2], dict)
-        self.assertEqual(grouped[2]["action"], "query")
-
-    def test_group_field_stripped_from_actions(self):
-        """Test that group field is removed before execution."""
-        from secator.ai.actions import group_actions
-
-        actions = [
-            {"action": "task", "name": "nmap", "targets": ["host1"], "group": "scan"},
-        ]
-
-        grouped = group_actions(actions)
-
-        # group field should be removed
-        self.assertNotIn("group", grouped[0][0])
-        self.assertEqual(grouped[0][0]["name"], "nmap")
+	def test_tool_call_to_action_preserves_all_fields(self):
+		from secator.ai.tools import tool_call_to_action
+		action = tool_call_to_action("add_finding", {
+			"_type": "vulnerability", "name": "SQLi",
+			"severity": "critical", "matched_at": "http://example.com/login"
+		})
+		assert action["action"] == "add_finding"
+		assert action["_type"] == "vulnerability"
+		assert action["name"] == "SQLi"
+		assert action["severity"] == "critical"
 
 
-if __name__ == '__main__':
-    unittest.main()
+class TestToolCallHistoryFormat:
+	"""Test tool results are added to history in correct format."""
+
+	def test_assistant_tool_calls_format(self):
+		from secator.ai.history import ChatHistory
+		history = ChatHistory()
+		tool_calls = [{
+			"id": "call_abc", "type": "function",
+			"function": {"name": "run_shell", "arguments": '{"command": "ls"}'}
+		}]
+		history.add_assistant_with_tool_calls("thinking...", tool_calls)
+		msg = history.messages[-1]
+		assert msg["role"] == "assistant"
+		assert msg["content"] == "thinking..."
+		assert msg["tool_calls"] == tool_calls
+
+	def test_tool_result_format(self):
+		from secator.ai.history import ChatHistory
+		history = ChatHistory()
+		history.add_tool_result("call_abc", '{"task":"nmap","status":"success","count":5}')
+		msg = history.messages[-1]
+		assert msg["role"] == "tool"
+		assert msg["tool_call_id"] == "call_abc"

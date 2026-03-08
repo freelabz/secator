@@ -3,7 +3,7 @@
 import json
 import random
 from pathlib import Path
-from typing import Dict, Generator, List, Optional
+from typing import Generator, List, Optional
 
 from time import sleep
 
@@ -16,11 +16,14 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.utils import format_token_count
-from secator.ai.actions import ActionContext, dispatch_action, group_actions, _run_batch
+from secator.ai.actions import ActionContext, dispatch_action, _run_batch, _decrypt_dict
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens
-from secator.ai.prompts import get_system_prompt, get_mode_config, format_user_initial, format_tool_result, format_continue
-from secator.ai.utils import call_llm, setup_ai, parse_actions, strip_json_from_response, prompt_user
+from secator.ai.prompts import (
+	get_system_prompt, get_mode_config, format_user_initial, format_tool_result, format_continue
+)
+from secator.ai.tools import build_tool_schemas, tool_call_to_action
+from secator.ai.utils import call_llm, setup_ai, prompt_user
 
 
 DEFAULT_API_KEY = CONFIG.addons.ai.api_key
@@ -92,6 +95,22 @@ class ai(PythonRunner):
 		prompt = self.run_opts.get("prompt", "")
 		if prompt and Path(prompt).is_file():
 			prompt = Path(prompt).read_text().strip()
+
+		# If no prompt provided, show full-screen prompt input
+		is_internal = self.run_opts.get("internal", False)
+		if not prompt and not is_internal:
+			from secator.definitions import IN_WORKER
+			if not IN_WORKER:
+				from secator.rich import FullScreenPrompt
+				targets_str = ', '.join(self.inputs) if self.inputs else 'no target'
+				prompt = FullScreenPrompt(
+					title=f"What do you want to do? ({targets_str})",
+					placeholder="e.g. Scan for vulnerabilities on this target..."
+				).show()
+				if not prompt:
+					yield Info(message="No prompt provided. Exiting.")
+					return
+
 		model = self.run_opts.get("model")
 		intent_model = self.run_opts.get("intent_model")
 		api_base = self.run_opts.get("api_base")
@@ -212,6 +231,9 @@ class ai(PythonRunner):
 			scope=scope, results=previous_results or [],
 			max_workers=max_workers)
 
+		# Build tool schemas for native tool calling
+		tool_schemas = build_tool_schemas(mode)
+
 		iteration = 0
 		query_extensions = 0
 		max_query_extensions = 3
@@ -230,34 +252,45 @@ class ai(PythonRunner):
 						ai_type="chat_compacted",
 					)
 
-				# Call LLM
+				# Call LLM with tool schemas
 				messages = history.to_messages(max_tokens_total=max_tokens_total)
 				token_count = history.count_tokens(model)
 				self.debug(f'[context] sending {token_count} tokens to LLM ({len(messages)} messages)')
 				token_str = format_token_count(token_count, icon='arrow_up')
 				msg = f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/] [gray42] • {token_str}[/]"
 				with maybe_status(msg, spinner="dots"):
-					result = call_llm(messages, model, temp, api_base, api_key)
-				response = result["content"]
+					result = call_llm(messages, model, temp, api_base, api_key, tools=tool_schemas)
+				response_content = result["content"]
+				tool_calls = result.get("tool_calls", [])
 				usage = result.get("usage", {})
 
-				# Handle empty response
-				if not response:
+				# Handle empty response (no content and no tool calls)
+				if not response_content and not tool_calls:
 					yield Warning(message="LLM returned empty response")
 					continue
 
-				# Decrypt response
-				if encryptor:
-					response = encryptor.decrypt(response)
+				# Decrypt response content
+				if encryptor and response_content:
+					response_content = encryptor.decrypt(response_content)
 
-				# Parse actions
-				actions = parse_actions(response)
+				# Convert tool_calls to actions
+				actions = []
+				tc_action_pairs = []  # list of (tool_call_dict, action_dict) tuples
+				for tc in tool_calls:
+					args = tc["arguments"]
+					if encryptor:
+						args = _decrypt_dict(args, encryptor)
+					action = tool_call_to_action(tc["name"], args)
+					if action is not None:
+						actions.append(action)
+						tc_action_pairs.append((tc, action))
+					else:
+						self.debug(f'[tool_call] skipping unknown tool: {tc["name"]}')
 
-				# Show response (strip JSON for display unless verbose)
-				display_text = response if verbose else strip_json_from_response(response)
-				if display_text:
+				# Display response content as-is
+				if response_content:
 					yield Ai(
-						content=display_text,
+						content=response_content,
 						ai_type="response",
 						mode=mode,
 						model=model,
@@ -270,7 +303,21 @@ class ai(PythonRunner):
 					)
 
 				# Add to history
-				history.add_assistant(response)
+				if tool_calls:
+					# Build litellm-format tool_calls for history
+					litellm_tool_calls = []
+					for tc in tool_calls:
+						litellm_tool_calls.append({
+							"id": tc["id"],
+							"type": "function",
+							"function": {
+								"name": tc["name"],
+								"arguments": json.dumps(tc["arguments"]),
+							},
+						})
+					history.add_assistant_with_tool_calls(response_content or None, litellm_tool_calls)
+				else:
+					history.add_assistant(response_content)
 
 				# Execute actions and capture follow_up
 				if len(actions) > 0:
@@ -279,21 +326,12 @@ class ai(PythonRunner):
 						yield Info(message=f"Executing {len(actions)} {action_str} ...")
 					self.debug(json.dumps(actions, indent=4))
 
-				# Group actions for batch execution
-				grouped = group_actions(actions)
-
+				# Dispatch actions: batch if multiple, single otherwise
 				follow_up_choices = None
-				for item in grouped:
-					# Determine if batch or single action
-					if isinstance(item, list):
-						action_iter = _run_batch(item, ctx)
-						is_batch = True
-					else:
-						action_iter = dispatch_action(item, ctx)
-						is_batch = False
-
-					action_type = "batch" if is_batch else item.get("action", "")
-					is_secator = action_type in ['task', 'workflow']
+				if len(tc_action_pairs) > 1:
+					# Batch execution
+					action_list = [action for _, action in tc_action_pairs]
+					action_iter = _run_batch(action_list, ctx)
 					action_results = []
 					has_errors = False
 
@@ -304,30 +342,21 @@ class ai(PythonRunner):
 							has_errors = True
 						if isinstance(result, Ai):
 							self.add_result(result)
-							# Capture choices from follow_up action
 							if result.ai_type == "follow_up":
 								follow_up_choices = (result.extra_data or {}).get("choices", [])
-							# Feed shell output back to the LLM
 							if result.ai_type == "shell_output":
 								action_results.append({"output": result.content})
 							continue
 						if isinstance(result, OutputType):
-							# Batch results already printed by _run_batch
 							self.add_result(result, print=False)
 							result = result.toDict(exclude=list(INTERNAL_FIELDS))
 						action_results.append(result)
-
-						# Keep ctx.results in sync for scope='current' queries
 						if ctx.scope == "current":
 							ctx.results.append(result)
 
-					# Build tool result for history (compact JSON)
-					if is_batch:
-						action_name = f"batch({len(item)})"
-					else:
-						action_name = item.get("name", action_type)
-
-					tool_result = format_tool_result(
+					# Build a single tool result and assign to first tool_call ID
+					action_name = f"batch({len(action_list)})"
+					tool_result_str = format_tool_result(
 						action_name,
 						"error" if has_errors else "success",
 						len(action_results),
@@ -336,27 +365,84 @@ class ai(PythonRunner):
 
 					# Apply token budget and truncation
 					budget = history.get_action_budget(model)
-					original_len = len(tool_result)
-					self.debug(f'[context] action "{action_type}" result: {len(action_results)} items, budget={budget} tokens')
-					if action_type in ("task", "workflow", "batch"):
-						fallback_path = Path(self.reports_folder) / "report.json" if self.reports_folder else None
-						tool_result = truncate_to_tokens(tool_result, budget, model, fallback_path=fallback_path)
+					original_len = len(tool_result_str)
+					self.debug(
+						f'[context] action "batch" result: {len(action_results)} items, budget={budget} tokens')
+					fallback_path = Path(self.reports_folder) / "report.json" if self.reports_folder else None
+					tool_result_str = truncate_to_tokens(
+						tool_result_str, budget, model, fallback_path=fallback_path)
+					if "[TRUNCATED]" in tool_result_str:
+						self.debug(f'[context] truncated: {original_len} -> {len(tool_result_str)} chars')
+
+					tool_result_str = maybe_encrypt(tool_result_str, encryptor)
+
+					# Add tool result for each tool call ID
+					for tc, _ in tc_action_pairs:
+						history.add_tool_result(tc["id"], tool_result_str)
+
+				elif len(tc_action_pairs) == 1:
+					# Single action dispatch
+					tc, action = tc_action_pairs[0]
+					action_type = action.get("action", "")
+					action_iter = dispatch_action(action, ctx)
+					action_results = []
+					has_errors = False
+
+					for result in action_iter:
+						if isinstance(result, (Stat, Progress, State, Info)):
+							continue
+						if isinstance(result, Error):
+							has_errors = True
+						if isinstance(result, Ai):
+							self.add_result(result)
+							if result.ai_type == "follow_up":
+								follow_up_choices = (result.extra_data or {}).get("choices", [])
+							if result.ai_type == "shell_output":
+								action_results.append({"output": result.content})
+							continue
+						if isinstance(result, OutputType):
+							self.add_result(result, print=False)
+							result = result.toDict(exclude=list(INTERNAL_FIELDS))
+						action_results.append(result)
+						if ctx.scope == "current":
+							ctx.results.append(result)
+
+					# Build tool result for history
+					action_name = action.get("name", action_type)
+					tool_result_str = format_tool_result(
+						action_name,
+						"error" if has_errors else "success",
+						len(action_results),
+						action_results
+					)
+
+					# Apply token budget and truncation
+					budget = history.get_action_budget(model)
+					original_len = len(tool_result_str)
+					self.debug(
+						f'[context] action "{action_type}" result: '
+						f'{len(action_results)} items, budget={budget} tokens')
+					if action_type in ("task", "workflow"):
+						fallback_path = (
+							Path(self.reports_folder) / "report.json" if self.reports_folder else None)
+						tool_result_str = truncate_to_tokens(
+							tool_result_str, budget, model, fallback_path=fallback_path)
 					elif action_type == "shell":
-						output_dir = Path(self.reports_folder) / ".outputs" if self.reports_folder else None
-						tool_result = truncate_to_tokens(
-							tool_result, budget, model,
+						output_dir = (
+							Path(self.reports_folder) / ".outputs" if self.reports_folder else None)
+						tool_result_str = truncate_to_tokens(
+							tool_result_str, budget, model,
 							output_dir=output_dir,
 							result_name="shell"
 						)
 					else:
-						tool_result = truncate_to_tokens(tool_result, budget, model)
+						tool_result_str = truncate_to_tokens(tool_result_str, budget, model)
 
-					truncated = "[TRUNCATED]" in tool_result
-					if truncated:
-						self.debug(f'[context] truncated: {original_len} -> {len(tool_result)} chars')
+					if "[TRUNCATED]" in tool_result_str:
+						self.debug(f'[context] truncated: {original_len} -> {len(tool_result_str)} chars')
 
-					tool_result = maybe_encrypt(tool_result, encryptor)
-					history.add_user(tool_result)
+					tool_result_str = maybe_encrypt(tool_result_str, encryptor)
+					history.add_tool_result(tc["id"], tool_result_str)
 
 				if len(actions) > 0:
 					action_str = 'actions' if len(actions) > 1 else None
@@ -382,6 +468,8 @@ class ai(PythonRunner):
 					if result is None:
 						return
 					mode, max_iter, items = result
+					# Rebuild tool schemas if mode changed
+					tool_schemas = build_tool_schemas(mode)
 					yield from items
 					continue
 
@@ -399,6 +487,8 @@ class ai(PythonRunner):
 				if result is None:
 					return
 				mode, max_iter, items = result
+				# Rebuild tool schemas if mode changed
+				tool_schemas = build_tool_schemas(mode)
 				yield from items
 				continue
 
