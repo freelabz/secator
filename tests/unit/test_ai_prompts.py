@@ -221,25 +221,57 @@ class TestPrompts(unittest.TestCase):
         self.assertIn("proof-of-concept", prompt)
 
     def test_system_exploiter_has_expected_structure(self):
-        """Test SYSTEM_EXPLOITER template has expected structure."""
+        """Test SYSTEM_EXPLOITER template has expected sections (no TEMPLATE/EXAMPLES)."""
         self.assertIn("PERSONA", SYSTEM_EXPLOITER.template)
         self.assertIn("ACTION", SYSTEM_EXPLOITER.template)
         self.assertIn("STEPS", SYSTEM_EXPLOITER.template)
         self.assertIn("CONTEXT", SYSTEM_EXPLOITER.template)
         self.assertIn("CONSTRAINTS", SYSTEM_EXPLOITER.template)
-        self.assertIn("TEMPLATE", SYSTEM_EXPLOITER.template)
-        self.assertIn("EXAMPLES", SYSTEM_EXPLOITER.template)
 
     def test_system_exploiter_has_expected_actions(self):
-        """Test SYSTEM_EXPLOITER template mentions expected actions."""
-        self.assertIn("shell", SYSTEM_EXPLOITER.template)
-        self.assertIn("task", SYSTEM_EXPLOITER.template)
-        self.assertIn("add_finding", SYSTEM_EXPLOITER.template)
+        """Test SYSTEM_EXPLOITER template mentions expected concepts."""
+        self.assertIn("tools", SYSTEM_EXPLOITER.template)
+        self.assertIn("exploitation", SYSTEM_EXPLOITER.template)
+        self.assertIn("proof-of-concept", SYSTEM_EXPLOITER.template)
 
     def test_get_system_prompt_raises_for_invalid_mode(self):
         """Test get_system_prompt raises ValueError for invalid mode."""
         with self.assertRaises(ValueError):
             get_system_prompt("invalid_mode")
+
+    # === Tests for TEMPLATE/EXAMPLES removal ===
+
+    def test_system_attack_has_no_template_section(self):
+        """Test SYSTEM_ATTACK does not contain ### TEMPLATE section."""
+        self.assertNotIn("### TEMPLATE", SYSTEM_ATTACK.template)
+
+    def test_system_attack_has_no_examples_section(self):
+        """Test SYSTEM_ATTACK does not contain ### EXAMPLES section."""
+        self.assertNotIn("### EXAMPLES", SYSTEM_ATTACK.template)
+
+    def test_system_chat_has_no_template_section(self):
+        """Test SYSTEM_CHAT does not contain ### TEMPLATE section."""
+        self.assertNotIn("### TEMPLATE", SYSTEM_CHAT.template)
+
+    def test_system_chat_has_no_examples_section(self):
+        """Test SYSTEM_CHAT does not contain ### EXAMPLES section."""
+        self.assertNotIn("### EXAMPLES", SYSTEM_CHAT.template)
+
+    def test_system_exploiter_has_no_template_section(self):
+        """Test SYSTEM_EXPLOITER does not contain ### TEMPLATE section."""
+        self.assertNotIn("### TEMPLATE", SYSTEM_EXPLOITER.template)
+
+    def test_system_exploiter_has_no_examples_section(self):
+        """Test SYSTEM_EXPLOITER does not contain ### EXAMPLES section."""
+        self.assertNotIn("### EXAMPLES", SYSTEM_EXPLOITER.template)
+
+    def test_system_attack_still_has_persona(self):
+        """Test SYSTEM_ATTACK still contains ### PERSONA section."""
+        self.assertIn("### PERSONA", SYSTEM_ATTACK.template)
+
+    def test_system_attack_still_has_constraints(self):
+        """Test SYSTEM_ATTACK still contains ### CONSTRAINTS section."""
+        self.assertIn("### CONSTRAINTS", SYSTEM_ATTACK.template)
 
 
 if __name__ == '__main__':

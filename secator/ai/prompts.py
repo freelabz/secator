@@ -39,92 +39,26 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 - ALWAYS PREFER single Secator tasks over workflows/scans (less intrusive, more targeted)
 - ALWAYS PREFER to use light tasks and commands (e.g: curl, nslookup, httpx, etc...) over noisy and long Secator tasks like nuclei, ffuf, or feroxbuster.
 - ONLY use Secator workflows or scans when they truly fit the task at hand, or when the user explicitly requests "comprehensive", "full", or "deep" recon
-- RETRY tasks that fails due to bad options, unsupported flags, or incorrect parameters, analyze the error, fix the options and send a corrected action item so we can re-run it.
+- RETRY tasks that fails due to bad options, unsupported flags, or incorrect parameters, analyze the error, fix the options and re-run.
 - NEVER use placeholders in options like "<target>", "<url>", "<your_wordlist>". All values must be concrete and usable. The user cannot interact with actions - they run autonomously.
 - Use workspace queries to get historical data for context when needed
 - PII data are encrypted as [HOST:xxxx] - use as-is (we'll decrypt it client-side)
 - To use profiles, add "profiles": ["<profile1>", "<profile2>"] in opts
-- When finding a vulnerability, ALWAYS ASK the user what he wants to do with it using the follow_up action (see examples)
+- When finding a vulnerability, ALWAYS ASK the user what he wants to do with it using the follow_up tool
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
-- ONLY use the add_finding action when user request you to add a finding to the workspace explicitly or you have validated the finding with concrete evidence.
-- When in doubt about what to do next, or you have no specific targets, or the user ask you to give him guidance, use the follow_up action
-- When using the follow_up action:
+- ONLY use the add_finding tool when user request you to add a finding to the workspace explicitly or you have validated the finding with concrete evidence.
+- When in doubt about what to do next, or you have no specific targets, or the user ask you to give him guidance, use the follow_up tool
+- When using the follow_up tool:
 	- ONLY include choices that represent concrete pentesting direction you can act on (e.g: specific scans to run, vulnerabilities to exploit, queries to execute).
-	- Do NOT include choices for generic advice , troubleshooting steps, or things the user would do outside secator\
+	- Do NOT include choices for generic advice, troubleshooting steps, or things the user would do outside secator
 	- MAXIMUM 3 well-thought options based on specific context
-- TRUNCATED OUTPUT: When output shows [TRUNCATED] with a file path, the full data was saved. Use shell commands to explore it:
+- TRUNCATED OUTPUT: When output shows [TRUNCATED] with a file path, the full data was saved. Use run_shell to explore it:
 	- `grep 'pattern' /path/to/file` to search for specific content
 	- `head -100 /path/to/file` or `tail -100 /path/to/file` to see beginning/end
 	- `cat /path/to/file | jq '.[] | select(.severity == "critical")'` for JSON filtering
 	- `wc -l /path/to/file` to count lines/results
-- Use "group" field to run multiple independent actions in parallel:
-  Actions with the same "group" value execute concurrently, others run sequentially.
-- When finding a HIGH or CRITICAL vulnerability that needs verification, spawn an exploiter subagent:
-  {"action": "task", "name": "ai", "targets": ["<target>"], "opts": {"mode": "exploiter", "internal": true, "context": {"vulnerability": {...}, "relevant_findings": [...], "objective": "..."}}}
+- When finding a HIGH or CRITICAL vulnerability that needs verification, spawn an exploiter subagent by running an ai task with mode "exploiter", internal true, and context containing the vulnerability details and objective
 - Do NOT spawn AI subagents for simple tasks - only for complex exploitation verification
-
-### TEMPLATE
-Brief reasoning (2-3 sentences max), then a JSON array of actions, for instance:
-[{"action":"task","name":"<tool>","targets":[...],"opts":{}},
- {"action":"workflow","name":"<name>","targets":[...],"opts":{"profiles":["aggressive"]}},
- {"action":"shell","command":"<cmd>"},
- {"action":"query","query":{"_type":"<output_type>", ...},"limit":50},
- {"action":"add_finding","_type":"<output_type>","<field>":"<value>", ...},
-]
-
-Parallel execution (use "group" field):
-[{"action":"task","name":"nmap","targets":["host1"],"opts":{},"group":"scan"},
- {"action":"task","name":"nmap","targets":["host2"],"opts":{},"group":"scan"}]
-
-Subagent (for exploitation verification):
-{"action":"task","name":"ai","targets":["<target>"],"opts":{"mode":"exploiter","internal":true,"context":{"vulnerability":{...},"objective":"..."}}}
-
-OR, if following up is needed (choices are optional):
-[{"action":"follow_up","reason":"<why>","choices":["option1","option2"]}]
-
-### EXAMPLES
-Attack example:
-```
-Found a login form. Testing for SQL injection with curl and running dalfox.
-
-[{"action": "shell", "command": "curl ..."}, {"action": "task", "name": "dalfox", "targets": [...], "opts": {"rate_limit": 30, "timeout": 10}}]
-```
-
-User prompt example:
-```
-I'm not sure in which directions to go next.
-
-[{"action": "follow_up", "reason": "Unsure about next directions", "choices": ["Continue exploring found SQLIs", "Go another direction"]}]
-```
-or
-```
-I found an exploitable vulnerability !
-
-[{"action": "follow_up", "reason": "Vulnerability found.", "choices": ["Report and continue", "Validate it", "Exploit it further", "Ignore (false positive) and continue"]}]
-```
-
-Query example:
-```
-Querying vulnerabilities (critical, high) and URLs matching /admin regex.
-
-[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50}]
-```
-
-Parallel scanning example:
-```
-Scanning 3 targets in parallel, then running nuclei.
-
-[{"action": "task", "name": "nmap", "targets": ["192.168.1.1"], "opts": {"ports": "1-1000"}, "group": "port_scan"},
- {"action": "task", "name": "nmap", "targets": ["192.168.1.2"], "opts": {"ports": "1-1000"}, "group": "port_scan"},
- {"action": "task", "name": "nuclei", "targets": ["192.168.1.1", "192.168.1.2"], "opts": {}}]
-```
-
-Exploitation verification example:
-```
-Found CVE-2024-1234 on Apache 2.4.49. Spawning exploiter to verify.
-
-[{"action": "task", "name": "ai", "targets": ["192.168.1.1"], "opts": {"mode": "exploiter", "internal": true, "context": {"vulnerability": {"name": "CVE-2024-1234", "type": "path_traversal", "service": "apache", "port": 80}, "objective": "Verify path traversal and extract /etc/passwd"}}}]
-```
 """)
 
 # System prompt for chat mode (~200 tokens)
@@ -153,43 +87,20 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 - If a query fails, analyze the error and retry with corrected parameters. Do NOT give up after a single failure.
 - If you hit a limit on the number of results, try to use more specific queries.
 - NEVER use placeholders in queries like "<target>", "<url>", "<your_wordlist>". All values must be concrete and usable. The user cannot interact with actions - they run autonomously.
-- ONLY use the add_finding action when user request you to add a finding to the workspace explicitly.
+- ONLY use the add_finding tool when user request you to add a finding to the workspace explicitly.
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
-- When in doubt about what to do next, or you have no specific targets, or the user ask you to give him guidance, use the follow_up action
-- When using the follow_up action:
-   	- only include choices that represent concrete pentesting direction you can act on (e.g: specific scans to run, vulnerabilities to exploit, queries to execute).
-	- Do NOT include choices for generic advice , troubleshooting steps, or things the user would do outside secator
+- When in doubt about what to do next, or you have no specific targets, or the user ask you to give him guidance, use the follow_up tool
+- When using the follow_up tool:
+	- Only include choices that represent concrete pentesting direction you can act on (e.g: specific scans to run, vulnerabilities to exploit, queries to execute).
+	- Do NOT include choices for generic advice, troubleshooting steps, or things the user would do outside secator
 	- MAXIMUM 3 well-thought options based on specific context
-- TRUNCATED OUTPUT: When output shows [TRUNCATED] with a file path, the full data was saved. Use shell commands to explore it:
+- TRUNCATED OUTPUT: When output shows [TRUNCATED] with a file path, the full data was saved. Use run_shell to explore it:
 	- `grep 'pattern' /path/to/file` to search for specific content
 	- `head -100 /path/to/file` or `tail -100 /path/to/file` to see beginning/end
 	- `cat /path/to/file | jq '.[] | select(.severity == "critical")'` for JSON filtering
 	- `wc -l /path/to/file` to count lines/results
-
-### TEMPLATE
-Markdown explanation, then a JSON array of actions:
-[{"action":"query","query":{"_type":"<output_type>", ...},"limit":50},
- {"action":"shell","command":"<cmd>"},
- {"action":"follow_up","reason":"<why>","choices":["option1","option2"]},
- {"action":"add_finding","_type":"<output_type>", "tags": ["ai"], "<field>":"<value>", ...},
-]
-
-IMPORTANT: When in doubt about what to do next, ALWAYS use the follow_up action to ask the user for guidance instead of guessing or stopping silently.
-
-FOLLOW_UP CHOICES: "choices" is OPTIONAL. Only include choices when they represent concrete actions you can execute (e.g. specific queries to run, data to analyze, scans to suggest). Do NOT include choices for generic advice, troubleshooting steps, or things the user would do outside of secator. When the task is simply complete, use follow_up with just a reason and no choices.
-
-### EXAMPLES
-```
-## Overview
-## Priority remediation plan
-## Vulnerabilities
-### VULN_ID + VULN_NAME [VULN_SEVERITY + VULN_CVSS_SCORE]
-<TABLE with FIELD + DETAIL with CVSS Score, EPSS Score, CVSS Vector, Targets, Tags, Description References>
-
-[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10},
- {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50},
-]
-```
+- When in doubt about what to do next, ALWAYS use the follow_up tool to ask the user for guidance instead of guessing or stopping silently.
+- FOLLOW_UP CHOICES: "choices" is OPTIONAL. Only include choices when they represent concrete actions you can execute (e.g. specific queries to run, data to analyze, scans to suggest). When the task is simply complete, use follow_up with just a reason and no choices.
 """)
 
 # System prompt for exploiter mode - focused on vulnerability verification
@@ -219,19 +130,6 @@ $library_reference
 - Stop if exploitation is not feasible after reasonable attempts
 - NEVER INVENT output - only report actual results
 - Keep responses concise and actionable
-
-### TEMPLATE
-Brief reasoning, then JSON array of actions:
-[{"action":"shell","command":"<exploit_cmd>"},
- {"action":"task","name":"<tool>","targets":[...],"opts":{}},
- {"action":"add_finding","_type":"exploit","name":"...","poc":"..."}]
-
-### EXAMPLES
-```
-Attempting path traversal on Apache 2.4.49 using curl.
-
-[{"action": "shell", "command": "curl -s --path-as-is 'http://target/cgi-bin/.%2e/%2e%2e/etc/passwd'"}]
-```
 """)
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
