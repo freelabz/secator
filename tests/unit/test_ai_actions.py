@@ -610,5 +610,50 @@ class TestHandleAddFinding(unittest.TestCase):
         self.assertEqual(results[1].matched_at, "http://t.com/search")
 
 
+class TestRunBatch(unittest.TestCase):
+    """Tests for _run_batch parallel execution."""
+
+    def test_run_batch_executes_all_actions(self):
+        from secator.ai.actions import _run_batch, ActionContext
+
+        ctx = ActionContext(targets=["t.com"], model="m", dry_run=True, max_workers=3)
+        actions = [
+            {"action": "shell", "command": "echo a"},
+            {"action": "shell", "command": "echo b"},
+            {"action": "shell", "command": "echo c"},
+        ]
+
+        results = list(_run_batch(actions, ctx))
+
+        # Should have Info + 3x (Info dry run)
+        info_results = [r for r in results if isinstance(r, Info)]
+        self.assertGreaterEqual(len(info_results), 3)
+
+    def test_run_batch_yields_info_message(self):
+        from secator.ai.actions import _run_batch, ActionContext
+
+        ctx = ActionContext(targets=["t.com"], model="m", dry_run=True, max_workers=2)
+        actions = [
+            {"action": "shell", "command": "echo a"},
+            {"action": "shell", "command": "echo b"},
+        ]
+
+        results = list(_run_batch(actions, ctx))
+
+        # First result should be Info about batch
+        self.assertIsInstance(results[0], Info)
+        self.assertIn("2", results[0].message)
+        self.assertIn("parallel", results[0].message.lower())
+
+    def test_run_batch_empty_actions(self):
+        from secator.ai.actions import _run_batch, ActionContext
+
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_run_batch([], ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Warning)
+
+
 if __name__ == '__main__':
     unittest.main()

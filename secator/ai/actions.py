@@ -1,6 +1,7 @@
 """Action handlers for AI task."""
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional
 
@@ -252,6 +253,37 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield finding
 	except Exception as e:
 		yield Error(message=f"Failed to create {finding_type}: {e}")
+
+
+def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
+	"""Execute multiple actions in parallel.
+
+	Args:
+		actions: List of action dicts to execute concurrently
+		ctx: Action context with max_workers setting
+
+	Yields:
+		Results from all actions as they complete
+	"""
+	if not actions:
+		yield Warning(message="Batch has no actions to execute")
+		return
+
+	max_workers = ctx.max_workers or 3
+
+	def run_single(act: Dict) -> List:
+		results = []
+		for item in dispatch_action(act, ctx):
+			results.append(item)
+		return results
+
+	yield Info(message=f"Batch: {len(actions)} actions in parallel (max_workers={max_workers})")
+
+	with ThreadPoolExecutor(max_workers=max_workers) as executor:
+		futures = [executor.submit(run_single, a) for a in actions]
+		for future in as_completed(futures):
+			for item in future.result():
+				yield item
 
 
 def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:
