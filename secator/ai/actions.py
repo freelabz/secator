@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional
 
-from secator.output_types import Ai, Error, Info, Warning, INTERNAL_FIELDS
+from secator.output_types import Ai, Error, Info, Warning, OutputType, INTERNAL_FIELDS
 from secator.template import TemplateLoader
 
 
@@ -29,6 +29,7 @@ class ActionContext:
 	scope: str = "workspace"
 	results: Optional[List[Dict]] = None
 	max_workers: int = 3
+	silent: bool = False
 	_query_engine: Any = field(default=None, repr=False)
 
 	def get_query_engine(self):
@@ -41,6 +42,41 @@ class ActionContext:
 				query_context = dict(self.context)
 			self._query_engine = QueryEngine(self.context.get("workspace_id", ""), context=query_context)
 		return self._query_engine
+
+
+def group_actions(actions: List[Dict]) -> List:
+	"""Group actions by 'group' field for batch execution.
+
+	Returns list where:
+	- Individual actions (no group) are dicts
+	- Grouped actions are lists of dicts
+	"""
+	result = []
+	groups = {}
+	group_order = []
+
+	for action in actions:
+		group = action.pop("group", None)
+		if group:
+			if group not in groups:
+				groups[group] = []
+				group_order.append(group)
+			groups[group].append(action)
+		else:
+			# Flush pending groups before sequential action
+			for g in group_order:
+				if groups[g]:
+					result.append(groups[g])
+					groups[g] = []
+			group_order = []
+			result.append(action)
+
+	# Flush remaining groups
+	for g in group_order:
+		if groups[g]:
+			result.append(groups[g])
+
+	return result
 
 
 def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
@@ -90,7 +126,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		yield Info(message=f"[DRY RUN] Would run {runner_type}: {name} on {targets}")
 		return
 
-	yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts})
+	if not ctx.silent:
+		yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts})
 
 	try:
 		if runner_type == "task":
@@ -104,9 +141,9 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 		run_opts = {
 			"print_item": True,
-			"print_line": ctx.verbose,
-			"print_cmd": True,
-			"print_description": True,
+			"print_line": ctx.verbose and not ctx.silent,
+			"print_cmd": not ctx.silent,
+			"print_description": not ctx.silent,
 			"print_progress": False,
 			"enable_reports": False,
 			"exporters": [],
@@ -114,8 +151,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			**opts,
 		}
 		if runner_type == "workflow":
-			run_opts["print_start"] = True
-			run_opts["print_end"] = True
+			run_opts["print_start"] = not ctx.silent
+			run_opts["print_end"] = not ctx.silent
 
 		runner = runner_cls(tpl, targets, run_opts=run_opts)
 		yield from runner
@@ -255,35 +292,108 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Failed to create {finding_type}: {e}")
 
 
+def _get_action_label(action: Dict) -> str:
+	"""Get a display label for an action."""
+	act_type = action.get("action", "unknown")
+	if act_type in ("task", "workflow"):
+		name = action.get("name", "?")
+		targets = action.get("targets", [])
+		target_str = targets[0] if len(targets) == 1 else f"{len(targets)} targets"
+		return f"{name} on {target_str}"
+	elif act_type == "shell":
+		cmd = action.get("command", "")[:40]
+		return f"shell: {cmd}"
+	return act_type
+
+
 def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
-	"""Execute multiple actions in parallel.
+	"""Execute multiple actions in parallel with Rich progress display.
+
+	Shows a live panel with task status while running, prints results
+	grouped by task as each completes.
 
 	Args:
 		actions: List of action dicts to execute concurrently
 		ctx: Action context with max_workers setting
 
 	Yields:
-		Results from all actions as they complete
+		Results from all actions as they complete, grouped by task
 	"""
+	from dataclasses import replace
+	from rich.padding import Padding
+	from rich.panel import Panel
+	from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
+	from secator.rich import console
+
 	if not actions:
 		yield Warning(message="Batch has no actions to execute")
 		return
 
 	max_workers = ctx.max_workers or 3
 
-	def run_single(act: Dict) -> List:
+	# Silence console output for parallel tasks to avoid interleaved printing
+	batch_ctx = replace(ctx, silent=True)
+
+	# Print all task start messages before any task begins
+	for act in actions:
+		act_type = act.get("action", "")
+		if act_type in ("task", "workflow"):
+			name = act.get("name", "")
+			targets = act.get("targets", ctx.targets)
+			ai_start = Ai(content=name, ai_type=act_type, extra_data={"targets": targets, "opts": act.get("opts", {})})
+			console.print(ai_start)
+
+	def run_single(act: Dict) -> Dict:
 		results = []
-		for item in dispatch_action(act, ctx):
+		for item in dispatch_action(act, batch_ctx):
 			results.append(item)
-		return results
+		return {"action": act, "results": results}
 
-	yield Info(message=f"Batch: {len(actions)} actions in parallel (max_workers={max_workers})")
+	# Build progress panel
+	class BatchProgress(RichProgress):
+		def get_renderables(self):
+			yield Padding(Panel(
+				self.make_tasks_table(self.tasks),
+				title='[bold]Batch Execution[/]',
+				border_style='bold gold3',
+				expand=False,
+				highlight=True), pad=(1, 0, 0, 0))
 
-	with ThreadPoolExecutor(max_workers=max_workers) as executor:
-		futures = [executor.submit(run_single, a) for a in actions]
-		for future in as_completed(futures):
-			for item in future.result():
-				yield item
+	progress = BatchProgress(
+		SpinnerColumn('dots'),
+		TextColumn('[bold cyan]{task.fields[label]}[/]'),
+		TextColumn('{task.fields[state]:<12}'),
+		TimeElapsedColumn(),
+		TextColumn('{task.fields[count]}'),
+		auto_refresh=True,
+		transient=True,
+		console=console,
+	)
+
+	# Initialize progress tasks
+	progress_ids = {}
+	with progress:
+		for i, act in enumerate(actions):
+			label = _get_action_label(act)
+			progress_ids[i] = progress.add_task('', label=label, state='PENDING', count='')
+
+		# Run in parallel
+		all_results = []
+		with ThreadPoolExecutor(max_workers=max_workers) as executor:
+			futures = {executor.submit(run_single, a): i for i, a in enumerate(actions)}
+			for future in as_completed(futures):
+				idx = futures[future]
+				result = future.result()
+				items = result["results"]
+				finding_count = sum(1 for r in items if isinstance(r, OutputType))
+				progress.update(progress_ids[idx], state='[green]DONE[/]', count=f'{finding_count} results')
+				all_results.append((idx, result))
+				progress.refresh()
+
+	# Yield all results for the main loop to process (already printed live by runners)
+	for idx, result in sorted(all_results, key=lambda x: x[0]):
+		for item in result["results"]:
+			yield item
 
 
 def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:

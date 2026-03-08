@@ -629,7 +629,7 @@ class TestRunBatch(unittest.TestCase):
         info_results = [r for r in results if isinstance(r, Info)]
         self.assertGreaterEqual(len(info_results), 3)
 
-    def test_run_batch_yields_info_message(self):
+    def test_run_batch_uses_rich_progress(self):
         from secator.ai.actions import _run_batch, ActionContext
 
         ctx = ActionContext(targets=["t.com"], model="m", dry_run=True, max_workers=2)
@@ -640,10 +640,9 @@ class TestRunBatch(unittest.TestCase):
 
         results = list(_run_batch(actions, ctx))
 
-        # First result should be Info about batch
-        self.assertIsInstance(results[0], Info)
-        self.assertIn("2", results[0].message)
-        self.assertIn("parallel", results[0].message.lower())
+        # Should have dry run Info results (no batch Info since Rich progress handles display)
+        info_results = [r for r in results if isinstance(r, Info)]
+        self.assertGreaterEqual(len(info_results), 2)
 
     def test_run_batch_empty_actions(self):
         from secator.ai.actions import _run_batch, ActionContext

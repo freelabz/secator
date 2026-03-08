@@ -16,51 +16,11 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.utils import format_token_count
-from secator.ai.actions import ActionContext, dispatch_action, _run_batch
-from secator.ai.encryption import SensitiveDataEncryptor
+from secator.ai.actions import ActionContext, dispatch_action, group_actions, _run_batch
+from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens
 from secator.ai.prompts import get_system_prompt, get_mode_config, format_user_initial, format_tool_result, format_continue
 from secator.ai.utils import call_llm, setup_ai, parse_actions, strip_json_from_response, prompt_user
-
-
-def _maybe_encrypt(text, encryptor):
-	"""Encrypt text if encryptor is available, otherwise return as-is."""
-	return encryptor.encrypt(text) if encryptor else text
-
-
-def group_actions(actions: List[Dict]) -> List:
-	"""Group actions by 'group' field for batch execution.
-
-	Returns list where:
-	- Individual actions (no group) are dicts
-	- Grouped actions are lists of dicts
-	"""
-	result = []
-	groups = {}
-	group_order = []
-
-	for action in actions:
-		group = action.pop("group", None)
-		if group:
-			if group not in groups:
-				groups[group] = []
-				group_order.append(group)
-			groups[group].append(action)
-		else:
-			# Flush pending groups before sequential action
-			for g in group_order:
-				if groups[g]:
-					result.append(groups[g])
-					groups[g] = []
-			group_order = []
-			result.append(action)
-
-	# Flush remaining groups
-	for g in group_order:
-		if groups[g]:
-			result.append(groups[g])
-
-	return result
 
 
 DEFAULT_API_KEY = CONFIG.addons.ai.api_key
@@ -239,7 +199,7 @@ class ai(PythonRunner):
 
 		history.add_system(system_prompt)
 		user_msg = format_user_initial(targets, prompt, previous_results=previous_results or [])
-		history.add_user(_maybe_encrypt(user_msg, encryptor))
+		history.add_user(maybe_encrypt(user_msg, encryptor))
 		yield Ai(content=prompt or f"Starting {mode}...", ai_type="prompt")
 
 		# Create action context
@@ -339,7 +299,6 @@ class ai(PythonRunner):
 
 					for result in action_iter:
 						if isinstance(result, (Stat, Progress, State, Info)):
-							# Skip stats, progress, state, and info
 							continue
 						if isinstance(result, Error):
 							has_errors = True
@@ -353,7 +312,8 @@ class ai(PythonRunner):
 								action_results.append({"output": result.content})
 							continue
 						if isinstance(result, OutputType):
-							self.add_result(result, print=not is_secator)
+							# Batch results already printed by _run_batch
+							self.add_result(result, print=False)
 							result = result.toDict(exclude=list(INTERNAL_FIELDS))
 						action_results.append(result)
 
@@ -395,7 +355,7 @@ class ai(PythonRunner):
 					if truncated:
 						self.debug(f'[context] truncated: {original_len} -> {len(tool_result)} chars')
 
-					tool_result = _maybe_encrypt(tool_result, encryptor)
+					tool_result = maybe_encrypt(tool_result, encryptor)
 					history.add_user(tool_result)
 
 				if len(actions) > 0:
@@ -428,7 +388,7 @@ class ai(PythonRunner):
 				# STOP or CONTINUE
 				stop_or_continue = "STOP or CONTINUE based on whether the initial user request has been fulfilled"
 				continue_msg = format_continue(iteration, max_iter, stop_or_continue)
-				history.add_user(_maybe_encrypt(continue_msg, encryptor))
+				history.add_user(maybe_encrypt(continue_msg, encryptor))
 
 			except KeyboardInterrupt:
 				if not interactive:

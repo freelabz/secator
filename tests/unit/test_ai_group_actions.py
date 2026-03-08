@@ -6,7 +6,7 @@ class TestGroupActions(unittest.TestCase):
     """Tests for grouping actions by 'group' field."""
 
     def test_no_groups_returns_sequential(self):
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
         actions = [
             {"action": "task", "name": "nmap"},
             {"action": "shell", "command": "whoami"},
@@ -17,7 +17,7 @@ class TestGroupActions(unittest.TestCase):
         self.assertIsInstance(result[1], dict)
 
     def test_same_group_batched(self):
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
         actions = [
             {"action": "task", "name": "nmap", "targets": ["a"], "group": "scan"},
             {"action": "task", "name": "nmap", "targets": ["b"], "group": "scan"},
@@ -29,7 +29,7 @@ class TestGroupActions(unittest.TestCase):
         self.assertEqual(len(result[0]), 3)
 
     def test_group_field_removed(self):
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
         actions = [
             {"action": "task", "name": "nmap", "group": "scan"},
         ]
@@ -37,7 +37,7 @@ class TestGroupActions(unittest.TestCase):
         self.assertNotIn("group", result[0][0])
 
     def test_mixed_grouped_and_sequential(self):
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
         actions = [
             {"action": "task", "name": "nmap", "targets": ["a"], "group": "scan"},
             {"action": "task", "name": "nmap", "targets": ["b"], "group": "scan"},
@@ -52,7 +52,7 @@ class TestGroupActions(unittest.TestCase):
         self.assertIsInstance(result[2], dict)
 
     def test_sequential_between_groups_flushes(self):
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
         actions = [
             {"action": "task", "name": "a", "group": "g1"},
             {"action": "task", "name": "b"},
@@ -65,7 +65,7 @@ class TestGroupActions(unittest.TestCase):
         self.assertIsInstance(result[2], list)
 
     def test_multiple_groups(self):
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
         actions = [
             {"action": "task", "name": "a", "group": "g1"},
             {"action": "task", "name": "b", "group": "g2"},

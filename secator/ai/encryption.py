@@ -16,6 +16,11 @@ PII_PATTERNS = {
 }
 
 
+def maybe_encrypt(text, encryptor):
+	"""Encrypt text if encryptor is available, otherwise return as-is."""
+	return encryptor.encrypt(text) if encryptor else text
+
+
 class SensitiveDataEncryptor:
 	"""Encrypt sensitive data using SHA-256 hashing with salt.
 

@@ -43,7 +43,7 @@ class TestBatchIntegration(unittest.TestCase):
 
     def test_group_and_batch_flow(self):
         """Test that grouped actions are batched and executed correctly."""
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
         from secator.ai.actions import _run_batch, ActionContext
 
         # Simulate LLM response with grouped actions
@@ -72,7 +72,7 @@ class TestBatchIntegration(unittest.TestCase):
 
     def test_mixed_parallel_and_sequential(self):
         """Test LLM response with both parallel and sequential actions."""
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
 
         actions = [
             {"action": "task", "name": "nmap", "targets": ["host1"], "group": "recon"},
@@ -95,7 +95,7 @@ class TestBatchIntegration(unittest.TestCase):
 
     def test_group_field_stripped_from_actions(self):
         """Test that group field is removed before execution."""
-        from secator.tasks.ai import group_actions
+        from secator.ai.actions import group_actions
 
         actions = [
             {"action": "task", "name": "nmap", "targets": ["host1"], "group": "scan"},
