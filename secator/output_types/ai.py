@@ -153,7 +153,7 @@ class Ai(OutputType):
 				line += f' ([dim yellow]limit: {_s(limit)}[/])'
 			if self.ai_type == 'prompt':
 				line = f'[on gray19]{line}[/]'
-			return '\n' + rich_to_ansi(line)
+			return rich_to_ansi(line)
 
 		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
