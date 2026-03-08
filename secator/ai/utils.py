@@ -2,7 +2,6 @@
 """Utility functions for AI task - LLM initialization, calling, and response parsing."""
 import json
 import logging
-import re
 from typing import Dict, List, Optional
 
 from secator.config import CONFIG
@@ -11,19 +10,6 @@ from secator.rich import console, maybe_status
 
 # Module-level state for litellm initialization
 _llm_initialized = False
-
-
-def _find_matching_bracket(text: str, start: int, open_char: str, close_char: str) -> int:
-	"""Find position after the matching closing bracket, starting from `start`."""
-	depth = 0
-	for i in range(start, len(text)):
-		if text[i] == open_char:
-			depth += 1
-		elif text[i] == close_char:
-			depth -= 1
-			if depth == 0:
-				return i + 1
-	return start
 
 
 def init_llm(api_key: Optional[str] = None):
@@ -165,83 +151,6 @@ def call_llm(
 			})
 
 	return {"content": content, "usage": usage, "tool_calls": tool_calls}
-
-
-def _is_action_list(obj) -> bool:
-	"""Check if parsed JSON is a list of action dicts."""
-	return isinstance(obj, list) and all(isinstance(a, dict) and "action" in a for a in obj)
-
-
-def parse_actions(response: str) -> List[Dict]:
-	"""Extract JSON action array from LLM response."""
-	# Try code block first (```json ... ```)
-	match = re.search(r'```(?:json)?\s*(\[[\s\S]*?\])\s*```', response)
-	if match:
-		try:
-			result = json.loads(match.group(1))
-			if _is_action_list(result):
-				return result
-		except json.JSONDecodeError:
-			pass
-
-	# Try raw JSON array with "action" key
-	match = re.search(r'\[[\s\S]*?"action"[\s\S]*?\]', response)
-	if match:
-		try:
-			text = response[match.start():]
-			end = _find_matching_bracket(text, 0, '[', ']')
-			result = json.loads(text[:end])
-			if _is_action_list(result):
-				return result
-		except json.JSONDecodeError:
-			pass
-
-	# Try collecting individual JSON objects with "action" key
-	actions = []
-	for match in re.finditer(r'\{"action"', response):
-		try:
-			text = response[match.start():]
-			end = _find_matching_bracket(text, 0, '{', '}')
-			obj = json.loads(text[:end])
-			if isinstance(obj, dict) and "action" in obj:
-				actions.append(obj)
-		except json.JSONDecodeError:
-			pass
-	if actions:
-		return actions
-
-	return []
-
-
-def strip_json_from_response(text: str) -> str:
-	"""Remove JSON action blocks, keep only text/reasoning."""
-	if not text:
-		return ""
-
-	# Remove code blocks
-	text = re.sub(r'```(?:json)?\s*\[[\s\S]*?\]\s*```', '', text)
-
-	# Remove raw JSON arrays that contain "action"
-	result = []
-	i = 0
-	while i < len(text):
-		if text[i] == '[':
-			end = _find_matching_bracket(text, i, '[', ']')
-
-			# Extract the bracketed content
-			bracketed = text[i:end]
-
-			# Only skip if it looks like a JSON action array
-			if '"action"' in bracketed and re.match(r'^\[\s*\{', bracketed):
-				i = end
-			else:
-				result.append(text[i])
-				i += 1
-		else:
-			result.append(text[i])
-			i += 1
-
-	return ''.join(result).strip()
 
 
 MODEL_COLORS = [

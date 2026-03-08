@@ -44,41 +44,6 @@ class ActionContext:
 		return self._query_engine
 
 
-def group_actions(actions: List[Dict]) -> List:
-	"""Group actions by 'group' field for batch execution.
-
-	Returns list where:
-	- Individual actions (no group) are dicts
-	- Grouped actions are lists of dicts
-	"""
-	result = []
-	groups = {}
-	group_order = []
-
-	for action in actions:
-		group = action.pop("group", None)
-		if group:
-			if group not in groups:
-				groups[group] = []
-				group_order.append(group)
-			groups[group].append(action)
-		else:
-			# Flush pending groups before sequential action
-			for g in group_order:
-				if groups[g]:
-					result.append(groups[g])
-					groups[g] = []
-			group_order = []
-			result.append(action)
-
-	# Flush remaining groups
-	for g in group_order:
-		if groups[g]:
-			result.append(groups[g])
-
-	return result
-
-
 def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	"""Route action to appropriate handler.
 
@@ -143,6 +108,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			"print_item": True,
 			"print_line": ctx.verbose and not ctx.silent,
 			"print_cmd": not ctx.silent,
+			"print_cmd_icon": "├",
 			"print_description": not ctx.silent,
 			"print_progress": False,
 			"enable_reports": False,
