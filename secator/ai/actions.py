@@ -27,6 +27,7 @@ class ActionContext:
 	context: Dict = field(default_factory=dict)
 	scope: str = "workspace"
 	results: Optional[List[Dict]] = None
+	max_workers: int = 3
 	_query_engine: Any = field(default=None, repr=False)
 
 	def get_query_engine(self):

@@ -19,7 +19,7 @@ from secator.utils import format_token_count
 from secator.ai.actions import ActionContext, dispatch_action
 from secator.ai.encryption import SensitiveDataEncryptor
 from secator.ai.history import ChatHistory, truncate_to_tokens
-from secator.ai.prompts import get_system_prompt, format_user_initial, format_tool_result, format_continue
+from secator.ai.prompts import get_system_prompt, get_mode_config, format_user_initial, format_tool_result, format_continue
 from secator.ai.utils import call_llm, setup_ai, parse_actions, strip_json_from_response, prompt_user
 
 
@@ -169,7 +169,11 @@ class ai(PythonRunner):
 	def _run_loop(self, mode: str, prompt: str, targets: List[str], model: str,
 				  encryptor: Optional[SensitiveDataEncryptor], previous_results: List = None) -> Generator:
 		"""Run unified loop for both attack and chat modes."""
-		max_iter = int(self.run_opts.get("max_iterations", 10))
+		# Get mode config
+		mode_config = get_mode_config(mode)
+		mode_max_iter = mode_config.get("max_iterations")
+		max_iter = mode_max_iter if mode_max_iter else int(self.run_opts.get("max_iterations", 10))
+
 		temp = float(self.run_opts.get("temperature", 0.7))
 		api_key = self.run_opts.get("api_key")
 		api_base = self.run_opts.get("api_base")
@@ -177,24 +181,41 @@ class ai(PythonRunner):
 		dry_run = self.run_opts.get("dry_run", False)
 		verbose = self.run_opts.get("verbose", False)
 		interactive = self.run_opts.get("interactive", True)
+
+		# Check if internal subagent
+		is_internal = self.run_opts.get("internal", False)
+		passed_context = self.run_opts.get("context") or {}
+
+		# Suppress interactive prompts for internal subagents
+		if is_internal:
+			interactive = False
+
 		import litellm
 
 		# Initialize chat history with appropriate system prompt
 		history = ChatHistory()
-		history.model = model  # Set model for token counting
-		history.add_system(get_system_prompt(mode))
+		history.model = model
+		system_prompt = get_system_prompt(mode)
+
+		# Inject context for subagents
+		if is_internal and passed_context:
+			system_prompt += "\n\n### SUBAGENT CONTEXT\n"
+			system_prompt += json.dumps(passed_context, indent=2)
+
+		history.add_system(system_prompt)
 		user_msg = format_user_initial(targets, prompt, previous_results=previous_results or [])
 		history.add_user(_maybe_encrypt(user_msg, encryptor))
 		yield Ai(content=prompt or f"Starting {mode}...", ai_type="prompt")
 
 		# Create action context
 		scope = "current" if previous_results else "workspace"
+		max_workers = int(self.run_opts.get("max_workers", 3))
 		ctx = ActionContext(
 			targets=targets, model=model, encryptor=encryptor,
 			dry_run=dry_run, verbose=verbose,
 			context=self.context or {},
-			scope=scope, results=previous_results or [])
-		# yield Info(message=repr(ctx))
+			scope=scope, results=previous_results or [],
+			max_workers=max_workers)
 
 		iteration = 0
 		query_extensions = 0
