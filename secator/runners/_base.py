@@ -668,7 +668,7 @@ class Runner:
 				# Repr output
 				if item_out:
 					item_repr = repr(item)
-					if not item_repr:
+					if not item_repr or not item_repr.strip():
 						return
 					if self.print_remote_info and item._source:
 						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')

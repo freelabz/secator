@@ -90,7 +90,7 @@ class Ai(OutputType):
 	def __repr__(self) -> str:
 		# Internal-only types (not displayed)
 		if self.ai_type == 'token_usage':
-			return ''
+			return ' '
 
 		# Get type configuration
 		type_config = AI_TYPES.get(self.ai_type, {'label': self.ai_type.upper(), 'color': 'white'})

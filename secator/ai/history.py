@@ -328,13 +328,13 @@ class ChatHistory:
             return False, old_tokens, old_tokens
 
         debug(f'compacting: {old_tokens} tokens', sub='runner.ai.context')
-        self._summarize_with_llm(model, api_base, api_key)
+        self.compact(model, api_base, api_key)
         new_tokens = self.count_tokens(model)
         debug(f'compacted: {old_tokens} -> {new_tokens} tokens', sub='runner.ai.context')
         return True, old_tokens, new_tokens
 
-    def _summarize_with_llm(self, model: str, api_base: Optional[str] = None,
-                            api_key: Optional[str] = None) -> None:
+    def compact(self, model: str, api_base: Optional[str] = None,
+                api_key: Optional[str] = None) -> None:
         """Summarize non-system messages using an LLM, keeping the initial system prompt intact."""
         if len(self.messages) <= 2:
             return

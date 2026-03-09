@@ -155,7 +155,7 @@ def replay_session(session):
 			for item_data, cls in all_items:
 				try:
 					item = cls.load(item_data)
-					console.print(item)
+					console.print(item, highlight=False)
 				except Exception:
 					continue
 		except (json.JSONDecodeError, OSError):

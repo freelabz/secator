@@ -289,7 +289,8 @@ def setup_ai():
 		return selected
 
 
-def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="chat", model=None):
+def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
+				mode="chat", model=None):
 	"""Prompt user for follow-up input via interactive menu.
 
 	Builds a unified menu with optional LLM-provided choices, plus Continue,
@@ -355,11 +356,26 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 
 		# Default options (always present)
 		continue_label = f"Continue to {mode}"
-		options.extend([
+		default_options = [
 			{"label": continue_label, "input": True, "action": "continue"},
 			{"label": "Summarize", "input": True, "action": "summarize", "default": "Summarize all findings so far"},
-			{"label": "Exit", "action": "exit"},
-		])
+		]
+
+		# Add "Compact context" when context is >50% full
+		if model:
+			try:
+				from secator.ai.history import get_context_window, OUTPUT_TOKEN_RESERVATION
+				by_role = history.count_tokens_by_role(model)
+				ctx_window = get_context_window(model)
+				usable = ctx_window - OUTPUT_TOKEN_RESERVATION
+				pct_used = (by_role["total"] / usable * 100) if usable > 0 else 0
+				if pct_used >= 50:
+					default_options.append({"label": f"Compact context ({pct_used:.0f}% full)", "action": "compact"})
+			except Exception:
+				pass
+
+		default_options.append({"label": "Exit", "action": "exit"})
+		options.extend(default_options)
 
 		result = InteractiveMenu(title, options).show()
 		if result is None:
@@ -400,6 +416,14 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 				msg += f". Additional instructions: {value}"
 			history.add_user(_maybe_encrypt(msg, encryptor))
 			return (msg, max_iterations)
+
+		if action == "compact":
+			old_tokens = history.count_tokens(model)
+			history.compact(model)
+			new_tokens = history.count_tokens(model)
+			continue_msg = format_continue(0, max_iterations, instruction=f"Context compacted: {old_tokens} -> {new_tokens} tokens. Continue.")  # noqa: E501
+			history.add_user(_maybe_encrypt(continue_msg, encryptor))
+			return (f"Compacted context: {old_tokens} -> {new_tokens} tokens", max_iterations)
 
 		# exit
 		return None

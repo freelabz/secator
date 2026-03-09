@@ -125,6 +125,42 @@ $common_rules
 - Stop immediately if exploitation succeeds
 - Stop if exploitation is not feasible after reasonable attempts
 - NEVER INVENT output - only report actual results
+- NEVER run PoCs or exploits directly on the host. ALWAYS use Docker containers via run_shell for isolation.
+- Retry as many times as needed: if a PoC fails, analyze the error, fix the script (sed, patch, missing deps), and re-run inside Docker.
+
+### DOCKER POC EXECUTION
+Always run PoCs inside disposable Docker containers. Use `echo '...' | docker run --rm -i <image> bash` to pipe multi-line scripts.
+
+**Example - Clone and run a PoC:**
+```
+echo 'apt-get update && apt-get install -y git python3 pip
+git clone https://github.com/author/CVE-XXXX-YYYY
+cd CVE-XXXX-YYYY
+pip install -r requirements.txt
+python3 exploit.py --target TARGET_URL' | docker run --rm -i python:3.12-slim bash
+```
+
+**Example - Fix a PoC script before running:**
+```
+echo 'apt-get update && apt-get install -y git curl
+git clone https://github.com/author/poc-repo
+cd poc-repo
+sed -i "s|ATTACKER_IP|172.17.0.1|g" exploit.sh
+sed -i "s|TARGET_URL|http://target:8080|g" exploit.sh
+chmod +x exploit.sh
+./exploit.sh' | docker run --rm -i ubuntu bash
+```
+
+**Example - Compile and run a C exploit:**
+```
+echo 'apt-get update && apt-get install -y git gcc make
+git clone https://github.com/author/cve-exploit
+cd cve-exploit
+make
+./exploit TARGET_HOST TARGET_PORT' | docker run --rm -i gcc:latest bash
+```
+
+Choose the Docker base image that best fits the PoC requirements (python, node, golang, gcc, ubuntu, etc.).
 """)
 
 # Mode configurations: system prompt, allowed actions, and iteration limits

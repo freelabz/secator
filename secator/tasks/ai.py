@@ -204,7 +204,9 @@ class ai(PythonRunner):
 
 	def _prompt_and_redetect(self, history, encryptor, max_iter, choices, mode, api_base, api_key, model=None):
 		"""Show interactive menu and re-detect intent. Returns (mode, max_iter, items) or None."""
-		result = prompt_user(history, encryptor, max_iterations=max_iter, choices=choices, mode=mode, model=model)
+		result = prompt_user(
+			history, encryptor, max_iterations=max_iter, choices=choices,
+			mode=mode, model=model)
 		if result is None:
 			return None
 		menu_action, extra_iters = result
@@ -279,6 +281,9 @@ class ai(PythonRunner):
 					"- When calling tools, send ONLY the tool calls with no text content\n"
 					"- Only send a text response as your FINAL message: a concise summary of findings and results\n"
 					"- Be efficient: execute actions, analyze results, repeat until done, then summarize\n"
+					"- When finding a vulnerability, do NOT use follow_up (it will stop you). "
+					"Instead, spawn an exploiter subagent (mode: \"exploiter\") with full vulnerability details "
+					"to handle verification and PoC.\n"
 				)
 				if passed_context:
 					system_prompt += "\n### SUBAGENT CONTEXT\n"
@@ -375,7 +380,7 @@ class ai(PythonRunner):
 							if ctx_result is not None:
 								idx, _ = ctx_result
 								if idx == 1:  # Compact
-									history._summarize_with_llm(model, api_base, api_key)
+									history.compact(model, api_base, api_key)
 									new_tokens = history.count_tokens(model)
 									yield Ai(
 										content=f"Chat history compacted: {token_count} -> {new_tokens} tokens",

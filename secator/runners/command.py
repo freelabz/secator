@@ -598,10 +598,10 @@ class Command(Runner):
 		"""Print command."""
 		if self.print_cmd:
 			icon = self.run_opts.get('print_cmd_icon', self.print_cmd_icon)
-			cmd_str = f'{icon} {_s(self.cmd)}'
+			cmd_str = f'{icon} [bold green]{_s(self.cmd)}[/]'
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
-			self._print(cmd_str, color='bold green', rich=True)
+			self._print(cmd_str, rich=True)
 		self.debug('command', obj={'cmd': self.cmd}, sub='start')
 		self.debug('options', obj=self.cmd_options, sub='start')
 
