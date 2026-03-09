@@ -967,20 +967,22 @@ def parse_raw_http_request(raw_request):
 	}
 
 
-def format_token_count(tokens, icon=''):
+def format_token_count(tokens, icon='', compact=False):
 	"""Format a token count as a human-readable string (e.g., '8.5k tokens').
 
 	Args:
 		tokens: Number of tokens.
 		icon: Optional Rich emoji icon prefix (e.g., 'arrow_up', 'arrow_down').
+		compact: If True, omit 'tokens' suffix (e.g., '8.5k' instead of '8.5k tokens').
 
 	Returns:
 		str: Formatted token string.
 	"""
 	prefix = f':{icon}: ' if icon else ''
+	suffix = '' if compact else ' tokens'
 	if tokens >= 1000:
-		return f'{prefix}{tokens/1000:.1f}k tokens'
-	return f'{prefix}{tokens} tokens'
+		return f'{prefix}{tokens/1000:.1f}k{suffix}'
+	return f'{prefix}{tokens}{suffix}'
 
 
 def format_object(obj, color='magenta', skip_keys=[], predicate=lambda x: True):

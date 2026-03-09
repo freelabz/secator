@@ -620,5 +620,41 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         self.assertEqual(messages[0]["role"], "system")
 
 
+    @patch('secator.ai.history.litellm')
+    def test_count_tokens_by_role(self, mock_litellm):
+        """count_tokens_by_role returns per-role breakdown plus total."""
+        mock_litellm.token_counter.return_value = 100
+
+        history = ChatHistory()
+        history.add_system("system prompt")
+        history.add_user("user message")
+        history.add_assistant("assistant reply")
+        history.add_tool_result("call_1", "tool result")
+
+        result = history.count_tokens_by_role("test-model")
+
+        self.assertEqual(result["system"], 100)
+        self.assertEqual(result["user"], 100)
+        self.assertEqual(result["assistant"], 100)
+        self.assertEqual(result["tool"], 100)
+        self.assertEqual(result["total"], 400)
+
+    @patch('secator.ai.history.litellm')
+    def test_count_tokens_by_role_aggregates(self, mock_litellm):
+        """count_tokens_by_role sums multiple messages of same role."""
+        mock_litellm.token_counter.return_value = 50
+
+        history = ChatHistory()
+        history.add_user("msg 1")
+        history.add_user("msg 2")
+        history.add_user("msg 3")
+
+        result = history.count_tokens_by_role("test-model")
+
+        self.assertEqual(result["user"], 150)
+        self.assertEqual(result["total"], 150)
+        self.assertNotIn("system", result)
+
+
 if __name__ == '__main__':
     unittest.main()

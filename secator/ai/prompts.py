@@ -57,8 +57,12 @@ Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
 	- `head -100 /path/to/file` or `tail -100 /path/to/file` to see beginning/end
 	- `cat /path/to/file | jq '.[] | select(.severity == "critical")'` for JSON filtering
 	- `wc -l /path/to/file` to count lines/results
-- When finding a HIGH or CRITICAL vulnerability that needs verification, spawn an exploiter subagent by running an ai task with mode "exploiter", internal true, and context containing the vulnerability details and objective
-- Do NOT spawn AI subagents for simple tasks - only for complex exploitation verification
+- AI SUBAGENTS: You can spawn autonomous AI subagents using run_task with name "ai". The subagent gets a fresh context window and runs non-interactively. Pass opts: {"prompt": "<objective>", "mode": "<mode>", "subagent": true, "session_name": "<short_id>", "max_iterations": <N>}. ALWAYS set "session_name" to a descriptive identifier using the ACTUAL target name (e.g. "recon-example.com", "exploit-sqli-10.0.0.1", "enum-api.target.io"). NEVER use generic placeholders like "target1" or "host2". Include all necessary context in the prompt (vulnerability details, credentials, service versions). Valid modes: "attack" (default, full recon/pentest), "chat" (analysis/queries only), "exploiter" (focused exploitation). Do NOT use other mode values. Use subagents when:
+	- A vulnerability needs focused exploitation/verification (mode: "exploiter", max_iterations: 5)
+	- A complex sub-task would benefit from dedicated context instead of polluting the main conversation
+	- The user explicitly asks to spawn a subagent
+	- Current context has grown large and a fresh agent would be more efficient for a specific objective
+- Do NOT spawn subagents for simple tasks that can be done with a single tool call
 """)
 
 # System prompt for chat mode (~200 tokens)
@@ -171,8 +175,6 @@ def build_tasks_reference() -> str:
 
 	lines = []
 	for task_cls in sorted(discover_tasks(), key=lambda t: t.__name__):
-		if task_cls.__name__.lower() == "ai":
-			continue
 		name = task_cls.__name__
 		desc = (task_cls.__doc__ or "").strip().split('\n')[0][:50]
 
@@ -254,7 +256,10 @@ def get_system_prompt(mode: str) -> str:
 		Formatted system prompt string
 	"""
 	if mode not in MODES:
-		raise ValueError(f"Unsupported mode: {mode!r}. Expected one of {list(MODES.keys())}.")
+		from secator.rich import console
+		from secator.output_types import Warning
+		console.print(Warning(message=f"Unknown mode {mode!r}, falling back to 'attack'. Valid modes: {list(MODES.keys())}"))
+		mode = "attack"
 
 	mode_config = MODES[mode]
 	system_prompt = mode_config["system_prompt"]

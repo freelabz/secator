@@ -125,6 +125,9 @@ class Command(Runner):
 	proxy_socks5 = False
 	proxy_http = False
 
+	# Print command icon
+	print_cmd_icon = ':zap:'
+
 	# Profile
 	profile = 'small'
 
@@ -591,7 +594,8 @@ class Command(Runner):
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = f':zap: {_s(self.cmd)}'
+			icon = self.run_opts.get('print_cmd_icon', self.print_cmd_icon)
+			cmd_str = f'{icon} {_s(self.cmd)}'
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, color='bold green', rich=True)

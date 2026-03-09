@@ -42,7 +42,7 @@ def render_markdown_for_rich(text: str, title: str = '') -> str:
 	console = Console(file=StringIO(), force_terminal=True, width=terminal_width)
 	md = Markdown(text)
 	if title:
-		panel = Panel(md, title=title, title_align="left", border_style="dim", padding=(1, 2))
+		panel = Panel(md, title=title, title_align="left", border_style="dim", padding=(0, 1))
 		console.print(panel)
 	else:
 		console.print(md)
@@ -75,6 +75,7 @@ class Ai(OutputType):
 	mode: str = field(default='', compare=False)  # summarize, suggest, attack
 	model: str = field(default='', compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
+	summary: bool = field(default=False, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='ai', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -87,37 +88,61 @@ class Ai(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self) -> str:
+		# Internal-only types (not displayed)
+		if self.ai_type == 'token_usage':
+			return ''
+
 		# Get type configuration
 		type_config = AI_TYPES.get(self.ai_type, {'label': self.ai_type.upper(), 'color': 'white'})
 		label = type_config['label']
 		color = type_config['color']
 
-		# For 'response' type, include iteration in header
-		if self.ai_type == 'response' and 'iteration' in self.extra_data:
-			iteration = self.extra_data.get('iteration', '')
-			max_iter = self.extra_data.get('max_iterations', '')
-			if max_iter:
-				label = f'{label} [gray42]({iteration}/{max_iter})[/]'
-			else:
-				label = f'{label} [gray42]({iteration})[/]'
+		# For 'response' and 'prompt' types, include iteration in header
+		if self.ai_type in ('response', 'prompt'):
+			if 'iteration' in self.extra_data:
+				iteration = self.extra_data.get('iteration', '')
+				max_iter = self.extra_data.get('max_iterations', '')
+				if max_iter:
+					label = f'{label} [gray42]({iteration}/{max_iter})[/]'
+				else:
+					label = f'{label} [gray42]({iteration})[/]'
 
 		# Build header with robot icon
 		s = rf'[bold {color}]{label}[/]'
+
+		# Add session name or subagent label for prompt and response types
+		subagent = self._context.get('subagent')
+		session_name = self._context.get('name')
+		if self.ai_type in ('response', 'prompt') and (session_name or subagent):
+			name_label = _s(session_name or (subagent if isinstance(subagent, str) else 'subagent'))
+			s += f' [bold orange4]{name_label}[/]'
 
 		# Build usage info string (dimmed, at end) for response and prompt types
 		usage_str = ''
 		if self.ai_type in ('response', 'prompt'):
 			tokens = self.extra_data.get('tokens')
 			cost = self.extra_data.get('cost')
+			context_window = self.extra_data.get('context_window')
+			by_role = self.extra_data.get('by_role')
 			icon = 'arrow_up'
 			if self.ai_type == 'response':
 				icon = 'arrow_down'
 			if tokens or cost:
 				parts = []
 				if tokens:
-					parts.append(f' • {format_token_count(tokens, icon=icon)}')
+					token_part = format_token_count(tokens, icon=icon, compact=True)
+					if context_window:
+						token_part += f'/[dim red]{format_token_count(context_window, compact=True)}[/]'
+					parts.append(f' • {token_part}')
+				if by_role:
+					role_parts = []
+					for role in ('system', 'user', 'assistant', 'tool'):
+						if role in by_role:
+							role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
+					if role_parts:
+						parts.append(f'({" | ".join(role_parts)})')
 				if cost:
-					parts.append(f' - ${cost:.4f}')
+					parts.append(f'- ${cost:.4f}')
 				usage_str = ' '.join(parts)
 
 		# Action types
@@ -157,7 +182,7 @@ class Ai(OutputType):
 
 		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
-						 if k not in ('iteration', 'max_iterations', 'tokens', 'cost')}
+						 if k not in ('iteration', 'max_iterations', 'tokens', 'cost', 'context_window', 'by_role')}
 
 		# Build suffix (usage + extra_data) as Rich markup
 		suffix = ''
@@ -193,6 +218,12 @@ class Ai(OutputType):
 
 		# Render content with markdown support
 		content = self.content
+
+		# Response type: always render in a Panel with title
+		if self.ai_type == 'response':
+			title = s + suffix
+			return '\n' + render_markdown_for_rich(content, title=title).rstrip()
+
 		if is_markdown(content):
 			# Markdown rendered inside a Rich Panel with header as title
 			title = s + suffix

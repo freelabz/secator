@@ -151,14 +151,18 @@ class ChatHistory:
             msg["content"] = content
         self.messages.append(msg)
 
-    def add_tool_result(self, tool_call_id: str, content: str) -> None:
+    def add_tool_result(self, tool_call_id: str, content: str, name: str = None) -> None:
         """Add a tool result message.
 
         Args:
             tool_call_id: ID of the tool call this result responds to
             content: The tool's output content
+            name: Optional tool function name
         """
-        self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
+        msg = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+        if name:
+            msg["name"] = name
+        self.messages.append(msg)
 
     def add_tool(self, content: str) -> None:
         self.messages.append({"role": "tool", "content": content})
@@ -241,6 +245,26 @@ class ChatHistory:
             sub='runner.ai.context'
         )
         return total
+
+    def count_tokens_by_role(self, model: str = None) -> Dict[str, int]:
+        """Count tokens per message role, reusing per-message cache.
+
+        Calls count_tokens() first to ensure cache is populated,
+        then aggregates by role.
+
+        Args:
+            model: LLM model name (required if self.model not set)
+
+        Returns:
+            Dict mapping role to token count, plus 'total' key
+        """
+        self.count_tokens(model)
+        by_role: Dict[str, int] = {}
+        for msg in self.messages:
+            role = msg.get("role", "unknown")
+            by_role[role] = by_role.get(role, 0) + msg.get("_token_count", 0)
+        by_role["total"] = sum(by_role.values())
+        return by_role
 
     def get_available_tokens(self, model: str) -> int:
         """Return tokens available for new content.

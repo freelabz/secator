@@ -1,6 +1,8 @@
 """Tool schema definitions for native LLM tool calling."""
 
 from secator.ai.prompts import get_mode_config
+from secator.output_types import Warning
+from secator.rich import console
 
 # Map tool names to action types used by existing action handlers
 TOOL_ACTION_MAP = {
@@ -21,7 +23,7 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "run_task",
-			"description": "Run a secator security task (e.g. nmap, httpx, nuclei) against one or more targets.",
+			"description": "Run a secator security task (e.g. nmap, httpx, nuclei, ai) against targets. Use name 'ai' to spawn an AI subagent.",  # noqa: E501
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -181,4 +183,6 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	action_type = TOOL_ACTION_MAP.get(tool_name)
 	if action_type is None:
 		return None
+	if not arguments:
+		console.print(Warning(message=f'Empty tool call for {tool_name} (missing arguments)'))
 	return {"action": action_type, **arguments}

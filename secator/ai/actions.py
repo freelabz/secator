@@ -1,12 +1,14 @@
 """Action handlers for AI task."""
 import json
 import subprocess
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional
 
 from secator.output_types import Ai, Error, Info, Warning, OutputType, INTERNAL_FIELDS
 from secator.template import TemplateLoader
+from secator.utils import format_token_count
 
 
 @dataclass
@@ -29,6 +31,7 @@ class ActionContext:
 	scope: str = "workspace"
 	results: Optional[List[Dict]] = None
 	max_workers: int = 3
+	subagent: bool = False
 	silent: bool = False
 	_query_engine: Any = field(default=None, repr=False)
 
@@ -84,6 +87,32 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	targets = action.get("targets", ctx.targets)
 	opts = action.get("opts", {})
 
+	# Validate runner name before proceeding
+	if not name:
+		yield Error(message=f"Empty {runner_type} name, skipping action")
+		return
+
+	if runner_type == "task":
+		from secator.runners import Task
+		from secator.loader import discover_tasks
+		try:
+			Task.get_task_class(name)
+		except ValueError:
+			available = [cls.__name__ for cls in discover_tasks()]
+			yield Error(message=f"Task '{name}' not found. Pick from: {', '.join(sorted(available))}")
+			return
+		tpl = TemplateLoader(input={'type': 'task', 'name': name})
+		runner_cls = Task
+	else:
+		from secator.runners import Workflow
+		from secator.loader import find_templates
+		available_wfs = [t['name'] for t in find_templates() if t['type'] == 'workflow']
+		if name not in available_wfs:
+			yield Error(message=f"Workflow '{name}' not found. Pick from: {', '.join(sorted(available_wfs))}")
+			return
+		tpl = TemplateLoader(name=f'workflows/{name}')
+		runner_cls = Workflow
+
 	if ctx.encryptor:
 		targets = [ctx.encryptor.decrypt(t) for t in targets]
 
@@ -95,14 +124,6 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts})
 
 	try:
-		if runner_type == "task":
-			from secator.runners import Task
-			tpl = TemplateLoader(input={'type': 'task', 'name': name})
-			runner_cls = Task
-		else:
-			from secator.runners import Workflow
-			tpl = TemplateLoader(name=f'workflows/{name}')
-			runner_cls = Workflow
 
 		run_opts = {
 			"print_item": True,
@@ -111,7 +132,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			"print_cmd_icon": "├",
 			"print_description": not ctx.silent,
 			"print_progress": False,
-			"enable_reports": False,
+			"print_reports_message": False,
+			"enable_reports": True,
 			"exporters": [],
 			"sync": True,
 			**opts,
@@ -120,7 +142,14 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			run_opts["print_start"] = not ctx.silent
 			run_opts["print_end"] = not ctx.silent
 
-		runner = runner_cls(tpl, targets, run_opts=run_opts)
+		context = ctx.context.copy()
+		context["task_chunk_id"] = str(uuid.uuid4())
+		tool_call_id = action.get("_tool_call_id")
+		if tool_call_id:
+			context["tool_call_id"] = tool_call_id
+		if ctx.subagent:
+			context["subagent"] = ctx.context.get("subagent", True)
+		runner = runner_cls(tpl, targets, run_opts=run_opts, context=context)
 		yield from runner
 		# TODO: verify if yielding raw output would be better than JSON findings
 		# yield Ai(content=runner.output, ai_type="shell_output")
@@ -263,6 +292,10 @@ def _get_action_label(action: Dict) -> str:
 	act_type = action.get("action", "unknown")
 	if act_type in ("task", "workflow"):
 		name = action.get("name", "?")
+		opts = action.get("opts", {})
+		session_name = opts.get("session_name", "")
+		if session_name:
+			return session_name
 		targets = action.get("targets", [])
 		target_str = targets[0] if len(targets) == 1 else f"{len(targets)} targets"
 		return f"{name} on {target_str}"
@@ -300,63 +333,93 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	# Silence console output for parallel tasks to avoid interleaved printing
 	batch_ctx = replace(ctx, silent=True)
 
-	# Print all task start messages before any task begins
-	for act in actions:
-		act_type = act.get("action", "")
-		if act_type in ("task", "workflow"):
-			name = act.get("name", "")
-			targets = act.get("targets", ctx.targets)
-			ai_start = Ai(content=name, ai_type=act_type, extra_data={"targets": targets, "opts": act.get("opts", {})})
-			console.print(ai_start)
+	# Skip Rich progress panel for subagents to avoid nested LiveError
+	use_progress = not ctx.subagent
 
-	def run_single(act: Dict) -> Dict:
+	# Print all task start messages before any task begins
+	if use_progress:
+		for act in actions:
+			act_type = act.get("action", "")
+			if act_type in ("task", "workflow"):
+				name = act.get("name", "")
+				targets = act.get("targets", ctx.targets)
+				ai_start = Ai(content=name, ai_type=act_type, extra_data={"targets": targets, "opts": act.get("opts", {})})
+				console.print(ai_start)
+
+	progress = None
+	progress_ids = {}
+
+	def run_single(act: Dict, idx: int) -> Dict:
 		results = []
 		for item in dispatch_action(act, batch_ctx):
+			if isinstance(item, Ai) and item.ai_type == "token_usage":
+				if progress:
+					extra = item.extra_data or {}
+					tokens = extra.get("tokens", 0)
+					ctx_win = extra.get("context_window", 0)
+					tokens_str = (
+						f'[gray42]{format_token_count(tokens, compact=True)}'
+						f'/[dim red]{format_token_count(ctx_win, compact=True)}[/][/]'
+					)
+					progress.update(progress_ids[idx], tokens=tokens_str)
+					progress.refresh()
+				continue  # Don't include token_usage items in results
 			results.append(item)
 		return {"action": act, "results": results}
 
-	# Build progress panel
-	class BatchProgress(RichProgress):
-		def get_renderables(self):
-			yield Padding(Panel(
-				self.make_tasks_table(self.tasks),
-				title='[bold]Batch Execution[/]',
-				border_style='bold gold3',
-				expand=False,
-				highlight=True), pad=(1, 0, 0, 0))
+	if use_progress:
+		class BatchProgress(RichProgress):
+			def get_renderables(self):
+				yield Padding(Panel(
+					self.make_tasks_table(self.tasks),
+					title='[bold]Batch execution[/]',
+					border_style='bold gold3',
+					expand=True,
+					highlight=True), pad=(1, 0, 0, 0))
 
-	progress = BatchProgress(
-		SpinnerColumn('dots'),
-		TextColumn('[bold cyan]{task.fields[label]}[/]'),
-		TextColumn('{task.fields[state]:<12}'),
-		TimeElapsedColumn(),
-		TextColumn('{task.fields[count]}'),
-		auto_refresh=True,
-		transient=True,
-		console=console,
-	)
+		progress = BatchProgress(
+			SpinnerColumn('dots'),
+			TextColumn('[bold cyan]{task.fields[label]}[/]'),
+			TextColumn('{task.fields[state]:<12}'),
+			TimeElapsedColumn(),
+			TextColumn('{task.fields[count]}'),
+			TextColumn('{task.fields[tokens]}'),
+			auto_refresh=True,
+			transient=True,
+			console=console,
+		)
+		ctx_mgr = progress
+	else:
+		from contextlib import nullcontext
+		ctx_mgr = nullcontext()
 
-	# Initialize progress tasks
-	progress_ids = {}
-	with progress:
-		for i, act in enumerate(actions):
-			label = _get_action_label(act)
-			progress_ids[i] = progress.add_task('', label=label, state='PENDING', count='')
+	all_results = []
+	with ctx_mgr:
+		if use_progress:
+			for i, act in enumerate(actions):
+				label = _get_action_label(act)
+				progress_ids[i] = progress.add_task('', label=label, state='[bold cyan]RUNNING[/]', count='', tokens='')
 
-		# Run in parallel
-		all_results = []
 		with ThreadPoolExecutor(max_workers=max_workers) as executor:
-			futures = {executor.submit(run_single, a): i for i, a in enumerate(actions)}
+			futures = {executor.submit(run_single, a, i): i for i, a in enumerate(actions)}
 			for future in as_completed(futures):
 				idx = futures[future]
 				result = future.result()
 				items = result["results"]
-				finding_count = sum(1 for r in items if isinstance(r, OutputType))
-				progress.update(progress_ids[idx], state='[green]DONE[/]', count=f'{finding_count} results')
-				all_results.append((idx, result))
-				progress.refresh()
 
-	# Yield all results for the main loop to process (already printed live by runners)
+				if use_progress:
+					finding_count = sum(1 for r in items if isinstance(r, OutputType))
+					has_errors = any(isinstance(r, Error) for r in items)
+					state = '[red]FAILURE[/]' if has_errors else '[green]SUCCESS[/]'
+					progress.update(
+						progress_ids[idx],
+						state=state,
+						count=f'{finding_count} results',
+					)
+					progress.refresh()
+
+				all_results.append((idx, result))
+
 	for idx, result in sorted(all_results, key=lambda x: x[0]):
 		for item in result["results"]:
 			yield item

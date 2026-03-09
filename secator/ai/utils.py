@@ -289,7 +289,7 @@ def setup_ai():
 		return selected
 
 
-def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="chat"):
+def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="chat", model=None):
 	"""Prompt user for follow-up input via interactive menu.
 
 	Builds a unified menu with optional LLM-provided choices, plus Continue,
@@ -300,6 +300,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 		encryptor: Optional SensitiveDataEncryptor for encrypting user input.
 		max_iterations: Current max iterations (used for continue message).
 		choices: Optional list of choice strings from LLM follow_up action.
+		model: Optional LLM model name for token count display.
 
 	Returns:
 		tuple: (action, extra_iters) where action is 'continue', 'summarize',
@@ -312,6 +313,25 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 	from secator.rich import InteractiveMenu
 	from secator.ai.prompts import format_continue
 	from secator.ai.prompts import get_system_prompt
+	from secator.utils import format_token_count
+
+	# Build title with token recap
+	title = "What's next?"
+	if model:
+		try:
+			from secator.ai.history import get_context_window
+			by_role = history.count_tokens_by_role(model)
+			ctx_window = get_context_window(model)
+			token_str = format_token_count(by_role['total'], icon='arrow_up', compact=True)
+			ctx_str = format_token_count(ctx_window, compact=True)
+			role_parts = []
+			for role in ('system', 'user', 'assistant', 'tool'):
+				if role in by_role:
+					role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
+			role_str = ' | '.join(role_parts)
+			title += f" [gray42]• {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
+		except Exception:
+			pass
 
 	try:
 		options = []
@@ -321,7 +341,6 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 			for choice in choices:
 				options.append({
 					"label": choice,
-					"description": "",
 					"input": True,
 					"action": "follow_up",
 				})
@@ -330,7 +349,6 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 			if len(choices) >= 2:
 				options.append({
 					"label": "All of the above",
-					"description": "Run all suggested actions",
 					"input": True,
 					"action": "all_choices",
 				})
@@ -338,18 +356,12 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 		# Default options (always present)
 		continue_label = f"Continue to {mode}"
 		options.extend([
-			{
-				"label": continue_label, "description": "Continue with optional instructions",
-				"input": True, "action": "continue",
-			},
-			{
-				"label": "Summarize", "description": "Get a summary of findings",
-				"input": True, "action": "summarize", "default": "Summarize all findings so far",
-			},
+			{"label": continue_label, "input": True, "action": "continue"},
+			{"label": "Summarize", "input": True, "action": "summarize", "default": "Summarize all findings so far"},
 			{"label": "Exit", "action": "exit"},
 		])
 
-		result = InteractiveMenu("What's next?", options).show()
+		result = InteractiveMenu(title, options).show()
 		if result is None:
 			return None
 

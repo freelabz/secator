@@ -11,9 +11,9 @@ console_stdout = Console(record=True)
 
 
 def maybe_status(*args, **kwargs):
-	"""Return console.status() normally, or nullcontext() when running in a worker."""
+	"""Return console.status() normally, or nullcontext() when a live display is already active or in a worker."""
 	from secator.definitions import IN_WORKER
-	if IN_WORKER:
+	if IN_WORKER or console._live is not None:
 		return nullcontext()
 	return console.status(*args, **kwargs)
 # handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
@@ -61,6 +61,235 @@ FORMATTERS = {
 	'match': lambda match: f'[link={match}]{match}[/]' if match else '',
 	'_source': lambda source: f'[bold gold3]{source}[/]'
 }
+
+
+class FullScreenPrompt:
+	"""Full-screen terminal prompt input with multiline support.
+
+	Renders a centered prompt area that fills the terminal, similar to
+	Claude Code's input style. Supports multiline editing with word wrap
+	display.
+
+	Usage:
+		result = FullScreenPrompt("What do you want to do?").show()
+
+	Returns:
+		str: The user's input text, or None if cancelled.
+	"""
+
+	def __init__(self, title="Enter your prompt", placeholder="Type your prompt here..."):
+		self.title = title
+		self.placeholder = placeholder
+		self.lines = [""]
+		self.cursor_line = 0
+		self.cursor_col = 0
+
+	def _read_key(self, fd):
+		"""Read a single keypress, handling escape sequences."""
+		import os
+		import select
+		ch = os.read(fd, 1).decode(errors='ignore')
+		if ch == '\x1b':
+			if not select.select([fd], [], [], 0.03)[0]:
+				return 'escape'
+			seq = ch + os.read(fd, 2).decode(errors='ignore')
+			if seq in ('\x1b[A', '\x1bOA'):
+				return 'up'
+			elif seq in ('\x1b[B', '\x1bOB'):
+				return 'down'
+			elif seq in ('\x1b[C', '\x1bOC'):
+				return 'right'
+			elif seq in ('\x1b[D', '\x1bOD'):
+				return 'left'
+			elif seq == '\x1b[3':
+				# Read the ~ for delete key
+				os.read(fd, 1)
+				return 'delete'
+			return 'ignore'
+		elif ch == '\r' or ch == '\n':
+			return 'enter'
+		elif ch == '\x03':
+			return 'ctrl_c'
+		elif ch == '\x04':
+			return 'ctrl_d'
+		elif ch == '\t':
+			return 'tab'
+		elif ch == '\x7f' or ch == '\x08':
+			return 'backspace'
+		else:
+			return ch
+
+	def _render(self):
+		"""Render the prompt to a string using Rich."""
+		from io import StringIO
+		buf = StringIO()
+		w = console.width
+		h = console.height
+		render_console = Console(file=buf, force_terminal=True, width=w)
+
+		# Top border
+		render_console.print(f"[dim]{'─' * w}[/]")
+		render_console.print()
+
+		# Title
+		render_console.print(f"  [bold cyan]{self.title}[/]")
+		render_console.print()
+
+		# Input area
+		text = '\n'.join(self.lines)
+		if text:
+			for i, line in enumerate(self.lines):
+				if i == self.cursor_line:
+					# Show cursor
+					before = line[:self.cursor_col]
+					after = line[self.cursor_col:]
+					render_console.print(f"  [bold white]  {before}[/][on white] [/][bold white]{after}[/]")
+				else:
+					render_console.print(f"  [white]  {line}[/]")
+		else:
+			render_console.print(f"  [dim]  {self.placeholder}[/][on white] [/]")
+
+		# Fill remaining space
+		used_lines = 5 + max(len(self.lines), 1)
+		remaining = h - used_lines - 3
+		for _ in range(max(0, remaining)):
+			render_console.print()
+
+		# Bottom help
+		render_console.print()
+		render_console.print("[gray42]  Ctrl+D: submit  •  Enter: new line  •  Esc: cancel[/]")
+		render_console.print(f"[dim]{'─' * w}[/]")
+
+		return buf.getvalue()
+
+	def _line_count(self, text):
+		return text.count('\n')
+
+	def show(self):
+		"""Display the prompt and handle input. Returns text or None."""
+		import sys
+		import tty
+		import termios
+
+		if not sys.stdin.isatty():
+			return None
+
+		fd = sys.stdin.fileno()
+		old_settings = termios.tcgetattr(fd)
+
+		try:
+			tty.setraw(fd)
+
+			# Clear screen and render
+			sys.stderr.write("\033[2J\033[H")
+			output = self._render().replace('\n', '\r\n')
+			sys.stderr.write(output)
+			sys.stderr.flush()
+
+			while True:
+				key = self._read_key(fd)
+
+				if key == 'ctrl_c' or key == 'escape':
+					# Restore screen
+					sys.stderr.write("\033[2J\033[H")
+					sys.stderr.flush()
+					return None
+
+				elif key == 'ctrl_d':
+					# Submit
+					text = '\n'.join(self.lines).strip()
+					sys.stderr.write("\033[2J\033[H")
+					sys.stderr.flush()
+					return text if text else None
+
+				elif key == 'enter':
+					# New line
+					rest = self.lines[self.cursor_line][self.cursor_col:]
+					self.lines[self.cursor_line] = self.lines[self.cursor_line][:self.cursor_col]
+					self.cursor_line += 1
+					self.lines.insert(self.cursor_line, rest)
+					self.cursor_col = 0
+
+				elif key == 'backspace':
+					if self.cursor_col > 0:
+						line = self.lines[self.cursor_line]
+						self.lines[self.cursor_line] = line[:self.cursor_col - 1] + line[self.cursor_col:]
+						self.cursor_col -= 1
+					elif self.cursor_line > 0:
+						# Merge with previous line
+						prev_len = len(self.lines[self.cursor_line - 1])
+						self.lines[self.cursor_line - 1] += self.lines[self.cursor_line]
+						self.lines.pop(self.cursor_line)
+						self.cursor_line -= 1
+						self.cursor_col = prev_len
+
+				elif key == 'delete':
+					line = self.lines[self.cursor_line]
+					if self.cursor_col < len(line):
+						self.lines[self.cursor_line] = line[:self.cursor_col] + line[self.cursor_col + 1:]
+					elif self.cursor_line < len(self.lines) - 1:
+						self.lines[self.cursor_line] += self.lines[self.cursor_line + 1]
+						self.lines.pop(self.cursor_line + 1)
+
+				elif key == 'left':
+					if self.cursor_col > 0:
+						self.cursor_col -= 1
+					elif self.cursor_line > 0:
+						self.cursor_line -= 1
+						self.cursor_col = len(self.lines[self.cursor_line])
+
+				elif key == 'right':
+					if self.cursor_col < len(self.lines[self.cursor_line]):
+						self.cursor_col += 1
+					elif self.cursor_line < len(self.lines) - 1:
+						self.cursor_line += 1
+						self.cursor_col = 0
+
+				elif key == 'up':
+					if self.cursor_line > 0:
+						self.cursor_line -= 1
+						self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_line]))
+
+				elif key == 'down':
+					if self.cursor_line < len(self.lines) - 1:
+						self.cursor_line += 1
+						self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_line]))
+
+				elif key == 'tab':
+					# Insert spaces for tab
+					self.lines[self.cursor_line] = (
+						self.lines[self.cursor_line][:self.cursor_col]
+						+ '    '
+						+ self.lines[self.cursor_line][self.cursor_col:]
+					)
+					self.cursor_col += 4
+
+				elif len(key) == 1 and key.isprintable():
+					self.lines[self.cursor_line] = (
+						self.lines[self.cursor_line][:self.cursor_col]
+						+ key
+						+ self.lines[self.cursor_line][self.cursor_col:]
+					)
+					self.cursor_col += 1
+
+				elif key == 'ignore':
+					continue
+				else:
+					continue
+
+				# Re-render
+				sys.stderr.write("\033[2J\033[H")
+				output = self._render().replace('\n', '\r\n')
+				sys.stderr.write(output)
+				sys.stderr.flush()
+
+		except (KeyboardInterrupt, EOFError):
+			sys.stderr.write("\033[2J\033[H")
+			sys.stderr.flush()
+			return None
+		finally:
+			termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+			termios.tcflush(fd, termios.TCIFLUSH)
 
 
 class InteractiveMenu:
@@ -127,14 +356,43 @@ class InteractiveMenu:
 			return ch
 
 	def _render(self):
-		"""Render the menu to a string using Rich."""
+		"""Render the menu to a string using Rich, with scrolling viewport."""
+		import shutil
 		from io import StringIO
 		buf = StringIO()
 		render_console = Console(file=buf, force_terminal=True, width=console.width)
 		w = console.width
+
+		# Calculate viewport: reserve lines for chrome (title, footer, separators)
+		term_height = shutil.get_terminal_size().lines
+		chrome_lines = 6  # top separator + title + blank + footer + hints + bottom separator
+		# Each option takes 1 line + optional description line
+		has_descriptions = any(opt.get("description") for opt in self.options)
+		lines_per_opt = 2 if has_descriptions else 1
+		max_visible = max(3, (term_height - chrome_lines) // lines_per_opt)
+
+		# Compute visible window around selected item
+		total = len(self.options)
+		if total <= max_visible:
+			win_start, win_end = 0, total
+		else:
+			half = max_visible // 2
+			win_start = self.selected - half
+			win_end = win_start + max_visible
+			if win_start < 0:
+				win_start, win_end = 0, max_visible
+			elif win_end > total:
+				win_end = total
+				win_start = total - max_visible
+
 		render_console.print(f"[dim]{'─' * w}[/]")
 		render_console.print(f"[bold white]{self.title}[/]\n")
-		for i, opt in enumerate(self.options):
+
+		if win_start > 0:
+			render_console.print(f"  [dim]↑ {win_start} more[/]")
+
+		for i in range(win_start, win_end):
+			opt = self.options[i]
 			is_selected = i == self.selected
 			prefix = "[bold cyan]❯[/]" if is_selected else " "
 			num = f"[bold]{i + 1}.[/]"
@@ -156,6 +414,10 @@ class InteractiveMenu:
 			render_console.print(label)
 			if opt.get("description") and not (opt.get("input") and self.in_input_mode):
 				render_console.print(f"     [gray42]{opt['description']}[/]")
+
+		if win_end < total:
+			render_console.print(f"  [dim]↓ {total - win_end} more[/]")
+
 		if self.in_input_mode:
 			render_console.print("\n[gray42]  Enter: confirm  •  Esc: cancel[/]")
 		else:

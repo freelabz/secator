@@ -33,5 +33,5 @@ class CsvExporter(Exporter):
 		else:
 			csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
 
-		info = Info(message=f'Saved CSV reports to {csv_paths_str}')
-		console.print(info)
+		if getattr(self.report.runner, 'print_reports_message', True):
+			console.print(Info(message=f'Saved CSV reports to {csv_paths_str}'))
