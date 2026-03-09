@@ -161,7 +161,7 @@ class TestPrompts(unittest.TestCase):
 		self.assertTrue(len(lines) > 0)
 		first_line = lines[0]
 		parts = first_line.split('|')
-		self.assertEqual(len(parts), 3, f"Expected 3 parts (name|desc|opts), got: {first_line}")
+		self.assertGreaterEqual(len(parts), 4, f"Expected 4+ parts (name|desc|tags|opts[|meta:...]), got: {first_line}")
 
 	def test_build_tasks_reference_includes_ai(self):
 		from secator.ai.prompts import build_tasks_reference

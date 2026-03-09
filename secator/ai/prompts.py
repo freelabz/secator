@@ -13,7 +13,34 @@ ports|1-1000,8080,8443|Comma-separated ports or ranges"""
 # Shared constraints across all modes - XML-tagged for unambiguous parsing by any LLM
 COMMON_RULES = """\
 <tool_calling>
-Always provide ALL required arguments when calling tools. Tool calls with missing arguments are discarded and waste an iteration.
+CRITICAL: Every tool call MUST include a complete JSON arguments object. A tool call with empty arguments {} is invalid and will be rejected. You must always populate name, targets, and any other required fields.
+
+<correct>
+run_task(name="nmap", targets=["10.0.0.1"])
+run_task(name="nmap", targets=["10.0.0.1"], opts={"ports": "1-1000"})
+run_workflow(name="domain_recon", targets=["example.com"])
+run_shell(command="curl -sk https://10.0.0.1/ | head -50")
+run_task(name="ai", targets=["example.com"], opts={"prompt": "Enumerate subdomains", "mode": "attack", "subagent": true, "session_name": "recon-example.com", "max_iterations": 5})
+</correct>
+
+<wrong>
+run_task()
+run_task(name="nmap")
+run_shell()
+</wrong>
+
+When making multiple parallel calls, EACH call must have its own complete arguments:
+<correct>
+Call 1: run_task(name="httpx", targets=["target1.com"])
+Call 2: run_task(name="httpx", targets=["target2.com"])
+Call 3: run_task(name="httpx", targets=["target3.com"])
+</correct>
+
+<wrong>
+Call 1: run_task(name="httpx", targets=["target1.com"])
+Call 2: run_task()
+Call 3: run_task()
+</wrong>
 </tool_calling>
 
 <accuracy>
@@ -272,6 +299,8 @@ def _build_runner_reference(config_type: str) -> str:
 	for r in sorted(runner_refs, key=lambda x: x.name):
 		desc = getattr(r, 'long_description', '') or getattr(r, 'description', '') or ''
 		desc = desc.strip().split('\n')[0][:50]
+		tags = getattr(r, 'tags', []) or []
+		tags_str = f"[{','.join(tags)}]" if tags else ""
 		opts = get_config_options(r)
 		non_meta = []
 		meta_names = []
@@ -281,7 +310,7 @@ def _build_runner_reference(config_type: str) -> str:
 				meta_names.append(opt_name)
 			else:
 				non_meta.append(f"{opt_name}({_format_opt_type(opt_config)})")
-		line = f"{r.name}|{desc}|{','.join(non_meta)}"
+		line = f"{r.name}|{desc}|{tags_str}|{','.join(non_meta)}"
 		if meta_names:
 			line += f"|meta:{','.join(meta_names)}"
 		lines.append(line)
@@ -471,9 +500,17 @@ def format_continue(iteration: int, max_iterations: int, instruction="continue")
 	}, separators=(',', ':'))
 
 
+REFERENCE_FORMAT = """\
+Format: name|description|[tags]|options|meta:shared_options
+- Options: name(type) where type is str, int, float, flag, list, dict, or Choice([...])
+- Meta options are shared across tools and defined in <meta_options>. Each task/workflow lists which ones it supports.
+- Profiles can be applied to any task/workflow via opts: {"profiles": ["profile_name"]}"""
+
+
 def build_library_reference() -> str:
 	"""Build complete library reference in compact format."""
 	sections = [
+		REFERENCE_FORMAT,
 		f"<meta_options>\n{build_meta_options_reference()}\n</meta_options>",
 		f"<tasks>\n{build_tasks_reference()}\n</tasks>",
 		f"<workflows>\n{build_workflows_reference()}\n</workflows>",

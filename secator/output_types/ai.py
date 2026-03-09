@@ -38,6 +38,8 @@ def is_markdown(text: str) -> bool:
 
 def render_markdown_for_rich(text: str, title: str = '') -> str:
 	"""Render Markdown text for rich console output, optionally in a Panel."""
+	# Pre-process: collapse 3+ consecutive newlines to 2 (single blank line)
+	text = re.sub(r'\n{3,}', '\n\n', text)
 	terminal_width = shutil.get_terminal_size().columns
 	console = Console(file=StringIO(), force_terminal=True, width=terminal_width)
 	md = Markdown(text)
@@ -46,7 +48,10 @@ def render_markdown_for_rich(text: str, title: str = '') -> str:
 		console.print(panel)
 	else:
 		console.print(md)
-	return console.file.getvalue()
+	# Post-process: collapse consecutive blank lines in rendered output
+	output = console.file.getvalue()
+	output = re.sub(r'(\n\s*){3,}', '\n\n', output)
+	return output
 
 
 # AI content type configurations

@@ -1,8 +1,6 @@
 """Tool schema definitions for native LLM tool calling."""
 
 from secator.ai.prompts import get_mode_config
-from secator.output_types import Warning
-from secator.rich import console
 
 # Map tool names to action types used by existing action handlers
 TOOL_ACTION_MAP = {
@@ -187,6 +185,5 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	if action_type is None:
 		return None
 	if not arguments:
-		console.print(Warning(message=f'Empty tool call for {tool_name} (missing arguments), skipping'))
 		return None
 	return {"action": action_type, **arguments}

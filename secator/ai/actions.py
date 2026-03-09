@@ -114,8 +114,16 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		tpl = TemplateLoader(name=f'workflows/{name}')
 		runner_cls = Workflow
 
+	# Flatten targets (LLMs sometimes pass nested lists) and decrypt
+	flat_targets = []
+	for t in targets:
+		if isinstance(t, list):
+			flat_targets.extend(t)
+		else:
+			flat_targets.append(t)
+	targets = flat_targets
 	if ctx.encryptor:
-		targets = [ctx.encryptor.decrypt(t) for t in targets]
+		targets = [ctx.encryptor.decrypt(str(t)) for t in targets]
 
 	if ctx.dry_run:
 		yield Info(message=f"[DRY RUN] Would run {runner_type}: {name} on {targets}")
@@ -129,9 +137,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		run_opts = {
 			"print_item": True,
 			"print_line": ctx.verbose and not ctx.silent,
-			"print_cmd": not ctx.silent,
+			"print_cmd": not ctx.silent and not ctx.subagent,
 			"print_cmd_icon": "└",
-			"print_description": not ctx.silent,
 			"print_progress": False,
 			"print_reports_message": False,
 			"enable_reports": True,
@@ -141,8 +148,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			**opts,
 		}
 		if runner_type == "workflow":
-			run_opts["print_start"] = not ctx.silent
-			run_opts["print_end"] = not ctx.silent
+			run_opts["print_start"] = not ctx.silent and not ctx.subagent
+			run_opts["print_end"] = not ctx.silent and not ctx.subagent
 
 		context = ctx.context.copy()
 		context["task_chunk_id"] = str(uuid.uuid4())
@@ -375,6 +382,7 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 				yield Padding(Panel(
 					self.make_tasks_table(self.tasks),
 					title='[bold]Batch execution[/]',
+					title_align='left',
 					border_style='bold gold3',
 					expand=True,
 					highlight=True), pad=(1, 0, 0, 0))

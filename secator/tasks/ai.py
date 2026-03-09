@@ -438,6 +438,11 @@ class ai(PythonRunner):
 				tool_calls = result.get("tool_calls", [])
 				usage = result.get("usage", {})
 
+				# Debug: log raw LLM response
+				self.debug(f'[llm] content: {response_content[:200] if response_content else "(empty)"}')
+				if tool_calls:
+					self.debug(f'[llm] tool_calls: {json.dumps(tool_calls, indent=2)}')
+
 				# Handle empty response (no content and no tool calls)
 				if not response_content and not tool_calls:
 					yield Warning(message="LLM returned empty response")
@@ -450,6 +455,7 @@ class ai(PythonRunner):
 				# Convert tool_calls to actions
 				actions = []
 				tc_action_pairs = []  # list of (tool_call_dict, action_dict) tuples
+				failed_tool_calls = []  # tool calls that failed validation (empty args, unknown tool)
 				for tc in tool_calls:
 					args = tc["arguments"]
 					if encryptor:
@@ -459,7 +465,9 @@ class ai(PythonRunner):
 						actions.append(action)
 						tc_action_pairs.append((tc, action))
 					else:
-						self.debug(f'[tool_call] skipping unknown tool: {tc["name"]}')
+						reason = "empty arguments" if not args else f"unknown tool '{tc['name']}'"
+						self.debug(f'[tool_call] skipping {tc["name"]}: {reason}')
+						failed_tool_calls.append((tc, reason))
 
 				# Display response content as-is
 				if response_content:
@@ -493,6 +501,14 @@ class ai(PythonRunner):
 							},
 						})
 					history.add_assistant_with_tool_calls(response_content or None, litellm_tool_calls)
+
+					# Send error feedback for failed tool calls so the LLM can retry
+					for tc, reason in failed_tool_calls:
+						error_msg = json.dumps({
+							"error": f"Tool call rejected: {reason}",
+							"hint": "Retry with all required arguments. See tool_calling examples in your instructions.",
+						}, separators=(',', ':'))
+						history.add_tool_result(tc["id"], error_msg, name=tc["name"])
 				else:
 					history.add_assistant(response_content)
 
@@ -639,6 +655,11 @@ class ai(PythonRunner):
 				if actions and actions[-1].get("action") == "query" and query_extensions < max_query_extensions:
 					max_iter += 1
 					query_extensions += 1
+
+				# If all tool calls failed, let the LLM retry with error feedback
+				if not actions and failed_tool_calls:
+					yield Warning(message=f"{len(failed_tool_calls)} tool call(s) rejected (empty arguments), retrying...")
+					continue
 
 				# Show menu if follow_up, no actions, or max_iter reached
 				if follow_up_choices is not None or not actions or iteration == max_iter:
