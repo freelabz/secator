@@ -136,6 +136,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			"enable_reports": True,
 			"exporters": [],
 			"sync": True,
+			"tty": False,
 			**opts,
 		}
 		if runner_type == "workflow":

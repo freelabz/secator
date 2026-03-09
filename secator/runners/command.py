@@ -186,6 +186,9 @@ class Command(Runner):
 		# Print cmd
 		self.print_cmd = self.run_opts.get('print_cmd', False)
 
+		# TTY availability (can be explicitly disabled for non-interactive contexts)
+		self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
+
 		# Stat update
 		self.last_updated_stat = None
 
@@ -818,8 +821,12 @@ class Command(Runner):
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
-		if not sys.stdin.isatty():
-			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
+		if not self.has_tty:
+			error = (
+				"Sudo password required but no TTY available (non-interactive mode). "
+				"Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), "
+				"or configure passwordless sudo."
+			)
 			return -1, error
 
 		# If not, prompt the user for a password
