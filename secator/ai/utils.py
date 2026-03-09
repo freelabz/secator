@@ -369,7 +369,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 				ctx_window = get_context_window(model)
 				usable = ctx_window - OUTPUT_TOKEN_RESERVATION
 				pct_used = (by_role["total"] / usable * 100) if usable > 0 else 0
-				if pct_used >= 50:
+				if pct_used >= 25:
 					default_options.append({"label": f"Compact context ({pct_used:.0f}% full)", "action": "compact"})
 			except Exception:
 				pass
@@ -421,9 +421,8 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 			old_tokens = history.count_tokens(model)
 			history.compact(model)
 			new_tokens = history.count_tokens(model)
-			continue_msg = format_continue(0, max_iterations, instruction=f"Context compacted: {old_tokens} -> {new_tokens} tokens. Continue.")  # noqa: E501
-			history.add_user(_maybe_encrypt(continue_msg, encryptor))
-			return (f"Compacted context: {old_tokens} -> {new_tokens} tokens", max_iterations)
+			console.print(f"[bold green]Compacted context: {old_tokens} -> {new_tokens} tokens[/]")
+			return prompt_user(history, encryptor, max_iterations, choices, mode, model)
 
 		# exit
 		return None

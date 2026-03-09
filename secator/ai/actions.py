@@ -33,6 +33,7 @@ class ActionContext:
 	max_workers: int = 3
 	subagent: bool = False
 	silent: bool = False
+	sync: bool = True
 	_query_engine: Any = field(default=None, repr=False)
 
 	def get_query_engine(self):
@@ -129,14 +130,14 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			"print_item": True,
 			"print_line": ctx.verbose and not ctx.silent,
 			"print_cmd": not ctx.silent,
-			"print_cmd_icon": "├",
+			"print_cmd_icon": "└",
 			"print_description": not ctx.silent,
 			"print_progress": False,
 			"print_reports_message": False,
 			"enable_reports": True,
 			"exporters": [],
-			"sync": True,
-			"tty": False,
+			"sync": ctx.sync,
+			"tty": not ctx.subagent and ctx.sync,
 			**opts,
 		}
 		if runner_type == "workflow":
@@ -264,7 +265,7 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	from secator.output_types import FINDING_TYPES
 
 	finding_type = action.get("_type", "")
-	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type")}
+	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type", "_tool_call_id")}
 
 	# Decrypt field values
 	if ctx.encryptor:

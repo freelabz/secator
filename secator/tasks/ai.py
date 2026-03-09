@@ -24,7 +24,7 @@ from secator.ai.prompts import (
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action
 from secator.ai.session import save_history, show_session_picker, replay_session
-from secator.ai.utils import call_llm, setup_ai, prompt_user
+from secator.ai.utils import call_llm, init_llm, setup_ai, prompt_user
 
 
 DEFAULT_API_KEY = CONFIG.addons.ai.api_key
@@ -82,6 +82,16 @@ class ai(PythonRunner):
 			"default": True,
 			"help": "Show context window usage warnings at 50%/75%"
 		},
+		"async_tasks": {
+			"is_flag": True,
+			"default": False,
+			"help": "Run tasks/workflows asynchronously (via Celery worker)"
+		},
+		"show_prompt": {
+			"is_flag": True,
+			"default": False,
+			"help": "Render and display the system prompt, then exit"
+		},
 	}
 
 	@classmethod
@@ -102,6 +112,14 @@ class ai(PythonRunner):
 
 		if not ADDONS_ENABLED['ai']:
 			yield Error(message='Missing ai addon: please run "secator install addons ai".')
+			return
+
+		# Handle --show-prompt: render and display the system prompt, then exit
+		if self.run_opts.get("show_prompt", False):
+			mode = self.run_opts.get("mode", "") or "attack"
+			system_prompt = get_system_prompt(mode)
+			console.print(f"[bold orange3]System prompt ({mode})[/]\n")
+			console.print(system_prompt, highlight=False, soft_wrap=True)
 			return
 
 		# Handle --resume: show session picker, replay, and continue
@@ -246,6 +264,8 @@ class ai(PythonRunner):
 		dry_run = self.run_opts.get("dry_run", False)
 		verbose = self.run_opts.get("verbose", False)
 		interactive = self.run_opts.get("interactive", True)
+		if not self.sync:
+			interactive = False
 		context_warnings = self.run_opts.get("context_warnings", True)
 
 		# Check if internal subagent
@@ -261,6 +281,7 @@ class ai(PythonRunner):
 			self.print_error = False
 
 		import litellm
+		init_llm(api_key=api_key)
 
 		if resumed_history:
 			# Use restored history as-is (already has system prompt, messages, token caches)
@@ -281,9 +302,8 @@ class ai(PythonRunner):
 					"- When calling tools, send ONLY the tool calls with no text content\n"
 					"- Only send a text response as your FINAL message: a concise summary of findings and results\n"
 					"- Be efficient: execute actions, analyze results, repeat until done, then summarize\n"
-					"- When finding a vulnerability, do NOT use follow_up (it will stop you). "
-					"Instead, spawn an exploiter subagent (mode: \"exploiter\") with full vulnerability details "
-					"to handle verification and PoC.\n"
+					"- When finding a vulnerability, spawn an exploiter subagent (mode: \"exploiter\") "
+					"with full vulnerability details to handle verification and PoC.\n"
 				)
 				if passed_context:
 					system_prompt += "\n### SUBAGENT CONTEXT\n"
@@ -312,16 +332,19 @@ class ai(PythonRunner):
 		# Create action context
 		scope = "current" if previous_results else "workspace"
 		max_workers = int(self.run_opts.get("max_workers", 3))
+		async_tasks = self.run_opts.get("async_tasks", False)
+		sync = False if async_tasks else self.sync
 		ctx = ActionContext(
 			targets=targets, model=model, encryptor=encryptor,
 			dry_run=dry_run, verbose=verbose,
 			context=self.context or {},
 			scope=scope, results=previous_results or [],
 			max_workers=max_workers,
-			subagent=is_subagent)
+			subagent=is_subagent,
+			sync=sync)
 
 		# Build tool schemas for native tool calling
-		tool_schemas = build_tool_schemas(mode)
+		tool_schemas = build_tool_schemas(mode, is_subagent=is_subagent)
 
 		# When resuming, prompt user for new instructions before entering the loop
 		if resumed_history and interactive:
@@ -331,7 +354,7 @@ class ai(PythonRunner):
 				save_history(history, self.reports_folder, debug_fn=self.debug)
 				return
 			mode, max_iter, items = result
-			tool_schemas = build_tool_schemas(mode)
+			tool_schemas = build_tool_schemas(mode, is_subagent=is_subagent)
 			yield from items
 
 		iteration = 0
@@ -622,11 +645,6 @@ class ai(PythonRunner):
 					if not interactive:
 						save_history(history, self.reports_folder, debug_fn=self.debug)
 						return
-					if not follow_up_choices:
-						if iteration == max_iter:
-							yield Ai(content="Max iterations reached. What should I do next?", ai_type="follow_up")
-						elif not actions:
-							yield Ai(content="No actions to execute. What should I do next?", ai_type="follow_up")
 					result = self._prompt_and_redetect(
 						history, encryptor, max_iter, follow_up_choices or [], mode, api_base, api_key, model=model)
 					if result is None:
@@ -634,7 +652,7 @@ class ai(PythonRunner):
 						return
 					mode, max_iter, items = result
 					# Rebuild tool schemas if mode changed
-					tool_schemas = build_tool_schemas(mode)
+					tool_schemas = build_tool_schemas(mode, is_subagent=is_subagent)
 					yield from items
 					continue
 
@@ -655,7 +673,7 @@ class ai(PythonRunner):
 					return
 				mode, max_iter, items = result
 				# Rebuild tool schemas if mode changed
-				tool_schemas = build_tool_schemas(mode)
+				tool_schemas = build_tool_schemas(mode, is_subagent=is_subagent)
 				yield from items
 				continue
 

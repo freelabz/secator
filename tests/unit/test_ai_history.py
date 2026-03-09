@@ -226,17 +226,22 @@ class TestChatHistory(unittest.TestCase):
         # All messages returned (no truncation)
         self.assertEqual(len(messages), 22)
 
-    def test_summarize_with_llm_few_messages(self):
-        """Summarization skipped when <= 2 messages."""
+    @patch('secator.ai.history.litellm')
+    def test_maybe_summarize_skips_when_not_needed(self, mock_litellm):
+        """Summarization skipped when context usage is below threshold."""
+        mock_litellm.token_counter.return_value = 10
+        mock_litellm.get_model_info.return_value = {"max_input_tokens": 128000}
+
         history = ChatHistory()
         history.add_system("system")
         history.add_user("user")
 
         original_messages = history.to_messages()
-        history._summarize_with_llm("test-model")
+        compacted, old_tokens, new_tokens = history.maybe_summarize("test-model")
 
-        # Messages should be unchanged (skipped)
-        self.assertEqual(history.to_messages(), original_messages)
+        # Should not compact (well under threshold)
+        self.assertFalse(compacted)
+        self.assertEqual(old_tokens, new_tokens)
 
 
     @patch('secator.ai.history.litellm')

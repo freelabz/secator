@@ -153,20 +153,23 @@ TOOL_SCHEMAS = {
 }
 
 
-def build_tool_schemas(mode: str) -> list:
+def build_tool_schemas(mode: str, is_subagent: bool = False) -> list:
 	"""Return list of tool schemas filtered by mode's allowed_actions.
 
 	Args:
 		mode: The AI mode (attack, chat, exploiter). Unknown modes fall back to chat.
+		is_subagent: If True, exclude follow_up tool.
 
 	Returns:
 		List of OpenAI-format tool schema dicts.
 	"""
 	config = get_mode_config(mode)
 	allowed_actions = config["allowed_actions"]
+	excluded = {'follow_up'} if is_subagent else set()
 	return [
 		schema for tool_name, schema in TOOL_SCHEMAS.items()
 		if TOOL_ACTION_MAP.get(tool_name) in allowed_actions
+		and TOOL_ACTION_MAP.get(tool_name) not in excluded
 	]
 
 
