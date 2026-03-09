@@ -11,10 +11,10 @@ wordlist|name_or_path|Use predefined name or file path
 ports|1-1000,8080,8443|Comma-separated ports or ranges"""
 
 COMMON_RULES = """\
-- Keep responses concise: max 100 lines (unless user asks for more). Be direct and actionable.
-- When analyzing tool outputs between iterations, keep your analysis to 1-2 sentences MAX. Save detailed analysis for the final summary.
+- Keep responses concise and actionable. For intermediary analysis between iterations, stay brief (1-2 sentences). For final summaries, scale the report to the complexity of the user's request: brief report for simple tasks, detailed report for complex engagements.
 - ALWAYS provide ALL required arguments when calling tools. Every tool call MUST include the "name" parameter - tool calls with missing arguments will be discarded.
 - NEVER INVENT details, rely on the user data
+- NEVER use shell commands to write reports, summaries, or analysis to files. Return your analysis, PoCs, and summaries directly as text responses - they will be rendered as markdown in the terminal.
 - NEVER use placeholders in options like "<target>", "<url>", "<your_wordlist>". All values must be concrete and usable. The user cannot interact with actions - they run autonomously.
 - When making vulnerability summaries, include the matched_at targets so we know what is impacted
 - ONLY use the add_finding tool when user request you to add a finding to the workspace explicitly or you have validated the finding with concrete evidence.
