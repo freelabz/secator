@@ -184,5 +184,6 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	if action_type is None:
 		return None
 	if not arguments:
-		console.print(Warning(message=f'Empty tool call for {tool_name} (missing arguments)'))
+		console.print(Warning(message=f'Empty tool call for {tool_name} (missing arguments), skipping'))
+		return None
 	return {"action": action_type, **arguments}
