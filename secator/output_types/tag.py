@@ -34,7 +34,7 @@ class Tag(OutputType):
 	def __str__(self) -> str:
 		return self.match
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		content = self.value
 		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{self.name}[/]'
 		small_content = False
@@ -70,4 +70,7 @@ class Tag(OutputType):
 					ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

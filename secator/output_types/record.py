@@ -30,10 +30,13 @@ class Record(OutputType):
 	def __str__(self) -> str:
 		return self.name
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = rf'🎤 [bold white]{self.name}[/] \[[green]{self.type}[/]]'
 		if self.host:
 			s += rf' \[[magenta]{self.host}[/]]'
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

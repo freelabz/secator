@@ -19,7 +19,7 @@ from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progre
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
-from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update, autodetect_type, sanitize_folder_name)
+from secator.utils import (debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name)
 from secator.tree import build_runner_tree
 from secator.loader import get_configs_by_type
 
@@ -595,7 +595,7 @@ class Runner:
 		self.uuids.add(item._uuid)
 		self.results.append(item)
 		self.results_count += 1
-		if output and item._type not in ['stat', 'progress']:
+		if output and isinstance(item, (Info, Warning, Error)):
 			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
@@ -666,11 +666,14 @@ class Runner:
 
 				# Repr output
 				if item_out:
-					item_repr = repr(item)
+					rich_str = item.__rich__() if hasattr(item, '__rich__') else repr(item)
+					if not rich_str or not rich_str.strip():
+						return
 					if self.print_remote_info and item._source:
-						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
-					# item_repr += f' ({self.__class__.__name__}) ({item._uuid}) ({item._context.get("ancestor_id")})'  # for debugging
-					self._print(item_repr, out=item_out)
+						rich_str += rf' \[[dim]{item._source}[/]]'
+					# rich_str += f' ({self.__class__.__name__}) ({item._uuid}) ({item._context.get("ancestor_id")})'  # for debugging
+					_console = console_stdout if item_out == sys.stdout else console
+					_console.print(rich_str, end='\n', highlight=False, soft_wrap=True)
 
 		# Item is a line
 		elif isinstance(item, str):

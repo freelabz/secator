@@ -33,11 +33,14 @@ class Error(OutputType):
 	def __str__(self):
 		return self.message
 
-	def __repr__(self):
+	def __rich__(self):
 		s = rf"\[[bold red]ERR[/]] {self.message}"
 		if self.traceback:
 			traceback_pretty = '   ' + _s(self.traceback).replace('\n', '\n   ')
 			if self.traceback_title:
 				traceback_pretty = f'   {self.traceback_title}:\n{traceback_pretty}'
 			s += f'\n[dim]{_s(traceback_pretty)}[/]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self):
+		return rich_to_ansi(self.__rich__())

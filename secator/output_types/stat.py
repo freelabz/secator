@@ -29,7 +29,7 @@ class Stat(OutputType):
 	def __str__(self) -> str:
 		return f'{self.name} ([bold]pid[/]:{self.pid}) ([bold]cpu[/]:{self.cpu:.2f}%) ([bold]memory[/]:{self.memory:.2f}MB / {self.memory_limit}MB)'  # noqa: E501
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = rf'[dim yellow3]📊 {self.name} ([bold]pid[/]:{self.pid}) ([bold]cpu[/]:{self.cpu:.2f}%)'
 		s += rf' ([bold]memory[/]:{self.memory:.2f}MB'
 		if self.memory_limit != -1:
@@ -38,4 +38,7 @@ class Stat(OutputType):
 		if self.net_conns:
 			s += rf' ([bold]connections[/]:{self.net_conns})'
 		s += ' [/]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())
