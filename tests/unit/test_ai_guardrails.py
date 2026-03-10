@@ -2,7 +2,7 @@
 import unittest
 
 from secator.config import CONFIG
-from secator.ai.guardrails import parse_rule, match_rule
+from secator.ai.guardrails import parse_rule, match_rule, detect_targets, detect_paths, classify_command
 
 
 class TestGuardrailsConfig(unittest.TestCase):
@@ -66,6 +66,67 @@ class TestRuleParser(unittest.TestCase):
 		self.assertTrue(match_rule("10.0.0.1:8080", ["10.0.0.1:{port}"]))
 		self.assertTrue(match_rule("10.0.0.1:443", ["10.0.0.1:{port}"]))
 		self.assertFalse(match_rule("10.0.0.2:8080", ["10.0.0.1:{port}"]))
+
+
+class TestDetection(unittest.TestCase):
+
+	def test_detect_targets_ip(self):
+		targets = detect_targets("nmap -sV 10.0.0.1")
+		self.assertIn("10.0.0.1", targets)
+
+	def test_detect_targets_host(self):
+		targets = detect_targets("curl https://example.com/api")
+		self.assertIn("example.com", targets)
+
+	def test_detect_targets_url(self):
+		targets = detect_targets("curl https://example.com:8080/path")
+		self.assertIn("https://example.com:8080/path", targets)
+
+	def test_detect_targets_no_false_positives(self):
+		targets = detect_targets("echo hello world")
+		self.assertEqual(targets, [])
+
+	def test_detect_paths_absolute(self):
+		paths = detect_paths("cat /etc/passwd")
+		self.assertIn("/etc/passwd", paths)
+
+	def test_detect_paths_home(self):
+		paths = detect_paths("cat ~/.ssh/id_rsa")
+		self.assertIn("~/.ssh/id_rsa", paths)
+
+	def test_detect_paths_relative(self):
+		paths = detect_paths("cat ./config.yaml")
+		self.assertIn("./config.yaml", paths)
+
+	def test_detect_paths_no_false_positives(self):
+		paths = detect_paths("nmap --timeout 30 10.0.0.1")
+		self.assertEqual(paths, [])
+
+	def test_classify_read_command(self):
+		self.assertEqual(classify_command("cat"), "read")
+		self.assertEqual(classify_command("grep"), "read")
+		self.assertEqual(classify_command("head"), "read")
+		self.assertEqual(classify_command("tail"), "read")
+		self.assertEqual(classify_command("ls"), "read")
+		self.assertEqual(classify_command("find"), "read")
+		self.assertEqual(classify_command("jq"), "read")
+		self.assertEqual(classify_command("wc"), "read")
+
+	def test_classify_write_command(self):
+		self.assertEqual(classify_command("tee"), "write")
+		self.assertEqual(classify_command("cp"), "write")
+		self.assertEqual(classify_command("mv"), "write")
+		self.assertEqual(classify_command("sed"), "write")
+
+	def test_classify_execute_command(self):
+		self.assertEqual(classify_command("python"), "execute")
+		self.assertEqual(classify_command("python3"), "execute")
+		self.assertEqual(classify_command("bash"), "execute")
+		self.assertEqual(classify_command("node"), "execute")
+
+	def test_classify_other_command(self):
+		self.assertEqual(classify_command("nmap"), "other")
+		self.assertEqual(classify_command("curl"), "other")
 
 
 if __name__ == '__main__':
