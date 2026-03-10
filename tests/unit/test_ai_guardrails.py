@@ -144,24 +144,34 @@ class TestPermissionEngine(unittest.TestCase):
 	# --- Action checks ---
 
 	def test_shell_allowed(self):
-		engine = self._make_engine(allow=["shell(nmap,curl)"])
+		engine = self._make_engine(allow=["shell(nmap,curl)", "target(*)"])
 		result = engine.check_action({"action": "shell", "command": "nmap -sV 10.0.0.1"})
-		self.assertNotEqual(result.decision, "deny")
+		self.assertEqual(result.decision, "allow")
 
-	def test_shell_denied(self):
-		engine = self._make_engine(deny=["shell(rm -rf /*)"])
+	def test_shell_denied_by_command(self):
+		engine = self._make_engine(deny=["shell(rm)"])
 		result = engine.check_action({"action": "shell", "command": "rm -rf /*"})
 		self.assertEqual(result.decision, "deny")
 
 	def test_task_allowed_wildcard(self):
-		engine = self._make_engine(allow=["task(*)"])
+		engine = self._make_engine(allow=["task(*)", "target(*)"])
 		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
-		self.assertNotEqual(result.decision, "deny")
+		self.assertEqual(result.decision, "allow")
 
 	def test_workflow_allowed_wildcard(self):
-		engine = self._make_engine(allow=["workflow(*)"])
+		engine = self._make_engine(allow=["workflow(*)", "target(*)"])
 		result = engine.check_action({"action": "workflow", "name": "recon", "targets": ["example.com"]})
-		self.assertNotEqual(result.decision, "deny")
+		self.assertEqual(result.decision, "allow")
+
+	def test_query_always_allowed(self):
+		engine = self._make_engine()
+		result = engine.check_action({"action": "query", "query": {"_type": "vulnerability"}})
+		self.assertEqual(result.decision, "allow")
+
+	def test_follow_up_always_allowed(self):
+		engine = self._make_engine()
+		result = engine.check_action({"action": "follow_up", "reason": "test"})
+		self.assertEqual(result.decision, "allow")
 
 	# --- Target checks ---
 
