@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import HOST, NAME, TYPE
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, format_object
+from secator.utils import rich_to_ansi, format_object, rich_escape as _s
 
 
 @dataclass
@@ -31,9 +31,9 @@ class Record(OutputType):
 		return self.name
 
 	def __rich__(self) -> str:
-		s = rf'🎤 [bold white]{self.name}[/] \[[green]{self.type}[/]]'
+		s = rf'🎤 [bold white]{_s(self.name)}[/] \[[green]{_s(self.type)}[/]]'
 		if self.host:
-			s += rf' \[[magenta]{self.host}[/]]'
+			s += rf' \[[magenta]{_s(self.host)}[/]]'
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
 		return s

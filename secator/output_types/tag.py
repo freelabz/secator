@@ -36,13 +36,13 @@ class Tag(OutputType):
 
 	def __rich__(self) -> str:
 		content = self.value
-		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{self.name}[/]'
+		s = rf'🏷️  \[[bold yellow]{_s(self.category)}[/]] [bold magenta]{_s(self.name)}[/]'
 		small_content = False
 		if len(content) < 100:
 			small_content = True
 		# content_xs = trim_string(content, max_length=50).replace('\n', '/')
 		if small_content:
-			s += f' [bold orange4]{content}[/]'
+			s += f' [bold orange4]{_s(content)}[/]'
 		if self.match != content:
 			s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''

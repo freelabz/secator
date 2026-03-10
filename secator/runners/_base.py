@@ -667,7 +667,8 @@ class Runner:
 				# Repr output
 				if item_out:
 					rich_str = item.__rich__() if hasattr(item, '__rich__') else repr(item)
-					if not rich_str or not rich_str.strip():
+					if not isinstance(rich_str, str) or not rich_str.strip():
+						debug(f'__rich__() returned non-string or empty for {item._type}', sub='runner.print')
 						return
 					if self.print_remote_info and item._source:
 						rich_str += rf' \[[dim]{item._source}[/]]'
