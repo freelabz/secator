@@ -65,10 +65,26 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	return False
 
 
+def _is_file_path(value: str) -> bool:
+	"""Check if a value looks like a file path rather than a network target."""
+	from pathlib import Path
+	if value.startswith(('/', '~/', './', '../')):
+		return True
+	# Check if it resolves to an existing file/directory
+	try:
+		expanded = Path(value).expanduser()
+		if expanded.exists():
+			return True
+	except (OSError, ValueError):
+		pass
+	return False
+
+
 def detect_targets(command: str) -> List[str]:
 	"""Extract target-like values (IPs, hosts, URLs) from a shell command string.
 
 	Reuses PII_PATTERNS from secator.ai.encryption for IP and host detection.
+	Excludes values that are part of file paths detected by detect_paths().
 
 	Args:
 		command: Shell command string
@@ -78,17 +94,22 @@ def detect_targets(command: str) -> List[str]:
 	"""
 	targets = []
 
+	# First, detect file paths so we can exclude them from target detection
+	paths = detect_paths(command)
+
 	# Detect URLs first (most specific)
 	for match in URL_PATTERN.finditer(command):
 		targets.append(match.group())
 
-	# Detect IPs
+	# Detect IPs (skip if part of a file path)
 	for match in PII_PATTERNS["ipv4"].finditer(command):
 		ip = match.group()
 		if not any(ip in url for url in targets):
+			if any(ip in p for p in paths):
+				continue
 			targets.append(ip)
 
-	# Detect hosts
+	# Detect hosts (skip if part of a file path)
 	cmd_parts = command.split()
 	cmd_name = cmd_parts[0] if cmd_parts else ""
 	for match in PII_PATTERNS["host"].finditer(command):
@@ -98,6 +119,9 @@ def detect_targets(command: str) -> List[str]:
 		if host in targets:
 			continue
 		if host.endswith(('.py', '.sh', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg')):
+			continue
+		# Skip if host appears inside a detected file path
+		if any(host in p for p in paths):
 			continue
 		targets.append(host)
 
@@ -195,6 +219,7 @@ class PermissionResult:
 	decision: str  # 'allow', 'deny', 'ask'
 	reason: str = ""
 	targets: List[str] = field(default_factory=list)
+	paths: List[str] = field(default_factory=list)
 
 
 class PermissionEngine:
@@ -259,8 +284,14 @@ class PermissionEngine:
 					path_result = self._check_values("write", paths)
 				else:
 					path_result = self._check_values("read", paths)
-				if path_result.decision != "allow":
+				if path_result.decision == "deny":
 					return path_result
+				if path_result.decision == "ask":
+					return PermissionResult(
+						decision="ask",
+						reason=path_result.reason,
+						paths=path_result.targets  # _check_values puts ask items in targets
+					)
 
 		if result.decision == "allow":
 			return result
@@ -325,12 +356,16 @@ class PermissionEngine:
 		return PermissionResult(decision="allow")
 
 	def _extract_targets(self, action: Dict) -> List[str]:
-		"""Extract targets from an action for validation."""
+		"""Extract network targets from an action for validation.
+
+		File paths are excluded — they are validated separately via read/write rules.
+		"""
 		action_type = action.get("action", "")
 		if action_type == "shell":
 			return detect_targets(action.get("command", ""))
 		elif action_type in ("task", "workflow"):
-			return action.get("targets", [])
+			# Filter out file paths from task/workflow targets
+			return [t for t in action.get("targets", []) if not _is_file_path(t)]
 		return []
 
 	def add_runtime_allow(self, rules: List[str]) -> None:
@@ -371,6 +406,45 @@ class PermissionEngine:
 
 		unique_rules = list(dict.fromkeys(all_rules))
 		self.add_runtime_allow(unique_rules)
+		return "allow"
+
+	def prompt_path(self, path: str, access_type: str = "read", interactive: bool = True) -> str:
+		"""Show interactive prompt for a path access request.
+
+		Args:
+			path: The file path that needs approval
+			access_type: 'read' or 'write'
+			interactive: If False, auto-deny without prompting
+
+		Returns:
+			'allow' or 'deny'
+		"""
+		if not interactive:
+			return "deny"
+
+		from secator.rich import console, InteractiveMenu
+
+		action_label = "Read from" if access_type == "read" else "Write to"
+		console.print(f"\n[bold yellow]{action_label} [cyan]{path}[/cyan] requires approval.[/]\n")
+
+		parent = '/'.join(path.split('/')[:-1]) if '/' in path else path
+		options = [
+			{"label": f"Allow {access_type}({path})"},
+			{"label": f"Allow {access_type}({parent}/*)"},
+			{"label": "Deny (block this action)"},
+		]
+		result = InteractiveMenu(f"Allow {access_type} access?", options).show()
+
+		if result is None:
+			return "deny"
+
+		idx, _ = result
+		if idx == 2:  # Deny
+			return "deny"
+		elif idx == 0:  # Exact path
+			self.add_runtime_allow([f"{access_type}({path})"])
+		elif idx == 1:  # Parent directory glob
+			self.add_runtime_allow([f"{access_type}({parent}/*)"])
 		return "allow"
 
 	def _show_target_menu(self, target: str, choices: List[Dict]) -> List[int]:

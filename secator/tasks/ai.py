@@ -534,7 +534,9 @@ class ai(PythonRunner):
 				if tc_action_pairs:
 					approved_pairs = []
 					for tc, action in tc_action_pairs:
-						denial = check_guardrails(action, ctx)
+						denial, warnings = check_guardrails(action, ctx)
+						for w in warnings:
+							yield Warning(message=w)
 						if denial:
 							yield Warning(message=denial)
 							error_msg = json.dumps({"error": denial}, separators=(',', ':'))

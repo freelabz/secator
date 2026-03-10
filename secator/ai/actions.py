@@ -4,7 +4,7 @@ import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from secator.output_types import Ai, Error, Info, Warning, OutputType, INTERNAL_FIELDS
 from secator.template import TemplateLoader
@@ -49,7 +49,7 @@ class ActionContext:
 		return self._query_engine
 
 
-def check_guardrails(action: Dict, ctx: ActionContext) -> Optional[str]:
+def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], List[str]]:
 	"""Check action against guardrails before dispatching.
 
 	Must be called from the main thread (before batch/parallel execution)
@@ -60,25 +60,53 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Optional[str]:
 		ctx: Shared action context
 
 	Returns:
-		None if action is allowed, or a denial reason string if blocked.
+		Tuple of (denial_reason, warnings) where denial_reason is None if allowed.
 	"""
 	if ctx.permission_engine is None:
-		return None
+		return None, []
+
+	# Check for non-existent file paths (warn but don't block)
+	from secator.ai.guardrails import detect_paths, classify_command
+	from pathlib import Path
+	action_type = action.get("action", "")
+	warnings = []
+	if action_type == "shell":
+		cmd = action.get("command", "")
+		cmd_name = cmd.split()[0] if cmd.split() else ""
+		cmd_class = classify_command(cmd_name)
+		if cmd_class == "read":
+			for path in detect_paths(cmd):
+				try:
+					expanded = Path(path).expanduser()
+					if not expanded.exists():
+						warnings.append(f"Path does not exist: {path}")
+				except (OSError, ValueError):
+					pass
 
 	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
-		return f"Action denied by guardrails: {result.reason}"
+		return f"Action denied by guardrails: {result.reason}", warnings
 	elif result.decision == "ask":
+		# Handle target prompts
 		for target in result.targets:
 			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.sync)
 			if decision == "deny":
-				return f"Action denied: target {target} not approved"
+				return f"Action denied: target {target} not approved", warnings
+		# Handle path prompts
+		for path in result.paths:
+			cmd = action.get("command", "")
+			cmd_name = cmd.split()[0] if cmd.split() else ""
+			cmd_class = classify_command(cmd_name)
+			access_type = "write" if cmd_class == "write" else "read"
+			decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.sync)
+			if decision == "deny":
+				return f"Action denied: {access_type} access to {path} not approved", warnings
 		# Re-check after prompting
 		recheck = ctx.permission_engine.check_action(action)
 		if recheck.decision != "allow":
-			return f"Action denied after prompt: {recheck.reason}"
+			return f"Action denied after prompt: {recheck.reason}", warnings
 
-	return None
+	return None, warnings
 
 
 def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:

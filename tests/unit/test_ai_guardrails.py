@@ -88,6 +88,15 @@ class TestDetection(unittest.TestCase):
 		targets = detect_targets("curl https://example.com:8080/path")
 		self.assertIn("https://example.com:8080/path", targets)
 
+	def test_detect_targets_excludes_file_paths(self):
+		"""File paths should not be detected as targets."""
+		targets = detect_targets("cat /etc/passwd")
+		self.assertEqual(targets, [])
+
+	def test_detect_targets_excludes_home_paths(self):
+		targets = detect_targets("cat ~/.ssh/id_rsa")
+		self.assertEqual(targets, [])
+
 	def test_detect_targets_no_false_positives(self):
 		targets = detect_targets("echo hello world")
 		self.assertEqual(targets, [])
@@ -239,6 +248,28 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "shell", "command": "cat /etc/shadow"})
 		self.assertEqual(result.decision, "deny")
 
+	def test_read_path_ask(self):
+		engine = self._make_engine(
+			allow=["shell(cat)"],
+			ask=["read(/etc/passwd)"]
+		)
+		result = engine.check_action({"action": "shell", "command": "cat /etc/passwd"})
+		self.assertEqual(result.decision, "ask")
+		self.assertIn("/etc/passwd", result.paths)
+
+	def test_cat_etc_passwd_no_target_prompt(self):
+		"""cat /etc/passwd should NOT trigger a target prompt for 'etc.passwd'."""
+		engine = self._make_engine(
+			allow=["shell(cat)", "read(/tmp/workspace/*)"],
+			ask=["target(*)", "read(*)"],
+			workspace="/tmp/workspace"
+		)
+		result = engine.check_action({"action": "shell", "command": "cat /etc/passwd"})
+		# Should ask about read path, NOT about a target
+		self.assertEqual(result.decision, "ask")
+		self.assertEqual(result.targets, [])
+		self.assertIn("/etc/passwd", result.paths)
+
 	# --- Runtime allow list expansion ---
 
 	def test_add_runtime_allow(self):
@@ -336,7 +367,7 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			targets=["example.com"], model="test", permission_engine=engine
 		)
 		action = {"action": "shell", "command": "curl http://169.254.169.254/latest/meta-data/"}
-		denial = check_guardrails(action, ctx)
+		denial, warnings = check_guardrails(action, ctx)
 		self.assertIsNotNone(denial)
 		self.assertIn("denied", denial.lower())
 
@@ -349,15 +380,28 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			targets=["example.com"], model="test", permission_engine=engine
 		)
 		action = {"action": "shell", "command": "curl https://example.com"}
-		denial = check_guardrails(action, ctx)
+		denial, warnings = check_guardrails(action, ctx)
 		self.assertIsNone(denial)
 
 	def test_check_guardrails_without_engine(self):
-		"""When no permission_engine is set, check_guardrails returns None."""
+		"""When no permission_engine is set, check_guardrails returns (None, [])."""
 		ctx = ActionContext(targets=["example.com"], model="test")
 		action = {"action": "shell", "command": "curl http://169.254.169.254/"}
-		denial = check_guardrails(action, ctx)
+		denial, warnings = check_guardrails(action, ctx)
 		self.assertIsNone(denial)
+		self.assertEqual(warnings, [])
+
+	def test_check_guardrails_warns_nonexistent_path(self):
+		"""Reading a non-existent path should produce a warning."""
+		engine = self._make_engine(allow=["shell(cat)", "read(*)"])
+		ctx = ActionContext(
+			targets=[], model="test", permission_engine=engine
+		)
+		action = {"action": "shell", "command": "cat /nonexistent/path/file.txt"}
+		denial, warnings = check_guardrails(action, ctx)
+		self.assertIsNone(denial)
+		self.assertTrue(len(warnings) > 0)
+		self.assertIn("/nonexistent/path/file.txt", warnings[0])
 
 	def test_dispatch_action_without_engine(self):
 		"""When no permission_engine is set, actions should pass through."""
