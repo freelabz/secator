@@ -215,6 +215,33 @@ class AiAddon(StrictModel):
 	max_tokens_total: int = 100000
 	max_results: int = 500
 	encrypt_pii: bool = True
+	permissions: Dict = {
+		"allow": [
+			"target({targets})",
+			"read({workspace}/*)",
+			"write({workspace}/.outputs/*)",
+			"shell(nmap,httpx,nuclei,curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find)",
+			"task(*)",
+			"workflow(*)",
+		],
+		"deny": [
+			"target(169.254.169.254)",
+			"target(127.0.0.1)",
+			"target(localhost)",
+			"read(/etc/shadow)",
+			"read(~/.ssh/*)",
+			"read(~/.aws/*)",
+			"write(/etc/*)",
+			"write(/usr/*)",
+			"shell(rm -rf /*,dd,mkfs)",
+		],
+		"ask": [
+			"target(*)",
+			"shell(python,bash,node,gcc)",
+			"read(/etc/passwd,.env,*.key,*.pem)",
+			"write({workspace}/*)",
+		],
+	}
 
 
 class Providers(StrictModel):
