@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from secator.config import CONFIG
-from secator.ai.actions import dispatch_action, ActionContext
+from secator.ai.actions import check_guardrails, dispatch_action, ActionContext
 from secator.ai.guardrails import (
 	parse_rule, match_rule, detect_targets, detect_paths, classify_command,
 	build_target_choices, PermissionEngine
@@ -326,8 +326,8 @@ class TestGuardrailsIntegration(unittest.TestCase):
 		}
 		return PermissionEngine(config, targets=targets or [], workspace=workspace)
 
-	def test_dispatch_action_with_denied_shell(self):
-		"""Shell commands to denied targets should be blocked."""
+	def test_check_guardrails_denied_target(self):
+		"""check_guardrails should return denial reason for blocked targets."""
 		engine = self._make_engine(
 			allow=["shell(curl)"],
 			deny=["target(169.254.169.254)"]
@@ -336,19 +336,34 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			targets=["example.com"], model="test", permission_engine=engine
 		)
 		action = {"action": "shell", "command": "curl http://169.254.169.254/latest/meta-data/"}
-		results = list(dispatch_action(action, ctx))
-		has_denial = any(
-			isinstance(r, (Warning, Error)) and "denied" in getattr(r, 'message', '').lower()
-			for r in results
+		denial = check_guardrails(action, ctx)
+		self.assertIsNotNone(denial)
+		self.assertIn("denied", denial.lower())
+
+	def test_check_guardrails_allowed_action(self):
+		"""check_guardrails should return None for allowed actions."""
+		engine = self._make_engine(
+			allow=["shell(curl)", "target(*)"]
 		)
-		self.assertTrue(has_denial, f"Expected denial message, got: {results}")
+		ctx = ActionContext(
+			targets=["example.com"], model="test", permission_engine=engine
+		)
+		action = {"action": "shell", "command": "curl https://example.com"}
+		denial = check_guardrails(action, ctx)
+		self.assertIsNone(denial)
+
+	def test_check_guardrails_without_engine(self):
+		"""When no permission_engine is set, check_guardrails returns None."""
+		ctx = ActionContext(targets=["example.com"], model="test")
+		action = {"action": "shell", "command": "curl http://169.254.169.254/"}
+		denial = check_guardrails(action, ctx)
+		self.assertIsNone(denial)
 
 	def test_dispatch_action_without_engine(self):
 		"""When no permission_engine is set, actions should pass through."""
 		ctx = ActionContext(targets=["example.com"], model="test")
 		action = {"action": "follow_up", "reason": "test"}
 		results = list(dispatch_action(action, ctx))
-		# follow_up should work normally without guardrails
 		has_denial = any(
 			isinstance(r, (Warning, Error)) and "denied" in getattr(r, 'message', '').lower()
 			for r in results

@@ -49,6 +49,38 @@ class ActionContext:
 		return self._query_engine
 
 
+def check_guardrails(action: Dict, ctx: ActionContext) -> Optional[str]:
+	"""Check action against guardrails before dispatching.
+
+	Must be called from the main thread (before batch/parallel execution)
+	because it may show interactive prompts.
+
+	Args:
+		action: Action dict with 'action' key and parameters
+		ctx: Shared action context
+
+	Returns:
+		None if action is allowed, or a denial reason string if blocked.
+	"""
+	if ctx.permission_engine is None:
+		return None
+
+	result = ctx.permission_engine.check_action(action)
+	if result.decision == "deny":
+		return f"Action denied by guardrails: {result.reason}"
+	elif result.decision == "ask":
+		for target in result.targets:
+			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.sync)
+			if decision == "deny":
+				return f"Action denied: target {target} not approved"
+		# Re-check after prompting
+		recheck = ctx.permission_engine.check_action(action)
+		if recheck.decision != "allow":
+			return f"Action denied after prompt: {recheck.reason}"
+
+	return None
+
+
 def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	"""Route action to appropriate handler.
 
@@ -60,24 +92,6 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		OutputType instances (Info, Warning, Error, Ai)
 	"""
 	action_type = action.get("action", "")
-
-	# Guardrails check
-	if ctx.permission_engine is not None:
-		result = ctx.permission_engine.check_action(action)
-		if result.decision == "deny":
-			yield Warning(message=f"Action denied by guardrails: {result.reason}")
-			return
-		elif result.decision == "ask":
-			for target in result.targets:
-				decision = ctx.permission_engine.prompt_target(target, interactive=ctx.sync)
-				if decision == "deny":
-					yield Warning(message=f"Action denied: target {target} not approved")
-					return
-			# Re-check after prompting
-			recheck = ctx.permission_engine.check_action(action)
-			if recheck.decision != "allow":
-				yield Warning(message=f"Action denied after prompt: {recheck.reason}")
-				return
 
 	handlers = {
 		"task": _handle_task,

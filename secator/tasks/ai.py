@@ -16,7 +16,7 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.utils import format_token_count
-from secator.ai.actions import ActionContext, dispatch_action, _run_batch, _decrypt_dict
+from secator.ai.actions import ActionContext, check_guardrails, dispatch_action, _run_batch, _decrypt_dict
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens
 from secator.ai.prompts import (
@@ -528,6 +528,21 @@ class ai(PythonRunner):
 					if action_str:
 						yield Info(message=f"Executing {len(actions)} {action_str} ...")
 					self.debug(json.dumps(actions, indent=4))
+
+				# Guardrails pre-check: validate all actions on main thread before dispatch
+				# This ensures interactive prompts happen before batch/progress panels
+				if tc_action_pairs:
+					approved_pairs = []
+					for tc, action in tc_action_pairs:
+						denial = check_guardrails(action, ctx)
+						if denial:
+							yield Warning(message=denial)
+							error_msg = json.dumps({"error": denial}, separators=(',', ':'))
+							history.add_tool_result(tc["id"], error_msg, name=tc["name"])
+						else:
+							approved_pairs.append((tc, action))
+					tc_action_pairs = approved_pairs
+					actions = [a for _, a in tc_action_pairs]
 
 				# Dispatch actions: batch if multiple, single otherwise
 				follow_up_choices = None
