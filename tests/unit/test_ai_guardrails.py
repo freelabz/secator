@@ -2,7 +2,9 @@
 import unittest
 
 from secator.config import CONFIG
-from secator.ai.guardrails import parse_rule, match_rule, detect_targets, detect_paths, classify_command
+from secator.ai.guardrails import (
+	parse_rule, match_rule, detect_targets, detect_paths, classify_command, PermissionEngine
+)
 
 
 class TestGuardrailsConfig(unittest.TestCase):
@@ -127,6 +129,126 @@ class TestDetection(unittest.TestCase):
 	def test_classify_other_command(self):
 		self.assertEqual(classify_command("nmap"), "other")
 		self.assertEqual(classify_command("curl"), "other")
+
+
+class TestPermissionEngine(unittest.TestCase):
+
+	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, workspace="/tmp/workspace"):
+		config = {
+			"allow": allow or [],
+			"deny": deny or [],
+			"ask": ask or [],
+		}
+		return PermissionEngine(config, targets=targets or [], workspace=workspace)
+
+	# --- Action checks ---
+
+	def test_shell_allowed(self):
+		engine = self._make_engine(allow=["shell(nmap,curl)"])
+		result = engine.check_action({"action": "shell", "command": "nmap -sV 10.0.0.1"})
+		self.assertNotEqual(result.decision, "deny")
+
+	def test_shell_denied(self):
+		engine = self._make_engine(deny=["shell(rm -rf /*)"])
+		result = engine.check_action({"action": "shell", "command": "rm -rf /*"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_task_allowed_wildcard(self):
+		engine = self._make_engine(allow=["task(*)"])
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
+		self.assertNotEqual(result.decision, "deny")
+
+	def test_workflow_allowed_wildcard(self):
+		engine = self._make_engine(allow=["workflow(*)"])
+		result = engine.check_action({"action": "workflow", "name": "recon", "targets": ["example.com"]})
+		self.assertNotEqual(result.decision, "deny")
+
+	# --- Target checks ---
+
+	def test_target_allowed_via_targets_variable(self):
+		engine = self._make_engine(
+			allow=["shell(nmap)", "target({targets})"],
+			targets=["10.0.0.1"]
+		)
+		result = engine.check_action({"action": "shell", "command": "nmap 10.0.0.1"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_target_denied(self):
+		engine = self._make_engine(
+			allow=["shell(nmap)"],
+			deny=["target(169.254.169.254)"]
+		)
+		result = engine.check_action({"action": "shell", "command": "nmap 169.254.169.254"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_target_ask_for_unknown(self):
+		engine = self._make_engine(
+			allow=["shell(nmap)"],
+			ask=["target(*)"]
+		)
+		result = engine.check_action({"action": "shell", "command": "nmap 10.5.2.3"})
+		self.assertEqual(result.decision, "ask")
+		self.assertIn("10.5.2.3", result.targets)
+
+	def test_task_target_validation(self):
+		engine = self._make_engine(
+			allow=["task(*)", "target({targets})"],
+			deny=["target(169.254.169.254)"],
+			targets=["example.com"]
+		)
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["169.254.169.254"]})
+		self.assertEqual(result.decision, "deny")
+
+	def test_task_target_allowed(self):
+		engine = self._make_engine(
+			allow=["task(*)", "target({targets})"],
+			targets=["example.com"]
+		)
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["example.com"]})
+		self.assertEqual(result.decision, "allow")
+
+	# --- Path checks ---
+
+	def test_read_path_allowed(self):
+		engine = self._make_engine(
+			allow=["shell(cat)", "read(/tmp/workspace/*)"],
+			workspace="/tmp/workspace"
+		)
+		result = engine.check_action({"action": "shell", "command": "cat /tmp/workspace/report.json"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_read_path_denied(self):
+		engine = self._make_engine(
+			allow=["shell(cat)"],
+			deny=["read(/etc/shadow)"]
+		)
+		result = engine.check_action({"action": "shell", "command": "cat /etc/shadow"})
+		self.assertEqual(result.decision, "deny")
+
+	# --- Runtime allow list expansion ---
+
+	def test_add_runtime_allow(self):
+		engine = self._make_engine(allow=["shell(nmap)"], ask=["target(*)"])
+		result = engine.check_action({"action": "shell", "command": "nmap 10.5.2.3"})
+		self.assertEqual(result.decision, "ask")
+		engine.add_runtime_allow(["target(10.5.2.3)"])
+		result = engine.check_action({"action": "shell", "command": "nmap 10.5.2.3"})
+		self.assertEqual(result.decision, "allow")
+
+	# --- Evaluation order ---
+
+	def test_deny_takes_precedence_over_allow(self):
+		engine = self._make_engine(
+			allow=["shell(nmap)", "target(169.254.169.254)"],
+			deny=["target(169.254.169.254)"]
+		)
+		result = engine.check_action({"action": "shell", "command": "nmap 169.254.169.254"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_default_deny_when_no_rules_match(self):
+		engine = self._make_engine()
+		result = engine.check_action({"action": "shell", "command": "nmap 10.0.0.1"})
+		self.assertEqual(result.decision, "deny")
 
 
 if __name__ == '__main__':

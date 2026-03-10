@@ -1,7 +1,8 @@
 """Permission engine for AI guardrails."""
 import fnmatch
 import re
-from typing import List, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple
 
 from secator.ai.encryption import PII_PATTERNS
 
@@ -143,3 +144,154 @@ def classify_command(cmd_name: str) -> str:
 	if base in EXECUTE_COMMANDS:
 		return "execute"
 	return "other"
+
+
+@dataclass
+class PermissionResult:
+	"""Result of a permission check."""
+	decision: str  # 'allow', 'deny', 'ask'
+	reason: str = ""
+	targets: List[str] = field(default_factory=list)
+
+
+class PermissionEngine:
+	"""Evaluate AI actions against allow/deny/ask permission rules.
+
+	Evaluation order: deny > allow > ask > default deny.
+	Two-step validation: (1) action type check, (2) target/path check.
+	"""
+
+	def __init__(self, config: Dict, targets: List[str] = None, workspace: str = ""):
+		self.targets = targets or []
+		self.workspace = str(workspace)
+		self.rules = {"allow": [], "deny": [], "ask": []}
+		self.runtime_allow: List[Tuple[str, List[str]]] = []
+
+		for category in ("allow", "deny", "ask"):
+			for rule_str in config.get(category, []):
+				resolved = self._resolve_variables(rule_str)
+				rule_type, patterns = parse_rule(resolved)
+				self.rules[category].append((rule_type, patterns))
+
+	def _resolve_variables(self, rule: str) -> str:
+		"""Replace {workspace} and {targets} variables in a rule string."""
+		result = rule.replace("{workspace}", self.workspace)
+		if "{targets}" in result:
+			targets_str = ",".join(self.targets)
+			result = result.replace("{targets}", targets_str)
+		return result
+
+	def check_action(self, action: Dict) -> PermissionResult:
+		"""Validate an action against permission rules (two-step)."""
+		action_type = action.get("action", "")
+
+		# Step 1: Check action itself
+		result = self._check_action_type(action_type, action)
+		if result.decision == "deny":
+			return result
+
+		# Step 2: Check targets (only if target rules are configured)
+		targets_to_check = self._extract_targets(action)
+		if targets_to_check and self._has_rules_for("target"):
+			target_result = self._check_values("target", targets_to_check)
+			if target_result.decision == "deny":
+				return target_result
+			if target_result.decision == "ask":
+				return PermissionResult(
+					decision="ask",
+					reason=target_result.reason,
+					targets=target_result.targets
+				)
+
+		# Step 3: Check paths (for shell commands)
+		if action_type == "shell":
+			command = action.get("command", "")
+			paths = detect_paths(command)
+			if paths and (self._has_rules_for("read") or self._has_rules_for("write")):
+				cmd_name = command.split()[0] if command.split() else ""
+				cmd_class = classify_command(cmd_name)
+				if cmd_class == "read":
+					path_result = self._check_values("read", paths)
+				elif cmd_class == "write":
+					path_result = self._check_values("write", paths)
+				else:
+					path_result = self._check_values("read", paths)
+				if path_result.decision != "allow":
+					return path_result
+
+		if result.decision == "allow":
+			return result
+
+		return PermissionResult(decision="deny", reason=f"No matching rule for {action_type}")
+
+	def _has_rules_for(self, rule_type: str) -> bool:
+		"""Check if any rules exist for the given rule type."""
+		for category in ("allow", "deny", "ask"):
+			for rt, _ in self.rules[category]:
+				if rt == rule_type:
+					return True
+		return any(rt == rule_type for rt, _ in self.runtime_allow)
+
+	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
+		"""Check if the action type is allowed/denied/ask."""
+		if action_type == "shell":
+			command = action.get("command", "")
+			cmd_name = command.split()[0] if command.split() else ""
+			return self._check_value("shell", cmd_name)
+		elif action_type in ("task", "workflow"):
+			name = action.get("name", "")
+			return self._check_value(action_type, name)
+		elif action_type in ("query", "follow_up", "add_finding"):
+			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
+		return PermissionResult(decision="deny", reason=f"Unknown action type: {action_type}")
+
+	def _check_value(self, rule_type: str, value: str) -> PermissionResult:
+		"""Check a single value. Order: deny > allow > ask > deny."""
+		for rt, patterns in self.rules["deny"]:
+			if rt == rule_type and match_rule(value, patterns):
+				return PermissionResult(decision="deny", reason=f"Denied by rule: {rule_type}({value})")
+
+		for rt, patterns in self.rules["allow"]:
+			if rt == rule_type and match_rule(value, patterns):
+				return PermissionResult(decision="allow", reason=f"Allowed by rule: {rule_type}({value})")
+		for rt, patterns in self.runtime_allow:
+			if rt == rule_type and match_rule(value, patterns):
+				return PermissionResult(decision="allow", reason=f"Allowed by runtime rule: {rule_type}({value})")
+
+		for rt, patterns in self.rules["ask"]:
+			if rt == rule_type and match_rule(value, patterns):
+				return PermissionResult(decision="ask", reason=f"Ask for: {rule_type}({value})")
+
+		return PermissionResult(decision="deny", reason=f"No rule for {rule_type}({value})")
+
+	def _check_values(self, rule_type: str, values: List[str]) -> PermissionResult:
+		"""Check multiple values, return the most restrictive result."""
+		ask_targets = []
+		for value in values:
+			result = self._check_value(rule_type, value)
+			if result.decision == "deny":
+				return result
+			if result.decision == "ask":
+				ask_targets.append(value)
+		if ask_targets:
+			return PermissionResult(
+				decision="ask",
+				reason=f"Unknown {rule_type}(s): {', '.join(ask_targets)}",
+				targets=ask_targets
+			)
+		return PermissionResult(decision="allow")
+
+	def _extract_targets(self, action: Dict) -> List[str]:
+		"""Extract targets from an action for validation."""
+		action_type = action.get("action", "")
+		if action_type == "shell":
+			return detect_targets(action.get("command", ""))
+		elif action_type in ("task", "workflow"):
+			return action.get("targets", [])
+		return []
+
+	def add_runtime_allow(self, rules: List[str]) -> None:
+		"""Add rules to the runtime allow list (session-scoped)."""
+		for rule_str in rules:
+			rule_type, patterns = parse_rule(rule_str)
+			self.runtime_allow.append((rule_type, patterns))
