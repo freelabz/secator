@@ -1,9 +1,11 @@
 # tests/unit/test_ai_guardrails.py
 import unittest
+from unittest.mock import patch
 
 from secator.config import CONFIG
 from secator.ai.guardrails import (
-	parse_rule, match_rule, detect_targets, detect_paths, classify_command, PermissionEngine
+	parse_rule, match_rule, detect_targets, detect_paths, classify_command,
+	build_target_choices, PermissionEngine
 )
 
 
@@ -259,6 +261,57 @@ class TestPermissionEngine(unittest.TestCase):
 		engine = self._make_engine()
 		result = engine.check_action({"action": "shell", "command": "nmap 10.0.0.1"})
 		self.assertEqual(result.decision, "deny")
+
+
+class TestTargetPrompt(unittest.TestCase):
+
+	def test_build_target_choices_ip(self):
+		choices = build_target_choices("10.5.2.3")
+		self.assertEqual(len(choices), 5)  # 4 scope options + deny
+		self.assertEqual(choices[0]["label"], "Allow 10.5.2.3 only (host only)")
+		self.assertEqual(choices[0]["rules"], ["target(10.5.2.3)"])
+		self.assertEqual(choices[-1]["label"], "Deny (block this action)")
+
+	def test_build_target_choices_host(self):
+		choices = build_target_choices("example.com")
+		self.assertEqual(len(choices), 5)
+		self.assertIn("example.com", choices[0]["label"])
+
+	def test_build_target_choices_all_of_above(self):
+		choices = build_target_choices("10.5.2.3")
+		all_choice = choices[3]
+		self.assertEqual(all_choice["label"], "All of the above")
+		self.assertTrue(len(all_choice["rules"]) >= 3)
+
+
+class TestPromptTarget(unittest.TestCase):
+
+	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, workspace="/tmp/workspace"):
+		config = {
+			"allow": allow or [],
+			"deny": deny or [],
+			"ask": ask or [],
+		}
+		return PermissionEngine(config, targets=targets or [], workspace=workspace)
+
+	def test_prompt_target_non_interactive_returns_deny(self):
+		engine = self._make_engine(ask=["target(*)"])
+		result = engine.prompt_target("10.5.2.3", interactive=False)
+		self.assertEqual(result, "deny")
+
+	def test_prompt_target_adds_to_runtime_allow(self):
+		engine = self._make_engine(allow=["shell(nmap)"], ask=["target(*)"])
+		with patch.object(engine, '_show_target_menu', return_value=[0]):
+			result = engine.prompt_target("10.5.2.3", interactive=True)
+		self.assertEqual(result, "allow")
+		check = engine.check_action({"action": "shell", "command": "nmap 10.5.2.3"})
+		self.assertEqual(check.decision, "allow")
+
+	def test_prompt_target_deny_choice(self):
+		engine = self._make_engine(allow=["shell(nmap)"], ask=["target(*)"])
+		with patch.object(engine, '_show_target_menu', return_value=[4]):
+			result = engine.prompt_target("10.5.2.3", interactive=True)
+		self.assertEqual(result, "deny")
 
 
 if __name__ == '__main__':

@@ -146,6 +146,49 @@ def classify_command(cmd_name: str) -> str:
 	return "other"
 
 
+def build_target_choices(target: str) -> List[Dict]:
+	"""Build multi-select choices for an unknown target.
+
+	Args:
+		target: The target string (IP, host, domain)
+
+	Returns:
+		List of choice dicts with label, rules, selected keys
+	"""
+	host_rule = f"target({target})"
+	port_rule = f"target({target}:{{port}})"
+	url_rule = f"target((http|https)://{target}:{{port}}/*)"
+
+	choices = [
+		{
+			"label": f"Allow {target} only (host only)",
+			"rules": [host_rule],
+			"selected": False,
+		},
+		{
+			"label": f"Allow {target}:{{port}} (host + all ports)",
+			"rules": [host_rule, port_rule],
+			"selected": False,
+		},
+		{
+			"label": f"Allow (http|https)://{target}:{{port}}/* (host + URLs + all ports)",
+			"rules": [host_rule, port_rule, url_rule],
+			"selected": False,
+		},
+		{
+			"label": "All of the above",
+			"rules": [host_rule, port_rule, url_rule],
+			"selected": False,
+		},
+		{
+			"label": "Deny (block this action)",
+			"rules": [],
+			"selected": False,
+		},
+	]
+	return choices
+
+
 @dataclass
 class PermissionResult:
 	"""Result of a permission check."""
@@ -295,3 +338,60 @@ class PermissionEngine:
 		for rule_str in rules:
 			rule_type, patterns = parse_rule(rule_str)
 			self.runtime_allow.append((rule_type, patterns))
+
+	def prompt_target(self, target: str, interactive: bool = True) -> str:
+		"""Show interactive prompt for an unknown target.
+
+		Args:
+			target: The target string that needs approval
+			interactive: If False, auto-deny without prompting
+
+		Returns:
+			'allow' or 'deny'
+		"""
+		if not interactive:
+			return "deny"
+
+		choices = build_target_choices(target)
+		selected_indices = self._show_target_menu(target, choices)
+
+		if selected_indices is None:
+			return "deny"
+
+		all_rules = []
+		for idx in selected_indices:
+			if idx < len(choices):
+				choice = choices[idx]
+				if not choice["rules"]:  # Deny choice
+					return "deny"
+				all_rules.extend(choice["rules"])
+
+		if not all_rules:
+			return "deny"
+
+		unique_rules = list(dict.fromkeys(all_rules))
+		self.add_runtime_allow(unique_rules)
+		return "allow"
+
+	def _show_target_menu(self, target: str, choices: List[Dict]) -> List[int]:
+		"""Show interactive menu. Separated for testability.
+
+		Args:
+			target: The target being prompted about
+			choices: List of choice dicts from build_target_choices
+
+		Returns:
+			List of selected indices, or None if cancelled
+		"""
+		from secator.rich import console, InteractiveMenu
+
+		console.print(f"\n[bold yellow]Target [cyan]{target}[/cyan] is not in allowed targets. Add it?[/]\n")
+
+		options = [{"label": choice["label"]} for choice in choices]
+		result = InteractiveMenu(f"Select permissions for {target}", options).show()
+
+		if result is None:
+			return None
+
+		idx, _ = result
+		return [idx]
