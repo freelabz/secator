@@ -22,7 +22,7 @@ from secator.ai.history import ChatHistory, truncate_to_tokens
 from secator.ai.prompts import (
 	get_system_prompt, get_mode_config, format_user_initial, format_tool_result, format_continue
 )
-from secator.ai.tools import build_tool_schemas, tool_call_to_action
+from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEMAS
 from secator.ai.session import save_history, show_session_picker, replay_session
 from secator.ai.utils import call_llm, init_llm, setup_ai, prompt_user
 
@@ -517,9 +517,13 @@ class ai(PythonRunner):
 
 					# Send error feedback for failed tool calls so the LLM can retry
 					for tc, reason in failed_tool_calls:
+						tool_name = tc["name"]
+						schema = TOOL_SCHEMAS.get(tool_name, {}).get("function", {})
+						required = schema.get("parameters", {}).get("required", [])
 						error_msg = json.dumps({
-							"error": f"Tool call rejected: {reason}",
-							"hint": "Retry with all required arguments. See tool_calling examples in your instructions.",
+							"error": f"Tool call '{tool_name}' rejected: {reason}",
+							"required_fields": required,
+							"hint": f"You must provide all required fields: {required}. Retry with a complete arguments object.",
 						}, separators=(',', ':'))
 						history.add_tool_result(tc["id"], error_msg, name=tc["name"])
 				else:
@@ -691,7 +695,8 @@ class ai(PythonRunner):
 
 				# If all tool calls failed, let the LLM retry with error feedback
 				if not actions and failed_tool_calls:
-					yield Warning(message=f"{len(failed_tool_calls)} tool call(s) rejected (empty arguments), retrying...")
+					details = "; ".join(f"{tc['name']}(): {reason}" for tc, reason in failed_tool_calls)
+					yield Warning(message=f"{len(failed_tool_calls)} tool call(s) rejected ({details}), retrying...")
 					continue
 
 				# Show menu if follow_up, no actions, or max_iter reached

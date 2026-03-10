@@ -69,6 +69,12 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 			continue
 		if fnmatch.fnmatch(value, pattern):
 			return True
+		# For path patterns ending with /*, also match any nested subpath
+		# e.g. pattern "/home/user/dir/*" should match "/home/user/dir/sub/file.py"
+		if pattern.endswith('/*') and '/' in value:
+			prefix = pattern[:-1]  # "/home/user/dir/"
+			if value.startswith(prefix):
+				return True
 		# For path-like values, also try matching against basename
 		if '/' in value and '/' not in pattern:
 			basename = value.rsplit('/', 1)[-1]
@@ -88,15 +94,14 @@ def _is_file_path(value: str) -> bool:
 	# Explicit path prefixes are always file paths
 	if value.startswith(('/', '~/', './', '../')):
 		return True
-	# For other values containing /, check if file or parent dir exists on disk
-	if '/' in value:
-		from pathlib import Path
-		try:
-			p = Path(value)
-			if p.exists() or p.parent.exists():
-				return True
-		except (OSError, ValueError):
-			pass
+	# Check if file or parent dir exists on disk (handles both bare filenames and relative paths with /)
+	from pathlib import Path
+	try:
+		p = Path(value)
+		if p.exists() or ('/' in value and p.parent.exists()):
+			return True
+	except (OSError, ValueError):
+		pass
 	return False
 
 
@@ -137,6 +142,11 @@ def detect_targets(command: str) -> List[str]:
 		List of detected target strings
 	"""
 	targets = []
+
+	# Docker/podman commands run in a sandbox — skip target detection for internal commands
+	top_cmd = command.strip().split()[0] if command.strip() else ""
+	if top_cmd in ('docker', 'podman'):
+		return targets
 
 	# First, detect file paths so we can exclude them from target detection
 	paths = detect_paths(command)
@@ -237,11 +247,39 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 	"""
 	seen = set()
 	paths = []
+
+	# If the top-level command is docker/podman, only check volume mounts on the
+	# original command. The -c argument may contain nested &&/;/| operators that
+	# split_commands can't reliably parse, and all paths inside the container are
+	# sandboxed anyway.
+	top_cmd = command.strip().split()[0] if command.strip() else ""
+	if top_cmd in ('docker', 'podman'):
+		parts = command.strip().split()
+		for j, p in enumerate(parts):
+			if (p in ('-v', '--volume') and j + 1 < len(parts)):
+				host_path = parts[j + 1].split(':')[0]
+				if _is_file_path(host_path):
+					resolved = _resolve_path(host_path)
+					if resolved not in seen:
+						seen.add(resolved)
+						paths.append((resolved, "read"))
+			elif p.startswith('--mount'):
+				mount_val = p.split('=', 1)[1] if '=' in p else (parts[j + 1] if j + 1 < len(parts) else '')
+				for fld in mount_val.split(','):
+					if fld.startswith(('source=', 'src=')):
+						host_path = fld.split('=', 1)[1]
+						if _is_file_path(host_path):
+							resolved = _resolve_path(host_path)
+							if resolved not in seen:
+								seen.add(resolved)
+								paths.append((resolved, "read"))
+		return paths
+
 	for sub_cmd in split_commands(command):
 		parts = sub_cmd.split()
 		if not parts:
 			continue
-		# Docker/podman commands run in a sandbox — only check volume mount paths
+		# Docker/podman as a sub-command (e.g. "echo foo && docker run ...")
 		if parts[0] in ('docker', 'podman'):
 			for j, p in enumerate(parts):
 				if (p in ('-v', '--volume') and j + 1 < len(parts)):
