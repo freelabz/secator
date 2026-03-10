@@ -334,6 +334,15 @@ class ai(PythonRunner):
 		max_workers = int(self.run_opts.get("max_workers", 3))
 		async_tasks = self.run_opts.get("async_tasks", False)
 		sync = False if async_tasks else self.sync
+		# Initialize permission engine
+		from secator.ai.guardrails import PermissionEngine
+		permissions_config = CONFIG.addons.ai.permissions
+		permission_engine = PermissionEngine(
+			permissions_config,
+			targets=targets,
+			workspace=self.reports_folder or ""
+		)
+
 		ctx = ActionContext(
 			targets=targets, model=model, encryptor=encryptor,
 			dry_run=dry_run, verbose=verbose,
@@ -341,7 +350,8 @@ class ai(PythonRunner):
 			scope=scope, results=previous_results or [],
 			max_workers=max_workers,
 			subagent=is_subagent,
-			sync=sync)
+			sync=sync,
+			permission_engine=permission_engine)
 
 		# Build tool schemas for native tool calling
 		tool_schemas = build_tool_schemas(mode, is_subagent=is_subagent)

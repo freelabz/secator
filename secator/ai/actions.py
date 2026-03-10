@@ -35,6 +35,7 @@ class ActionContext:
 	silent: bool = False
 	sync: bool = True
 	_query_engine: Any = field(default=None, repr=False)
+	permission_engine: Any = field(default=None, repr=False)
 
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries)."""
@@ -59,6 +60,24 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		OutputType instances (Info, Warning, Error, Ai)
 	"""
 	action_type = action.get("action", "")
+
+	# Guardrails check
+	if ctx.permission_engine is not None:
+		result = ctx.permission_engine.check_action(action)
+		if result.decision == "deny":
+			yield Warning(message=f"Action denied by guardrails: {result.reason}")
+			return
+		elif result.decision == "ask":
+			for target in result.targets:
+				decision = ctx.permission_engine.prompt_target(target, interactive=ctx.sync)
+				if decision == "deny":
+					yield Warning(message=f"Action denied: target {target} not approved")
+					return
+			# Re-check after prompting
+			recheck = ctx.permission_engine.check_action(action)
+			if recheck.decision != "allow":
+				yield Warning(message=f"Action denied after prompt: {recheck.reason}")
+				return
 
 	handlers = {
 		"task": _handle_task,

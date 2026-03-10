@@ -3,10 +3,12 @@ import unittest
 from unittest.mock import patch
 
 from secator.config import CONFIG
+from secator.ai.actions import dispatch_action, ActionContext
 from secator.ai.guardrails import (
 	parse_rule, match_rule, detect_targets, detect_paths, classify_command,
 	build_target_choices, PermissionEngine
 )
+from secator.output_types import Warning, Error
 
 
 class TestGuardrailsConfig(unittest.TestCase):
@@ -312,6 +314,46 @@ class TestPromptTarget(unittest.TestCase):
 		with patch.object(engine, '_show_target_menu', return_value=[4]):
 			result = engine.prompt_target("10.5.2.3", interactive=True)
 		self.assertEqual(result, "deny")
+
+
+class TestGuardrailsIntegration(unittest.TestCase):
+
+	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, workspace="/tmp/workspace"):
+		config = {
+			"allow": allow or [],
+			"deny": deny or [],
+			"ask": ask or [],
+		}
+		return PermissionEngine(config, targets=targets or [], workspace=workspace)
+
+	def test_dispatch_action_with_denied_shell(self):
+		"""Shell commands to denied targets should be blocked."""
+		engine = self._make_engine(
+			allow=["shell(curl)"],
+			deny=["target(169.254.169.254)"]
+		)
+		ctx = ActionContext(
+			targets=["example.com"], model="test", permission_engine=engine
+		)
+		action = {"action": "shell", "command": "curl http://169.254.169.254/latest/meta-data/"}
+		results = list(dispatch_action(action, ctx))
+		has_denial = any(
+			isinstance(r, (Warning, Error)) and "denied" in getattr(r, 'message', '').lower()
+			for r in results
+		)
+		self.assertTrue(has_denial, f"Expected denial message, got: {results}")
+
+	def test_dispatch_action_without_engine(self):
+		"""When no permission_engine is set, actions should pass through."""
+		ctx = ActionContext(targets=["example.com"], model="test")
+		action = {"action": "follow_up", "reason": "test"}
+		results = list(dispatch_action(action, ctx))
+		# follow_up should work normally without guardrails
+		has_denial = any(
+			isinstance(r, (Warning, Error)) and "denied" in getattr(r, 'message', '').lower()
+			for r in results
+		)
+		self.assertFalse(has_denial)
 
 
 if __name__ == '__main__':
