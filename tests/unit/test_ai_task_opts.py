@@ -1,7 +1,10 @@
 """Tests for AI task subagent opts."""
 import unittest
 
+from secator.definitions import ADDONS_ENABLED
 
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestAiTaskOpts(unittest.TestCase):
     """Tests for context, subagent, and max_workers opts."""
 

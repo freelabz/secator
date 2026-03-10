@@ -307,8 +307,9 @@ class InteractiveMenu:
 		None: if user pressed Escape or Ctrl+C.
 	"""
 
-	def __init__(self, title, options):
+	def __init__(self, title, options, description=""):
 		self.title = title
+		self.description = description
 		self.options = options
 		self.selected = 0
 		self.typed = ""
@@ -366,10 +367,7 @@ class InteractiveMenu:
 		# Calculate viewport: reserve lines for chrome (title, footer, separators)
 		term_height = shutil.get_terminal_size().lines
 		chrome_lines = 6  # top separator + title + blank + footer + hints + bottom separator
-		# Each option takes 1 line + optional description line
-		has_descriptions = any(opt.get("description") for opt in self.options)
-		lines_per_opt = 2 if has_descriptions else 1
-		max_visible = max(3, (term_height - chrome_lines) // lines_per_opt)
+		max_visible = max(3, (term_height - chrome_lines))
 
 		# Compute visible window around selected item
 		total = len(self.options)
@@ -386,7 +384,10 @@ class InteractiveMenu:
 				win_start = total - max_visible
 
 		render_console.print(f"[dim]{'─' * w}[/]")
-		render_console.print(f"[bold white]{self.title}[/]\n")
+		render_console.print(f"[bold white]{self.title}[/]")
+		if self.description:
+			render_console.print(f"[dim]{self.description}[/]")
+		render_console.print()
 
 		if win_start > 0:
 			render_console.print(f"  [dim]↑ {win_start} more[/]")
@@ -412,8 +413,6 @@ class InteractiveMenu:
 				else:
 					label = f"{prefix} {num} [dim]{opt['label']}[/]"
 			render_console.print(label)
-			if opt.get("description") and not (opt.get("input") and self.in_input_mode):
-				render_console.print(f"     [gray42]{opt['description']}[/]")
 
 		if win_end < total:
 			render_console.print(f"  [dim]↓ {total - win_end} more[/]")

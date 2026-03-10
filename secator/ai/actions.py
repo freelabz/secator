@@ -49,6 +49,27 @@ class ActionContext:
 		return self._query_engine
 
 
+def _build_action_display(action: Dict) -> str:
+	"""Build a display string for the action being checked.
+
+	Returns a concise description of the command/task/workflow for prompt context.
+	"""
+	action_type = action.get("action", "")
+	if action_type == "shell":
+		return action.get("command", "")
+	elif action_type in ("task", "workflow"):
+		name = action.get("name", "")
+		targets = action.get("targets", [])
+		opts = action.get("opts", {})
+		parts = [f"{action_type}: {name}"]
+		if targets:
+			parts.append(f"targets={targets}")
+		if opts:
+			parts.append(f"opts={opts}")
+		return " ".join(parts)
+	return ""
+
+
 def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], List[str]]:
 	"""Check action against guardrails before dispatching.
 
@@ -66,7 +87,7 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 		return None, []
 
 	# Check for non-existent file paths (warn but don't block)
-	from secator.ai.guardrails import detect_paths, classify_command
+	from secator.ai.guardrails import detect_paths, detect_paths_with_access, classify_command, split_commands
 	from pathlib import Path
 	action_type = action.get("action", "")
 	warnings = []
@@ -76,6 +97,9 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 		cmd_class = classify_command(cmd_name)
 		if cmd_class == "read":
 			for path in detect_paths(cmd):
+				# Skip glob patterns — they're not literal paths
+				if any(c in path for c in ('*', '?', '[', ']')):
+					continue
 				try:
 					expanded = Path(path).expanduser()
 					if not expanded.exists():
@@ -87,18 +111,19 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 	if result.decision == "deny":
 		return f"Action denied by guardrails: {result.reason}", warnings
 	elif result.decision == "ask":
+		# Build display string for the command context
+		cmd_display = _build_action_display(action)
 		# Handle target prompts
 		for target in result.targets:
-			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.sync)
+			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.sync, command=cmd_display)
 			if decision == "deny":
 				return f"Action denied: target {target} not approved", warnings
-		# Handle path prompts
+		# Handle path prompts - use detected access type per path
+		cmd = action.get("command", "")
+		path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
 		for path in result.paths:
-			cmd = action.get("command", "")
-			cmd_name = cmd.split()[0] if cmd.split() else ""
-			cmd_class = classify_command(cmd_name)
-			access_type = "write" if cmd_class == "write" else "read"
-			decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.sync)
+			access_type = path_access_map.get(path, "read")
+			decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.sync, command=cmd_display)
 			if decision == "deny":
 				return f"Action denied: {access_type} access to {path} not approved", warnings
 		# Re-check after prompting
@@ -221,8 +246,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			context["subagent"] = ctx.context.get("subagent", True)
 		runner = runner_cls(tpl, targets, run_opts=run_opts, context=context)
 		yield from runner
-		# TODO: verify if yielding raw output would be better than JSON findings
-		# yield Ai(content=runner.output, ai_type="shell_output")
+
+		# Auto-allow reading from the spawned runner's reports folder
+		if ctx.permission_engine and hasattr(runner, 'reports_folder') and runner.reports_folder:
+			reports_path = str(runner.reports_folder)
+			ctx.permission_engine.add_runtime_allow([f"read({reports_path}/*)", f"read({reports_path})"])
 
 	except Exception as e:
 		yield Error(message=f"{runner_type.title()} {name} failed: {e}")

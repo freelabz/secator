@@ -1,7 +1,10 @@
 """Tests for secator.ai.tools module."""
 import unittest
 
+from secator.definitions import ADDONS_ENABLED
 
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestToolSchemas(unittest.TestCase):
 	"""Verify TOOL_SCHEMAS structure and content."""
 
@@ -95,6 +98,7 @@ class TestToolSchemas(unittest.TestCase):
 		self.assertTrue(params.get("additionalProperties", False))
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestBuildToolSchemas(unittest.TestCase):
 	"""Verify build_tool_schemas filters by mode."""
 
@@ -144,6 +148,7 @@ class TestBuildToolSchemas(unittest.TestCase):
 			self.assertEqual(s["type"], "function")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestToolCallToAction(unittest.TestCase):
 	"""Verify tool_call_to_action conversion."""
 

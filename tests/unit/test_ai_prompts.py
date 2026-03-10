@@ -1,19 +1,23 @@
 # tests/unit/test_ai_prompts.py
 import unittest
 
-from secator.ai.prompts import (
-	SYSTEM_ATTACK,
-	SYSTEM_CHAT,
-	SYSTEM_EXPLOITER,
-	MODES,
-	get_system_prompt,
-	get_mode_config,
-	format_user_initial,
-	format_tool_result,
-	format_continue,
-)
+from secator.definitions import ADDONS_ENABLED
+
+if ADDONS_ENABLED['ai']:
+	from secator.ai.prompts import (
+		SYSTEM_ATTACK,
+		SYSTEM_CHAT,
+		SYSTEM_EXPLOITER,
+		MODES,
+		get_system_prompt,
+		get_mode_config,
+		format_user_initial,
+		format_tool_result,
+		format_continue,
+	)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestPrompts(unittest.TestCase):
 
 	# === Structure tests: XML tags ===

@@ -9,8 +9,14 @@ from secator.ai.encryption import PII_PATTERNS
 # URL pattern for target detection
 URL_PATTERN = re.compile(r'https?://[^\s\'"]+')
 
+# Shell operators that chain commands
+SHELL_OPERATORS = re.compile(r'\s*(?:&&|\|\||[;|])\s*')
+
 # Read-type commands
-READ_COMMANDS = frozenset({"cat", "grep", "head", "tail", "ls", "find", "jq", "wc", "less", "more", "file", "strings"})
+READ_COMMANDS = frozenset({
+	"cat", "grep", "head", "tail", "ls", "find", "jq", "wc", "less", "more", "file", "strings",
+	"cd", "pwd", "diff", "git", "stat", "du", "df", "tree", "realpath", "readlink",
+})
 
 # Write-type commands
 WRITE_COMMANDS = frozenset({"tee", "cp", "mv", "sed", "awk", "dd", "install", "mkdir", "touch", "chmod", "chown"})
@@ -44,6 +50,7 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	- Wildcard '*' (matches everything)
 	- Glob patterns (fnmatch)
 	- {port} variable (matches :\\d+)
+	- Basename matching for path-like values (e.g. '.env' matches '/home/user/.env')
 
 	Args:
 		value: The value to check
@@ -62,21 +69,58 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 			continue
 		if fnmatch.fnmatch(value, pattern):
 			return True
+		# For path-like values, also try matching against basename
+		if '/' in value and '/' not in pattern:
+			basename = value.rsplit('/', 1)[-1]
+			if fnmatch.fnmatch(basename, pattern):
+				return True
 	return False
 
 
 def _is_file_path(value: str) -> bool:
-	"""Check if a value looks like a file path rather than a network target."""
-	from pathlib import Path
+	"""Check if a value looks like a file path rather than a network target.
+
+	Uses explicit path prefixes and filesystem existence checks.
+	"""
+	# URLs are not file paths
+	if value.startswith(('http://', 'https://', 'ftp://')):
+		return False
+	# Explicit path prefixes are always file paths
 	if value.startswith(('/', '~/', './', '../')):
 		return True
-	# Check if it resolves to an existing file/directory
-	try:
-		expanded = Path(value).expanduser()
-		if expanded.exists():
+	# For other values containing /, check if file or parent dir exists on disk
+	if '/' in value:
+		from pathlib import Path
+		try:
+			p = Path(value)
+			if p.exists() or p.parent.exists():
+				return True
+		except (OSError, ValueError):
+			pass
+	return False
+
+
+def _is_network_target(value: str) -> bool:
+	"""Check if a value looks like a valid network target (IP, hostname, URL, CIDR).
+
+	Filters out descriptive strings that aren't actual targets.
+	"""
+	if ' ' in value.strip():
+		return False
+	if value.startswith(('http://', 'https://')):
+		return True
+	if PII_PATTERNS["ipv4"].fullmatch(value):
+		return True
+	# CIDR notation (e.g. 10.0.0.0/24)
+	if '/' in value and PII_PATTERNS["ipv4"].match(value.split('/')[0]):
+		return True
+	if PII_PATTERNS["host"].fullmatch(value):
+		return True
+	# host:port
+	if ':' in value:
+		host_part = value.rsplit(':', 1)[0]
+		if PII_PATTERNS["ipv4"].fullmatch(host_part) or PII_PATTERNS["host"].fullmatch(host_part):
 			return True
-	except (OSError, ValueError):
-		pass
 	return False
 
 
@@ -109,12 +153,21 @@ def detect_targets(command: str) -> List[str]:
 				continue
 			targets.append(ip)
 
-	# Detect hosts (skip if part of a file path)
-	cmd_parts = command.split()
-	cmd_name = cmd_parts[0] if cmd_parts else ""
+	# Detect hosts (skip command names from all sub-commands)
+	cmd_names = set()
+	for sub_cmd in split_commands(command):
+		parts = sub_cmd.split()
+		if parts:
+			cmd_names.add(parts[0])
+
+	# Find quoted regions so we can skip matches inside code strings
+	quoted_ranges = []
+	for qm in re.finditer(r"""(?:'[^']*'|"[^"]*")""", command):
+		quoted_ranges.append((qm.start(), qm.end()))
+
 	for match in PII_PATTERNS["host"].finditer(command):
 		host = match.group()
-		if host == cmd_name:
+		if host in cmd_names:
 			continue
 		if host in targets:
 			continue
@@ -123,13 +176,128 @@ def detect_targets(command: str) -> List[str]:
 		# Skip if host appears inside a detected file path
 		if any(host in p for p in paths):
 			continue
+		# Skip if host match is inside a quoted string (likely code, not a target)
+		if any(start <= match.start() and match.end() <= end for start, end in quoted_ranges):
+			continue
 		targets.append(host)
 
 	return targets
 
 
+def split_commands(command: str) -> List[str]:
+	"""Split a compound shell command into individual sub-commands.
+
+	Handles &&, ||, ;, and | operators while respecting single/double quotes.
+
+	Args:
+		command: Full shell command string
+
+	Returns:
+		List of individual command strings (stripped)
+	"""
+	# Strip quoted regions before splitting to avoid splitting inside quotes
+	# Replace quoted content with placeholders, split, then restore
+	placeholders = []
+	cleaned = command
+	for quote_match in re.finditer(r"""(?:'[^']*'|"[^"]*")""", command):
+		placeholder = f"\x00QUOTED{len(placeholders)}\x00"
+		placeholders.append((placeholder, quote_match.group()))
+		cleaned = cleaned.replace(quote_match.group(), placeholder, 1)
+	parts = [cmd.strip() for cmd in SHELL_OPERATORS.split(cleaned) if cmd.strip()]
+	# Restore quoted content
+	result = []
+	for part in parts:
+		for placeholder, original in placeholders:
+			part = part.replace(placeholder, original)
+		result.append(part)
+	return result
+
+
+def _resolve_path(path: str) -> str:
+	"""Resolve a path to absolute for consistent rule matching."""
+	from pathlib import Path
+	try:
+		return str(Path(path).expanduser().resolve())
+	except (OSError, ValueError):
+		return path
+
+
+def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
+	"""Extract file paths with access type from a shell command string.
+
+	Handles compound commands (&&, ||, ;, |) by splitting first.
+	Redirects (>, >>, 2>) are always classified as 'write'.
+	Other paths are classified based on the sub-command's classification.
+
+	Args:
+		command: Shell command string
+
+	Returns:
+		List of (resolved_path, access_type) tuples where access_type is 'read' or 'write'
+	"""
+	seen = set()
+	paths = []
+	for sub_cmd in split_commands(command):
+		parts = sub_cmd.split()
+		if not parts:
+			continue
+		# Docker/podman commands run in a sandbox — only check volume mount paths
+		if parts[0] in ('docker', 'podman'):
+			for j, p in enumerate(parts):
+				if (p in ('-v', '--volume') and j + 1 < len(parts)):
+					host_path = parts[j + 1].split(':')[0]
+					if _is_file_path(host_path):
+						resolved = _resolve_path(host_path)
+						if resolved not in seen:
+							seen.add(resolved)
+							paths.append((resolved, "read"))
+				elif p.startswith('--mount'):
+					mount_val = p.split('=', 1)[1] if '=' in p else (parts[j + 1] if j + 1 < len(parts) else '')
+					for field in mount_val.split(','):
+						if field.startswith(('source=', 'src=')):
+							host_path = field.split('=', 1)[1]
+							if _is_file_path(host_path):
+								resolved = _resolve_path(host_path)
+								if resolved not in seen:
+									seen.add(resolved)
+									paths.append((resolved, "read"))
+			continue
+		# Determine base access type from command classification
+		cmd_name = parts[0]
+		cmd_class = classify_command(cmd_name)
+		base_access = "write" if cmd_class == "write" else "read"
+		redirect_next = False
+		for i, part in enumerate(parts):
+			if i == 0:
+				continue
+			# Standalone redirect operator (> file, >> file, 2> file)
+			if re.fullmatch(r'[012]?>{1,2}', part):
+				redirect_next = True
+				continue
+			is_redirect = redirect_next
+			redirect_next = False
+			if part.startswith('-'):
+				continue
+			# Inline redirect prefixes (>file, 2>/dev/null, >>file)
+			if re.match(r'^[012]?>{1,2}.', part):
+				is_redirect = True
+				part = re.sub(r'^[012]?>{1,2}', '', part)
+			if not part:
+				continue
+			# Redirect targets are always writes; others use command classification
+			if is_redirect or _is_file_path(part):
+				access = "write" if is_redirect else base_access
+				resolved = _resolve_path(part)
+				if resolved not in seen:
+					seen.add(resolved)
+					paths.append((resolved, access))
+	return paths
+
+
 def detect_paths(command: str) -> List[str]:
 	"""Extract file paths from a shell command string.
+
+	Handles compound commands (&&, ||, ;, |) by splitting first.
 
 	Args:
 		command: Shell command string
@@ -137,18 +305,25 @@ def detect_paths(command: str) -> List[str]:
 	Returns:
 		List of detected file paths
 	"""
-	paths = []
-	parts = command.split()
+	return [path for path, _ in detect_paths_with_access(command)]
 
-	for i, part in enumerate(parts):
-		if i == 0:
-			continue
-		if part.startswith('-'):
-			continue
-		if part.startswith('/') or part.startswith('~/') or part.startswith('./') or part.startswith('../'):
-			paths.append(part)
 
-	return paths
+SENSITIVE_ENV_PATTERNS = re.compile(
+	r'\$\{?([A-Z_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH)[A-Z_]*)\}?',
+	re.IGNORECASE
+)
+
+
+def detect_sensitive_env_vars(command: str) -> List[str]:
+	"""Detect references to sensitive environment variables in a command.
+
+	Matches $VAR and ${VAR} patterns where the variable name contains
+	KEY, SECRET, TOKEN, PASSWORD, PASSWD, CREDENTIAL, or AUTH.
+
+	Returns:
+		List of matched variable names (e.g. ['ANTHROPIC_API_KEY'])
+	"""
+	return list(set(SENSITIVE_ENV_PATTERNS.findall(command)))
 
 
 def classify_command(cmd_name: str) -> str:
@@ -174,42 +349,84 @@ def build_target_choices(target: str) -> List[Dict]:
 	"""Build multi-select choices for an unknown target.
 
 	Args:
-		target: The target string (IP, host, domain)
+		target: The target string (IP, host, domain, or URL)
 
 	Returns:
 		List of choice dicts with label, rules, selected keys
 	"""
-	host_rule = f"target({target})"
-	port_rule = f"target({target}:{{port}})"
-	url_rule = f"target((http|https)://{target}:{{port}}/*)"
+	from urllib.parse import urlparse
 
-	choices = [
-		{
-			"label": f"Allow {target} only (host only)",
-			"rules": [host_rule],
-			"selected": False,
-		},
-		{
-			"label": f"Allow {target}:{{port}} (host + all ports)",
-			"rules": [host_rule, port_rule],
-			"selected": False,
-		},
-		{
-			"label": f"Allow (http|https)://{target}:{{port}}/* (host + URLs + all ports)",
-			"rules": [host_rule, port_rule, url_rule],
-			"selected": False,
-		},
-		{
-			"label": "All of the above",
-			"rules": [host_rule, port_rule, url_rule],
-			"selected": False,
-		},
-		{
-			"label": "Deny (block this action)",
-			"rules": [],
-			"selected": False,
-		},
-	]
+	# Detect if target is a URL and extract components
+	is_url = target.startswith(('http://', 'https://'))
+	if is_url:
+		parsed = urlparse(target)
+		host = parsed.hostname or target
+		port = parsed.port
+		base_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.path else f"{parsed.scheme}://{parsed.netloc}"
+		host_port = f"{host}:{port}" if port else host
+
+		choices = [
+			{
+				"label": f"Allow this URL only ({base_path})",
+				"rules": [f"target({base_path}*)"],
+				"selected": False,
+			},
+			{
+				"label": f"Allow all URLs from {host_port}",
+				"rules": [f"target({host})", f"target({host}:*)", f"target((http|https)://{host}:*/*)", f"target((http|https)://{host}/*)"],
+				"selected": False,
+			},
+			{
+				"label": f"Allow all URLs from {host} (any port)",
+				"rules": [f"target({host})", f"target({host}:*)", f"target((http|https)://{host}:*/*)", f"target((http|https)://{host}/*)"],
+				"selected": False,
+			},
+			{
+				"label": "All of the above",
+				"rules": [f"target({host})", f"target({host}:*)", f"target((http|https)://{host}:*/*)", f"target((http|https)://{host}/*)"],
+				"selected": False,
+			},
+			{
+				"label": "Deny (block this action)",
+				"rules": [],
+				"selected": False,
+			},
+		]
+		# Deduplicate options 2 and 3 when there's no port
+		if not port:
+			choices = [choices[0], choices[1], choices[3], choices[4]]
+	else:
+		host_rule = f"target({target})"
+		port_rule = f"target({target}:*)"
+		url_rule = f"target((http|https)://{target}:*/*)"
+
+		choices = [
+			{
+				"label": f"Allow {target} only",
+				"rules": [host_rule],
+				"selected": False,
+			},
+			{
+				"label": f"Allow {target} (any port)",
+				"rules": [host_rule, port_rule],
+				"selected": False,
+			},
+			{
+				"label": f"Allow all URLs from {target} (any port)",
+				"rules": [host_rule, port_rule, url_rule, f"target((http|https)://{target}/*)"],
+				"selected": False,
+			},
+			{
+				"label": "All of the above",
+				"rules": [host_rule, port_rule, url_rule, f"target((http|https)://{target}/*)"],
+				"selected": False,
+			},
+			{
+				"label": "Deny (block this action)",
+				"rules": [],
+				"selected": False,
+			},
+		]
 	return choices
 
 
@@ -247,6 +464,10 @@ class PermissionEngine:
 		if "{targets}" in result:
 			targets_str = ",".join(self.targets)
 			result = result.replace("{targets}", targets_str)
+		# Expand ~ to actual home directory in path patterns
+		if "~/" in result:
+			from pathlib import Path
+			result = result.replace("~/", str(Path.home()) + "/")
 		return result
 
 	def check_action(self, action: Dict) -> PermissionResult:
@@ -274,26 +495,39 @@ class PermissionEngine:
 		# Step 3: Check paths (for shell commands)
 		if action_type == "shell":
 			command = action.get("command", "")
-			paths = detect_paths(command)
-			if paths and (self._has_rules_for("read") or self._has_rules_for("write")):
-				cmd_name = command.split()[0] if command.split() else ""
-				cmd_class = classify_command(cmd_name)
-				if cmd_class == "read":
-					path_result = self._check_values("read", paths)
-				elif cmd_class == "write":
-					path_result = self._check_values("write", paths)
-				else:
-					path_result = self._check_values("read", paths)
-				if path_result.decision == "deny":
-					return path_result
-				if path_result.decision == "ask":
+			paths_with_access = detect_paths_with_access(command)
+			if paths_with_access and (self._has_rules_for("read") or self._has_rules_for("write")):
+				# Check each path with its correct access type
+				ask_paths = []
+				for path, access in paths_with_access:
+					path_result = self._check_value(access, path)
+					if path_result.decision == "deny":
+						return PermissionResult(
+							decision="deny",
+							reason=path_result.reason,
+							paths=[path]
+						)
+					if path_result.decision == "ask":
+						ask_paths.append((path, access))
+				if ask_paths:
 					return PermissionResult(
 						decision="ask",
-						reason=path_result.reason,
-						paths=path_result.targets  # _check_values puts ask items in targets
+						reason=f"Unknown {ask_paths[0][1]}(s): {ask_paths[0][0]}",
+						paths=[p for p, _ in ask_paths]
 					)
 
-		if result.decision == "allow":
+		# Step 4: Check for sensitive env variable references (for shell commands)
+		if action_type == "shell":
+			command = action.get("command", "")
+			sensitive_vars = detect_sensitive_env_vars(command)
+			if sensitive_vars:
+				return PermissionResult(
+					decision="ask",
+					reason=f"References sensitive env var(s): {', '.join(sensitive_vars)}",
+					targets=sensitive_vars,
+				)
+
+		if result.decision in ("allow", "ask"):
 			return result
 
 		return PermissionResult(decision="deny", reason=f"No matching rule for {action_type}")
@@ -307,11 +541,25 @@ class PermissionEngine:
 		return any(rt == rule_type for rt, _ in self.runtime_allow)
 
 	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
-		"""Check if the action type is allowed/denied/ask."""
+		"""Check if the action type is allowed/denied/ask.
+
+		For shell commands with operators (&&, ||, ;, |), checks each sub-command.
+		Returns the most restrictive result (deny > ask > allow).
+		"""
 		if action_type == "shell":
 			command = action.get("command", "")
-			cmd_name = command.split()[0] if command.split() else ""
-			return self._check_value("shell", cmd_name)
+			sub_cmds = split_commands(command)
+			most_restrictive = None
+			for sub_cmd in sub_cmds:
+				cmd_name = sub_cmd.split()[0] if sub_cmd.split() else ""
+				result = self._check_value("shell", cmd_name)
+				if result.decision == "deny":
+					return result
+				if result.decision == "ask":
+					most_restrictive = result
+				elif most_restrictive is None:
+					most_restrictive = result
+			return most_restrictive or PermissionResult(decision="deny", reason="Empty command")
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
@@ -320,21 +568,43 @@ class PermissionEngine:
 		return PermissionResult(decision="deny", reason=f"Unknown action type: {action_type}")
 
 	def _check_value(self, rule_type: str, value: str) -> PermissionResult:
-		"""Check a single value. Order: deny > allow > ask > deny."""
+		"""Check a single value. Order: deny > allow > ask > deny.
+
+		For target rules, URL values are also checked by their host and host:port
+		components so that approving 'example.com:8080' covers all URLs under it.
+		"""
+		# Build list of values to check (original + URL components for targets)
+		values_to_check = [value]
+		if rule_type == "target" and value.startswith(('http://', 'https://')):
+			from urllib.parse import urlparse
+			parsed = urlparse(value)
+			if parsed.hostname:
+				values_to_check.append(parsed.hostname)
+				if parsed.port:
+					values_to_check.append(f"{parsed.hostname}:{parsed.port}")
+
 		for rt, patterns in self.rules["deny"]:
-			if rt == rule_type and match_rule(value, patterns):
-				return PermissionResult(decision="deny", reason=f"Denied by rule: {rule_type}({value})")
+			if rt == rule_type:
+				for v in values_to_check:
+					if match_rule(v, patterns):
+						return PermissionResult(decision="deny", reason=f"Denied by rule: {rule_type}({v})")
 
 		for rt, patterns in self.rules["allow"]:
-			if rt == rule_type and match_rule(value, patterns):
-				return PermissionResult(decision="allow", reason=f"Allowed by rule: {rule_type}({value})")
+			if rt == rule_type:
+				for v in values_to_check:
+					if match_rule(v, patterns):
+						return PermissionResult(decision="allow", reason=f"Allowed by rule: {rule_type}({v})")
 		for rt, patterns in self.runtime_allow:
-			if rt == rule_type and match_rule(value, patterns):
-				return PermissionResult(decision="allow", reason=f"Allowed by runtime rule: {rule_type}({value})")
+			if rt == rule_type:
+				for v in values_to_check:
+					if match_rule(v, patterns):
+						return PermissionResult(decision="allow", reason=f"Allowed by runtime rule: {rule_type}({v})")
 
 		for rt, patterns in self.rules["ask"]:
-			if rt == rule_type and match_rule(value, patterns):
-				return PermissionResult(decision="ask", reason=f"Ask for: {rule_type}({value})")
+			if rt == rule_type:
+				for v in values_to_check:
+					if match_rule(v, patterns):
+						return PermissionResult(decision="ask", reason=f"Ask for: {rule_type}({value})")
 
 		return PermissionResult(decision="deny", reason=f"No rule for {rule_type}({value})")
 
@@ -364,8 +634,8 @@ class PermissionEngine:
 		if action_type == "shell":
 			return detect_targets(action.get("command", ""))
 		elif action_type in ("task", "workflow"):
-			# Filter out file paths from task/workflow targets
-			return [t for t in action.get("targets", []) if not _is_file_path(t)]
+			# Filter out file paths and non-network strings from task/workflow targets
+			return [t for t in action.get("targets", []) if _is_network_target(t) and not _is_file_path(t)]
 		return []
 
 	def add_runtime_allow(self, rules: List[str]) -> None:
@@ -374,12 +644,13 @@ class PermissionEngine:
 			rule_type, patterns = parse_rule(rule_str)
 			self.runtime_allow.append((rule_type, patterns))
 
-	def prompt_target(self, target: str, interactive: bool = True) -> str:
+	def prompt_target(self, target: str, interactive: bool = True, command: str = "") -> str:
 		"""Show interactive prompt for an unknown target.
 
 		Args:
 			target: The target string that needs approval
 			interactive: If False, auto-deny without prompting
+			command: The shell command triggering this prompt (for display)
 
 		Returns:
 			'allow' or 'deny'
@@ -388,7 +659,7 @@ class PermissionEngine:
 			return "deny"
 
 		choices = build_target_choices(target)
-		selected_indices = self._show_target_menu(target, choices)
+		selected_indices = self._show_target_menu(target, choices, command=command)
 
 		if selected_indices is None:
 			return "deny"
@@ -408,13 +679,14 @@ class PermissionEngine:
 		self.add_runtime_allow(unique_rules)
 		return "allow"
 
-	def prompt_path(self, path: str, access_type: str = "read", interactive: bool = True) -> str:
+	def prompt_path(self, path: str, access_type: str = "read", interactive: bool = True, command: str = "") -> str:
 		"""Show interactive prompt for a path access request.
 
 		Args:
 			path: The file path that needs approval
 			access_type: 'read' or 'write'
 			interactive: If False, auto-deny without prompting
+			command: The shell command triggering this prompt (for display)
 
 		Returns:
 			'allow' or 'deny'
@@ -422,18 +694,20 @@ class PermissionEngine:
 		if not interactive:
 			return "deny"
 
-		from secator.rich import console, InteractiveMenu
+		from secator.rich import InteractiveMenu
 
 		action_label = "Read from" if access_type == "read" else "Write to"
-		console.print(f"\n[bold yellow]{action_label} [cyan]{path}[/cyan] requires approval.[/]\n")
-
 		parent = '/'.join(path.split('/')[:-1]) if '/' in path else path
 		options = [
 			{"label": f"Allow {access_type}({path})"},
 			{"label": f"Allow {access_type}({parent}/*)"},
 			{"label": "Deny (block this action)"},
 		]
-		result = InteractiveMenu(f"Allow {access_type} access?", options).show()
+		result = InteractiveMenu(
+			f"{action_label} {path} requires approval.",
+			options,
+			description=command,
+		).show()
 
 		if result is None:
 			return "deny"
@@ -443,26 +717,29 @@ class PermissionEngine:
 			return "deny"
 		elif idx == 0:  # Exact path
 			self.add_runtime_allow([f"{access_type}({path})"])
-		elif idx == 1:  # Parent directory glob
-			self.add_runtime_allow([f"{access_type}({parent}/*)"])
+		elif idx == 1:  # Parent directory glob (also allow the parent itself)
+			self.add_runtime_allow([f"{access_type}({parent}/*)", f"{access_type}({parent})"])
 		return "allow"
 
-	def _show_target_menu(self, target: str, choices: List[Dict]) -> List[int]:
+	def _show_target_menu(self, target: str, choices: List[Dict], command: str = "") -> List[int]:
 		"""Show interactive menu. Separated for testability.
 
 		Args:
 			target: The target being prompted about
 			choices: List of choice dicts from build_target_choices
+			command: The shell command triggering this prompt (for display)
 
 		Returns:
 			List of selected indices, or None if cancelled
 		"""
-		from secator.rich import console, InteractiveMenu
-
-		console.print(f"\n[bold yellow]Target [cyan]{target}[/cyan] is not in allowed targets. Add it?[/]\n")
+		from secator.rich import InteractiveMenu
 
 		options = [{"label": choice["label"]} for choice in choices]
-		result = InteractiveMenu(f"Select permissions for {target}", options).show()
+		result = InteractiveMenu(
+			f"Target {target} is not in allowed targets. Add it?",
+			options,
+			description=command,
+		).show()
 
 		if result is None:
 			return None

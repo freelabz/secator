@@ -117,7 +117,7 @@ class ai(PythonRunner):
 		# Handle --show-prompt: render and display the system prompt, then exit
 		if self.run_opts.get("show_prompt", False):
 			mode = self.run_opts.get("mode", "") or "attack"
-			system_prompt = get_system_prompt(mode)
+			system_prompt = get_system_prompt(mode, workspace_path=str(self.reports_folder))
 			console.print(f"[bold orange3]System prompt ({mode})[/]\n")
 			console.print(system_prompt, highlight=False, soft_wrap=True)
 			return
@@ -133,6 +133,9 @@ class ai(PythonRunner):
 			if restored_history is None:
 				yield Error(message="Failed to restore session.")
 				return
+
+			# Reuse the original session's reports folder so saves go to the same place
+			self._reports_folder = session['folder']
 
 			model = self.run_opts.get("model")
 			restored_history.model = model
@@ -255,12 +258,12 @@ class ai(PythonRunner):
 		# Get mode config
 		mode_config = get_mode_config(mode)
 		mode_max_iter = mode_config.get("max_iterations")
-		max_iter = mode_max_iter if mode_max_iter else int(self.run_opts.get("max_iterations", 10))
+		max_iter = mode_max_iter if mode_max_iter else self.run_opts.get("max_iterations", 10)
 
-		temp = float(self.run_opts.get("temperature", 0.7))
+		temp = self.run_opts.get("temperature", 0.7)
 		api_key = self.run_opts.get("api_key")
 		api_base = self.run_opts.get("api_base")
-		max_tokens_total = int(self.run_opts.get("max_tokens_total", CONFIG.addons.ai.max_tokens_total))
+		max_tokens_total = self.run_opts.get("max_tokens_total", CONFIG.addons.ai.max_tokens_total)
 		dry_run = self.run_opts.get("dry_run", False)
 		verbose = self.run_opts.get("verbose", False)
 		interactive = self.run_opts.get("interactive", True)
@@ -291,7 +294,7 @@ class ai(PythonRunner):
 			# Initialize chat history with appropriate system prompt
 			history = ChatHistory()
 			history.model = model
-			system_prompt = get_system_prompt(mode)
+			system_prompt = get_system_prompt(mode, workspace_path=str(self.reports_folder))
 
 			# Inject subagent-specific instructions
 			if is_subagent:
@@ -331,7 +334,7 @@ class ai(PythonRunner):
 
 		# Create action context
 		scope = "current" if previous_results else "workspace"
-		max_workers = int(self.run_opts.get("max_workers", 3))
+		max_workers = self.run_opts.get("max_workers", 3)
 		async_tasks = self.run_opts.get("async_tasks", False)
 		sync = False if async_tasks else self.sync
 		# Initialize permission engine
@@ -522,19 +525,15 @@ class ai(PythonRunner):
 				else:
 					history.add_assistant(response_content)
 
-				# Execute actions and capture follow_up
-				if len(actions) > 0:
-					action_str = 'actions' if len(actions) > 1 else None
-					if action_str:
-						yield Info(message=f"Executing {len(actions)} {action_str} ...")
-					self.debug(json.dumps(actions, indent=4))
-
 				# Guardrails pre-check: validate all actions on main thread before dispatch
 				# This ensures interactive prompts happen before batch/progress panels
 				if tc_action_pairs:
+					self.debug(f'[guardrails] checking {len(tc_action_pairs)} actions')
 					approved_pairs = []
 					for tc, action in tc_action_pairs:
 						denial, warnings = check_guardrails(action, ctx)
+						act_desc = action.get("command", action.get("name", ""))
+						self.debug(f'[guardrails] {action.get("action")}({act_desc}) => {"denied" if denial else "ok"}')
 						for w in warnings:
 							yield Warning(message=w)
 						if denial:
@@ -545,6 +544,13 @@ class ai(PythonRunner):
 							approved_pairs.append((tc, action))
 					tc_action_pairs = approved_pairs
 					actions = [a for _, a in tc_action_pairs]
+
+				# Execute actions and capture follow_up
+				if len(actions) > 0:
+					action_str = 'actions' if len(actions) > 1 else None
+					if action_str:
+						yield Info(message=f"Executing {len(actions)} {action_str} ...")
+					self.debug(json.dumps(actions, indent=4))
 
 				# Dispatch actions: batch if multiple, single otherwise
 				follow_up_choices = None

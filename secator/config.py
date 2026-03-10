@@ -219,8 +219,13 @@ class AiAddon(StrictModel):
 		"allow": [
 			"target({targets})",
 			"read({workspace}/*)",
-			"write({workspace}/.outputs/*)",
-			"shell(nmap,httpx,nuclei,curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find)",
+			"write({workspace}/.outputs/*,/dev/null)",
+			"shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,"
+			"cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,"
+			"file,strings,xxd,base64,id,whoami,uname,hostname,"
+			"tee,cp,mv,mkdir,touch,chmod,sed,awk,xargs,docker,printf,"
+			"redis-cli,nc,ncat,nmap,sqlmap,nikto,gobuster,feroxbuster,ffuf,"
+			"socat,telnet,openssl,ssh,scp,rsync,ping,traceroute,tcpdump,ss,netstat)",
 			"task(*)",
 			"workflow(*)",
 		],
@@ -233,13 +238,13 @@ class AiAddon(StrictModel):
 			"read(~/.aws/*)",
 			"write(/etc/*)",
 			"write(/usr/*)",
-			"shell(rm -rf /*,dd,mkfs)",
+			"shell(rm -rf /*,dd,mkfs,env,printenv)",
 		],
 		"ask": [
 			"target(*)",
-			"shell(python,bash,node,gcc)",
-			"read(/etc/passwd,.env,*.key,*.pem)",
-			"write({workspace}/*)",
+			"shell(python,python3,bash,sh,exec,node,ruby,perl,gcc,g++,make,go,php,java,javac)",
+			"read(*)",
+			"write(*)",
 		],
 	}
 
@@ -547,8 +552,8 @@ class Config(DotMap):
 			string (str): YAML string.
 		"""
 		from rich.syntax import Syntax
-		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
-		console_stdout.print(data)
+		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default', word_wrap=False)
+		console_stdout.print(data, soft_wrap=True)
 
 	@staticmethod
 	def dump(config, partial=True):

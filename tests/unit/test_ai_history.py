@@ -4,9 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from secator.ai.history import ChatHistory
+from secator.definitions import ADDONS_ENABLED
+
+if ADDONS_ENABLED['ai']:
+	from secator.ai.history import ChatHistory
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestChatHistory(unittest.TestCase):
 
     def test_add_system(self):
@@ -545,6 +549,7 @@ class TestChatHistory(unittest.TestCase):
         self.assertFalse(summarized)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestChatHistoryToolCalling(unittest.TestCase):
 
     def test_add_assistant_with_tool_calls(self):

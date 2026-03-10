@@ -4,7 +4,10 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
+from secator.definitions import ADDONS_ENABLED
 
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestInitLLM(unittest.TestCase):
     """Tests for the init_llm singleton function."""
 
@@ -50,6 +53,7 @@ class TestInitLLM(unittest.TestCase):
             litellm.callbacks = old_callbacks
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestCallLLM(unittest.TestCase):
     """Tests for the call_llm function."""
 
@@ -231,6 +235,7 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(tc["arguments"], {})
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestPromptUserAllChoices(unittest.TestCase):
     """Tests for the 'All of the above' option in prompt_user."""
 

@@ -4,7 +4,10 @@
 import unittest
 from dataclasses import fields
 
+from secator.definitions import ADDONS_ENABLED
 
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestActionContext(unittest.TestCase):
     """Tests for the ActionContext dataclass."""
 
@@ -60,6 +63,7 @@ class TestActionContext(unittest.TestCase):
         self.assertEqual(ctx.scope, 'current')
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestDispatchAction(unittest.TestCase):
     """Tests for the dispatch_action function."""
 
@@ -138,6 +142,7 @@ class TestDispatchAction(unittest.TestCase):
         self.assertIsInstance(results, list)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestAITask(unittest.TestCase):
     """Tests for the ai task class."""
 
