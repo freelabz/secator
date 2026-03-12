@@ -105,6 +105,23 @@ class PythonRunner(Runner):
 			return False
 		return True
 
+	def get_opt_value(self, opt_name):
+		"""Get option value with fallback to default from opts definition.
+
+		# TODO: align with Command.get_opt_value to support aliases, pre_process, process, and opt_key_map overrides.
+
+		Args:
+			opt_name (str): Option name.
+
+		Returns:
+			Any: Option value.
+		"""
+		val = self.run_opts.get(opt_name)
+		if val is not None:
+			return val
+		opt_conf = self.opts.get(opt_name, {})
+		return opt_conf.get('default')
+
 	def yielder(self):
 		"""Execute the Python task and yield its results.
 

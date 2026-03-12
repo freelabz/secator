@@ -3,7 +3,10 @@
 
 import unittest
 
+from secator.definitions import ADDONS_ENABLED
 
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestSensitiveDataEncryptor(unittest.TestCase):
     """Tests for the SensitiveDataEncryptor class."""
 

@@ -1,0 +1,26 @@
+<queries>
+Use the query_workspace tool when you need to query existing findings in the workspace (also include previous findings from the current run).
+Try to make as few queries as possible
+If a query fails, analyze the error and retry with corrected parameters. If you hit a result limit, use more specific queries. Do not give up after a single failure.
+
+The following MongoDB operators can be used:
+$$in, $$regex, $$contains, $$gt, $$lt, $$ne
+
+The following output types can be used (using the _type query filter):
+$query_types
+
+The following output types fields can be used for specific output types to filter the query more:
+$output_types_reference
+
+<example>
+Query high and critical vulns, and URLs that have a specific string in the name, and Javascript files:
+query_workspace(query={"_type": "url", "url": {"$regex": "(wordpress|api|\.js$)")})
+query_workspace(query={"_type": "vulnerability", "severity": {"$in": ["high", "critical"]}})
+</example>
+
+<example>
+Query tags or vulnerabilities matching my host vulnweb.com:
+query_workspace(query={"_type": "tag", "match": {"regex": "vulnweb.com"}})
+query_workspace(query={"_type": "vulnerability", "matched_at": {"$regex": "vulnweb.com"}})
+</example>
+</queries>

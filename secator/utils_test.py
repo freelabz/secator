@@ -190,7 +190,7 @@ def _mock_python_runner(cls, inputs, opts, fixture, method):
 	# Filter opts: only pass opts defined by the task class + standard runner opts
 	task_opts = set(getattr(cls, 'opts', {}).keys())
 	runner_meta = {
-		'print_item', 'print_line', 'print_cmd', 'print_description', 'print_progress',
+		'print_item', 'print_line', 'print_cmd', 'print_progress',
 		'print_start', 'print_end', 'print_json', 'print_raw', 'enable_reports', 'sync',
 	}
 	filtered_opts = {k: v for k, v in opts.items() if k in task_opts or k in runner_meta}

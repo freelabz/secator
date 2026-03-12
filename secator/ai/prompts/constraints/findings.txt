@@ -1,0 +1,21 @@
+<findings>
+Use the add_finding tool to record confirmed or suspected vulnerabilities.
+When summarizing vulnerabilities, always include matched_at targets.
+All list fields (tags, matched_at, references) MUST be passed as JSON arrays, not strings.
+If you encounter a schema error while adding finding, fix the error and retry.
+Do NOT add findings that were already reported before, unless you found additional information.
+
+<example>
+add_finding(
+  _type="vulnerability",
+  name="SQL Injection in login form",
+  matched_at=["http://example.com/login.php"],
+  severity="high",
+  confidence="high",
+  tags=["sqli", "owasp-top10", "CWE-89"],
+  description="The login form is vulnerable to SQL injection via the username parameter.",
+  extra_data={"parameter": "username", "payload": "' OR 1=1 --"}
+)
+</example>
+
+</findings>

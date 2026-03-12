@@ -158,6 +158,7 @@ class Runner:
 		self.print_fmt = self.run_opts.get('fmt', '')
 		self.print_stat = self.run_opts.get('print_stat', False)
 		self.print_profiles = self.run_opts.get('print_profiles', False)
+		self.print_reports_message = self.run_opts.get('print_reports_message', True)
 
 		# Chunks
 		self.chunk = self.run_opts.get('chunk', None)
@@ -667,6 +668,8 @@ class Runner:
 				# Repr output
 				if item_out:
 					item_repr = repr(item)
+					if not item_repr or not item_repr.strip():
+						return
 					if self.print_remote_info and item._source:
 						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
 					# item_repr += f' ({self.__class__.__name__}) ({item._uuid}) ({item._context.get("ancestor_id")})'  # for debugging
@@ -827,7 +830,7 @@ class Runner:
 		data.update({
 			'config': self.config.toDict(),
 			'opts': self.config.supported_opts,
-			'profiles': [p.name for p in self.profiles],
+			'profiles': [p.name for p in self.profiles] if self.profiles else [],
 			'has_parent': self.has_parent,
 			'has_children': self.has_children,
 			'chunk': self.chunk,

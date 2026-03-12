@@ -96,8 +96,10 @@ class dalfox(HttpBase):
 	@staticmethod
 	def format_data(data):
 		try:
-			data = json.loads(data)
-			data = '&'.join([f'{k}={v}' for k, v in data.items()])
-			return data
-		except json.JSONDecodeError:
+			if isinstance(data, str):
+				data = json.loads(data)
+			if isinstance(data, dict):
+				return '&'.join([f'{k}={v}' for k, v in data.items()])
+			return ''
+		except (json.JSONDecodeError, TypeError):
 			return ''
