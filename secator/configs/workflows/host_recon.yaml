@@ -36,6 +36,7 @@ options:
     short: ps
 
 tasks:
+
   _group:
     naabu:
       description: Find open ports (light)
@@ -51,24 +52,24 @@ tasks:
     tcp_syn_stealth: false
     fragment: false
     targets_:
-      - type: target
-        field: name
-        condition: opts.ports
-      - type: port
-        field: host
-        condition: opts.scanners
+    - type: target
+      field: name
+      condition: opts.ports
+    - type: port
+      field: host
+      condition: opts.scanners
     ports_:
-      - type: port
-        field: port
-        condition: port.host in targets and opts.scanners
+    - type: port
+      field: port
+      condition: port.host in targets and opts.scanners
     if: not opts.passive
 
   sshaudit:
     description: Audit SSH port
     targets_:
-      - type: port
-        field: host
-        condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
+    - type: port
+      field: host
+      condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
     if: not opts.passive
 
   _group/1:
@@ -77,14 +78,14 @@ tasks:
       tech_detect: True
       targets_:
         - type: port
-          field: "{host}:{port}"
+          field: '{host}:{port}'
       if: not opts.passive
 
     searchsploit:
       description: Search for related exploits
       targets_:
         - type: port
-          field: "{host}:{port}~{service_name}"
+          field: '{host}:{port}~{service_name}'
           condition: len(item.service_name.split('/')) > 1
       if: "'searchsploit' in opts.exploiters"
 
@@ -92,10 +93,10 @@ tasks:
       description: Search for related exploits
       targets_:
         - type: port
-          field: "{host}:{port}~{service_name}"
+          field: '{host}:{port}~{service_name}'
           condition: len(item.service_name.split('/')) > 1
         - type: vulnerability
-          field: "{matched_at}~{id}"
+          field: '{matched_at}~{id}'
           condition: item.id
       if: "'search_vulns' in opts.exploiters"
 

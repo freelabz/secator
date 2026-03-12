@@ -194,17 +194,11 @@ def process_extractor(results, extractor, ctx=None):
 
 	# Format field if needed
 	if _field:
-<<<<<<< HEAD
-		_field = '{' + _field + '}' if not '{' in _field else _field
-		items = [_field.format(**item.toDict()) for item in items]
-	return items
-=======
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
 		results = [_field.format(**item.toDict()) for item in results]
 	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
->>>>>>> main
 
 
 def get_task_folder_id(path):

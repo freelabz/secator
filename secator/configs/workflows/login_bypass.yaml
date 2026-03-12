@@ -1,9 +1,0 @@
-type: workflow
-name: login_bypass
-alias: loginbypass
-description: Login bypass
-tags: [http, crawl]
-input_types:
-  - url
-tasks:
-  httpx:
