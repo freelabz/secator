@@ -6,7 +6,7 @@ from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
 from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
-								 HEADER, URL, FOLLOW_REDIRECT, OPT_NOT_SUPPORTED, DATA, USER_AGENT, RETRIES)
+								 HEADER, URL, FOLLOW_REDIRECT, OPT_NOT_SUPPORTED, SKIP_SSL_VERIFY, DATA, USER_AGENT, RETRIES)
 from secator.output_types import Info, Url, Warning, Tag
 from secator.tasks._categories import HttpBase
 from secator.utils import process_wordlist
@@ -42,6 +42,7 @@ class arjun(HttpBase):
 		WORDLIST: 'w',
 		HEADER: '--headers',
 		FOLLOW_REDIRECT: '--follow-redirect',
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		'chunk_size': 'c',
 		'stable': '--stable',
 		'passive': '--passive',

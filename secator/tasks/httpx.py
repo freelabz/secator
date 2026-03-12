@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from secator.decorators import task
 from secator.definitions import (DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							 	 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
-								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
+								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, THREADS, TIMEOUT,
 								 URL, USER_AGENT, HOST, IP, HOST_PORT)
 from secator.config import CONFIG
 from secator.output_types import Url, Subdomain, Certificate, Vulnerability
@@ -56,6 +56,7 @@ class httpx(Http):
 		FILTER_SIZE: 'filter-length',
 		FILTER_WORDS: 'filter-word-count',
 		FOLLOW_REDIRECT: 'follow-redirects',
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		MATCH_CODES: 'match-code',
 		MATCH_REGEX: 'match-regex',
 		MATCH_SIZE: 'match-length',
