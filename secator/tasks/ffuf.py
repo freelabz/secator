@@ -5,7 +5,7 @@ from secator.definitions import (AUTO_CALIBRATION, DATA, DELAY, DEPTH, EXTRA_DAT
 								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 								 PERCENT, PROXY, RATE_LIMIT, RETRIES,
-								 THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL, REPLAY_PROXY)
+								 SKIP_SSL_VERIFY, THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL, REPLAY_PROXY)
 from secator.output_types import Progress, Url, Subdomain, Info, Warning
 from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
@@ -47,6 +47,7 @@ class ffuf(HttpFuzzer):
 		FILTER_SIZE: 'fs',
 		FILTER_WORDS: 'fw',
 		FOLLOW_REDIRECT: 'r',
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		MATCH_CODES: 'mc',
 		MATCH_REGEX: 'mr',
 		MATCH_SIZE: 'ms',

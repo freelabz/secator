@@ -8,7 +8,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DATA, DELAY, DEPT
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
 							   MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
-							   RATE_LIMIT, RETRIES, STATUS_CODE,
+							   RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL, HOST, HOST_PORT, IP)
 from secator.output_types import Url, Info, Error
 from secator.tasks._categories import HttpFuzzer
@@ -36,6 +36,7 @@ class dirsearch(HttpFuzzer):
 		FILTER_SIZE: 'exclude-sizes',
 		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: 'follow-redirects',
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		MATCH_CODES: 'include-status',
 		MATCH_REGEX: OPT_NOT_SUPPORTED,
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
