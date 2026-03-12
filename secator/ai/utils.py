@@ -99,11 +99,12 @@ def call_llm(
 	)
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
 	# Remove only when we have a better way to show this
-	# if len(messages) > 1:
-	# 	for message in messages[1:]:
-	# 		print("-" * 80)
-	# 		print(message)
-	# 		print("-" * 80)
+	if 'litellm.raw' in CONFIG.debug:
+		if len(messages) > 1:
+			for message in messages[1:]:
+				print("-" * 80)
+				print(message)
+				print("-" * 80)
 	if tools is not None:
 		kwargs["tools"] = tools
 		kwargs["tool_choice"] = "auto"
@@ -132,6 +133,8 @@ def call_llm(
 			raise
 
 	message = response.choices[0].message
+	if 'litellm.raw' in CONFIG.debug:
+		print(message.content)
 	content = message.content or ""
 	usage = None
 

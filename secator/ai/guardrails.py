@@ -528,9 +528,11 @@ class PermissionEngine:
 		"""Validate an action against permission rules (two-step)."""
 		action_type = action.get("action", "")
 
-		# Step 1: Check action itself
+		# Step 1: Check action itself (shell commands, task/workflow names)
+		# Return immediately on deny OR ask so shell approval happens
+		# before targets/paths are checked (each recheck peels one layer)
 		result = self._check_action_type(action_type, action)
-		if result.decision == "deny":
+		if result.decision in ("deny", "ask"):
 			return result
 
 		# Step 2: Check targets (only if target rules are configured)
@@ -581,7 +583,8 @@ class PermissionEngine:
 					targets=sensitive_vars,
 				)
 
-		if result.decision in ("allow", "ask"):
+		# If Step 1 was "allow" and no target/path/env issues, allow
+		if result.decision == "allow":
 			return result
 
 		return PermissionResult(decision="deny", reason=f"No matching rule for {action_type}")
@@ -635,6 +638,9 @@ class PermissionEngine:
 					reason=f"No rule for command(s): {', '.join(unmatched)}",
 					shell_command=command,
 				)
+			# If most restrictive is "ask", attach the full command so prompt_shell fires
+			if most_restrictive and most_restrictive.decision == "ask":
+				most_restrictive.shell_command = command
 			return most_restrictive or PermissionResult(decision="deny", reason="Empty command")
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")

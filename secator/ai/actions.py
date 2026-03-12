@@ -37,6 +37,7 @@ class ActionContext:
 	subagent: bool = False
 	silent: bool = False
 	sync: bool = True
+	interactive: bool = True
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
 
@@ -135,7 +136,7 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 		if result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
 			decision = ctx.permission_engine.prompt_shell(
-				result.shell_command, reason=result.reason, interactive=ctx.sync)
+				result.shell_command, reason=result.reason, interactive=ctx.interactive)
 			if decision == "deny":
 				return f"Action denied: shell command not approved", warnings
 			# If command couldn't be parsed, we can't add granular runtime rules,
@@ -156,7 +157,7 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 			recheck = ctx.permission_engine._check_value("target", target)
 			if recheck.decision == "allow":
 				continue
-			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.sync, command=cmd_display)
+			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.interactive, command=cmd_display)
 			if decision == "deny":
 				return f"Action denied: target {target} not approved", warnings
 		# Handle path prompts - use detected access type per path
@@ -164,7 +165,7 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 		path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
 		for path in result.paths:
 			access_type = path_access_map.get(path, "read")
-			decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.sync, command=cmd_display)
+			decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.interactive, command=cmd_display)
 			if decision == "deny":
 				return f"Action denied: {access_type} access to {path} not approved", warnings
 		# Re-check after prompting

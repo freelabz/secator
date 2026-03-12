@@ -24,6 +24,7 @@ ${findings}
 ${arsenal}
 ${follow_up}
 ${subagents}
+${guardrails}
 ${isolation}
 ${exploitation_report}
 

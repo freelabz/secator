@@ -148,6 +148,10 @@ class ai(PythonRunner):
 			workspace=self.reports_folder or ""
 		)
 
+		# Auto-approve all workspace targets so the AI can operate on known targets
+		# without prompting (especially important in non-interactive mode)
+		self._auto_approve_workspace_targets()
+
 		# Suppress interactive prompts and noisy output for subagents
 		if self.is_subagent:
 			self.print_info = False
@@ -254,6 +258,26 @@ class ai(PythonRunner):
 				self.mode,
 				is_subagent=self.is_subagent)
 
+	def _auto_approve_workspace_targets(self):
+		"""Auto-approve all targets found in the workspace so the AI can operate
+		on known targets without prompting."""
+		workspace_id = self.context.get("workspace_id", "")
+		if not workspace_id:
+			return
+		try:
+			from secator.query import QueryEngine
+			engine = QueryEngine(workspace_id, context=dict(self.context))
+			results = engine.search({"_type": "target"}, limit=1000)
+			target_names = {r.get("name") or r.get("_name", "") for r in results if r}
+			target_names.discard("")
+			self.debug(f'[workspace] found {len(results)} target(s): {list(target_names)[:20]}', sub='guardrail')
+			if target_names:
+				rule = f"target({','.join(target_names)})"
+				self.debug(f'[workspace] auto-approve: {rule}', sub='guardrail')
+				self.permission_engine.add_runtime_allow([rule])
+		except Exception as e:
+			self.debug(f'[workspace] failed to query targets: {e}', sub='guardrail')
+
 	def _prompt_and_redetect(self, choices):
 		"""Show interactive menu and re-detect intent. Returns (mode, max_iter, items) or None."""
 
@@ -343,6 +367,7 @@ class ai(PythonRunner):
 			max_workers=self.max_workers,
 			subagent=self.is_subagent,
 			sync=self._sync,
+			interactive=self.interactive,
 			permission_engine=self.permission_engine)
 
 		# Enter loop
@@ -571,9 +596,23 @@ class ai(PythonRunner):
 					self.max_iterations += 1
 					query_extensions += 1
 
+				# If all tool calls were denied by guardrails, let the LLM retry
+				# (denial errors are already in history as tool results)
+				all_denied = tool_calls and not actions
+				if all_denied:
+					continue_msg = format_continue(iteration, self.max_iterations,
+						"Some actions were denied by guardrails. Try alternative approaches that stay within allowed permissions.")
+					self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
+					continue
+
 				# Show menu if follow_up, no actions, or max_iter reached
 				if follow_up_choices is not None or not actions or iteration == self.max_iterations:
 					if not self.interactive:
+						# In non-interactive mode, keep going unless max iterations reached
+						if iteration < self.max_iterations:
+							continue_msg = format_continue(iteration, self.max_iterations)
+							self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
+							continue
 						save_history(self.history, self.reports_folder, debug_fn=self.debug)
 						return
 					result = self._prompt_and_redetect(follow_up_choices or [])
@@ -600,8 +639,7 @@ class ai(PythonRunner):
 				if result is None:
 					save_history(self.history, self.reports_folder, debug_fn=self.debug)
 					return
-				mode, self.max_iterations, items = result
-				yield from items
+				yield from result
 				continue
 
 			except Exception as e:

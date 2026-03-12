@@ -77,8 +77,9 @@ class Report:
 		data['info']['title'] = self.title
 		data['info']['errors'] = self.runner.errors
 
-		# Fill report
-		for output_type in FINDING_TYPES:
+		# Fill report (findings + targets)
+		from secator.output_types.target import Target
+		for output_type in list(FINDING_TYPES) + [Target]:
 			output_name = output_type.get_name()
 			sort_by, _ = get_table_fields(output_type)
 			items = [
