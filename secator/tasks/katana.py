@@ -1,22 +1,27 @@
 import os
-from urllib.parse import urlparse
+import shlex
+
+from urllib.parse import urlparse, urlunparse
 
 from secator.decorators import task
-from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-								 FOLLOW_REDIRECT, HEADER, HOST, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
-								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, STATUS_CODE,
-								 STORED_RESPONSE_PATH, TECH, THREADS, TIME, TIMEOUT, URL, USER_AGENT, WEBSERVER,
-								 CONTENT_LENGTH)
+from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+								 FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, IP, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
+								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.config import CONFIG
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
+
+EXCLUDED_PARAMS = ['v']
 
 
 @task()
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
 	cmd = 'katana'
+	input_types = [URL, HOST, HOST_PORT, IP]
+	output_types = [Url, Tag]
+	tags = ['url', 'crawl']
 	file_flag = '-list'
 	input_flag = '-u'
 	json_flag = '-jsonl'
@@ -26,11 +31,12 @@ class katana(HttpCrawler):
 		'form_extraction': {'is_flag': True, 'short': 'fx', 'help': 'Detect forms'},
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store responses'},  # noqa: E501
 		'form_fill': {'is_flag': True, 'short': 'ff', 'help': 'Enable form filling'},
-		'js_crawl': {'is_flag': True, 'short': 'jc', 'default': True, 'help': 'Enable endpoint parsing / crawling in javascript file'},  # noqa: E501
-		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': True, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
+		'js_crawl': {'is_flag': True, 'short': 'jc', 'default': False, 'help': 'Enable endpoint parsing / crawling in javascript file'},  # noqa: E501
+		'jsluice': {'is_flag': True, 'short': 'jsl', 'default': False, 'help': 'Enable jsluice parsing in javascript file (memory intensive)'},  # noqa: E501
 		'known_files': {'type': str, 'short': 'kf', 'default': 'all', 'help': 'Enable crawling of known files (all, robotstxt, sitemapxml)'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
-		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'}
+		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'},
+		'no_sandbox': {'is_flag': True, 'short': 'ns', 'default': False, 'help': 'Disable sandboxing'},
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -59,64 +65,124 @@ class katana(HttpCrawler):
 		DELAY: lambda x: int(x) if isinstance(x, float) else x
 	}
 	item_loaders = [JSONSerializer()]
-	output_map = {
-		Url: {
-			URL: lambda x: x['request']['endpoint'],
-			HOST: lambda x: urlparse(x['request']['endpoint']).netloc,
-			TIME: 'timestamp',
-			METHOD: lambda x: x['request']['method'],
-			STATUS_CODE: lambda x: x['response'].get('status_code'),
-			CONTENT_TYPE: lambda x: x['response'].get('headers', {}).get('content_type', ';').split(';')[0],
-			CONTENT_LENGTH: lambda x: x['response'].get('headers', {}).get('content_length', 0),
-			WEBSERVER: lambda x: x['response'].get('headers', {}).get('server', ''),
-			TECH: lambda x: x['response'].get('technologies', []),
-			STORED_RESPONSE_PATH: lambda x: x['response'].get('stored_response_path', '')
-			# TAGS: lambda x: x['response'].get('server')
-		}
-	}
-	install_cmd = 'sudo apt install build-essential && go install -v github.com/projectdiscovery/katana/cmd/katana@latest'
-	install_github_handle = 'projectdiscovery/katana'
+	install_pre = {'apk': ['libc6-compat']}
+	install_version = 'v1.3.0'
+	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@[install_version]'
+	github_handle = 'projectdiscovery/katana'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
+	profile = lambda opts: katana.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def dynamic_profile(opts):
+		headless = katana._get_opt_value(
+			opts,
+			'headless',
+			opts_conf=dict(katana.opts, **katana.meta_opts),
+			opt_aliases=opts.get('aliases', [])
+		)
+		return 'large' if headless is True else 'medium'
+
+	@staticmethod
+	def on_init(self):
+		form_fill = self.get_opt_value('form_fill')
+		form_extraction = self.get_opt_value('form_extraction')
+		store_responses = self.get_opt_value('store_responses')
+		if form_fill or form_extraction or store_responses:
+			reports_folder_outputs = f'{self.reports_folder}/.outputs'
+			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
+		self.tags = []
+		self.urls = []
 
 	@staticmethod
 	def on_json_loaded(self, item):
 		# form detection
-		forms = item.get('response', {}).get('forms', [])
+		response = item.get('response', {})
+		forms = response.get('forms', [])
+		parsed_url = urlparse(item['request']['endpoint'])
+		url_without_params = urlunparse(parsed_url._replace(query=''))
+		params = parsed_url.query.split('&')
 		if forms:
 			for form in forms:
 				method = form['method']
-				yield Url(form['action'], host=urlparse(item['request']['endpoint']).netloc, method=method)
+				url = Url(
+					form['action'],
+					host=parsed_url.hostname,
+					method=method,
+					stored_response_path=response["stored_response_path"],
+					request_headers=self.get_opt_value('header', preprocess=True)
+				)
+				if url not in self.urls:
+					self.urls.append(url)
+					yield url
+				params = form.get('parameters', [])
 				yield Tag(
+					category='info',
 					name='form',
+					value=form['action'],
 					match=form['action'],
+					stored_response_path=response["stored_response_path"],
 					extra_data={
 						'method': form['method'],
 						'enctype': form.get('enctype', ''),
-						'parameters': ','.join(form.get('parameters', []))
+						'parameters': params
 					}
 				)
-		yield item
-
-	@staticmethod
-	def on_init(self):
-		debug_resp = self.get_opt_value('debug_resp')
-		if debug_resp:
-			self.cmd = self.cmd.replace('-silent', '')
-		store_responses = self.get_opt_value('store_responses')
-		if store_responses:
-			self.cmd += f' -srd {self.reports_folder}/.outputs'
+		response = item.get('response')
+		if not response:
+			return item
+		tags = []
+		headless = self.get_opt_value('headless')
+		if headless:
+			tags.append('headless')
+		url = Url(
+			url=item['request']['endpoint'],
+			host=parsed_url.hostname,
+			method=item['request'].get('method', ''),
+			request_headers=self.get_opt_value('header', preprocess=True),
+			time=item['timestamp'],
+			status_code=item['response'].get('status_code'),
+			content_length=item['response'].get('content_length', 0),
+			tech=item['response'].get('technologies', []),
+			stored_response_path=item['response'].get('stored_response_path', ''),
+			response_headers=item['response'].get('headers', {}),
+			tags=tags
+		)
+		if url not in self.urls:
+			self.urls.append(url)
+			yield url
+		for param in params:
+			if not param:
+				continue
+			split_param = param.split('=')
+			param_name = split_param[0]
+			param_value = None
+			if len(split_param) > 1:
+				param_value = split_param[1]
+			if param_name in EXCLUDED_PARAMS:
+				continue
+			tag = Tag(
+				category='info',
+				name='url_param',
+				value=param_name,
+				match=url_without_params,
+				extra_data={'value': param_value, 'url': item['request']['endpoint']}
+			)
+			if tag not in self.tags:
+				self.tags.append(tag)
+				yield tag
 
 	@staticmethod
 	def on_item(self, item):
-		if not isinstance(item, Url):
+		if not isinstance(item, (Url, Tag)):
 			return item
 		store_responses = self.get_opt_value('store_responses')
 		if store_responses and os.path.exists(item.stored_response_path):
 			with open(item.stored_response_path, 'r', encoding='latin-1') as fin:
 				data = fin.read().splitlines(True)
+				if not data:
+					return item
 				first_line = data[0]
 			with open(item.stored_response_path, 'w', encoding='latin-1') as fout:
 				fout.writelines(data[1:])

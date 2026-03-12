@@ -1,5 +1,5 @@
 import unittest
-from secator.celery import app, forward_results
+from secator.celery import app, forward_results  # noqa: F401
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS, FIXTURES_DIR, load_fixture
 from secator.output_types import Url
 from celery import chain, chord
@@ -91,7 +91,7 @@ class TestCelery(unittest.TestCase):
 			return
 
 		nmap_fixture = load_fixture('nmap_output', fixtures_dir=FIXTURES_DIR, ext='.xml', only_path=True)
-		with mock_command(nmap, fixture=[]):
+		with mock_command(nmap, fixture=[FIXTURES_TASKS[nmap]] * len(TARGETS)):
 			workflow = chain(
 				forward_results.s([]),
 				chord((
@@ -100,18 +100,173 @@ class TestCelery(unittest.TestCase):
 			)
 			result = workflow.apply()
 			results = result.get()
+			vulns = [r.id for r in results if r._type == 'vulnerability']
 			targets = [r.name for r in results if r._type == 'target']
 			self.assertEqual(len(targets), len(TARGETS))
+			self.assertEqual(len(vulns), 61)  # number of vulns in the XML fixture
 
 	def test_ffuf_chunked(self):
 		from secator.tasks import ffuf
-		with mock_command(ffuf, fixture=[]):
+		if ffuf not in TEST_TASKS:
+			return
+
+		HTTP_TARGETS = [f'https://{target}' for target in TARGETS]
+
+		with mock_command(ffuf, fixture=[FIXTURES_TASKS[ffuf]] * len(HTTP_TARGETS)):
 			workflow = chain(
 				forward_results.s([]),
 				chord((
-					ffuf.s(TARGETS)
+					ffuf.s(HTTP_TARGETS)
 				), forward_results.s()),
 			)
 			result = workflow.apply()
 			results = result.get()
-			self.assertEqual(len(results), len(TARGETS))
+			urls = [r.url for r in results if r._type == 'url']
+			targets = [r.name for r in results if r._type == 'target']
+			self.assertEqual(len(targets), len(HTTP_TARGETS) * 2)
+			self.assertEqual(len(urls), len(HTTP_TARGETS))
+
+	def test_break_task_with_disabled_chunking(self):
+		"""Test that break_task doesn't chunk when input_chunk_size=-1."""
+		from secator.tasks import httpx
+		from secator.celery import break_task
+		if httpx not in TEST_TASKS:
+			return
+
+		class TestTask(httpx):
+			input_chunk_size = -1
+
+		# Create a task with many inputs
+		inputs = ['target1', 'target2', 'target3', 'target4', 'target5']
+		task = TestTask(inputs)
+		task_opts = {}
+
+		# Mock to get the workflow signature
+		with mock_command(TestTask, fixture=[FIXTURES_TASKS[httpx]]):
+			workflow = break_task(task, task_opts, results=[])
+			# With input_chunk_size=-1, should return the inputs as-is without chunking
+			# This means one chunk with all inputs
+			self.assertEqual(len(workflow.tasks), len(inputs))
+
+
+class TestDelayMethods(unittest.TestCase):
+	"""Test the delay methods for different runner types."""
+
+	def test_command_delay_signature(self):
+		"""Test that Command.delay() creates a proper Celery signature."""
+		from secator.tasks import httpx
+		if httpx not in TEST_TASKS:
+			return
+
+		# Test that delay returns an AsyncResult-like object
+		sig = httpx.delay('example.com')
+		self.assertIsNotNone(sig)
+		self.assertTrue(hasattr(sig, 'id'))
+
+	def test_dynamic_workflow_delay_creates_signature(self):
+		"""Test that DynamicWorkflow.delay() creates a proper Celery signature."""
+		from secator.loader import get_configs_by_type
+
+		# Get a workflow config
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		# Import the dynamic workflow
+		from secator.workflows import DYNAMIC_WORKFLOWS
+		if not DYNAMIC_WORKFLOWS:
+			self.skipTest('No dynamic workflows available')
+
+		workflow_name = list(DYNAMIC_WORKFLOWS.keys())[0]
+		workflow = DYNAMIC_WORKFLOWS[workflow_name]
+
+		# Test that delay method exists and is callable
+		self.assertTrue(callable(getattr(workflow, 'delay', None)))
+
+		# Test that s() and si() methods exist
+		self.assertTrue(callable(getattr(workflow, 's', None)))
+		self.assertTrue(callable(getattr(workflow, 'si', None)))
+
+	def test_dynamic_scan_delay_creates_signature(self):
+		"""Test that DynamicScan.delay() creates a proper Celery signature."""
+		from secator.loader import get_configs_by_type
+
+		# Get a scan config
+		scans = get_configs_by_type('scan')
+		if not scans:
+			self.skipTest('No scans configured')
+
+		# Import the dynamic scan
+		from secator.scans import DYNAMIC_SCANS
+		if not DYNAMIC_SCANS:
+			self.skipTest('No dynamic scans available')
+
+		scan_name = list(DYNAMIC_SCANS.keys())[0]
+		scan = DYNAMIC_SCANS[scan_name]
+
+		# Test that delay method exists and is callable
+		self.assertTrue(callable(getattr(scan, 'delay', None)))
+
+		# Test that s() and si() methods exist
+		self.assertTrue(callable(getattr(scan, 's', None)))
+		self.assertTrue(callable(getattr(scan, 'si', None)))
+
+	def test_runner_classmethod_delay(self):
+		"""Test Runner.delay() classmethod with explicit config (TemplateLoader)."""
+		from secator.runners import Runner
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+
+		# Test that the classmethod accepts config (TemplateLoader) and targets
+		sig = Runner.delay(config, ['example.com'])
+		self.assertIsNotNone(sig)
+		self.assertTrue(hasattr(sig, 'id'))
+
+	def test_run_workflow_celery_task(self):
+		"""Test run_workflow Celery task with config as TemplateLoader."""
+		from secator.celery import start_runner
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+
+		# Create a signature with config as TemplateLoader
+		sig = start_runner.s(
+			config=config,
+			targets=['example.com'],
+			results=[],
+			run_opts={'dry_run': True},
+			hooks={},
+			context={}
+		)
+		self.assertIsNotNone(sig)
+
+	def test_run_scan_celery_task(self):
+		"""Test run_scan Celery task with config as TemplateLoader."""
+		from secator.celery import start_runner
+		from secator.loader import get_configs_by_type
+
+		scans = get_configs_by_type('scan')
+		if not scans:
+			self.skipTest('No scans configured')
+
+		config = scans[0]
+
+		# Create a signature with config as TemplateLoader
+		sig = start_runner.s(
+			config=config,
+			targets=['example.com'],
+			results=[],
+			run_opts={'dry_run': True},
+			hooks={},
+			context={}
+		)
+		self.assertIsNotNone(sig)

@@ -1,12 +1,13 @@
+from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (CONTENT_TYPE, DELAY, DEPTH, FILTER_CODES,
+from secator.definitions import (CONTENT_TYPE, DATA, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, LINES, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
 							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
 							   RATE_LIMIT, RETRIES, STATUS_CODE,
-							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, DEFAULT_FEROXBUSTER_FLAGS)
-from secator.output_types import Url
+							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, URL, REPLAY_PROXY, HOST, HOST_PORT, IP)
+from secator.output_types import Url, Info
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpFuzzer
 
@@ -14,14 +15,18 @@ from secator.tasks._categories import HttpFuzzer
 @task()
 class feroxbuster(HttpFuzzer):
 	"""Simple, fast, recursive content discovery tool written in Rust"""
-	cmd = f'feroxbuster {DEFAULT_FEROXBUSTER_FLAGS}'
+	cmd = 'feroxbuster --no-state'
+	input_types = [URL, HOST, HOST_PORT, IP]
+	output_types = [Url]
+	tags = ['url', 'fuzz']
 	input_flag = '--url'
 	input_chunk_size = 1
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--silent --json'
 	opt_prefix = '--'
 	opts = {
-		# 'auto_tune': {'is_flag': True, 'default': False, 'help': 'Automatically lower scan rate when too many errors'},
+		'auto_bail': {'is_flag': True, 'default': False, 'help': 'Automatically bail out when too many errors occur'},
+		'auto_tune': {'is_flag': True, 'default': True, 'help': 'Automatically lower scan rate when too many errors'},
 		'extract_links': {'is_flag': True, 'default': False, 'help': 'Extract links from response body'},
 		'collect_backups': {'is_flag': True, 'default': False, 'help': 'Request likely backup exts for urls'},
 		'collect_extensions': {'is_flag': True, 'default': False, 'help': 'Discover exts and add to --extensions'},
@@ -29,6 +34,7 @@ class feroxbuster(HttpFuzzer):
 	}
 	opt_key_map = {
 		HEADER: 'headers',
+		DATA: 'data',
 		DELAY: OPT_NOT_SUPPORTED,
 		DEPTH: 'depth',
 		FILTER_CODES: 'filter-status',
@@ -47,7 +53,10 @@ class feroxbuster(HttpFuzzer):
 		THREADS: 'threads',
 		TIMEOUT: 'timeout',
 		USER_AGENT: 'user-agent',
-		WORDLIST: 'wordlist'
+		WORDLIST: 'wordlist',
+		REPLAY_PROXY: 'replay-proxy',
+		'request_headers': 'headers',
+		'auto_tune': 'auto-tune',
 	}
 	item_loaders = [JSONSerializer()]
 	output_map = {
@@ -58,16 +67,30 @@ class feroxbuster(HttpFuzzer):
 			WORDS: 'word_count'
 		}
 	}
+	install_cmd_pre = {
+		'*': ['curl', 'bash']
+	}
+	install_version = 'v2.11.0'
 	install_cmd = (
-		'sudo apt install -y unzip curl && '
-		'curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | '
-		'bash && sudo mv feroxbuster /usr/local/bin'
+		f'cd /tmp && curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash -s {CONFIG.dirs.bin}'  # noqa: E501
 	)
-	install_github_handle = 'epi052/feroxbuster'
+	github_handle = 'epi052/feroxbuster'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'cpu'
+
+	@staticmethod
+	def on_cmd(self):
+		rate_limit = self.get_opt_value('rate_limit')
+		auto_tune = self.get_opt_value('auto_tune')
+		proxy = self.get_opt_value('proxy')
+		rproxy = self.get_opt_value('replay_proxy')
+		if (proxy and proxy.startswith('http://')) or (rproxy and rproxy.startswith('http://')):
+			self.cmd += ' --insecure'
+		if rate_limit is not None and auto_tune:
+			self.add_result(Info(message='Disabling auto-tune since it conflicts with rate-limit'))
+			self.cmd = self.cmd.replace('--auto-tune', '')
+		return self.cmd
 
 	@staticmethod
 	def on_start(self):
@@ -79,3 +102,16 @@ class feroxbuster(HttpFuzzer):
 		if isinstance(item, dict):
 			return item['type'] == 'response'
 		return True
+
+	@staticmethod
+	def on_json_loaded(self, item):
+		yield Url(
+			url=item['url'],
+			method=item['method'],
+			status_code=item['status'],
+			time=item['timestamp'],
+			response_headers=item['headers'],
+			request_headers=self.get_opt_value('header', preprocess=True),
+			confidence='low',
+			tags=['fuzz']
+		)

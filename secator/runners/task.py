@@ -1,62 +1,64 @@
 from secator.config import CONFIG
 from secator.runners import Runner
-from secator.utils import discover_tasks
-from secator.celery_utils import CeleryData
-from secator.output_types import Info
+from secator.loader import discover_tasks
+from celery import chain
 
 
 class Task(Runner):
+
 	default_exporters = CONFIG.tasks.exporters
-	enable_hooks = False
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secator.celery import run_task
-		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='celery')
+	def build_celery_workflow(self):
+		"""Build Celery workflow for task execution.
 
-	def yielder(self):
-		"""Run task.
+		Args:
+			run_opts (dict): Run options.
+			results (list): Prior results.
 
-		Yields:
-			secator.output_types.OutputType: Secator output type.
+		Returns:
+			celery.Signature: Celery task signature.
 		"""
+		from secator.celery import run_command
+
 		# Get task class
 		task_cls = Task.get_task_class(self.config.name)
 
 		# Run opts
-		run_opts = self.run_opts.copy()
-		run_opts.pop('output', None)
+		opts = self.run_opts.copy()
+		opts.pop('output', None)
+		opts.pop('profiles', None)
+		opts.pop('no_poll', False)
 
-		# Set task output types
+		# Set output types
 		self.output_types = task_cls.output_types
-		self.enable_duplicate_check = False
+
+		# Set hooks and reports
+		self.enable_hooks = False   # Celery will handle hooks
+		self.enable_reports = self.run_opts.get('enable_reports', True)  # Task will handle reports
 
 		# Get hooks
-		hooks = {task_cls: self.hooks}
-		run_opts['hooks'] = hooks
-		run_opts['context'] = self.context
+		hooks = self._hooks.get(Task, {})
+		opts['hooks'] = hooks
+		opts['context'] = self.context.copy()
+		opts['reports_folder'] = str(self.reports_folder)
 
-		# Run task
-		if self.sync:
-			self.print_item = False
-			result = task_cls.si(self.inputs, **run_opts)
-			results = result.apply().get()
-		else:
-			self.celery_result = task_cls.delay(self.inputs, **run_opts)
-			self.add_subtask(self.celery_result.id, self.config.name, self.config.description or '')
-			yield Info(
-				message=f'Celery task created: {self.celery_result.id}',
-				task_id=self.celery_result.id
-			)
-			results = CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				print_remote_info=False,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results')
+		# Task class will handle those
+		opts['enable_reports'] = False
+		opts['enable_profiles'] = False
+		opts['enable_duplicate_check'] = False
+		opts['print_start'] = False
+		opts['print_end'] = False
+		opts['print_target'] = False
+		opts['has_parent'] = False
+		opts['skip_if_no_inputs'] = False
+		opts['caller'] = 'Task'
 
-		# Yield task results
-		yield from results
+		# Create task signature
+		profile = task_cls.profile(opts) if callable(task_cls.profile) else task_cls.profile
+		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=profile)
+		task_id = sig.freeze().task_id
+		self.add_subtask(task_id, self.config.name, self.description)
+		return chain(sig)
 
 	@staticmethod
 	def get_task_class(name):

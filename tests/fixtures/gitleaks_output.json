@@ -1,0 +1,42 @@
+[
+  {
+    "RuleID": "aws-access-token",
+    "Description": "Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.",
+    "StartLine": 57,
+    "EndLine": 57,
+    "StartColumn": 955,
+    "EndColumn": 974,
+    "Match": "AKIA1234567890ABCDEF",
+    "Secret": "AKIA1234567890ABCDEF",
+    "File": "/home/osboxes/Workspace/secator/tests/unit/__pycache__/test_runners.cpython-311-pytest-8.3.4.pyc",
+    "SymlinkFile": "",
+    "Commit": "",
+    "Entropy": 4.0841837,
+    "Author": "",
+    "Email": "",
+    "Date": "",
+    "Message": "",
+    "Tags": [],
+    "Fingerprint": "/home/osboxes/Workspace/secator/tests/unit/__pycache__/test_runners.cpython-311-pytest-8.3.4.pyc:aws-access-token:57"
+  },
+  {
+    "RuleID": "aws-access-token",
+    "Description": "Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.",
+    "StartLine": 216,
+    "EndLine": 216,
+    "StartColumn": 22,
+    "EndColumn": 41,
+    "Match": "AKIA1234567890ABCDEF",
+    "Secret": "AKIA1234567890ABCDEF",
+    "File": "/home/osboxes/Workspace/secator/tests/unit/test_runners.py",
+    "SymlinkFile": "",
+    "Commit": "",
+    "Entropy": 4.0841837,
+    "Author": "",
+    "Email": "",
+    "Date": "",
+    "Message": "",
+    "Tags": [],
+    "Fingerprint": "/home/osboxes/Workspace/secator/tests/unit/test_runners.py:aws-access-token:216"
+  }
+]

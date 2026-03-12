@@ -1,5 +1,6 @@
 import os
 import json
+import shlex
 
 from secator.decorators import task
 from secator.definitions import EMAIL, OUTPUT_PATH
@@ -11,9 +12,11 @@ from secator.output_types import UserAccount, Info, Error
 class h8mail(OSInt):
 	"""Email information and password lookup tool."""
 	cmd = 'h8mail'
-	json_flag = '--json '
+	input_types = [EMAIL]
+	output_types = [UserAccount]
+	tags = ['user', 'recon', 'email']
+	json_flag = '--json'
 	input_flag = '--targets'
-	input_type = EMAIL
 	file_flag = '-domain'
 	version_flag = '--help'
 	opt_prefix = '--'
@@ -21,7 +24,8 @@ class h8mail(OSInt):
 		'config': {'type': str, 'help': 'Configuration file for API keys'},
 		'local_breach': {'type': str, 'short': 'lb', 'help': 'Local breach file'}
 	}
-	install_cmd = 'pipx install h8mail'
+	install_version = '2.5.6'
+	install_cmd = 'pipx install h8mail==[install_version] --force'
 
 	@staticmethod
 	def on_start(self):
@@ -29,7 +33,8 @@ class h8mail(OSInt):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd = self.cmd.replace('--json', f'--json {self.output_path}')
+		output_path_quoted = shlex.quote(self.output_path)
+		self.cmd = self.cmd.replace('--json ', f'--json {output_path_quoted} ')
 
 	@staticmethod
 	def on_cmd_done(self):

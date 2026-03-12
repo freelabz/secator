@@ -1,0 +1,6 @@
+type: profile
+name: tor
+category: evasion
+description: "Anonymous scan using Tor network"
+opts:
+  proxy: auto

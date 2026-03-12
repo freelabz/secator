@@ -1,0 +1,167 @@
+{
+  "plugins": {
+    "elementor": [
+      {
+        "severities": {
+          "high": [
+            {
+              "auth_type": "Auth",
+              "vulnerabilities": [
+                {
+                  "cve": "CVE-2023-48777",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2023-48777",
+                  "cvss_score": 8.8,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+                  "title": "Elementor \u003c= 3.18.1 - Authenticated(Contributor+) Arbitrary File Upload to Remote Code Execution via Template Import"
+                },
+                {
+                  "cve": "CVE-2024-24934",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-24934",
+                  "cvss_score": 8.8,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+                  "title": "Elementor \u003c= 3.19.0 - Authenticated(Contributor+) Arbitrary File Deletion and PHAR Deserialization"
+                }
+              ]
+            }
+          ],
+          "medium": [
+            {
+              "auth_type": "Unauth",
+              "vulnerabilities": [
+                {
+                  "cve": "CVE-2022-29455",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2022-29455",
+                  "cvss_score": 6.1,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder \u003c= 3.5.5 - Unauthenticated DOM-based Reflected Cross-Site Scripting"
+                },
+                {
+                  "cve": "CVE-2022-4953",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2022-4953",
+                  "cvss_score": 6.1,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+                  "title": "Elementor \u003c= 3.5.4 - DOM-Based iFrame Injection"
+                }
+              ]
+            },
+            {
+              "auth_type": "Auth",
+              "vulnerabilities": [
+                {
+                  "cve": "CVE-2023-33922",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2023-33922",
+                  "cvss_score": 5.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
+                  "title": "Elementor \u003c= 3.13.2 Authenticated(Contributor+) Arbitrary Post Type Creation via save_item"
+                },
+                {
+                  "cve": "CVE-2024-13445",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-13445",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder – More Than Just a Page Builder \u003c= 3.27.4 - Authenticated (Contributor+) Stored Cross-Site Scripting"
+                },
+                {
+                  "cve": "CVE-2024-54444",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-54444",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder \u003c= 3.25.10 - Authenticated (Contributor+) Stored Cross-Site Scripting"
+                },
+                {
+                  "cve": "CVE-2024-5416",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-5416",
+                  "cvss_score": 5.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder – More than Just a Page Builder \u003c= 3.23.4 - Authenticated (Contributor+) Stored Cross-Site Scripting in the URL Parameter in Multiple Widgets"
+                },
+                {
+                  "cve": "CVE-2024-37437",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-37437",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder \u003c= 3.22.1 - Authenticated (Contributor+) Arbitrary SVG Download"
+                },
+                {
+                  "cve": "CVE-2024-10453",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-10453",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder – More than Just a Page Builder \u003c= 3.25.9 - Authenticated (Contributor+) Stored Cross-Site Scripting via Typography Settings"
+                },
+                {
+                  "cve": "CVE-2024-4619",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-4619",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder – More than Just a Page Builder \u003c= 3.21.5 - Authenticated (Contributor+) DOM-Based Stored Cross-Site Scripting"
+                },
+                {
+                  "cve": "CVE-2024-2117",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-2117",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder – More than Just a Page Builder \u003c= 3.20.2 - Authenticated (Contributor+) DOM-Based Stored Cross-Site Scripting via Path Widget"
+                },
+                {
+                  "cve": "CVE-2024-0506",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-0506",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder – More than Just a Page Builder \u003c= 3.18.3 - Authenticated (Contributor+) Stored Cross-Site Scripting via get_image_alt"
+                },
+                {
+                  "cve": "CVE-2023-47504",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2023-47504",
+                  "cvss_score": 6.5,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+                  "title": "Elementor Website Builder \u003c= 3.16.4 - Missing Authorization to Arbitrary Attachment Read"
+                },
+                {
+                  "cve": "CVE-2023-47505",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2023-47505",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder \u003c= 3.16.4 - Authenticated (Contributor+) Stored Cross-Site Scripting via get_inline_svg()"
+                },
+                {
+                  "cve": "CVE-2024-6757",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-6757",
+                  "cvss_score": 4.3,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N",
+                  "title": "Elementor \u003c= 3.23.5 - Authenticated (Contributor+) Basic Information Exposure via get_image_alt Function"
+                },
+                {
+                  "cve": "CVE-2024-8236",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2024-8236",
+                  "cvss_score": 6.4,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Elementor Website Builder – More than Just a Page Builder \u003c= 3.25.7 - Authenticated (Contributor+) Stored Cross-Site Scripting"
+                }
+              ]
+            },
+            {
+              "auth_type": "Privileged",
+              "vulnerabilities": [
+                {
+                  "cve": "CVE-2023-0329",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2023-0329",
+                  "cvss_score": 6.6,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:U/C:H/I:H/A:H",
+                  "title": "Elementor \u003c= 3.12.1 - Authenticated(Administrator+) SQL Injection via 'replace_urls'"
+                }
+              ]
+            }
+          ]
+        },
+        "version": "3.5.4"
+      }
+    ],
+    "wordpress-seo": [
+      {
+        "version": "24.9"
+      }
+    ]
+  },
+  "url": "https://example.com/wordpress"
+}

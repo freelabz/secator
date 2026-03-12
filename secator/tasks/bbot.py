@@ -1,9 +1,12 @@
+import re
 import shutil
 
+from secator.config import CONFIG
 from secator.decorators import task
+from secator.definitions import FILENAME, HOST, IP, ORG_NAME, PORT, URL, USERNAME
 from secator.runners import Command
 from secator.serializers import RegexSerializer
-from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Error
+from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error, UserAccount, Warning
 from secator.serializers import JSONSerializer
 
 
@@ -120,18 +123,45 @@ BBOT_PRESETS = [
 	'web-screenshots',
 	'web-thorough'
 ]
+BBOT_FLAGS = [
+	'active',
+	'affiliates',
+	'aggressive',
+	'baddns',
+	'cloud-enum,'
+	'code-enum,deadly',
+	'email-enum',
+	'iis-shortnames',
+	'passive',
+	'portscan',
+	'report',
+	'safe',
+	'service-enum',
+	'slow',
+	'social-enum',
+	'subdomain-enum',
+	'subdomain-hijack',
+	'web-basic',
+	'web-paramminer',
+	'web-screenshots',
+	'web-thorough'
+]
 BBOT_MODULES_STR = ' '.join(BBOT_MODULES)
 BBOT_MAP_TYPES = {
 	'IP_ADDRESS': Ip,
 	'PROTOCOL': Port,
 	'OPEN_TCP_PORT': Port,
 	'URL': Url,
-	'TECHNOLOGY': Tag,
+	'URL_HINT': Url,
 	'ASN': Record,
 	'DNS_NAME': Record,
 	'WEBSCREENSHOT': Url,
 	'VULNERABILITY': Vulnerability,
-	'FINDING': Tag
+	'EMAIL_ADDRESS': UserAccount,
+	'FINDING': Tag,
+	'AZURE_TENANT': Tag,
+	'STORAGE_BUCKET': Tag,
+	'TECHNOLOGY': Tag,
 }
 BBOT_DESCRIPTION_REGEX = RegexSerializer(
 	regex=r'(?P<name>[\w ]+): \[(?P<value>[^\[\]]+)\]',
@@ -151,23 +181,29 @@ def output_discriminator(self, item):
 
 @task()
 class bbot(Command):
+	"""Multipurpose scanner."""
 	cmd = 'bbot -y --allow-deadly --force'
+	input_types = [HOST, IP, URL, PORT, ORG_NAME, USERNAME, FILENAME]
+	output_types = [Vulnerability, Port, Url, Record, Ip]
+	tags = ['vuln', 'scan']
 	json_flag = '--json'
 	input_flag = '-t'
 	file_flag = None
+	version_flag = '--help'
 	opts = {
-		'modules': {'type': str, 'short': 'm', 'default': '', 'help': ','.join(BBOT_MODULES)},
-		'presets': {'type': str, 'short': 'ps', 'default': 'kitchen-sink', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
+		'modules': {'type': str, 'short': 'm', 'help': ','.join(BBOT_MODULES)},
+		'presets': {'type': str, 'short': 'ps', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
+		'flags': {'type': str, 'short': 'fl', 'help': ','.join(BBOT_FLAGS)}
 	}
 	opt_key_map = {
 		'modules': 'm',
-		'presets': 'p'
+		'presets': 'p',
+		'flags': 'f'
 	}
 	opt_value_map = {
 		'presets': lambda x: ' '.join(x.split(','))
 	}
 	item_loaders = [JSONSerializer()]
-	output_types = [Vulnerability, Port, Url, Record, Ip]
 	output_discriminator = output_discriminator
 	output_map = {
 		Ip: {
@@ -178,7 +214,8 @@ class bbot(Command):
 		},
 		Tag: {
 			'name': 'name',
-			'match': lambda x: x['data'].get('url') or x['data'].get('host'),
+			'category': lambda x: x.get('type', 'bbot'),
+			'match': lambda x: x['data'].get('url') or x['data'].get('host') or '',
 			'extra_data': 'extra_data',
 			'_source': lambda x: 'bbot-' + x['module']
 		},
@@ -191,7 +228,7 @@ class bbot(Command):
 			'_source': lambda x: 'bbot-' + x['module']
 		},
 		Port: {
-			'port': lambda x: int(x['data']['port']) if 'port' in x['data'] else x['data'].split(':')[-1],
+			'port': lambda x: int(x['data']['port']) if 'port' in x['data'] else int(x['data'].split(':')[-1]),
 			'ip': lambda x: [_ for _ in x['resolved_hosts'] if not _.startswith('::')][0],
 			'state': lambda x: 'OPEN',
 			'service_name': lambda x: x['data']['protocol'] if 'protocol' in x['data'] else '',
@@ -202,8 +239,9 @@ class bbot(Command):
 		},
 		Vulnerability: {
 			'name': 'name',
-			'match': lambda x: x['data'].get('url') or x['data']['host'],
+			'matched_at': lambda x: x['data'].get('url') or x['data'].get('host') or '',
 			'extra_data': 'extra_data',
+			'confidence': 'high',
 			'severity': lambda x: x['data']['severity'].lower()
 		},
 		Record: {
@@ -213,9 +251,23 @@ class bbot(Command):
 		},
 		Error: {
 			'message': 'message'
+		},
+		UserAccount: {
+			'username': lambda x: x['data'].split('@')[0],
+			'email': 'data',
+			'site_name': 'host',
+			'extra_data': 'extra_data',
 		}
 	}
-	install_cmd = 'pipx install bbot && pipx upgrade bbot'
+	install_pre = {
+		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
+		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
+	}
+	install_version = '2.7.2'
+	install_cmd = 'pipx install bbot==[install_version] --force'
+	install_post = {
+		'*': f'rm -fr {CONFIG.dirs.share}/pipx/venvs/bbot/lib/python3.12/site-packages/ansible_collections/*'
+	}
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -225,8 +277,14 @@ class bbot(Command):
 			yield item
 			return
 
+		# Set scan name and base path for output
+		if _type == 'SCAN':
+			self.scan_config = item['data']
+			return
+
 		if _type not in BBOT_MAP_TYPES:
-			self._print(f'[bold orange3]Found unsupported bbot type: {_type}.[/] [bold green]Skipping.[/]')
+			yield Warning(message=f'Found unsupported bbot type: {_type}. Skipping.')
+			self.debug(f'Found unsupported bbot type: {item}')
 			return
 
 		if isinstance(item['data'], str):
@@ -235,23 +293,37 @@ class bbot(Command):
 			return
 
 		item['extra_data'] = item['data']
+		if self.scan_config:
+			modules = self.scan_config.get('preset', {}).get('modules', [])
+			item['extra_data']['bbot_modules'] = modules
 
 		# Parse bbot description into extra_data
 		description = item['data'].get('description')
 		if description:
-			del item['data']['description']
-			match = BBOT_DESCRIPTION_REGEX.run(description)
-			for chunk in match:
-				key, val = tuple([c.strip() for c in chunk])
-				if ',' in val:
-					val = val.split(',')
-				key = '_'.join(key.split(' ')).lower()
-				item['extra_data'][key] = val
+			parts = description.split(':')
+			if len(parts) == 2:
+				description = parts[0].strip()
+			match = list(BBOT_DESCRIPTION_REGEX.run(description))
+			if match:
+				del item['data']['description']
+				for chunk in match:
+					key, val = tuple([c.strip() for c in chunk])
+					if ',' in val:
+						val = val.split(',')
+					key = '_'.join(key.split(' ')).lower()
+					item['extra_data'][key] = val
+			description = re.split(r'\s*(\(|\.|Detected.)', description.strip(), 1)[0].rstrip()
 
-		# Set technology as name for Tag
-		if item['type'] == 'TECHNOLOGY':
-			item['name'] = item['data']['technology']
-			del item['data']['technology']
+		# Set tag name for objects mapping Tag
+		if item['type'] in ['AZURE_TENANT', 'STORAGE_BUCKET', 'TECHNOLOGY']:
+			item['name'] = ' '.join(item['type'].split('_')).lower().title()
+			keys = ['technology', 'tenant-names', 'url']
+			info = next((item['data'].get(key) for key in keys if key in item['data']))
+			if info:
+				item['extra_data']['info'] = info
+				for key in keys:
+					if key in item['data']:
+						del item['data'][key]
 
 		# If 'name' key is present in 'data', set it as name
 		elif 'name' in item['data'].keys():
@@ -263,16 +335,23 @@ class bbot(Command):
 			item['name'] = item['extra_data']['name']
 			del item['extra_data']['name']
 
+		# If 'description' key is present in 'data', set it as name
+		elif description:
+			item['name'] = description
+			del item['data']['description']
+
 		# If 'discovery_context' and no name set yet, set it as name
 		else:
 			item['name'] = item['discovery_context']
 
 		# If a screenshot was saved, move it to secator output folder
 		if item['type'] == 'WEBSCREENSHOT':
-			path = item['data']['path']
-			name = path.split('/')[-1]
+			from pathlib import Path
+			path = Path.home() / '.bbot' / 'scans' / self.scan_config['name'] / item['data']['path']
+			name = path.as_posix().split('/')[-1]
 			secator_path = f'{self.reports_folder}/.outputs/{name}'
-			shutil.copy(path, secator_path)
+			yield Info(f'Copying screenshot {path} to {secator_path}')
+			shutil.copyfile(path, secator_path)
 			item['data']['path'] = secator_path
 
 		yield item

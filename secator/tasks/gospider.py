@@ -4,7 +4,7 @@ from secator.decorators import task
 from secator.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FILTER_CODES,
 							   FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
 							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
-							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
+							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 							   STATUS_CODE, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Url
@@ -15,7 +15,10 @@ from secator.tasks._categories import HttpCrawler
 @task()
 class gospider(HttpCrawler):
 	"""Fast web spider written in Go."""
-	cmd = 'gospider --js'
+	cmd = 'gospider'
+	input_types = [URL]
+	output_types = [Url]
+	tags = ['url', 'crawl']
 	file_flag = '-S'
 	input_flag = '-s'
 	json_flag = '--json'
@@ -33,7 +36,6 @@ class gospider(HttpCrawler):
 		MATCH_REGEX: OPT_NOT_SUPPORTED,
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
 		MATCH_WORDS: OPT_NOT_SUPPORTED,
-		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
@@ -53,13 +55,13 @@ class gospider(HttpCrawler):
 			CONTENT_LENGTH: 'length',
 		}
 	}
-	install_cmd = 'go install -v github.com/jaeles-project/gospider@latest'
-	install_github_handle = 'jaeles-project/gospider'
-	ignore_return_code = True
+	install_version = 'v1.1.6'
+	install_cmd = 'go install -v github.com/jaeles-project/gospider@[install_version]'
+	github_handle = 'jaeles-project/gospider'
 	proxychains = False
 	proxy_socks5 = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61
 	proxy_http = True  # with leaks... https://github.com/jaeles-project/gospider/issues/61
-	profile = 'cpu'
+	profile = 'small'
 
 	@staticmethod
 	def validate_item(self, item):
@@ -74,3 +76,8 @@ class gospider(HttpCrawler):
 		except ValueError:  # gospider returns invalid URLs for output sometimes
 			return False
 		return True
+
+	@staticmethod
+	def on_json_loaded(self, item):
+		item['request_headers'] = self.get_opt_value('header', preprocess=True)
+		yield item

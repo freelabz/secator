@@ -1,3 +1,4 @@
+from sysconfig import get_config_h_filename
 import unittest
 from unittest.mock import patch, MagicMock
 from io import StringIO
@@ -11,6 +12,7 @@ from secator.serializers.json import JSONSerializer
 
 
 class MyCommand(Command):
+	input_types = ['slug']
 	cmd = 'dummy'
 	input_flag = '-u'
 	file_flag = None
@@ -42,6 +44,9 @@ class TestCommandRunner(unittest.TestCase):
 			if hook in ['on_item_pre_convert', 'on_item', 'on_line', 'on_duplicate']:
 				def func(self, item):
 					return item
+			elif hook in ['on_cmd_opts']:
+				def func(self, opts):
+					return opts
 			else:
 				def func(self):
 					return None
@@ -89,8 +94,8 @@ class TestCommandRunner(unittest.TestCase):
 
 		with patch.object(Command, 'run_hooks') as mock_run_hooks:
 			MyCommand(TARGETS)
-			mock_run_hooks.assert_any_call('before_init')
-			mock_run_hooks.assert_any_call('on_init')
+			mock_run_hooks.assert_any_call('before_init', sub='init')
+			mock_run_hooks.assert_any_call('on_init', sub='init')
 
 		# Clean up after test
 		delattr(MyCommand, 'before_init')
@@ -159,7 +164,7 @@ class TestCommandRunner(unittest.TestCase):
 					command.run()
 					errors = [e.message for e in command.errors]
 					if errors:  # error happened during the actual execution, it will be yielded in results
-						self.assertIn(f'Hook "unittest.mock.{failing_hook}" execution failed.', errors)
+						self.assertIn(f'Hook "unittest.mock.{failing_hook}" execution failed', errors)
 						self.assertEqual(command.status, 'FAILURE')
 				delattr(MyCommand, failing_hook)
 
@@ -192,14 +197,14 @@ class TestCommandRunner(unittest.TestCase):
 		cmd.run()
 		errors = cmd.errors
 		messages = [e.message for e in errors]
-		self.assertIn("Validator failed: Command does not suport multiple inputs in non-worker mode. Consider using .delay() instead.", messages)
-		self.assertEqual(len(cmd.results), 1)
+		self.assertIn("Validator failed: Command does not support multiple inputs in non-worker mode. Consider running with a remote worker instead.", messages)
+		self.assertEqual(len(cmd.results), 3)
 		self.assertFalse(cmd.inputs_valid)
 		self.assertEqual(cmd.status, 'FAILURE')
 
 	# def test_inputs_validator_failed_wrong_input_type(self):
 	# 	MyCommand.input_types = [Url]
-	# 	targets = ['host1', 'host2'] 
+	# 	targets = ['host1', 'host2']
 	# 	cmd = MyCommand(targets)
 	# 	errors = cmd.errors
 	# 	messages = [e.message for e in errors]
@@ -213,7 +218,7 @@ class TestCommandRunner(unittest.TestCase):
 		fixture = [
 			"http://example.com | URL | example.com | 200 | 1000 | Example Title",
 			"CVE-2021-1234 | VULNERABILITY | CVE-2021-1234 | http://example.com",
-			"AWS_KEY | TAG | AKIA1234567890ABCDEF | http://example.com"
+			"AWS_KEY | TAG | secret | AKIA1234567890ABCDEF | http://example.com"
 		]
 		MyCommand.output_types = [Url, Tag, Vulnerability]
 		MyCommand.item_loaders = [
@@ -226,8 +231,8 @@ class TestCommandRunner(unittest.TestCase):
 				fields=['name', 'id', 'matched_at']
 			),
 			RegexSerializer(
-				r'^(?P<name>.*?) \| TAG \| (?P<match>.*?) \| (?P<matched_at>.*?)$',
-				fields=['name', 'match', 'matched_at']
+				r'^(?P<name>.*?) \| TAG \| (?P<category>.*?) \| (?P<value>.*?) \| (?P<match>.*?)$',
+				fields=['name', 'category', 'match', 'value', 'match']
 			)
 		]
 		def on_regex_loaded(self, item):
@@ -257,7 +262,7 @@ class TestCommandRunner(unittest.TestCase):
 		fixture = [
 			'{"url": "http://host1:5000/api/", "status": 200}',
 			'{"vulnerability": "myvuln", "severity": "HIGH", "matched": "http://host1:5000/api/"}',
-			'{"tag": "mytag", "matched_at": "http://host1:5000/api/", "tag_type": "AWS_API_KEY", "value": "ACDIFOJ-ASDF"}'
+			'{"tag": "mytag", "category": "secret", "matched_at": "http://host1:5000/api/", "tag_type": "AWS_API_KEY", "value": "ACDIFOJ-ASDF"}'
 		]
 		MyCommand.output_types = [Url, Vulnerability, Tag]
 		MyCommand.item_loaders = [JSONSerializer()]
@@ -299,7 +304,7 @@ class TestCommandRunner(unittest.TestCase):
 		json_output = [
 			{"url": "http://example.com", "status_code": 200},
 			{"name": "SQL Injection", "severity": "high", "matched_at": "http://example.com"},
-			{"name": "sensitive_data", "match": "http://example.com", "extra_data": {"tag_type": "PII", "value": "SSN"}}
+			{"name": "sensitive_data", "value": "1234567890", "category": "PII", "match": "http://example.com", "extra_data": {"tag_type": "PII"}}
 		]
 
 		import json
@@ -327,7 +332,7 @@ class TestCommandRunner(unittest.TestCase):
 			self.assertIsInstance(results[1], Url)
 			self.assertIsInstance(results[2], Vulnerability)
 			self.assertIsInstance(results[3], Tag)
-	
+
 			# Check specific attributes
 			self.assertEqual(results[0].name, "host1")
 			self.assertEqual(results[1].url, "http://example.com")
@@ -402,6 +407,8 @@ class TestCommandRunner(unittest.TestCase):
 				'__test__': 'Item of type vulnerability with no _type hint should be incorrectly loaded as Tag',
 				'name': 'sensitive_data',
 				'match': 'http://example.com',
+				'value': 'sensitive',
+				'category': 'PII',
 				'extra_data': {
 					'tag_type': 'PII',
 					'value': 'SSN'
@@ -433,3 +440,103 @@ class TestCommandRunner(unittest.TestCase):
 					for k, v in expected_fields.items():
 						self.assertEqual(getattr(converted, k), v)
 		delattr(MyCommand, 'output_types')
+
+	def test_custom_profiles(self):
+		"""Test that custom profiles (TemplateLoader instances) can be passed to runners."""
+		from secator.template import TemplateLoader
+
+		# Create a custom profile using TemplateLoader
+		custom_profile = TemplateLoader(input={
+			'name': 'custom_test_profile',
+			'type': 'profile',
+			'description': 'Custom test profile',
+			'opts': {
+				'timeout': 120,
+				'retries': 3
+			}
+		})
+
+		# Create a command with the custom profile
+		with mock_command(MyCommand, TARGETS, {'profiles': [custom_profile]}, []) as cmd:
+			# Verify the profile was loaded
+			self.assertEqual(len(cmd.profiles), 1)
+			self.assertEqual(cmd.profiles[0].name, 'custom_test_profile')
+			# Verify the profile options were applied
+			self.assertEqual(cmd.run_opts.get('timeout'), 120)
+			self.assertEqual(cmd.run_opts.get('retries'), 3)
+
+	def test_mixed_profiles(self):
+		"""Test that both string profile names and TemplateLoader instances can be mixed."""
+		from secator.utils_test import clear_modules
+		clear_modules()
+
+		from secator.runners import Command
+		from secator.template import TemplateLoader
+		from secator.utils_test import mock_command
+		from unittest.mock import patch
+
+		class LocalMyCommand(Command):
+			input_types = ['slug']
+			cmd = 'dummy'
+			input_flag = '-u'
+			file_flag = None
+
+		custom_profile = TemplateLoader(input={
+			'name': 'custom_mixed_profile',
+			'type': 'profile',
+			'description': 'Custom mixed profile',
+			'opts': {'timeout': 90}
+		})
+		mock_profile = TemplateLoader(input={
+			'name': 'test_string_profile',
+			'type': 'profile',
+			'description': 'String profile',
+			'opts': {'retries': 2}
+		})
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+				mock_get_configs.return_value = [mock_profile]
+				with mock_command(LocalMyCommand, TARGETS, {'profiles': [custom_profile, 'test_string_profile']}, []) as cmd:
+					self.assertEqual(len(cmd.profiles), 2)
+					profile_names = [p.name for p in cmd.profiles]
+					self.assertIn('custom_mixed_profile', profile_names)
+					self.assertIn('test_string_profile', profile_names)
+					self.assertEqual(cmd.run_opts.get('timeout'), 90)
+					self.assertEqual(cmd.run_opts.get('retries'), 2)
+
+	def test_custom_profile_no_duplicate_defaults(self):
+		"""Test that custom profiles with same name as defaults don't get duplicated."""
+		from secator.utils_test import clear_modules
+		clear_modules()
+
+		from secator.runners import Command
+		from secator.template import TemplateLoader
+		from secator.utils_test import mock_command
+		from unittest.mock import patch
+
+		class LocalMyCommand(Command):
+			input_types = ['slug']
+			cmd = 'dummy'
+			input_flag = '-u'
+			file_flag = None
+
+		custom_profile = TemplateLoader(input={
+			'name': 'test_default',
+			'type': 'profile',
+			'description': 'Custom profile',
+			'opts': {'timeout': 100}
+		})
+
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.CONFIG.profiles.defaults', ['test_default']):
+				with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+					default_profile = TemplateLoader(input={
+						'name': 'test_default',
+						'type': 'profile',
+						'opts': {'timeout': 50}
+					})
+					mock_get_configs.return_value = [default_profile]
+					with mock_command(LocalMyCommand, TARGETS, {'profiles': [custom_profile]}, []) as cmd:
+						self.assertEqual(len(cmd.profiles), 1)
+						self.assertEqual(cmd.profiles[0].name, 'test_default')
+						self.assertEqual(cmd.run_opts.get('timeout'), 100)

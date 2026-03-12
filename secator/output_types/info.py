@@ -20,5 +20,5 @@ class Info(OutputType):
 	_sort_by = ('_timestamp',)
 
 	def __repr__(self):
-		s = f" ℹ️ {self.message}"
+		s = rf"\[[blue]INF[/]] {self.message}"
 		return rich_to_ansi(s)

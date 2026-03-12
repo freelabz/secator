@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import CPES, EXTRA_DATA, HOST, IP, PORT
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, rich_escape as _s, format_object
 
 
 @dataclass
@@ -17,6 +17,10 @@ class Port(OutputType):
 	protocol: str = field(default='tcp', repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	confidence: str = field(default='low', repr=False, compare=False)
+	service_confidence: str = field(default='low', repr=False, compare=False)
+	is_false_positive: bool = field(default=False, compare=False)
+	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='port', repr=True)
@@ -39,14 +43,24 @@ class Port(OutputType):
 		return f'{self.host}:{self.port}'
 
 	def __repr__(self) -> str:
-		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/] [bold yellow]{self.state.upper()}[/]'
+		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/]'
+		state = f'[bold yellow]{self.state.upper()}[/]'
+		if self.confidence == 'low':
+			state += '[bold orange3]?[/]'
+		s += f' {state}'
 		if self.protocol != 'TCP':
-			s += f' \[[yellow3]{self.protocol}[/]]'
+			s += rf' \[[yellow3]{self.protocol}[/]]'
 		if self.service_name:
 			conf = ''
-			if self.confidence == 'low':
-				conf = '?'
-			s += f' \[[bold purple]{self.service_name}{conf}[/]]'
-		if self.host:
-			s += f' \[[cyan]{self.host}[/]]'
+			if self.service_confidence == 'low':
+				conf = '[bold orange3]?[/]'
+			s += rf' \[[bold purple]{self.service_name}{conf}[/]]'
+		if self.host and self.host != self.ip:
+			s += rf' \[[cyan]{self.host}[/]]'
+		if self.tags:
+			tags_str = ','.join(self.tags)
+			s += rf' \[[cyan]{_s(tags_str)}[/]]'
+		if self.extra_data:
+			skip_keys = ['name', 'servicefp', 'method', 'service_name', 'product', 'version', 'conf']
+			s += format_object(self.extra_data, 'yellow', skip_keys=skip_keys)
 		return rich_to_ansi(s)

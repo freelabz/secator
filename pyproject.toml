@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'secator'
-version = '0.6.0'
+version = "0.25.7"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -32,8 +32,10 @@ classifiers = [
 dependencies = [
   'beautifulsoup4 <= 5',
   'celery < 6',
+  'distro < 2',
   'cpe < 2',
   'dotmap < 2',
+  'dnspython < 3',
   'free-proxy < 2',
   'furl < 3',
   'greenlet < 4',
@@ -46,7 +48,8 @@ dependencies = [
   'pydantic < 3',
   'requests < 3',
   'rich < 14',
-  'rich-click < 1.7',
+  'rich-click < 1.9',
+  'click < 8.3',
   'psutil < 7',
   'retry < 1',
   'tldextract < 6',
@@ -61,7 +64,7 @@ dev = [
   'flake8 < 8',
   'pytest < 9',
   'watchdog < 3',
-  'asciinema-automation < 1',
+  'pillow < 13',
 ]
 build = [
   'hatch < 2',
@@ -71,7 +74,6 @@ trace = [
   'pyinstrument < 5',
 ]
 worker = [
-  'gevent < 25',
   'eventlet < 1',
   'flower < 3',
 ]
@@ -87,6 +89,9 @@ gdrive = [
 ]
 gcs = [
 	'google-cloud-storage < 3'
+]
+ai = [
+	'litellm < 2'
 ]
 
 [project.scripts]

@@ -1,0 +1,7 @@
+type: profile
+name: sneaky
+category: evasion
+description: "IDS/IPS evasion, sensitive networks"
+opts:
+    fragment: true
+    nmap_light_fragment: true

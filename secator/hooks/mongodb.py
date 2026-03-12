@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES
+from secator.output_types import OUTPUT_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
@@ -20,11 +20,21 @@ MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
 
 logger = logging.getLogger(__name__)
 
-client = pymongo.MongoClient(
-	escape_mongodb_url(MONGODB_URL),
-	maxPoolSize=MONGODB_MAX_POOL_SIZE,
-	serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT
-)
+_mongodb_client = None
+
+
+def get_mongodb_client():
+	"""Get or create MongoDB client"""
+	global _mongodb_client
+	if _mongodb_client is None:
+		_mongodb_client = pymongo.MongoClient(
+			escape_mongodb_url(MONGODB_URL),
+			maxPoolSize=MONGODB_MAX_POOL_SIZE,
+			serverSelectionTimeoutMS=MONGODB_CONNECT_TIMEOUT,
+			connect=False,
+			tz_aware=True
+		)
+	return _mongodb_client
 
 
 def get_runner_dbg(runner):
@@ -38,7 +48,30 @@ def get_runner_dbg(runner):
 	}
 
 
+def get_results(uuids):
+	"""Get results from MongoDB based on a list of uuids.
+
+	Args:
+		uuids (list[str | Output]): List of uuids, but can also be a mix of uuids and output types.
+
+	Returns:
+		Generator of findings.
+	"""
+	client = get_mongodb_client()
+	db = client.main
+	del_uuids = []
+	for r in uuids:
+		if isinstance(r, tuple(OUTPUT_TYPES)):
+			yield r
+			del_uuids.append(r)
+	uuids = [ObjectId(u) for u in uuids if u not in del_uuids and ObjectId.is_valid(u)]
+	for r in db.findings.find({'_id': {'$in': uuids}}):
+		finding = load_finding(r)
+		yield finding
+
+
 def update_runner(self):
+	client = get_mongodb_client()
 	db = client.main
 	type = self.config.type
 	collection = f'{type}s'
@@ -69,9 +102,10 @@ def update_runner(self):
 
 
 def update_finding(self, item):
-	if type(item) not in FINDING_TYPES:
+	if type(item) not in OUTPUT_TYPES:
 		return item
 	start_time = time.time()
+	client = get_mongodb_client()
 	db = client.main
 	update = item.toDict()
 	_type = item._type
@@ -97,22 +131,24 @@ def update_finding(self, item):
 
 
 def find_duplicates(self):
+	from secator.definitions import IN_WORKER
 	ws_id = self.toDict().get('context', {}).get('workspace_id')
 	if not ws_id:
 		return
-	if self.sync:
+	if not IN_WORKER:
 		tag_duplicates(ws_id)
-		debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb')
 	else:
-		celery_id = tag_duplicates.delay(ws_id)
-		debug(f'running duplicate check on workspace {ws_id}', id=celery_id, sub='hooks.mongodb')
+		tag_duplicates.delay(ws_id)
 
 
-def load_finding(obj):
+def load_finding(obj, exclude_types=[]):
 	finding_type = obj['_type']
+	if finding_type in exclude_types:
+		return None
 	klass = None
-	for otype in FINDING_TYPES:
-		if finding_type == otype.get_name():
+	for otype in OUTPUT_TYPES:
+		oname = otype.get_name()
+		if finding_type == oname:
 			klass = otype
 			item = klass.load(obj)
 			item._uuid = str(obj['_id'])
@@ -120,95 +156,139 @@ def load_finding(obj):
 	return None
 
 
-def load_findings(objs):
-	findings = [load_finding(obj) for obj in objs]
+def load_findings(objs, exclude_types=[]):
+	findings = [load_finding(obj, exclude_types) for obj in objs]
 	return [f for f in findings if f is not None]
 
 
 @shared_task
-def tag_duplicates(ws_id: str = None):
+def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=CONFIG.addons.mongodb.max_items, log_hook=None):  # noqa: E501
 	"""Tag duplicates in workspace.
 
 	Args:
 		ws_id (str): Workspace id.
+		full_scan (bool): If True, scan all findings, otherwise only untagged findings.
 	"""
+	debug(f'running duplicate check on workspace {ws_id}', sub='hooks.mongodb', log_hook=log_hook)
+	init_time = time.time()
+	client = get_mongodb_client()
 	db = client.main
-	workspace_query = list(
-		db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': True}).sort('_timestamp', -1))
-	untagged_query = list(
-		db.findings.find({'_context.workspace_id': str(ws_id)}).sort('_timestamp', -1))
-	# TODO: use this instead when duplicate removal logic is final
-	# untagged_query = list(
-	# 	db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': False}).sort('_timestamp', -1))
-	if not untagged_query:
-		debug('no untagged findings. Skipping.', id=ws_id, sub='hooks.mongodb')
-		return
+	start_time = time.time()
+	workspace_query = {'_context.workspace_id': str(ws_id), '_context.workspace_duplicate': False, '_tagged': True}
+	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$ne': True}}
+	if full_scan:
+		del untagged_query['_tagged']
+	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)), exclude_types)
+	untagged_query_cursor = db.findings.find(untagged_query).sort('_timestamp', -1)
+	if max_items != -1:
+		debug(f'Limiting untagged query to {max_items} items', sub='hooks.mongodb', log_hook=log_hook)
+		untagged_query_cursor = untagged_query_cursor.limit(max_items)
+	untagged_findings = load_findings(list(untagged_query_cursor), exclude_types)
+	debug(
+		f'Workspace non-duplicates findings: {len(workspace_findings)} '
+		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}. Excluded types: {exclude_types}. '
+		f'Query time: {time.time() - start_time}s',
+		sub='hooks.mongodb',
+		log_hook=log_hook
+	)
+	start_time = time.time()
+	seen = []
+	db_updates = {}
 
-	untagged_findings = load_findings(untagged_query)
-	workspace_findings = load_findings(workspace_query)
-	non_duplicates = []
-	duplicates = []
 	for item in untagged_findings:
-		# If already seen in duplicates
-		seen = [f for f in duplicates if f._uuid == item._uuid]
-		if seen:
+		if item._uuid in seen:
 			continue
 
-		# Check for duplicates
-		tmp_duplicates = []
-
-		# Check if already present in list of workspace_findings findings, list of duplicates, or untagged_findings
-		workspace_dupes = [f for f in workspace_findings if f == item and f._uuid != item._uuid]
-		untagged_dupes = [f for f in untagged_findings if f == item and f._uuid != item._uuid]
-		seen_dupes = [f for f in duplicates if f == item and f._uuid != item._uuid]
-		tmp_duplicates.extend(workspace_dupes)
-		tmp_duplicates.extend(untagged_dupes)
-		tmp_duplicates.extend(seen_dupes)
 		debug(
-			f'for item {item._uuid}',
-			obj={
-				'workspace dupes': len(workspace_dupes),
-				'untagged dupes': len(untagged_dupes),
-				'seen dupes': len(seen_dupes)
-			},
-			id=ws_id,
+			f'Processing: {repr(item)} ({item._timestamp}) [{item._uuid}]',
 			sub='hooks.mongodb',
-			verbose=True)
-		tmp_duplicates_ids = list(dict.fromkeys([i._uuid for i in tmp_duplicates]))
-		debug(f'duplicate ids: {tmp_duplicates_ids}', id=ws_id, sub='hooks.mongodb', verbose=True)
+			verbose=True,
+			log_hook=log_hook
+		)
 
-		# Update latest object as non-duplicate
-		if tmp_duplicates:
-			duplicates.extend([f for f in tmp_duplicates])
-			db.findings.update_one({'_id': ObjectId(item._uuid)}, {'$set': {'_related': tmp_duplicates_ids}})
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
-			non_duplicates.append(item)
-		else:
-			debug(f'adding {item._uuid} as non-duplicate', id=ws_id, sub='hooks.mongodb', verbose=True)
-			non_duplicates.append(item)
+		duplicate_ids = [
+			_._uuid
+			for _ in untagged_findings
+			if _ == item and _._uuid != item._uuid
+		]
+		seen.extend(duplicate_ids)
 
-	# debug(f'found {len(duplicates)} total duplicates')
+		debug(
+			f'Found {len(duplicate_ids)} duplicates for item',
+			sub='hooks.mongodb',
+			verbose=True,
+			log_hook=log_hook
+		)
 
-	# Update objects with _tagged and _duplicate fields
-	duplicates_ids = list(dict.fromkeys([n._uuid for n in duplicates]))
-	non_duplicates_ids = list(dict.fromkeys([n._uuid for n in non_duplicates]))
+		duplicate_ws = [
+			_ for _ in workspace_findings
+			if _ == item and _._uuid != item._uuid
+		]
+		debug(f' --> Found {len(duplicate_ws)} workspace duplicates for item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
 
-	search = {'_id': {'$in': [ObjectId(d) for d in duplicates_ids]}}
-	update = {'$set': {'_context.workspace_duplicate': True, '_tagged': True}}
-	db.findings.update_many(search, update)
+		# Copy selected fields from the previous "main" finding (first workspace duplicate)
+		# into the new main finding, if configured.
+		copied_fields = {}
+		for previous_item in duplicate_ws:
+			copy_fields = CONFIG.addons.mongodb.duplicate_main_copy_fields
+			if copy_fields:
+				for field in copy_fields:
+					# Only copy if the attribute exists on the previous finding
+					if not hasattr(previous_item, field):
+						debug(f'{field} not found on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
+						continue
+					value_prev = getattr(previous_item, field)
+					debug(f'{field} is {value_prev} on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
+					# Skip empty values to avoid overwriting with "less useful" data
+					if not value_prev:
+						debug(f'{field} is empty on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
+						continue
+					# Only overwrite if current item field isn't set
+					value_curr = getattr(item, field)
+					debug(f'{field} is {value_curr} on {item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
+					if not value_curr:
+						if field in copied_fields:
+							debug(f'{field} is already copied from previous item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
+							continue
+						debug(f'Using {field}={value_prev} from {previous_item._uuid} for {item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
+						copied_fields[field] = value_prev
 
-	search = {'_id': {'$in': [ObjectId(d) for d in non_duplicates_ids]}}
-	update = {'$set': {'_context.workspace_duplicate': False, '_tagged': True}}
-	db.findings.update_many(search, update)
-	debug(
-		'completed duplicates check for workspace.',
-		id=ws_id,
-		obj={
-			'processed': len(untagged_findings),
-			'duplicates': len(duplicates_ids),
-			'non-duplicates': len(non_duplicates_ids)
-		},
-		sub='hooks.mongodb')
+		related_ids = []
+		if duplicate_ws:
+			duplicate_ws_ids = [_._uuid for _ in duplicate_ws]
+			duplicate_ids.extend(duplicate_ws_ids)
+			for related in duplicate_ws:
+				related_ids.extend(related._related)
+
+		debug(f' --> Found {len(duplicate_ids)} total duplicates for item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
+
+		db_updates[item._uuid] = {
+			**copied_fields,
+			'_related': duplicate_ids + related_ids,
+			'_context.workspace_duplicate': False,
+			'_tagged': True
+		}
+		for uuid in duplicate_ids:
+			db_updates[uuid] = {
+				'_context.workspace_duplicate': True,
+				'_tagged': True
+			}
+	debug(f'Finished processing untagged findings in {time.time() - start_time}s', sub='hooks.mongodb', log_hook=log_hook)
+	start_time = time.time()
+
+	debug(f'Executing {len(db_updates)} database updates', sub='hooks.mongodb', log_hook=log_hook)
+
+	from pymongo import UpdateOne
+	if not db_updates:
+		debug('no db updates to execute', sub='hooks.mongodb', log_hook=log_hook)
+		return
+
+	result = db.findings.bulk_write(
+		[UpdateOne({'_id': ObjectId(uuid)}, {'$set': update}) for uuid, update in db_updates.items()]
+	)
+	debug(result, sub='hooks.mongodb', log_hook=log_hook)
+	debug(f'Finished running db update in {time.time() - start_time}s', sub='hooks.mongodb', log_hook=log_hook)
+	debug(f'Finished running tag duplicates in {time.time() - init_time}s', sub='hooks.mongodb', log_hook=log_hook)
 
 
 HOOKS = {
@@ -232,6 +312,6 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, find_duplicates]
+		'on_end': [update_runner]
 	}
 }

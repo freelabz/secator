@@ -1,0 +1,11 @@
+{
+  "http://testphp.vulnweb.com/hpp": {
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1"
+    },
+    "method": "GET",
+    "params": [
+      "pp"
+    ]
+  }
+}

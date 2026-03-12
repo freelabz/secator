@@ -1,3 +1,5 @@
+import gc
+
 from contextlib import nullcontext
 from time import sleep
 
@@ -5,6 +7,7 @@ import kombu
 import kombu.exceptions
 
 from celery.result import AsyncResult, GroupResult
+from celery.exceptions import TaskRevokedError
 from greenlet import GreenletExit
 from rich.panel import Panel
 from rich.padding import Padding
@@ -12,7 +15,7 @@ from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from secator.config import CONFIG
 from secator.definitions import STATE_COLORS
-from secator.output_types import Error
+from secator.output_types import Error, Info, State
 from secator.rich import console
 from secator.utils import debug, traceback_as_string
 
@@ -24,6 +27,7 @@ class CeleryData(object):
 			result,
 			ids_map={},
 			description=True,
+			revoked=False,
 			refresh_interval=CONFIG.runners.poll_frequency,
 			print_remote_info=True,
 			print_remote_title='Results'
@@ -33,6 +37,7 @@ class CeleryData(object):
 		Args:
 			result (Union[AsyncResult, GroupResult]): Celery result.
 			description (bool): Whether to show task description.
+			revoked (bool): Whether the task was revoked.
 			refresh_interval (int): Refresh interval.
 			print_remote_info (bool): Whether to display live results.
 			print_remote_title (str): Title for the progress panel.
@@ -59,7 +64,7 @@ class CeleryData(object):
 				TextColumn('{task.fields[count]}'),
 				TextColumn('{task.fields[progress]}%'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
-				refresh_per_second=1,
+				auto_refresh=False,
 				transient=False,
 				console=console,
 				# redirect_stderr=True,
@@ -75,18 +80,46 @@ class CeleryData(object):
 				progress_cache = CeleryData.init_progress(progress, ids_map)
 
 			# Get live results and print progress
-			for data in CeleryData.poll(result, ids_map, refresh_interval):
-				yield from data['results']
+			for data in CeleryData.poll(result, ids_map, refresh_interval, revoked):
+				for result in data['results']:
+
+					# Add dynamic subtask to ids_map
+					if isinstance(result, Info):
+						message = result.message
+						if message.startswith('Celery chunked task created: '):
+							task_id = message.split(' ')[-1]
+							ids_map[task_id] = {
+								'id': task_id,
+								'name': result._source,
+								'full_name': result._source,
+								'descr': '',
+								'state': 'PENDING',
+								'count': 0,
+								'progress': 0
+							}
+					yield result
+					del result
 
 				if print_remote_info:
 					task_id = data['id']
+					if task_id not in progress_cache:
+						if CONFIG.runners.show_subtasks:
+							progress_cache[task_id] = progress.add_task('', advance=0, **data)
+						else:
+							continue
 					progress_id = progress_cache[task_id]
 					CeleryData.update_progress(progress, progress_id, data)
+					progress.refresh()
+
+				# Garbage collect between polls
+				del data
+				gc.collect()
 
 			# Update all tasks to 100 %
 			if print_remote_info:
 				for progress_id in progress_cache.values():
 					progress.update(progress_id, advance=100)
+				progress.refresh()
 
 	@staticmethod
 	def init_progress(progress, ids_map):
@@ -109,21 +142,22 @@ class CeleryData(object):
 		progress.update(progress_id, **pdata)
 
 	@staticmethod
-	def poll(result, ids_map, refresh_interval):
+	def poll(result, ids_map, refresh_interval, revoked=False):
 		"""Poll Celery subtasks results in real-time. Fetch task metadata and partial results from each task that runs.
 
 		Yields:
 			dict: Subtasks state and results.
 		"""
-		while True:
+		exit_loop = False
+		while not exit_loop:
 			try:
-				yield from CeleryData.get_all_data(result, ids_map)
-				if result.ready():
+				yield from CeleryData.get_all_data(result, ids_map, revoked=revoked)
+				if result.ready() or revoked:
 					debug('result is ready', sub='celery.poll', id=result.id)
-					yield from CeleryData.get_all_data(result, ids_map)
-					break
+					exit_loop = True
 			except (KeyboardInterrupt, GreenletExit):
 				debug('encounted KeyboardInterrupt or GreenletExit', sub='celery.poll')
+				yield from CeleryData.get_all_data(result, ids_map, revoked=revoked)
 				raise
 			except Exception as e:
 				error = Error.from_exception(e)
@@ -133,7 +167,18 @@ class CeleryData(object):
 				sleep(refresh_interval)
 
 	@staticmethod
-	def get_all_data(result, ids_map):
+	def get_all_data(result, ids_map, revoked=False):
+		main_task = State(
+			task_id=result.id,
+			state='REVOKED' if revoked and result.state == 'PENDING' else result.state,
+			_source='celery'
+		)
+		debug(f"Main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
+		yield {'id': result.id, 'state': result.state, 'results': [main_task]}
+		yield from CeleryData.get_tasks_data(ids_map, revoked=revoked)
+
+	@staticmethod
+	def get_tasks_data(ids_map, revoked=False):
 		"""Get Celery results from main result object, AND all subtasks results.
 
 		Yields:
@@ -144,6 +189,8 @@ class CeleryData(object):
 			data = CeleryData.get_task_data(task_id, ids_map)
 			if not data:
 				continue
+			if revoked and data['state'] == 'PENDING':
+				data['state'] = 'REVOKED'
 			debug(
 				'POLL',
 				sub='celery.poll',
@@ -202,13 +249,18 @@ class CeleryData(object):
 		info = res.info
 
 		# Depending on the task state, info will be either an Exception (FAILURE), a list (SUCCESS), or a dict (RUNNING).
-		# - If it's an Exception, it's an unhandled error.
+		# - If it's an Exception, it's a TaskRevokedError or an unhandled error.
 		# - If it's a list, it's the task results.
 		# - If it's a dict, it's the custom user metadata.
 
 		if isinstance(info, Exception):
-			debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
-			raise info
+			if isinstance(info, TaskRevokedError):
+				data['results'] = [Error(message='Task was revoked', _source=data['name'])]
+				data['state'] = 'REVOKED'
+				data['ready'] = True
+			else:
+				debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
+				raise info
 
 		elif isinstance(info, list):
 			data['results'] = info
@@ -264,5 +316,5 @@ class CeleryData(object):
 				CeleryData.get_task_ids(result.parent, ids=ids)
 
 		except kombu.exceptions.DecodeError:
-			debug('kombu decode error', sub='celery.data.get_task_ids')
+			debug('kombu decode error', sub='celery.data')
 			return

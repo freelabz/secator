@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (DELAY, DOMAIN, OPT_NOT_SUPPORTED, PROXY,
+from secator.definitions import (DELAY, DOMAIN, HOST, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secator.output_types import Subdomain
 from secator.serializers import JSONSerializer
@@ -9,7 +9,10 @@ from secator.tasks._categories import ReconDns
 @task()
 class subfinder(ReconDns):
 	"""Fast passive subdomain enumeration tool."""
-	cmd = 'subfinder -silent -cs'
+	cmd = 'subfinder -cs'
+	input_types = [HOST]
+	output_types = [Subdomain]
+	tags = ['dns', 'recon', 'passive']
 	file_flag = '-dL'
 	input_flag = '-d'
 	json_flag = '-json'
@@ -30,16 +33,22 @@ class subfinder(ReconDns):
 			DOMAIN: 'input',
 		}
 	}
-	output_types = [Subdomain]
-	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
-	install_github_handle = 'projectdiscovery/subfinder'
+	install_version = 'v2.7.0'
+	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@[install_version]'
+	github_handle = 'projectdiscovery/subfinder'
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def validate_item(self, item):
 		if isinstance(item, dict):
 			return item['input'] != 'localhost'
 		return True
+
+	@staticmethod
+	def on_item(self, item):
+		if isinstance(item, Subdomain):
+			item.tags = ['passive']
+		return item

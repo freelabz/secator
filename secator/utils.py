@@ -1,32 +1,35 @@
 import fnmatch
-import inspect
 import importlib
+import ipaddress
 import itertools
+import json
 import logging
 import operator
 import os
-import tldextract
 import re
 import select
+import signal
 import sys
+import tldextract
+import traceback
 import validators
 import warnings
 
 from datetime import datetime, timedelta
 from functools import reduce
-from inspect import isclass
-from pathlib import Path
-from pkgutil import iter_modules
+from pathlib import Path, PurePath
 from time import time
-import traceback
 from urllib.parse import urlparse, quote
 
 import humanize
 import ifaddr
+import platform
+import unicodedata
 import yaml
 
-from secator.definitions import (DEBUG_COMPONENT, VERSION, DEV_PACKAGE)
-from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER
+from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE, IP, HOST, CIDR_RANGE,
+								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT, GCS_URL)
+from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,7 @@ logger = logging.getLogger(__name__)
 _tasks = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
+CAMEL_TO_SNAKE_REGEX = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 class TaskError(ValueError):
@@ -72,20 +76,35 @@ def expand_input(input, ctx):
 	Returns:
 		str: Input.
 	"""
+	piped_input = ctx.obj['piped_input']
+	dry_run = ctx.obj['dry_run']
+	default_inputs = ctx.obj['default_inputs']
+	input_required = ctx.obj['input_required']
 	if input is None:  # read from stdin
-		if not ctx.obj['piped_input']:
-			console.print('Waiting for input on stdin ...', style='bold yellow')
-		rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
-		if rlist:
-			data = sys.stdin.read().splitlines()
-		else:
-			console.print(
-				'No input passed on stdin. Showing help page.',
-				style='bold red')
-			return None
-		return data
+		if not piped_input and input_required and not default_inputs and not dry_run:
+			console.print('No input passed on stdin. Showing help page.', style='bold red')
+			ctx.get_help()
+			sys.exit(1)
+		elif piped_input:
+			rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
+			if rlist:
+				data = sys.stdin.read().splitlines()
+				return data
+			else:
+				console.print('No input passed on stdin.', style='bold red')
+				sys.exit(1)
+		elif default_inputs:
+			console.print('[bold yellow]No inputs provided, using default inputs:[/]')
+			for inp in default_inputs:
+				console.print(f'  • {inp}')
+			return default_inputs
+		elif not dry_run:
+			return []
 	elif os.path.exists(input):
-		if os.path.isfile(input):
+		input_types = ctx.obj['input_types']
+		if not input_types or 'path' in input_types:
+			return input
+		elif os.path.isfile(input):
 			with open(input, 'r') as f:
 				data = f.read().splitlines()
 			return data
@@ -97,6 +116,9 @@ def expand_input(input, ctx):
 	# Usefull for commands that can take only one input at a time.
 	if isinstance(input, list) and len(input) == 1:
 		return input[0]
+
+	if ctx.obj['dry_run'] and not input:
+		return ['TARGET']
 
 	return input
 
@@ -118,6 +140,79 @@ def sanitize_url(http_url):
 	return url.geturl().rstrip('/')
 
 
+def sanitize_folder_name(
+	name: str,
+	replacement_char: str = "_",
+	replace_spaces: bool = True,
+	replace_hyphens: bool = True,
+	max_length: int = 255,
+	normalize_unicode: bool = True,
+) -> str:
+	"""
+	Sanitizes a string to be used as a folder name across Windows, Linux, and macOS.
+
+	Args:
+		name: The input string to sanitize.
+		replacement_char: Character to replace invalid chars (default: '_').
+		replace_spaces: If True, replaces spaces with `replacement_char`.
+		replace_hyphens: If True, replaces hyphens with `replacement_char`.
+		max_length: Maximum allowed length (default: 255, None to disable).
+		normalize_unicode: If True, normalizes Unicode (e.g., é → e).
+
+	Returns:
+		A sanitized folder name.
+	"""
+	if not name:
+		return "unnamed_folder"
+
+	# Normalize Unicode (optional, helps with lookalike characters)
+	if normalize_unicode:
+		name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+
+	# Replace spaces and hyphens if enabled
+	if replace_spaces:
+		name = re.sub(r"\s+", replacement_char, name)
+	if replace_hyphens:
+		name = name.replace("-", replacement_char)
+
+	# Remove invalid characters (OS-specific)
+	if platform.system() == "Windows":
+		# Windows: < > : " / \ | ? * and control chars (0-31)
+		invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
+	else:
+		# Unix: Only / and null byte are invalid
+		invalid_chars = r'[/\x00]'
+
+	sanitized = re.sub(invalid_chars, replacement_char, name)
+
+	# Handle reserved names (Windows only)
+	if platform.system() == "Windows":
+		reserved_names = {
+			"CON", "PRN", "AUX", "NUL",
+			"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+			"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+		}
+		upper_name = sanitized.upper()
+		if upper_name in reserved_names:
+			sanitized = f"{sanitized}{replacement_char}"
+
+	# Remove leading/trailing spaces, dots, and replacement chars
+	sanitized = sanitized.strip().strip(f".{replacement_char}")
+
+	# Replace multiple replacement chars with a single one
+	sanitized = re.sub(f"{re.escape(replacement_char)}+", replacement_char, sanitized)
+
+	# Truncate if too long
+	if max_length and len(sanitized) > max_length:
+		sanitized = sanitized[:max_length].rstrip(f".{replacement_char}")
+
+	# Ensure the name is not empty
+	if not sanitized:
+		return "unnamed_folder"
+
+	return sanitized
+
+
 def deduplicate(array, attr=None):
 	"""Deduplicate list of OutputType items.
 
@@ -137,74 +232,6 @@ def deduplicate(array, attr=None):
 				memo.add(getattr(sub, attr))
 		return sorted(res, key=operator.attrgetter(attr))
 	return sorted(list(dict.fromkeys(array)))
-
-
-def discover_internal_tasks():
-	"""Find internal secator tasks."""
-	from secator.runners import Runner
-	package_dir = Path(__file__).resolve().parent / 'tasks'
-	task_classes = []
-	for (_, module_name, _) in iter_modules([str(package_dir)]):
-		if module_name.startswith('_'):
-			continue
-		try:
-			module = importlib.import_module(f'secator.tasks.{module_name}')
-		except ImportError as e:
-			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
-			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
-			continue
-		for attribute_name in dir(module):
-			attribute = getattr(module, attribute_name)
-			if isclass(attribute):
-				bases = inspect.getmro(attribute)
-				if Runner in bases and hasattr(attribute, '__task__'):
-					task_classes.append(attribute)
-
-	# Sort task_classes by category
-	task_classes = sorted(
-		task_classes,
-		key=lambda x: (get_command_category(x), x.__name__))
-
-	return task_classes
-
-
-def discover_external_tasks():
-	"""Find external secator tasks."""
-	output = []
-	sys.dont_write_bytecode = True
-	for path in CONFIG.dirs.templates.glob('**/*.py'):
-		try:
-			task_name = path.stem
-			module_name = f'secator.tasks.{task_name}'
-
-			# console.print(f'Importing module {module_name} from {path}')
-			spec = importlib.util.spec_from_file_location(module_name, path)
-			module = importlib.util.module_from_spec(spec)
-			# console.print(f'Adding module "{module_name}" to sys path')
-			sys.modules[module_name] = module
-
-			# console.print(f'Executing module "{module}"')
-			spec.loader.exec_module(module)
-
-			# console.print(f'Checking that {module} contains task {task_name}')
-			if not hasattr(module, task_name):
-				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
-				continue
-			cls = getattr(module, task_name)
-			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
-			output.append(cls)
-		except Exception as e:
-			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
-	sys.dont_write_bytecode = False
-	return output
-
-
-def discover_tasks():
-	"""Find all secator tasks (internal + external)."""
-	global _tasks
-	if not _tasks:
-		_tasks = discover_internal_tasks() + discover_external_tasks()
-	return _tasks
 
 
 def import_dynamic(path, name=None):
@@ -236,22 +263,6 @@ def import_dynamic(path, name=None):
 		return None
 
 
-def get_command_cls(cls_name):
-	"""Get secator command by class name.
-
-	Args:
-		cls_name (str): Class name to load.
-
-	Returns:
-		cls: Class.
-	"""
-	tasks_classes = discover_tasks()
-	for task_cls in tasks_classes:
-		if task_cls.__name__ == cls_name:
-			return task_cls
-	return None
-
-
 def get_command_category(command):
 	"""Get the category of a command.
 
@@ -261,9 +272,9 @@ def get_command_category(command):
 	Returns:
 		str: Command category.
 	"""
-	base_cls = command.__bases__[0].__name__.replace('Command', '').replace('Runner', 'misc')
-	category = re.sub(r'(?<!^)(?=[A-Z])', '/', base_cls).lower()
-	return category
+	if not command.tags:
+		return 'misc'
+	return '/'.join(command.tags)
 
 
 def merge_opts(*options):
@@ -308,11 +319,23 @@ def pluralize(word):
 	"""
 	if word.endswith('y'):
 		return word.rstrip('y') + 'ies'
-	else:
-		return f'{word}s'
+	elif word.endswith('s'):
+		return word + 'es'
+	return f'{word}s'
 
 
 def load_fixture(name, fixtures_dir, ext=None, only_path=False):
+	"""Load fixture a fixture dir. Optionally load it's content if it's JSON / YAML.
+
+	Args:
+		name (str): Fixture name.
+		fixtures_dir (str): Fixture parent directory.
+		ext (str, Optional): Extension to load.
+		only_path (bool, Optional): Return fixture path instead of fixture content.
+
+	Returns:
+		str: Fixture path or content.
+	"""
 	fixture_path = f'{fixtures_dir}/{name}'
 	exts = ['.json', '.txt', '.xml', '.rc']
 	if ext:
@@ -331,10 +354,19 @@ def load_fixture(name, fixtures_dir, ext=None, only_path=False):
 
 
 def get_file_timestamp():
+	"""Get current timestamp into a formatted string."""
 	return datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%f_%p")
 
 
 def detect_host(interface=None):
+	"""Detect hostname from ethernet adapters.
+
+	Args:
+		interface (str): Interface name to get hostname from.
+
+	Returns:
+		str | None: hostname or ip address, or None if not found.
+	"""
 	adapters = ifaddr.get_adapters()
 	for adapter in adapters:
 		iface = adapter.name
@@ -345,51 +377,115 @@ def detect_host(interface=None):
 
 
 def rich_to_ansi(text):
-	"""Convert text formatted with rich markup to standard string."""
-	from rich.console import Console
-	tmp_console = Console(file=None, highlight=False, color_system='truecolor')
-	with tmp_console.capture() as capture:
-		tmp_console.print(text, end='', soft_wrap=True)
-	return capture.get()
+	"""Convert text formatted with rich markup to standard string.
+
+	Args:
+		text (str): Text.
+
+	Returns:
+		str: Converted text (ANSI).
+	"""
+	try:
+		from rich.console import Console
+		tmp_console = Console(file=None, highlight=False, force_terminal=True)
+		with tmp_console.capture() as capture:
+			tmp_console.print(text, end='', soft_wrap=True)
+		return capture.get()
+	except Exception:
+		print(f'Could not convert rich text to ansi: {text}[/]', file=sys.stderr)
+		return text
 
 
-def format_object(obj, obj_breaklines=False):
-    """Format the debug object for printing."""
-    sep = '\n ' if obj_breaklines else ', '
-    if isinstance(obj, dict):
-        return sep.join(f'[dim cyan]{k}[/] [dim yellow]->[/] [dim green]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
-    elif isinstance(obj, list):
-        return f'[dim green]{sep.join(obj)}[/]'
-    return ''
+def strip_rich_markup(text):
+	"""Strip rich markup from text.
+
+	Args:
+		text (str): Text.
+
+	Returns:
+		str: Text without rich markup.
+	"""
+	from rich.text import Text
+	return Text.from_markup(text).plain
 
 
-def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False):
-    """Print debug log if DEBUG >= level."""
-    if not DEBUG_COMPONENT or DEBUG_COMPONENT == [""]:
-        return
+def rich_escape(obj):
+	"""Escape object for rich printing.
 
-    if sub:
-        if verbose and sub not in DEBUG_COMPONENT:
-            sub = f'debug.{sub}'
-        if not any(sub.startswith(s) for s in DEBUG_COMPONENT):
-            return
+	Args:
+		obj (any): Input object.
 
-    if lazy:
-        msg = lazy(msg)
+	Returns:
+		any: Initial object, or escaped Rich string.
+	"""
+	if isinstance(obj, str):
+		return obj.replace('[', r'\[').replace(']', r'\]').replace(r'\[/', r'\[\/')
+	return obj
 
-    formatted_msg = f'[dim yellow4]{sub:13s}[/] ' if sub else ''
-    obj_str = format_object(obj, obj_breaklines) if obj else ''
 
-    # Constructing the message string based on object position
-    if obj_str and not obj_after:
-        formatted_msg += f'{obj_str} '
-    formatted_msg += f'[dim yellow]{msg}[/]'
-    if obj_str and obj_after:
-        formatted_msg += f': {obj_str}'
-    if id:
-        formatted_msg += f' [italic dim gray11]\[{id}][/]'
+def format_debug_object(obj, obj_breaklines=False):
+	"""Format the debug object for printing.
 
-    console.print(f'[dim red]🐛 {formatted_msg}[/]', style='red')
+	Args:
+		obj (dict | list): Input object.
+		obj_breaklines (bool): Split output with newlines for each item in input object.
+
+	Returns:
+		str: Rich-formatted string.
+	"""
+	sep = '\n ' if obj_breaklines else ', '
+	if isinstance(obj, dict):
+		return sep.join(f'[bold blue]{k}[/] [yellow]->[/] [blue]{v}[/]' for k, v in obj.items() if v is not None)  # noqa: E501
+	elif isinstance(obj, list):
+		return f'[dim green]{sep.join(obj)}[/]'
+	return ''
+
+
+def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breaklines=False, verbose=False, log_hook=None):
+	"""Print debug log if DEBUG >= level."""
+	if log_hook:
+		formatted_msg = ''
+		if msg:
+			formatted_msg += str(msg)
+		if obj:
+			formatted_msg += f'\n{json.dumps(obj, indent=4, default=str)}'
+		log_hook(formatted_msg)
+
+	if not DEBUG == ['all'] and not DEBUG == ['1'] and not DEBUG == ["*"]:
+		if not DEBUG or DEBUG == [""]:
+			return
+		if sub:
+			for s in DEBUG:
+				if '*' in s and re.match(s + '$', sub):
+					break
+				elif not verbose and sub.startswith(s):
+					break
+				elif verbose and sub == s:
+					break
+			else:
+				return
+
+	if lazy:
+		msg = lazy(msg)
+
+	formatted_msg = f'[yellow4]{sub:13s}[/] ' if sub else ''
+	obj_str = format_debug_object(obj, obj_breaklines) if obj else ''
+
+	# Constructing the message string based on object position
+	if obj_str and not obj_after:
+		formatted_msg += f'{obj_str} '
+	formatted_msg += f'[yellow]{msg}[/]'
+	if obj_str and obj_after:
+		formatted_msg += f': {obj_str}'
+	if id:
+		formatted_msg += rf' [italic gray11]\[{id}][/]'
+
+	try:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] {formatted_msg}[/]', highlight=False)
+	except Exception:
+		console.print(rf'[dim]\[[magenta4]DBG[/]] <MARKUP_DISABLED>{rich_escape(formatted_msg)}</MARKUP_DISABLED>[/]', highlight=False)  # noqa: E501
+		if 'rich' in DEBUG:
+			raise
 
 
 def escape_mongodb_url(url):
@@ -408,6 +504,40 @@ def escape_mongodb_url(url):
 		user, password = quote(user), quote(password)
 		return f'mongodb://{user}:{password}@{url}'
 	return url
+
+
+def caml_to_snake(name):
+	"""
+	Convert CamelCase string to snake_case, handling acronyms properly.
+
+	Examples:
+		>>> caml_to_snake("MongoDB")
+		'mongo_db'
+		>>> caml_to_snake("MONGODB")
+		'mongodb'
+		>>> caml_to_snake("getHTTPResponseCode")
+		'get_http_response_code'
+		>>> caml_to_snake("XMLHttpRequest")
+		'xml_http_request'
+		>>> caml_to_snake("HTMLElement")
+		'html_element'
+	"""
+	if not name:
+		return ""
+	name = CAMEL_TO_SNAKE_REGEX.sub(r'_', name)
+	return name.lower().replace('__', '_')
+
+
+def to_title_case_hyphenated(name):
+	"""Convert a string to title case with hyphens.
+
+	Args:
+		name (str): String to convert.
+
+	Returns:
+		str: Title case string with hyphens.
+	"""
+	return '-'.join(word.capitalize() for word in name.split('-'))
 
 
 def print_version():
@@ -437,6 +567,7 @@ def extract_domain_info(input, domain_only=False):
 
 	Args:
 		input (str): An URL or FQDN.
+		domain_only (bool): Return only the registered domain name.
 
 	Returns:
 		tldextract.ExtractResult: Extracted info.
@@ -446,9 +577,9 @@ def extract_domain_info(input, domain_only=False):
 	if not result or not result.domain or not result.suffix:
 		return None
 	if domain_only:
-		if not validators.domain(result.registered_domain):
+		if not validators.domain(result.top_domain_under_public_suffix):
 			return None
-		return result.registered_domain
+		return result.top_domain_under_public_suffix
 	return result
 
 
@@ -528,16 +659,15 @@ def get_file_date(file_path):
 
 
 def trim_string(s, max_length=30):
-	"""
-	Trims a long string to include the beginning and the end, with an ellipsis in the middle.
-	The output string will not exceed the specified maximum length.
+	"""Trims a long string to include the beginning and the end, with an ellipsis in the middle. The output string will
+	not exceed the specified maximum length.
 
 	Args:
 		s (str): The string to be trimmed.
 		max_length (int): The maximum allowed length of the trimmed string.
 
 	Returns:
-	str: The trimmed string.
+		str: The trimmed string.
 	"""
 	if len(s) <= max_length:
 		return s  # Return the original string if it's short enough
@@ -592,6 +722,8 @@ def should_update(update_frequency, last_updated=None, timestamp=None):
 	"""
 	if not timestamp:
 		timestamp = time()
+	if update_frequency == -1:
+		return False
 	if last_updated and (timestamp - last_updated) < update_frequency:
 		return False
 	return True
@@ -608,6 +740,8 @@ def list_reports(workspace=None, type=None, timedelta=None):
 	Returns:
 		list: List all JSON reports.
 	"""
+	if workspace:
+		workspace = sanitize_folder_name(workspace)
 	if type and not type.endswith('s'):
 		type += 's'
 	json_reports = []
@@ -627,6 +761,14 @@ def list_reports(workspace=None, type=None, timedelta=None):
 
 
 def get_info_from_report_path(path):
+	"""Get some info from the report path, like workspace, run type and id.
+
+	Args:
+		path (pathlib.Path): Report path.
+
+	Returns:
+		dict: Info dict.
+	"""
 	try:
 		ws, runner_type, number = path.parts[-4], path.parts[-3], path.parts[-2]
 		workspace_path = '/'.join(path.parts[:-3])
@@ -641,6 +783,14 @@ def get_info_from_report_path(path):
 
 
 def human_to_timedelta(time_str):
+	"""Convert human time to a timedelta object.
+
+	Args:
+		str: Time string in human format (like 2 years)
+
+	Returns:
+		datetime.TimeDelta: TimeDelta object.
+	"""
 	if not time_str:
 		return None
 	parts = TIMEDELTA_REGEX.match(time_str)
@@ -661,31 +811,607 @@ def human_to_timedelta(time_str):
 
 
 def deep_merge_dicts(*dicts):
-    """
-    Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
+	"""Recursively merges multiple dictionaries by concatenating lists and merging nested dictionaries.
 
-    Args:
-        dicts (tuple): A tuple of dictionary objects to merge.
+	Args:
+		dicts (tuple): A tuple of dictionary objects to merge.
 
-    Returns:
-        dict: A new dictionary containing merged keys and values from all input dictionaries.
+	Returns:
+		dict: A new dictionary containing merged keys and values from all input dictionaries.
 	"""
-    def merge_two_dicts(dict1, dict2):
-        """
-        Helper function that merges two dictionaries.
-        """
-        result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
-        for key, value in dict2.items():
-            if key in result:
-                if isinstance(result[key], dict) and isinstance(value, dict):
-                    result[key] = merge_two_dicts(result[key], value)
-                elif isinstance(result[key], list) and isinstance(value, list):
-                    result[key] += value  # Concatenating lists
-                else:
-                    result[key] = value  # Overwrite if not both lists or both dicts
-            else:
-                result[key] = value
-        return result
+	def merge_two_dicts(dict1, dict2):
+		"""Helper function that merges two dictionaries.
 
-    # Use reduce to apply merge_two_dicts to all dictionaries in dicts
-    return reduce(merge_two_dicts, dicts, {})
+		Args:
+			dict1 (dict): First dict.
+			dict2 (dict): Second dict.
+		Returns:
+			dict: Merged dict.
+		"""
+		result = dict(dict1)  # Create a copy of dict1 to avoid modifying it.
+		for key, value in dict2.items():
+			if key in result:
+				if isinstance(result[key], dict) and isinstance(value, dict):
+					result[key] = merge_two_dicts(result[key], value)
+				elif isinstance(result[key], list) and isinstance(value, list):
+					result[key] += value  # Concatenating lists
+				else:
+					result[key] = value  # Overwrite if not both lists or both dicts
+			else:
+				result[key] = value
+		return result
+
+	# Use reduce to apply merge_two_dicts to all dictionaries in dicts
+	return reduce(merge_two_dicts, dicts, {})
+
+
+def process_wordlist(val):
+	"""Pre-process wordlist option value to allow referencing wordlists from remote URLs or from config keys.
+
+	Args:
+		val (str): Can be a config value in CONFIG.wordlists.defaults or CONFIG.wordlists.templates, or a local path,
+		or a URL.
+	"""
+	default_wordlist = getattr(CONFIG.wordlists.defaults, val)
+	if default_wordlist:
+		val = default_wordlist
+	template_wordlist = getattr(CONFIG.wordlists.templates, val)
+	if template_wordlist:
+		val = template_wordlist
+
+	return download_file(
+		val,
+		target_folder=CONFIG.dirs.wordlists,
+		offline_mode=CONFIG.offline_mode,
+		type='wordlist'
+	)
+
+
+def convert_functions_to_strings(data):
+	"""Recursively convert functions to strings in a dict.
+
+	Args:
+		data (dict): Dictionary to convert.
+
+	Returns:
+		dict: Converted dictionary.
+	"""
+	if isinstance(data, dict):
+		return {k: convert_functions_to_strings(v) for k, v in data.items()}
+	elif isinstance(data, list):
+		return [convert_functions_to_strings(v) for v in data]
+	elif callable(data):
+		return json.dumps(data.__name__)  # or use inspect.getsource(data) if you want the actual function code
+	else:
+		return data
+
+
+def headers_to_dict(header_opt):
+	# If already a dict, return as-is
+	if isinstance(header_opt, dict):
+		return header_opt
+	headers = {}
+	for header in header_opt.split(';;'):
+		split = header.strip().split(':')
+		key = split[0].strip()
+		val = ':'.join(split[1:]).strip()
+		headers[key] = val
+	return headers
+
+
+def parse_raw_http_request(raw_request):
+	"""Parse a raw HTTP request (Burp-style format) and extract method, URL, headers, and body.
+
+	Args:
+		raw_request (str): Raw HTTP request string.
+
+	Returns:
+		dict: Dictionary containing 'method', 'url', 'headers', and 'data'.
+	"""
+	lines = raw_request.strip().split('\n')
+	if not lines or not lines[0]:
+		return {}
+
+	# Parse request line (e.g., "POST /test HTTP/1.1")
+	request_line = lines[0].strip()
+	parts = request_line.split(' ')
+	if len(parts) < 3:
+		return {}
+
+	method = parts[0]
+	path = parts[1]
+
+	# Parse headers
+	headers = {}
+	body_start = len(lines)  # Default to end of lines (no body)
+	found_empty_line = False
+	for i, line in enumerate(lines[1:], start=1):
+		line_stripped = line.strip()
+		if not line_stripped:
+			# Empty line indicates end of headers
+			body_start = i + 1
+			found_empty_line = True
+			break
+		if ':' in line_stripped:
+			key, value = line_stripped.split(':', 1)
+			headers[key.strip()] = value.strip()
+		else:
+			# If we encounter a line without a colon and no empty line yet, it's not a valid header format
+			# This shouldn't happen in properly formatted requests, but we'll handle it gracefully
+			break
+
+	# Extract host from headers to construct full URL
+	host = headers.get('Host', '')
+	if not host:
+		return {}
+
+	# Determine scheme (default to https if not specified)
+	scheme = 'https'
+	# If port 80 is explicitly in host, use http
+	if ':80' in host and not host.startswith('['):
+		scheme = 'http'
+
+	# Construct full URL
+	url = f"{scheme}://{host}{path}"
+
+	# Parse body (everything after the empty line)
+	body = ''
+	if found_empty_line and body_start < len(lines):
+		body = '\n'.join(lines[body_start:]).strip()
+
+	return {
+		'method': method,
+		'url': url,
+		'headers': headers,
+		'data': body
+	}
+
+
+def format_token_count(tokens, icon=''):
+	"""Format a token count as a human-readable string (e.g., '8.5k tokens').
+
+	Args:
+		tokens: Number of tokens.
+		icon: Optional Rich emoji icon prefix (e.g., 'arrow_up', 'arrow_down').
+
+	Returns:
+		str: Formatted token string.
+	"""
+	prefix = f':{icon}: ' if icon else ''
+	if tokens >= 1000:
+		return f'{prefix}{tokens/1000:.1f}k tokens'
+	return f'{prefix}{tokens} tokens'
+
+
+def format_object(obj, color='magenta', skip_keys=[], predicate=lambda x: True):
+	if isinstance(obj, list) and obj:
+		return ' [' + ', '.join([f'[{color}]{rich_escape(item)}[/]' for item in obj if predicate(item)]) + ']'
+	elif isinstance(obj, dict) and obj.keys():
+		obj = {k: v for k, v in obj.items() if k.lower().replace('-', '_') not in skip_keys if predicate(v)}
+		if obj:
+			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
+	return ''
+
+
+def is_host_port(target):
+	"""Check if a target is a host:port.
+
+	Args:
+		target (str): The target to check.
+
+	Returns:
+		bool: True if the target is a host:port, False otherwise.
+	"""
+	split = target.split(':')
+	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0]) or split[0] == 'localhost'):  # noqa: E501
+		return False
+	try:
+		port = int(split[1])
+		if port < 1 or port > 65535:
+			return False
+	except ValueError:
+		return False
+	return True
+
+
+def autodetect_type(target):
+	"""Autodetect the type of a target.
+
+	Args:
+		target (str): The target to autodetect the type of.
+
+	Returns:
+		str: The type of the target.
+	"""
+	if validators.url(target, simple_host=True):
+		return URL
+	elif target.startswith('gs://'):
+		return GCS_URL
+	elif validate_cidr_range(target):
+		return CIDR_RANGE
+	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
+		return IP
+	elif validators.domain(target):
+		return HOST
+	elif is_host_port(target):
+		return HOST_PORT
+	elif validators.mac_address(target):
+		return MAC_ADDRESS
+	elif validators.email(target):
+		return EMAIL
+	elif validators.iban(target):
+		return IBAN
+	elif validators.uuid(target):
+		return UUID
+	elif Path(target).exists():
+		return PATH
+	elif validators.slug(target):
+		return SLUG
+
+	return str(type(target).__name__).lower()
+
+
+def validate_cidr_range(target):
+	if '/' not in target:
+		return False
+	try:
+		ipaddress.ip_network(target, False)
+		return True
+	except ValueError:
+		return False
+
+
+def get_versions_from_string(string):
+	"""Get versions from a string.
+
+	Args:
+		string (str): String to get versions from.
+
+	Returns:
+		list[str]: List of versions.
+	"""
+	regex = r'v?[0-9]+\.[0-9]+\.?[0-9]*\.?[a-zA-Z]*'
+	matches = re.findall(regex, string)
+	if not matches:
+		return []
+	return matches
+
+
+def signal_to_name(signum):
+	"""Convert a signal number to its name"""
+	for name, value in vars(signal).items():
+		if name.startswith('SIG') and not name.startswith('SIG_') and value == signum:
+			return name
+	return str(signum)
+
+
+def is_valid_path(path):
+	"""Check if a path is valid.
+
+	Args:
+		path (str): Path to check.
+
+	Returns:
+		bool: True if the path is valid, False otherwise.
+	"""
+	try:
+		PurePath(path)
+		return True
+	except (TypeError, ValueError):
+		return False
+
+
+def trim_gif(input_path, output_path, max_pause_ms=3000):
+	"""Cap long pauses in a GIF where the terminal output is static.
+
+	Args:
+		input_path (Path): Path to input GIF file.
+		output_path (Path): Path to output GIF file.
+		max_pause_ms (int): Maximum pause duration in milliseconds (default: 3000).
+
+	Returns:
+		bool: True if successful, False otherwise.
+	"""
+	try:
+		from PIL import Image, ImageChops
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF optimization is disabled. Install with: pip install Pillow')
+		return False
+
+	try:
+		with Image.open(input_path) as im:
+			frames = []
+			durations = []
+
+			# Load the first frame
+			im.seek(0)
+			prev_frame = im.convert('RGB')
+
+			current_static_duration = 0
+
+			for i in range(im.n_frames):
+				im.seek(i)
+				duration = im.info.get('duration', 100)
+				curr_frame = im.convert('RGB')
+
+				# Check if visual content has changed
+				is_static = ImageChops.difference(prev_frame, curr_frame).getbbox() is None
+
+				if is_static and i > 0:
+					if current_static_duration + duration > max_pause_ms:
+						remaining_allowed = max_pause_ms - current_static_duration
+						if remaining_allowed > 0:
+							durations.append(remaining_allowed)
+							frames.append(im.copy())
+							current_static_duration = max_pause_ms
+					else:
+						current_static_duration += duration
+						durations.append(duration)
+						frames.append(im.copy())
+				else:
+					current_static_duration = 0
+					durations.append(duration)
+					frames.append(im.copy())
+					prev_frame = curr_frame
+
+			if frames:
+				frames[0].save(
+					output_path,
+					save_all=True,
+					append_images=frames[1:],
+					duration=durations,
+					loop=im.info.get('loop', 0),
+					optimize=True
+				)
+				return True
+		return False
+	except Exception as e:
+		logger.warning(f'Failed to optimize GIF: {str(e)}')
+		return False
+
+
+def get_gif_info(input_path):
+	"""Get information about a GIF file (dimensions, frames, total pixels).
+
+	Args:
+		input_path (Path): Path to input GIF file.
+
+	Returns:
+		dict: Dictionary with 'width', 'height', 'frame_count', and 'total_pixels', or None on error.
+	"""
+	try:
+		from PIL import Image
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF info is disabled. Install with: pip install Pillow')
+		return None
+
+	try:
+		with Image.open(input_path) as im:
+			width, height = im.size
+			frame_count = im.n_frames
+			total_pixels = width * height * frame_count
+			return {
+				'width': width,
+				'height': height,
+				'frame_count': frame_count,
+				'total_pixels': total_pixels
+			}
+	except Exception as e:
+		logger.warning(f'Failed to get GIF info: {str(e)}')
+		return None
+
+
+def reduce_gif_frames(input_path, output_path, max_frames=500):
+	"""Reduce the number of frames in a GIF by accelerating it.
+
+	Args:
+		input_path (Path): Path to input GIF file.
+		output_path (Path): Path to output GIF file.
+		max_frames (int): Maximum number of frames to keep (default: 500).
+
+	Returns:
+		bool: True if successful, False otherwise.
+	"""
+	try:
+		from PIL import Image
+	except ImportError:
+		logger.warning('PIL/Pillow is not installed. GIF frame reduction is disabled. Install with: pip install Pillow')
+		return False
+
+	try:
+		with Image.open(input_path) as im:
+			total_frames = im.n_frames
+
+			# If already at or below max_frames, no need to reduce
+			if total_frames <= max_frames:
+				logger.info(f'GIF already has {total_frames} frames (<= {max_frames}), no reduction needed')
+				return False
+
+			# Calculate frame sampling interval
+			# If we have 1000 frames and want 500, we take every 2nd frame (indices 0, 2, 4, ...)
+			step = total_frames / max_frames
+
+			frames = []
+			durations = []
+
+			# Collect all original durations first
+			original_durations = []
+			for i in range(total_frames):
+				im.seek(i)
+				duration = im.info.get('duration', 100)
+				original_durations.append(duration)
+
+			# Sample frames evenly
+			kept_indices = []
+			for i in range(max_frames):
+				idx = int(i * step)
+				if idx >= total_frames:
+					idx = total_frames - 1
+				kept_indices.append(idx)
+
+			# Remove duplicates while preserving order
+			seen = set()
+			kept_indices = [x for x in kept_indices if not (x in seen or seen.add(x))]
+
+			# Calculate acceleration factor
+			# Total duration of kept frames should be proportional to reduction
+			# If we keep 50% of frames, we can either:
+			# 1. Keep same total duration (sum durations of skipped frames)
+			# 2. Accelerate by reducing durations proportionally
+			# We'll do option 2 for acceleration
+			acceleration_factor = total_frames / len(kept_indices)
+
+			# Load kept frames and adjust durations
+			for idx in kept_indices:
+				im.seek(idx)
+				frames.append(im.copy())
+				# Accelerate by reducing duration proportionally
+				original_duration = original_durations[idx]
+				new_duration = int(original_duration / acceleration_factor)
+				# Ensure minimum duration of 10ms for GIF compatibility
+				durations.append(max(10, new_duration))
+
+			if frames:
+				frames[0].save(
+					output_path,
+					save_all=True,
+					append_images=frames[1:],
+					duration=durations,
+					loop=im.info.get('loop', 0),
+					optimize=True
+				)
+				logger.info(f'Reduced GIF from {total_frames} to {len(frames)} frames (accelerated by {acceleration_factor:.2f}x)')
+				return True
+		return False
+	except Exception as e:
+		logger.warning(f'Failed to reduce GIF frames: {str(e)}')
+		return False
+
+
+def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12, line_height=1.4, sleep_before=200, sleep_after=500, wait_line=120):  # noqa: E501
+	"""Convert .tap file to .tape file for VHS.
+
+	Args:
+		tap_file (Path): Path to input .tap file.
+		output_tape (Path): Path to output .tape file.
+		width (int, optional): Terminal width.
+		height (int, optional): Terminal height.
+		font_size (int): Font size (default: 12).
+		line_height (float): Line height (default: 1.4).
+		sleep_before (int): Sleep before command in milliseconds (default: 200).
+		sleep_after (int): Sleep after command in milliseconds (default: 2000).
+		wait_line (int): Wait line timeout in seconds (default: 30).
+	"""
+	from secator.output_types import Error, Info
+
+	VHS_KEYWORDS = {
+		'Output', 'Require', 'Set', 'Type', 'Left', 'Right', 'Up', 'Down',
+		'Backspace', 'Enter', 'Tab', 'Space', 'Ctrl', 'Sleep', 'Wait',
+		'Hide', 'Show', 'Screenshot', 'Copy', 'Paste', 'Source', 'Env'
+	}
+
+	# Read tap file
+	try:
+		with open(tap_file, 'r') as f:
+			lines = f.readlines()
+	except Exception as e:
+		console.print(Error(message=f'Failed to read {tap_file}: {str(e)}'))
+		sys.exit(1)
+
+	tape_lines = []
+
+	# Add header: Output and Set Shell
+	output_gif = output_tape.with_suffix('.gif').name
+	tape_lines.append(f'Output {output_gif}')
+	tape_lines.append('Set Shell fish')
+	tape_lines.append('Set CursorBlink false')
+
+	# Add terminal dimensions and font size if provided
+	if width is not None:
+		tape_lines.append(f'Set Width {width}')
+	if height is not None:
+		tape_lines.append(f'Set Height {height}')
+	if font_size is not None:
+		tape_lines.append(f'Set FontSize {font_size}')
+	tape_lines.append(f'Set LineHeight {line_height}')
+
+	tape_lines.append('')  # Empty line after header
+
+	for line in lines:
+		line = line.rstrip('\n\r')
+
+		# Skip empty lines
+		if not line.strip():
+			continue
+
+		# Check if line starts with a comment
+		if line.startswith('#'):
+			# Comment line: Type it, Enter, and add Wait
+			comment_text = line
+			tape_lines.append(f'Type "{comment_text}"')
+			tape_lines.append('Enter')
+			tape_lines.append(f'Wait+Line@{wait_line}s')
+			continue
+
+		# Check for inline comments and flags
+		has_noenter = '# noenter' in line
+		has_nowait = '# nowait' in line
+		has_hide = '# hide' in line
+
+		# Remove flags from the line
+		line_clean = line.replace('# noenter', '').replace('# nowait', '').replace('# hide', '')
+		line_stripped = line_clean
+		if has_noenter or has_nowait or has_hide:
+			line_stripped = line_stripped.rstrip()
+
+		# Check if this is a "clear" command
+		is_clear = line_stripped == 'clear'
+
+		# Check if line starts with a VHS keyword (handles cases like "Ctrl+C" and "Up 3")
+		is_vhs_keyword = any(line_stripped.startswith(keyword) for keyword in VHS_KEYWORDS)
+
+		if is_clear:
+			# Handle clear command: Hide, Type, Enter, Sleep, Show, Wait Line
+			tape_lines.append('Hide')
+			tape_lines.append(f'Type "{line_stripped}"')
+			if not has_noenter:
+				tape_lines.append('Enter')
+			tape_lines.append(f'Wait+Line@{wait_line}s')
+			tape_lines.append('Show')
+		elif is_vhs_keyword:
+			# VHS keyword: use as-is
+			tape_lines.append(line_stripped)
+		else:
+			# Regular command: add Wait before (unless nowait), Type command, Enter (unless noenter), Wait after
+			if not has_nowait:
+				tape_lines.append(f'Sleep {sleep_before}ms')
+
+			# Add Hide before command if # hide flag is present
+			if has_hide:
+				tape_lines.append('Hide')
+
+			# Type the command
+			tape_lines.append(f'Type "{line_stripped}"')
+
+			# Add Enter unless noenter flag
+			if not has_noenter:
+				tape_lines.append('Enter')
+				# Wait for command output
+				if not has_nowait:
+					tape_lines.append(f'Wait+Line@{wait_line}s')
+
+			# Add Show after command if # hide flag is present
+			if has_hide:
+				tape_lines.append('Show')
+
+			# Always add Wait after command
+			tape_lines.append(f'Sleep {sleep_after}ms')
+
+	# Write tape file
+	try:
+		with open(output_tape, 'w') as f:
+			f.write('\n'.join(tape_lines) + '\n')
+		console.print(Info(message=f'Converted {tap_file} to {output_tape}'))
+	except Exception as e:
+		console.print(Error(message=f'Failed to write {output_tape}: {str(e)}'))
+		sys.exit(1)

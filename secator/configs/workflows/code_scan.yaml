@@ -1,11 +1,29 @@
 type: workflow
 name: code_scan
 alias: codescan
-description: Code vulnerability scan
-tags: [vuln, code]
+description: Code vulnerability scan and secret hunt
+long_description: |
+  Analyzes source code repositories and filesystems for security vulnerabilities and exposed secrets.
+  Scans dependencies for known CVEs, detects hardcoded credentials, API keys, and sensitive data
+  in code. Supports multiple input types including local paths, Git repositories, and cloud storage.
+  Essential for DevSecOps and identifying security issues before deployment.
+tags: [vuln, secret, code]
 input_types:
   - path
-  - docker_image_name
+  - url
+  - gcs_url
+  - string
+
 tasks:
-  grype:
-    description: Run code vulnerability scan
+  _group:
+    grype:
+      description: Find vulnerabilities in dependencies
+      if: not opts.mode or opts.mode in ['filesystem', 'git']
+    trivy:
+      description: Find vulnerabilities in codebase
+      if: not opts.mode or opts.mode in ['filesystem', 'git']
+    gitleaks:
+      description: Scan codebase for leaks
+      if: not opts.mode or opts.mode in ['filesystem', 'git']
+    trufflehog:
+      description: Scan codebase for secrets

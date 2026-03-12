@@ -1,5 +1,5 @@
 #!/bin/bash
-GO_VERSION=1.22.0
+GO_VERSION=1.24.0
 GO_BUILD=linux-amd64.tar.gz
 GO_TAR=go$GO_VERSION.$GO_BUILD
 

@@ -1,6 +1,7 @@
 import contextlib
 import json
 import os
+import re
 import sys
 import unittest.mock
 
@@ -9,12 +10,14 @@ from fp.fp import FreeProxy
 from secator.definitions import (CIDR_RANGE, DELAY, DEPTH, EMAIL,
 							   FOLLOW_REDIRECT, HEADER, HOST, IP, MATCH_CODES,
 							   METHOD, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME)
-from secator.cli import ALL_WORKFLOWS, ALL_TASKS, ALL_SCANS
+							   THREADS, TIMEOUT, URL, USER_AGENT, USERNAME, PATH,
+							   DOCKER_IMAGE, GIT_REPOSITORY)
+from secator.loader import get_configs_by_type
 from secator.output_types import EXECUTION_TYPES, STAT_TYPES
-from secator.runners import Command
+from secator.runners import Command, Task
+from secator.runners.python import PythonRunner
 from secator.rich import console
-from secator.utils import load_fixture
+from secator.utils import load_fixture, debug, traceback_as_string
 
 #---------#
 # GLOBALS #
@@ -23,33 +26,37 @@ USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
 TEST_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/tests/'
 FIXTURES_DIR = f'{TEST_DIR}/fixtures'
 USE_PROXY = bool(int(os.environ.get('USE_PROXY', '0')))
+TASKS = get_configs_by_type('task')
+WORKFLOWS = get_configs_by_type('workflow')
+SCANS = get_configs_by_type('scan')
+
 
 #------------#
 # TEST TASKS #
 #------------#
 TEST_TASKS = os.environ.get('TEST_TASKS', '')
 if TEST_TASKS:
-	TEST_TASKS = [cls for cls in ALL_TASKS if cls.__name__ in TEST_TASKS.split(',')]
+	TEST_TASKS = [config for config in TASKS if config.name in TEST_TASKS.split(',')]
 else:
-	TEST_TASKS = ALL_TASKS
+	TEST_TASKS = TASKS
 
 #----------------#
 # TEST WORKFLOWS #
 #----------------#
 TEST_WORKFLOWS = os.environ.get('TEST_WORKFLOWS', '')
 if TEST_WORKFLOWS:
-	TEST_WORKFLOWS = [config for config in ALL_WORKFLOWS if config.name in TEST_WORKFLOWS.split(',')]
+	TEST_WORKFLOWS = [config for config in WORKFLOWS if config.name in TEST_WORKFLOWS.split(',')]
 else:
-	TEST_WORKFLOWS = ALL_WORKFLOWS
+	TEST_WORKFLOWS = WORKFLOWS
 
 #------------#
 # TEST SCANS #
 #------------#
 TEST_SCANS = os.environ.get('TEST_SCANS', '')
 if TEST_SCANS:
-	TEST_SCANS = [config for config in ALL_SCANS if config.name in TEST_SCANS.split(',')]
+	TEST_SCANS = [config for config in SCANS if config.name in TEST_SCANS.split(',')]
 else:
-	TEST_SCANS = ALL_SCANS
+	TEST_SCANS = SCANS
 
 #-------------------#
 # TEST INPUTS_TASKS #
@@ -60,22 +67,31 @@ INPUTS_TASKS = {
 	USERNAME: 'test',
 	IP: '192.168.1.23',
 	CIDR_RANGE: '192.168.1.0/24',
-	EMAIL: 'fake@fake.com'
+	EMAIL: 'fake@fake.com',
+	PATH: '.',
+	DOCKER_IMAGE: 'redis:latest',
+	GIT_REPOSITORY: 'https://github.com/freelabz/secator',
+	'ai': 'example.com',
+	'gf': 'http://testphp.vulnweb.com/hpp?pp=1',
+	'maigret': 'Linus__Torvalds',
+	'searchsploit': 'apache',
+	'search_vulns': 'apache 2.4.39',
 }
 
 #---------------------#
 # TEST FIXTURES_TASKS #
 #---------------------#
 FIXTURES_TASKS = {
-	tool_cls: load_fixture(f'{tool_cls.__name__}_output', FIXTURES_DIR)
-	for tool_cls in TEST_TASKS
+	Task.get_task_class(task.name): load_fixture(f'{task.name}_output', FIXTURES_DIR)
+	for task in TASKS
+	if task.name in [t.name for t in TEST_TASKS]
 }
 
 #-----------#
 # TEST OPTS #
 #-----------#
 META_OPTS = {
-	HEADER: 'User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1',
+	HEADER: 'User-Agent: Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1;; Hello: World',
 	DELAY: 0,
 	DEPTH: 2,
 	FOLLOW_REDIRECT: True,
@@ -97,11 +113,30 @@ META_OPTS = {
 	'nmap.skip_host_discovery': True,
 	'msfconsole.resource': load_fixture('msfconsole_input', FIXTURES_DIR, only_path=True),
 	'dirsearch.output_path': load_fixture('dirsearch_output', FIXTURES_DIR, only_path=True),
+	'gitleaks_output_path': load_fixture('gitleaks_output', FIXTURES_DIR, only_path=True),
 	'maigret.output_path': load_fixture('maigret_output', FIXTURES_DIR, only_path=True),
 	'nuclei.template_id': 'prometheus-metrics',
 	'wpscan.output_path': load_fixture('wpscan_output', FIXTURES_DIR, only_path=True),
 	'h8mail.output_path': load_fixture('h8mail_output', FIXTURES_DIR, only_path=True),
-	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True)
+	'h8mail.local_breach': load_fixture('h8mail_breach', FIXTURES_DIR, only_path=True),
+	'wpprobe.output_path': load_fixture('wpprobe_output', FIXTURES_DIR, only_path=True),
+	'arjun.output_path': load_fixture('arjun_output', FIXTURES_DIR, only_path=True),
+	'arjun.wordlist': False,
+	'trivy.output_path': load_fixture('trivy_output', FIXTURES_DIR, only_path=True),
+	'wafw00f.output_path': load_fixture('wafw00f_output', FIXTURES_DIR, only_path=True),
+	'testssl.output_path': load_fixture('testssl_output', FIXTURES_DIR, only_path=True),
+	'ssh_audit.output_path': load_fixture('ssh_audit_output', FIXTURES_DIR, only_path=True),
+	'x8.wordlist': 'http_params',
+}
+
+# PythonRunner task-specific test options (keyed by task name)
+PYTHON_RUNNER_OPTS = {
+	'ai': {
+		'mode': 'attack',
+		'interactive': False,
+		'sensitive': False,
+		'prompt': 'Run a full reconnaissance on this target',
+	},
 }
 
 
@@ -119,18 +154,87 @@ def mock_subprocess_popen(output_list):
 
 
 @contextlib.contextmanager
+def mock_litellm_completion(responses):
+	"""Mock litellm.completion and subprocess calls for PythonRunner tests.
+
+	Mocks LLM API calls to return fixture responses in sequence, and also mocks
+	subprocess.Popen/run so that task/workflow/shell actions don't hit the network.
+
+	Args:
+		responses: List of response content strings.
+	"""
+	if not isinstance(responses, list):
+		responses = [responses]
+	mock_responses = []
+	for content in responses:
+		mock_resp = unittest.mock.MagicMock()
+		mock_resp.choices = [unittest.mock.MagicMock()]
+		mock_resp.choices[0].message.content = content
+		mock_resp.usage = None
+		mock_responses.append(mock_resp)
+
+	mock_run = unittest.mock.MagicMock(stdout='mock output', stderr='', returncode=0)
+	patch_llm = unittest.mock.patch('litellm.completion', side_effect=mock_responses)
+	patch_run = unittest.mock.patch('subprocess.run', return_value=mock_run)
+	with patch_llm, mock_subprocess_popen([]), patch_run:
+		yield
+
+
+@contextlib.contextmanager
+def _mock_python_runner(cls, inputs, opts, fixture, method):
+	"""Mock a PythonRunner task using fixture data and class-defined mock context.
+
+	PythonRunner tasks can define a get_mock_context(fixture) classmethod that returns
+	a context manager for mocking their external dependencies (e.g. LLM API calls).
+	"""
+	# Filter opts: only pass opts defined by the task class + standard runner opts
+	task_opts = set(getattr(cls, 'opts', {}).keys())
+	runner_meta = {
+		'print_item', 'print_line', 'print_cmd', 'print_description', 'print_progress',
+		'print_start', 'print_end', 'print_json', 'print_raw', 'enable_reports', 'sync',
+	}
+	filtered_opts = {k: v for k, v in opts.items() if k in task_opts or k in runner_meta}
+
+	# Merge task-specific PythonRunner test opts
+	task_name = cls.__name__
+	filtered_opts.update(PYTHON_RUNNER_OPTS.get(task_name, {}))
+
+	mock_ctx = cls.get_mock_context(fixture) if hasattr(cls, 'get_mock_context') else contextlib.nullcontext()
+	with mock_ctx:
+		runner = cls(inputs, **filtered_opts)
+		if method == 'run':
+			yield cls(inputs, **filtered_opts).run()
+		elif method == 'si':
+			yield cls.si([], inputs, **filtered_opts)
+		elif method in ['s', 'delay']:
+			yield getattr(cls, method)(inputs, **filtered_opts)
+		else:
+			yield runner
+
+
+@contextlib.contextmanager
 def mock_command(cls, inputs=[], opts={}, fixture=None, method=''):
+	# PythonRunner tasks use their own mock strategy (no subprocess to mock)
+	if issubclass(cls, PythonRunner):
+		with _mock_python_runner(cls, inputs, opts, fixture, method) as runner:
+			yield runner
+		return
+
 	mocks = []
 	if isinstance(fixture, dict):
 		fixture = [fixture]
 
 	is_list = isinstance(fixture, list)
+	supports_list = next((loader for loader in cls.item_loaders if getattr(loader, 'list', False)), None)
 	if is_list:
-		for item in fixture:
-			if isinstance(item, dict):
-				mocks.append(json.dumps(item))
-			else:
-				mocks.append(item)
+		if supports_list:
+			mocks.append(json.dumps(fixture))
+		else:
+			for item in fixture:
+				if isinstance(item, dict):
+					mocks.append(json.dumps(item))
+				else:
+					mocks.append(item)
 	else:
 		mocks.append(fixture)
 
@@ -148,6 +252,10 @@ def mock_command(cls, inputs=[], opts={}, fixture=None, method=''):
 
 class CommandOutputTester:  # Mixin for unittest.TestCase
 
+	@staticmethod
+	def get_item_str(item):
+		return f"Item: {repr(item)}\nItem dict: {json.dumps(item.toDict(), default=str, indent=2)}"
+
 	def _test_runner_output(
 			self,
 			runner,
@@ -155,20 +263,30 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			expected_output_types=[],
 			expected_results=[],
 			expected_status='SUCCESS',
-			empty_results_allowed=False):
+			empty_results_allowed=False,
+			additional_checks=[]):
 
-		console.print(f'[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
+		console.print(f'\t[dim]Testing {runner.config.type} {runner.name} ...[/]', end='')
+		debug('', sub='unittest')
+		debug('-' * 10 + f' RUNNER {runner.name} STARTING ' + '-' * 10, sub='unittest')
 
 		if not runner.inputs:
 			console.print('[dim gold3] skipped (no inputs defined).[/]')
 			return
 
-		if not expected_results and not expected_output_keys:
+		if not expected_results and not expected_output_keys and not expected_output_types:
 			console.print('[dim gold3] (no outputs defined).[/]', end='')
 
 		try:
+			debug(f'{runner.name} starting command: {runner.cmd}', sub='unittest') if isinstance(runner, Command) else None
+
 			# Run runner
 			results = runner.run()
+			results_str = "\n".join([repr(r) for r in results])
+			debug(f'{runner.name} yielded results\n{results_str}', sub='unittest')
+			debug(f'{runner.name} yielded results\n{json.dumps([r.toDict() for r in results], default=str, indent=2)}', sub='unittest.dict', verbose=True)  # noqa: E501
+
+			debug('-' * 10 + f' RUNNER {runner.name} TESTS ' + '-' * 10, sub='unittest')
 
 			# Add execution types to allowed output types
 			expected_output_types.extend(EXECUTION_TYPES + STAT_TYPES)
@@ -176,32 +294,66 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			# Check return code
 			if isinstance(runner, Command):
 				if not runner.ignore_return_code:
-					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code')
+					debug(f'{runner.name} should have a 0 return code', sub='unittest')
+					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code. Runner return code: {runner.return_code}')  # noqa: E501
 
 			# Check results not empty
 			if not empty_results_allowed:
+				debug(f'{runner.name} should return at least 1 result', sub='unittest')
 				self.assertGreater(len(results), 0, f'{runner.name} should return at least 1 result')
 
 			# Check status
-			self.assertEqual(runner.status, expected_status, f'{runner.name} should have the status {expected_status}')
+			debug(f'{runner.name} should have the status {expected_status}.', sub='unittest')
+			self.assertEqual(runner.status, expected_status, f'{runner.name} should have the status {expected_status}. Errors: {runner.errors}')  # noqa: E501
 
 			# Check results
+			failures = []
+			debug('-' * 10 + f' RUNNER {runner.name} ITEM TESTS ' + '-' * 10, sub='unittest')
 			for item in results:
+				item_str = self.get_item_str(item)
+				debug('--' * 5, sub='unittest')
+				debug(f'{runner.name} item {repr(item)}', sub='unittest')
+				debug(f'{runner.name} item [{item.toDict()}]', sub='unittest.item', verbose=True)
 
 				if expected_output_types:
-					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}"')  # noqa: E501
+					debug(f'{runner.name} item should have an output type in {[_._type for _ in expected_output_types]}', sub='unittest')  # noqa: E501
+					self.assertIn(type(item), expected_output_types, f'{runner.name}: item has an unexpected output type "{type(item)}". Expected types: {expected_output_types}.\n{item_str}')  # noqa: E501
 
 				if expected_output_keys:
 					keys = [k for k in list(item.keys()) if not k.startswith('_')]
+					debug(f'{runner.name} item should have output keys {keys}', sub='unittest')
 					self.assertEqual(
 						set(keys).difference(set(expected_output_keys)),
 						set(),
-						f'{runner.name}: item is missing expected keys {set(expected_output_keys)}')
+						f'{runner.name}: item is missing expected keys {set(expected_output_keys)}.\nItem keys: {keys}.\n{item_str}')  # noqa: E501
+
+				if additional_checks and item.__class__ in additional_checks.get('output_types', {}):
+					config = additional_checks['output_types'][item.__class__]
+					runner_regex = config.get('runner', '*')
+					if not re.match(runner_regex, runner.name):
+						continue
+					checks = config.get('checks', [])
+					for check in checks:
+						error = check['error']
+						info = check['info']
+						func = check['function']
+						debug(f'{runner.name} item {info}', sub='unittest')
+						try:
+							result = func(item)
+							if not result:
+								failures.append(f'ERROR ({runner.name}): {error}.\n{item_str}')
+						except Exception as e:
+							failures.append(f'ERROR ({runner.name}): {error}.\n{item_str}\n{traceback_as_string(e)}')
+
+			# Additional checks failures
+			if failures:
+				self.fail("\n\n" + "\n\n".join(failures))
 
 			# Check if runner results in expected results
 			if expected_results:
 				for result in expected_results:
-					self.assertIn(result, results, f'{runner.name}: {result} should be in runner results')
+					debug(f'{runner.name} item should be in expected results {result}.', sub='unittest')
+					self.assertIn(result, results, f'{runner.name}: {result} should be in runner results.')  # noqa: E501
 
 		except Exception:
 			console.print('[dim red] failed[/]')

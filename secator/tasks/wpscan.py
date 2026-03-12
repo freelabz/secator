@@ -1,24 +1,29 @@
 import json
 import os
+import shlex
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
 							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
 							   SEVERITY, TAGS, THREADS, TIMEOUT,
-							   URL, USER_AGENT)
+							   URL, USER_AGENT, HOST, IP)
 from secator.output_types import Tag, Vulnerability, Info, Error
 from secator.tasks._categories import VulnHttp
+from secator.installer import parse_version
 
 
 @task()
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
-	cmd = 'wpscan --random-user-agent --force --verbose'
-	file_flag = None
+	cmd = 'wpscan --force --verbose'
+	input_types = [URL, HOST, IP]
+	output_types = [Vulnerability, Tag]
+	tags = ['vuln', 'scan', 'wordpress']
 	input_flag = '--url'
-	input_type = URL
+	input_chunk_size = 1
 	json_flag = '-f json'
 	opt_prefix = '--'
 	opts = {
@@ -29,7 +34,9 @@ class wpscan(VulnHttp):
 		'passwords': {'type': str, 'help': 'List of passwords to use during the password attack.'},
 		'usernames': {'type': str, 'help': 'List of usernames to use during the password attack.'},
 		'login_uri': {'type': str, 'short': 'lu', 'help': 'URI of the login page if different from /wp-login.php'},
-		'detection_mode': {'type': str, 'short': 'dm', 'help': 'Detection mode between mixed, passive, and aggressive'}
+		'detection_mode': {'type': str, 'short': 'dm', 'help': 'Detection mode between mixed, passive, and aggressive'},
+		'random_user_agent': {'is_flag': True, 'short': 'rua', 'help': 'Random user agent'},
+		'disable_tls_checks': {'is_flag': True, 'short': 'dtc', 'help': 'Disable TLS checks'}
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,
@@ -65,13 +72,25 @@ class wpscan(VulnHttp):
 			PROVIDER: 'wpscan',
 		},
 	}
-	output_types = [Vulnerability, Tag]
-	install_cmd = 'sudo apt install -y build-essential ruby-dev rubygems && sudo gem install wpscan'
+	install_version = 'v3.8.28'
+	install_pre_cmd = {
+		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
+		'pacman': ['make', 'ruby-erb'],
+		'*': ['make']
+	}
+	install_cmd = f'gem install wpscan -v [install_version_strip] --user-install -n {CONFIG.dirs.bin}'
+	install_post = {
+		'kali': (
+			f'gem uninstall nokogiri --user-install -n {CONFIG.dirs.bin} --force --executables && '
+			f'gem install nokogiri --user-install -n {CONFIG.dirs.bin} --platform=ruby'
+		)
+	}
+	install_github_bin = False
+	github_handle = 'wpscanteam/wpscan'
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	ignore_return_code = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):
@@ -79,7 +98,7 @@ class wpscan(VulnHttp):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -93,6 +112,12 @@ class wpscan(VulnHttp):
 
 		# Get URL
 		target = data.get('target_url', self.inputs[0])
+
+		# Get errors
+		scan_aborted = data.get('scan_aborted', False)
+		if scan_aborted:
+			yield Error(message=scan_aborted, traceback='\n'.join(data.get('trace', [])))
+			return
 
 		# Wordpress version
 		version = data.get('version', {})
@@ -117,20 +142,26 @@ class wpscan(VulnHttp):
 			location = main_theme['location']
 			if version:
 				number = version['number']
-				latest_version = main_theme.get('latest_version')
+				latest_version = main_theme.get('latest_version') or 'unknown'
 				yield Tag(
-					name=f'Wordpress theme - {slug} {number}',
+					category='info',
+					name='wordpress_theme',
 					match=target,
+					value=slug + ':' + number,
 					extra_data={
 						'url': location,
 						'latest_version': latest_version
 					}
 				)
-				if (latest_version and number < latest_version):
+				outdated = parse_version(number) < parse_version(latest_version) if latest_version != 'unknown' and number else False  # noqa: E501
+				if outdated:
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress theme - {slug} {number} outdated',
-						severity='info'
+						description=f'The wordpress theme {slug} is outdated, consider updating to the latest version {latest_version}',
+						confidence='high',
+						severity='info',
+						tags=['wordpress', 'wordpress_theme']
 					)
 
 		# Interesting findings
@@ -146,18 +177,26 @@ class wpscan(VulnHttp):
 			location = data['location']
 			if version:
 				number = version['number']
-				latest_version = data.get('latest_version')
+				latest_version = data.get('latest_version') or 'unknown'
 				yield Tag(
-					name=f'Wordpress plugin - {slug} {number}',
+					category='info',
+					name='wordpress_plugin',
 					match=target,
+					value=slug + ':' + number,
 					extra_data={
 						'url': location,
+						'name': slug,
+						'version': number,
 						'latest_version': latest_version
 					}
 				)
-				if (latest_version and number < latest_version):
+				outdated = parse_version(number) < parse_version(latest_version) if latest_version != 'unknown' and number else False  # noqa: E501
+				if outdated:
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress plugin - {slug} {number} outdated',
-						severity='info'
+						description=f'The wordpress plugin {slug} is outdated, consider updating to the latest version {latest_version}.',
+						confidence='high',
+						severity='info',
+						tags=['wordpress', 'wordpress_plugin']
 					)

@@ -2,28 +2,66 @@ type: workflow
 name: url_dirsearch
 alias: dirfind
 description: URL directory search
-tags: [http, dir]
+long_description: |
+  Searches for hidden directories and files on web servers using content discovery techniques.
+  Probes URLs for directory listings, optionally bruteforces directories and crawls discovered
+  directory contents. Can hunt for sensitive files and secrets in HTTP responses.
+  Helpful for finding hidden admin panels, backup files, and exposed directories.
+tags: [http, dir, secrets]
 input_types:
   - url
+  - host
+  - host_port
+  - ip
+
+options:
+  hunt_secrets:
+    is_flag: True
+    help: Hunt secrets in HTTP responses (trufflehog)
+    default: False
+    short: hs
+
+  hunt_files:
+    is_flag: True
+    help: Hunt files in HTTP directories
+    default: False
+    short: cf
+
+  hunt_dirs:
+    is_flag: True
+    help: Hunt HTTP directories (ffuf)
+    default: False
+    short: fd
+
 tasks:
+  httpx:
+    description: Run HTTP probes on URLs
+    tech_detect: True
+    follow_redirect: True
+
   ffuf:
     description: Search for HTTP directories
-    wordlist: /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt
+    auto_calibration: True
+    wordlist: directory_list_small
+    match_regex: '<title>Index of'
     targets_:
       - type: target
         field: '{name}/FUZZ'
-  cariddi:
-    description: Crawl HTTP directories for content
-    targets_:
-      - target.name
-      - url.url
-  httpx:
-    description: Run HTTP probes on crawled URLs
-    follow_redirects: True
+        condition: item.type == 'url'
+    if: opts.hunt_dirs
+
+  katana:
+    description: Crawl files from HTTP directories
     targets_:
       - type: url
         field: url
-        condition: item.status_code == 0
-results:
-- type: url
-  condition: item.status_code != 0
+        condition: item.is_directory
+    if: opts.hunt_files
+
+  trufflehog:
+    description: Find secrets in HTTP responses
+    targets_:
+      - type: url
+        field: stored_response_path
+        condition: item.stored_response_path != ''
+    if: opts.hunt_files

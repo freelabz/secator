@@ -1,133 +1,159 @@
-import uuid
+from dotmap import DotMap
 
 from secator.config import CONFIG
+from secator.output_types import Info
 from secator.runners._base import Runner
 from secator.runners.task import Task
+from secator.tree import build_runner_tree, walk_runner_tree
 from secator.utils import merge_opts
-from secator.celery_utils import CeleryData
-from secator.output_types import Info
 
 
 class Workflow(Runner):
 
 	default_exporters = CONFIG.workflows.exporters
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secator.celery import run_workflow
-		return run_workflow.delay(args=args, kwargs=kwargs)
-
-	def yielder(self):
-		"""Run workflow.
-
-		Yields:
-			secator.output_types.OutputType: Secator output type.
-		"""
-		# Task opts
-		run_opts = self.run_opts.copy()
-		run_opts['hooks'] = self._hooks.get(Task, {})
-
-		# Build Celery workflow
-		workflow = self.build_celery_workflow(
-			run_opts=run_opts,
-			results=self.results
-		)
-		self.celery_ids = list(self.celery_ids_map.keys())
-
-		# Run Celery workflow and get results
-		if self.sync:
-			self.print_item = False
-			results = workflow.apply().get()
-		else:
-			result = workflow()
-			self.celery_ids.append(str(result.id))
-			self.celery_result = result
-			yield Info(
-				message=f'Celery task created: {self.celery_result.id}',
-				task_id=self.celery_result.id
-			)
-			results = CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
-			)
-
-		# Get workflow results
-		yield from results
-
-	def build_celery_workflow(self, run_opts={}, results=[]):
-		""""Build Celery workflow.
-
-		Returns:
-			tuple(celery.chain, List[str]): Celery task chain, Celery task ids.
-		"""
-		from celery import chain
-		from secator.celery import forward_results
-		sigs = self.get_tasks(
-			self.config.tasks.toDict(),
-			self.inputs,
-			self.config.options,
-			run_opts)
-		sigs = [forward_results.si(results).set(queue='io')] + sigs + [forward_results.s().set(queue='io')]
-		workflow = chain(*sigs)
-		return workflow
-
-	def get_tasks(self, config, inputs, workflow_opts, run_opts):
-		"""Get tasks recursively as Celery chains / chords.
+	def build_celery_workflow(self, chain_previous_results=False):
+		"""Build Celery workflow for workflow execution.
 
 		Args:
-			config (dict): Tasks config dict.
-			inputs (list): Inputs.
-			workflow_opts (dict): Workflow options.
-			run_opts (dict): Run options.
-			sync (bool): Synchronous mode (chain of tasks, no chords).
+			chain_previous_results (bool): Chain previous results.
 
 		Returns:
-			tuple (List[celery.Signature], List[str]): Celery signatures, Celery task ids.
+			celery.Signature: Celery task signature.
 		"""
-		from celery import chain, chord
-		from secator.celery import forward_results
-		sigs = []
-		for task_name, task_opts in config.items():
-			# Task opts can be None
-			task_opts = task_opts or {}
+		from celery import chain
+		from secator.celery import mark_runner_started, mark_runner_completed, forward_results
 
-			# If it's a group, process the sublevel tasks as a Celery chord.
-			if task_name.startswith('_group'):
-				tasks = self.get_tasks(
-					task_opts,
-					inputs,
-					workflow_opts,
-					run_opts
-				)
-				sig = chord((tasks), forward_results.s().set(queue='io'))
-			elif task_name == '_chain':
-				tasks = self.get_tasks(
-					task_opts,
-					inputs,
-					workflow_opts,
-					run_opts
-				)
-				sig = chain(*tasks)
-			else:
+		# Prepare run options
+		opts = self.run_opts.copy()
+		opts.pop('output', None)
+		opts.pop('no_poll', False)
+		opts.pop('print_profiles', False)
+
+		# Set hooks and reports
+		self.enable_hooks = False   # Celery will handle hooks
+		self.enable_reports = True  # Workflow will handle reports
+		self.print_item = not self.sync
+
+		# Get hooks
+		hooks = self._hooks.get(Task, {})
+		opts['hooks'] = hooks
+		opts['context'] = self.context.copy()
+		opts['reports_folder'] = str(self.reports_folder)
+		opts['enable_reports'] = False  # Workflow will handle reports
+		opts['enable_duplicate_check'] = False  # Workflow will handle duplicate check
+		opts['has_parent'] = True
+		opts['skip_if_no_inputs'] = True
+		opts['caller'] = 'Workflow'
+
+		# Remove workflow config prefix from opts
+		for k, v in opts.copy().items():
+			if k.startswith(self.config.name + '_'):
+				opts[k.replace(self.config.name + '_', '')] = v
+
+		# Remove dynamic opts from parent runner
+		opts = {k: v for k, v in opts.items() if k not in self.dynamic_opts}
+
+		# Forward workflow opts to first task if needed
+		forwarded_opts = {}
+		if chain_previous_results:
+			forwarded_opts = self.dynamic_opts
+
+		# Build workflow tree
+		tree = build_runner_tree(self.config)
+		current_id = tree.root_nodes[0].id
+		ix = 0
+		sigs = []
+
+		def process_task(node, force=False, parent_ix=None):
+			from celery import chain, group
+			from secator.utils import debug
+			nonlocal ix
+			sig = None
+
+			if node.id is None:
+				return
+
+			if node.type == 'task':
+				if node.parent.type == 'group' and not force:
+					return
+
+				# Skip task if condition is not met
+				condition = node.opts.pop('if', None)
+				local_ns = {'opts': DotMap(opts), 'targets': self.inputs}
+				if condition:
+					# debug(f'{node.id} evaluating {condition} with opts {opts}', sub=self.config.name)
+					safe_globals = {'__builtins__': {'len': len}}
+					result = eval(condition, safe_globals, local_ns)
+					if not result:
+						debug(f'{node.id} skipped task because condition is not met: {condition}', sub=self.config.name)
+						self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] because condition is not met: [bold green]{condition}[/]'))  # noqa: E501
+						return
+
 				# Get task class
-				task = Task.get_task_class(task_name)
+				task = Task.get_task_class(node.name)
 
 				# Merge task options (order of priority with overrides)
-				opts = merge_opts(workflow_opts, task_opts, run_opts)
-
-				# Add task context and hooks to options
-				opts['hooks'] = {task: self._hooks.get(Task, {})}
-				opts['context'] = self.context.copy()
-				opts['name'] = task_name
-				opts['has_parent'] = True
+				task_opts = merge_opts(self.config.default_options.toDict(), node.opts, opts)
+				if (ix == 0 or parent_ix == 0) and forwarded_opts:
+					task_opts.update(forwarded_opts)
 
 				# Create task signature
-				task_id = str(uuid.uuid4())
-				sig = task.s(inputs, **opts).set(queue=task.profile, task_id=task_id)
-				self.add_subtask(task_id, task_name, task_opts.get('description', ''))
+				task_opts['name'] = node.name
+				task_opts['context'] = self.context.copy()
+				task_opts['context']['node_id'] = node.id
+				task_opts['context']['ancestor_id'] = None if (ix == 0 or parent_ix == 0) else current_id
+				task_opts['aliases'] = [node.id, node.name]
+				if task.__name__ != node.name:
+					task_opts['aliases'].append(task.__name__)
+				profile = task.profile(task_opts) if callable(task.profile) else task.profile
+				sig = task.s(self.inputs, **task_opts).set(queue=profile)
+				task_id = sig.freeze().task_id
+				debug(f'{node.id} sig built ix: {ix}, parent_ix: {parent_ix}', sub=self.config.name)
+				# debug(f'{node.id} opts', obj=task_opts, sub=f'workflow.{self.config.name}')
+				debug(f'{node.id} ancestor id: {task_opts.get("context", {}).get("ancestor_id")}', sub=self.config.name)
+				self.add_subtask(task_id, node.name, task_opts.get('description', ''))
 				self.output_types.extend(task.output_types)
-			sigs.append(sig)
-		return sigs
+				ix += 1
+
+			elif node.type == 'group' and node.children:
+				parent_ix = ix
+				tasks = [sig for sig in [process_task(child, force=True, parent_ix=parent_ix) for child in node.children] if sig]
+				debug(f'{node.id} group built with {len(tasks)} tasks', sub=self.config.name)
+				if len(tasks) == 1:
+					debug(f'{node.id} downgraded group to task', sub=self.config.name)
+					sig = tasks[0]
+				elif len(tasks) > 1:
+					sig = group(*tasks)
+					last_sig = sigs[-1] if sigs else None
+					if sig and isinstance(last_sig, group):  # cannot chain 2 groups without bridge task
+						debug(f'{node.id} previous is group, adding bridge task forward_results', sub=self.config.name)
+						sigs.append(forward_results.s())
+				else:
+					debug(f'{node.id} group built with 0 tasks', sub=self.config.name)
+				ix += 1
+
+			elif node.type == 'chain' and node.children:
+				tasks = [sig for sig in [process_task(child, force=True, parent_ix=ix) for child in node.children] if sig]
+				sig = chain(*tasks) if tasks else None
+				debug(f'{node.id} chain built with {len(tasks)} tasks', sub=self.config.name)
+				ix += 1
+
+			if sig and node.parent.type != 'group':
+				debug(f'{node.id} added to workflow', sub=self.config.name)
+				sigs.append(sig)
+
+			return sig
+
+		walk_runner_tree(tree, process_task)
+
+		# Build workflow chain with lifecycle management
+		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue='results')
+		if chain_previous_results:
+			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue='results')
+		sig = chain(
+			start_sig,
+			*sigs,
+			mark_runner_completed.s(self, enable_hooks=True).set(queue='results'),
+		)
+		return sig

@@ -1,8 +1,9 @@
 import re
 
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
-								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED)
+								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED, STRING, SLUG)
 from secator.output_types import Exploit
 from secator.runners import Command
 from secator.serializers import JSONSerializer
@@ -13,9 +14,12 @@ SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*
 
 @task()
 class searchsploit(Command):
-	"""Exploit-DB command line search tool."""
+	"""Exploit searcher based on ExploitDB."""
 	cmd = 'searchsploit'
-	input_flag = None
+	input_types = [STRING, SLUG]
+	output_types = [Exploit]
+	tags = ['exploit', 'recon']
+	input_chunk_size = 1
 	json_flag = '--json'
 	version_flag = OPT_NOT_SUPPORTED
 	opts = {
@@ -23,7 +27,6 @@ class searchsploit(Command):
 	}
 	opt_key_map = {}
 	item_loaders = [JSONSerializer()]
-	output_types = [Exploit]
 	output_map = {
 		Exploit: {
 			NAME: 'Title',
@@ -37,12 +40,16 @@ class searchsploit(Command):
 			}
 		}
 	}
-	install_cmd = 'sudo git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb || true && sudo ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit'  # noqa: E501
+	install_version = '2025-04-23'
+	install_pre = {'apk': ['ncurses']}
+	install_cmd = (
+		f'git clone  --depth 1 --single-branch -b [install_version] https://gitlab.com/exploit-database/exploitdb.git {CONFIG.dirs.share}/exploitdb_[install_version] || true && '  # noqa: E501
+		f'ln -sf $HOME/.local/share/exploitdb_[install_version]/searchsploit {CONFIG.dirs.bin}/searchsploit'
+	)
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
-	input_chunk_size = 1
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def tags_extractor(item):
@@ -76,6 +83,8 @@ class searchsploit(Command):
 
 	@staticmethod
 	def on_item(self, item):
+		if not isinstance(item, Exploit):
+			return item
 		match = SEARCHSPLOIT_TITLE_REGEX.match(item.name)
 		# if not match:
 		# 	self._print(f'[bold red]{item.name} ({item.reference}) did not match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
@@ -96,4 +105,5 @@ class searchsploit(Command):
 			# 	self._print(f'[bold red]{item.name} ({item.reference}) did not quite match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
 		input_tag = '-'.join(self.inputs[0].replace('\'', '').split(' '))
 		item.tags = [input_tag] + item.tags
+		item.matched_at = self.matched_at if self.matched_at else self.inputs[0] if self.inputs else ''
 		return item

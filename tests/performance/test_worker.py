@@ -1,9 +1,9 @@
 import unittest
-from secator.runners import Command
-from secator.config import CONFIG
-from time import sleep
-from threading import Thread
-from secator.celery import is_celery_worker_alive
+# from secator.runners import Command
+# from secator.config import CONFIG
+# from time import sleep
+# from threading import Thread
+# from secator.celery import is_celery_worker_alive
 
 class TestWorker(unittest.TestCase):
 
