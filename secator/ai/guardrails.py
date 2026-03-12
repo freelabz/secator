@@ -175,12 +175,8 @@ def extract_command_targets(command: str) -> List[str]:
 				continue
 			targets.append(ip)
 
-	# Detect hosts (skip command names from all sub-commands)
-	cmd_names = set()
-	for sub_cmd in split_commands(command):
-		parts = sub_cmd.split()
-		if parts:
-			cmd_names.add(parts[0])
+	# Detect hosts (skip command names)
+	cmd_names = set(_extract_cmd_names(command))
 
 	# Find quoted regions so we can skip matches inside code strings
 	quoted_ranges = []
@@ -278,7 +274,7 @@ def _resolve_path(path: str) -> str:
 def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 	"""Extract file paths with access type from a shell command string.
 
-	Handles compound commands (&&, ||, ;, |) by splitting first.
+	Uses safecmd's bash parser (shfmt) for proper argument splitting.
 	Redirects (>, >>, 2>) are always classified as 'write'.
 	Other paths are classified based on the sub-command's classification.
 
@@ -291,91 +287,63 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 	seen = set()
 	paths = []
 
-	# If the top-level command is docker/podman, only check volume mounts on the
-	# original command. The -c argument may contain nested &&/;/| operators that
-	# split_commands can't reliably parse, and all paths inside the container are
-	# sandboxed anyway.
-	top_cmd = command.strip().split()[0] if command.strip() else ""
-	if top_cmd in ('docker', 'podman'):
-		parts = command.strip().split()
-		for j, p in enumerate(parts):
-			if (p in ('-v', '--volume') and j + 1 < len(parts)):
-				host_path = parts[j + 1].split(':')[0]
+	def _add_path(path: str, access: str):
+		resolved = _resolve_path(path)
+		if resolved not in seen:
+			seen.add(resolved)
+			paths.append((resolved, access))
+
+	def _extract_docker_volumes(args: List[str]):
+		"""Extract host paths from docker/podman volume mounts."""
+		for j, p in enumerate(args):
+			if p in ('-v', '--volume') and j + 1 < len(args):
+				host_path = args[j + 1].split(':')[0]
 				if _is_file_path(host_path):
-					resolved = _resolve_path(host_path)
-					if resolved not in seen:
-						seen.add(resolved)
-						paths.append((resolved, "read"))
+					_add_path(host_path, "read")
 			elif p.startswith('--mount'):
-				mount_val = p.split('=', 1)[1] if '=' in p else (parts[j + 1] if j + 1 < len(parts) else '')
+				mount_val = p.split('=', 1)[1] if '=' in p else (args[j + 1] if j + 1 < len(args) else '')
 				for fld in mount_val.split(','):
 					if fld.startswith(('source=', 'src=')):
 						host_path = fld.split('=', 1)[1]
 						if _is_file_path(host_path):
-							resolved = _resolve_path(host_path)
-							if resolved not in seen:
-								seen.add(resolved)
-								paths.append((resolved, "read"))
+							_add_path(host_path, "read")
+
+	# Use safecmd for proper bash parsing (handles quotes, pipes, &&, etc.)
+	try:
+		from safecmd.bashxtract import extract_commands
+		parsed_cmds, _, redirects = extract_commands(command)
+	except Exception:
 		return paths
 
-	for sub_cmd in split_commands(command):
-		parts = sub_cmd.split()
-		if not parts:
+	# Redirects are always writes (no _is_file_path check — redirect targets are always paths)
+	for _, dest in redirects:
+		if dest and not dest.startswith('&'):
+			_add_path(dest, "write")
+
+	for args in parsed_cmds:
+		if not args:
 			continue
-		# Docker/podman as a sub-command (e.g. "echo foo && docker run ...")
-		if parts[0] in ('docker', 'podman'):
-			for j, p in enumerate(parts):
-				if (p in ('-v', '--volume') and j + 1 < len(parts)):
-					host_path = parts[j + 1].split(':')[0]
-					if _is_file_path(host_path):
-						resolved = _resolve_path(host_path)
-						if resolved not in seen:
-							seen.add(resolved)
-							paths.append((resolved, "read"))
-				elif p.startswith('--mount'):
-					mount_val = p.split('=', 1)[1] if '=' in p else (parts[j + 1] if j + 1 < len(parts) else '')
-					for field in mount_val.split(','):
-						if field.startswith(('source=', 'src=')):
-							host_path = field.split('=', 1)[1]
-							if _is_file_path(host_path):
-								resolved = _resolve_path(host_path)
-								if resolved not in seen:
-									seen.add(resolved)
-									paths.append((resolved, "read"))
+		cmd_name = args[0]
+
+		# Docker/podman: only check volume mounts, container paths are sandboxed
+		if cmd_name in ('docker', 'podman'):
+			_extract_docker_volumes(args)
 			continue
-		# Determine base access type from command classification
-		cmd_name = parts[0]
+
+		# Interpreter -c: everything after -c is code, not file paths
+		if cmd_name in ('python', 'python3', 'bash', 'sh', 'zsh', 'ruby', 'perl', 'node') and '-c' in args:
+			continue
+
+		# Classify command to determine default access type
 		cmd_class = classify_command(cmd_name)
 		base_access = "write" if cmd_class == "write" else "read"
-		redirect_next = False
-		for i, part in enumerate(parts):
-			if i == 0:
+
+		for arg in args[1:]:
+			if arg.startswith('-'):
 				continue
-			# Standalone redirect operator (> file, >> file, 2> file)
-			if re.fullmatch(r'[012]?>{1,2}', part):
-				redirect_next = True
-				continue
-			is_redirect = redirect_next
-			redirect_next = False
-			if part.startswith('-'):
-				continue
-			# Inline redirect prefixes (>file, 2>/dev/null, >>file)
-			if re.match(r'^[012]?>{1,2}.', part):
-				is_redirect = True
-				part = re.sub(r'^[012]?>{1,2}', '', part)
-			if not part:
-				continue
-			# File descriptor redirects (2>&1, >&2) are not file paths
-			if part.startswith('&'):
-				redirect_next = False
-				continue
-			# Redirect targets are always writes; others use command classification
-			if is_redirect or _is_file_path(part):
-				access = "write" if is_redirect else base_access
-				resolved = _resolve_path(part)
-				if resolved not in seen:
-					seen.add(resolved)
-					paths.append((resolved, access))
+			if _is_file_path(arg):
+				_add_path(arg, base_access)
+
 	return paths
 
 
