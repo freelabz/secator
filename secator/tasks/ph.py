@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (NAME, EXTRA_DATA)
+from secator.definitions import (NAME, EXTRA_DATA, URL, STRING, OPT_PIPE_INPUT)
 from secator.output_types import Tag
 from secator.tasks._categories import Tagger
 
@@ -7,9 +7,10 @@ from secator.tasks._categories import Tagger
 @task()
 class ph(Tagger):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
-	cmd = f'ph'
-	file_flag = '-l'
-	input_flag = '-f'
+	cmd = 'ph'
+	input_types = [URL, STRING]
+	file_flag = OPT_PIPE_INPUT
+	input_flag = OPT_PIPE_INPUT
 	json_flag = '-jsonl'
 	opts = {
 		'p': {'type': str, 'short': 'p', 'help': 'Patterns'},
@@ -25,6 +26,6 @@ class ph(Tagger):
 	ignore_return_code = True
 	install_cmd = 'go install -v github.com/freelabz/ph/cmd/ph@latest'
 	proxychains = False
-	proxy_socks5 = False 
+	proxy_socks5 = False
 	proxy_http = False
 	profile = 'cpu'
