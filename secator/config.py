@@ -30,7 +30,7 @@ USER_AGENTS = {
 }
 
 
-class StrictModel(BaseModel, extra='forbid'):
+class StrictModel(BaseModel, extra='ignore'):
 	pass
 
 
@@ -225,6 +225,16 @@ class Providers(StrictModel):
 	}
 
 
+class DiscordAddon(StrictModel):
+	enabled: bool = False
+	webhook_url: str = ''
+	bot_token: str = ''
+	send_runner_updates: bool = True
+	send_findings: bool = True
+	finding_types: List[str] = ['vulnerability']
+	min_severity: str = 'high'
+
+
 class ApiAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'https://app.secator.cloud/api'
@@ -246,6 +256,7 @@ class Addons(StrictModel):
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 	vulners: VulnersAddon = VulnersAddon()
+	discord: DiscordAddon = DiscordAddon()
 	api: ApiAddon = ApiAddon()
 	ai: AiAddon = AiAddon()
 
