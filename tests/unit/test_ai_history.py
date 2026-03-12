@@ -579,7 +579,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
     def test_add_tool_result(self):
         """add_tool_result stores role, tool_call_id, and content."""
         history = ChatHistory()
-        history.add_tool_result("call_1", "scan complete: 3 ports open")
+        history.add_tool_result("nmap", "call_1", "scan complete: 3 ports open")
 
         messages = history.to_messages()
         self.assertEqual(len(messages), 1)
@@ -590,8 +590,8 @@ class TestChatHistoryToolCalling(unittest.TestCase):
     def test_add_tool_result_preserves_order(self):
         """Multiple tool results preserve insertion order."""
         history = ChatHistory()
-        history.add_tool_result("call_1", "result 1")
-        history.add_tool_result("call_2", "result 2")
+        history.add_tool_result("nmap", "call_1", "result 1")
+        history.add_tool_result("httpx", "call_2", "result 2")
 
         messages = history.to_messages()
         self.assertEqual(len(messages), 2)
@@ -618,7 +618,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
             tool_calls = [{"id": f"call_{i}", "type": "function",
                            "function": {"name": "nmap", "arguments": "{}"}}]
             history.add_assistant_with_tool_calls(None, tool_calls)
-            history.add_tool_result(f"call_{i}", f"result {i}")
+            history.add_tool_result("nmap", f"call_{i}", f"result {i}")
 
         summarized, old_tokens, new_tokens = history.maybe_summarize("test-model")
 
@@ -639,7 +639,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         history.add_system("system prompt")
         history.add_user("user message")
         history.add_assistant("assistant reply")
-        history.add_tool_result("call_1", "tool result")
+        history.add_tool_result("tool_func", "call_1", "tool result")
 
         result = history.count_tokens_by_role("test-model")
 

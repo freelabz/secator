@@ -9,7 +9,8 @@ class TestToolCallFlow:
 	def test_single_tool_call_dispatched(self):
 		from secator.ai.tools import tool_call_to_action
 		action = tool_call_to_action("run_shell", {"command": "curl http://example.com"})
-		assert action == {"action": "shell", "command": "curl http://example.com"}
+		assert action["action"] == "shell"
+		assert action["command"] == "curl http://example.com"
 
 	def test_multiple_tool_calls_create_batch(self):
 		from secator.ai.tools import tool_call_to_action
@@ -57,7 +58,7 @@ class TestToolCallHistoryFormat:
 	def test_tool_result_format(self):
 		from secator.ai.history import ChatHistory
 		history = ChatHistory()
-		history.add_tool_result("call_abc", '{"task":"nmap","status":"success","count":5}')
+		history.add_tool_result("run_task", "call_abc", '{"task":"nmap","status":"success","count":5}')
 		msg = history.messages[-1]
 		assert msg["role"] == "tool"
 		assert msg["tool_call_id"] == "call_abc"

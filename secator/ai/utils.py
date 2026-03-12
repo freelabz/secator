@@ -1,12 +1,14 @@
 # secator/ai/utils.py
 """Utility functions for AI task - LLM initialization, calling, and response parsing."""
-import json
 import logging
+import random
 from typing import Dict, List, Optional
 
+from secator.definitions import LLM_SPINNER_MESSAGES
 from secator.config import CONFIG
 from secator.output_types import Warning, Error
 from secator.rich import console, maybe_status
+from secator.utils import format_token_count
 
 # Module-level state for litellm initialization
 _llm_initialized = False
@@ -95,8 +97,16 @@ def call_llm(
 		temperature=temperature,
 		api_base=api_base,
 	)
+	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
+	# Remove only when we have a better way to show this
+	# if len(messages) > 1:
+	# 	for message in messages[1:]:
+	# 		print("-" * 80)
+	# 		print(message)
+	# 		print("-" * 80)
 	if tools is not None:
 		kwargs["tools"] = tools
+		kwargs["tool_choice"] = "auto"
 
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
@@ -136,19 +146,8 @@ def call_llm(
 			"cost": cost,
 		}
 
-	# Parse tool calls
-	tool_calls = []
-	if hasattr(message, 'tool_calls') and message.tool_calls:
-		for tc in message.tool_calls:
-			try:
-				arguments = json.loads(tc.function.arguments)
-			except (json.JSONDecodeError, TypeError):
-				arguments = {}
-			tool_calls.append({
-				"id": tc.id,
-				"name": tc.function.name,
-				"arguments": arguments,
-			})
+	# Get tool calls
+	tool_calls = getattr(message, 'tool_calls', None) or []
 
 	return {"content": content, "usage": usage, "tool_calls": tool_calls}
 
@@ -159,6 +158,21 @@ MODEL_COLORS = [
 	'bright_red', 'bright_blue', 'orange3', 'deep_pink2', 'dark_olive_green3',
 	'medium_purple3', 'dodger_blue2', 'gold3', 'spring_green3', 'hot_pink',
 ]
+
+
+def format_llm_status(token_count, ctx_window, by_role):
+	"""Format a rich status message for LLM calls with token counts and a spinner message."""
+	token_str = format_token_count(token_count, icon='arrow_up', compact=True)
+	ctx_str = format_token_count(ctx_window, compact=True)
+	role_parts = []
+	for role in ('system', 'user', 'assistant', 'tool'):
+		if role in by_role:
+			role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
+	role_str = ' | '.join(role_parts)
+	return (
+		f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/]"
+		f" [gray42] • {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
+	)
 
 
 def setup_ai():
@@ -337,13 +351,14 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 	try:
 		options = []
 
-		# Insert LLM-provided choices first
+		# Insert LLM-provided choices first (selectable for multi-select via Space)
 		if choices:
 			for choice in choices:
 				options.append({
 					"label": choice,
 					"input": True,
 					"action": "follow_up",
+					"selectable": True,
 				})
 
 			# Add "All of the above" when 2+ choices
@@ -381,7 +396,20 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 		if result is None:
 			return None
 
-		idx, value = result
+		idx_or_indices, value = result
+
+		# Multi-select: Space-toggled multiple choices
+		if isinstance(idx_or_indices, list):
+			selected_choices = [options[i]["label"] for i in idx_or_indices if options[i].get("selectable")]
+			if selected_choices:
+				numbered = [f"{i}) {c}" for i, c in enumerate(selected_choices, 1)]
+				msg = f"Do all of the following: {', '.join(numbered)}"
+				if value:
+					msg += f". Additional instructions: {value}"
+				history.add_user(_maybe_encrypt(msg, encryptor))
+				return (msg, max_iterations)
+
+		idx = idx_or_indices
 		action = options[idx].get("action")
 
 		if action == "continue":
@@ -395,9 +423,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 
 		if action == "summarize":
 			history.set_system(get_system_prompt("chat"))
-			summary_msg = "Summarize all findings so far and provide a final report."
-			if value:
-				summary_msg += f" {value}"
+			summary_msg = value if value else "Summarize all findings so far and provide a final report."
 			history.add_user(_maybe_encrypt(summary_msg, encryptor))
 			return (summary_msg, 1)
 

@@ -303,7 +303,8 @@ class InteractiveMenu:
 		]).show()
 
 	Returns:
-		tuple: (index, value) where value is typed text for input options, or None.
+		tuple: (index_or_indices, value) where index_or_indices is an int (single-select)
+			or a sorted list of ints (multi-select via Space). value is typed text or None.
 		None: if user pressed Escape or Ctrl+C.
 	"""
 
@@ -312,6 +313,7 @@ class InteractiveMenu:
 		self.description = description
 		self.options = options
 		self.selected = 0
+		self.checked = set()
 		self.typed = ""
 		self.in_input_mode = False
 
@@ -353,6 +355,8 @@ class InteractiveMenu:
 			return 'tab'
 		elif ch == '\x7f' or ch == '\x08':
 			return 'backspace'
+		elif ch == ' ':
+			return 'space'
 		else:
 			return ch
 
@@ -395,23 +399,25 @@ class InteractiveMenu:
 		for i in range(win_start, win_end):
 			opt = self.options[i]
 			is_selected = i == self.selected
+			is_checked = i in self.checked
 			prefix = "[bold cyan]❯[/]" if is_selected else " "
+			check = "[bold green]✓[/] " if is_checked else "  " if self.checked else ""
 			num = f"[bold]{i + 1}.[/]"
 			if opt.get("input"):
 				if is_selected and self.in_input_mode:
 					if self.typed:
-						label = f"{prefix} {num} [bold]{self.typed}[/][dim]▎[/]"
+						label = f"{prefix} {num} {check}[bold]{self.typed}[/][dim]▎[/]"
 					else:
-						label = f"{prefix} {num} [gray42]{opt['label']}[/][dim]▎[/]"
+						label = f"{prefix} {num} {check}[gray42]{opt['label']}[/][dim]▎[/]"
 				elif is_selected:
-					label = f"{prefix} {num} [bold]{opt['label']}[/]"
+					label = f"{prefix} {num} {check}[bold]{opt['label']}[/]"
 				else:
-					label = f"{prefix} {num} [dim]{opt['label']}[/]"
+					label = f"{prefix} {num} {check}[dim]{opt['label']}[/]"
 			else:
 				if is_selected:
-					label = f"{prefix} {num} [bold]{opt['label']}[/]"
+					label = f"{prefix} {num} {check}[bold]{opt['label']}[/]"
 				else:
-					label = f"{prefix} {num} [dim]{opt['label']}[/]"
+					label = f"{prefix} {num} {check}[dim]{opt['label']}[/]"
 			render_console.print(label)
 
 		if win_end < total:
@@ -420,7 +426,13 @@ class InteractiveMenu:
 		if self.in_input_mode:
 			render_console.print("\n[gray42]  Enter: confirm  •  Esc: cancel[/]")
 		else:
-			render_console.print("\n[gray42]  Enter: confirm  •  Tab: edit prompt  •  Esc: exit[/]")
+			has_selectable = any(opt.get("selectable") for opt in self.options)
+			parts = ["Enter: confirm"]
+			if has_selectable:
+				parts.append("Space: toggle")
+			parts.append("Tab: edit prompt")
+			parts.append("Esc: exit")
+			render_console.print(f"\n[gray42]  {'  •  '.join(parts)}[/]")
 		render_console.print(f"[dim]{'─' * w}[/]")
 		return buf.getvalue()
 
@@ -477,7 +489,19 @@ class InteractiveMenu:
 				elif key == 'down' and not self.in_input_mode:
 					self.selected = (self.selected + 1) % len(self.options)
 
+				elif key == 'space' and not self.in_input_mode:
+					opt = self.options[self.selected]
+					if opt.get("selectable"):
+						if self.selected in self.checked:
+							self.checked.discard(self.selected)
+						else:
+							self.checked.add(self.selected)
+
 				elif key == 'enter':
+					# Multi-select: return checked indices if any
+					if self.checked:
+						self._clear_and_exit(prev_output)
+						return (sorted(self.checked), self.typed.strip() if self.typed.strip() else None)
 					opt = self.options[self.selected]
 					if opt.get("input") and not self.in_input_mode:
 						# Enter always confirms immediately; use Tab to edit

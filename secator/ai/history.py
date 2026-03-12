@@ -151,15 +151,15 @@ class ChatHistory:
             msg["content"] = content
         self.messages.append(msg)
 
-    def add_tool_result(self, tool_call_id: str, content: str, name: str = None) -> None:
+    def add_tool_result(self, name: str, tool_call_id: str, content: str) -> None:
         """Add a tool result message.
 
         Args:
+            name: Function name
             tool_call_id: ID of the tool call this result responds to
             content: The tool's output content
-            name: Optional tool function name
         """
-        msg = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+        msg = {"role": "tool", "tool_call_id": tool_call_id, "name": name, "content": content}
         if name:
             msg["name"] = name
         self.messages.append(msg)

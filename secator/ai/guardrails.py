@@ -1,7 +1,9 @@
 """Permission engine for AI guardrails."""
 import fnmatch
 import re
+import socket
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Dict, List, Tuple
 
 from secator.ai.encryption import PII_PATTERNS
@@ -129,7 +131,17 @@ def _is_network_target(value: str) -> bool:
 	return False
 
 
-def detect_targets(command: str) -> List[str]:
+@lru_cache(maxsize=256)
+def _resolves(hostname: str) -> bool:
+	"""Check if a hostname resolves via DNS. Results are cached."""
+	try:
+		socket.gethostbyname(hostname)
+		return True
+	except socket.gaierror:
+		return False
+
+
+def extract_command_targets(command: str) -> List[str]:
 	"""Extract target-like values (IPs, hosts, URLs) from a shell command string.
 
 	Reuses PII_PATTERNS from secator.ai.encryption for IP and host detection.
@@ -177,6 +189,10 @@ def detect_targets(command: str) -> List[str]:
 
 	for match in PII_PATTERNS["host"].finditer(command):
 		host = match.group()
+		# Only match hosts preceded by whitespace or start of string (not inside URLs/paths)
+		pos = match.start()
+		if pos > 0 and command[pos - 1] not in (' ', '\t', '\n'):
+			continue
 		if host in cmd_names:
 			continue
 		if host in targets:
@@ -189,15 +205,42 @@ def detect_targets(command: str) -> List[str]:
 		# Skip if host match is inside a quoted string (likely code, not a target)
 		if any(start <= match.start() and match.end() <= end for start, end in quoted_ranges):
 			continue
+		# Verify host actually resolves via DNS (filters out false positives like json.tool)
+		if not _resolves(host):
+			continue
 		targets.append(host)
 
 	return targets
+
+
+def _extract_cmd_names(command: str) -> List[str]:
+	"""Extract command names from a shell command using safecmd's bash parser.
+
+	Uses shfmt (via safecmd) to properly parse pipes, &&, ||, ;, subshells,
+	and command substitutions. Returns empty list if parsing fails (caller
+	should prompt the user to approve the whole command).
+
+	Args:
+		command: Full shell command string
+
+	Returns:
+		List of command name strings (first token of each sub-command),
+		or empty list if parsing fails.
+	"""
+	try:
+		from safecmd.bashxtract import extract_commands
+		cmds, ops, redirects = extract_commands(command)
+		return [c[0] for c in cmds if c]
+	except Exception:
+		return []
 
 
 def split_commands(command: str) -> List[str]:
 	"""Split a compound shell command into individual sub-commands.
 
 	Handles &&, ||, ;, and | operators while respecting single/double quotes.
+	This is a simple regex-based fallback; prefer _extract_cmd_names() for
+	guardrails checks as it uses a proper bash parser.
 
 	Args:
 		command: Full shell command string
@@ -321,6 +364,10 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 				is_redirect = True
 				part = re.sub(r'^[012]?>{1,2}', '', part)
 			if not part:
+				continue
+			# File descriptor redirects (2>&1, >&2) are not file paths
+			if part.startswith('&'):
+				redirect_next = False
 				continue
 			# Redirect targets are always writes; others use command classification
 			if is_redirect or _is_file_path(part):
@@ -475,6 +522,7 @@ class PermissionResult:
 	reason: str = ""
 	targets: List[str] = field(default_factory=list)
 	paths: List[str] = field(default_factory=list)
+	shell_command: str = ""  # full command when prompting for shell approval
 
 
 class PermissionEngine:
@@ -581,22 +629,44 @@ class PermissionEngine:
 	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
 		"""Check if the action type is allowed/denied/ask.
 
-		For shell commands with operators (&&, ||, ;, |), checks each sub-command.
+		For shell commands, uses safecmd's bash parser (shfmt) to extract
+		sub-commands from pipes, &&, ||, ;, and subshells. When parsing fails
+		(e.g. unbalanced quotes from LLM), prompts the user for the whole command.
 		Returns the most restrictive result (deny > ask > allow).
 		"""
 		if action_type == "shell":
 			command = action.get("command", "")
-			sub_cmds = split_commands(command)
+			if not command.strip():
+				return PermissionResult(decision="deny", reason="Empty command")
+			cmd_names = _extract_cmd_names(command)
+			if not cmd_names:
+				# Parse failure — prompt user for the whole command
+				return PermissionResult(
+					decision="ask",
+					reason="Could not parse command",
+					shell_command=command,
+				)
 			most_restrictive = None
-			for sub_cmd in sub_cmds:
-				cmd_name = sub_cmd.split()[0] if sub_cmd.split() else ""
+			unmatched = []
+			for cmd_name in cmd_names:
 				result = self._check_value("shell", cmd_name)
 				if result.decision == "deny":
-					return result
+					# Distinguish explicit deny rules from "no matching rule" default
+					if "No rule for" in result.reason:
+						unmatched.append(cmd_name)
+					else:
+						return result  # Explicit deny rule hit
+					continue
 				if result.decision == "ask":
 					most_restrictive = result
 				elif most_restrictive is None:
 					most_restrictive = result
+			if unmatched:
+				return PermissionResult(
+					decision="ask",
+					reason=f"No rule for command(s): {', '.join(unmatched)}",
+					shell_command=command,
+				)
 			return most_restrictive or PermissionResult(decision="deny", reason="Empty command")
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
@@ -670,7 +740,7 @@ class PermissionEngine:
 		"""
 		action_type = action.get("action", "")
 		if action_type == "shell":
-			return detect_targets(action.get("command", ""))
+			return extract_command_targets(action.get("command", ""))
 		elif action_type in ("task", "workflow"):
 			# Filter out file paths and non-network strings from task/workflow targets
 			return [t for t in action.get("targets", []) if _is_network_target(t) and not _is_file_path(t)]
@@ -758,6 +828,52 @@ class PermissionEngine:
 		elif idx == 1:  # Parent directory glob (also allow the parent itself)
 			self.add_runtime_allow([f"{access_type}({parent}/*)", f"{access_type}({parent})"])
 		return "allow"
+
+	def prompt_shell(self, command: str, reason: str = "", interactive: bool = True) -> str:
+		"""Show interactive prompt for a shell command that needs approval.
+
+		Args:
+			command: The full shell command to approve
+			reason: Why approval is needed
+			interactive: If False, auto-deny without prompting
+
+		Returns:
+			'allow' or 'deny'
+		"""
+		if not interactive:
+			return "deny"
+
+		from secator.rich import InteractiveMenu
+
+		# Extract first command name for the allow rule
+		cmd_names = _extract_cmd_names(command)
+		first_cmd = cmd_names[0] if cmd_names else command.split()[0] if command.split() else "unknown"
+
+		options = [
+			{"label": f"Allow this command"},
+			{"label": f"Allow all '{first_cmd}' commands"},
+			{"label": "Deny (block this action)"},
+		]
+		title = reason or "Shell command requires approval"
+		result = InteractiveMenu(
+			title,
+			options,
+			description=f"[gray42]{command}[/gray42]",
+		).show()
+
+		if result is None:
+			return "deny"
+
+		idx, _ = result
+		if idx == 0:  # Allow this specific command (one-time, no rule added)
+			# Add a runtime allow for each cmd name in this command
+			if cmd_names:
+				self.add_runtime_allow([f"shell({','.join(cmd_names)})"])
+			return "allow"
+		elif idx == 1:  # Allow all commands with this name
+			self.add_runtime_allow([f"shell({first_cmd})"])
+			return "allow"
+		return "deny"
 
 	def _show_target_menu(self, target: str, choices: List[Dict], command: str = "") -> List[int]:
 		"""Show interactive menu. Separated for testability.

@@ -23,10 +23,10 @@ def save_history(history, reports_folder, debug_fn=None):
 		with open(history_path, 'w') as f:
 			json.dump(history.messages, f, indent=2)
 		if debug_fn:
-			debug_fn(f'Saved history to {history_path}')
+			debug_fn(f'Saved history to {history_path}', sub='llm')
 	except Exception as e:
 		if debug_fn:
-			debug_fn(f'Failed to save history: {e}')
+			debug_fn(f'Failed to save history: {e}', sub='llm')
 
 
 def list_sessions(max_sessions=20):

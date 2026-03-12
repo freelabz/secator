@@ -224,7 +224,6 @@ class Ai(OutputType):
 		# Render content with markdown support
 		content = self.content
 
-		# Response type: always render in a Panel with title
 		if self.ai_type == 'response':
 			title = s + suffix
 			return '\n' + render_markdown_for_rich(content, title=title).rstrip()

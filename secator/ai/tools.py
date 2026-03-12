@@ -155,7 +155,7 @@ def build_tool_schemas(mode: str, is_subagent: bool = False) -> list:
 	"""Return list of tool schemas filtered by mode's allowed_actions.
 
 	Args:
-		mode: The AI mode (attack, chat, exploiter). Unknown modes fall back to chat.
+		mode: The AI mode (attack, chat, exploit). Unknown modes fall back to chat.
 		is_subagent: If True, exclude follow_up tool.
 
 	Returns:
@@ -186,4 +186,5 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		return None
 	if not arguments:
 		return None
-	return {"action": action_type, **arguments}
+	descr = arguments.get("name", "") or arguments.get("query") or arguments.get("command", "unknown")
+	return {"action": action_type, "description": descr, **arguments}

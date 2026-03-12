@@ -120,9 +120,9 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("add_finding", names)
 		self.assertIn("run_shell", names)
 
-	def test_exploiter_mode_excludes_follow_up_and_query(self):
+	def test_exploit_mode_excludes_follow_up_and_query(self):
 		from secator.ai.tools import build_tool_schemas
-		schemas = build_tool_schemas("exploiter")
+		schemas = build_tool_schemas("exploit")
 		names = {s["function"]["name"] for s in schemas}
 		self.assertNotIn("follow_up", names)
 		self.assertNotIn("query_workspace", names)

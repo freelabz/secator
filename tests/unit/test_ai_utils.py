@@ -181,12 +181,12 @@ class TestCallLLM(unittest.TestCase):
         # Verify content is empty string when None
         self.assertEqual(result["content"], "")
 
-        # Verify tool_calls parsed correctly
+        # Verify tool_calls returned from response
         self.assertEqual(len(result["tool_calls"]), 1)
         tc = result["tool_calls"][0]
-        self.assertEqual(tc["id"], "call_abc123")
-        self.assertEqual(tc["name"], "run_scan")
-        self.assertEqual(tc["arguments"], {"target": "example.com", "ports": "80,443"})
+        self.assertEqual(tc.id, "call_abc123")
+        self.assertEqual(tc.function.name, "run_scan")
+        self.assertEqual(tc.function.arguments, '{"target": "example.com", "ports": "80,443"}')
 
     @patch('litellm.completion')
     def test_call_llm_without_tools_returns_empty_tool_calls(self, mock_completion):
@@ -230,9 +230,9 @@ class TestCallLLM(unittest.TestCase):
 
         self.assertEqual(len(result["tool_calls"]), 1)
         tc = result["tool_calls"][0]
-        self.assertEqual(tc["id"], "call_bad")
-        self.assertEqual(tc["name"], "broken_tool")
-        self.assertEqual(tc["arguments"], {})
+        self.assertEqual(tc.id, "call_bad")
+        self.assertEqual(tc.function.name, "broken_tool")
+        self.assertEqual(tc.function.arguments, "{not valid json")
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

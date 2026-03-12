@@ -205,7 +205,7 @@ class TestHandleQuery(unittest.TestCase):
 
         with patch.object(ctx, 'get_query_engine') as mock_get_engine:
             mock_engine = MagicMock()
-            mock_engine.search.return_value = [{"host": "a.com", "port": 80}]
+            mock_engine.search.return_value = [{"host": "a.com", "port": 80, "_context": {}}]
             mock_get_engine.return_value = mock_engine
 
             results = list(_handle_query({"action": "query", "query": {"host": "a.com"}}, ctx))
@@ -219,8 +219,8 @@ class TestHandleQuery(unittest.TestCase):
     def test_query_success(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.search.return_value = [
-            {"host": "a.com", "port": 80, "_type": "port"},
-            {"host": "b.com", "port": 443, "_type": "port"},
+            {"host": "a.com", "port": 80, "_type": "port", "_context": {}},
+            {"host": "b.com", "port": 443, "_type": "port", "_context": {}},
         ]
         mock_get_engine.return_value = mock_engine
         ctx = ActionContext(targets=["t.com"], model="m", context={"workspace_id": "ws1"})
