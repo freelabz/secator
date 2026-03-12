@@ -36,7 +36,7 @@ class Subdomain(OutputType):
 	def __str__(self):
 		return self.host
 
-	def __repr__(self):
+	def __rich__(self):
 		sources_str = ', '.join([f'[magenta]{source}[/]' for source in self.sources])
 		s = f'🏰 [white]{self.host}[/]'
 		if sources_str:
@@ -45,4 +45,7 @@ class Subdomain(OutputType):
 			s += format_object(self.extra_data, 'yellow')
 		if not self.verified:
 			s = f'[dim]{s}[/]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self):
+		return rich_to_ansi(self.__rich__())

@@ -19,7 +19,7 @@ from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progre
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import (get_task_folder_id, run_extractors)
-from secator.utils import (debug, import_dynamic, rich_to_ansi, should_update, autodetect_type, sanitize_folder_name)
+from secator.utils import (debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name)
 from secator.tree import build_runner_tree
 from secator.loader import get_configs_by_type
 
@@ -595,7 +595,7 @@ class Runner:
 		self.uuids.add(item._uuid)
 		self.results.append(item)
 		self.results_count += 1
-		if output and item._type not in ['stat', 'progress']:
+		if output and isinstance(item, (Info, Warning, Error)):
 			self.output += repr(item) + '\n'
 		if print:
 			self._print_item(item)
@@ -666,11 +666,15 @@ class Runner:
 
 				# Repr output
 				if item_out:
-					item_repr = repr(item)
+					rich_str = item.__rich__() if hasattr(item, '__rich__') else repr(item)
+					if not isinstance(rich_str, str) or not rich_str.strip():
+						debug(f'__rich__() returned non-string or empty for {item._type}', sub='runner.print')
+						return
 					if self.print_remote_info and item._source:
-						item_repr += rich_to_ansi(rf' \[[dim]{item._source}[/]]')
-					# item_repr += f' ({self.__class__.__name__}) ({item._uuid}) ({item._context.get("ancestor_id")})'  # for debugging
-					self._print(item_repr, out=item_out)
+						rich_str += rf' \[[dim]{item._source}[/]]'
+					# rich_str += f' ({self.__class__.__name__}) ({item._uuid}) ({item._context.get("ancestor_id")})'  # for debugging
+					_console = console_stdout if item_out == sys.stdout else console
+					_console.print(rich_str, end='\n', highlight=False, soft_wrap=True)
 
 		# Item is a line
 		elif isinstance(item, str):
@@ -698,55 +702,43 @@ class Runner:
 		debug(*args, **kwargs)
 
 	def mark_duplicates(self):
-		"""Check for duplicates and mark items as duplicates."""
+		"""Check for duplicates and mark items as duplicates.
+
+		Uses hash-based grouping (O(n)) instead of pairwise comparison (O(n²)).
+		"""
 		if not self.enable_duplicate_check:
 			return
 		start_time = time()
 		self.debug('running duplicate check', sub='end')
-		# dupe_count = 0
-		import concurrent.futures
-		executor = concurrent.futures.ThreadPoolExecutor(max_workers=100)
-		for item in self.results.copy():
-			executor.submit(self.check_duplicate, item)
-		executor.shutdown(wait=True)
-		# duplicates = [repr(i) for i in self.results if i._duplicate]
-		# if duplicates:
-		# 	duplicates_str = '\n\t'.join(duplicates)
-		# 	self.debug(f'Duplicates ({dupe_count}):\n\t{duplicates_str}', sub='duplicates', verbose=True)
-		# self.debug(f'duplicate check completed: {dupe_count} found', sub='duplicates')
+
+		# Group items by their compare key (O(n))
+		from collections import defaultdict
+		groups = defaultdict(list)
+		for item in self.results:
+			groups[item._compare_key()].append(item)
+
+		# Process only groups with duplicates
+		for key, items in groups.items():
+			if len(items) < 2:
+				continue
+			# Pick the main item (newest by timestamp)
+			main = max(items)
+			for dupe in items:
+				if dupe._uuid == main._uuid:
+					continue
+				self.debug(
+					'found duplicate', obj=dupe.toDict(), obj_breaklines=True,
+					sub='item.duplicate', verbose=True)
+				dupe._duplicate = True
+				dupe = self.run_hooks('on_item', dupe, sub='item.duplicate')
+				dupe = self.run_hooks('on_duplicate', dupe, sub='item.duplicate')
+				if dupe._uuid not in main._related:
+					main._related.append(dupe._uuid)
+			main._duplicate = False
+			main = self.run_hooks('on_duplicate', main, sub='item.duplicate')
+
 		total_time = time() - start_time
 		self.debug(f'duplicate check completed in {total_time:.2f} seconds', sub='end')
-
-	def check_duplicate(self, item):
-		"""Check if an item is a duplicate in the list of results and mark it like so.
-
-		Args:
-			item (OutputType): Secator output type.
-		"""
-		self.debug('running duplicate check for item', obj=item.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)  # noqa: E501
-		others = [f for f in self.results if f == item and f._uuid != item._uuid]
-		if others:
-			main = max(item, *others)
-			dupes = [f for f in others if f._uuid != main._uuid]
-			main._duplicate = False
-			main._related.extend([dupe._uuid for dupe in dupes])
-			main._related = list(dict.fromkeys(main._related))
-			if main._uuid != item._uuid:
-				self.debug(f'found {len(others)} duplicates for', obj=item.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)  # noqa: E501
-				item._duplicate = True
-				item = self.run_hooks('on_item', item, sub='item.duplicate')
-				if item._uuid not in main._related:
-					main._related.append(item._uuid)
-				main = self.run_hooks('on_duplicate', main, sub='item.duplicate')
-				item = self.run_hooks('on_duplicate', item, sub='item.duplicate')
-
-			for dupe in dupes:
-				if not dupe._duplicate:
-					self.debug(
-						'found new duplicate', obj=dupe.toDict(), obj_breaklines=True,
-						sub='item.duplicate', verbose=True)
-					dupe._duplicate = True
-					dupe = self.run_hooks('on_duplicate', dupe, sub='item.duplicate')
 
 	def yielder(self):
 		"""Base yielder implementation.

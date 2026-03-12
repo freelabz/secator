@@ -86,7 +86,7 @@ class Certificate(OutputType):
 				}
 			)
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'📜 [bold white]{self.host}[/]'
 		if self.status != CERTIFICATE_STATUS_UNKNOWN:
 			s += f' [cyan]{self.status}[/]'
@@ -108,4 +108,7 @@ class Certificate(OutputType):
 		elif self.issuer_cn:
 			s += rf' \[[magenta][bold]issuer_cn[/]={self.issuer_cn}[/]]'
 		s += rf' \[[cyan][bold]fingerprint_sha256[/]={self.fingerprint_sha256[:10]}[/]]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())
