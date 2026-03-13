@@ -23,6 +23,7 @@ INPUTS_TASKS = {
 	'jswhois': 'wikipedia.org',
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
+	'sqlmap': 'http://testphp.vulnweb.com/listproducts.php?cat=1',
 	'subfinder': 'github.com',
 	'search_vulns': 'apache 2.4.39',
 	'testssl': 'free.fr',
