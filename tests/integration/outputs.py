@@ -226,7 +226,7 @@ OUTPUTS_TASKS = {
     ],
     'katana': [
         Url(
-            url='http://localhost:3000/vendor.js',
+            url='http://localhost:3000/scripts.js',
             host='localhost:3000',
             status_code=200,
             method='GET',

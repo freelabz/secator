@@ -47,7 +47,7 @@ class TestWorker(unittest.TestCase):
 
 	def test_host_recon(self):
 		cmd = Command.execute(
-			'secator w host_recon vulnweb.com -json -p 80 -tid nginx-version --nuclei',
+			'secator w host_recon secator.cloud -json -p 443 -tid nginx-version --nuclei',
 			name='secator_w_host_recon',
 			process=True,
 			quiet=True,
@@ -55,33 +55,29 @@ class TestWorker(unittest.TestCase):
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
 		self.assertGreater(len(cmd.results), 0)
+		vulns = [v for v in cmd.results if v._type == 'vulnerability']
 		port = Port(
-			port=80,
-			ip="44.228.249.3",
+			port=443,
+			ip="34.149.194.179",
 			state="open",
-			service_name="nginx/1.19.0",
 			_source="nmap"
 		)
 		url = Url(
-			'http://vulnweb.com',
+			'https://secator.cloud',
 			status_code=200,
-			title='Acunetix Web Vulnerability Scanner - Test Websites',
-			webserver='nginx/1.19.0',
-			tech=['Nginx:1.19.0'],
-			content_type='text/html',
-			content_length=4018,
 			_source='httpx'
 		)
 		tag = Tag(
 			name='nginx-version',
-			match='http://vulnweb.com',
+			match='https://secator.cloud',
 			category='info',
-			value='nginx/1.19.0',
+			value='nginx/1.28.1',
 			_source='nuclei_url'
 		)
 		self.assertIn(port, cmd.findings)
 		self.assertIn(url, cmd.findings)
 		self.assertIn(tag, cmd.findings)
+		self.assertEqual(vulns, [])
 
 	# def test_pd_pipe(self):
 	# 	cmd = Command.execute(
