@@ -93,6 +93,7 @@ class arjun(HttpBase):
 				request_headers=values['headers'],
 				method=values['method'],
 				confidence='high',
+				verified=True,
 				tags=["fuzz"]
 			)
 			for param in values['params']:
@@ -101,4 +102,13 @@ class arjun(HttpBase):
 					name='url_param',
 					value=param,
 					match=url_without_param,
+				)
+				yield Url(
+					url=f'{url}?{param}=',
+					host=parsed_url.hostname,
+					request_headers=values['headers'],
+					method=values['method'],
+					confidence='high',
+					verified=True,
+					tags=["fuzz"],
 				)
