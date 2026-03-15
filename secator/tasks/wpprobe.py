@@ -31,7 +31,7 @@ class wpprobe(Command):
 	opt_key_map = {
 		THREADS: 't'
 	}
-	install_version = 'v0.5.6'
+	install_version = 'v0.10.16'
 	install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
 	github_handle = 'Chocapikk/wpprobe'
 	install_post = {
@@ -92,7 +92,7 @@ class wpprobe(Command):
 						severities = tmp_severities
 
 					for severity, severity_data in severities.items():
-						if severity == 'None':
+						if severity.lower() == 'none':
 							severity = 'unknown'
 						for item in severity_data:
 							for vuln in item['vulnerabilities']:
@@ -103,6 +103,8 @@ class wpprobe(Command):
 								}
 								if auth_type:
 									extra_data['auth_type'] = auth_type
+								if not vuln['title']:
+									continue
 								yield Vulnerability(
 									name=vuln['title'],
 									id=vuln['cve'],
