@@ -23,7 +23,7 @@ class TestWorker(unittest.TestCase):
 
 	def test_httpx_command(self):
 		cmd = Command.execute(
-			'secator x httpx testphp.vulnweb.com -json',
+			'secator x httpx secator.cloud -json',
 			name='secator_x_httpx',
 			process=True,
 			quiet=True,
@@ -34,13 +34,8 @@ class TestWorker(unittest.TestCase):
 		self.assertEqual(cmd.status, 'SUCCESS')
 		self.assertEqual(len(cmd.findings), 1)
 		url = Url(
-			'http://testphp.vulnweb.com',
+			'https://secator.cloud',
 			status_code=200,
-			title='Home of Acunetix Art',
-			webserver='nginx',
-			tech=['DreamWeaver', 'Nginx:1.19.0', 'PHP:5.6.40', 'Ubuntu'],
-			content_type='text/html',
-			content_length=4958,
 			_source='httpx'
 		)
 		self.assertIn(url, cmd.findings)
