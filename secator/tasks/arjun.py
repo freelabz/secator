@@ -87,13 +87,14 @@ class arjun(HttpBase):
 				return
 		for url, values in results.items():
 			parsed_url = urlparse(url)
-			url_without_param = urlunparse(parsed_url._replace(query=''))
+			url_without_param = str(urlunparse(parsed_url._replace(query='')))
 			yield Url(
 				url=url,
 				host=parsed_url.hostname,
 				request_headers=values['headers'],
 				method=values['method'],
 				confidence='high',
+				verified=True,
 				tags=["fuzz"]
 			)
 			for param in values['params']:
@@ -102,4 +103,13 @@ class arjun(HttpBase):
 					name='url_param',
 					value=param,
 					match=url_without_param,
+				)
+				yield Url(
+					url=f'{url_without_param}?{param}=',
+					host=parsed_url.hostname,
+					request_headers=values['headers'],
+					method=values['method'],
+					confidence='high',
+					verified=True,
+					tags=["fuzz"],
 				)
