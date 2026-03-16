@@ -17,6 +17,11 @@ workflows:
     - type: url
       field: url
       condition: url.is_root
+  url_params_fuzz:
+    targets_:
+    - type: url
+      field: url
+      condition: url.verified
   url_vuln:
     targets_:
     - type: url
