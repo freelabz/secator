@@ -31,15 +31,14 @@ OUTPUTS_CHECKS = {
 OUTPUTS_TASKS = {
     'arjun': [
         Url(
-            url='http://testphp.vulnweb.com/hpp',
+            url='https://xss-game.appspot.com/level1/frame?query=',
             _source='arjun'
         ),
         Tag(
             category='info',
             name='url_param',
-            value='pp',
-            extra_data={'value': 'FUZZ'},
-            match='http://testphp.vulnweb.com/hpp',
+            value='query',
+            match='https://xss-game.appspot.com/level1/frame',
             _source='arjun'
         )
     ],
@@ -126,21 +125,12 @@ OUTPUTS_TASKS = {
 	],
     'dalfox': [
         Vulnerability(
-            matched_at='http://testphp.vulnweb.com/listproducts.php',
+            matched_at='https://xss-game.appspot.com/level1/frame',
             name='Verified XSS',
             confidence='high',
             severity='high',
             cvss_score=0,
             tags=['CWE-79'],
-            extra_data={
-                'inject_type': 'inHTML-URL',
-                'poc_type': 'plain',
-                'method': 'GET',
-                'data': 'http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%3C%2FScriPt%3E%3CsCripT+class%3Ddalfox%3Ealert%281%29%3C%2FsCriPt%3E',
-                'param': 'cat',
-                'payload': '</ScriPt><sCripT class=dalfox>alert(1)</sCriPt>',
-                'evidence': ''
-            },
             _source='dalfox'
         ),
     ],
@@ -182,7 +172,7 @@ OUTPUTS_TASKS = {
         Ip(ip='127.0.0.1', alive=True, _source='fping')
     ],
     'gau': [
-        Url(url='http://testphp.vulnweb.com/categories.php', _source='gau')
+        Url(url='http://xss-game.appspot.com/feedback/level1/file/level.py', _source='gau')
     ],
     'getasn': [
         Tag(name='asn', category='info', value='AS14907', match='wikipedia.org', _source='getasn')
@@ -236,7 +226,7 @@ OUTPUTS_TASKS = {
     ],
     'katana': [
         Url(
-            url='http://localhost:3000/vendor.js',
+            url='http://localhost:3000/scripts.js',
             host='localhost:3000',
             status_code=200,
             method='GET',
@@ -303,8 +293,8 @@ OUTPUTS_TASKS = {
     ],
     'urlfinder': [
         Url(
-            url='http://testphp.vulnweb.com/categories.php',
-            host='testphp.vulnweb.com',
+            url='https://xss-game.appspot.com/level2/source',
+            host='xss-game.appspot.com',
             _source='urlfinder'
         )
     ],
@@ -385,10 +375,10 @@ OUTPUTS_TASKS = {
 			_source='wpscan'),
 	],
     'x8': [
-        Tag(name='url_param', category='info', match='http://testphp.vulnweb.com/hpp/', value='pp', extra_data={'value': 'FUZZ'}, _source='x8'),
+        Tag(name='url_param', category='info', match='https://xss-game.appspot.com/level1/frame', value='query', _source='x8'),
     ],
     'xurlfind3r': [
-        Url(url='http://testphp.vulnweb.com/login.php', _source='xurlfind3r')
+        Url(url='https://xss-game.appspot.com/', _source='xurlfind3r')
     ],
 }
 
