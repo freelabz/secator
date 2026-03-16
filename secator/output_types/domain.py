@@ -71,7 +71,7 @@ class Domain(OutputType):
 	def __str__(self) -> str:
 		return self.domain
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'🪪  [bold white]{self.domain}[/]'
 		if self.alive:
 			s += r' \[[bold green]alive[/]]'
@@ -90,4 +90,7 @@ class Domain(OutputType):
 			s += format_object(self.administrative_info, 'purple', predicate=lambda x: x)
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow', predicate=lambda x: x)
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

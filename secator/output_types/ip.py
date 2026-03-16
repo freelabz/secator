@@ -37,7 +37,7 @@ class Ip(OutputType):
 	def __str__(self) -> str:
 		return self.ip
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'💻 [bold white]{self.ip}[/]'
 		if self.host and self.host != self.ip:
 			s += rf' \[[bold magenta]{self.host}[/]]'
@@ -47,4 +47,7 @@ class Ip(OutputType):
 			s += format_object(self.extra_data, 'yellow')
 		if not self.alive:
 			s = f'[dim]{s}[/]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

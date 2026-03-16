@@ -29,8 +29,11 @@ class Progress(OutputType):
 	def __str__(self) -> str:
 		return f'{self.percent}%'
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'[dim]⏳ [bold]{self.percent}%[/] ' + '█' * (self.percent // 10) + '[/]'
 		ed = format_object(self.extra_data, color='yellow3', skip_keys=['startedAt'])
 		s += f'[dim]{ed}[/]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

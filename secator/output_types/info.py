@@ -19,6 +19,9 @@ class Info(OutputType):
 	_table_fields = ['message', 'task_id']
 	_sort_by = ('_timestamp',)
 
-	def __repr__(self):
+	def __rich__(self):
 		s = rf"\[[blue]INF[/]] {self.message}"
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self):
+		return rich_to_ansi(self.__rich__())

@@ -92,11 +92,7 @@ class Ai(OutputType):
 	_table_fields = ['ai_type', 'mode', 'content']
 	_sort_by = ('_timestamp',)
 
-	def __repr__(self) -> str:
-		# Internal-only types (not displayed)
-		if self.ai_type == 'token_usage':
-			return ' '
-
+	def __rich__(self) -> str:
 		# Get type configuration
 		type_config = AI_TYPES.get(self.ai_type, {'label': self.ai_type.upper(), 'color': 'white'})
 		label = type_config['label']
@@ -183,7 +179,7 @@ class Ai(OutputType):
 				line += f' ([dim yellow]limit: {_s(limit)}[/])'
 			if self.ai_type == 'prompt':
 				line = f'[on gray19]{line}[/]'
-			return rich_to_ansi(line)
+			return line
 
 		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
@@ -240,4 +236,7 @@ class Ai(OutputType):
 		else:
 			s += f' {_s(content_indented)}'
 		s += suffix
-		return '\n' + rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

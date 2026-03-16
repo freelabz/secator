@@ -60,6 +60,18 @@ class OutputType:
 	def __le__(self, other):
 		return self == other
 
+	def _compare_key(self):
+		"""Return a hashable tuple of fields used for equality comparison.
+		Used by mark_duplicates for O(n) grouping instead of O(n²) pairwise comparison.
+		"""
+		def _hashable(v):
+			if isinstance(v, dict):
+				return tuple(sorted(v.items()))
+			if isinstance(v, list):
+				return tuple(v)
+			return v
+		return tuple(_hashable(getattr(self, f.name)) for f in fields(self) if f.compare)
+
 	def __post_init__(self):
 		"""Initialize default fields to their proper types."""
 		for field in fields(self):
