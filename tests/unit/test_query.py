@@ -326,3 +326,42 @@ class TestQueryEngine(unittest.TestCase):
         # When both are available, MongoDB takes priority
         engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
         self.assertIsInstance(engine.backend, MongoDBBackend)
+
+
+class TestQueryEngineUpdate(unittest.TestCase):
+    """Tests for QueryEngine.update method."""
+
+    def test_json_backend_update(self):
+        from secator.query.json import JsonBackend
+        backend = JsonBackend("test", results=[
+            {"_type": "ai", "ai_type": "follow_up", "session_id": "s1", "status": "pending"},
+            {"_type": "url", "url": "http://a.com"},
+        ])
+        backend.update(
+            {"_type": "ai", "session_id": "s1", "status": "pending"},
+            {"$set": {"status": "timed_out"}}
+        )
+        results = backend.search({"_type": "ai", "session_id": "s1"})
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["status"], "timed_out")
+
+    def test_json_backend_update_no_match(self):
+        from secator.query.json import JsonBackend
+        backend = JsonBackend("test", results=[
+            {"_type": "url", "url": "http://a.com"},
+        ])
+        # Should not raise
+        backend.update(
+            {"_type": "ai", "session_id": "s1"},
+            {"$set": {"status": "timed_out"}}
+        )
+
+    def test_query_engine_update_delegates(self):
+        from secator.query import QueryEngine
+        from unittest.mock import MagicMock
+        engine = QueryEngine("ws1", context={})
+        engine.backend = MagicMock()
+        engine.update({"_type": "ai"}, {"$set": {"status": "done"}})
+        engine.backend.update.assert_called_once_with(
+            {"_type": "ai"}, {"$set": {"status": "done"}}
+        )

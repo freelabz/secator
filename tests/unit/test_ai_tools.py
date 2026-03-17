@@ -1,7 +1,10 @@
 """Tests for secator.ai.tools module."""
 import unittest
 
+from secator.definitions import ADDONS_ENABLED
 
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestToolSchemas(unittest.TestCase):
 	"""Verify TOOL_SCHEMAS structure and content."""
 
@@ -95,6 +98,7 @@ class TestToolSchemas(unittest.TestCase):
 		self.assertTrue(params.get("additionalProperties", False))
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestBuildToolSchemas(unittest.TestCase):
 	"""Verify build_tool_schemas filters by mode."""
 
@@ -116,9 +120,9 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("add_finding", names)
 		self.assertIn("run_shell", names)
 
-	def test_exploiter_mode_excludes_follow_up_and_query(self):
+	def test_exploit_mode_excludes_follow_up_and_query(self):
 		from secator.ai.tools import build_tool_schemas
-		schemas = build_tool_schemas("exploiter")
+		schemas = build_tool_schemas("exploit")
 		names = {s["function"]["name"] for s in schemas}
 		self.assertNotIn("follow_up", names)
 		self.assertNotIn("query_workspace", names)
@@ -144,6 +148,7 @@ class TestBuildToolSchemas(unittest.TestCase):
 			self.assertEqual(s["type"], "function")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestToolCallToAction(unittest.TestCase):
 	"""Verify tool_call_to_action conversion."""
 
@@ -192,6 +197,69 @@ class TestToolCallToAction(unittest.TestCase):
 		from secator.ai.tools import tool_call_to_action
 		result = tool_call_to_action("nonexistent_tool", {"foo": "bar"})
 		self.assertIsNone(result)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestStopToolSchema(unittest.TestCase):
+	"""Verify STOP_TOOL_SCHEMA structure."""
+
+	def test_stop_tool_schema_exists(self):
+		from secator.ai.tools import STOP_TOOL_SCHEMA
+		self.assertIsInstance(STOP_TOOL_SCHEMA, dict)
+
+	def test_stop_tool_schema_format(self):
+		from secator.ai.tools import STOP_TOOL_SCHEMA
+		self.assertEqual(STOP_TOOL_SCHEMA["type"], "function")
+		self.assertEqual(STOP_TOOL_SCHEMA["function"]["name"], "stop")
+		self.assertIn("reason", STOP_TOOL_SCHEMA["function"]["parameters"]["properties"])
+		self.assertIn("reason", STOP_TOOL_SCHEMA["function"]["parameters"]["required"])
+
+	def test_stop_not_in_tool_schemas(self):
+		from secator.ai.tools import TOOL_SCHEMAS
+		self.assertNotIn("stop", TOOL_SCHEMAS)
+
+	def test_stop_in_tool_action_map(self):
+		from secator.ai.tools import TOOL_ACTION_MAP
+		self.assertEqual(TOOL_ACTION_MAP["stop"], "stop")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestBuildToolSchemasWithBackend(unittest.TestCase):
+	"""Verify build_tool_schemas with backend parameter."""
+
+	def test_auto_backend_excludes_follow_up_adds_stop(self):
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.interactivity import AutoBackend
+		backend = AutoBackend()
+		schemas = build_tool_schemas("attack", backend=backend)
+		names = {s["function"]["name"] for s in schemas}
+		self.assertNotIn("follow_up", names)
+		self.assertIn("stop", names)
+
+	def test_cli_backend_excludes_stop(self):
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.interactivity import CLIBackend
+		backend = CLIBackend()
+		schemas = build_tool_schemas("attack", backend=backend)
+		names = {s["function"]["name"] for s in schemas}
+		self.assertIn("follow_up", names)
+		self.assertNotIn("stop", names)
+
+	def test_backend_takes_precedence_over_is_subagent(self):
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.interactivity import CLIBackend
+		backend = CLIBackend()
+		schemas = build_tool_schemas("attack", is_subagent=True, backend=backend)
+		names = {s["function"]["name"] for s in schemas}
+		# Backend should take precedence - CLI excludes stop, not follow_up
+		self.assertIn("follow_up", names)
+		self.assertNotIn("stop", names)
+
+	def test_no_backend_with_is_subagent(self):
+		from secator.ai.tools import build_tool_schemas
+		schemas = build_tool_schemas("attack", is_subagent=True)
+		names = {s["function"]["name"] for s in schemas}
+		self.assertNotIn("follow_up", names)
 
 
 if __name__ == "__main__":

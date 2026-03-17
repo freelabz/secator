@@ -1,19 +1,22 @@
 # tests/unit/test_ai_prompts.py
 import unittest
 
-from secator.ai.prompts import (
-	SYSTEM_ATTACK,
-	SYSTEM_CHAT,
-	SYSTEM_EXPLOITER,
-	MODES,
-	get_system_prompt,
-	get_mode_config,
-	format_user_initial,
-	format_tool_result,
-	format_continue,
-)
+from secator.definitions import ADDONS_ENABLED
+
+if ADDONS_ENABLED['ai']:
+	from secator.ai.prompts import (
+		SYSTEM_ATTACK,
+		SYSTEM_CHAT,
+		SYSTEM_EXPLOIT,
+		MODES,
+		get_system_prompt,
+		get_mode_config,
+		format_tool_result,
+		format_continue,
+	)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestPrompts(unittest.TestCase):
 
 	# === Structure tests: XML tags ===
@@ -30,19 +33,21 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn("<persona>", SYSTEM_CHAT.template)
 		self.assertIn("<instructions>", SYSTEM_CHAT.template)
 		self.assertIn("<constraints>", SYSTEM_CHAT.template)
-		self.assertIn("<context>", SYSTEM_CHAT.template)
 
-	def test_system_exploiter_has_xml_structure(self):
-		"""Test SYSTEM_EXPLOITER uses XML tags for structure."""
-		self.assertIn("<persona>", SYSTEM_EXPLOITER.template)
-		self.assertIn("<instructions>", SYSTEM_EXPLOITER.template)
-		self.assertIn("<constraints>", SYSTEM_EXPLOITER.template)
-		self.assertIn("<context>", SYSTEM_EXPLOITER.template)
+	def test_system_exploit_has_xml_structure(self):
+		"""Test SYSTEM_EXPLOIT uses XML tags for structure."""
+		self.assertIn("<persona>", SYSTEM_EXPLOIT.template)
+		self.assertIn("<instructions>", SYSTEM_EXPLOIT.template)
+		self.assertIn("<constraints>", SYSTEM_EXPLOIT.template)
+		self.assertIn("<context>", SYSTEM_EXPLOIT.template)
 
 	def test_no_markdown_headers_in_templates(self):
-		"""Templates should use XML tags, not markdown ### headers."""
-		for template in (SYSTEM_ATTACK, SYSTEM_CHAT, SYSTEM_EXPLOITER):
-			self.assertNotIn("### ", template.template)
+		"""Templates should use XML tags, not markdown ### headers (outside examples)."""
+		import re
+		for template in (SYSTEM_ATTACK, SYSTEM_CHAT, SYSTEM_EXPLOIT):
+			# Strip content inside <example> tags before checking
+			content = re.sub(r'<example\w*>.*?</example\w*>', '', template.template, flags=re.DOTALL)
+			self.assertNotIn("### ", content)
 
 	# === Content tests ===
 
@@ -57,11 +62,11 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn("query", SYSTEM_CHAT.template)
 		self.assertIn("follow_up", SYSTEM_CHAT.template)
 
-	def test_system_exploiter_has_expected_content(self):
-		"""Test SYSTEM_EXPLOITER template mentions expected concepts."""
-		self.assertIn("exploitation", SYSTEM_EXPLOITER.template)
-		self.assertIn("proof-of-concept", SYSTEM_EXPLOITER.template)
-		self.assertIn("docker", SYSTEM_EXPLOITER.template.lower())
+	def test_system_exploit_has_expected_content(self):
+		"""Test SYSTEM_EXPLOIT template mentions expected concepts."""
+		self.assertIn("exploitation", SYSTEM_EXPLOIT.template)
+		self.assertIn("proof-of-concept", SYSTEM_EXPLOIT.template)
+		self.assertIn("docker", SYSTEM_EXPLOIT.template.lower())
 
 	def test_system_attack_has_subagents(self):
 		"""Test SYSTEM_ATTACK has subagent guidance."""
@@ -71,7 +76,7 @@ class TestPrompts(unittest.TestCase):
 
 	def test_context_is_at_top(self):
 		"""Best practice: long data (context) should be at top of prompt."""
-		for template in (SYSTEM_ATTACK, SYSTEM_EXPLOITER):
+		for template in (SYSTEM_ATTACK, SYSTEM_EXPLOIT):
 			content = template.template.strip()
 			context_pos = content.find("<context>")
 			persona_pos = content.find("<persona>")
@@ -90,9 +95,9 @@ class TestPrompts(unittest.TestCase):
 		prompt = get_system_prompt("chat")
 		self.assertIn("query", prompt)
 
-	def test_get_system_prompt_exploiter(self):
-		"""Test get_system_prompt works for exploiter mode."""
-		prompt = get_system_prompt("exploiter")
+	def test_get_system_prompt_exploit(self):
+		"""Test get_system_prompt works for exploit mode."""
+		prompt = get_system_prompt("exploit")
 		self.assertIn("exploitation verification specialist", prompt)
 		self.assertIn("proof-of-concept", prompt)
 
@@ -116,12 +121,6 @@ class TestPrompts(unittest.TestCase):
 		self.assertEqual(invalid_prompt, attack_prompt)
 
 	# === Format functions ===
-
-	def test_format_user_initial(self):
-		result = format_user_initial(["example.com"], "scan for vulns")
-		self.assertIn("example.com", result)
-		self.assertIn("scan for vulns", result)
-		self.assertNotIn("\n", result)
 
 	def test_format_tool_result(self):
 		result = format_tool_result("nmap", "success", 5, [{"port": 80}])
@@ -226,16 +225,16 @@ class TestPrompts(unittest.TestCase):
 	def test_modes_dict_exists_with_expected_modes(self):
 		self.assertIn("attack", MODES)
 		self.assertIn("chat", MODES)
-		self.assertIn("exploiter", MODES)
+		self.assertIn("exploit", MODES)
 
-	def test_exploiter_mode_config_has_correct_allowed_actions(self):
-		exploiter_config = MODES["exploiter"]
+	def test_exploit_mode_config_has_correct_allowed_actions(self):
+		exploit_config = MODES["exploit"]
 		expected_actions = ["task", "workflow", "shell", "add_finding"]
-		self.assertEqual(exploiter_config["allowed_actions"], expected_actions)
+		self.assertEqual(exploit_config["allowed_actions"], expected_actions)
 
-	def test_exploiter_mode_config_has_max_iterations_5(self):
-		exploiter_config = MODES["exploiter"]
-		self.assertEqual(exploiter_config["max_iterations"], 5)
+	def test_exploit_mode_config_has_max_iterations_5(self):
+		exploit_config = MODES["exploit"]
+		self.assertEqual(exploit_config["max_iterations"], 5)
 
 	def test_attack_mode_config_has_correct_allowed_actions(self):
 		attack_config = MODES["attack"]
@@ -247,17 +246,18 @@ class TestPrompts(unittest.TestCase):
 		expected_actions = ["query", "follow_up", "add_finding", "shell"]
 		self.assertEqual(chat_config["allowed_actions"], expected_actions)
 
-	def test_attack_and_chat_modes_have_no_max_iterations(self):
-		self.assertIsNone(MODES["attack"]["max_iterations"])
-		self.assertIsNone(MODES["chat"]["max_iterations"])
+	def test_all_modes_have_max_iterations_5(self):
+		self.assertEqual(MODES["attack"]["max_iterations"], 5)
+		self.assertEqual(MODES["chat"]["max_iterations"], 5)
+		self.assertEqual(MODES["exploit"]["max_iterations"], 5)
 
 	def test_get_mode_config_returns_correct_mode(self):
 		attack_config = get_mode_config("attack")
 		self.assertEqual(attack_config["system_prompt"], SYSTEM_ATTACK)
 		chat_config = get_mode_config("chat")
 		self.assertEqual(chat_config["system_prompt"], SYSTEM_CHAT)
-		exploiter_config = get_mode_config("exploiter")
-		self.assertEqual(exploiter_config["system_prompt"], SYSTEM_EXPLOITER)
+		exploit_config = get_mode_config("exploit")
+		self.assertEqual(exploit_config["system_prompt"], SYSTEM_EXPLOIT)
 
 	def test_get_mode_config_falls_back_to_chat_for_unknown_modes(self):
 		unknown_config = get_mode_config("unknown_mode")
@@ -270,10 +270,9 @@ class TestPrompts(unittest.TestCase):
 		"""COMMON_RULES should use XML tags for each rule category."""
 		from secator.ai.prompts import COMMON_RULES
 		self.assertIn("<tool_calling>", COMMON_RULES)
-		self.assertIn("<accuracy>", COMMON_RULES)
-		self.assertIn("<placeholders>", COMMON_RULES)
 		self.assertIn("<response_style>", COMMON_RULES)
-		self.assertIn("<follow_up>", COMMON_RULES)
+		self.assertIn("<guardrails>", COMMON_RULES)
+		self.assertIn("<truncated_output>", COMMON_RULES)
 
 	def test_common_rules_has_no_shouting(self):
 		"""COMMON_RULES should not have excessive ALL CAPS directives."""
@@ -281,6 +280,51 @@ class TestPrompts(unittest.TestCase):
 		# Aggressive NEVER/ALWAYS at start of sentences should be toned down
 		self.assertNotIn("NEVER INVENT", COMMON_RULES)
 		self.assertNotIn("ALWAYS provide", COMMON_RULES)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestConditionalPromptRules(unittest.TestCase):
+	"""Tests for conditional prompt rules based on backend."""
+
+	def test_follow_up_rules_constant_exists(self):
+		from secator.ai.prompts import FOLLOW_UP_RULES
+		self.assertIn("<follow_up>", FOLLOW_UP_RULES)
+		self.assertIn("follow_up", FOLLOW_UP_RULES)
+
+	def test_stop_rules_constant_exists(self):
+		from secator.ai.prompts import STOP_RULES
+		self.assertIn("<stop>", STOP_RULES)
+		self.assertIn("stop", STOP_RULES)
+
+	def test_auto_backend_gets_stop_rules(self):
+		from secator.ai.interactivity import AutoBackend
+		prompt = get_system_prompt("attack", backend=AutoBackend())
+		self.assertIn("<stop>", prompt)
+
+	def test_cli_backend_gets_follow_up_rules(self):
+		from secator.ai.interactivity import CLIBackend
+		prompt = get_system_prompt("attack", backend=CLIBackend())
+		self.assertIn("<follow_up>", prompt)
+		self.assertNotIn("<stop>", prompt)
+
+	def test_auto_backend_does_not_get_appended_follow_up(self):
+		"""AutoBackend should not append the FOLLOW_UP_RULES block."""
+		from secator.ai.interactivity import AutoBackend
+		from secator.ai.prompts import FOLLOW_UP_RULES
+		prompt = get_system_prompt("attack", backend=AutoBackend())
+		# The FOLLOW_UP_RULES constant should NOT be appended
+		# (the template may still have baked-in follow_up references from ${follow_up} includes)
+		self.assertNotIn(FOLLOW_UP_RULES.strip(), prompt)
+
+	def test_no_backend_gets_follow_up_rules(self):
+		prompt = get_system_prompt("attack")
+		self.assertIn("<follow_up>", prompt)
+
+	def test_get_system_prompt_accepts_backend_kwarg(self):
+		"""Verify get_system_prompt signature accepts backend."""
+		import inspect
+		sig = inspect.signature(get_system_prompt)
+		self.assertIn("backend", sig.parameters)
 
 
 if __name__ == '__main__':

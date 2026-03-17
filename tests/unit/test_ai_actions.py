@@ -4,13 +4,17 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
-from secator.ai.actions import (
-    ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
-    _handle_query, _handle_add_finding, _run_runner, _decrypt_dict
-)
-from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
+from secator.definitions import ADDONS_ENABLED
+
+if ADDONS_ENABLED['ai']:
+    from secator.ai.actions import (
+        ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
+        _handle_query, _handle_add_finding, _run_runner, _decrypt_dict
+    )
+    from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestDecryptDict(unittest.TestCase):
     """Tests for _decrypt_dict recursive decryption."""
 
@@ -70,6 +74,7 @@ class TestDecryptDict(unittest.TestCase):
         encryptor.decrypt.assert_not_called()
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleFollowUp(unittest.TestCase):
     """Tests for the _handle_follow_up action handler."""
 
@@ -81,14 +86,14 @@ class TestHandleFollowUp(unittest.TestCase):
         self.assertIsInstance(results[0], Ai)
         self.assertEqual(results[0].ai_type, "follow_up")
         self.assertEqual(results[0].content, "All scanned")
-        self.assertEqual(results[0].extra_data["choices"], [])
+        self.assertEqual(results[0].choices, [])
 
     def test_follow_up_default_reason(self):
         ctx = ActionContext(targets=["t.com"], model="m")
         results = list(_handle_follow_up({"action": "follow_up"}, ctx))
 
         self.assertEqual(results[0].content, "completed")
-        self.assertEqual(results[0].extra_data["choices"], [])
+        self.assertEqual(results[0].choices, [])
 
     def test_follow_up_with_choices(self):
         ctx = ActionContext(targets=["t.com"], model="m")
@@ -101,9 +106,10 @@ class TestHandleFollowUp(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].ai_type, "follow_up")
         self.assertEqual(results[0].content, "What next?")
-        self.assertEqual(results[0].extra_data["choices"], ["Scan deeper", "Try SQL injection"])
+        self.assertEqual(results[0].choices, ["Scan deeper", "Try SQL injection"])
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleShell(unittest.TestCase):
     """Tests for the _handle_shell action handler."""
 
@@ -177,6 +183,7 @@ class TestHandleShell(unittest.TestCase):
         encryptor.decrypt.assert_called_once_with("nmap ENCRYPTED")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleQuery(unittest.TestCase):
     """Tests for the _handle_query action handler."""
 
@@ -268,6 +275,7 @@ class TestHandleQuery(unittest.TestCase):
         self.assertEqual(call_args["host"], "example.com")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestRunRunner(unittest.TestCase):
     """Tests for the _run_runner function."""
 
@@ -310,6 +318,7 @@ class TestRunRunner(unittest.TestCase):
         self.assertIn("default.com", results[0].message)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestGetQueryEngine(unittest.TestCase):
     """Tests for ActionContext.get_query_engine caching and backend selection."""
 
@@ -539,6 +548,7 @@ class TestGetQueryEngine(unittest.TestCase):
         self.assertIsInstance(engine.backend, MongoDBBackend)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleAddFinding(unittest.TestCase):
     """Tests for the _handle_add_finding action handler."""
 
@@ -610,6 +620,7 @@ class TestHandleAddFinding(unittest.TestCase):
         self.assertEqual(results[1].matched_at, "http://t.com/search")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestRunBatch(unittest.TestCase):
     """Tests for _run_batch parallel execution."""
 
@@ -652,6 +663,78 @@ class TestRunBatch(unittest.TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertIsInstance(results[0], Warning)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestHandleStop(unittest.TestCase):
+    """Tests for the _handle_stop action handler."""
+
+    def test_stop_with_reason(self):
+        from secator.ai.actions import _handle_stop
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_handle_stop({"action": "stop", "reason": "Task completed"}, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Ai)
+        self.assertEqual(results[0].ai_type, "stopped")
+        self.assertEqual(results[0].content, "Task completed")
+
+    def test_stop_default_reason(self):
+        from secator.ai.actions import _handle_stop
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_handle_stop({"action": "stop"}, ctx))
+
+        self.assertEqual(results[0].content, "completed")
+        self.assertEqual(results[0].ai_type, "stopped")
+
+    def test_stop_dispatched_via_dispatch_action(self):
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(dispatch_action({"action": "stop", "reason": "done"}, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Ai)
+        self.assertEqual(results[0].ai_type, "stopped")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestAiOutputFields(unittest.TestCase):
+    """Tests for Ai output type fields added for interactivity."""
+
+    def test_ai_has_status_field(self):
+        ai = Ai(content="test", ai_type="follow_up")
+        self.assertEqual(ai.status, '')
+
+    def test_ai_has_answer_field(self):
+        ai = Ai(content="test", ai_type="follow_up")
+        self.assertEqual(ai.answer, '')
+
+    def test_ai_has_choices_field(self):
+        ai = Ai(content="test", ai_type="follow_up")
+        self.assertEqual(ai.choices, [])
+
+    def test_ai_has_session_id_field(self):
+        ai = Ai(content="test", ai_type="follow_up")
+        self.assertEqual(ai.session_id, '')
+
+    def test_ai_choices_set_directly(self):
+        ai = Ai(content="test", ai_type="follow_up", choices=["a", "b"])
+        self.assertEqual(ai.choices, ["a", "b"])
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestHandleFollowUpChoices(unittest.TestCase):
+    """Tests for _handle_follow_up using choices kwarg."""
+
+    def test_follow_up_uses_choices_kwarg(self):
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_handle_follow_up({
+            "action": "follow_up",
+            "reason": "What next?",
+            "choices": ["Scan deeper", "Try SQLi"],
+        }, ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].choices, ["Scan deeper", "Try SQLi"])
 
 
 if __name__ == '__main__':

@@ -4,9 +4,10 @@ import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
-from secator.output_types import Ai, Error, Info, Warning, OutputType, INTERNAL_FIELDS
+from secator.runners import Task, Workflow
+from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
 from secator.utils import format_token_count
 
@@ -35,6 +36,7 @@ class ActionContext:
 	silent: bool = False
 	sync: bool = True
 	_query_engine: Any = field(default=None, repr=False)
+	permission_engine: Any = field(default=None, repr=False)
 
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries)."""
@@ -46,6 +48,105 @@ class ActionContext:
 				query_context = dict(self.context)
 			self._query_engine = QueryEngine(self.context.get("workspace_id", ""), context=query_context)
 		return self._query_engine
+
+
+def _build_action_display(action: Dict) -> str:
+	"""Build a display string for the action being checked.
+
+	Returns a concise description of the command/task/workflow for prompt context.
+	"""
+	action_type = action.get("action", "")
+	if action_type == "shell":
+		return action.get("command", "")
+	elif action_type in ("task", "workflow"):
+		name = action.get("name", "")
+		targets = action.get("targets", [])
+		opts = action.get("opts", {})
+		parts = [f"{action_type}: {name}"]
+		if targets:
+			parts.append(f"targets={targets}")
+		if opts:
+			parts.append(f"opts={opts}")
+		return " ".join(parts)
+	return ""
+
+
+def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], List[str]]:
+	"""Check action against guardrails before dispatching.
+
+	Must be called from the main thread (before batch/parallel execution)
+	because it may show interactive prompts.
+
+	Args:
+		action: Action dict with 'action' key and parameters
+		ctx: Shared action context
+
+	Returns:
+		Tuple of (denial_reason, warnings) where denial_reason is None if allowed.
+	"""
+	if ctx.permission_engine is None:
+		return None, []
+
+	# Check for non-existent file paths (warn but don't block)
+	from secator.ai.guardrails import detect_paths, detect_paths_with_access, classify_command
+	from pathlib import Path
+	action_type = action.get("action", "")
+	warnings = []
+	if action_type == "shell":
+		cmd = action.get("command", "")
+		cmd_name = cmd.split()[0] if cmd.split() else ""
+		cmd_class = classify_command(cmd_name)
+		if cmd_class == "read":
+			for path in detect_paths(cmd):
+				# Skip glob patterns — they're not literal paths
+				if any(c in path for c in ('*', '?', '[', ']')):
+					continue
+				try:
+					expanded = Path(path).expanduser()
+					if not expanded.exists():
+						warnings.append(f"Path does not exist: {path}")
+				except (OSError, ValueError):
+					pass
+
+	result = ctx.permission_engine.check_action(action)
+	if result.decision == "deny":
+		return f"Action denied by guardrails: {result.reason}", warnings
+	elif result.decision == "ask":
+		# Build display string for the command context
+		cmd_display = _build_action_display(action)
+		# Handle shell command prompts (unknown commands or parse failures)
+		if result.shell_command:
+			decision = ctx.permission_engine.prompt_shell(
+				result.shell_command, reason=result.reason, interactive=ctx.sync)
+			if decision == "deny":
+				return f"Action denied: shell command not approved", warnings
+			# Re-check after adding runtime rules
+			recheck = ctx.permission_engine.check_action(action)
+			if recheck.decision == "deny":
+				return f"Action denied after prompt: {recheck.reason}", warnings
+			# If still "ask" for other reasons (targets, paths), fall through
+			if recheck.decision == "allow":
+				return None, warnings
+			result = recheck
+		# Handle target prompts
+		for target in result.targets:
+			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.sync, command=cmd_display)
+			if decision == "deny":
+				return f"Action denied: target {target} not approved", warnings
+		# Handle path prompts - use detected access type per path
+		cmd = action.get("command", "")
+		path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
+		for path in result.paths:
+			access_type = path_access_map.get(path, "read")
+			decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.sync, command=cmd_display)
+			if decision == "deny":
+				return f"Action denied: {access_type} access to {path} not approved", warnings
+		# Re-check after prompting
+		recheck = ctx.permission_engine.check_action(action)
+		if recheck.decision != "allow":
+			return f"Action denied after prompt: {recheck.reason}", warnings
+
+	return None, warnings
 
 
 def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
@@ -67,6 +168,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"query": _handle_query,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
+		"stop": _handle_stop,
 	}
 
 	handler = handlers.get(action_type)
@@ -87,84 +189,70 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	name = action.get("name", "")
 	targets = action.get("targets", ctx.targets)
 	opts = action.get("opts", {})
+	context = _get_result_context(action, ctx)
 
-	# Validate runner name before proceeding
-	if not name:
-		yield Error(message=f"Empty {runner_type} name, skipping action")
-		return
+	# Force subagent flags when spawning an AI task from a parent AI task
+	if runner_type == "task" and name.lower() == "ai":
+		opts["subagent"] = True
+		opts["interactive"] = False
 
 	if runner_type == "task":
-		from secator.runners import Task
-		from secator.loader import discover_tasks
-		try:
-			Task.get_task_class(name)
-		except ValueError:
-			available = [cls.__name__ for cls in discover_tasks()]
-			yield Error(message=f"Task '{name}' not found. Pick from: {', '.join(sorted(available))}")
-			return
 		tpl = TemplateLoader(input={'type': 'task', 'name': name})
 		runner_cls = Task
 	else:
-		from secator.runners import Workflow
-		from secator.loader import find_templates
-		available_wfs = [t['name'] for t in find_templates() if t['type'] == 'workflow']
-		if name not in available_wfs:
-			yield Error(message=f"Workflow '{name}' not found. Pick from: {', '.join(sorted(available_wfs))}")
-			return
 		tpl = TemplateLoader(name=f'workflows/{name}')
 		runner_cls = Workflow
 
-	# Flatten targets (LLMs sometimes pass nested lists) and decrypt
-	flat_targets = []
-	for t in targets:
-		if isinstance(t, list):
-			flat_targets.extend(t)
-		else:
-			flat_targets.append(t)
-	targets = flat_targets
+	# Decrypt targets
 	if ctx.encryptor:
 		targets = [ctx.encryptor.decrypt(str(t)) for t in targets]
 
 	if ctx.dry_run:
-		yield Info(message=f"[DRY RUN] Would run {runner_type}: {name} on {targets}")
+		yield Info(message=f"[DRY RUN] Would run {runner_type}: {name} on {targets}", _context=context)
 		return
 
 	if not ctx.silent:
-		yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts})
+		yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts}, _context=context)
 
-	try:
+	run_opts = {
+		"print_item": True,
+		"print_line": ctx.verbose and not ctx.silent,
+		"print_cmd": not ctx.silent and not ctx.subagent,
+		"print_cmd_icon": "└",
+		"print_progress": False,
+		"print_reports_message": False,
+		"enable_reports": True,
+		"exporters": [],
+		"sync": ctx.sync,
+		"tty": not ctx.subagent and ctx.sync,
+		**opts,
+	}
+	if runner_type == "workflow":
+		run_opts["print_start"] = not ctx.silent and not ctx.subagent
+		run_opts["print_end"] = not ctx.silent and not ctx.subagent
 
-		run_opts = {
-			"print_item": True,
-			"print_line": ctx.verbose and not ctx.silent,
-			"print_cmd": not ctx.silent and not ctx.subagent,
-			"print_cmd_icon": "└",
-			"print_progress": False,
-			"print_reports_message": False,
-			"enable_reports": True,
-			"exporters": [],
-			"sync": ctx.sync,
-			"tty": not ctx.subagent and ctx.sync,
-			**opts,
-		}
-		if runner_type == "workflow":
-			run_opts["print_start"] = not ctx.silent and not ctx.subagent
-			run_opts["print_end"] = not ctx.silent and not ctx.subagent
+	context["task_chunk_id"] = str(uuid.uuid4())
+	if ctx.subagent:
+		context["subagent"] = ctx.context.get("subagent", True)
+	runner = runner_cls(tpl, targets, run_opts=run_opts, context=context)
+	yield from runner
 
-		context = ctx.context.copy()
-		context["task_chunk_id"] = str(uuid.uuid4())
-		tool_call_id = action.get("_tool_call_id")
-		if tool_call_id:
-			context["tool_call_id"] = tool_call_id
-		if ctx.subagent:
-			context["subagent"] = ctx.context.get("subagent", True)
-		runner = runner_cls(tpl, targets, run_opts=run_opts, context=context)
-		yield from runner
-		# TODO: verify if yielding raw output would be better than JSON findings
-		# yield Ai(content=runner.output, ai_type="shell_output")
+	# Auto-allow reading from the spawned runner's reports folder
+	if ctx.permission_engine and hasattr(runner, 'reports_folder') and runner.reports_folder:
+		reports_path = str(runner.reports_folder)
+		ctx.permission_engine.add_runtime_allow([f"read({reports_path}/*)", f"read({reports_path})"])
 
-	except Exception as e:
-		yield Error(message=f"{runner_type.title()} {name} failed: {e}")
+
+def _get_result_context(action, ctx):
+	"""Get result context from action"""
+	ctx = ctx.context.copy()
+	action_context = {}
+	tool_call_id = action.get("tool_call_id")
+	tool_call_name = action.get("tool_call_name")
+	if tool_call_id:
+		action_context["tool_call_id"] = tool_call_id
+		action_context["tool_call_name"] = tool_call_name
+	return {**ctx, **action_context}
 
 
 def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
@@ -185,6 +273,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		ctx: Action context
 	"""
 	command = action.get("command", "")
+	context = _get_result_context(action, ctx)
 
 	if ctx.encryptor:
 		command = ctx.encryptor.decrypt(command)
@@ -204,7 +293,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			timeout=60
 		)
 		output = result.stdout or result.stderr or "(no output)"
-		yield Ai(content=output, ai_type="shell_output")
+		yield Ai(content=output, ai_type="shell_output",_context=context)
 
 	except Exception as e:
 		yield Error(message=f"Shell command failed: {e}")
@@ -217,6 +306,7 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		action: Action dict with query (MongoDB query dict)
 		ctx: Action context (scope='current' passes results to QueryEngine in-memory)
 	"""
+	context = _get_result_context(action, ctx)
 	query_filter = action.get("query", {})
 	limit = action.get("limit", 100)
 
@@ -235,17 +325,19 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		yield Ai(
 			content=query_str,
 			ai_type="query",
-			extra_data={"results": len(results), "limit": limit}
+			extra_data={"results": len(results), "limit": limit},
+			_context=context
 		)
 		for result in results:
-			clean = {k: v for k, v in result.items() if k not in INTERNAL_FIELDS}
-			yield clean
+			result["_context"].update(context)
+			yield result
 
 	except Exception as e:
 		yield Ai(
 			content=str(query_filter),
 			ai_type="query",
-			extra_data={"results": "failed", "limit": limit}
+			extra_data={"results": "failed", "limit": limit},
+			_context=context
 		)
 		yield Error.from_exception(e)
 
@@ -257,9 +349,16 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 		action: Action dict with reason and optional choices
 		ctx: Action context
 	"""
+	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
-	yield Ai(content=reason, ai_type="follow_up", extra_data={"choices": choices})
+	yield Ai(content=reason, ai_type="follow_up", choices=choices, _context=context)
+
+
+def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
+	"""Handle stop action - signals session completion."""
+	reason = action.get("reason", "completed")
+	yield Ai(content=reason, ai_type="stopped")
 
 
 def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
@@ -269,10 +368,10 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		action: Action dict with _type and finding fields
 		ctx: Action context
 	"""
-	from secator.output_types import FINDING_TYPES
+	context = _get_result_context(action, ctx)
 
 	finding_type = action.get("_type", "")
-	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type", "_tool_call_id")}
+	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type", "tool_call_id", "tool_call_name")}
 
 	# Decrypt field values
 	if ctx.encryptor:
@@ -282,7 +381,14 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	type_map = {cls.get_name(): cls for cls in FINDING_TYPES}
 	cls = type_map.get(finding_type)
 	if not cls:
-		yield Warning(message=f"Unknown finding type: {finding_type}")
+		yield Warning(message=f"Unknown finding type: {finding_type}", _context=context)
+		return
+
+	# Validate field types before instantiation
+	errors = cls.validate_fields(finding_data)
+	if errors:
+		error_msg = f"Invalid {finding_type} fields: {'; '.join(errors)}.\nExpected schema:\n{cls.schema()}"
+		yield Error(message=error_msg, _context=context)
 		return
 
 	try:
@@ -290,10 +396,11 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Ai(
 			content=f'{str(finding)}',
 			ai_type="add_finding",
+			_context=context
 		)
 		yield finding
 	except Exception as e:
-		yield Error(message=f"Failed to create {finding_type}: {e}")
+		yield Error(message=f"Failed to create {finding_type}: {e}\nExpected schema:\n{cls.schema()}", _context=context)
 
 
 def _get_action_label(action: Dict) -> str:
@@ -342,18 +449,22 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	# Silence console output for parallel tasks to avoid interleaved printing
 	batch_ctx = replace(ctx, silent=True)
 
-	# Skip Rich progress panel for subagents to avoid nested LiveError
-	use_progress = not ctx.subagent
+	# Skip Rich progress panel when we are a subagent, or when the batch
+	# contains an AI subagent task (its output conflicts with the Live display)
+	has_ai_subagent = any(
+		a.get("action") == "task" and a.get("name", "").lower() == "ai"
+		for a in actions
+	)
+	use_progress = not ctx.subagent and not has_ai_subagent
 
 	# Print all task start messages before any task begins
 	if use_progress:
 		for act in actions:
-			act_type = act.get("action", "")
-			if act_type in ("task", "workflow"):
-				name = act.get("name", "")
-				targets = act.get("targets", ctx.targets)
-				ai_start = Ai(content=name, ai_type=act_type, extra_data={"targets": targets, "opts": act.get("opts", {})})
-				console.print(ai_start)
+			name = act.get("description")
+			action = act.get("action", "")
+			targets = act.get("targets", ctx.targets)
+			ai_start = Ai(content=name, ai_type=action, extra_data={"targets": targets, "opts": act.get("opts", {})})
+			console.print(ai_start)
 
 	progress = None
 	progress_ids = {}

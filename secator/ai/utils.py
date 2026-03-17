@@ -1,12 +1,14 @@
 # secator/ai/utils.py
 """Utility functions for AI task - LLM initialization, calling, and response parsing."""
-import json
 import logging
+import random
 from typing import Dict, List, Optional
 
+from secator.definitions import LLM_SPINNER_MESSAGES
 from secator.config import CONFIG
 from secator.output_types import Warning, Error
 from secator.rich import console, maybe_status
+from secator.utils import format_token_count
 
 # Module-level state for litellm initialization
 _llm_initialized = False
@@ -95,8 +97,16 @@ def call_llm(
 		temperature=temperature,
 		api_base=api_base,
 	)
+	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
+	# Remove only when we have a better way to show this
+	# if len(messages) > 1:
+	# 	for message in messages[1:]:
+	# 		print("-" * 80)
+	# 		print(message)
+	# 		print("-" * 80)
 	if tools is not None:
 		kwargs["tools"] = tools
+		kwargs["tool_choice"] = "auto"
 
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
@@ -136,19 +146,8 @@ def call_llm(
 			"cost": cost,
 		}
 
-	# Parse tool calls
-	tool_calls = []
-	if hasattr(message, 'tool_calls') and message.tool_calls:
-		for tc in message.tool_calls:
-			try:
-				arguments = json.loads(tc.function.arguments)
-			except (json.JSONDecodeError, TypeError):
-				arguments = {}
-			tool_calls.append({
-				"id": tc.id,
-				"name": tc.function.name,
-				"arguments": arguments,
-			})
+	# Get tool calls
+	tool_calls = getattr(message, 'tool_calls', None) or []
 
 	return {"content": content, "usage": usage, "tool_calls": tool_calls}
 
@@ -159,6 +158,21 @@ MODEL_COLORS = [
 	'bright_red', 'bright_blue', 'orange3', 'deep_pink2', 'dark_olive_green3',
 	'medium_purple3', 'dodger_blue2', 'gold3', 'spring_green3', 'hot_pink',
 ]
+
+
+def format_llm_status(token_count, ctx_window, by_role):
+	"""Format a rich status message for LLM calls with token counts and a spinner message."""
+	token_str = format_token_count(token_count, icon='arrow_up', compact=True)
+	ctx_str = format_token_count(ctx_window, compact=True)
+	role_parts = []
+	for role in ('system', 'user', 'assistant', 'tool'):
+		if role in by_role:
+			role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
+	role_str = ' | '.join(role_parts)
+	return (
+		f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/]"
+		f" [gray42] • {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
+	)
 
 
 def setup_ai():

@@ -151,15 +151,15 @@ class ChatHistory:
             msg["content"] = content
         self.messages.append(msg)
 
-    def add_tool_result(self, tool_call_id: str, content: str, name: str = None) -> None:
+    def add_tool_result(self, name: str, tool_call_id: str, content: str) -> None:
         """Add a tool result message.
 
         Args:
+            name: Function name
             tool_call_id: ID of the tool call this result responds to
             content: The tool's output content
-            name: Optional tool function name
         """
-        msg = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+        msg = {"role": "tool", "tool_call_id": tool_call_id, "name": name, "content": content}
         if name:
             msg["name"] = name
         self.messages.append(msg)
@@ -334,8 +334,16 @@ class ChatHistory:
         return True, old_tokens, new_tokens
 
     def compact(self, model: str, api_base: Optional[str] = None,
-                api_key: Optional[str] = None) -> None:
-        """Summarize non-system messages using an LLM, keeping the initial system prompt intact."""
+                api_key: Optional[str] = None, keep_last: int = 4) -> None:
+        """Summarize non-system messages using an LLM, keeping the initial system prompt
+        and the last few messages intact so the LLM retains recent context.
+
+        Args:
+            model: LLM model name
+            api_base: Optional API base URL
+            api_key: Optional API key
+            keep_last: Number of recent non-system messages to preserve (default 4)
+        """
         if len(self.messages) <= 2:
             return
 
@@ -349,6 +357,14 @@ class ChatHistory:
         if not rest:
             return
 
+        # Split rest into messages to summarize and recent messages to keep
+        if len(rest) > keep_last:
+            to_summarize = rest[:-keep_last]
+            to_keep = rest[-keep_last:]
+        else:
+            to_summarize = rest
+            to_keep = []
+
         from secator.ai.utils import call_llm
         from secator.rich import console
         from secator.utils import format_token_count
@@ -359,7 +375,7 @@ class ChatHistory:
         target_tokens = int(usable * 0.3)  # Target 30% of usable context
         max_words = target_tokens // 2  # Rough tokens-to-words ratio
 
-        history_text = json.dumps(rest, indent=None)
+        history_text = json.dumps(to_summarize, indent=None)
         prompt = SUMMARIZATION_PROMPT.format(history=history_text, max_words=max_words)
         token_str = format_token_count(self.count_tokens(model), icon='arrow_up')
         with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
@@ -371,6 +387,7 @@ class ChatHistory:
         if first_user:
             self.messages.append(first_user)
         self.messages.append({"role": "user", "content": f"Summary of previous iterations:\n\n{result['content']}"})
+        self.messages.extend(to_keep)
 
     def get_action_budget(self, model: str) -> int:
         """Get max tokens allowed for a single action's combined output.

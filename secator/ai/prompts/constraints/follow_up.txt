@@ -1,0 +1,7 @@
+<follow_up>
+Use the follow_up tool when you need user guidance, have no clear next step, or lack specific targets, as you might get confused otherwise.
+Keep choices to max 3 concrete actions you can execute (specific scans, exploits, queries), so the user only has a few choices to choose from.
+Omit choices when the task is simply complete, as it bloats the output.
+Do not include generic advice or steps unrelated to the task at hand, as it will confuse the user.
+Do not include choices like "No user actions needed" or "Do nothing for now" or similar choices that are not actionable.
+</follow_up>

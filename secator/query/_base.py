@@ -74,3 +74,15 @@ class QueryBackend(ABC):
     def _execute_count(self, query: dict) -> int:
         """Backend-specific count implementation."""
         pass
+
+    def update(self, query: dict, update: dict) -> int:
+        """Update records matching query.
+
+        Args:
+            query: MongoDB-style filter dict
+            update: Update dict with $set operator
+
+        Returns:
+            Number of records updated
+        """
+        raise NotImplementedError
