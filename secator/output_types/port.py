@@ -42,7 +42,7 @@ class Port(OutputType):
 	def __str__(self) -> str:
 		return f'{self.host}:{self.port}'
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'🔓 {self.ip}:[bold red]{self.port:<4}[/]'
 		state = f'[bold yellow]{self.state.upper()}[/]'
 		if self.confidence == 'low':
@@ -63,4 +63,7 @@ class Port(OutputType):
 		if self.extra_data:
 			skip_keys = ['name', 'servicefp', 'method', 'service_name', 'product', 'version', 'conf']
 			s += format_object(self.extra_data, 'yellow', skip_keys=skip_keys)
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

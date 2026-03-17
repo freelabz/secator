@@ -31,7 +31,7 @@ class UserAccount(OutputType):
 	def __str__(self) -> str:
 		return self.url
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'👤 [green]{_s(self.username)}[/]'
 		if self.email:
 			s += rf' \[[bold yellow]{_s(self.email)}[/]]'
@@ -41,4 +41,7 @@ class UserAccount(OutputType):
 			s += rf' \[[white]{_s(self.url)}[/]]'
 		if self.extra_data:
 			s += format_object(self.extra_data, 'yellow')
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())
