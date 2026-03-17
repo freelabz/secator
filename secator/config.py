@@ -30,7 +30,7 @@ USER_AGENTS = {
 }
 
 
-class StrictModel(BaseModel, extra='ignore'):
+class StrictModel(BaseModel, extra='forbid'):
 	pass
 
 
