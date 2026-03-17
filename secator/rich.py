@@ -489,6 +489,9 @@ class InteractiveMenu:
 				elif key == 'down' and not self.in_input_mode:
 					self.selected = (self.selected + 1) % len(self.options)
 
+				elif key == 'space' and self.in_input_mode:
+					self.typed += ' '
+
 				elif key == 'space' and not self.in_input_mode:
 					opt = self.options[self.selected]
 					if opt.get("selectable"):

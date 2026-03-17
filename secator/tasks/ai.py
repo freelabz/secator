@@ -93,6 +93,11 @@ class ai(PythonRunner):
 			"default": False,
 			"help": "Render and display the system prompt, then exit"
 		},
+		"dangerous": {
+			"is_flag": True,
+			"default": False,
+			"help": "Skip all permission engine checks (dangerous!)"
+		},
 	}
 
 	@classmethod
@@ -137,6 +142,7 @@ class ai(PythonRunner):
 		self.session_name = self.run_opts.get("session_name")
 		self.passed_context = self.run_opts.get("context") or {}
 		self.async_tasks = self.get_opt_value("async_tasks")
+		self.dangerous = self.get_opt_value("dangerous")
 		self._sync = False if self.async_tasks else self.sync
 		self.history = ChatHistory()
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
@@ -228,11 +234,15 @@ class ai(PythonRunner):
 		# Run unified loop
 		yield from self._run_loop()
 
-	def _detect_mode(self):
-		"""Detect mode using a fast LLM call for intent analysis."""
+	def _detect_mode(self, force=False):
+		"""Detect mode using a fast LLM call for intent analysis.
+		Skips detection if mode was explicitly set (e.g. by subagent or CLI option),
+		unless force=True (used for follow-up re-detection)."""
 		old_mode = self.mode
+		if old_mode and not force:
+			return
 		if not self.prompt:
-			self.mode = old_mode or "chat"
+			self.mode = "chat"
 			return
 		try:
 			selection_prompt = load_prompt("modes/_selection.txt")
@@ -295,9 +305,9 @@ class ai(PythonRunner):
 		self.prompt = menu_action
 		items = []
 
-		# Re-detect mode (_detect_mode uses max() so it won't clobber accumulated iterations)
+		# Re-detect mode for follow-up (user may switch from chat to attack, etc.)
 		previous_mode = self.mode
-		self._detect_mode()
+		self._detect_mode(force=True)
 		self.max_iterations += extra_iters
 		if self.mode != previous_mode:
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
@@ -442,9 +452,11 @@ class ai(PythonRunner):
 							"arguments": tc.function.arguments if isinstance(tc.function.arguments, str) else json.dumps(tc.function.arguments),
 						},
 					} for tc in tool_calls]
-					self.history.add_assistant_with_tool_calls(response_content or None, litellm_tool_calls)
+					self.history.add_assistant_with_tool_calls(
+						maybe_encrypt(response_content, self.encryptor) if response_content else None,
+						litellm_tool_calls)
 				else:
-					self.history.add_assistant(response_content)
+					self.history.add_assistant(maybe_encrypt(response_content, self.encryptor))
 
 				# Display response content as-is
 				if response_content:
@@ -478,24 +490,44 @@ class ai(PythonRunner):
 
 					# Convert args to JSON if needed (some LLMs send a string here)
 					if isinstance(args, str):
-						args = json.loads(tc.function.arguments)
+						try:
+							args = json.loads(tc.function.arguments)
+						except (json.JSONDecodeError, TypeError) as e:
+							self.debug(f'[tool_call] {name}: failed to parse arguments: {tc.function.arguments[:200]}', sub='llm')
+							schema = TOOL_SCHEMAS.get(name, {}).get("function", {})
+							params = schema.get("parameters", {})
+							properties = params.get("properties", {})
+							error_msg = json.dumps({
+								"error": f"Tool call '{id}' rejected: malformed JSON arguments ({e})",
+								"raw_arguments": tc.function.arguments[:200],
+								"expected_schema": {k: v.get("type", "any") for k, v in properties.items()},
+								"hint": "Your tool call arguments were not valid JSON. Retry with properly formatted JSON arguments.",
+							}, separators=(',', ':'))
+							error_msg = maybe_encrypt(error_msg, self.encryptor)
+							self.history.add_tool_result(name, id, error_msg)
+							continue
 
 					# Decrypt args
 					if self.encryptor:
 						args = _decrypt_dict(args, self.encryptor)
 
 					# Validate action parsing
+					self.debug(f'[tool_call] {name} id={id} args={args}', sub='llm')
 					action = tool_call_to_action(name, args)
 					if not action:
 						reason = "empty arguments" if not args else f"unknown tool '{name}'"
 						self.debug(f'[tool_call] skipping {name}: {reason}', sub='llm')
 						schema = TOOL_SCHEMAS.get(name, {}).get("function", {})
-						required = schema.get("parameters", {}).get("required", [])
+						params = schema.get("parameters", {})
+						required = params.get("required", [])
+						properties = params.get("properties", {})
 						error_msg = json.dumps({
 							"error": f"Tool call '{id}' rejected: {reason}",
 							"required_fields": required,
+							"schema": {k: v.get("type", "any") for k, v in properties.items()},
 							"hint": f"You must provide all required fields: {required}. Retry with a complete arguments object.",
 						}, separators=(',', ':'))
+						error_msg = maybe_encrypt(error_msg, self.encryptor)
 						self.history.add_tool_result(name, id, error_msg)
 						continue
 
@@ -505,7 +537,10 @@ class ai(PythonRunner):
 
 					# Guardrails pre-check: validate all actions on main thread before dispatch
 					# This ensures interactive prompts happen before batch/progress panels
-					denial, warnings = check_guardrails(action, ctx)
+					if self.dangerous:
+						denial, warnings = None, []
+					else:
+						denial, warnings = check_guardrails(action, ctx)
 					denial_str = "denied" if denial else "ok"
 					act_desc = args.get("command", None) or args.get("name", None) or args.get("query", None)
 					self.debug(f'[guardrails] {name}({act_desc}) => {denial_str}', sub='guardrail')
@@ -518,6 +553,7 @@ class ai(PythonRunner):
 							denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]"
 						yield Warning(message=denial_display)
 						error_msg = json.dumps({"error": denial}, separators=(',', ':'))
+						error_msg = maybe_encrypt(error_msg, self.encryptor)
 						self.history.add_tool_result(name, id, error_msg)
 						continue
 					actions.append(action)
@@ -532,37 +568,27 @@ class ai(PythonRunner):
 					# Collect results
 					collected = []
 					for result in action_iter:
-						# Skip adding execution types to this runner results
+						# Skip execution-only types (not useful for LLM context)
 						if isinstance(result, (Stat, Progress, State, Info)):
 							continue
 
-						# Check if result is from a subagent
 						is_from_subagent = isinstance(result, OutputType) and bool(result._context.get('subagent'))
-						if isinstance(result, Ai):
-							# Do not print subagent Ai-type results to not bloat main window, but still add them
-							self.add_result(result, print=not is_from_subagent)
 
-							# For Ai follow ups, grab proposed choices if any
+						# Handle Ai results: add to runner, grab follow_up choices
+						if isinstance(result, Ai):
+							self.add_result(result, print=not is_from_subagent)
 							if result.ai_type == "follow_up":
 								follow_up_choices = (result.extra_data or {}).get("choices", [])
+								continue  # follow_up is metadata, not a tool result
+							if result.ai_type not in ("shell_output", "response"):
+								continue  # skip UI-only Ai types (e.g. "shell" command echo)
 
-							# TODO: Check if needed (probably not)
-							# # If it's from an Ai-summary from a subagent, add it to action results
-							# # so the main thread can read it
-							# if result.summary and is_from_subagent and not self.is_subagent:
-							# 	action_results.append({"summary": result.content})
-
-							# # Add shell outputs to main thread
-							# elif result.ai_type == "shell_output":
-							# 	action_results.append({"output": result.content})
-							continue
-
-						# If it's output type, always add it, but don't print if it's from a subagent
-						if isinstance(result, OutputType):
+						# Add other OutputTypes to runner results
+						elif isinstance(result, OutputType):
 							self.add_result(result, print=not is_from_subagent)
 
+						# Collect all results for tool result grouping
 						result = result.toDict() if isinstance(result, OutputType) else result
-						# console.print(result)
 						collected.append(result)
 						ctx.results.append(result)
 
@@ -605,16 +631,17 @@ class ai(PythonRunner):
 					self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 					continue
 
-				# Show menu if follow_up, no actions, or max_iter reached
-				if follow_up_choices is not None or not actions or iteration == self.max_iterations:
+				# Show menu if follow_up or max_iter reached
+				if not tool_calls or follow_up_choices is not None or iteration == self.max_iterations:
 					if not self.interactive:
-						# In non-interactive mode, keep going unless max iterations reached
-						if iteration < self.max_iterations:
-							continue_msg = format_continue(iteration, self.max_iterations)
-							self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
-							continue
-						save_history(self.history, self.reports_folder, debug_fn=self.debug)
-						return
+						# In non-interactive mode, stop if LLM offered follow_up choices (task complete),
+						# max iterations reached, or LLM returned text-only response (final answer).
+						if follow_up_choices is not None or iteration >= self.max_iterations or not tool_calls:
+							save_history(self.history, self.reports_folder, debug_fn=self.debug)
+							return
+						continue_msg = format_continue(iteration, self.max_iterations)
+						self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
+						continue
 					result = self._prompt_and_redetect(follow_up_choices or [])
 					if result is None:
 						save_history(self.history, self.reports_folder, debug_fn=self.debug)
@@ -623,10 +650,7 @@ class ai(PythonRunner):
 					continue
 
 				# STOP or CONTINUE
-				stop_or_continue = (
-					"Analyze the tool results, then STOP or CONTINUE based on whether the initial user request has been fulfilled"
-					" (no need to explain why you stopped or continued, or comment on the initial user request)"
-				)
+				stop_or_continue = load_prompt("constraints/tool_result_analysis.txt")
 				continue_msg = format_continue(iteration, self.max_iterations, stop_or_continue)
 				self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 

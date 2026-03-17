@@ -6,8 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import litellm
-
 from secator.utils import debug
 
 
@@ -25,6 +23,7 @@ def get_context_window(model: str) -> int:
     Returns:
         Context window size in tokens (default 128000 on error)
     """
+    import litellm
     try:
         info = litellm.get_model_info(model)
         context_window = info.get("max_input_tokens") or info.get("max_tokens", 128_000)
@@ -56,6 +55,7 @@ def truncate_to_tokens(
     Returns:
         Original content if under budget, or truncated with [TRUNCATED] marker
     """
+    import litellm
     current = litellm.token_counter(model=model, text=content)
     if current <= max_tokens:
         debug(f'no truncation needed: {current} <= {max_tokens} tokens', sub='runner.ai.context')
@@ -224,6 +224,7 @@ class ChatHistory:
         Raises:
             ValueError: If no model provided and self.model not set
         """
+        import litellm
         model = model or self.model
         if not model:
             raise ValueError("Model required for token counting")

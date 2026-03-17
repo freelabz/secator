@@ -181,15 +181,27 @@ def build_wordlists_reference() -> str:
 	return "\n".join(lines)
 
 
+def _type_name(tp) -> str:
+	"""Return a human-readable type name for a dataclass field type."""
+	type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+	if tp in type_names:
+		return type_names[tp]
+	origin = getattr(tp, '__origin__', None)
+	if origin in type_names:
+		return type_names[origin]
+	return getattr(tp, '__name__', str(tp))
+
+
 def build_output_types_reference() -> str:
-	"""Build compact output types reference: name|queryable_fields."""
+	"""Build compact output types reference: name|field:type,field:type,..."""
 	from secator.output_types import FINDING_TYPES
 	lines = []
 	for cls in FINDING_TYPES:
 		name = cls.get_name()
 		if hasattr(cls, '__dataclass_fields__'):
 			fields = ",".join(
-				f.name for f in cls.__dataclass_fields__.values()
+				f"{f.name}({_type_name(f.type)})"
+				for f in cls.__dataclass_fields__.values()
 				if not f.name.startswith('_')
 			)
 		else:

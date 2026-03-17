@@ -222,7 +222,7 @@ class AiAddon(StrictModel):
 			"write({workspace}/.outputs/*,/dev/null,/tmp/*)",
 			"shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,"
 			"cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,"
-			"file,strings,xxd,base64,for,while,"
+			"file,strings,xxd,base64,for,while,which,true,timeout,"
 			"tee,cp,mv,mkdir,touch,chmod,sed,awk,xargs,docker,printf,"
 			"redis-cli,nc,ncat,nmap,sqlmap,nikto,gobuster,feroxbuster,ffuf,"
 			"socat,telnet,openssl,ssh,scp,rsync,ping,traceroute,tcpdump,ss,netstat)",

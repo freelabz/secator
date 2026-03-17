@@ -1,6 +1,6 @@
 <queries>
-Use the query_workspace tool when you need to query existing findings in the workspace (also include previous findings from the current run).
-Try to make as few queries as possible
+Use the query_workspace tool when you REALLY need to query existing findings in the workspace (unlikely).
+Try to make as few queries as possible.
 If a query fails, analyze the error and retry with corrected parameters. If you hit a result limit, use more specific queries. Do not give up after a single failure.
 
 The following MongoDB operators can be used:

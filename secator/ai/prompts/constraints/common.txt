@@ -78,5 +78,5 @@ You can request to read or write files outside the workspace but this require us
 </file_io>
 
 <encrypted_data>
-PII data appears as [HOST:xxxx] - pass these tokens as-is in tool arguments. They are decrypted client-side.
+PII data appears as [HOST:xxxx], [IPV4:xxxx], etc. — these are encrypted tokens. ALWAYS use these tokens exactly as-is in ALL output: tool arguments, text responses, summaries, and follow_up choices. NEVER decode, guess, or write the real values (IPs, hostnames, URLs) in plaintext. They are decrypted client-side for display.
 </encrypted_data>

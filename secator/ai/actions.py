@@ -4,7 +4,7 @@ import os
 import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from secator.runners import Task, Workflow
@@ -129,9 +129,16 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
 		return f"Action denied by guardrails: {result.reason}", warnings
-	elif result.decision == "ask":
-		# Build display string for the command context
+
+	# Prompt loop: each check_action returns the first "ask" it encounters
+	# (shell, then targets, then paths). We prompt for that layer, then re-check
+	# to surface the next layer, until everything is resolved.
+	max_rounds = 5  # safety limit to prevent infinite prompting
+	rounds = 0
+	while result.decision == "ask" and rounds < max_rounds:
+		rounds += 1
 		cmd_display = _build_action_display(action)
+
 		# Handle shell command prompts (unknown commands or parse failures)
 		if result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
@@ -139,39 +146,32 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 				result.shell_command, reason=result.reason, interactive=ctx.interactive)
 			if decision == "deny":
 				return f"Action denied: shell command not approved", warnings
-			# If command couldn't be parsed, we can't add granular runtime rules,
-			# but the user already approved the full command — allow it
 			if parse_failed:
 				return None, warnings
-			# Re-check after adding runtime rules
-			recheck = ctx.permission_engine.check_action(action)
-			if recheck.decision == "deny":
-				return f"Action denied after prompt: {recheck.reason}", warnings
-			# If still "ask" for other reasons (targets, paths), fall through
-			if recheck.decision == "allow":
-				return None, warnings
-			result = recheck
+
 		# Handle target prompts
 		for target in result.targets:
-			# Skip targets already covered by previously added runtime rules
 			recheck = ctx.permission_engine._check_value("target", target)
 			if recheck.decision == "allow":
 				continue
 			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.interactive, command=cmd_display)
 			if decision == "deny":
 				return f"Action denied: target {target} not approved", warnings
-		# Handle path prompts - use detected access type per path
-		cmd = action.get("command", "")
-		path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
-		for path in result.paths:
-			access_type = path_access_map.get(path, "read")
-			decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.interactive, command=cmd_display)
-			if decision == "deny":
-				return f"Action denied: {access_type} access to {path} not approved", warnings
-		# Re-check after prompting
-		recheck = ctx.permission_engine.check_action(action)
-		if recheck.decision != "allow":
-			return f"Action denied after prompt: {recheck.reason}", warnings
+
+		# Handle path prompts
+		if result.paths:
+			cmd = action.get("command", "")
+			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
+			for path in result.paths:
+				access_type = path_access_map.get(path, "read")
+				decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.interactive, command=cmd_display)
+				if decision == "deny":
+					return f"Action denied: {access_type} access to {path} not approved", warnings
+
+		# Re-check to see if more layers need prompting
+		result = ctx.permission_engine.check_action(action)
+		if result.decision == "deny":
+			return f"Action denied after prompt: {result.reason}", warnings
 
 	return None, warnings
 
@@ -242,7 +242,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts}, _context=context)
 
 	run_opts = {
-		"print_item": True,
+		"print_item": not ctx.silent,
 		"print_line": ctx.verbose and not ctx.silent,
 		"print_cmd": not ctx.silent and not ctx.subagent,
 		"print_cmd_icon": "└",
@@ -398,6 +398,7 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 
 	finding_type = action.get("_type", "")
 	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type", "tool_call_id", "tool_call_name")}
+	finding_data["_context"] = context
 
 	# Decrypt field values
 	if ctx.encryptor:
@@ -409,6 +410,35 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	if not cls:
 		yield Warning(message=f"Unknown finding type: {finding_type}", _context=context)
 		return
+
+	# Deserialize JSON strings that should be dicts/lists
+	# (LLMs often send structured fields as JSON strings)
+	for f in fields(cls):
+		if f.name not in finding_data:
+			continue
+		val = finding_data[f.name]
+		if not isinstance(val, str):
+			continue
+		expected = f.type if isinstance(f.type, type) else getattr(f.type, '__origin__', None)
+		if expected in (dict, list):
+			try:
+				finding_data[f.name] = json.loads(val)
+			except (json.JSONDecodeError, TypeError):
+				pass
+
+	# Strip unknown fields: move them into extra_data so no data is lost
+	known_fields = {f.name for f in fields(cls)}
+	unknown = {k: v for k, v in finding_data.items() if k not in known_fields and not k.startswith('_')}
+	if unknown:
+		finding_data = {k: v for k, v in finding_data.items() if k in known_fields or k.startswith('_')}
+		extra = finding_data.get('extra_data', {})
+		if isinstance(extra, str):
+			try:
+				extra = json.loads(extra)
+			except (json.JSONDecodeError, TypeError):
+				extra = {}
+		extra.update(unknown)
+		finding_data['extra_data'] = extra
 
 	# Validate field types before instantiation
 	errors = cls.validate_fields(finding_data)

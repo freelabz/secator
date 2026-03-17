@@ -71,11 +71,11 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 			continue
 		if fnmatch.fnmatch(value, pattern):
 			return True
-		# For path patterns ending with /*, also match any nested subpath
-		# e.g. pattern "/home/user/dir/*" should match "/home/user/dir/sub/file.py"
+		# For path patterns ending with /*, also match the base dir and any nested subpath
+		# e.g. pattern "/home/user/dir/*" should match "/home/user/dir" and "/home/user/dir/sub/file.py"
 		if pattern.endswith('/*') and '/' in value:
-			prefix = pattern[:-1]  # "/home/user/dir/"
-			if value.startswith(prefix):
+			prefix = pattern[:-2]  # "/home/user/dir"
+			if value == prefix or value.startswith(prefix + '/'):
 				return True
 		# For path-like values, also try matching against basename
 		if '/' in value and '/' not in pattern:
@@ -144,8 +144,9 @@ def _resolves(hostname: str) -> bool:
 def extract_command_targets(command: str) -> List[str]:
 	"""Extract target-like values (IPs, hosts, URLs) from a shell command string.
 
-	Reuses PII_PATTERNS from secator.ai.encryption for IP and host detection.
-	Excludes values that are part of file paths detected by detect_paths().
+	Uses safecmd's parsed sub-command arguments and checks each individually,
+	which naturally excludes heredoc content, quoted code strings, etc.
+	Falls back to regex on raw string if parsing fails.
 
 	Args:
 		command: Shell command string
@@ -154,57 +155,73 @@ def extract_command_targets(command: str) -> List[str]:
 		List of detected target strings
 	"""
 	targets = []
+	seen = set()
 
-	# Docker/podman commands run in a sandbox — skip target detection for internal commands
+	# Docker/podman commands run in a sandbox — skip target detection
 	top_cmd = command.strip().split()[0] if command.strip() else ""
 	if top_cmd in ('docker', 'podman'):
 		return targets
 
-	# First, detect file paths so we can exclude them from target detection
 	paths = detect_paths(command)
-
-	# Detect URLs first (most specific)
-	for match in URL_PATTERN.finditer(command):
-		targets.append(match.group())
-
-	# Detect IPs (skip if part of a file path)
-	for match in PII_PATTERNS["ipv4"].finditer(command):
-		ip = match.group()
-		if not any(ip in url for url in targets):
-			if any(ip in p for p in paths):
-				continue
-			targets.append(ip)
-
-	# Detect hosts (skip command names)
 	cmd_names = set(_extract_cmd_names(command))
 
-	# Find quoted regions so we can skip matches inside code strings
-	quoted_ranges = []
-	for qm in re.finditer(r"""(?:'[^']*'|"[^"]*")""", command):
-		quoted_ranges.append((qm.start(), qm.end()))
+	def _add_target(value: str):
+		if value not in seen:
+			seen.add(value)
+			targets.append(value)
 
-	for match in PII_PATTERNS["host"].finditer(command):
-		host = match.group()
-		# Only match hosts preceded by whitespace or start of string (not inside URLs/paths)
-		pos = match.start()
-		if pos > 0 and command[pos - 1] not in (' ', '\t', '\n'):
-			continue
-		if host in cmd_names:
-			continue
-		if host in targets:
-			continue
-		if host.endswith(('.py', '.sh', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg')):
-			continue
-		# Skip if host appears inside a detected file path
-		if any(host in p for p in paths):
-			continue
-		# Skip if host match is inside a quoted string (likely code, not a target)
-		if any(start <= match.start() and match.end() <= end for start, end in quoted_ranges):
-			continue
-		# Verify host actually resolves via DNS (filters out false positives like json.tool)
-		if not _resolves(host):
-			continue
-		targets.append(host)
+	def _check_arg(arg: str):
+		"""Check a single argument for targets (URLs, IPs, hosts)."""
+		# Skip flags
+		if arg.startswith('-'):
+			return
+		# Check for URLs first (before file path/extension checks — URLs can have .sh etc.)
+		url_match = URL_PATTERN.search(arg)
+		if url_match:
+			_add_target(url_match.group())
+			return
+		# Skip file paths, command names
+		if _is_file_path(arg) or arg in cmd_names:
+			return
+		# Skip file-like extensions
+		if arg.endswith(('.py', '.sh', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg')):
+			return
+		# Skip args that are part of detected file paths
+		if any(arg in p for p in paths):
+			return
+		# Check if it's a network target (IP, host, host:port)
+		if _is_network_target(arg):
+			# For hosts (not IPs), verify DNS resolution
+			if not PII_PATTERNS["ipv4"].fullmatch(arg.split(':')[0]):
+				host_part = arg.rsplit(':', 1)[0] if ':' in arg else arg
+				if not _resolves(host_part):
+					return
+			_add_target(arg)
+
+	# Parse with safecmd and check each argument
+	try:
+		from safecmd.bashxtract import extract_commands
+		parsed_cmds, _, _ = extract_commands(command)
+		for args in parsed_cmds:
+			if not args:
+				continue
+			# Skip docker/podman sub-commands
+			if args[0] in ('docker', 'podman'):
+				continue
+			for arg in args[1:]:
+				_check_arg(arg)
+	except Exception:
+		# Fallback: scan raw command with regex
+		for match in URL_PATTERN.finditer(command):
+			_add_target(match.group())
+		for match in PII_PATTERNS["ipv4"].finditer(command):
+			ip = match.group()
+			if not any(ip in t for t in targets) and not any(ip in p for p in paths):
+				_add_target(ip)
+		for match in PII_PATTERNS["host"].finditer(command):
+			host = match.group()
+			if host not in cmd_names and host not in seen and _resolves(host):
+				_add_target(host)
 
 	return targets
 
@@ -223,50 +240,32 @@ def _extract_cmd_names(command: str) -> List[str]:
 		List of command name strings (first token of each sub-command),
 		or empty list if parsing fails.
 	"""
+	import re
 	try:
 		from safecmd.bashxtract import extract_commands
+		# Normalize LLM-generated multiline commands: join lines where a pipe/operator
+		# starts the next line (e.g. "cmd1\n| cmd2" -> "cmd1 | cmd2")
+		command = re.sub(r'\s*\n\s*(\||\&\&|\|\|)', r' \1', command)
 		cmds, ops, redirects = extract_commands(command)
 		return [c[0] for c in cmds if c]
 	except Exception:
 		return []
 
 
-def split_commands(command: str) -> List[str]:
-	"""Split a compound shell command into individual sub-commands.
-
-	Handles &&, ||, ;, and | operators while respecting single/double quotes.
-	This is a simple regex-based fallback; prefer _extract_cmd_names() for
-	guardrails checks as it uses a proper bash parser.
+def _resolve_path(path: str, cwd: str = "") -> str:
+	"""Resolve a path to absolute for consistent rule matching.
 
 	Args:
-		command: Full shell command string
-
-	Returns:
-		List of individual command strings (stripped)
+		path: The path to resolve
+		cwd: Effective working directory (from cd commands in the shell chain).
+			 If empty, uses the real CWD.
 	"""
-	# Strip quoted regions before splitting to avoid splitting inside quotes
-	# Replace quoted content with placeholders, split, then restore
-	placeholders = []
-	cleaned = command
-	for quote_match in re.finditer(r"""(?:'[^']*'|"[^"]*")""", command):
-		placeholder = f"\x00QUOTED{len(placeholders)}\x00"
-		placeholders.append((placeholder, quote_match.group()))
-		cleaned = cleaned.replace(quote_match.group(), placeholder, 1)
-	parts = [cmd.strip() for cmd in SHELL_OPERATORS.split(cleaned) if cmd.strip()]
-	# Restore quoted content
-	result = []
-	for part in parts:
-		for placeholder, original in placeholders:
-			part = part.replace(placeholder, original)
-		result.append(part)
-	return result
-
-
-def _resolve_path(path: str) -> str:
-	"""Resolve a path to absolute for consistent rule matching."""
 	from pathlib import Path
 	try:
-		return str(Path(path).expanduser().resolve())
+		p = Path(path).expanduser()
+		if not p.is_absolute() and cwd:
+			p = Path(cwd) / p
+		return str(p.resolve())
 	except (OSError, ValueError):
 		return path
 
@@ -286,9 +285,10 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 	"""
 	seen = set()
 	paths = []
+	effective_cwd = ""  # tracks cd commands in the shell chain
 
 	def _add_path(path: str, access: str):
-		resolved = _resolve_path(path)
+		resolved = _resolve_path(path, cwd=effective_cwd)
 		if resolved not in seen:
 			seen.add(resolved)
 			paths.append((resolved, access))
@@ -324,6 +324,22 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 		if not args:
 			continue
 		cmd_name = args[0]
+
+		# Track cd commands to resolve relative paths in subsequent sub-commands
+		if cmd_name == 'cd' and len(args) > 1:
+			cd_target = args[1]
+			from pathlib import Path
+			try:
+				p = Path(cd_target).expanduser()
+				if p.is_absolute():
+					effective_cwd = str(p.resolve())
+				elif effective_cwd:
+					effective_cwd = str((Path(effective_cwd) / p).resolve())
+				else:
+					effective_cwd = str(p.resolve())
+			except (OSError, ValueError):
+				pass
+			continue
 
 		# Docker/podman: only check volume mounts, container paths are sandboxed
 		if cmd_name in ('docker', 'podman'):
@@ -558,11 +574,16 @@ class PermissionEngine:
 				for path, access in paths_with_access:
 					path_result = self._check_value(access, path)
 					if path_result.decision == "deny":
-						return PermissionResult(
-							decision="deny",
-							reason=path_result.reason,
-							paths=[path]
-						)
+						# Explicit deny rule: block immediately
+						# "No rule" default deny: prompt user instead
+						if "No rule for" in path_result.reason:
+							ask_paths.append((path, access))
+						else:
+							return PermissionResult(
+								decision="deny",
+								reason=path_result.reason,
+								paths=[path]
+							)
 					if path_result.decision == "ask":
 						ask_paths.append((path, access))
 				if ask_paths:
@@ -662,8 +683,8 @@ class PermissionEngine:
 			parsed = urlparse(value)
 			if parsed.hostname:
 				values_to_check.append(parsed.hostname)
-				if parsed.port:
-					values_to_check.append(f"{parsed.hostname}:{parsed.port}")
+			if parsed.port:
+				values_to_check.append(f"{parsed.hostname}:{parsed.port}")
 
 		for rt, patterns in self.rules["deny"]:
 			if rt == rule_type:
@@ -819,13 +840,18 @@ class PermissionEngine:
 
 		from secator.rich import InteractiveMenu
 
-		# Extract first command name for the allow rule
+		# Extract command names; use the unmatched one(s) from reason for option 2
 		cmd_names = _extract_cmd_names(command)
-		first_cmd = cmd_names[0] if cmd_names else command.split()[0] if command.split() else "unknown"
+		# Parse unmatched commands from reason like "No rule for command(s): ./terrapin-scanner, foo"
+		unmatched_cmd = None
+		if reason and "No rule for command(s):" in reason:
+			unmatched_str = reason.split("No rule for command(s):")[1].strip()
+			unmatched_cmd = unmatched_str.split(",")[0].strip()
+		prompt_cmd = unmatched_cmd or (cmd_names[0] if cmd_names else command.split()[0] if command.split() else "unknown")
 
 		options = [
 			{"label": f"Allow this command"},
-			{"label": f"Allow all '{first_cmd}' commands"},
+			{"label": f"Allow all '{prompt_cmd}' commands"},
 			{"label": "Deny (block this action)"},
 		]
 		title = reason or "Shell command requires approval"
@@ -845,7 +871,7 @@ class PermissionEngine:
 				self.add_runtime_allow([f"shell({','.join(cmd_names)})"])
 			return "allow"
 		elif idx == 1:  # Allow all commands with this name
-			self.add_runtime_allow([f"shell({first_cmd})"])
+			self.add_runtime_allow([f"shell({prompt_cmd})"])
 			return "allow"
 		return "deny"
 

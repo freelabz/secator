@@ -44,7 +44,7 @@ def render_markdown_for_rich(text: str, title: str = '') -> str:
 	console = Console(file=StringIO(), force_terminal=True, width=terminal_width)
 	md = Markdown(text)
 	if title:
-		panel = Panel(md, title=title, title_align="left", border_style="dim", padding=(0, 1))
+		panel = Panel(md, title=title, title_align="left", border_style="gray42", padding=(0, 1))
 		console.print(panel)
 	else:
 		console.print(md)
@@ -216,6 +216,22 @@ class Ai(OutputType):
 			panel = Panel(text, title=f"{s}", title_align="left", border_style="gray42", padding=(0, 1))
 			render_console.print(panel)
 			return buf.getvalue().rstrip()
+
+		# Follow-up choices panel (non-interactive mode only)
+		if self.ai_type == 'follow_up':
+			choices = self.extra_data.get('choices', [])
+			if choices:
+				buf = StringIO()
+				terminal_width = shutil.get_terminal_size().columns
+				render_console = Console(file=buf, force_terminal=True, width=terminal_width)
+				lines = []
+				for i, choice in enumerate(choices, 1):
+					lines.append(f"[bold cyan]{i}.[/] {_s(choice)}")
+				text = Text.from_markup('\n'.join(lines))
+				panel = Panel(text, title=f"{s}", title_align="left", border_style="orange3", padding=(0, 1))
+				render_console.print(panel)
+				return '\n' + buf.getvalue().rstrip()
+			return '\n' + rich_to_ansi(f'{s} {_s(self.content)}')
 
 		# Render content with markdown support
 		content = self.content

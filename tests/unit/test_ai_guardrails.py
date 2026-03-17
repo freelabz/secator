@@ -10,7 +10,7 @@ if ADDONS_ENABLED['ai']:
 	from secator.ai.guardrails import (
 		parse_rule, match_rule, extract_command_targets, detect_paths, detect_paths_with_access,
 		detect_sensitive_env_vars, classify_command, build_target_choices, PermissionEngine,
-		_is_file_path, split_commands
+		_is_file_path
 	)
 	from secator.output_types import Warning, Error
 
@@ -283,6 +283,24 @@ class TestPermissionEngine(unittest.TestCase):
 		self.assertEqual(result.decision, "ask")
 		self.assertIn("/etc/passwd", result.paths)
 
+	def test_read_path_no_rule_asks_instead_of_deny(self):
+		"""A path with no matching rule should ask (not silently deny)."""
+		engine = self._make_engine(
+			allow=["shell(cd,cat)", "read(/home/*)"],
+		)
+		result = engine.check_action({"action": "shell", "command": "cat /tmp/somefile.txt"})
+		self.assertEqual(result.decision, "ask")
+		self.assertIn("/tmp/somefile.txt", result.paths)
+
+	def test_read_path_explicit_deny_still_denies(self):
+		"""A path matching an explicit deny rule should still be denied."""
+		engine = self._make_engine(
+			allow=["shell(cat)"],
+			deny=["read(/etc/shadow)"],
+		)
+		result = engine.check_action({"action": "shell", "command": "cat /etc/shadow"})
+		self.assertEqual(result.decision, "deny")
+
 	def test_cat_etc_passwd_no_target_prompt(self):
 		"""cat /etc/passwd should NOT trigger a target prompt for 'etc.passwd'."""
 		engine = self._make_engine(
@@ -460,6 +478,69 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			for r in results
 		)
 		self.assertFalse(has_denial)
+
+	def test_multi_prompt_target_then_path(self):
+		"""Commands with both unknown targets AND unknown paths should prompt for each layer.
+
+		Simulates: cd /tmp && git clone https://github.com/user/repo.git 2>&1 | head -20
+		- First ask: URL target (github.com)
+		- Second ask: path (/tmp)
+		Both approved → action should be allowed.
+		"""
+		engine = self._make_engine(
+			allow=["shell(cd,git,head)", "read({workspace}/*)"],
+			ask=["target(*)", "read(*)", "write(*)"],
+			workspace="/tmp/workspace"
+		)
+		ctx = ActionContext(
+			targets=["10.0.0.1"], model="test", permission_engine=engine, interactive=True
+		)
+		action = {"action": "shell", "command": "cd /tmp && git clone https://github.com/RUB-NDS/Terrapin-Scanner.git 2>&1 | head -20"}
+
+		# First check_action returns ask for target (github URL)
+		result = engine.check_action(action)
+		self.assertEqual(result.decision, "ask")
+		self.assertTrue(len(result.targets) > 0, "Should ask about URL target")
+
+		# Mock both prompt_target and prompt_path to approve
+		with patch.object(engine, '_show_target_menu', return_value=[2]):  # "All of the above"
+			with patch.object(engine, 'prompt_path', return_value='allow'):
+				denial, warnings = check_guardrails(action, ctx)
+
+		self.assertIsNone(denial, f"Expected no denial but got: {denial}")
+
+	def test_multi_prompt_target_denied_stops_early(self):
+		"""If user denies the target prompt, path prompt should not be shown."""
+		engine = self._make_engine(
+			allow=["shell(cd,git,head)"],
+			ask=["target(*)", "read(*)"],
+		)
+		ctx = ActionContext(
+			targets=["10.0.0.1"], model="test", permission_engine=engine, interactive=True
+		)
+		action = {"action": "shell", "command": "cd /tmp && git clone https://github.com/RUB-NDS/Terrapin-Scanner.git 2>&1 | head -20"}
+
+		with patch.object(engine, '_show_target_menu', return_value=[4]):  # Deny
+			denial, warnings = check_guardrails(action, ctx)
+
+		self.assertIsNotNone(denial)
+		self.assertIn("denied", denial.lower())
+
+	def test_multi_prompt_path_only_no_rule(self):
+		"""Unknown path with no matching rule should trigger prompt, not silent deny."""
+		engine = self._make_engine(
+			allow=["shell(cat)", "target(*)"],
+			ask=["read(*)"],
+		)
+		ctx = ActionContext(
+			targets=[], model="test", permission_engine=engine, interactive=True
+		)
+		action = {"action": "shell", "command": "cat /tmp/somefile.txt"}
+
+		# check_action should return ask (not deny) for the unknown path
+		result = engine.check_action(action)
+		self.assertEqual(result.decision, "ask")
+		self.assertIn("/tmp/somefile.txt", result.paths)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -748,17 +829,6 @@ class TestEdgeCases(unittest.TestCase):
 
 	# --- Compound commands ---
 
-	def test_split_commands_basic(self):
-		"""Should split on && || ; |."""
-		cmds = split_commands("echo a && echo b || echo c; echo d | cat")
-		self.assertEqual(len(cmds), 5)
-
-	def test_split_commands_preserves_quotes(self):
-		"""Should not split inside quoted strings."""
-		cmds = split_commands("echo 'hello && world' | cat")
-		self.assertEqual(len(cmds), 2)
-		self.assertIn("'hello && world'", cmds[0])
-
 	def test_compound_command_most_restrictive(self):
 		"""Compound commands should return the most restrictive result."""
 		engine = self._make_engine(
@@ -776,6 +846,29 @@ class TestEdgeCases(unittest.TestCase):
 		)
 		result = engine.check_action({"action": "shell", "command": "echo test && rm -rf /tmp"})
 		self.assertEqual(result.decision, "deny")
+
+	# --- cd-aware path resolution ---
+
+	def test_cd_resolves_relative_paths(self):
+		"""Relative paths after cd should resolve against the cd target, not real CWD."""
+		paths = detect_paths_with_access(
+			'cd /tmp/Terrapin-Scanner && find . -name "*.go" | head -10'
+		)
+		resolved = [p for p, _ in paths]
+		self.assertIn("/tmp/Terrapin-Scanner", resolved)
+		self.assertNotIn(str(__import__('pathlib').Path('.').resolve()), resolved)
+
+	def test_cd_then_cat_relative(self):
+		"""cat ./file after cd should resolve to the cd'd directory."""
+		paths = detect_paths_with_access("cd /tmp && cat ./somefile.txt")
+		resolved = [p for p, _ in paths]
+		self.assertIn("/tmp/somefile.txt", resolved)
+
+	def test_chained_cd_commands(self):
+		"""Multiple cd commands should accumulate the effective directory."""
+		paths = detect_paths_with_access("cd /tmp && cd subdir && cat README.md")
+		resolved = [p for p, _ in paths]
+		self.assertIn("/tmp/subdir/README.md", resolved)
 
 	# --- Path deduplication ---
 

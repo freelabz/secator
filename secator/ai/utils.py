@@ -48,28 +48,87 @@ def init_llm(api_key: Optional[str] = None):
 			from rich.markdown import Markdown
 			from rich.panel import Panel
 			from rich.text import Text
+			from rich.console import Group
 			MAX_LEN = 2000
-			role_styles = {"system": "blue", "user": "green", "assistant": "red"}
+			role_styles = {"system": "blue", "user": "green", "assistant": "red", "tool": "yellow"}
 			message_count = len(messages)
-			new_start = self._last_message_count - 1
-			self._last_message_count = message_count
-			if new_start > 0:
-				console.print(f"[dim]... {new_start} previous message(s) hidden ...[/]")
+			# Only update counter when conversation is growing (same conversation)
+			# A smaller message list means a side call (e.g. detect_mode) — show all, don't update
+			is_side_call = message_count <= self._last_message_count
+			prev_count = 0 if is_side_call else self._last_message_count
+			if not is_side_call:
+				self._last_message_count = message_count
+			panels = []
+			if prev_count > 0:
+				panels.append(Text(f"... {prev_count} previous message(s) hidden ...", style="dim"))
 			for count, msg in enumerate(messages, 1):
-				if count <= new_start:
+				if count <= prev_count:
 					continue
 				role = msg.get("role", "unknown").upper()
 				content = msg.get("content", "").strip()
 				style = role_styles.get(msg.get("role", ""), "white")
-				if len(content) > MAX_LEN:
-					content = content[:MAX_LEN] + f"\n\n... ({len(content) - MAX_LEN} chars truncated)"
-				# Use Markdown for assistant responses, Text for everything else
-				renderable = Markdown(content) if msg.get("role") == "assistant" else Text(content)
-				console.print(Panel(
+				if "litellm.raw" not in CONFIG.debug:
+					if len(content) > MAX_LEN:
+						content = content[:MAX_LEN] + f"\n\n... ({len(content) - MAX_LEN} chars truncated)"
+				# For assistant messages with tool_calls, show the tool calls
+				if msg.get("role") == "assistant" and msg.get("tool_calls"):
+					parts = [content] if content else []
+					for tc in msg["tool_calls"]:
+						fn = tc.get("function", {})
+						parts.append(f"**tool_call**: `{fn.get('name', '')}({fn.get('arguments', '')})`")
+					renderable = Markdown("\n\n".join(parts))
+				elif msg.get("role") == "assistant":
+					renderable = Markdown(content)
+				else:
+					renderable = Text(content)
+
+				# For tool results, pretty-print the JSON content
+				title_extra = ""
+				if msg.get("role") == "tool":
+					tool_name = msg.get("name", msg.get("tool_call_id", ""))
+					title_extra = f" [dim]{tool_name}[/]"
+					try:
+						import json as _json
+						from rich.pretty import Pretty
+						data = _json.loads(content)
+						renderable = Pretty(data)
+					except (ValueError, TypeError):
+						pass
+
+				panels.append(Panel(
 					renderable,
-					title=f"[bold {style}]{role}[/] [dim]({count}/{message_count})[/]",
+					title=f"[bold {style}]{role}[/]{title_extra} [dim]({count}/{message_count})[/]",
 					border_style=style
 				))
+			console.print(Panel(
+				Group(*panels),
+				title=f"[bold white]LLM REQUEST[/] [dim]({message_count} messages)[/]",
+				border_style="white"
+			))
+
+		def log_success_event(self, kwargs, response_obj, start_time, end_time):
+			if "litellm" not in CONFIG.debug:
+				return
+			from rich.markdown import Markdown
+			from rich.panel import Panel
+			message = response_obj.choices[0].message
+			content = message.content or ""
+			tool_calls = getattr(message, 'tool_calls', None) or []
+			parts = []
+			if content:
+				parts.append(content)
+			for tc in tool_calls:
+				parts.append(f"**tool_call**: `{tc.function.name}({tc.function.arguments})`")
+			text = "\n\n".join(parts) if parts else "(empty response)"
+			if "litellm.raw" not in CONFIG.debug:
+				MAX_LEN = 2000
+				if len(text) > MAX_LEN:
+					text = text[:MAX_LEN] + f"\n\n... ({len(text) - MAX_LEN} chars truncated)"
+			console.print(Panel(
+				Markdown(text),
+				title="[bold red]LLM RESPONSE[/]",
+				border_style="red"
+			))
 
 	litellm.callbacks = [LLMCallbackHandler()]
 	_llm_initialized = True
@@ -99,19 +158,13 @@ def call_llm(
 	)
 	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
 	# Remove only when we have a better way to show this
-	if 'litellm.raw' in CONFIG.debug:
-		if len(messages) > 1:
-			for message in messages[1:]:
-				print("-" * 80)
-				print(message)
-				print("-" * 80)
 	if tools is not None:
 		kwargs["tools"] = tools
 		kwargs["tool_choice"] = "auto"
 
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
-		litellm.ServiceUnavailableError, litellm.APIConnectionError,
+		litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.BadRequestError
 	)
 	for attempt in range(1, max_retries + 1):
 		try:
@@ -133,8 +186,6 @@ def call_llm(
 			raise
 
 	message = response.choices[0].message
-	if 'litellm.raw' in CONFIG.debug:
-		print(message.content)
 	content = message.content or ""
 	usage = None
 
