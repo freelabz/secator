@@ -115,3 +115,60 @@ secator test unit --test <test_name_or_regex>         # Run specific unit test(s
 ```
 
 Flake8 config (`.flake8`): max-line-length=120, ignores W191, E101, E128, E265, W605
+
+## Coding guidelines
+
+### Don't repeat yourself
+We should keep code DRY in a reasonable way:
+BAD, should refactor:
+- More than 2 repeated code blocks of more than 5 lines
+- More than 10 repeated code blocks of less than 3 lines
+
+**Note:** We consider a repeated code block not an exact copy, it can have some variations, a.k.a only a few variables / if statements change between the code blocks.
+
+### Long methods and functions
+Long methods or functions are fine, as they allow us to understand a whole flow.
+However, when long methods include too many blocks not required to understand the flow, those blocks should be refactored into their own methods.
+If some blocks are re-used more than 2 times inside the same long method, refactor into a method.
+
+### Instance methods
+If within a class, we should thrive to not repeat too much the input arguments, and write instance methods that use self.<key> attributes instead.
+This cleans up the overall flow and allows us to reason on the object instead of function input arguments.
+When an instance method takes many arguments that should have belonged to to the instance method instead, refactor those to be self.<key> attributes.
+
+### Inheritance vs composition
+We can use inheritance reasonably, and already do, but should avoid to overuse it, and prefer composition if it grows too much (more than 3 children for a defined base class).
+
+### Task integration
+We should keep modules in secator/tasks/*.py to a reasonable size (no more than 500 lines).
+
+## Adding new Secator tasks
+
+When adding new Secator tasks (e.g: nmap):
+
+### Commands
+If you want to implement a new Command task (a task that will call another binary):
+* First make sure to install it.
+* Then, make sure to run `-h`, `--help`, or `help` on it so that you understand all the options. Pick options that should be supported by secator, leave out the rest (too-specific, format-related options, management-related options, etc...).
+* Read all the other tasks in `secator/tasks/` to understand how we process commands supporting JSON, commands not supporting JSON (only plaintext output), and commands outputting JSON in files that we parse afterwards.
+* Make sure to add `json_flag` if your task supports JSON-lines or JSON output to file
+* If options can be mutualized with other tasks, make sure to use the proper subclass for the task (e.g: if it's an HTTP crawler, use the `HTTPCrawler` class)
+* If you have a subclass other than `Command` or `Python` for the task, make sure you understand which meta options need to be set
+* Implement the meta options in `meta_opts = {}`
+* Implement the task-specific options in `opts = {}`.
+* Add an `install_command` for your task. If binaries can be found on GitHub (you can check the repo to make sure), also use `github_handle = '<org>/<repo>'` so it auto-download binaries
+* If your task outputs JSON in file, implement the `on_cmd_done(self)` method, parse the JSON and yield proper results
+* If your task supports JSON lines, add an `item_loaders = [JSONSerializer()]` and implement the `on_json_loaded(self, item)` method
+* If your task only supports plaintext output, implement the `on_line(self, line)` and do custom parsing. If it can be a simple regex, use the `item_loaders = [RegexSerializer(regex, fields=[...])]` and then implement the `on_json_loaded(self, item)` method.
+
+### Python
+If you want to implement a new Python task (a task that will call custom Python code to achieve the purpose), just implement it (check `secator/tasks/urlparser.py` or `secator/tasks/prompt.py` task for examples).
+If you need libraries that are not in `pyproject.toml`, add a new addon to `pyproject.toml` with the libraries you need instead of adding them to the core dependencies.
+Make sure to import libraries that are optional within the task methods themselves, not at the top-level. Check how addons are added and add your own (it should have the task name and be installable with `secator install addons <your_addon>`).
+
+## Adding new Secator workflows
+
+When creating new Secator workflows:
+* Read all the other workflow YAMLs in `secator/configs/workflows/` to understand how we create workflows.
+* If you need tasks not currently supported by secator, follow the "Adding new tasks" section to implement them before you implement the workflow.
+* Always add a description, a long description, a type, a name, and tags to the workflow YAML.
