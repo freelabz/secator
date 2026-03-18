@@ -44,7 +44,7 @@ def render_markdown_for_rich(text: str, title: str = '') -> str:
 	console = Console(file=StringIO(), force_terminal=True, width=terminal_width)
 	md = Markdown(text)
 	if title:
-		panel = Panel(md, title=title, title_align="left", border_style="gray42", padding=(0, 1))
+		panel = Panel(md, title=title, title_align="left", border_style="dim", padding=(0, 1))
 		console.print(panel)
 	else:
 		console.print(md)
@@ -81,6 +81,10 @@ class Ai(OutputType):
 	model: str = field(default='', compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	summary: bool = field(default=False, compare=False)
+	status: str = field(default='', compare=False)
+	answer: str = field(default='', compare=False)
+	choices: list = field(default_factory=list, compare=False)
+	session_id: str = field(default='', compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='ai', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -92,7 +96,11 @@ class Ai(OutputType):
 	_table_fields = ['ai_type', 'mode', 'content']
 	_sort_by = ('_timestamp',)
 
-	def __rich__(self) -> str:
+	def __repr__(self) -> str:
+		# Internal-only types (not displayed)
+		if self.ai_type == 'token_usage':
+			return ' '
+
 		# Get type configuration
 		type_config = AI_TYPES.get(self.ai_type, {'label': self.ai_type.upper(), 'color': 'white'})
 		label = type_config['label']
@@ -151,7 +159,7 @@ class Ai(OutputType):
 			action_label = self.ai_type
 			if self.ai_type == 'stopped':
 				action_label = 'done'
-			line = f'{s}[bold blue]{action_label.capitalize().replace("_", " ")}[/]'
+			line = f'{s}[bold blue]{action_label.capitalize().replace('_', ' ')}[/]'
 			content = _s(self.content)
 			if self.ai_type in ['task', 'workflow', 'scan']:
 				colors = {
@@ -179,7 +187,7 @@ class Ai(OutputType):
 				line += f' ([dim yellow]limit: {_s(limit)}[/])'
 			if self.ai_type == 'prompt':
 				line = f'[on gray19]{line}[/]'
-			return line
+			return rich_to_ansi(line)
 
 		# Filter out internal fields from extra_data display
 		display_extra = {k: v for k, v in self.extra_data.items()
@@ -217,25 +225,10 @@ class Ai(OutputType):
 			render_console.print(panel)
 			return buf.getvalue().rstrip()
 
-		# Follow-up choices panel (non-interactive mode only)
-		if self.ai_type == 'follow_up':
-			choices = self.extra_data.get('choices', [])
-			if choices:
-				buf = StringIO()
-				terminal_width = shutil.get_terminal_size().columns
-				render_console = Console(file=buf, force_terminal=True, width=terminal_width)
-				lines = []
-				for i, choice in enumerate(choices, 1):
-					lines.append(f"[bold cyan]{i}.[/] {_s(choice)}")
-				text = Text.from_markup('\n'.join(lines))
-				panel = Panel(text, title=f"{s}", title_align="left", border_style="orange3", padding=(0, 1))
-				render_console.print(panel)
-				return '\n' + buf.getvalue().rstrip()
-			return '\n' + rich_to_ansi(f'{s} {_s(self.content)}')
-
 		# Render content with markdown support
 		content = self.content
 
+		# Response type: always render in a Panel with title
 		if self.ai_type == 'response':
 			title = s + suffix
 			return '\n' + render_markdown_for_rich(content, title=title).rstrip()
@@ -252,7 +245,4 @@ class Ai(OutputType):
 		else:
 			s += f' {_s(content_indented)}'
 		s += suffix
-		return s
-
-	def __repr__(self) -> str:
-		return rich_to_ansi(self.__rich__())
+		return '\n' + rich_to_ansi(s)

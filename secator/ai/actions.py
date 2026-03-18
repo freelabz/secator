@@ -37,7 +37,9 @@ class ActionContext:
 	subagent: bool = False
 	silent: bool = False
 	sync: bool = True
-	interactive: bool = True
+	interactive: Any = "local"  # "local", "remote", "auto", or bool (legacy)
+	backend: Any = field(default=None, repr=False)
+	session_id: str = ""
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
 
@@ -133,6 +135,8 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 	# Prompt loop: each check_action returns the first "ask" it encounters
 	# (shell, then targets, then paths). We prompt for that layer, then re-check
 	# to surface the next layer, until everything is resolved.
+	# All prompting goes through ctx.backend.ask_user() — the backend handles
+	# the UX differences (CLI menu, DB polling, or auto-deny).
 	max_rounds = 5  # safety limit to prevent infinite prompting
 	rounds = 0
 	while result.decision == "ask" and rounds < max_rounds:
@@ -142,9 +146,17 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 		# Handle shell command prompts (unknown commands or parse failures)
 		if result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
-			decision = ctx.permission_engine.prompt_shell(
-				result.shell_command, reason=result.reason, interactive=ctx.interactive)
-			if decision == "deny":
+			response = ctx.backend.ask_user(
+				question=result.reason or "Shell command requires approval",
+				choices=["allow", "allow_all", "deny"],
+				session_id=ctx.session_id,
+				prompt_type="permission",
+				permission_type="shell",
+				value=result.shell_command,
+				reason=result.reason,
+				engine=ctx.permission_engine,
+			) if ctx.backend else None
+			if response is None or response.get("answer") == "deny":
 				return f"Action denied: shell command not approved", warnings
 			if parse_failed:
 				return None, warnings
@@ -154,8 +166,17 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 			recheck = ctx.permission_engine._check_value("target", target)
 			if recheck.decision == "allow":
 				continue
-			decision = ctx.permission_engine.prompt_target(target, interactive=ctx.interactive, command=cmd_display)
-			if decision == "deny":
+			response = ctx.backend.ask_user(
+				question=f"Target {target} requires approval",
+				choices=["allow", "allow_all", "deny"],
+				session_id=ctx.session_id,
+				prompt_type="permission",
+				permission_type="target",
+				value=target,
+				command=cmd_display,
+				engine=ctx.permission_engine,
+			) if ctx.backend else None
+			if response is None or response.get("answer") == "deny":
 				return f"Action denied: target {target} not approved", warnings
 
 		# Handle path prompts
@@ -164,8 +185,17 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
 			for path in result.paths:
 				access_type = path_access_map.get(path, "read")
-				decision = ctx.permission_engine.prompt_path(path, access_type, interactive=ctx.interactive, command=cmd_display)
-				if decision == "deny":
+				response = ctx.backend.ask_user(
+					question=f"{access_type.capitalize()} access to {path} requires approval",
+					choices=["allow", "allow_all", "deny"],
+					session_id=ctx.session_id,
+					prompt_type="permission",
+					permission_type=access_type,
+					value=path,
+					command=cmd_display,
+					engine=ctx.permission_engine,
+				) if ctx.backend else None
+				if response is None or response.get("answer") == "deny":
 					return f"Action denied: {access_type} access to {path} not approved", warnings
 
 		# Re-check to see if more layers need prompting
@@ -195,6 +225,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"query": _handle_query,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
+		"stop": _handle_stop,
 	}
 
 	handler = handlers.get(action_type)
@@ -385,6 +416,13 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
 	yield Ai(content=reason, ai_type="follow_up", extra_data={"choices": choices}, _context=context)
+
+
+def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
+	"""Handle stop action - signals session completion."""
+	context = _get_result_context(action, ctx)
+	reason = action.get("reason", "completed")
+	yield Ai(content=reason, ai_type="stopped", _context=context)
 
 
 def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:

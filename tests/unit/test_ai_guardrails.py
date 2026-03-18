@@ -492,8 +492,11 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			ask=["target(*)", "read(*)", "write(*)"],
 			workspace="/tmp/workspace"
 		)
+		from secator.ai.interactivity import CLIBackend
+		backend = CLIBackend()
 		ctx = ActionContext(
-			targets=["10.0.0.1"], model="test", permission_engine=engine, interactive=True
+			targets=["10.0.0.1"], model="test", permission_engine=engine, interactive=True,
+			backend=backend,
 		)
 		action = {"action": "shell", "command": "cd /tmp && git clone https://github.com/RUB-NDS/Terrapin-Scanner.git 2>&1 | head -20"}
 
@@ -515,8 +518,11 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			allow=["shell(cd,git,head)"],
 			ask=["target(*)", "read(*)"],
 		)
+		from secator.ai.interactivity import CLIBackend
+		backend = CLIBackend()
 		ctx = ActionContext(
-			targets=["10.0.0.1"], model="test", permission_engine=engine, interactive=True
+			targets=["10.0.0.1"], model="test", permission_engine=engine, interactive=True,
+			backend=backend,
 		)
 		action = {"action": "shell", "command": "cd /tmp && git clone https://github.com/RUB-NDS/Terrapin-Scanner.git 2>&1 | head -20"}
 
@@ -532,8 +538,11 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			allow=["shell(cat)", "target(*)"],
 			ask=["read(*)"],
 		)
+		from secator.ai.interactivity import CLIBackend
+		backend = CLIBackend()
 		ctx = ActionContext(
-			targets=[], model="test", permission_engine=engine, interactive=True
+			targets=[], model="test", permission_engine=engine, interactive=True,
+			backend=backend,
 		)
 		action = {"action": "shell", "command": "cat /tmp/somefile.txt"}
 

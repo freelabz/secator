@@ -10,6 +10,7 @@ TOOL_ACTION_MAP = {
 	"query_workspace": "query",
 	"follow_up": "follow_up",
 	"add_finding": "add_finding",
+	"stop": "stop",
 }
 
 # Reverse mapping: action type -> tool name
@@ -151,24 +152,53 @@ TOOL_SCHEMAS = {
 }
 
 
-def build_tool_schemas(mode: str, is_subagent: bool = False) -> list:
+# Stop tool schema — NOT in TOOL_SCHEMAS (injected by AutoBackend via get_extra_tools)
+STOP_TOOL_SCHEMA = {
+	"type": "function",
+	"function": {
+		"name": "stop",
+		"description": "Stop the current session. Call when the user request has been fulfilled or when you encounter a blocker that cannot be resolved without user input.",  # noqa: E501
+		"parameters": {
+			"type": "object",
+			"properties": {
+				"reason": {
+					"type": "string",
+					"description": "Why you are stopping (summary of accomplishments or description of blocker)."
+				}
+			},
+			"required": ["reason"]
+		}
+	}
+}
+
+
+def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> list:
 	"""Return list of tool schemas filtered by mode's allowed_actions.
 
 	Args:
 		mode: The AI mode (attack, chat, exploit). Unknown modes fall back to chat.
-		is_subagent: If True, exclude follow_up tool.
+		is_subagent: If True, exclude follow_up tool (legacy compat).
+		backend: Optional interactivity backend for exclusion/extra tools.
 
 	Returns:
 		List of OpenAI-format tool schema dicts.
 	"""
 	config = get_mode_config(mode)
 	allowed_actions = config["allowed_actions"]
-	excluded = {'follow_up'} if is_subagent else set()
-	return [
+	if backend is not None:
+		excluded = backend.get_excluded_tools()
+	elif is_subagent:
+		excluded = {'follow_up'}
+	else:
+		excluded = set()
+	schemas = [
 		schema for tool_name, schema in TOOL_SCHEMAS.items()
 		if TOOL_ACTION_MAP.get(tool_name) in allowed_actions
-		and TOOL_ACTION_MAP.get(tool_name) not in excluded
+		and tool_name not in excluded
 	]
+	if backend is not None:
+		schemas.extend(backend.get_extra_tools())
+	return schemas
 
 
 def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:

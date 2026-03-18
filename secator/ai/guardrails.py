@@ -717,7 +717,11 @@ class PermissionEngine:
 		for value in values:
 			result = self._check_value(rule_type, value)
 			if result.decision == "deny":
-				return result
+				# "No rule for" default deny → ask user instead of blocking
+				if "No rule for" in result.reason:
+					ask_targets.append(value)
+				else:
+					return result  # Explicit deny rule: block
 			if result.decision == "ask":
 				ask_targets.append(value)
 		if ask_targets:

@@ -55,17 +55,17 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		"allowed_actions": ["query", "follow_up", "add_finding", "shell"],
+		"allowed_actions": ["query", "follow_up", "add_finding", "shell", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
 		"system_prompt": SYSTEM_EXPLOIT,
-		"allowed_actions": ["task", "workflow", "shell", "add_finding"],
+		"allowed_actions": ["task", "workflow", "shell", "add_finding", "stop"],
 		"max_iterations": 5,
 	},
 }
@@ -216,12 +216,13 @@ def build_query_types() -> str:
 	return ", ".join(cls.get_name() for cls in FINDING_TYPES)
 
 
-def get_system_prompt(mode: str, workspace_path: str = "") -> str:
+def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
 		mode: One of "attack", "chat", or "exploit"
 		workspace_path: Path to the workspace/reports directory
+		backend: Optional interactivity backend to determine interaction rules
 
 	Returns:
 		Formatted system prompt string
@@ -242,6 +243,14 @@ def get_system_prompt(mode: str, workspace_path: str = "") -> str:
 		result = system_prompt.safe_substitute(library_reference=build_library_reference())
 	else:  # chat mode
 		result = system_prompt.safe_substitute(output_types_reference=build_output_types_reference())
+
+	# Determine interaction rules based on backend
+	# The mode templates already include ${follow_up} for interactive modes.
+	# For non-interactive backends, append stop rules instead.
+	if backend is not None:
+		excluded = backend.get_excluded_tools()
+		if "follow_up" in excluded:
+			result += "\n" + load_prompt("constraints/stop.txt")
 
 	return result.replace("$workspace_path", ws)
 

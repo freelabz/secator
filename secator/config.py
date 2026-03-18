@@ -214,6 +214,7 @@ class AiAddon(StrictModel):
 	max_tokens: int = 30000
 	max_tokens_total: int = 100000
 	max_results: int = 500
+	user_response_timeout: int = 600
 	encrypt_pii: bool = True
 	permissions: Dict = {
 		"allow": [

@@ -18,6 +18,7 @@ from secator.ai.actions import (
 	ActionContext, check_guardrails, dispatch_action, _run_batch, _decrypt_dict, _build_action_display
 )
 from secator.ai.guardrails import PermissionEngine
+from secator.ai.interactivity import create_backend, RemoteBackend
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window
 from secator.ai.prompts import (
@@ -25,7 +26,7 @@ from secator.ai.prompts import (
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEMAS
 from secator.ai.session import save_history, show_session_picker, replay_session
-from secator.ai.utils import call_llm, init_llm, setup_ai, prompt_user, format_llm_status
+from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
 
 DEFAULT_API_KEY = CONFIG.addons.ai.api_key
@@ -135,9 +136,17 @@ class ai(PythonRunner):
 		self.temp = self.get_opt_value("temperature")
 		self.dry_run = self.run_opts.get("dry_run", False)
 		self.verbose = self.run_opts.get("verbose", False)
-		self.interactive = self.get_opt_value("interactive")
-		self.interactive = False if not self.sync else self.interactive
-		self.interactive = self.interactive and not self.is_subagent
+		interactive = self.get_opt_value("interactive")
+		if interactive is True:
+			self.interactive = "local"
+		elif interactive is False:
+			self.interactive = "auto"
+		elif interactive is None:
+			self.interactive = "local" if self.sync else "auto"
+		else:
+			self.interactive = interactive
+		if self.is_subagent:
+			self.interactive = "auto"
 		self.context_warnings = self.get_opt_value("context_warnings")
 		self.session_name = self.run_opts.get("session_name")
 		self.passed_context = self.run_opts.get("context") or {}
@@ -154,6 +163,10 @@ class ai(PythonRunner):
 			workspace=self.reports_folder or ""
 		)
 
+		# Create interactivity backend
+		self.session_id = self.session_name or str(self.id)
+		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
+
 		# Auto-approve all workspace targets so the AI can operate on known targets
 		# without prompting (especially important in non-interactive mode)
 		self._auto_approve_workspace_targets()
@@ -167,7 +180,7 @@ class ai(PythonRunner):
 		# Handle --show-prompt: render and display the system prompt, then exit
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "attack"
-			system_prompt = get_system_prompt(show_mode, workspace_path=str(self.reports_folder))
+			system_prompt = get_system_prompt(show_mode, workspace_path=str(self.reports_folder), backend=self.backend)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(system_prompt, highlight=False, soft_wrap=True)
 			return
@@ -184,7 +197,7 @@ class ai(PythonRunner):
 				return
 			self.history.model = self.model # update to new model if different
 			self._reports_folder = session['folder'] # restore the original session folder
-			if self.interactive:
+			if self.interactive != "auto":
 				result = self._prompt_and_redetect([])
 				if result is None:
 					save_history(self.history, self.reports_folder, debug_fn=self.debug)
@@ -226,7 +239,7 @@ class ai(PythonRunner):
 
 		# Detect mode + set system prompt
 		self._detect_mode()
-		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder))
+		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
 		self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 		self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
 		yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
@@ -240,6 +253,10 @@ class ai(PythonRunner):
 		unless force=True (used for follow-up re-detection)."""
 		old_mode = self.mode
 		if old_mode and not force:
+			# Still ensure tool_schemas is set (first call with explicit mode)
+			if not hasattr(self, 'tool_schemas'):
+				self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+				self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
 			return
 		if not self.prompt:
 			self.mode = "chat"
@@ -262,11 +279,12 @@ class ai(PythonRunner):
 			self.mode = "chat"
 		mode_max = get_mode_config(self.mode).get("max_iterations", self.max_iterations)
 		self.max_iterations = max(self.max_iterations, mode_max)
-		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder))
+		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
 			self.tool_schemas = build_tool_schemas(
 				self.mode,
-				is_subagent=self.is_subagent)
+				is_subagent=self.is_subagent,
+				backend=self.backend)
 
 	def _auto_approve_workspace_targets(self):
 		"""Auto-approve all targets found in the workspace so the AI can operate
@@ -289,37 +307,57 @@ class ai(PythonRunner):
 			self.debug(f'[workspace] failed to query targets: {e}', sub='guardrail')
 
 	def _prompt_and_redetect(self, choices):
-		"""Show interactive menu and re-detect intent. Returns (mode, max_iter, items) or None."""
+		"""Prompt user via backend and re-detect intent.
 
-		# Prompt user with choices
-		result = prompt_user(
-			self.history,
-			self.encryptor,
-			max_iterations=self.max_iterations,
+		Works for all backends: CLIBackend shows rich menus, RemoteBackend
+		polls DB, AutoBackend returns None (exits).
+
+		Returns list of items to yield, or None to exit.
+		"""
+		response = self.backend.ask_user(
+			question="What's next?",
 			choices=choices,
+			session_id=self.session_id,
+			prompt_type="follow_up",
+			history=self.history,
+			encryptor=self.encryptor,
+			max_iterations=self.max_iterations,
 			mode=self.mode,
-			model=self.model)
-		if result is None:
+			model=self.model,
+		)
+		if response is None:
 			return None
-		menu_action, extra_iters = result
-		self.prompt = menu_action
+
+		answer = response["answer"]
+		extra_iters = response.get("extra_iters", 1)
+		self.prompt = answer
 		items = []
 
-		# Re-detect mode for follow-up (user may switch from chat to attack, etc.)
-		previous_mode = self.mode
-		self._detect_mode(force=True)
-		self.max_iterations += extra_iters
-		if self.mode != previous_mode:
+		# Add to history
+		self.history.add_user(maybe_encrypt(answer, self.encryptor))
+
+		# Handle explicit mode switch (e.g. summarize → chat)
+		if response.get("switch_mode"):
+			self.mode = response["switch_mode"]
+			self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
+			self.max_iterations += extra_iters
 			items.append(Info(message=f"Switched to {self.mode} mode"))
+		else:
+			# Re-detect mode for follow-up (user may switch from chat to attack, etc.)
+			previous_mode = self.mode
+			self._detect_mode(force=True)
+			self.max_iterations += extra_iters
+			if self.mode != previous_mode:
+				self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
+				items.append(Info(message=f"Switched to {self.mode} mode"))
 
 		# Build token breakdown for prompt display
-		extra_data = {}
 		by_role = self.history.count_tokens_by_role(self.model)
-		from secator.ai.history import get_context_window
 		extra_data = {"tokens": by_role["total"], "context_window": get_context_window(self.model), "by_role": by_role}
 
-		items.append(Ai(content=menu_action, ai_type="prompt", extra_data=extra_data))
+		items.append(Ai(content=answer, ai_type="prompt", extra_data=extra_data))
 		return items
 
 	def _prompt_context_fill(self, token_count, ctx_window):
@@ -378,7 +416,13 @@ class ai(PythonRunner):
 			subagent=self.is_subagent,
 			sync=self._sync,
 			interactive=self.interactive,
+			backend=self.backend,
+			session_id=self.session_id,
 			permission_engine=self.permission_engine)
+
+		# Wire query_engine to remote backend if needed
+		if isinstance(self.backend, RemoteBackend):
+			self.backend.query_engine = ctx.get_query_engine()
 
 		# Enter loop
 		iteration = 0
@@ -408,7 +452,7 @@ class ai(PythonRunner):
 				self.debug(f'sending {token_count} tokens to LLM ({len(messages)} messages)', sub='context')
 
 				# Prompt user when context is filling up
-				if self.interactive and self.context_warnings and ctx_window > 0:
+				if self.interactive == "local" and self.context_warnings and ctx_window > 0:
 					compacted, items = self._prompt_context_fill(token_count, ctx_window)
 					yield from items
 					if compacted:
@@ -561,6 +605,8 @@ class ai(PythonRunner):
 
 				# Dispatch actions: batch if multiple, single otherwise
 				follow_up_choices = None
+				stop_reason = None
+				follow_up_ai = None
 				if actions:
 					is_batch = len(actions) > 1
 					action_iter = _run_batch(actions, ctx) if is_batch else dispatch_action(actions[0], ctx)
@@ -578,8 +624,12 @@ class ai(PythonRunner):
 						if isinstance(result, Ai):
 							self.add_result(result, print=not is_from_subagent)
 							if result.ai_type == "follow_up":
-								follow_up_choices = (result.extra_data or {}).get("choices", [])
+								follow_up_ai = result
+								follow_up_choices = result.choices or (result.extra_data or {}).get("choices", [])
 								continue  # follow_up is metadata, not a tool result
+							elif result.ai_type == "stopped":
+								stop_reason = result.content
+								continue
 							if result.ai_type not in ("shell_output", "response"):
 								continue  # skip UI-only Ai types (e.g. "shell" command echo)
 
@@ -631,17 +681,19 @@ class ai(PythonRunner):
 					self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 					continue
 
-				# Show menu if follow_up or max_iter reached
-				if not tool_calls or follow_up_choices is not None or iteration == self.max_iterations:
-					if not self.interactive:
-						# In non-interactive mode, stop if LLM offered follow_up choices (task complete),
-						# max iterations reached, or LLM returned text-only response (final answer).
-						if follow_up_choices is not None or iteration >= self.max_iterations or not tool_calls:
-							save_history(self.history, self.reports_folder, debug_fn=self.debug)
-							return
-						continue_msg = format_continue(iteration, self.max_iterations)
-						self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
-						continue
+				# Stop tool: save and exit
+				if stop_reason is not None:
+					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					return
+
+				# Show menu if follow_up, no actions, or max_iter reached
+				if follow_up_choices is not None or not actions or iteration == self.max_iterations:
+					# For remote with follow_up, yield the pending Ai for frontend
+					if follow_up_ai and isinstance(self.backend, RemoteBackend):
+						follow_up_ai.status = "pending"
+						follow_up_ai.session_id = self.session_id
+						yield follow_up_ai
+
 					result = self._prompt_and_redetect(follow_up_choices or [])
 					if result is None:
 						save_history(self.history, self.reports_folder, debug_fn=self.debug)
@@ -655,7 +707,7 @@ class ai(PythonRunner):
 				self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 
 			except KeyboardInterrupt:
-				if not self.interactive:
+				if self.interactive == "auto":
 					save_history(self.history, self.reports_folder, debug_fn=self.debug)
 					return
 				yield Warning(message="Interrupted by user.")

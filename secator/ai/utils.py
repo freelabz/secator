@@ -362,18 +362,18 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 	"""Prompt user for follow-up input via interactive menu.
 
 	Builds a unified menu with optional LLM-provided choices, plus Continue,
-	Summarize, and Exit. Mutates history in-place before returning.
+	Summarize, and Exit. Does NOT mutate history — the caller is responsible
+	for adding the returned answer to history.
 
 	Args:
-		history: ChatHistory instance to mutate with user's choice.
-		encryptor: Optional SensitiveDataEncryptor for encrypting user input.
+		history: ChatHistory instance (read-only, used for token counts and compaction).
+		encryptor: Optional SensitiveDataEncryptor (unused, kept for compat).
 		max_iterations: Current max iterations (used for continue message).
 		choices: Optional list of choice strings from LLM follow_up action.
 		model: Optional LLM model name for token count display.
 
 	Returns:
-		tuple: (action, extra_iters) where action is 'continue', 'summarize',
-			or 'follow_up', and extra_iters is iterations to add.
+		dict: {"answer": str, "extra_iters": int, "switch_mode": str|None}
 		None: to exit.
 	"""
 	from secator.definitions import IN_WORKER
@@ -381,7 +381,6 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 		return None
 	from secator.rich import InteractiveMenu
 	from secator.ai.prompts import format_continue
-	from secator.ai.prompts import get_system_prompt
 	from secator.utils import format_token_count
 
 	# Build title with token recap
@@ -460,42 +459,32 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 				msg = f"Do all of the following: {', '.join(numbered)}"
 				if value:
 					msg += f". Additional instructions: {value}"
-				history.add_user(_maybe_encrypt(msg, encryptor))
-				return (msg, max_iterations)
+				return {"answer": msg, "extra_iters": max_iterations}
 
 		idx = idx_or_indices
 		action = options[idx].get("action")
 
 		if action == "continue":
-			if value:
-				user_msg = _maybe_encrypt(value, encryptor)
-				history.add_user(user_msg)
-			else:
-				continue_msg = format_continue(0, max_iterations)
-				history.add_user(_maybe_encrypt(continue_msg, encryptor))
-			return (value or continue_label, max_iterations)
+			msg = value if value else format_continue(0, max_iterations)
+			return {"answer": msg, "extra_iters": max_iterations}
 
 		if action == "summarize":
-			history.set_system(get_system_prompt("chat"))
 			summary_msg = value if value else "Summarize all findings so far and provide a final report."
-			history.add_user(_maybe_encrypt(summary_msg, encryptor))
-			return (summary_msg, 1)
+			return {"answer": summary_msg, "extra_iters": 1, "switch_mode": "chat"}
 
 		if action == "follow_up":
 			choice_label = options[idx].get("label", "")
 			msg = choice_label
 			if value:
 				msg = f"{choice_label}: {value}"
-			history.add_user(_maybe_encrypt(msg, encryptor))
-			return (msg, 1)
+			return {"answer": msg, "extra_iters": 1}
 
 		if action == "all_choices":
 			numbered = [f"{i}) {c}" for i, c in enumerate(choices, 1)]
 			msg = f"Do all of the following: {', '.join(numbered)}"
 			if value:
 				msg += f". Additional instructions: {value}"
-			history.add_user(_maybe_encrypt(msg, encryptor))
-			return (msg, max_iterations)
+			return {"answer": msg, "extra_iters": max_iterations}
 
 		if action == "compact":
 			old_tokens = history.count_tokens(model)
