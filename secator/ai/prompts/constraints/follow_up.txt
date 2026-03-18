@@ -20,5 +20,6 @@ Do not include choices like "No user actions needed" or "Do nothing for now" or 
 - Do nothing for now
 - Install nuclei
 - Research options for the nuclei task
+- No further actions needed
 </bad_choices>
 </follow_up>

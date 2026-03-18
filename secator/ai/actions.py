@@ -91,53 +91,67 @@ def _build_action_display(action: Dict) -> str:
 	return ""
 
 
-def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], List[str]]:
+def check_guardrails_sync(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], List]:
+	"""Non-generator wrapper for check_guardrails.
+
+	Collects yielded items (warnings, pending prompts) and returns (denial, items).
+	Use from non-generator callers (tests, simple scripts).
+	"""
+	gen = check_guardrails(action, ctx)
+	items = []
+	try:
+		while True:
+			items.append(next(gen))
+	except StopIteration as e:
+		return e.value, items
+
+
+def check_guardrails(action: Dict, ctx: ActionContext):
 	"""Check action against guardrails before dispatching.
 
-	Must be called from the main thread (before batch/parallel execution)
-	because it may show interactive prompts.
+	Generator that yields Warning and pending Ai items (for remote backends).
+	Returns denial_reason (str or None) via generator return.
 
-	Args:
-		action: Action dict with 'action' key and parameters
-		ctx: Shared action context
-
-	Returns:
-		Tuple of (denial_reason, warnings) where denial_reason is None if allowed.
+	Use from generators: denial = yield from check_guardrails(action, ctx)
+	Use from regular code: denial, items = check_guardrails_sync(action, ctx)
 	"""
+	from secator.ai.interactivity import RemoteBackend
+	from secator.output_types import Warning as Warn
+
 	if ctx.permission_engine is None:
-		return None, []
+		return None
 
 	# Check for non-existent file paths (warn but don't block)
 	from secator.ai.guardrails import detect_paths, detect_paths_with_access, classify_command
 	from pathlib import Path
 	action_type = action.get("action", "")
-	warnings = []
 	if action_type == "shell":
 		cmd = action.get("command", "")
 		cmd_name = cmd.split()[0] if cmd.split() else ""
 		cmd_class = classify_command(cmd_name)
 		if cmd_class == "read":
 			for path in detect_paths(cmd):
-				# Skip glob patterns — they're not literal paths
 				if any(c in path for c in ('*', '?', '[', ']')):
 					continue
 				try:
 					expanded = Path(path).expanduser()
 					if not expanded.exists():
-						warnings.append(f"Path does not exist: {path}")
+						yield Warn(message=f"Path does not exist: {path}")
 				except (OSError, ValueError):
 					pass
 
 	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
-		return f"Action denied by guardrails: {result.reason}", warnings
+		return f"Action denied by guardrails: {result.reason}"
+
+	is_remote = isinstance(ctx.backend, RemoteBackend)
 
 	# Prompt loop: each check_action returns the first "ask" it encounters
 	# (shell, then targets, then paths). We prompt for that layer, then re-check
 	# to surface the next layer, until everything is resolved.
 	# All prompting goes through ctx.backend.ask_user() — the backend handles
 	# the UX differences (CLI menu, DB polling, or auto-deny).
-	max_rounds = 5  # safety limit to prevent infinite prompting
+	max_rounds = 5
 	rounds = 0
 	while result.decision == "ask" and rounds < max_rounds:
 		rounds += 1
@@ -146,7 +160,7 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 		# Handle shell command prompts (unknown commands or parse failures)
 		if result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
-			response = ctx.backend.ask_user(
+			ask_kwargs = dict(
 				question=result.reason or "Shell command requires approval",
 				choices=["allow", "allow_all", "deny"],
 				session_id=ctx.session_id,
@@ -155,18 +169,21 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 				value=result.shell_command,
 				reason=result.reason,
 				engine=ctx.permission_engine,
-			) if ctx.backend else None
+			)
+			if is_remote:
+				yield ctx.backend.build_pending_prompt(**ask_kwargs)
+			response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
 			if response is None or response.get("answer") == "deny":
-				return f"Action denied: shell command not approved", warnings
+				return "Action denied: shell command not approved"
 			if parse_failed:
-				return None, warnings
+				return None
 
 		# Handle target prompts
 		for target in result.targets:
 			recheck = ctx.permission_engine._check_value("target", target)
 			if recheck.decision == "allow":
 				continue
-			response = ctx.backend.ask_user(
+			ask_kwargs = dict(
 				question=f"Target {target} requires approval",
 				choices=["allow", "allow_all", "deny"],
 				session_id=ctx.session_id,
@@ -175,9 +192,12 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 				value=target,
 				command=cmd_display,
 				engine=ctx.permission_engine,
-			) if ctx.backend else None
+			)
+			if is_remote:
+				yield ctx.backend.build_pending_prompt(**ask_kwargs)
+			response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
 			if response is None or response.get("answer") == "deny":
-				return f"Action denied: target {target} not approved", warnings
+				return f"Action denied: target {target} not approved"
 
 		# Handle path prompts
 		if result.paths:
@@ -185,7 +205,7 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
 			for path in result.paths:
 				access_type = path_access_map.get(path, "read")
-				response = ctx.backend.ask_user(
+				ask_kwargs = dict(
 					question=f"{access_type.capitalize()} access to {path} requires approval",
 					choices=["allow", "allow_all", "deny"],
 					session_id=ctx.session_id,
@@ -194,16 +214,19 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 					value=path,
 					command=cmd_display,
 					engine=ctx.permission_engine,
-				) if ctx.backend else None
+				)
+				if is_remote:
+					yield ctx.backend.build_pending_prompt(**ask_kwargs)
+				response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
 				if response is None or response.get("answer") == "deny":
-					return f"Action denied: {access_type} access to {path} not approved", warnings
+					return f"Action denied: {access_type} access to {path} not approved"
 
 		# Re-check to see if more layers need prompting
 		result = ctx.permission_engine.check_action(action)
 		if result.decision == "deny":
-			return f"Action denied after prompt: {result.reason}", warnings
+			return f"Action denied after prompt: {result.reason}"
 
-	return None, warnings
+	return None
 
 
 def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:

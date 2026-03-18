@@ -6,7 +6,7 @@ from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
 	from secator.config import CONFIG
-	from secator.ai.actions import check_guardrails, dispatch_action, ActionContext
+	from secator.ai.actions import check_guardrails_sync as check_guardrails, dispatch_action, ActionContext
 	from secator.ai.guardrails import (
 		parse_rule, match_rule, extract_command_targets, detect_paths, detect_paths_with_access,
 		detect_sensitive_env_vars, classify_command, build_target_choices, PermissionEngine,
@@ -452,9 +452,9 @@ class TestGuardrailsIntegration(unittest.TestCase):
 		"""When no permission_engine is set, check_guardrails returns (None, [])."""
 		ctx = ActionContext(targets=["example.com"], model="test")
 		action = {"action": "shell", "command": "curl http://169.254.169.254/"}
-		denial, warnings = check_guardrails(action, ctx)
+		denial, items = check_guardrails(action, ctx)
 		self.assertIsNone(denial)
-		self.assertEqual(warnings, [])
+		self.assertEqual(items, [])
 
 	def test_check_guardrails_warns_nonexistent_path(self):
 		"""Reading a non-existent path should produce a warning."""
@@ -463,10 +463,11 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			targets=[], model="test", permission_engine=engine
 		)
 		action = {"action": "shell", "command": "cat /nonexistent/path/file.txt"}
-		denial, warnings = check_guardrails(action, ctx)
+		denial, items = check_guardrails(action, ctx)
 		self.assertIsNone(denial)
+		warnings = [i for i in items if hasattr(i, 'message')]
 		self.assertTrue(len(warnings) > 0)
-		self.assertIn("/nonexistent/path/file.txt", warnings[0])
+		self.assertIn("/nonexistent/path/file.txt", warnings[0].message)
 
 	def test_dispatch_action_without_engine(self):
 		"""When no permission_engine is set, actions should pass through."""

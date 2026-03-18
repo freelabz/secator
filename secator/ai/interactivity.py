@@ -4,6 +4,8 @@ All user prompting (permission requests and follow-up questions) flows through
 backend.ask_user().  Callers never branch on interactive mode — the backend
 handles the UX differences.
 """
+import time
+
 from time import sleep
 from typing import Any, Dict, List, Optional
 
@@ -95,6 +97,26 @@ class RemoteBackend(InteractivityBackend):
 
 	def get_excluded_tools(self) -> set:
 		return {"stop"}
+
+	def build_pending_prompt(self, question, choices, session_id, prompt_type="follow_up", **context):
+		"""Build a pending Ai finding for the remote user to see and answer.
+
+		The caller must yield this item so it gets stored in the workspace
+		(via runner hooks) before calling ask_user(), which will poll for the answer.
+		"""
+		from secator.output_types import Ai
+		return Ai(
+			content=question,
+			ai_type=prompt_type,
+			status="pending",
+			choices=choices,
+			session_id=session_id,
+			extra_data={
+				"permission_type": context.get("permission_type", ""),
+				"value": context.get("value", ""),
+			},
+			_timestamp=time.time(),
+		)
 
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
 		answer = self._poll_for_answer(session_id, prompt_type)

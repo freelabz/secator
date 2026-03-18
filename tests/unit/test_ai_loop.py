@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 try:
 	from secator.ai.actions import (
-		ActionContext, check_guardrails, dispatch_action
+		ActionContext, check_guardrails_sync as check_guardrails, dispatch_action
 	)
 	from secator.ai.guardrails import PermissionEngine, detect_paths_with_access
 	from secator.ai.interactivity import CLIBackend, RemoteBackend, AutoBackend, create_backend
