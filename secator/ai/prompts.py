@@ -7,6 +7,10 @@ from typing import Any, Dict, List
 from string import Template
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
+SECATOR_DIR = Path(__file__).parent.parent
+TASKS_PATH = SECATOR_DIR / "tasks"
+WORKFLOWS_PATH = SECATOR_DIR / "configs" / "workflows"
+PROFILES_PATH = SECATOR_DIR / "configs" / "profiles"
 
 OPTION_FORMATS = """header|key1:value1;;key2:value2|Multiple headers separated by ;;
 cookie|name1=val1;name2=val2|Standard cookie format
@@ -237,10 +241,11 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 	system_prompt = mode_config["system_prompt"]
 	ws = workspace_path or "<workspace>"
 
+	path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 	if mode == "attack":
-		result = system_prompt.safe_substitute(library_reference=build_library_reference())
+		result = system_prompt.safe_substitute(library_reference=build_library_reference(), **path_vars)
 	elif mode == "exploit":
-		result = system_prompt.safe_substitute(library_reference=build_library_reference())
+		result = system_prompt.safe_substitute(library_reference=build_library_reference(), **path_vars)
 	else:  # chat mode
 		result = system_prompt.safe_substitute(output_types_reference=build_output_types_reference())
 

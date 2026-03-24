@@ -99,11 +99,11 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(messages[0]["content"], "tool output here")
 
     @patch('secator.ai.history.get_context_window')
-    @patch('secator.ai.history.litellm')
-    def test_maybe_summarize_below_threshold(self, mock_litellm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_maybe_summarize_below_threshold(self, mock_token_counter, mock_get_ctx):
         """maybe_summarize returns False when under percentage threshold."""
         mock_get_ctx.return_value = 100000
-        mock_litellm.token_counter.return_value = 1000  # Well under 85%
+        mock_token_counter.return_value = 1000  # Well under 85%
 
         history = ChatHistory()
         history.add_system("system prompt")
@@ -118,15 +118,15 @@ class TestChatHistory(unittest.TestCase):
 
     @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')
-    @patch('secator.ai.history.litellm')
-    def test_maybe_summarize_above_threshold(self, mock_litellm, mock_call_llm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_maybe_summarize_above_threshold(self, mock_token_counter, mock_call_llm, mock_get_ctx):
         """maybe_summarize triggers compaction when over percentage threshold."""
         mock_get_ctx.return_value = 100000
         # Usable = 100000 - 8192 = 91808
         # 85% threshold = 78037 tokens
         # Return 2000 tokens per message (41 messages = 82000 total, over 85%)
         # After compaction, 3 messages = 6000 total
-        mock_litellm.token_counter.return_value = 2000
+        mock_token_counter.return_value = 2000
         mock_call_llm.return_value = {"content": "Summary of session.", "usage": None}
 
         history = ChatHistory()
@@ -144,13 +144,13 @@ class TestChatHistory(unittest.TestCase):
 
     @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')
-    @patch('secator.ai.history.litellm')
-    def test_summarize_preserves_system_prompt(self, mock_litellm, mock_call_llm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_summarize_preserves_system_prompt(self, mock_token_counter, mock_call_llm, mock_get_ctx):
         """Summarization preserves system prompt and first user message."""
         mock_get_ctx.return_value = 100000
         # Return 4000 tokens per message (21 messages = 84000 total, over 85%)
         # After compaction, 3 messages = 12000 total
-        mock_litellm.token_counter.return_value = 4000
+        mock_token_counter.return_value = 4000
         mock_call_llm.return_value = {"content": "Compact summary.", "usage": None}
 
         history = ChatHistory()
@@ -230,11 +230,9 @@ class TestChatHistory(unittest.TestCase):
         # All messages returned (no truncation)
         self.assertEqual(len(messages), 22)
 
-    @patch('secator.ai.history.litellm')
-    def test_maybe_summarize_skips_when_not_needed(self, mock_litellm):
-        """Summarization skipped when context usage is below threshold."""
-        mock_litellm.token_counter.return_value = 10
-        mock_litellm.get_model_info.return_value = {"max_input_tokens": 128000}
+    @patch('litellm.get_model_info', return_value={'max_input_tokens': 128000})
+    @patch('litellm.token_counter', return_value=10)
+    def test_maybe_summarize_skips_when_not_needed(self, mock_token_counter, mock_get_model_info):
 
         history = ChatHistory()
         history.add_system("system")
@@ -248,23 +246,23 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(old_tokens, new_tokens)
 
 
-    @patch('secator.ai.history.litellm')
-    def test_count_tokens_uses_litellm(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_count_tokens_uses_litellm(self, mock_token_counter):
         """count_tokens uses litellm.token_counter for accurate counting."""
-        mock_litellm.token_counter.return_value = 42
+        mock_token_counter.return_value = 42
 
         history = ChatHistory()
         history.add_user("test message")
 
         tokens = history.count_tokens("gpt-4")
 
-        mock_litellm.token_counter.assert_called_once()
+        mock_token_counter.assert_called_once()
         self.assertEqual(tokens, 42)
 
-    @patch('secator.ai.history.litellm')
-    def test_count_tokens_caches_result(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_count_tokens_caches_result(self, mock_token_counter):
         """count_tokens caches result and reuses on second call."""
-        mock_litellm.token_counter.return_value = 100
+        mock_token_counter.return_value = 100
 
         history = ChatHistory()
         history.add_user("test message")
@@ -275,14 +273,14 @@ class TestChatHistory(unittest.TestCase):
         tokens2 = history.count_tokens("gpt-4")
 
         # litellm called only once due to caching
-        self.assertEqual(mock_litellm.token_counter.call_count, 1)
+        self.assertEqual(mock_token_counter.call_count, 1)
         self.assertEqual(tokens1, 100)
         self.assertEqual(tokens2, 100)
 
-    @patch('secator.ai.history.litellm')
-    def test_count_tokens_invalidates_cache_on_model_change(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_count_tokens_invalidates_cache_on_model_change(self, mock_token_counter):
         """count_tokens recounts when model changes."""
-        mock_litellm.token_counter.side_effect = [100, 120]
+        mock_token_counter.side_effect = [100, 120]
 
         history = ChatHistory()
         history.add_user("test message")
@@ -290,7 +288,7 @@ class TestChatHistory(unittest.TestCase):
         tokens1 = history.count_tokens("gpt-4")
         tokens2 = history.count_tokens("claude-3")  # Different model
 
-        self.assertEqual(mock_litellm.token_counter.call_count, 2)
+        self.assertEqual(mock_token_counter.call_count, 2)
         self.assertEqual(tokens1, 100)
         self.assertEqual(tokens2, 120)
 
@@ -303,10 +301,10 @@ class TestChatHistory(unittest.TestCase):
             history.count_tokens()
         self.assertIn("Model required", str(ctx.exception))
 
-    @patch('secator.ai.history.litellm')
-    def test_count_tokens_uses_instance_model(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_count_tokens_uses_instance_model(self, mock_token_counter):
         """count_tokens uses self.model when no model argument provided."""
-        mock_litellm.token_counter.return_value = 50
+        mock_token_counter.return_value = 50
 
         history = ChatHistory()
         history.model = "gpt-4"
@@ -314,46 +312,46 @@ class TestChatHistory(unittest.TestCase):
 
         tokens = history.count_tokens()  # No model argument
 
-        mock_litellm.token_counter.assert_called_once()
+        mock_token_counter.assert_called_once()
         self.assertEqual(tokens, 50)
 
-    @patch('secator.ai.history.litellm')
-    def test_set_system_invalidates_token_cache(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_set_system_invalidates_token_cache(self, mock_token_counter):
         """set_system invalidates cached token count for system message."""
-        mock_litellm.token_counter.return_value = 50
+        mock_token_counter.return_value = 50
 
         history = ChatHistory()
         history.add_system("old prompt")
 
         # Count tokens - this caches the count
         history.count_tokens("gpt-4")
-        self.assertEqual(mock_litellm.token_counter.call_count, 1)
+        self.assertEqual(mock_token_counter.call_count, 1)
 
         # Change system prompt
         history.set_system("new longer prompt")
 
         # Count again - should recount since cache invalidated
         history.count_tokens("gpt-4")
-        self.assertEqual(mock_litellm.token_counter.call_count, 2)
+        self.assertEqual(mock_token_counter.call_count, 2)
 
-    @patch('secator.ai.history.litellm')
-    def test_get_context_window_returns_model_limit(self, mock_litellm):
+    @patch('litellm.get_model_info')
+    def test_get_context_window_returns_model_limit(self, mock_get_model_info):
         """get_context_window returns model's max input tokens."""
         from secator.ai.history import get_context_window
 
-        mock_litellm.get_model_info.return_value = {"max_input_tokens": 128000}
+        mock_get_model_info.return_value = {"max_input_tokens": 128000}
 
         result = get_context_window("gpt-4")
 
-        mock_litellm.get_model_info.assert_called_once_with("gpt-4")
+        mock_get_model_info.assert_called_once_with("gpt-4")
         self.assertEqual(result, 128000)
 
-    @patch('secator.ai.history.litellm')
-    def test_get_context_window_fallback_on_error(self, mock_litellm):
+    @patch('litellm.get_model_info')
+    def test_get_context_window_fallback_on_error(self, mock_get_model_info):
         """get_context_window returns default on error."""
         from secator.ai.history import get_context_window
 
-        mock_litellm.get_model_info.side_effect = Exception("API error")
+        mock_get_model_info.side_effect = Exception("API error")
 
         result = get_context_window("unknown-model")
 
@@ -367,11 +365,11 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(COMPACTION_THRESHOLD_PCT, 85)
 
     @patch('secator.ai.history.get_context_window')
-    @patch('secator.ai.history.litellm')
-    def test_get_available_tokens(self, mock_litellm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_get_available_tokens(self, mock_token_counter, mock_get_ctx):
         """get_available_tokens returns usable - used tokens."""
         mock_get_ctx.return_value = 128000
-        mock_litellm.token_counter.return_value = 1000
+        mock_token_counter.return_value = 1000
 
         history = ChatHistory()
         history.add_user("test")
@@ -382,11 +380,11 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(available, 118808)
 
     @patch('secator.ai.history.get_context_window')
-    @patch('secator.ai.history.litellm')
-    def test_should_compact_below_threshold(self, mock_litellm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_should_compact_below_threshold(self, mock_token_counter, mock_get_ctx):
         """should_compact returns False when under threshold."""
         mock_get_ctx.return_value = 100000
-        mock_litellm.token_counter.return_value = 1000  # 1% used
+        mock_token_counter.return_value = 1000  # 1% used
 
         history = ChatHistory()
         history.add_user("test")
@@ -394,13 +392,13 @@ class TestChatHistory(unittest.TestCase):
         self.assertFalse(history.should_compact("gpt-4"))
 
     @patch('secator.ai.history.get_context_window')
-    @patch('secator.ai.history.litellm')
-    def test_should_compact_above_threshold(self, mock_litellm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_should_compact_above_threshold(self, mock_token_counter, mock_get_ctx):
         """should_compact returns True when over threshold."""
         mock_get_ctx.return_value = 100000
         # Usable = 100000 - 8192 = 91808
         # 85% of 91808 = 78037
-        mock_litellm.token_counter.return_value = 80000  # Over 85%
+        mock_token_counter.return_value = 80000  # Over 85%
 
         history = ChatHistory()
         history.add_user("test")
@@ -408,11 +406,11 @@ class TestChatHistory(unittest.TestCase):
         self.assertTrue(history.should_compact("gpt-4"))
 
     @patch('secator.ai.history.get_context_window')
-    @patch('secator.ai.history.litellm')
-    def test_get_action_budget_caps_at_max(self, mock_litellm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_get_action_budget_caps_at_max(self, mock_token_counter, mock_get_ctx):
         """get_action_budget caps at MAX_ACTION_TOKENS when plenty available."""
         mock_get_ctx.return_value = 200000
-        mock_litellm.token_counter.return_value = 1000  # Very little used
+        mock_token_counter.return_value = 1000  # Very little used
 
         history = ChatHistory()
         history.add_user("test")
@@ -423,15 +421,15 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(budget, 10000)
 
     @patch('secator.ai.history.get_context_window')
-    @patch('secator.ai.history.litellm')
-    def test_get_action_budget_uses_half_available(self, mock_litellm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_get_action_budget_uses_half_available(self, mock_token_counter, mock_get_ctx):
         """get_action_budget uses 50% of available when constrained."""
         mock_get_ctx.return_value = 50000
         # Usable = 50000 - 8192 = 41808
         # Used = 35000
         # Available = 41808 - 35000 = 6808
         # Half = 3404
-        mock_litellm.token_counter.return_value = 35000
+        mock_token_counter.return_value = 35000
 
         history = ChatHistory()
         history.add_user("test")
@@ -442,23 +440,23 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(budget, 3404)
 
 
-    @patch('secator.ai.history.litellm')
-    def test_truncate_to_tokens_no_truncation_needed(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_truncate_to_tokens_no_truncation_needed(self, mock_token_counter):
         """truncate_to_tokens returns content unchanged when under budget."""
         from secator.ai.history import truncate_to_tokens
 
-        mock_litellm.token_counter.return_value = 100
+        mock_token_counter.return_value = 100
 
         result = truncate_to_tokens("short content", 500, "gpt-4")
 
         self.assertEqual(result, "short content")
 
-    @patch('secator.ai.history.litellm')
-    def test_truncate_to_tokens_truncates_with_marker(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_truncate_to_tokens_truncates_with_marker(self, mock_token_counter):
         """truncate_to_tokens truncates and adds [TRUNCATED] marker."""
         from secator.ai.history import truncate_to_tokens
 
-        mock_litellm.token_counter.return_value = 1000
+        mock_token_counter.return_value = 1000
         content = "x" * 4000  # Long content
 
         result = truncate_to_tokens(content, 100, "gpt-4")
@@ -466,12 +464,12 @@ class TestChatHistory(unittest.TestCase):
         self.assertIn("[TRUNCATED]", result)
         self.assertLess(len(result), len(content))
 
-    @patch('secator.ai.history.litellm')
-    def test_truncate_to_tokens_with_fallback_path(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_truncate_to_tokens_with_fallback_path(self, mock_token_counter):
         """truncate_to_tokens includes existing file path in hint."""
         from secator.ai.history import truncate_to_tokens
 
-        mock_litellm.token_counter.return_value = 1000
+        mock_token_counter.return_value = 1000
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             f.write('{"test": true}')
@@ -486,12 +484,12 @@ class TestChatHistory(unittest.TestCase):
         finally:
             fallback_path.unlink()
 
-    @patch('secator.ai.history.litellm')
-    def test_truncate_to_tokens_saves_shell_output(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_truncate_to_tokens_saves_shell_output(self, mock_token_counter):
         """truncate_to_tokens saves shell output to .outputs directory."""
         from secator.ai.history import truncate_to_tokens
 
-        mock_litellm.token_counter.return_value = 1000
+        mock_token_counter.return_value = 1000
         content = "shell output " * 500
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -514,13 +512,13 @@ class TestChatHistory(unittest.TestCase):
 
     @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')
-    @patch('secator.ai.history.litellm')
-    def test_maybe_summarize_uses_percentage_threshold(self, mock_litellm, mock_call_llm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_maybe_summarize_uses_percentage_threshold(self, mock_token_counter, mock_call_llm, mock_get_ctx):
         """maybe_summarize uses percentage-based threshold, not fixed tokens."""
         mock_get_ctx.return_value = 100000
         # Usable = 100000 - 8192 = 91808
         # 85% threshold = 78037 tokens
-        mock_litellm.token_counter.return_value = 80000  # Over 85%
+        mock_token_counter.return_value = 80000  # Over 85%
         mock_call_llm.return_value = {"content": "Summary.", "usage": None}
 
         history = ChatHistory()
@@ -534,11 +532,11 @@ class TestChatHistory(unittest.TestCase):
         mock_call_llm.assert_called_once()
 
     @patch('secator.ai.history.get_context_window')
-    @patch('secator.ai.history.litellm')
-    def test_maybe_summarize_no_threshold_param(self, mock_litellm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_maybe_summarize_no_threshold_param(self, mock_token_counter, mock_get_ctx):
         """maybe_summarize no longer accepts threshold parameter."""
         mock_get_ctx.return_value = 100000
-        mock_litellm.token_counter.return_value = 1000
+        mock_token_counter.return_value = 1000
 
         history = ChatHistory()
         history.add_system("system")
@@ -602,11 +600,11 @@ class TestChatHistoryToolCalling(unittest.TestCase):
 
     @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')
-    @patch('secator.ai.history.litellm')
-    def test_summarize_handles_tool_messages(self, mock_litellm, mock_call_llm, mock_get_ctx):
+    @patch('litellm.token_counter')
+    def test_summarize_handles_tool_messages(self, mock_token_counter, mock_call_llm, mock_get_ctx):
         """maybe_summarize works when history contains tool_calls and tool messages."""
         mock_get_ctx.return_value = 100000
-        mock_litellm.token_counter.return_value = 2000
+        mock_token_counter.return_value = 2000
         mock_call_llm.return_value = {"content": "Summary with tool results.", "usage": None}
 
         history = ChatHistory()
@@ -630,10 +628,10 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         self.assertEqual(messages[0]["role"], "system")
 
 
-    @patch('secator.ai.history.litellm')
-    def test_count_tokens_by_role(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_count_tokens_by_role(self, mock_token_counter):
         """count_tokens_by_role returns per-role breakdown plus total."""
-        mock_litellm.token_counter.return_value = 100
+        mock_token_counter.return_value = 100
 
         history = ChatHistory()
         history.add_system("system prompt")
@@ -649,10 +647,10 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         self.assertEqual(result["tool"], 100)
         self.assertEqual(result["total"], 400)
 
-    @patch('secator.ai.history.litellm')
-    def test_count_tokens_by_role_aggregates(self, mock_litellm):
+    @patch('litellm.token_counter')
+    def test_count_tokens_by_role_aggregates(self, mock_token_counter):
         """count_tokens_by_role sums multiple messages of same role."""
-        mock_litellm.token_counter.return_value = 50
+        mock_token_counter.return_value = 50
 
         history = ChatHistory()
         history.add_user("msg 1")
