@@ -15,6 +15,35 @@ PII_PATTERNS = {
 	),
 }
 
+# File extensions that are never TLDs — prevents hex hash filenames (e.g. sha1.txt) from
+# being treated as hostnames by the host pattern.
+_FAKE_HOST_EXTENSIONS = frozenset({
+	'txt', 'json', 'xml', 'html', 'htm', 'log', 'csv', 'md',
+	'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf',
+	'py', 'js', 'ts', 'sh', 'bash', 'rb', 'php', 'go', 'rs', 'java', 'c', 'h', 'cpp',
+	'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'pdf',
+	'zip', 'tar', 'gz', 'bz2', 'xz', 'mp3', 'mp4',
+})
+
+
+def _is_hash_filename(hostname: str) -> bool:
+	"""Return True if the matched hostname looks like a hash filename rather than a real host.
+
+	Prevents false-positive encryption of paths like:
+	  fefdc75b8092569ffdaaf5c91522f10d063a93d2.txt   (SHA-1 hash from httpx)
+	  d41d8cd98f00b204e9800998ecf8427e.json          (MD5 hash)
+	"""
+	dot_idx = hostname.rfind('.')
+	if dot_idx < 0:
+		return False
+	label = hostname[:dot_idx].lower()
+	ext = hostname[dot_idx + 1:].lower()
+	# Only skip if TLD is a known file extension and the label is a pure hex string
+	# of a length typical for cryptographic hashes (MD5=32, SHA1=40, SHA256=64, etc.)
+	if ext in _FAKE_HOST_EXTENSIONS and re.fullmatch(r'[0-9a-f]{8,}', label):
+		return True
+	return False
+
 
 def maybe_encrypt(text, encryptor):
 	"""Encrypt text if encryptor is available, otherwise return as-is."""
@@ -89,6 +118,8 @@ class SensitiveDataEncryptor:
 		for pii_type, pattern in PII_PATTERNS.items():
 			for match in pattern.finditer(result):
 				original = match.group()
+				if pii_type == "host" and _is_hash_filename(original):
+					continue
 				placeholder = self._hash_value(original, pii_type)
 				result = result.replace(original, placeholder)
 

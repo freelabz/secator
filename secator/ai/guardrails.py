@@ -243,6 +243,11 @@ def _extract_cmd_names(command: str) -> List[str]:
 	import re
 	try:
 		from safecmd.bashxtract import extract_commands
+	except ImportError:
+		from secator.rich import console
+		console.print('[bold red][ERR][/] Missing ai addon: please run "secator install addons ai".')
+		return []
+	try:
 		# Normalize LLM-generated multiline commands: join lines where a pipe/operator
 		# starts the next line (e.g. "cmd1\n| cmd2" -> "cmd1 | cmd2")
 		command = re.sub(r'\s*\n\s*(\||\&\&|\|\|)', r' \1', command)
@@ -434,6 +439,10 @@ def build_target_choices(target: str) -> List[Dict]:
 		base_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.path else f"{parsed.scheme}://{parsed.netloc}"
 		host_port = f"{host}:{port}" if port else host
 
+		host_rules = [
+			f"target({host})", f"target({host}:*)",
+			f"target((http|https)://{host}:*/*)", f"target((http|https)://{host}/*)",
+		]
 		choices = [
 			{
 				"label": f"Allow this URL only ({base_path})",
@@ -442,17 +451,17 @@ def build_target_choices(target: str) -> List[Dict]:
 			},
 			{
 				"label": f"Allow all URLs from {host_port}",
-				"rules": [f"target({host})", f"target({host}:*)", f"target((http|https)://{host}:*/*)", f"target((http|https)://{host}/*)"],
+				"rules": host_rules,
 				"selected": False,
 			},
 			{
 				"label": f"Allow all URLs from {host} (any port)",
-				"rules": [f"target({host})", f"target({host}:*)", f"target((http|https)://{host}:*/*)", f"target((http|https)://{host}/*)"],
+				"rules": host_rules,
 				"selected": False,
 			},
 			{
 				"label": "All of the above",
-				"rules": [f"target({host})", f"target({host}:*)", f"target((http|https)://{host}:*/*)", f"target((http|https)://{host}/*)"],
+				"rules": host_rules,
 				"selected": False,
 			},
 			{
@@ -850,7 +859,7 @@ class PermissionEngine:
 		prompt_cmd = unmatched_cmd or (cmd_names[0] if cmd_names else command.split()[0] if command.split() else "unknown")
 
 		options = [
-			{"label": f"Allow this command"},
+			{"label": "Allow this command"},
 			{"label": f"Allow all '{prompt_cmd}' commands"},
 			{"label": "Deny (block this action)"},
 		]

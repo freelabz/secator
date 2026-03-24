@@ -170,6 +170,7 @@ def mock_litellm_completion(responses):
 		mock_resp = unittest.mock.MagicMock()
 		mock_resp.choices = [unittest.mock.MagicMock()]
 		mock_resp.choices[0].message.content = content
+		mock_resp.choices[0].message.tool_calls = None
 		mock_resp.usage = None
 		mock_responses.append(mock_resp)
 

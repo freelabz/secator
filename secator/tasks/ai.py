@@ -182,8 +182,8 @@ class ai(PythonRunner):
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
-			self.history.model = self.model # update to new model if different
-			self._reports_folder = session['folder'] # restore the original session folder
+			self.history.model = self.model  # update to new model if different
+			self._reports_folder = session['folder']  # restore the original session folder
 			if self.interactive:
 				result = self._prompt_and_redetect([])
 				if result is None:
@@ -240,6 +240,8 @@ class ai(PythonRunner):
 		unless force=True (used for follow-up re-detection)."""
 		old_mode = self.mode
 		if old_mode and not force:
+			if not hasattr(self, 'tool_schemas'):
+				self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent)
 			return
 		if not self.prompt:
 			self.mode = "chat"
@@ -444,14 +446,14 @@ class ai(PythonRunner):
 
 				# Add assistant message to history (must happen before tool results)
 				if tool_calls:
-					litellm_tool_calls = [{
-						"id": tc.id,
-						"type": "function",
-						"function": {
-							"name": tc.function.name,
-							"arguments": tc.function.arguments if isinstance(tc.function.arguments, str) else json.dumps(tc.function.arguments),
-						},
-					} for tc in tool_calls]
+					def _tc_args(tc):
+						args = tc.function.arguments
+						return args if isinstance(args, str) else json.dumps(args)
+					litellm_tool_calls = [
+						{"id": tc.id, "type": "function",
+						 "function": {"name": tc.function.name, "arguments": _tc_args(tc)}}
+						for tc in tool_calls
+					]
 					self.history.add_assistant_with_tool_calls(
 						maybe_encrypt(response_content, self.encryptor) if response_content else None,
 						litellm_tool_calls)

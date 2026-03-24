@@ -162,9 +162,16 @@ def call_llm(
 		kwargs["tools"] = tools
 		kwargs["tool_choice"] = "auto"
 
+	# Normalize assistant messages that have tool_calls but no 'content' key.
+	# litellm's trim_messages crashes with KeyError: 'content' on such messages.
+	for msg in kwargs["messages"]:
+		if msg.get("role") == "assistant" and "content" not in msg:
+			msg["content"] = None
+
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
-		litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.BadRequestError
+		litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.BadRequestError,
+		litellm.APIError
 	)
 	for attempt in range(1, max_retries + 1):
 		try:

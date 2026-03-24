@@ -2,6 +2,7 @@
 <secator_reference>
 $library_reference
 </secator_reference>
+${discovery}
 </context>
 
 <persona>

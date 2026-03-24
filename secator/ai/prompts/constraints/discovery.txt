@@ -1,0 +1,24 @@
+<discovery>
+The library reference shows abbreviated descriptions. When the summary isn't enough to confidently pick the right task or workflow, inspect the source files directly using run_shell before deciding.
+
+Tasks directory: $tasks_path
+- List all tasks:       run_shell(command="ls $tasks_path")
+- Read a task file:     run_shell(command="cat $tasks_path/<name>.py")
+  Key class attributes: `tags`, `description`, `long_description`, `input_types`, `output_types`, `opts`
+
+Workflows directory: $workflows_path
+- List all workflows:   run_shell(command="ls $workflows_path")
+- Read a workflow file: run_shell(command="cat $workflows_path/<name>.yaml")
+  Key YAML fields:      `description`, `long_description`, `tags`, `input_types`, `tasks`
+
+Profiles directory: $profiles_path
+- List all profiles:    run_shell(command="ls $profiles_path")
+- Read a profile file:  run_shell(command="cat $profiles_path/<name>.yaml")
+  Key YAML fields:      `description`, `category`, `opts` (the option overrides the profile applies)
+
+Use this when:
+- The reference description is too brief to judge fit between multiple candidates
+- You need to verify exact supported options or input/output types before running
+- You want to understand which sub-tasks a workflow runs before committing to it
+- You need to know what options a profile sets before applying it
+</discovery>

@@ -145,7 +145,7 @@ def check_guardrails(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], L
 			decision = ctx.permission_engine.prompt_shell(
 				result.shell_command, reason=result.reason, interactive=ctx.interactive)
 			if decision == "deny":
-				return f"Action denied: shell command not approved", warnings
+				return "Action denied: shell command not approved", warnings
 			if parse_failed:
 				return None, warnings
 

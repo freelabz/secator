@@ -136,6 +136,42 @@ class TestSensitiveDataEncryptor(unittest.TestCase):
         self.assertEqual(encryptor.encrypt(""), "")
         self.assertEqual(encryptor.decrypt(""), "")
 
+    def test_hash_filenames_not_encrypted_as_hosts(self):
+        """Test that hash filenames (e.g. from httpx) are not encrypted as fake hosts."""
+        from secator.ai.encryption import SensitiveDataEncryptor
+
+        encryptor = SensitiveDataEncryptor()
+
+        # SHA1 hash + .txt extension — httpx response body filename format
+        sha1_path = "/reports/xss-game.appspot.com/fefdc75b8092569ffdaaf5c91522f10d063a93d2.txt"
+        encrypted = encryptor.encrypt(sha1_path)
+
+        # The real hostname should be encrypted
+        self.assertIn("[HOST:", encrypted)
+        self.assertNotIn("xss-game.appspot.com", encrypted)
+
+        # But the SHA1 filename should NOT be encrypted (not a real host)
+        self.assertIn("fefdc75b8092569ffdaaf5c91522f10d063a93d2.txt", encrypted)
+
+        # Full round-trip should restore original
+        decrypted = encryptor.decrypt(encrypted)
+        self.assertEqual(decrypted, sha1_path)
+
+    def test_hash_filename_detection(self):
+        """Test _is_hash_filename helper for various inputs."""
+        from secator.ai.encryption import _is_hash_filename
+
+        # Should be detected as hash filenames (skip encryption)
+        self.assertTrue(_is_hash_filename("fefdc75b8092569ffdaaf5c91522f10d063a93d2.txt"))
+        self.assertTrue(_is_hash_filename("d41d8cd98f00b204e9800998ecf8427e.json"))
+        self.assertTrue(_is_hash_filename("aabbccdd.py"))
+
+        # Should NOT be detected as hash filenames (encrypt normally)
+        self.assertFalse(_is_hash_filename("xss-game.appspot.com"))
+        self.assertFalse(_is_hash_filename("api.example.com"))
+        self.assertFalse(_is_hash_filename("deadbeef.cafe.com"))
+        self.assertFalse(_is_hash_filename("fefdc75b8092569ffdaaf5c91522f10d063a93d2"))
+
 
 if __name__ == '__main__':
     unittest.main()
