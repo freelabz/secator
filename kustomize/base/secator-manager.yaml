@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: secator-manager
+  namespace: secator
+spec:
+  selector:
+    matchLabels:
+      app: secator-manager
+  serviceName: secator-manager
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: secator-manager
+    spec:
+      containers:
+      - name: secator-manager
+        image: freelabz/secator
+        command: ["tail"]
+        args: ["-F", "anything"]
+        env:
+        - name: SECATOR_CELERY_BROKER_URL
+          value: "redis://redis:6379/0"
+        - name: SECATOR_CELERY_RESULT_BACKEND
+          value: "redis://redis:6379/0"
