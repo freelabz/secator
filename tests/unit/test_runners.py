@@ -551,3 +551,21 @@ def test_runner_paused_status():
 	r.skipped = False
 	r.paused = True
 	assert r.status == 'PAUSED'
+
+
+def test_runner_pid_file(tmp_path):
+	import os, json
+	from pathlib import Path
+	from secator.runners._base import Runner
+
+	runner = Runner.__new__(Runner)
+	runner._reports_folder = str(tmp_path)
+
+	Runner._write_pid_file(runner)
+	pid_path = tmp_path / 'runner.pid'
+	assert pid_path.exists()
+	data = json.loads(pid_path.read_text())
+	assert data['pid'] == os.getpid()
+
+	Runner._delete_pid_file(runner)
+	assert not pid_path.exists()

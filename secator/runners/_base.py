@@ -963,6 +963,7 @@ class Runner:
 		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks}), chunk: {self.chunk}, chunk_count: {self.chunk_count}', sub='start')  # noqa: E501
 		self.log_start()
 		self.run_hooks('on_start', sub='start')
+		self._write_pid_file()
 
 	def mark_completed(self):
 		"""Mark runner as completed."""
@@ -977,6 +978,7 @@ class Runner:
 		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
 		self.log_results()
+		self._delete_pid_file()
 
 	def log_start(self):
 		"""Log runner start."""
@@ -1020,6 +1022,31 @@ class Runner:
 			report.build()
 			report.send()
 			self.report = report
+
+	def _write_pid_file(self):
+		"""Write runner.pid to reports folder for pause/resume lookup."""
+		import os
+		pid_data = {
+			'pid': os.getpid(),
+			'runner_type': getattr(self.config, 'type', '') if hasattr(self, 'config') else '',
+			'runner_name': self.name if hasattr(self, 'name') else '',
+			'celery_id': self.context.get('celery_id', '') if hasattr(self, 'context') else '',
+		}
+		try:
+			pid_path = Path(self.reports_folder) / 'runner.pid'
+			with open(pid_path, 'w') as f:
+				json.dump(pid_data, f)
+		except Exception:
+			pass
+
+	def _delete_pid_file(self):
+		"""Remove runner.pid from reports folder."""
+		try:
+			pid_path = Path(self.reports_folder) / 'runner.pid'
+			if pid_path.exists():
+				pid_path.unlink()
+		except Exception:
+			pass
 
 	def export_profiler(self):
 		"""Export profiler."""
