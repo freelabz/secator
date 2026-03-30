@@ -41,6 +41,7 @@ class nmap(ReconPort):
 		'detect_os': {'is_flag': True, 'short': 'O', 'default': False, 'help': 'Enable OS detection', 'requires_sudo': True},
 
 		# Scan techniques
+		'list_scan': {'is_flag': True, 'short': 'sL', 'default': False, 'help': 'List scan'},
 		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth', 'requires_sudo': True},  # noqa: E501
 		'tcp_connect': {'is_flag': True, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
 		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan', 'requires_sudo': True},
@@ -94,6 +95,7 @@ class nmap(ReconPort):
 		'version_detection': '-sV',
 		'detect_all': '-A',
 		'detect_os': '-O',
+		'list_scan': '-sL',
 		'tcp_syn_stealth': '-sS',
 		'tcp_connect': '-sT',
 		'tcp_window_scan': '-sW',

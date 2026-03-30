@@ -49,6 +49,7 @@ class nuclei(VulnMulti):
 		'tags': {'type': str, 'help': 'Tags'},
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
+		'template_condition': {'type': str, 'short': 'tc', 'help': 'Templates to run based on expression condition (ex: "contains(id, "ssh")")'},  # noqa: E501
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -65,7 +66,8 @@ class nuclei(VulnMulti):
 		'exclude_tags': 'exclude-tags',
 		'exclude_severity': 'exclude-severity',
 		'templates': 't',
-		'response_size_read': 'rsr'
+		'response_size_read': 'rsr',
+		'template_condition': 'tc'
 	}
 	opt_value_map = {
 		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,

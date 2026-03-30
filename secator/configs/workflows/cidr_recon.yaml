@@ -50,18 +50,11 @@ tasks:
         field: name
 
     nmap:
-      description: Discover hosts and ports with TCP SYN scan
-      version_detection: true
+      description: Discover hosts and ports with ping scan
+      ping_scan: True
       targets_:
       - type: tag
         field: value
         condition: item.name == 'user_input'
       - type: target
         field: name
-
-  search_vulns:
-    description: Search for related exploits
-    targets_:
-    - type: port
-      field: '{host}:{port}~{service_name}'
-      condition: len(item.service_name.split('/')) > 1
