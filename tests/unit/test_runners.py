@@ -540,3 +540,14 @@ class TestCommandRunner(unittest.TestCase):
 						self.assertEqual(len(cmd.profiles), 1)
 						self.assertEqual(cmd.profiles[0].name, 'test_default')
 						self.assertEqual(cmd.run_opts.get('timeout'), 100)
+
+
+def test_runner_paused_status():
+	from secator.runners._base import Runner
+	r = Runner.__new__(Runner)
+	r.started = True
+	r.done = False
+	r.revoked = False
+	r.skipped = False
+	r.paused = True
+	assert r.status == 'PAUSED'

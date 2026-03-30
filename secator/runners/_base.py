@@ -123,6 +123,7 @@ class Runner:
 		self.celery_ids_map = {}
 		self.revoked = False
 		self.skipped = False
+		self.paused = False
 		self.results_buffer = []
 		self._hooks = hooks
 
@@ -354,6 +355,8 @@ class Runner:
 			return 'REVOKED'
 		if self.skipped:
 			return 'SKIPPED'
+		if self.paused:
+			return 'PAUSED'
 		if not self.done:
 			return 'RUNNING'
 		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
