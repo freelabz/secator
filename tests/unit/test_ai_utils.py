@@ -327,11 +327,8 @@ class TestPromptUserAllChoices(unittest.TestCase):
 
         result = prompt_user(history, choices=choices, max_iterations=10)
 
-        # Check the message added to history
-        last_msg = history.messages[-1]
         expected = "Do all of the following: 1) Scan for ports, 2) Enumerate subdomains"
-        self.assertEqual(last_msg["content"], expected)
-        self.assertEqual(result[0], expected)
+        self.assertEqual(result["answer"], expected)
 
     @patch('secator.rich.InteractiveMenu')
     @patch('secator.definitions.IN_WORKER', False)
@@ -351,10 +348,8 @@ class TestPromptUserAllChoices(unittest.TestCase):
 
         result = prompt_user(history, choices=choices)
 
-        last_msg = history.messages[-1]
         expected = "Do all of the following: 1) Choice A, 2) Choice B. Additional instructions: focus on main domain"
-        self.assertEqual(last_msg["content"], expected)
-        self.assertEqual(result[0], expected)
+        self.assertEqual(result["answer"], expected)
 
 
 if __name__ == '__main__':
