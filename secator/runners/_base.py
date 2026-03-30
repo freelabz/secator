@@ -605,6 +605,12 @@ class Runner:
 		if queue:
 			self.results_buffer.append(item)
 
+		# Track completed inputs for Command subclasses (for checkpoint/resume)
+		if hasattr(self, 'completed_inputs') and hasattr(item, '_input'):
+			inp = getattr(item, '_input', None)
+			if inp and inp in self.inputs and inp not in self.completed_inputs:
+				self.completed_inputs.append(inp)
+
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes.
 
