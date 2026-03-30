@@ -1,5 +1,5 @@
 <mode>
-Classify the following user prompt as either 'attack' or 'chat'.
+Classify the following user prompt as exactly one of: 'attack', 'chat', or 'exploit'.
 'chat' = the user wants to ask questions, get summaries, or discuss findings
 'attack' = the user wants to actively scan, test, attack, enumerate, or pentest targets.
 'exploit' = the user wants to validate a specific vulnerability, or write an exploit report.
