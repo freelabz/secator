@@ -50,7 +50,7 @@ tasks:
         field: name
 
     nmap:
-      description: Discover hosts and ports with ping scan
+      description: Discover live hosts with ping scan
       ping_scan: True
       targets_:
       - type: tag
