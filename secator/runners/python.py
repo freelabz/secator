@@ -38,6 +38,16 @@ class PythonRunner(Runner):
 	opts = {}
 	default_inputs = None
 	profile = 'small'
+	install_cmd = None
+	install_pre = None
+	install_post = None
+	install_cmd_pre = None
+	github_handle = None
+	install_github_bin = False
+	install_ignore_bin = []
+	install_binary_name = None
+	install_version = None
+	install_github_version_prefix = ''
 
 	def needs_chunking(self, sync):
 		return False

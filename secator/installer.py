@@ -63,7 +63,10 @@ class ToolInstaller:
 		name = tool_cls.__name__
 		console.print(Info(message=f'[bold yellow]:wrench: Installing {name} ...[/]'))
 		status = InstallerStatus.UNKNOWN
-		if not hasattr(tool_cls, 'cmd'):
+		has_cmd = hasattr(tool_cls, 'cmd')
+
+		# For non-Command tasks (e.g. PythonRunner), only proceed if they have an install_cmd
+		if not has_cmd and not getattr(tool_cls, 'install_cmd', None):
 			return InstallerStatus.INSTALL_SKIPPED_OK
 
 		# Fail if not supported
@@ -74,11 +77,12 @@ class ToolInstaller:
 			tool_cls.install_post]):
 			return InstallerStatus.INSTALL_NOT_SUPPORTED
 
-		# Check PATH
-		path_var = os.environ.get('PATH', '')
-		if str(CONFIG.dirs.bin) not in path_var:
-			console.print(Warning(message=f'Bin directory {CONFIG.dirs.bin} not found in PATH ! Binaries installed by secator will not work'))  # noqa: E501
-			console.print(Warning(message=f'Run "export PATH=$PATH:{CONFIG.dirs.bin}" to add the binaries to your PATH'))
+		# Check PATH (only relevant for Command-based tasks that install binaries)
+		if has_cmd:
+			path_var = os.environ.get('PATH', '')
+			if str(CONFIG.dirs.bin) not in path_var:
+				console.print(Warning(message=f'Bin directory {CONFIG.dirs.bin} not found in PATH ! Binaries installed by secator will not work'))  # noqa: E501
+				console.print(Warning(message=f'Run "export PATH=$PATH:{CONFIG.dirs.bin}" to add the binaries to your PATH'))
 
 		# Install pre-required packages
 		if tool_cls.install_pre:
@@ -89,7 +93,9 @@ class ToolInstaller:
 
 		# Get custom binary name if specified
 		target_binary_name = getattr(tool_cls, 'install_binary_name', None)
-		binary_name = tool_cls.__name__ if target_binary_name else tool_cls.cmd.split(' ')[0]
+		binary_name = tool_cls.__name__ if target_binary_name else (
+			tool_cls.cmd.split(' ')[0] if has_cmd else tool_cls.__name__
+		)
 
 		# Install binaries from GH
 		gh_status = InstallerStatus.UNKNOWN
@@ -117,7 +123,7 @@ class ToolInstaller:
 				status = SourceInstaller.install(
 					tool_cls.install_cmd,
 					tool_cls.install_version,
-					binary_name=binary_name,
+					binary_name=binary_name if has_cmd else None,
 					target_binary_name=target_binary_name
 				)
 				if not status.is_ok():

@@ -38,6 +38,7 @@ class ai(PythonRunner):
 	output_types = FINDING_TYPES
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''
+	install_cmd = 'pipx install shfmt-py'
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
