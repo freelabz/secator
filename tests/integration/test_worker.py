@@ -66,7 +66,7 @@ class TestWorker(unittest.TestCase):
 			name='nginx-version',
 			match='https://secator.cloud',
 			category='info',
-			value='nginx/1.28.1',
+			value='nginx/1.28.3',
 			_source='nuclei_url'
 		)
 		self.assertIn(port, cmd.findings)
