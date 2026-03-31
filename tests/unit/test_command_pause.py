@@ -1,7 +1,6 @@
 import os
 import signal
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 def test_command_supports_pause_default():

@@ -554,8 +554,8 @@ def test_runner_paused_status():
 
 
 def test_runner_pid_file(tmp_path):
-	import os, json
-	from pathlib import Path
+	import os
+	import json
 	from secator.runners._base import Runner
 
 	runner = Runner.__new__(Runner)

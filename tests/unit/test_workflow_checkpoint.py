@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock, patch
-
 
 def test_workflow_checkpoint_task_states():
 	from secator.runners.checkpoint import Checkpoint
