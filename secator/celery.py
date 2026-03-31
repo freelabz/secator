@@ -104,6 +104,22 @@ if IN_WORKER:
 	setup_handlers()
 
 
+def save_celery_checkpoint(checkpoint):
+	"""Save a Checkpoint to the Celery result backend.
+
+	Stores under key 'checkpoint:<runner_id>' with 7-day TTL.
+	"""
+	from dataclasses import asdict
+	from secator.runners.checkpoint import CELERY_CHECKPOINT_PREFIX
+
+	key = f'{CELERY_CHECKPOINT_PREFIX}{checkpoint.runner_id}'
+	value = json.dumps(asdict(checkpoint), default=str)
+	try:
+		app.backend.set(key, value, expires=604800)  # 7 days
+	except Exception as e:
+		debug(f'Failed to save checkpoint to Celery backend: {e}', sub='celery.checkpoint')
+
+
 @retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
@@ -220,9 +236,27 @@ def run_command(self, results, name, targets, opts={}):
 		return replace(self, workflow)
 
 	# Update state live
-	for _ in task:
-		update_state(self, task)
-	update_state(self, task, force=True)
+	try:
+		for _ in task:
+			update_state(self, task)
+		update_state(self, task, force=True)
+	except Exception as e:
+		# Save checkpoint on unexpected kill/revoke
+		if task.started and not task.done:
+			from secator.runners.checkpoint import Checkpoint
+			cp = Checkpoint(
+				runner_type='task',
+				runner_id=context.get('task_id', self.request.id),
+				runner_name=name,
+				targets=list(targets) if targets else [],
+				opts=opts,
+				context=context,
+				completed_inputs=list(getattr(task, 'completed_inputs', [])),
+				pause_method='kill',
+			)
+			cp.save(task.reports_folder)
+			save_celery_checkpoint(cp)
+		raise
 
 	if CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in task.results]
