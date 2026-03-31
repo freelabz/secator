@@ -104,6 +104,27 @@ if IN_WORKER:
 	setup_handlers()
 
 
+def _update_workflow_checkpoint(completed_runner):
+	"""Mark this task as completed in the parent workflow's checkpoint."""
+	from secator.runners.checkpoint import Checkpoint
+	from secator.runners._base import Runner
+
+	parent_id = completed_runner.context.get('workflow_id') or completed_runner.context.get('scan_id')
+	if not parent_id:
+		return
+	parent_folder = Runner.find_runner_folder(parent_id)
+	if not parent_folder:
+		return
+	cp = Checkpoint.load(parent_folder)
+	if cp is None:
+		return
+	task_name = completed_runner.name
+	if task_name in cp.task_states:
+		cp.task_states[task_name] = 'completed'
+	cp.completed_results_count += len(completed_runner.results)
+	cp.save(parent_folder)
+
+
 def save_celery_checkpoint(checkpoint):
 	"""Save a Checkpoint to the Celery result backend.
 
@@ -381,6 +402,10 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
 	runner.mark_completed()
+
+	# Update parent workflow/scan checkpoint
+	if runner.has_parent:
+		_update_workflow_checkpoint(runner)
 
 	# Log total time
 	total_time = time() - start_time
