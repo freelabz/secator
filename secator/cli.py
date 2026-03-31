@@ -1246,7 +1246,6 @@ def pause_runner(runner_id):
 def resume_runner(runner_id, sync):
 	"""Resume a paused task, workflow, or scan by its ID."""
 	import signal as _signal
-	from pathlib import Path
 	from secator.runners.checkpoint import Checkpoint, CELERY_CHECKPOINT_PREFIX
 	from secator.runners._base import Runner
 	from secator.template import TemplateLoader

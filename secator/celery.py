@@ -261,7 +261,7 @@ def run_command(self, results, name, targets, opts={}):
 		for _ in task:
 			update_state(self, task)
 		update_state(self, task, force=True)
-	except Exception as e:
+	except Exception:
 		# Save checkpoint on unexpected kill/revoke
 		if task.started and not task.done:
 			from secator.runners.checkpoint import Checkpoint
