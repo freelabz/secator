@@ -181,7 +181,7 @@ def process_extractor(results, extractor, ctx=None):
 				'__builtins__': {'len': len},
 				're_match': lambda pattern, value: bool(re.search(pattern, str(value))) if value is not None else False,
 			}
-			_eval_condition = re.sub(r'([\w.]+)\s*~=\s*(.+)', r're_match(\2, \1)', _condition)
+			_eval_condition = re.sub(r'([\w.]+)\s*~=\s*(.+?)(?=\s+(?:and|or)\s+|$)', r're_match(\2, \1)', _condition)
 			eval_result = eval(_eval_condition, safe_globals, ctx)
 			if eval_result:
 				tmp_results.append(item)
