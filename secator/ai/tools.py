@@ -185,12 +185,11 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> li
 	"""
 	config = get_mode_config(mode)
 	allowed_actions = config["allowed_actions"]
+	excluded = set()
+	if is_subagent:
+		excluded.add("follow_up")
 	if backend is not None:
-		excluded = backend.get_excluded_tools()
-	elif is_subagent:
-		excluded = {'follow_up'}
-	else:
-		excluded = set()
+		excluded.update(backend.get_excluded_tools())
 	schemas = [
 		schema for tool_name, schema in TOOL_SCHEMAS.items()
 		if TOOL_ACTION_MAP.get(tool_name) in allowed_actions
@@ -216,5 +215,6 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		return None
 	if not arguments:
 		return None
-	descr = arguments.get("name", "") or arguments.get("query") or arguments.get("command", "unknown")
-	return {"action": action_type, "description": descr, **arguments}
+	safe_arguments = {k: v for k, v in arguments.items() if k not in {"action", "description"}}
+	descr = safe_arguments.get("name", "") or safe_arguments.get("query") or safe_arguments.get("command", "unknown")
+	return {"action": action_type, "description": descr, **safe_arguments}

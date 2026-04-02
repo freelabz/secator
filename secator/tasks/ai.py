@@ -188,6 +188,7 @@ class ai(PythonRunner):
 		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
 		self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 		self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
+		yield Ai(content=self.prompt, ai_type="prompt")
 		yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 
 		# Run loop
@@ -685,7 +686,7 @@ class ai(PythonRunner):
 			tc_name = group_results[0]["_context"]['tool_call_name']
 			has_errors = any(r["_type"] == "error" for r in group_results)
 			serialized = [
-				r.toDict(exclude=list(INTERNAL_FIELDS)) if isinstance(r, OutputType) else r
+				{k: v for k, v in r.items() if k not in INTERNAL_FIELDS}
 				for r in group_results
 			]
 			tool_result_str = format_tool_result(

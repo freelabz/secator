@@ -121,7 +121,7 @@ class Ai(OutputType):
 
 		# Add session name or subagent label for prompt and response types
 		subagent = self._context.get('subagent')
-		session_name = self._context.get('name')
+		session_name = self._context.get('session_name') or self._context.get('name')
 		if self.ai_type in ('response', 'prompt') and (session_name or subagent):
 			name_label = _s(session_name or (subagent if isinstance(subagent, str) else 'subagent'))
 			s += f' [bold orange4]{name_label}[/]'

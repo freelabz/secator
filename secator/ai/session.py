@@ -20,13 +20,15 @@ def save_history(history, reports_folder, debug_fn=None):
 	"""
 	try:
 		history_path = Path(reports_folder) / 'history.json'
-		with open(history_path, 'w') as f:
+		with open(history_path, 'w', encoding='utf-8') as f:
 			json.dump(history.messages, f, indent=2)
 		if debug_fn:
 			debug_fn(f'Saved history to {history_path}', sub='llm')
-	except Exception as e:
+	except (OSError, TypeError) as e:
 		if debug_fn:
 			debug_fn(f'Failed to save history: {e}', sub='llm')
+		else:
+			console.print(Warning(message=f'Failed to save history: {e}'))
 
 
 def list_sessions(max_sessions=20):
@@ -57,7 +59,7 @@ def list_sessions(max_sessions=20):
 			for item in ai_items:
 				if item.get('ai_type') == 'prompt':
 					first_prompt = item.get('content', '')
-					session_name = (item.get('_context') or {}).get('name', '')
+					session_name = (item.get('_context') or {}).get('session_name', '') or (item.get('_context') or {}).get('name', '')
 					break
 			info = data.get('info', {})
 			sessions.append({
@@ -97,10 +99,13 @@ def show_session_picker():
 
 	options = []
 	for s in sessions:
-		if s.get('name'):
-			label_text = f"[{s['name']}] {s['prompt']}"
+		name = s.get('name', '')
+		prompt = s.get('prompt', '')
+		# Only show bracket label when name is an explicit custom name, not auto-derived from the prompt
+		if name and prompt and name != prompt and not prompt.startswith(name.rstrip('.')):
+			label_text = f"[{name}] {prompt}"
 		else:
-			label_text = s['prompt']
+			label_text = prompt or name
 		prompt_preview = label_text[:max_label]
 		if len(label_text) > max_label:
 			prompt_preview += '...'

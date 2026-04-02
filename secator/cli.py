@@ -803,8 +803,12 @@ def workspace_clear(name):
 	"""Clear all contents of a workspace (keeps the folder)."""
 	import shutil
 	name = name or CONFIG.workspace.default or 'default'
-	ws_path = Path(CONFIG.dirs.reports) / name
-	if not ws_path.exists():
+	reports_root = Path(CONFIG.dirs.reports).resolve()
+	ws_path = (reports_root / name).resolve()
+	if reports_root not in ws_path.parents:
+		console.print(Error(message=f'Invalid workspace name: [bold]{name}[/].'))
+		return
+	if not ws_path.is_dir():
 		console.print(Error(message=f'Workspace [bold]{name}[/] does not exist.'))
 		return
 	count = 0

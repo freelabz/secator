@@ -234,8 +234,8 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 	if mode not in MODES:
 		from secator.rich import console
 		from secator.output_types import Warning
-		console.print(Warning(message=f"Unknown mode {mode!r}, falling back to 'attack'. Valid modes: {list(MODES.keys())}"))
-		mode = "attack"
+		console.print(Warning(message=f"Unknown mode {mode!r}, falling back to 'chat'. Valid modes: {list(MODES.keys())}"))
+		mode = "chat"
 
 	mode_config = MODES[mode]
 	system_prompt = mode_config["system_prompt"]

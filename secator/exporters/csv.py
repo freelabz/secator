@@ -17,7 +17,9 @@ class CsvExporter(Exporter):
 		csv_paths = []
 
 		for output_type, items in results.items():
-			output_cls = [o for o in FINDING_TYPES + [Target] if o._type == output_type][0]
+			output_cls = next((o for o in [*FINDING_TYPES, Target] if o._type == output_type), None)
+			if output_cls is None:
+				continue
 			keys = [o.name for o in fields(output_cls)]
 			items = [i.toDict() for i in items]
 			if not items:

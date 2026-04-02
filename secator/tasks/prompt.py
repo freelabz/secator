@@ -66,7 +66,7 @@ class prompt(PythonRunner):
     }
 
     def yielder(self):
-        yes = self.get_opt_value.get('yes')
+        yes = self.get_opt_value('yes')
         in_ci = _is_ci()
         timeout = CONFIG.runners.prompt_timeout
 

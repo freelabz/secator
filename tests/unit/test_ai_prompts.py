@@ -115,10 +115,10 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn('$regex', prompt)
 
 	def test_get_system_prompt_invalid_mode_falls_back(self):
-		"""Test get_system_prompt falls back to attack for invalid mode."""
+		"""Test get_system_prompt falls back to chat for invalid mode (consistent with get_mode_config)."""
 		invalid_prompt = get_system_prompt("invalid_mode")
-		attack_prompt = get_system_prompt("attack")
-		self.assertEqual(invalid_prompt, attack_prompt)
+		chat_prompt = get_system_prompt("chat")
+		self.assertEqual(invalid_prompt, chat_prompt)
 
 	# === Format functions ===
 

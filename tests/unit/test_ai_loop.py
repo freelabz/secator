@@ -7,24 +7,21 @@ Covers three primary scenarios:
 """
 import json
 import unittest
-from dataclasses import field
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
-try:
+from secator.definitions import ADDONS_ENABLED
+HAS_AI = ADDONS_ENABLED.get('ai', False)
+
+if HAS_AI:
 	from secator.ai.actions import (
 		ActionContext, check_guardrails_sync as check_guardrails, dispatch_action
 	)
-	from secator.ai.guardrails import PermissionEngine, detect_paths_with_access
+	from secator.ai.guardrails import PermissionEngine
 	from secator.ai.interactivity import CLIBackend, RemoteBackend, AutoBackend, create_backend
-	from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEMAS
-	from secator.ai.prompts import get_system_prompt, get_mode_config
+	from secator.ai.tools import build_tool_schemas, tool_call_to_action
+	from secator.ai.prompts import get_system_prompt
 	from secator.ai.history import ChatHistory
-	from secator.ai.encryption import maybe_encrypt
-	from secator.output_types import Ai, Error, Warning, Info
-	from secator.definitions import ADDONS_ENABLED
-	HAS_AI = ADDONS_ENABLED.get('ai', False)
-except ImportError:
-	HAS_AI = False
+	from secator.output_types import Ai
 
 
 def _make_tool_call(name, args, tc_id=None):
