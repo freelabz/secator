@@ -1,3 +1,4 @@
+from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID, IP,
@@ -42,13 +43,14 @@ class nuclei(VulnMulti):
 		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
 		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
-		'response_size_read': {'type': int, 'help': 'Max body size to read (bytes)'},
+		'response_size_read': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},  # noqa: E501
 		'stats': {'is_flag': True, 'short': 'stats', 'default': True, 'help': 'Display statistics about the running scan'},
 		'stats_json': {'is_flag': True, 'short': 'sj', 'default': True, 'help': 'Display statistics in JSONL(ines) format'},
 		'stats_interval': {'type': str, 'short': 'si', 'help': 'Number of seconds to wait between showing a statistics update'},  # noqa: E501
 		'tags': {'type': str, 'help': 'Tags'},
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
+		'template_condition': {'type': str, 'short': 'tc', 'help': 'Templates to run based on expression condition (ex: "contains(id, "ssh")")'},  # noqa: E501
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -65,7 +67,8 @@ class nuclei(VulnMulti):
 		'exclude_tags': 'exclude-tags',
 		'exclude_severity': 'exclude-severity',
 		'templates': 't',
-		'response_size_read': 'rsr'
+		'response_size_read': 'rsr',
+		'template_condition': 'tc'
 	}
 	opt_value_map = {
 		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,
