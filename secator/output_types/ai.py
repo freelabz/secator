@@ -159,8 +159,9 @@ class Ai(OutputType):
 			action_label = self.ai_type
 			if self.ai_type == 'stopped':
 				action_label = 'done'
-			line = f'{s}[bold blue]{action_label.capitalize().replace("_", " ")}[/]'
-			content = _s(self.content) or ''
+			action_label_str = action_label.capitalize().replace('_', ' ')
+			line = f'{s}[bold blue]{action_label_str}[/]'
+			content = _s(self.content)
 			if self.ai_type in ['task', 'workflow', 'scan']:
 				colors = {
 					'task': 'bold gold3',
