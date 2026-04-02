@@ -82,3 +82,9 @@ class ApiBackend(QueryBackend):
         except Exception as e:
             console.print(Warning(message=f"API count failed: {e}"))
             return 0
+
+    def update(self, query: dict, update: dict) -> int:
+        """Update records via API PATCH endpoint."""
+        payload = {"query": query, "update": update}
+        result = self._make_request("PATCH", "findings/update", data=payload)
+        return result.get("modified_count", 0)

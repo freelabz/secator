@@ -5,6 +5,7 @@ from dataclasses import fields
 from secator.exporters._base import Exporter
 from secator.rich import console
 from secator.output_types import FINDING_TYPES
+from secator.output_types.target import Target
 from secator.output_types import Info
 
 
@@ -16,7 +17,9 @@ class CsvExporter(Exporter):
 		csv_paths = []
 
 		for output_type, items in results.items():
-			output_cls = [o for o in FINDING_TYPES if o._type == output_type][0]
+			output_cls = next((o for o in [*FINDING_TYPES, Target] if o._type == output_type), None)
+			if output_cls is None:
+				continue
 			keys = [o.name for o in fields(output_cls)]
 			items = [i.toDict() for i in items]
 			if not items:
@@ -33,5 +36,5 @@ class CsvExporter(Exporter):
 		else:
 			csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
 
-		info = Info(message=f'Saved CSV reports to {csv_paths_str}')
-		console.print(info)
+		if getattr(self.report.runner, 'print_reports_message', True):
+			console.print(Info(message=f'Saved CSV reports to {csv_paths_str}'))

@@ -1,0 +1,28 @@
+<subagents>
+You can spawn autonomous AI subagents by calling the `run_task` tool with name "ai". Each subagent gets a fresh context window and runs non-interactively.
+
+Use subagents when:
+- A vulnerability was found and you think it can be exploited
+- A complex sub-task can benefit from a fresh context window, or the current context is too large
+- The user explicitly asks for a subagent
+
+Include all necessary context in the prompt:
+- Full vulnerability details (raw JSON)
+- Related findings (raw JSON)
+- Other relevant information that the subagent would need (auth credentials, service versions, related vulns, ...).
+
+Valid modes: "attack" (full recon/pentest), "chat" (analysis/queries), "exploit" (focused exploitation, max_iterations: 5).
+Session name: `session_name` must use the actual target name (e.g. "Recon on example.com", "SQLI exploitation on 10.0.0.1").
+
+<example>
+  run_task(
+    name='ai'
+    targets=["vulnweb.com"]
+    opts={
+     "mode": "attack",
+     "prompt": "Perform comprehensive domain recon on vulnweb.com with rate limit 500 and the aggressive profile",
+     "session_name": "Domain recon on vulnweb.com",
+     "max_iterations": 5
+    }
+</example>
+</subagents>

@@ -747,6 +747,13 @@ def workspace():
 def workspace_list():
 	"""List workspaces."""
 	workspaces = {}
+	reports_dir = Path(CONFIG.dirs.reports)
+	# Discover all workspace directories (including empty ones)
+	if reports_dir.exists():
+		for child in sorted(reports_dir.iterdir()):
+			if child.is_dir():
+				workspaces[child.name] = {'count': 0, 'path': str(child)}
+	# Count reports per workspace
 	json_reports = []
 	for root, _, files in os.walk(CONFIG.dirs.reports):
 		for file in files:
@@ -770,7 +777,7 @@ def workspace_list():
 	console.print(table)
 
 
-@workspace.command('use')
+@workspace.command(name='use', aliases=['create'])
 @click.argument('name')
 def workspace_use(name):
 	"""Use a workspace (set as default)."""
@@ -788,6 +795,30 @@ def workspace_current():
 	"""Show current default workspace."""
 	current = CONFIG.workspace.default or 'default'
 	console.print(f'Current workspace: [bold gold3]{current}[/]')
+
+
+@workspace.command('clear')
+@click.argument('name', required=False)
+def workspace_clear(name):
+	"""Clear all contents of a workspace (keeps the folder)."""
+	import shutil
+	name = name or CONFIG.workspace.default or 'default'
+	reports_root = Path(CONFIG.dirs.reports).resolve()
+	ws_path = (reports_root / name).resolve()
+	if reports_root not in ws_path.parents:
+		console.print(Error(message=f'Invalid workspace name: [bold]{name}[/].'))
+		return
+	if not ws_path.is_dir():
+		console.print(Error(message=f'Workspace [bold]{name}[/] does not exist.'))
+		return
+	count = 0
+	for child in ws_path.iterdir():
+		if child.is_dir():
+			shutil.rmtree(child)
+		else:
+			child.unlink()
+		count += 1
+	console.print(Info(message=f'Cleared workspace [bold]{name}[/] ({count} items removed).'))
 
 
 #----------#

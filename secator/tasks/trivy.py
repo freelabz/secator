@@ -115,7 +115,7 @@ class trivy(Vuln):
 				if vuln_id.startswith('CVE'):
 					remote_data = Vuln.lookup_cve(vuln_id)
 					if remote_data:
-						data.update(remote_data)
+						data.update(remote_data.toDict() if hasattr(remote_data, 'toDict') else remote_data)
 				yield Vulnerability(**data)
 			for secret in item.get('Secrets', []):
 				code_context = '\n'.join([line['Content'] for line in secret.get('Code', {}).get('Lines') or []])

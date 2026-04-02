@@ -132,3 +132,46 @@ class OutputType:
 		if exclude:
 			return {k: v for k, v in data.items() if k not in exclude}
 		return data
+
+	@classmethod
+	def validate_fields(cls, data: dict) -> list:
+		"""Validate data types against dataclass field definitions.
+
+		Returns a list of error messages for invalid fields.
+		"""
+		errors = []
+		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		for f in fields(cls):
+			if f.name.startswith('_') or f.name not in data:
+				continue
+			value = data[f.name]
+			if value is None:
+				continue
+			expected_type = f.type if isinstance(f.type, type) else None
+			if expected_type is None:
+				origin = getattr(f.type, '__origin__', None)
+				if origin is not None:
+					expected_type = origin
+			if expected_type and not isinstance(value, expected_type):
+				expected_name = type_names.get(expected_type, getattr(expected_type, '__name__', str(expected_type)))
+				actual_name = type_names.get(type(value), type(value).__name__)
+				errors.append(f"'{f.name}' expected {expected_name}, got {actual_name}: {repr(value)[:100]}")
+		return errors
+
+	@classmethod
+	def schema(cls) -> str:
+		"""Get a human-readable schema string for this OutputType class."""
+		lines = [f"{cls.__name__}("]
+		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		for f in fields(cls):
+			if f.name.startswith('_'):
+				continue
+			type_name = type_names.get(f.type, str(f.type)) if isinstance(f.type, type) else str(f.type)
+			if not isinstance(f.default, _MISSING_TYPE):
+				lines.append(f"  {f.name}: {type_name} = {repr(f.default)},")
+			elif not isinstance(f.default_factory, _MISSING_TYPE):
+				lines.append(f"  {f.name}: {type_name} = {repr(f.default_factory())},")
+			else:
+				lines.append(f"  {f.name}: {type_name},  # required")
+		lines.append(")")
+		return "\n".join(lines)

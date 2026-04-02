@@ -1,29 +1,17 @@
 # secator/ai/utils.py
 """Utility functions for AI task - LLM initialization, calling, and response parsing."""
-import json
 import logging
-import re
+import random
 from typing import Dict, List, Optional
 
+from secator.definitions import LLM_SPINNER_MESSAGES
 from secator.config import CONFIG
 from secator.output_types import Warning, Error
 from secator.rich import console, maybe_status
+from secator.utils import format_token_count
 
 # Module-level state for litellm initialization
 _llm_initialized = False
-
-
-def _find_matching_bracket(text: str, start: int, open_char: str, close_char: str) -> int:
-	"""Find position after the matching closing bracket, starting from `start`."""
-	depth = 0
-	for i in range(start, len(text)):
-		if text[i] == open_char:
-			depth += 1
-		elif text[i] == close_char:
-			depth -= 1
-			if depth == 0:
-				return i + 1
-	return start
 
 
 def init_llm(api_key: Optional[str] = None):
@@ -60,28 +48,87 @@ def init_llm(api_key: Optional[str] = None):
 			from rich.markdown import Markdown
 			from rich.panel import Panel
 			from rich.text import Text
+			from rich.console import Group
 			MAX_LEN = 2000
-			role_styles = {"system": "blue", "user": "green", "assistant": "red"}
+			role_styles = {"system": "blue", "user": "green", "assistant": "red", "tool": "yellow"}
 			message_count = len(messages)
-			new_start = self._last_message_count - 1
-			self._last_message_count = message_count
-			if new_start > 0:
-				console.print(f"[dim]... {new_start} previous message(s) hidden ...[/]")
+			# Only update counter when conversation is growing (same conversation)
+			# A smaller message list means a side call (e.g. detect_mode) — show all, don't update
+			is_side_call = message_count <= self._last_message_count
+			prev_count = 0 if is_side_call else self._last_message_count
+			if not is_side_call:
+				self._last_message_count = message_count
+			panels = []
+			if prev_count > 0:
+				panels.append(Text(f"... {prev_count} previous message(s) hidden ...", style="dim"))
 			for count, msg in enumerate(messages, 1):
-				if count <= new_start:
+				if count <= prev_count:
 					continue
 				role = msg.get("role", "unknown").upper()
 				content = msg.get("content", "").strip()
 				style = role_styles.get(msg.get("role", ""), "white")
-				if len(content) > MAX_LEN:
-					content = content[:MAX_LEN] + f"\n\n... ({len(content) - MAX_LEN} chars truncated)"
-				# Use Markdown for assistant responses, Text for everything else
-				renderable = Markdown(content) if msg.get("role") == "assistant" else Text(content)
-				console.print(Panel(
+				if "litellm.raw" not in CONFIG.debug:
+					if len(content) > MAX_LEN:
+						content = content[:MAX_LEN] + f"\n\n... ({len(content) - MAX_LEN} chars truncated)"
+				# For assistant messages with tool_calls, show the tool calls
+				if msg.get("role") == "assistant" and msg.get("tool_calls"):
+					parts = [content] if content else []
+					for tc in msg["tool_calls"]:
+						fn = tc.get("function", {})
+						parts.append(f"**tool_call**: `{fn.get('name', '')}({fn.get('arguments', '')})`")
+					renderable = Markdown("\n\n".join(parts))
+				elif msg.get("role") == "assistant":
+					renderable = Markdown(content)
+				else:
+					renderable = Text(content)
+
+				# For tool results, pretty-print the JSON content
+				title_extra = ""
+				if msg.get("role") == "tool":
+					tool_name = msg.get("name", msg.get("tool_call_id", ""))
+					title_extra = f" [dim]{tool_name}[/]"
+					try:
+						import json as _json
+						from rich.pretty import Pretty
+						data = _json.loads(content)
+						renderable = Pretty(data)
+					except (ValueError, TypeError):
+						pass
+
+				panels.append(Panel(
 					renderable,
-					title=f"[bold {style}]{role}[/] [dim]({count}/{message_count})[/]",
+					title=f"[bold {style}]{role}[/]{title_extra} [dim]({count}/{message_count})[/]",
 					border_style=style
 				))
+			console.print(Panel(
+				Group(*panels),
+				title=f"[bold white]LLM REQUEST[/] [dim]({message_count} messages)[/]",
+				border_style="white"
+			))
+
+		def log_success_event(self, kwargs, response_obj, start_time, end_time):
+			if "litellm" not in CONFIG.debug:
+				return
+			from rich.markdown import Markdown
+			from rich.panel import Panel
+			message = response_obj.choices[0].message
+			content = message.content or ""
+			tool_calls = getattr(message, 'tool_calls', None) or []
+			parts = []
+			if content:
+				parts.append(content)
+			for tc in tool_calls:
+				parts.append(f"**tool_call**: `{tc.function.name}({tc.function.arguments})`")
+			text = "\n\n".join(parts) if parts else "(empty response)"
+			if "litellm.raw" not in CONFIG.debug:
+				MAX_LEN = 2000
+				if len(text) > MAX_LEN:
+					text = text[:MAX_LEN] + f"\n\n... ({len(text) - MAX_LEN} chars truncated)"
+			console.print(Panel(
+				Markdown(text),
+				title="[bold red]LLM RESPONSE[/]",
+				border_style="red"
+			))
 
 	litellm.callbacks = [LLMCallbackHandler()]
 	_llm_initialized = True
@@ -94,6 +141,7 @@ def call_llm(
 	api_base: Optional[str] = None,
 	api_key: Optional[str] = None,
 	max_retries: int = 3,
+	tools: Optional[List[Dict]] = None,
 ) -> Dict:
 	"""Call litellm completion and return response with usage."""
 	import time
@@ -102,18 +150,32 @@ def call_llm(
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
 
+	kwargs = dict(
+		model=model,
+		messages=messages,
+		temperature=temperature,
+		api_base=api_base,
+	)
+	# HARD DEBUG (ALL COMPLETE MESSAGES EXCEPT SYSPROMPT)
+	# Remove only when we have a better way to show this
+	if tools is not None:
+		kwargs["tools"] = tools
+		kwargs["tool_choice"] = "auto"
+
+	# Normalize assistant messages that have tool_calls but no 'content' key.
+	# litellm's trim_messages crashes with KeyError: 'content' on such messages.
+	for msg in kwargs["messages"]:
+		if msg.get("role") == "assistant" and "content" not in msg:
+			msg["content"] = None
+
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
-		litellm.ServiceUnavailableError, litellm.APIConnectionError,
+		litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.BadRequestError,
+		litellm.APIError
 	)
 	for attempt in range(1, max_retries + 1):
 		try:
-			response = litellm.completion(
-				model=model,
-				messages=messages,
-				temperature=temperature,
-				api_base=api_base,
-			)
+			response = litellm.completion(**kwargs)
 			break
 		except retryable as e:
 			if attempt < max_retries:
@@ -130,7 +192,8 @@ def call_llm(
 			))
 			raise
 
-	content = response.choices[0].message.content
+	message = response.choices[0].message
+	content = message.content or ""
 	usage = None
 
 	if hasattr(response, 'usage') and response.usage:
@@ -144,84 +207,10 @@ def call_llm(
 			"cost": cost,
 		}
 
-	return {"content": content, "usage": usage}
+	# Get tool calls
+	tool_calls = getattr(message, 'tool_calls', None) or []
 
-
-def _is_action_list(obj) -> bool:
-	"""Check if parsed JSON is a list of action dicts."""
-	return isinstance(obj, list) and all(isinstance(a, dict) and "action" in a for a in obj)
-
-
-def parse_actions(response: str) -> List[Dict]:
-	"""Extract JSON action array from LLM response."""
-	# Try code block first (```json ... ```)
-	match = re.search(r'```(?:json)?\s*(\[[\s\S]*?\])\s*```', response)
-	if match:
-		try:
-			result = json.loads(match.group(1))
-			if _is_action_list(result):
-				return result
-		except json.JSONDecodeError:
-			pass
-
-	# Try raw JSON array with "action" key
-	match = re.search(r'\[[\s\S]*?"action"[\s\S]*?\]', response)
-	if match:
-		try:
-			text = response[match.start():]
-			end = _find_matching_bracket(text, 0, '[', ']')
-			result = json.loads(text[:end])
-			if _is_action_list(result):
-				return result
-		except json.JSONDecodeError:
-			pass
-
-	# Try collecting individual JSON objects with "action" key
-	actions = []
-	for match in re.finditer(r'\{"action"', response):
-		try:
-			text = response[match.start():]
-			end = _find_matching_bracket(text, 0, '{', '}')
-			obj = json.loads(text[:end])
-			if isinstance(obj, dict) and "action" in obj:
-				actions.append(obj)
-		except json.JSONDecodeError:
-			pass
-	if actions:
-		return actions
-
-	return []
-
-
-def strip_json_from_response(text: str) -> str:
-	"""Remove JSON action blocks, keep only text/reasoning."""
-	if not text:
-		return ""
-
-	# Remove code blocks
-	text = re.sub(r'```(?:json)?\s*\[[\s\S]*?\]\s*```', '', text)
-
-	# Remove raw JSON arrays that contain "action"
-	result = []
-	i = 0
-	while i < len(text):
-		if text[i] == '[':
-			end = _find_matching_bracket(text, i, '[', ']')
-
-			# Extract the bracketed content
-			bracketed = text[i:end]
-
-			# Only skip if it looks like a JSON action array
-			if '"action"' in bracketed and re.match(r'^\[\s*\{', bracketed):
-				i = end
-			else:
-				result.append(text[i])
-				i += 1
-		else:
-			result.append(text[i])
-			i += 1
-
-	return ''.join(result).strip()
+	return {"content": content, "usage": usage, "tool_calls": tool_calls}
 
 
 MODEL_COLORS = [
@@ -230,6 +219,21 @@ MODEL_COLORS = [
 	'bright_red', 'bright_blue', 'orange3', 'deep_pink2', 'dark_olive_green3',
 	'medium_purple3', 'dodger_blue2', 'gold3', 'spring_green3', 'hot_pink',
 ]
+
+
+def format_llm_status(token_count, ctx_window, by_role):
+	"""Format a rich status message for LLM calls with token counts and a spinner message."""
+	token_str = format_token_count(token_count, icon='arrow_up', compact=True)
+	ctx_str = format_token_count(ctx_window, compact=True)
+	role_parts = []
+	for role in ('system', 'user', 'assistant', 'tool'):
+		if role in by_role:
+			role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
+	role_str = ' | '.join(role_parts)
+	return (
+		f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/]"
+		f" [gray42] • {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
+	)
 
 
 def setup_ai():
@@ -360,21 +364,23 @@ def setup_ai():
 		return selected
 
 
-def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="chat"):
+def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
+				mode="chat", model=None):
 	"""Prompt user for follow-up input via interactive menu.
 
 	Builds a unified menu with optional LLM-provided choices, plus Continue,
-	Summarize, and Exit. Mutates history in-place before returning.
+	Summarize, and Exit. Does NOT mutate history — the caller is responsible
+	for adding the returned answer to history.
 
 	Args:
-		history: ChatHistory instance to mutate with user's choice.
-		encryptor: Optional SensitiveDataEncryptor for encrypting user input.
+		history: ChatHistory instance (read-only, used for token counts and compaction).
+		encryptor: Optional SensitiveDataEncryptor (unused, kept for compat).
 		max_iterations: Current max iterations (used for continue message).
 		choices: Optional list of choice strings from LLM follow_up action.
+		model: Optional LLM model name for token count display.
 
 	Returns:
-		tuple: (action, extra_iters) where action is 'continue', 'summarize',
-			or 'follow_up', and extra_iters is iterations to add.
+		dict: {"answer": str, "extra_iters": int, "switch_mode": str|None}
 		None: to exit.
 	"""
 	from secator.definitions import IN_WORKER
@@ -382,83 +388,117 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None, mode="
 		return None
 	from secator.rich import InteractiveMenu
 	from secator.ai.prompts import format_continue
-	from secator.ai.prompts import get_system_prompt
+	from secator.utils import format_token_count
+
+	# Build title with token recap
+	title = "What's next?"
+	if model:
+		try:
+			from secator.ai.history import get_context_window
+			by_role = history.count_tokens_by_role(model)
+			ctx_window = get_context_window(model)
+			token_str = format_token_count(by_role['total'], icon='arrow_up', compact=True)
+			ctx_str = format_token_count(ctx_window, compact=True)
+			role_parts = []
+			for role in ('system', 'user', 'assistant', 'tool'):
+				if role in by_role:
+					role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
+			role_str = ' | '.join(role_parts)
+			title += f" [gray42]• {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
+		except Exception:
+			pass
 
 	try:
 		options = []
 
-		# Insert LLM-provided choices first
+		# Insert LLM-provided choices first (selectable for multi-select via Space)
 		if choices:
 			for choice in choices:
 				options.append({
 					"label": choice,
-					"description": "",
 					"input": True,
 					"action": "follow_up",
+					"selectable": True,
 				})
 
 			# Add "All of the above" when 2+ choices
 			if len(choices) >= 2:
 				options.append({
 					"label": "All of the above",
-					"description": "Run all suggested actions",
 					"input": True,
 					"action": "all_choices",
 				})
 
 		# Default options (always present)
 		continue_label = f"Continue to {mode}"
-		options.extend([
-			{
-				"label": continue_label, "description": "Continue with optional instructions",
-				"input": True, "action": "continue",
-			},
-			{
-				"label": "Summarize", "description": "Get a summary of findings",
-				"input": True, "action": "summarize", "default": "Summarize all findings so far",
-			},
-			{"label": "Exit", "action": "exit"},
-		])
+		default_options = [
+			{"label": continue_label, "input": True, "action": "continue"},
+			{"label": "Summarize", "input": True, "action": "summarize", "default": "Summarize all findings so far"},
+		]
 
-		result = InteractiveMenu("What's next?", options).show()
+		# Add "Compact context" when context is >50% full
+		if model:
+			try:
+				from secator.ai.history import get_context_window, OUTPUT_TOKEN_RESERVATION
+				by_role = history.count_tokens_by_role(model)
+				ctx_window = get_context_window(model)
+				usable = ctx_window - OUTPUT_TOKEN_RESERVATION
+				pct_used = (by_role["total"] / usable * 100) if usable > 0 else 0
+				if pct_used >= 25:
+					default_options.append({"label": f"Compact context ({pct_used:.0f}% full)", "action": "compact"})
+			except Exception:
+				pass
+
+		default_options.append({"label": "Exit", "action": "exit"})
+		options.extend(default_options)
+
+		result = InteractiveMenu(title, options).show()
 		if result is None:
 			return None
 
-		idx, value = result
+		idx_or_indices, value = result
+
+		# Multi-select: Space-toggled multiple choices
+		if isinstance(idx_or_indices, list):
+			selected_choices = [options[i]["label"] for i in idx_or_indices if options[i].get("selectable")]
+			if selected_choices:
+				numbered = [f"{i}) {c}" for i, c in enumerate(selected_choices, 1)]
+				msg = f"Do all of the following: {', '.join(numbered)}"
+				if value:
+					msg += f". Additional instructions: {value}"
+				return {"answer": msg, "extra_iters": max_iterations}
+
+		idx = idx_or_indices
 		action = options[idx].get("action")
 
 		if action == "continue":
-			if value:
-				user_msg = _maybe_encrypt(value, encryptor)
-				history.add_user(user_msg)
-			else:
-				continue_msg = format_continue(0, max_iterations)
-				history.add_user(_maybe_encrypt(continue_msg, encryptor))
-			return (value or continue_label, max_iterations)
+			msg = value if value else format_continue(0, max_iterations)
+			return {"answer": msg, "extra_iters": max_iterations}
 
 		if action == "summarize":
-			history.set_system(get_system_prompt("chat"))
-			summary_msg = "Summarize all findings so far and provide a final report."
-			if value:
-				summary_msg += f" {value}"
-			history.add_user(_maybe_encrypt(summary_msg, encryptor))
-			return (summary_msg, 1)
+			summary_msg = value if value else "Summarize all findings so far and provide a final report."
+			return {"answer": summary_msg, "extra_iters": 1, "switch_mode": "chat"}
 
 		if action == "follow_up":
 			choice_label = options[idx].get("label", "")
 			msg = choice_label
 			if value:
 				msg = f"{choice_label}: {value}"
-			history.add_user(_maybe_encrypt(msg, encryptor))
-			return (msg, 1)
+			return {"answer": msg, "extra_iters": 1}
 
 		if action == "all_choices":
 			numbered = [f"{i}) {c}" for i, c in enumerate(choices, 1)]
 			msg = f"Do all of the following: {', '.join(numbered)}"
 			if value:
 				msg += f". Additional instructions: {value}"
-			history.add_user(_maybe_encrypt(msg, encryptor))
-			return (msg, max_iterations)
+			return {"answer": msg, "extra_iters": max_iterations}
+
+		if action == "compact":
+			old_tokens = history.count_tokens(model)
+			history.compact(model)
+			new_tokens = history.count_tokens(model)
+			console.print(f"[bold green]Compacted context: {old_tokens} -> {new_tokens} tokens[/]")
+			return prompt_user(history, encryptor, max_iterations, choices, mode, model)
 
 		# exit
 		return None
