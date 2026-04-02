@@ -54,7 +54,7 @@ LLM_SPINNER_MESSAGES = [
 ]
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'markdown', 'table', 'txt']
 
 # Vocab
@@ -180,6 +180,7 @@ for addon, module in [
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
 	('api', 'requests'),
+	('discord', 'requests'),
 	('mongodb', 'pymongo'),
 	('redis', 'redis'),
 	('dev', 'flake8'),
