@@ -65,6 +65,21 @@ class Workflow(Runner):
 		ix = 0
 		sigs = []
 
+		# Write initial checkpoint with all tasks as 'pending'
+		from secator.runners.checkpoint import Checkpoint
+		all_task_names = [node.name for node in getattr(tree, 'nodes', []) if getattr(node, 'type', '') == 'task']
+		if self.context.get('workflow_id'):
+			cp = Checkpoint(
+				runner_type='workflow',
+				runner_id=self.context['workflow_id'],
+				runner_name=self.name,
+				targets=list(self.inputs),
+				opts=self.run_opts.copy(),
+				context=self.context.copy(),
+				task_states={name: 'pending' for name in all_task_names},
+			)
+			cp.save(self.reports_folder)
+
 		def process_task(node, force=False, parent_ix=None):
 			from celery import chain, group
 			from secator.utils import debug
@@ -77,6 +92,13 @@ class Workflow(Runner):
 			if node.type == 'task':
 				if node.parent.type == 'group' and not force:
 					return
+
+				# Skip tasks marked as completed in a resume checkpoint
+				skip_tasks = opts.get('skip_tasks', [])
+				if node.name in skip_tasks:
+					debug(f'{node.id} skipped (completed in checkpoint)', sub=self.config.name)
+					ix += 1
+					return None
 
 				# Skip task if condition is not met
 				condition = node.opts.pop('if', None)

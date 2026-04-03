@@ -128,6 +128,9 @@ class Command(Runner):
 	# Profile
 	profile = 'small'
 
+	# Whether the subprocess supports SIGSTOP/SIGCONT pause (default: True)
+	supports_pause = True
+
 	def __init__(self, inputs=[], **run_opts):
 
 		# Build runnerconfig on-the-fly
@@ -188,6 +191,8 @@ class Command(Runner):
 
 		# Process
 		self.process = None
+		self.completed_inputs = []    # inputs that produced >=1 result
+		self.pause_method = None      # 'signal' or 'kill'
 
 		# Monitor thread (lazy initialization)
 		self.monitor_thread = None
@@ -627,6 +632,32 @@ class Command(Runner):
 			os.killpg(os.getpgid(self.process.pid), sig)
 		if exit_ok:
 			self.exit_ok = True
+
+	def pause_process(self):
+		"""Pause the running subprocess. Uses SIGSTOP if supported, else terminates."""
+		if self.process is None:
+			return
+		if self.supports_pause:
+			try:
+				os.kill(self.process.pid, signal.SIGSTOP)
+				self.pause_method = 'signal'
+			except (OSError, ProcessLookupError):
+				self.process.terminate()
+				self.pause_method = 'kill'
+		else:
+			self.process.terminate()
+			self.pause_method = 'kill'
+		self.paused = True
+
+	def resume_process(self):
+		"""Resume a SIGSTOP-paused subprocess."""
+		if self.process is None or self.pause_method != 'signal':
+			return
+		try:
+			os.kill(self.process.pid, signal.SIGCONT)
+		except (OSError, ProcessLookupError):
+			pass
+		self.paused = False
 
 	def _stop_monitor_thread(self):
 		"""Stop monitor thread."""

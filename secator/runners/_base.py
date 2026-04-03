@@ -123,6 +123,7 @@ class Runner:
 		self.celery_ids_map = {}
 		self.revoked = False
 		self.skipped = False
+		self.paused = False
 		self.results_buffer = []
 		self._hooks = hooks
 
@@ -354,6 +355,8 @@ class Runner:
 			return 'REVOKED'
 		if self.skipped:
 			return 'SKIPPED'
+		if self.paused:
+			return 'PAUSED'
 		if not self.done:
 			return 'RUNNING'
 		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
@@ -601,6 +604,12 @@ class Runner:
 			self._print_item(item)
 		if queue:
 			self.results_buffer.append(item)
+
+		# Track completed inputs for Command subclasses (for checkpoint/resume)
+		if hasattr(self, 'completed_inputs') and hasattr(item, '_input'):
+			inp = getattr(item, '_input', None)
+			if inp and inp in self.inputs and inp not in self.completed_inputs:
+				self.completed_inputs.append(inp)
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes.
@@ -960,6 +969,9 @@ class Runner:
 		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks}), chunk: {self.chunk}, chunk_count: {self.chunk_count}', sub='start')  # noqa: E501
 		self.log_start()
 		self.run_hooks('on_start', sub='start')
+		self._write_pid_file()
+		if self.sync:
+			self._install_signal_handlers()
 
 	def mark_completed(self):
 		"""Mark runner as completed."""
@@ -974,6 +986,7 @@ class Runner:
 		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
 		self.log_results()
+		self._delete_pid_file()
 
 	def log_start(self):
 		"""Log runner start."""
@@ -1017,6 +1030,95 @@ class Runner:
 			report.build()
 			report.send()
 			self.report = report
+
+	def _write_pid_file(self):
+		"""Write runner.pid to reports folder for pause/resume lookup."""
+		import os
+		pid_data = {
+			'pid': os.getpid(),
+			'runner_type': getattr(self.config, 'type', '') if hasattr(self, 'config') else '',
+			'runner_name': self.name if hasattr(self, 'name') else '',
+			'celery_id': self.context.get('celery_id', '') if hasattr(self, 'context') else '',
+		}
+		try:
+			pid_path = Path(self.reports_folder) / 'runner.pid'
+			with open(pid_path, 'w') as f:
+				json.dump(pid_data, f)
+		except Exception:
+			pass
+
+	def _delete_pid_file(self):
+		"""Remove runner.pid from reports folder."""
+		try:
+			pid_path = Path(self.reports_folder) / 'runner.pid'
+			if pid_path.exists():
+				pid_path.unlink()
+		except Exception:
+			pass
+
+	def pause(self):
+		"""Pause this runner: signal or kill subprocess, save checkpoint."""
+		from secator.runners.checkpoint import Checkpoint
+
+		# Pause subprocess if this is a Command
+		if hasattr(self, 'pause_process'):
+			self.pause_process()
+			pause_method = self.pause_method or 'kill'
+			process_pid = self.process.pid if self.process else None
+		else:
+			pause_method = 'kill'
+			process_pid = None
+
+		# Save checkpoint
+		cp = Checkpoint(
+			runner_type=getattr(self.config, 'type', 'task'),
+			runner_id=self.context.get('task_id') or self.context.get('workflow_id') or self.context.get('scan_id', ''),
+			runner_name=self.name,
+			targets=list(self.inputs),
+			opts=self.run_opts.copy(),
+			context=self.context.copy(),
+			completed_inputs=list(getattr(self, 'completed_inputs', [])),
+			pause_method=pause_method,
+			process_pid=process_pid,
+		)
+		cp.save(self.reports_folder)
+		self.paused = True
+		self._print(Info(message=f'Runner paused. Resume with: secator resume {cp.runner_id}'), rich=True)
+
+	@classmethod
+	def find_runner_folder(cls, runner_id: str):
+		"""Scan reports directory for a runner.pid matching runner_id.
+
+		Args:
+			runner_id: Celery task ID or runner name to match.
+
+		Returns:
+			Path to reports folder containing runner.pid, or None.
+		"""
+		import glob
+		pattern = str(Path(CONFIG.dirs.reports) / '**' / 'runner.pid')
+		for pid_path_str in glob.glob(pattern, recursive=True):
+			try:
+				with open(pid_path_str) as f:
+					data = json.load(f)
+				if data.get('celery_id') == runner_id or data.get('runner_name') == runner_id:
+					return str(Path(pid_path_str).parent)
+			except (json.JSONDecodeError, OSError):
+				continue
+		return None
+
+	def _install_signal_handlers(self):
+		"""Install SIGTSTP (Ctrl+Z) and SIGUSR1 (remote pause) handlers."""
+		import signal as _signal
+
+		def _handle_pause(signum, frame):
+			self.pause()
+
+		try:
+			_signal.signal(_signal.SIGTSTP, _handle_pause)
+			_signal.signal(_signal.SIGUSR1, _handle_pause)
+		except (OSError, ValueError):
+			pass  # Not in main thread or platform doesn't support it
 
 	def export_profiler(self):
 		"""Export profiler."""

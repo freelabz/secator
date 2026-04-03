@@ -1201,6 +1201,126 @@ def report_export(json_path, output_folder, output):
 # 	pass
 
 
+#--------------#
+# PAUSE/RESUME #
+#--------------#
+
+@cli.command(name='pause')
+@click.argument('runner_id')
+def pause_runner(runner_id):
+	"""Pause a running task, workflow, or scan by its ID."""
+	import signal
+	from pathlib import Path
+	from secator.runners._base import Runner
+
+	# 1. Try local runner via runner.pid file
+	folder = Runner.find_runner_folder(runner_id)
+	if folder:
+		pid_path = Path(folder) / 'runner.pid'
+		try:
+			data = json.loads(pid_path.read_text())
+			pid = data['pid']
+			os.kill(pid, signal.SIGUSR1)
+			console.print(Info(message=f'Sent pause signal to runner {runner_id} (PID {pid})'))
+			return
+		except (OSError, ProcessLookupError) as e:
+			console.print(Warning(message=f'Could not signal local process: {e}'))
+
+	# 2. Try Celery task (revoke; worker saves checkpoint on revoke)
+	try:
+		from celery.result import AsyncResult
+		from secator.celery import app
+		result = AsyncResult(runner_id, app=app)
+		if result.state in ('PENDING', 'STARTED', 'RUNNING'):
+			result.revoke(terminate=True)
+			console.print(Info(message=f'Revoked Celery task {runner_id}. Resume with: secator resume {runner_id}'))
+		else:
+			console.print(Warning(message=f'Task {runner_id} is in state {result.state}, cannot pause'))
+	except Exception as e:
+		console.print(Error(message=f'Could not pause runner {runner_id}: {e}'))
+
+
+@cli.command(name='resume')
+@click.argument('runner_id')
+@click.option('--sync', is_flag=True, default=False, help='Run resumed task synchronously.')
+def resume_runner(runner_id, sync):
+	"""Resume a paused task, workflow, or scan by its ID."""
+	import signal as _signal
+	from secator.runners.checkpoint import Checkpoint, CELERY_CHECKPOINT_PREFIX
+	from secator.runners._base import Runner
+	from secator.template import TemplateLoader
+
+	# 1. Find checkpoint: report folder first, then Celery backend
+	checkpoint = None
+	folder = Runner.find_runner_folder(runner_id)
+	if folder:
+		checkpoint = Checkpoint.load(folder)
+	if checkpoint is None:
+		try:
+			from secator.celery import app
+			raw = app.backend.get(f'{CELERY_CHECKPOINT_PREFIX}{runner_id}')
+			if raw:
+				checkpoint = Checkpoint(**json.loads(raw))
+		except Exception:
+			pass
+
+	if checkpoint is None:
+		console.print(Error(message=f'No checkpoint found for runner ID: {runner_id}'))
+		return
+
+	console.print(Info(message=(
+		f'Resuming {checkpoint.runner_type} {checkpoint.runner_name} '
+		f'({len(checkpoint.remaining_inputs)} of {len(checkpoint.targets)} inputs remaining)'
+	)))
+
+	# 2. If SIGSTOP was used and PID is alive, send SIGCONT
+	if checkpoint.pause_method == 'signal' and checkpoint.process_pid:
+		try:
+			os.kill(checkpoint.process_pid, _signal.SIGCONT)
+			console.print(Info(message=f'Sent SIGCONT to PID {checkpoint.process_pid}'))
+			if folder:
+				checkpoint.delete(folder)
+			return
+		except (OSError, ProcessLookupError):
+			console.print(Warning(message=f'Process {checkpoint.process_pid} no longer alive, restarting task'))
+
+	# 3. Rebuild and restart with remaining inputs + original context
+	targets = checkpoint.remaining_inputs
+	if not targets:
+		console.print(Info(message='No remaining inputs — nothing to resume'))
+		if folder:
+			checkpoint.delete(folder)
+		return
+
+	from secator.runners.task import Task
+	from secator.runners.workflow import Workflow
+	from secator.runners.scan import Scan
+	runner_map = {'task': Task, 'workflow': Workflow, 'scan': Scan}
+	runner_cls = runner_map.get(checkpoint.runner_type)
+	if runner_cls is None:
+		console.print(Error(message=f'Unknown runner type: {checkpoint.runner_type}'))
+		return
+
+	config = TemplateLoader(name=f'{checkpoint.runner_type}/{checkpoint.runner_name}')
+	run_opts = checkpoint.opts.copy()
+	run_opts['sync'] = sync
+	context = checkpoint.context.copy()  # preserves original task_id/workflow_id/etc.
+
+	# For workflows: skip already-completed tasks
+	if checkpoint.runner_type == 'workflow' and checkpoint.task_states:
+		completed = [name for name, state in checkpoint.task_states.items() if state == 'completed']
+		if completed:
+			run_opts['skip_tasks'] = completed
+			console.print(Info(message=f'Skipping already-completed tasks: {completed}'))
+
+	runner = runner_cls(config, inputs=targets, run_opts=run_opts, context=context)
+	for _ in runner:
+		pass
+
+	if folder:
+		checkpoint.delete(folder)
+
+
 #--------#
 # HEALTH #
 #--------#
