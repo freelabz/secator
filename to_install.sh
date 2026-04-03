@@ -1,0 +1,1 @@
+secator install tools cariddi==v1.4.6,dalfox==v2.12.0,dnsx==v1.2.3,feroxbuster==v2.13.1,fping==v5.5,gitleaks==v8.30.1,grype==v0.110.0,httpx==v1.9.0,jswhois==v1.0.0,katana==v1.5.0,mapcidr==v1.1.97,naabu==v2.5.0,nuclei==v3.7.1,ph==v0.1.1,search_vulns==1.0.9,subfinder==v2.13.0,testssl==v3.2.3,trufflehog==v3.94.2,wafw00f==v2.4.2,whoisdomain==1.20260326.1,wpprobe==v0.11.4

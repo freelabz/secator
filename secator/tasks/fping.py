@@ -42,7 +42,7 @@ class fping(ReconIp):
 	}
 	github_handle = 'schweikert/fping'
 	install_github_bin = False
-	install_version = 'v5.1'
+	install_version = 'v5.5'
 	install_pre = {'*': ['fping']}
 	ignore_return_code = True
 
