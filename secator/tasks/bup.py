@@ -5,7 +5,7 @@ import shlex
 from secator.decorators import task
 from secator.output_types import Url, Progress
 from secator.definitions import (
-	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT,
+	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, THREADS, TIMEOUT, USER_AGENT,
 	OPT_NOT_SUPPORTED, URL, DATA
 )
 from secator.serializers import JSONSerializer
@@ -33,6 +33,7 @@ class bup(HttpBase):
 		HEADER: 'header',
 		DELAY: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		METHOD: OPT_NOT_SUPPORTED,
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: 'retry',
