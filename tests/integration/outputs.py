@@ -246,6 +246,11 @@ OUTPUTS_TASKS = {
         Ip(ip='192.168.1.255', alive=False, _source='mapcidr')
     ],
     'msfconsole': [],
+    'masscan': [
+        Port(port=80, ip='127.0.0.1', state='open', _source='masscan'),
+        Port(port=443, ip='127.0.0.1', state='open', _source='masscan'),
+        Port(port=8080, ip='127.0.0.1', state='open', _source='masscan'),
+    ],
     'naabu': [
         Port(port=3000, ip='127.0.0.1', state='open', _source='naabu'),
         Port(port=8080, ip='127.0.0.1', state='open', _source='naabu'),
