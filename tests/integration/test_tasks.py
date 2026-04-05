@@ -51,6 +51,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'maigret.site': 'github',
 			'trivy.mode': 'repo',
 			'testssl.server_defaults': True,
+			'nc.port': '3000,8080',
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 		}
 		# TODO: copy profile and test with profile
