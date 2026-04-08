@@ -192,7 +192,7 @@ class bbot(Command):
 	version_flag = '--help'
 	opts = {
 		'modules': {'type': str, 'short': 'm', 'help': ','.join(BBOT_MODULES)},
-		'presets': {'type': str, 'short': 'ps', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
+		'presets': {'type': str, 'short': 'bp', 'help': ','.join(BBOT_PRESETS), 'shlex': False},
 		'flags': {'type': str, 'short': 'fl', 'help': ','.join(BBOT_FLAGS)}
 	}
 	opt_key_map = {

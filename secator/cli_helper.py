@@ -80,6 +80,7 @@ def decorate_command_options(opts):
 	"""
 	def decorator(f):
 		reversed_opts = OrderedDict(list(opts.items())[::-1])
+		used_short_opts = set()
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
 			short_opt = conf.pop('short', None)
@@ -119,7 +120,12 @@ def decorate_command_options(opts):
 			if choices:
 				choices_str = ', '.join([f'[dim yellow3]{c}[/]' for c in choices])
 				conf['help'] += rf' \[[dim]choices: {choices_str}[/]]'
-			args = [long, short]
+			short_base = short.split('/')[0]
+			if short_base in used_short_opts:
+				args = [long]
+			else:
+				used_short_opts.add(short_base)
+				args = [long, short]
 			if internal_name:
 				args.append(internal_name)
 			f = click.option(*args, **conf)(f)
