@@ -5,7 +5,7 @@ from collections import OrderedDict
 from dotmap import DotMap
 from pathlib import Path
 
-from secator.output_types import Error
+from secator.output_types import Error, Warning
 from secator.rich import console
 
 
@@ -145,7 +145,10 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 				continue
 			node_task = None
 			if check_class_opts:
-				node_task = Task.get_task_class(_.name)
+				try:
+					node_task = Task.get_task_class(_.name)
+				except ValueError:
+					continue
 				if opt_name not in node_task.opts:
 					continue
 				opts_value = node_task.opts[opt_name]
@@ -188,7 +191,11 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 
 		# Process task options
 		# a.k.a task options defined in their respective task classes
-		cls = Task.get_task_class(node.name)
+		try:
+			cls = Task.get_task_class(node.name)
+		except ValueError:
+			console.print(Warning(message=f'Task {node.name!r} not found - skipping it in {config.name!r}. Please update your config.'))
+			return
 		task_opts = cls.opts.copy()
 		task_opts_meta = getattr(cls, 'meta_opts', {}).copy()
 		task_opts_all = {**task_opts, **task_opts_meta}
