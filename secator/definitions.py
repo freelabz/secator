@@ -176,7 +176,7 @@ def is_importable(module_to_import):
 ADDONS_ENABLED = {}
 
 for addon, module in [
-	('worker', 'eventlet'),
+	('worker', 'gevent'),
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
 	('api', 'requests'),
