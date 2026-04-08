@@ -935,16 +935,26 @@ def process_query(query, fields=None):
 	fields_filter = {}
 	if fields:
 		for field in fields:
-			parts = field.split('.')
-			if len(parts) == 2:
-				_type, field = parts
+			if '{' in field:
+				# Format string like '{port.host}:{port.port}' - extract type via regex
+				m = re.search(r'\{(\w+)[.\}]', field)
+				if not m:
+					console.print(Error(message='Could not determine output type from format string: ' + field))
+					sys.exit(1)
+				_type = m.group(1)
+				_field = field
 			else:
-				_type = parts[0]
-				field = None
+				parts = field.split('.')
+				if len(parts) >= 2:
+					_type = parts[0]
+					_field = '.'.join(parts[1:])
+				else:
+					_type = parts[0]
+					_field = None
 			if _type not in otypes:
 				console.print(Error(message='Invalid output type: ' + _type))
 				sys.exit(1)
-			fields_filter[_type] = field
+			fields_filter[_type] = _field
 
 	# No query
 	if not query:
@@ -1005,7 +1015,8 @@ def report_show(ctx, report_query, output, runner_type, time_delta, _format, que
 		unified = True
 
 	# Get extractors
-	extractors = process_query(query, fields=_format.split(',') if _format else [])
+	format_fields = [f.strip() for f in re.split(r'\s*\|\|\s*|,', _format) if f.strip()] if _format else []
+	extractors = process_query(query, fields=format_fields)
 	if extractors:
 		console.print(':wrench: [bold gold3]Showing query summary[/]')
 		op = extractors[0]['op']

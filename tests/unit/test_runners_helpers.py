@@ -152,6 +152,14 @@ class TestExtractorFunctions(unittest.TestCase):
         result = process_extractor(self.results, extractor)
         self.assertEqual(result, ['test1', 'test2', 'test3'])
 
+        # Test type-prefixed format string like '{mock.field1}_{mock.field2}'
+        extractor = {
+            'type': 'mock',
+            'field': '{mock.field1}_{mock.field2}'
+        }
+        result = process_extractor(self.results, extractor)
+        self.assertEqual(result, ['test1_1', 'test2_2', 'test3_3'])
+
         # TODO: Test nested field access
         # extractor = {
         #     'type': 'mock',
