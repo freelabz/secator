@@ -935,12 +935,21 @@ def process_query(query, fields=None):
 	fields_filter = {}
 	if fields:
 		for field in fields:
-			parts = field.split('.')
-			if len(parts) == 2:
-				_type, field = parts
+			# Handle format strings like '{tag.match}-{tag.name}'
+			if '{' in field and '}' in field:
+				match = re.search(r'\{(\w+)\.', field)
+				if not match:
+					console.print(Error(message='Invalid format string: ' + field))
+					sys.exit(1)
+				_type = match.group(1)
+				# Keep full format string as the field value
 			else:
-				_type = parts[0]
-				field = None
+				parts = field.split('.')
+				if len(parts) == 2:
+					_type, field = parts
+				else:
+					_type = parts[0]
+					field = None
 			if _type not in otypes:
 				console.print(Error(message='Invalid output type: ' + _type))
 				sys.exit(1)
