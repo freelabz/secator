@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/freelabz/secator/compare/v0.26.0...v0.26.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* ai output type compat ([#960](https://github.com/freelabz/secator/issues/960)) ([93e6072](https://github.com/freelabz/secator/commit/93e6072be942dfb62e4840b534736a354e14a5c0))
+
 ## [0.26.0](https://github.com/freelabz/secator/compare/v0.25.7...v0.26.0) (2026-04-02)
 
 
