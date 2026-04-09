@@ -1,18 +1,18 @@
 from urllib.parse import urlparse
 
-
 from secator.decorators import task
-from secator.definitions import (OPT_NOT_SUPPORTED, HEADER,
-								 DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES,
-								 THREADS, TIMEOUT, USER_AGENT)
-from secator.output_types import Vulnerability, Exploit, Warning
-from secator.tasks._categories import Vuln
+from secator.definitions import (
+	DELAY, FOLLOW_REDIRECT, HEADER, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
+)
+from secator.output_types import Exploit, Info, Vulnerability, Warning
 from secator.serializers import JSONSerializer
+from secator.tasks._categories import Vuln
 
 
 @task()
 class search_vulns(Vuln):
 	"""Search for known vulnerabilities in software by product name or CPE."""
+
 	cmd = 'search_vulns'
 	output_types = [Vulnerability, Exploit]
 	tags = ['vuln', 'recon']
@@ -22,18 +22,9 @@ class search_vulns(Vuln):
 	json_flag = '-f json'
 	version_flag = '-V'
 	opts = {
-		'ignore_general_product_vulns': {
-			'is_flag': True,
-			'help': 'Ignore vulnerabilities that only affect a general product'
-		},
-		'include_single_version_vulns': {
-			'is_flag': True,
-			'help': 'Include vulnerabilities that only affect one specific version'
-		},
-		'include_patched': {
-			'is_flag': True,
-			'help': 'Include vulnerabilities reported as patched'
-		},
+		'ignore_general_product_vulns': {'is_flag': True, 'help': 'Ignore vulnerabilities that only affect a general product'},  # noqa: E501
+		'include_single_version_vulns': {'is_flag': True, 'help': 'Include vulnerabilities that only affect one specific version'},  # noqa: E501
+		'include_patched': {'is_flag': True, 'help': 'Include vulnerabilities reported as patched'},
 	}
 	opt_key_map = {
 		'ignore_general_product_vulns': 'ignore-general-product-vulns',
@@ -69,7 +60,7 @@ class search_vulns(Vuln):
 			split = _in.split('~')
 			self.matched_at = split[0]
 			self.inputs[0] = split[1]
-		self.inputs[0] = self.inputs[0].replace('httpd', '').replace('/', ' ')
+		self.inputs[0] = self.inputs[0].replace('/', ' ').rstrip()
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -82,7 +73,7 @@ class search_vulns(Vuln):
 
 		data = list(values)[0]
 		if isinstance(data, str):
-			yield Warning(message=data)
+			yield Warning(message=data.replace('Warning: ', ''))
 			return
 
 		vulns = data.get('vulns', {})
@@ -117,6 +108,11 @@ class search_vulns(Vuln):
 				provider='search_vulns',
 				tags=tags,
 			)
+
+			# Exploits
+			if len(exploits) > 2:
+				yield Info(message=f'{len(exploits)} exploits found. Keeping max 3')
+				exploits = exploits[:3]
 			for exploit in exploits:
 				extra_data = common_extra_data.copy()
 				parts = exploit.replace('http://', '').replace('https://', '').replace('github.com', 'github').split('/')
@@ -128,10 +124,7 @@ class search_vulns(Vuln):
 					user = parts[1]
 					repo = parts[2]
 					name = 'Github'
-					extra_data.update({
-						'user': user,
-						'repo': repo,
-					})
+					extra_data.update({'user': user, 'repo': repo})
 				else:
 					hostname = urlparse(exploit).hostname
 					name = provider.capitalize()

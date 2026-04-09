@@ -1,15 +1,20 @@
 import json
 import re
+from typing import Any, Dict, List, Optional, Tuple
+
 from packaging import version
-from typing import List, Dict, Any, Optional, Tuple
 
 from secator.utils import get_versions_from_string
 
+VERSION_SIMPLE = re.compile(r'([a-zA-Z][a-zA-Z\s]*?)\s+([0-9]+\.[0-9]+(?:\.[0-9]+)*)')
+VERSION_POSTFIX = re.compile(r'([a-zA-Z][a-zA-Z\s]*?)\s+([0-9]+\.[0-9]+(?:\.[0-9]+)*(?:[a-zA-z][0-9])*)')
 
-def extract_software_and_version(version_string: str) -> Tuple[Optional[str], Optional[str]]:
+
+def extract_software_and_version(version_string: str, postfix=False) -> Tuple[Optional[str], Optional[str]]:
 	"""Extract software name and version from a version string."""
 	# Try to match software name followed by version
-	match = re.search(r'([a-zA-Z][a-zA-Z\s]*?)\s+([0-9]+\.[0-9]+(?:\.[0-9]+)*)', version_string.strip())
+	regex = VERSION_POSTFIX if postfix else VERSION_SIMPLE
+	match = regex.search(version_string.strip())
 	if match:
 		return match.group(1).strip().lower(), match.group(2).strip()
 
@@ -104,9 +109,7 @@ def parse_complex_version_ranges(version_str: str, current_version: str) -> bool
 			before_ver = thru_before_match.group(3)
 
 			# Check if current version is in range [start_ver, end_ver] and before before_ver
-			if (compare_versions(current_ver, start_ver) >= 0 and
-					compare_versions(current_ver, end_ver) <= 0 and
-					compare_versions(current_ver, before_ver) < 0):
+			if compare_versions(current_ver, start_ver) >= 0 and compare_versions(current_ver, end_ver) <= 0 and compare_versions(current_ver, before_ver) < 0:  # noqa: E501
 				return True
 			continue
 
@@ -116,8 +119,7 @@ def parse_complex_version_ranges(version_str: str, current_version: str) -> bool
 			base_ver = version_before_match.group(1)
 			before_ver = version_before_match.group(2)
 
-			if (compare_versions(current_ver, base_ver) >= 0 and
-					compare_versions(current_ver, before_ver) < 0):
+			if compare_versions(current_ver, base_ver) >= 0 and compare_versions(current_ver, before_ver) < 0:
 				return True
 
 		# Handle simple ranges "X to Y" or "X thru Y"
@@ -126,8 +128,7 @@ def parse_complex_version_ranges(version_str: str, current_version: str) -> bool
 			start_ver = range_match.group(1)
 			end_ver = range_match.group(2)
 
-			if (compare_versions(current_ver, start_ver) >= 0 and
-					compare_versions(current_ver, end_ver) <= 0):
+			if compare_versions(current_ver, start_ver) >= 0 and compare_versions(current_ver, end_ver) <= 0:
 				return True
 
 		# Handle simple version match
@@ -144,7 +145,7 @@ def parse_version_string_for_affected_version(version_str: str) -> str:
 	Parse version string and return the affected version.
 	"""
 	# Handle "Fixed in" format with "Affected" in parentheses
-	if "fixed in" in version_str.lower() and "affected" in version_str.lower():
+	if 'fixed in' in version_str.lower() and 'affected' in version_str.lower():
 		# Extract the affected version from parentheses
 		affected_match = re.search(r'$ \s*affected\s+([^)]+)\s* $ ', version_str, re.IGNORECASE)
 		if affected_match:
@@ -160,7 +161,7 @@ def parse_version_string_for_affected_version(version_str: str) -> str:
 			affected_sw, affected_ver = extract_software_and_version(affected_part)
 
 			if fixed_sw and affected_ver:
-				result = f"{fixed_sw} {affected_ver}"
+				result = f'{fixed_sw} {affected_ver}'
 				return result
 			else:
 				return affected_part
@@ -185,7 +186,7 @@ def parse_version_string_for_affected_version(version_str: str) -> str:
 			software_part = version_str[:first_version_pos].strip()
 
 			if software_part:
-				result = f"{software_part} {versions_in_string[-1]}"
+				result = f'{software_part} {versions_in_string[-1]}'
 				return result
 
 	return version_str
@@ -202,22 +203,18 @@ def check_version_against_entry(current_version: str, version_entry: Dict[str, A
 	# Check changes array for unaffected versions
 	changes = version_entry.get('changes', [])
 	for change in changes:
-		if (change.get('status') == 'unaffected' and
-				change.get('at') and current_ver and
-				compare_versions(current_ver, change['at']) == 0):
+		if change.get('status') == 'unaffected' and change.get('at') and current_ver and compare_versions(current_ver, change['at']) == 0:  # noqa: E501
 			return False
 
 	# Handle lessThan with semver - this means all versions >= base version are affected
 	# UNLESS they're specifically marked as unaffected in changes array
-	if (version_entry.get('lessThan') == '*' and
-			version_entry.get('versionType') == 'semver'):
+	if version_entry.get('lessThan') == '*' and version_entry.get('versionType') == 'semver':
 		base_version = version_entry.get('version', '')
 		if current_ver and base_version:
 			return compare_versions(current_ver, base_version) >= 0
 
 	# Handle lessThan with wildcard (for version ranges like "2.4*")
-	if ('lessThan' in version_entry and
-			version_entry.get('lessThan', '').endswith('*')):
+	if 'lessThan' in version_entry and version_entry.get('lessThan', '').endswith('*'):
 		less_than = version_entry['lessThan']
 		base_version = version_entry.get('version', '')
 
@@ -282,8 +279,7 @@ def check_version_against_entry(current_version: str, version_entry: Dict[str, A
 			start_versions = get_versions_from_string(parts[0])
 			end_versions = get_versions_from_string(parts[1])
 			if start_versions and end_versions and current_ver:
-				return (compare_versions(current_ver, start_versions[0]) >= 0 and
-						compare_versions(current_ver, end_versions[0]) <= 0)
+				return compare_versions(current_ver, start_versions[0]) >= 0 and compare_versions(current_ver, end_versions[0]) <= 0
 
 	# Direct version matching
 	return versions_match(current_version, affected_version)
@@ -312,253 +308,219 @@ def create_test_cases():
 
 	test_cases = [
 		{
-			"name": "Simple affected version - dnsmasq",
-			"versions": [{"status": "affected", "version": "dnsmasq 2.83"}],
-			"tests": [
-				("dnsmasq 2.83", True),
-				("dnsmasq 2.84", False),
-				("dnsmasq 2.82", False),
-				("dnsmasq 2.8", False),
-				("2.83", True),  # No software name match
-			]
-		},
-		{
-			"name": "Multiple simple affected versions",
-			"versions": [
-				{"status": "affected", "version": "2.4.46"},
-				{"status": "affected", "version": "2.4.43"}
+			'name': 'Simple affected version - dnsmasq',
+			'versions': [{'status': 'affected', 'version': 'dnsmasq 2.83'}],
+			'tests': [
+				('dnsmasq 2.83', True),
+				('dnsmasq 2.84', False),
+				('dnsmasq 2.82', False),
+				('dnsmasq 2.8', False),
+				('2.83', True),  # No software name match
 			],
-			"tests": [
-				("2.4.46", True),
-				("2.4.43", True),
-				("2.4.44", False),
-				("2.4.47", False),
-				("2.4.42", False),
-				("2.4", False),
-			]
 		},
 		{
-			"name": "Multiple software in one entry",
-			"versions": [
-				{"version": "vsftpd 3.0.4, nginx 1.21.0, sendmail 8.17", "status": "affected"}
+			'name': 'Multiple simple affected versions',
+			'versions': [{'status': 'affected', 'version': '2.4.46'}, {'status': 'affected', 'version': '2.4.43'}],
+			'tests': [
+				('2.4.46', True),
+				('2.4.43', True),
+				('2.4.44', False),
+				('2.4.47', False),
+				('2.4.42', False),
+				('2.4', False),
 			],
-			"tests": [
-				("vsftpd 3.0.4", True),
-				("nginx 1.21.0", True),
-				("1.21.0", True),
-				("sendmail 8.17", True),
-				("vsftpd 3.0.5", False),
-				("nginx 1.21.1", False),
-				("sendmail 8.16", False),
-				("3.0.4", True),
-			]
 		},
 		{
-			"name": "Complex nginx version ranges",
-			"versions": [
+			'name': 'Multiple software in one entry',
+			'versions': [{'version': 'vsftpd 3.0.4, nginx 1.21.0, sendmail 8.17', 'status': 'affected'}],
+			'tests': [
+				('vsftpd 3.0.4', True),
+				('nginx 1.21.0', True),
+				('1.21.0', True),
+				('sendmail 8.17', True),
+				('vsftpd 3.0.5', False),
+				('nginx 1.21.1', False),
+				('sendmail 8.16', False),
+				('3.0.4', True),
+			],
+		},
+		{
+			'name': 'Complex nginx version ranges',
+			'versions': [
 				{
-					"status": "affected",
-					"version": "Nginx Web Server versions 0.6.18 thru 1.20.0 before 1.20.1, Nginx plus versions R13 thru R23 before R23 P1. Nginx plus version R24 before R24 P1"  # noqa: E501
+					'status': 'affected',
+					'version': 'Nginx Web Server versions 0.6.18 thru 1.20.0 before 1.20.1, Nginx plus versions R13 thru R23 before R23 P1. Nginx plus version R24 before R24 P1',  # noqa: E501
 				}
 			],
-			"tests": [
-				("nginx 1.18.0", True),
-				("nginx 1.20.0", True),
-				("nginx 0.6.18", True),
-				("nginx 1.20.1", False),
-				("nginx 0.6.17", False),
-				("nginx 1.21.0", False),
-			]
+			'tests': [
+				('nginx 1.18.0', True),
+				('nginx 1.20.0', True),
+				('nginx 0.6.18', True),
+				('nginx 1.20.1', False),
+				('nginx 0.6.17', False),
+				('nginx 1.21.0', False),
+			],
 		},
 		{
-			"name": "Apache with lessThan and custom versionType",
-			"versions": [
+			'name': 'Apache with lessThan and custom versionType',
+			'versions': [
 				{
-					"lessThan": "Apache HTTP Server 2.4*",
-					"status": "affected",
-					"version": "2.4.7",
-					"versionType": "custom"
+					'lessThan': 'Apache HTTP Server 2.4*',
+					'status': 'affected',
+					'version': '2.4.7',
+					'versionType': 'custom'
 				}
 			],
-			"tests": [
-				("Apache HTTP Server 2.4.7", True),
-				("Apache HTTP Server 2.4.8", True),
-				("Apache HTTP Server 2.4.6", False),
-				("Apache HTTP Server 2.5.0", False),  # lessThan 2.4*
-			]
-		},
-		{
-			"name": "Simple version range",
-			"versions": [
-				{"status": "affected", "version": "2.4.20 to 2.4.43"}
+			'tests': [
+				('Apache HTTP Server 2.4.7', True),
+				('Apache HTTP Server 2.4.8', True),
+				('Apache HTTP Server 2.4.6', False),
+				('Apache HTTP Server 2.5.0', False),  # lessThan 2.4*
 			],
-			"tests": [
-				("2.4.20", True),
-				("2.4.43", True),
-				("2.4.30", True),
-				("2.4.19", False),
-				("2.4.44", False),
-			]
 		},
 		{
-			"name": "Apache with lessThanOrEqual",
-			"versions": [
+			'name': 'Simple version range',
+			'versions': [{'status': 'affected', 'version': '2.4.20 to 2.4.43'}],
+			'tests': [
+				('2.4.20', True),
+				('2.4.43', True),
+				('2.4.30', True),
+				('2.4.19', False),
+				('2.4.44', False),
+			],
+		},
+		{
+			'name': 'Apache with lessThanOrEqual',
+			'versions': [
 				{
-					"lessThanOrEqual": "2.4.48",
-					"status": "affected",
-					"version": "Apache HTTP Server 2.4",
-					"versionType": "custom"
+					'lessThanOrEqual': '2.4.48',
+					'status': 'affected',
+					'version': 'Apache HTTP Server 2.4',
+					'versionType': 'custom'
 				}
 			],
-			"tests": [
-				("Apache HTTP Server 2.4.48", True),
-				("Apache HTTP Server 2.4.30", True),
-				("Apache HTTP Server 2.4.0", True),
-				("Apache HTTP Server 2.4.49", False),
-			]
-		},
-		{
-			"name": "Apache specific version with software name",
-			"versions": [
-				{"status": "affected", "version": "Apache HTTP Server 2.4 2.4.49"}
+			'tests': [
+				('Apache HTTP Server 2.4.48', True),
+				('Apache HTTP Server 2.4.30', True),
+				('Apache HTTP Server 2.4.0', True),
+				('Apache HTTP Server 2.4.49', False),
 			],
-			"tests": [
-				("Apache HTTP Server 2.4.49", True),
-				("Apache HTTP Server 2.4.48", False),
-				("2.4.49", True),  # No software name
-			]
 		},
 		{
-			"name": "Apache specific version 2.4.37",
-			"versions": [
-				{"status": "affected", "version": "Apache HTTP Server 2.4.37"}
+			'name': 'Apache specific version with software name',
+			'versions': [{'status': 'affected', 'version': 'Apache HTTP Server 2.4 2.4.49'}],
+			'tests': [
+				('Apache HTTP Server 2.4.49', True),
+				('Apache HTTP Server 2.4.48', False),
+				('2.4.49', True),  # No software name
 			],
-			"tests": [
-				("Apache HTTP Server 2.4.37", True),
-				("Apache HTTP Server 2.4.36", False),
-				("Apache HTTP Server 2.4.38", False),
-			]
 		},
 		{
-			"name": "Apache version range with software name",
-			"versions": [
-				{"status": "affected", "version": "Apache HTTP Server 2.4.0 to 2.4.37"}
+			'name': 'Apache specific version 2.4.37',
+			'versions': [{'status': 'affected', 'version': 'Apache HTTP Server 2.4.37'}],
+			'tests': [
+				('Apache HTTP Server 2.4.37', True),
+				('Apache HTTP Server 2.4.36', False),
+				('Apache HTTP Server 2.4.38', False),
 			],
-			"tests": [
-				("Apache HTTP Server 2.4.0", True),
-				("Apache HTTP Server 2.4.37", True),
-				("Apache HTTP Server 2.4.20", True),
-				("Apache HTTP Server 2.3.9", False),
-				("Apache HTTP Server 2.4.38", False),
-			]
 		},
 		{
-			"name": "Fixed in format",
-			"versions": [
-				{"status": "affected", "version": "Fixed in Apache HTTP Server 2.4.34 (Affected 2.4.33)"}
+			'name': 'Apache version range with software name',
+			'versions': [{'status': 'affected', 'version': 'Apache HTTP Server 2.4.0 to 2.4.37'}],
+			'tests': [
+				('Apache HTTP Server 2.4.0', True),
+				('Apache HTTP Server 2.4.37', True),
+				('Apache HTTP Server 2.4.20', True),
+				('Apache HTTP Server 2.3.9', False),
+				('Apache HTTP Server 2.4.38', False),
 			],
-			"tests": [
-				("Apache HTTP Server 2.4.33", True),
-				("Apache HTTP Server 2.4.34", False),
-				("Apache HTTP Server 2.4.32", False),
-			]
 		},
 		{
-			"name": "Up to and including format",
-			"versions": [
-				{"status": "affected", "version": "up to and including 2.78"}
+			'name': 'Fixed in format',
+			'versions': [{'status': 'affected', 'version': 'Fixed in Apache HTTP Server 2.4.34 (Affected 2.4.33)'}],
+			'tests': [
+				('Apache HTTP Server 2.4.33', True),
+				('Apache HTTP Server 2.4.34', False),
+				('Apache HTTP Server 2.4.32', False),
 			],
-			"tests": [
-				("2.78", True),
-				("2.77", False),
-				("2.70", False),
-				("2.79", False),
-			]
 		},
 		{
-			"name": "Semver with lessThanOrEqual",
-			"versions": [
+			'name': 'Up to and including format',
+			'versions': [{'status': 'affected', 'version': 'up to and including 2.78'}],
+			'tests': [
+				('2.78', True),
+				('2.77', False),
+				('2.70', False),
+				('2.79', False),
+			],
+		},
+		{
+			'name': 'Semver with lessThanOrEqual',
+			'versions': [{'lessThanOrEqual': '2.4.54', 'status': 'affected', 'version': '2.4', 'versionType': 'semver'}],
+			'tests': [
+				('2.4.54', True),
+				('2.4.50', True),
+				('2.4.0', True),
+				('2.4.55', False),
+			],
+		},
+		{
+			'name': 'Nginx mainline and stable branches',
+			'versions': [
+				{'version': 'Mainline', 'status': 'affected', 'lessThan': '1.23.2', 'versionType': 'custom'},
+				{'version': 'Stable', 'status': 'affected', 'lessThan': '1.22.1', 'versionType': 'custom'}
+			],
+			'tests': [
+				('nginx mainline 1.23.1', False),  # Complex branch logic, hard to determine
+				('nginx stable 1.22.0', False),  # Complex branch logic, hard to determine
+				('nginx 1.23.2', False),
+				('nginx 1.22.1', False),
+			],
+		},
+		{
+			'name': 'Version with changes array - unaffected versions',
+			'versions': [
 				{
-					"lessThanOrEqual": "2.4.54",
-					"status": "affected",
-					"version": "2.4",
-					"versionType": "semver"
-				}
-			],
-			"tests": [
-				("2.4.54", True),
-				("2.4.50", True),
-				("2.4.0", True),
-				("2.4.55", False),
-			]
-		},
-		{
-			"name": "Nginx mainline and stable branches",
-			"versions": [
-				{
-					"version": "Mainline",
-					"status": "affected",
-					"lessThan": "1.23.2",
-					"versionType": "custom"
-				},
-				{
-					"version": "Stable",
-					"status": "affected",
-					"lessThan": "1.22.1",
-					"versionType": "custom"
-				}
-			],
-			"tests": [
-				("nginx mainline 1.23.1", False),  # Complex branch logic, hard to determine
-				("nginx stable 1.22.0", False),   # Complex branch logic, hard to determine
-				("nginx 1.23.2", False),
-				("nginx 1.22.1", False),
-			]
-		},
-		{
-			"name": "Version with changes array - unaffected versions",
-			"versions": [
-				{
-					"status": "affected",
-					"version": "1.5.13",
-					"lessThan": "*",
-					"changes": [
-						{"at": "1.26.2", "status": "unaffected"},
-						{"at": "1.27.1", "status": "unaffected"}
+					'status': 'affected',
+					'version': '1.5.13',
+					'lessThan': '*',
+					'changes': [
+						{'at': '1.26.2', 'status': 'unaffected'},
+						{'at': '1.27.1', 'status': 'unaffected'}
 					],
-					"versionType": "semver"
+					'versionType': 'semver'
 				}
 			],
-			"tests": [
-				("1.26.2", False),  # Unaffected version
-				("1.27.1", False),  # Unaffected version
-				("1.20.0", True),   # Between 1.5.13 and 1.26.2
-				("1.5.12", False),  # Below affected version
-				("1.5.13", True),   # Exact affected version
-			]
+			'tests': [
+				('1.26.2', False),  # Unaffected version
+				('1.27.1', False),  # Unaffected version
+				('1.20.0', True),  # Between 1.5.13 and 1.26.2
+				('1.5.12', False),  # Below affected version
+				('1.5.13', True),  # Exact affected version
+			],
 		},
 		{
-			"name": "Another version with changes array",
-			"versions": [
+			'name': 'Another version with changes array',
+			'versions': [
 				{
-					"changes": [
-						{"at": "1.27.4", "status": "unaffected"},
-						{"at": "1.26.3", "status": "unaffected"}
+					'changes': [
+						{'at': '1.27.4', 'status': 'unaffected'},
+						{'at': '1.26.3', 'status': 'unaffected'}
 					],
-					"lessThan": "*",
-					"status": "affected",
-					"version": "1.11.4",
-					"versionType": "semver"
+					'lessThan': '*',
+					'status': 'affected',
+					'version': '1.11.4',
+					'versionType': 'semver'
 				}
 			],
-			"tests": [
-				("1.27.4", False),  # Unaffected version
-				("1.26.3", False),  # Unaffected version
-				("1.20.0", True),   # Between 1.11.4 and unaffected versions
-				("1.11.4", True),   # Exact affected version
-				("1.11.3", False),  # Below affected version
-			]
-		}
+			'tests': [
+				('1.27.4', False),  # Unaffected version
+				('1.26.3', False),  # Unaffected version
+				('1.20.0', True),  # Between 1.11.4 and unaffected versions
+				('1.11.4', True),  # Exact affected version
+				('1.11.3', False),  # Below affected version
+			],
+		},
 	]
 
 	return test_cases
@@ -572,16 +534,16 @@ def run_all_tests():
 	passed_tests = 0
 	failed_tests = []
 
-	print("🧪 Running comprehensive CVE version parsing tests...\n")
-	print("=" * 80)
+	print('🧪 Running comprehensive CVE version parsing tests...\n')
+	print('=' * 80)
 
 	for i, test_case in enumerate(test_cases, 1):
-		print(f"\n📋 Test Case {i}: {test_case['name']}")
-		print("-" * 60)
+		print(f'\n📋 Test Case {i}: {test_case["name"]}')
+		print('-' * 60)
 
 		versions_data = test_case['versions']
-		print(f"📄 CVE Data: {json.dumps(versions_data, indent=2)}")
-		print("\n🔍 Test Results:")
+		print(f'📄 CVE Data: {json.dumps(versions_data, indent=2)}')
+		print('\n🔍 Test Results:')
 
 		case_passed = 0
 		case_total = 0
@@ -596,9 +558,9 @@ def run_all_tests():
 				if actual_result == expected_result:
 					passed_tests += 1
 					case_passed += 1
-					status = "✅ PASS"
+					status = '✅ PASS'
 				else:
-					status = "❌ FAIL"
+					status = '❌ FAIL'
 					failed_tests.append({
 						'case': test_case['name'],
 						'version': current_version,
@@ -606,38 +568,38 @@ def run_all_tests():
 						'actual': actual_result
 					})
 
-				print(f"  {status} | Version: {current_version:<30} | Expected: {str(expected_result):<5} | Got: {str(actual_result):<5}")  # noqa: E501
+				print(f'  {status} | Version: {current_version:<30} | Expected: {str(expected_result):<5} | Got: {str(actual_result):<5}')  # noqa: E501
 
 			except Exception as e:
-				status = "💥 ERROR"
+				status = '💥 ERROR'
 				failed_tests.append({
 					'case': test_case['name'],
 					'version': current_version,
 					'expected': expected_result,
 					'error': str(e)
 				})
-				print(f"  {status} | Version: {current_version:<30} | Error: {str(e)}")
+				print(f'  {status} | Version: {current_version:<30} | Error: {str(e)}')
 
-		print(f"\n📊 Case Summary: {case_passed}/{case_total} tests passed")
+		print(f'\n📊 Case Summary: {case_passed}/{case_total} tests passed')
 
 	# Final summary
-	print("\n" + "=" * 80)
-	print("🏁 FINAL TEST SUMMARY")
-	print("=" * 80)
-	print(f"✅ Total Tests Passed: {passed_tests}")
-	print(f"❌ Total Tests Failed: {len(failed_tests)}")
-	print(f"📈 Success Rate: {(passed_tests/total_tests)*100:.1f}%")
+	print('\n' + '=' * 80)
+	print('🏁 FINAL TEST SUMMARY')
+	print('=' * 80)
+	print(f'✅ Total Tests Passed: {passed_tests}')
+	print(f'❌ Total Tests Failed: {len(failed_tests)}')
+	print(f'📈 Success Rate: {(passed_tests / total_tests) * 100:.1f}%')
 
 	if failed_tests:
-		print("\n🔍 FAILED TEST DETAILS:")
-		print("-" * 40)
+		print('\n🔍 FAILED TEST DETAILS:')
+		print('-' * 40)
 		for i, failure in enumerate(failed_tests, 1):
-			print(f"{i}. Test Case: {failure['case']}")
-			print(f"   Version: {failure['version']}")
+			print(f'{i}. Test Case: {failure["case"]}')
+			print(f'   Version: {failure["version"]}')
 			if 'error' in failure:
-				print(f"   Error: {failure['error']}")
+				print(f'   Error: {failure["error"]}')
 			else:
-				print(f"   Expected: {failure['expected']}, Got: {failure['actual']}")
+				print(f'   Expected: {failure["expected"]}, Got: {failure["actual"]}')
 			print()
 
 	return passed_tests == total_tests
@@ -649,16 +611,16 @@ def run_specific_test(test_name: str):
 
 	for test_case in test_cases:
 		if test_name.lower() in test_case['name'].lower():
-			print(f"🧪 Running Test: {test_case['name']}")
-			print("=" * 60)
+			print(f'🧪 Running Test: {test_case["name"]}')
+			print('=' * 60)
 
 			versions_data = test_case['versions']
-			print(f"CVE Data: {json.dumps(versions_data, indent=2)}\n")
+			print(f'CVE Data: {json.dumps(versions_data, indent=2)}\n')
 
 			for current_version, expected_result in test_case['tests']:
 				actual_result = is_version_affected(current_version, versions_data)
-				status = "✅ PASS" if actual_result == expected_result else "❌ FAIL"
-				print(f"{status} | {current_version} -> Expected: {expected_result}, Got: {actual_result}")
+				status = '✅ PASS' if actual_result == expected_result else '❌ FAIL'
+				print(f'{status} | {current_version} -> Expected: {expected_result}, Got: {actual_result}')
 
 			return
 
@@ -667,20 +629,20 @@ def run_specific_test(test_name: str):
 
 def interactive_test():
 	"""Interactive testing function for manual testing."""
-	print("🧪 Interactive CVE Version Tester")
-	print("=" * 40)
+	print('🧪 Interactive CVE Version Tester')
+	print('=' * 40)
 	print("Enter 'quit' to exit\n")
 
 	while True:
 		try:
 			print("Enter current version (or 'quit' to exit):")
-			current_version = input("> ").strip()
+			current_version = input('> ').strip()
 
 			if current_version.lower() == 'quit':
 				break
 
-			print("\nEnter CVE versions JSON (paste the versions array):")
-			cve_input = input("> ").strip()
+			print('\nEnter CVE versions JSON (paste the versions array):')
+			cve_input = input('> ').strip()
 
 			# Try to parse the JSON
 			try:
@@ -690,22 +652,22 @@ def interactive_test():
 
 				result = is_version_affected(current_version, versions_data)
 
-				print(f"\n🎯 Result: Version {current_version} is {'AFFECTED' if result else 'NOT AFFECTED'}")
-				print("-" * 40)
+				print(f'\n🎯 Result: Version {current_version} is {"AFFECTED" if result else "NOT AFFECTED"}')
+				print('-' * 40)
 
 			except json.JSONDecodeError:
-				print("❌ Invalid JSON format. Please try again.")
+				print('❌ Invalid JSON format. Please try again.')
 			except Exception as e:
-				print(f"❌ Error: {str(e)}")
+				print(f'❌ Error: {str(e)}')
 
 		except KeyboardInterrupt:
-			print("\n👋 Goodbye!")
+			print('\n👋 Goodbye!')
 			break
 		except Exception as e:
-			print(f"❌ Unexpected error: {str(e)}")
+			print(f'❌ Unexpected error: {str(e)}')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
 	# Run all tests
 	success = run_all_tests()
 
@@ -715,4 +677,4 @@ if __name__ == "__main__":
 	# Optionally run interactive tester
 	# interactive_test()
 
-	print(f"\n🎉 All tests {'PASSED' if success else 'COMPLETED with failures'}!")
+	print(f'\n🎉 All tests {"PASSED" if success else "COMPLETED with failures"}!')

@@ -1,26 +1,50 @@
 import os
 import shlex
-
 from datetime import datetime, timezone
 
-from secator.decorators import task
-from secator.definitions import (DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-							 	 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
-								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
-								 URL, USER_AGENT, HOST, IP, HOST_PORT, STRING)
 from secator.config import CONFIG
-from secator.output_types import Url, Subdomain, Certificate, Vulnerability
+from secator.decorators import task
+from secator.definitions import (
+	DATA,
+	DELAY,
+	DEPTH,
+	FILTER_CODES,
+	FILTER_REGEX,
+	FILTER_SIZE,
+	FILTER_WORDS,
+	FOLLOW_REDIRECT,
+	HEADER,
+	HOST,
+	HOST_PORT,
+	IP,
+	MATCH_CODES,
+	MATCH_REGEX,
+	MATCH_SIZE,
+	MATCH_WORDS,
+	METHOD,
+	OPT_NOT_SUPPORTED,
+	PROXY,
+	RATE_LIMIT,
+	RETRIES,
+	STRING,
+	THREADS,
+	TIMEOUT,
+	URL,  # noqa: I001
+	USER_AGENT,
+)
+from secator.output_types import Certificate, Subdomain, Technology, Url, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
-from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
+from secator.utils import extract_domain_info, extract_subdomains_from_fqdn, sanitize_url
 
 
 @task()
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
+
 	cmd = 'httpx-toolkit -irh'
 	input_types = [HOST, HOST_PORT, IP, URL, STRING]
-	output_types = [Url, Subdomain, Vulnerability]
+	output_types = [Url, Subdomain, Technology, Vulnerability]
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -90,7 +114,7 @@ class httpx(Http):
 			opts,
 			'screenshot',
 			opts_conf=dict(httpx.opts, **httpx.meta_opts),
-			opt_aliases=opts.get('aliases', [])
+			opt_aliases=opts.get('aliases', []),
 		)
 		return 'large' if screenshot is True else 'small'
 
@@ -112,6 +136,22 @@ class httpx(Http):
 	def on_json_loaded(self, item):
 		item = self._preprocess_url(item)
 		yield item
+
+		# Technologies
+		techs = item.get('tech', [])
+		for tech in techs:
+			split = tech.split(':')
+			if len(split) > 1:
+				product, version = tuple(split)
+			else:
+				product, version = tech, None
+			yield Technology(
+				match=item['url'],
+				product=product,
+				version=version,
+			)
+
+		# Certificate
 		tls = item.get('tls', None)
 		if tls:
 			subject_cn = tls.get('subject_cn', None)

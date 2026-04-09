@@ -84,20 +84,23 @@ tasks:
     searchsploit:
       description: Search for related exploits
       targets_:
-        - type: port
-          field: '{host}:{port}~{service_name}'
-          condition: len(item.service_name.split('/')) > 1
+        - type: vulnerability
+          field: '{matched_at}~{id}'
+          condition: item.id
+        - type: technology
+          field: '{match}~{product} {version}'
+          condition: item.version
       if: "'searchsploit' in opts.exploiters"
 
     search_vulns:
       description: Search for related exploits
       targets_:
-        - type: port
-          field: '{host}:{port}~{service_name}'
-          condition: len(item.service_name.split('/')) > 1
         - type: vulnerability
           field: '{matched_at}~{id}'
           condition: item.id
+        - type: technology
+          field: '{match}~{product} {version}'
+          condition: item.version
       if: "'search_vulns' in opts.exploiters"
 
   _group/2:

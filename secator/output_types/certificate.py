@@ -1,10 +1,11 @@
 import time
-from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
-from secator.output_types import OutputType, Vulnerability
-from secator.utils import rich_to_ansi
+from datetime import datetime, timedelta, timezone
+
 from secator.config import CONFIG
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
+from secator.output_types import OutputType
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -66,13 +67,15 @@ class Certificate(OutputType):
 			date = date.replace(tzinfo=timezone.utc)
 			return date
 		try:
-			dt = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ")
+			dt = datetime.strptime(date, '%Y-%m-%dT%H:%M:%SZ')
 			dt = dt.replace(tzinfo=timezone.utc)
 			return dt
 		except (ValueError, TypeError):
 			return None
 
 	def get_vulnerabilities(self):
+		from secator.output_types import Vulnerability
+
 		if self.is_expired():
 			yield Vulnerability(
 				name='SSL certificate expired',
@@ -81,9 +84,7 @@ class Certificate(OutputType):
 				tags=['ssl', 'tls'],
 				severity='high',
 				confidence='high',
-				extra_data={
-					'expiration_date': self.format_date(self.not_after)
-				}
+				extra_data={'expiration_date': self.format_date(self.not_after)},
 			)
 
 	def __rich__(self) -> str:
