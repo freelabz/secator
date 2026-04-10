@@ -71,6 +71,7 @@ class arjun(HttpBase):
 	def on_line(self, line):
 		if 'Processing chunks' in line:
 			yield ''
+			return
 		yield line
 
 	@staticmethod
