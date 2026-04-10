@@ -1,6 +1,7 @@
 import os
 import re
 
+from dotmap import DotMap
 from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
@@ -175,8 +176,8 @@ def process_extractor(results, extractor, ctx=None):
 		for item in results:
 			if item._type != _type:
 				continue
-			ctx['item'] = item
-			ctx[f'{_type}'] = item
+			ctx['item'] = DotMap(item.toDict())
+			ctx[f'{_type}'] = DotMap(item.toDict())
 			safe_globals = {
 				'__builtins__': {'len': len},
 				're_match': lambda pattern, value: bool(re.search(pattern, str(value))) if value is not None else False,
