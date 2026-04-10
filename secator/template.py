@@ -194,7 +194,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		try:
 			cls = Task.get_task_class(node.name)
 		except ValueError:
-			console.print(Warning(message=f'Task {node.name!r} not found - skipping it in {config.name!r}. Please update your config.'))
+			console.print(Warning(message=f'Task {node.name!r} not found - skipping it in {config.name!r}. Please update your config.'))  # noqa: E501
 			return
 		task_opts = cls.opts.copy()
 		task_opts_meta = getattr(cls, 'meta_opts', {}).copy()
