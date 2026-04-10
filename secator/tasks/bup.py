@@ -77,7 +77,7 @@ class bup(HttpBase):
 			current, total = tuple([int(c.strip()) for c in progress_indicator.split('/')])
 			yield json.dumps({"duration": "unknown", "percent": int((current / total) * 100)})
 		elif 'batcat' in line:  # ignore batcat lines as they're loaded as JSON
-			yield None
+			yield ''
 		yield line
 
 	@staticmethod
