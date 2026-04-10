@@ -134,6 +134,37 @@ class TestExtractorFunctions(unittest.TestCase):
         result = process_extractor(self.results, extractor, {})
         self.assertEqual(result, ['test1'])
 
+    def test_process_extractor_with_nested_condition(self):
+        """Test process_extractor with nested dict field access in conditions (dot notation)."""
+        # Test dot notation access on nested dict field (the original bug)
+        extractor = {
+            'type': 'mock',
+            'field': 'field1',
+            'condition': "mock.nested.subfield == 'nested_value'"
+        }
+        result = process_extractor(self.results, extractor)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result, ['test1', 'test2', 'test3'])
+
+        # Test dot notation with combined condition
+        extractor = {
+            'type': 'mock',
+            'field': 'field1',
+            'condition': "mock.nested.subfield == 'nested_value' and mock.field2 == 1"
+        }
+        result = process_extractor(self.results, extractor)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result, ['test1'])
+
+        # Test that non-matching nested value returns no results
+        extractor = {
+            'type': 'mock',
+            'field': 'field1',
+            'condition': "mock.nested.subfield == 'no_such_value'"
+        }
+        result = process_extractor(self.results, extractor)
+        self.assertEqual(result, [])
+
     def test_process_extractor_with_formatted_field(self):
         """Test process_extractor with formatted fields."""
         # Test already formatted field
