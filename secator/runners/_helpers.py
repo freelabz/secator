@@ -201,7 +201,7 @@ def process_extractor(results, extractor, ctx=None):
 	if _field:
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
-		results = [_field.format(**{_type: item, **item.toDict()}) for item in results]
+		results = [_field.format(**{**item.toDict(), _type: item}) for item in results]
 	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 

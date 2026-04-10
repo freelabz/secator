@@ -9,7 +9,7 @@ from secator.runners._helpers import (
     process_extractor,
     get_task_folder_id
 )
-from secator.output_types import OutputType, Url, Vulnerability, Target
+from secator.output_types import OutputType, Url, Vulnerability, Target, Port
 from dataclasses import dataclass, field
 
 
@@ -159,6 +159,17 @@ class TestExtractorFunctions(unittest.TestCase):
         }
         result = process_extractor(self.results, extractor)
         self.assertEqual(result, ['test1_1', 'test2_2', 'test3_3'])
+
+        # Test type-prefixed format string where type name conflicts with a field name of the same name.
+        # Port has a 'port' field (int), so {_type: item, **item.toDict()} would override the item
+        # with the int value, causing '{port.host}'.format() to fail with AttributeError.
+        port = Port(port=80, ip='127.0.0.1', host='localhost')
+        extractor = {
+            'type': 'port',
+            'field': '{port.host}'
+        }
+        result = process_extractor([port], extractor)
+        self.assertEqual(result, ['localhost'])
 
         # TODO: Test nested field access
         # extractor = {
