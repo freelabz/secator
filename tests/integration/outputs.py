@@ -293,7 +293,7 @@ OUTPUTS_TASKS = {
     ],
     'urlfinder': [
         Url(
-            url='http://xss-game.appspot.com/',
+            url='https://xss-game.appspot.com/level4/frame',
             host='xss-game.appspot.com',
             _source='urlfinder'
         )
