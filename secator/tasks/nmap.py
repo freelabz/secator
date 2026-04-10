@@ -12,6 +12,7 @@ from secator.definitions import (CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED,
 from secator.output_types import Exploit, Port, Vulnerability, Info, Error, Ip, Warning, Progress
 from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
+from secator.serializers import RegexSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,14 @@ logger = logging.getLogger(__name__)
 NMAP_PROGRESS_REGEX_1 = re.compile(r'Stats: (\d+:\d+:\d+) elapsed; (\d+) hosts completed \((\d+) up\)')
 NMAP_PROGRESS_REGEX_2 = re.compile(r'(.*) Timing: About (\d+\.\d+)% done; ETC: \d+:\d+ \((\d+:\d+:\d+) remaining\)')
 
+NMAP_HOST_UP_REGEX = RegexSerializer(
+	regex=r'Host: (?P<ip>.*) \((?P<host>.*)\)\s+Status: Up',
+	fields=['ip', 'host']
+)
+NMAP_PORTS_REGEX = RegexSerializer(
+	regex=r'Host: (?P<ip>.*) \((?P<host>.*)\)\s+Ports:\s(?P<ports>.*)',
+	fields=['ip', 'host', 'ports']
+)
 
 @task()
 class nmap(ReconPort):
@@ -78,6 +87,7 @@ class nmap(ReconPort):
 		'disable_arp_ping': {'is_flag': True, 'short': 'dap', 'default': False, 'help': 'Disable ARP ping'},
 
 		# Misc
+		'output_grep': {'type': str, 'short': 'oG', 'default': None, 'help': 'Greppable output'},
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path', 'internal': True, 'display': False},  # noqa: E501
 		'debug': {'is_flag': True, 'default': False, 'help': 'Enable debug mode'},
 		'verbosity': {'type': int, 'short': 'vo', 'default': None, 'internal': True, 'display': True, 'help': 'Enable verbose mode (1, 2, 3)'},  # noqa: E501
@@ -127,6 +137,7 @@ class nmap(ReconPort):
 		'traceroute': '--traceroute',
 		'disable_arp_ping': '--disable-arp-ping',
 		'output_path': '-oX',
+		'output_grep': '-oG'
 	}
 	opt_value_map = {
 		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
@@ -166,24 +177,55 @@ class nmap(ReconPort):
 
 	@staticmethod
 	def on_line(self, line):
-		match = NMAP_PROGRESS_REGEX_1.search(line)
-		if match:
-			self._progress.update({
-				'extra_data': {
-					'elapsed': match.group(1),
-					'hosts_completed': match.group(2),
-					'hosts_up': match.group(3)
-				}
-			})
-			return
-		match = NMAP_PROGRESS_REGEX_2.search(line)
-		if match:
-			self._progress.update({'percent': float(match.group(2))})
-			self._progress['extra_data'].update({'scan_type': match.group(1), 'remaining_time': match.group(3)})
-			pg = Progress(**self._progress)
-			self._progress = {}
-			return pg
-		return line
+		live = self.get_opt_value('output_grep')
+		if not live:  # progress output not available in -oG - mode
+			match = NMAP_PROGRESS_REGEX_1.search(line)
+			if match:
+				self._progress.update({
+					'extra_data': {
+						'elapsed': match.group(1),
+						'hosts_completed': match.group(2),
+						'hosts_up': match.group(3)
+					}
+				})
+				return
+			match = NMAP_PROGRESS_REGEX_2.search(line)
+			if match:
+				self._progress.update({'percent': float(match.group(2))})
+				self._progress['extra_data'].update({'scan_type': match.group(1), 'remaining_time': match.group(3)})
+				pg = Progress(**self._progress)
+				self._progress = {}
+				yield pg
+				return
+
+		# Host status lines
+		for item in NMAP_HOST_UP_REGEX.run(line):
+			yield Ip(**item)
+
+		# Host + ports lines
+		for item in NMAP_PORTS_REGEX.run(line):
+			ports = item['ports'].split(', ')
+			for port_info in ports:
+				port_info_split = port_info.split('/')
+				port, state, protocol, owner, service, rpc_info, version, _ = tuple(port_info_split)
+				extra_data = {}
+				if version:
+					extra_data['version'] = version
+				if owner:
+					extra_data['owner'] = owner
+				if rpc_info:
+					extra_data['rpc_info'] = rpc_info
+				yield Port(
+					ip=item['ip'],
+					host=item['host'],
+					port=int(port),
+					state=state,
+					protocol=protocol,
+					service_name=service,
+					confidence='high',
+					extra_data=extra_data
+				)
+		yield line
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -191,6 +233,10 @@ class nmap(ReconPort):
 			yield Error(message=f'Could not find XML results in {self.output_path}')
 			return
 		yield Info(message=f'XML results saved to {self.output_path}')
+		live = self.get_opt_value('output_grep')
+		if live:
+			yield Info(message='Skipping XML parsing since live mode was enabled (-oG -).')
+			return
 		yield from self.xml_to_json()
 
 	def xml_to_json(self):
