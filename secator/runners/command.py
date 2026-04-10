@@ -564,13 +564,10 @@ class Command(Runner):
 		if line is None:
 			return
 
-		# Turn line into generator so it works for both on_line yielded items
-		# and single lines
-		raw_line = isinstance(line, str)
-		if raw_line:
-			line = [line]
+		# Turn line into generator if it's raw string
+		line = [line] if isinstance(line, str) else line
 
-		# Run item loaders on raw lines
+		# Run item loaders on generator
 		for sub in line:
 			yield sub
 			yield from self.run_item_loaders(sub)
