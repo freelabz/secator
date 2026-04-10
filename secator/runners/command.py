@@ -570,7 +570,8 @@ class Command(Runner):
 		# Run item loaders on generator
 		for sub in line:
 			yield sub
-			yield from self.run_item_loaders(sub)
+			if isinstance(sub, str):
+				yield from self.run_item_loaders(sub)
 
 	def process_monitor_queue(self):
 		"""Process and yield any queued items from monitor thread."""
