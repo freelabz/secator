@@ -108,6 +108,9 @@ class Command(Runner):
 	# Ignore return code
 	ignore_return_code = False
 
+	# Disable pre-exec
+	disable_preexec = False
+
 	# Sudo
 	requires_sudo = False
 
@@ -489,7 +492,7 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
-				preexec_fn=os.setsid if not sudo_required else None,
+				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
