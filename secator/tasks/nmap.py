@@ -25,7 +25,7 @@ class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap'
 	input_types = [HOST, IP, CIDR_RANGE]
-	output_types = [Port, Ip, Vulnerability, Exploit]
+	output_types = [Port, Ip, Vulnerability, Exploit, Progress]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
 	file_flag = '-iL'
