@@ -29,6 +29,7 @@ NMAP_PORTS_REGEX = RegexSerializer(
 	fields=['ip', 'host', 'ports']
 )
 
+
 @task()
 class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
