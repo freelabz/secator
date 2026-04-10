@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from secator.config import CONFIG
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
-from secator.output_types import OutputType
+from secator.output_types import OutputType, Vulnerability
 from secator.utils import rich_to_ansi
 
 
@@ -74,8 +74,6 @@ class Certificate(OutputType):
 			return None
 
 	def get_vulnerabilities(self):
-		from secator.output_types import Vulnerability
-
 		if self.is_expired():
 			yield Vulnerability(
 				name='SSL certificate expired',

@@ -119,9 +119,7 @@ class katana(HttpCrawler):
 					stored_response_path=response['stored_response_path'],
 					request_headers=self.get_opt_value('header', preprocess=True),
 				)
-				if url not in self.urls:
-					self.urls.append(url)
-					yield url
+				yield url
 				params = form.get('parameters', [])
 				yield Tag(
 					category='info',
