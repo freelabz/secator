@@ -215,7 +215,7 @@ class nmapData(dict):
 			hostname = self._get_hostname(host)
 			tags = []
 			global_confidence = 'high'
-			is_mass_scan = len(self._get_ports(host)) > 3
+			is_mass_scan = len(self._get_ports(host)) > 20
 			if is_mass_scan:
 				yield Warning(
 					message=f'Unusual number of ports found for host {hostname}. There might be an IDS interfering with the scan.',
