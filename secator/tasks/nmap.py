@@ -25,7 +25,7 @@ class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 	cmd = 'nmap'
 	input_types = [HOST, IP, CIDR_RANGE]
-	output_types = [Port, Ip, Vulnerability, Exploit]
+	output_types = [Port, Ip, Vulnerability, Exploit, Progress]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
 	file_flag = '-iL'
@@ -182,8 +182,8 @@ class nmap(ReconPort):
 			self._progress['extra_data'].update({'scan_type': match.group(1), 'remaining_time': match.group(3)})
 			pg = Progress(**self._progress)
 			self._progress = {}
-			return pg
-		return line
+			yield pg
+		yield line
 
 	@staticmethod
 	def on_cmd_done(self):
