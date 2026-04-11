@@ -363,7 +363,14 @@ def create_test_cases():
 		},
 		{
 			'name': 'Apache with lessThan and custom versionType',
-			'versions': [{'lessThan': 'Apache HTTP Server 2.4*', 'status': 'affected', 'version': '2.4.7', 'versionType': 'custom'}],
+			'versions': [
+				{
+					'lessThan': 'Apache HTTP Server 2.4*',
+					'status': 'affected',
+					'version': '2.4.7',
+					'versionType': 'custom',
+				}
+			],
 			'tests': [
 				('Apache HTTP Server 2.4.7', True),
 				('Apache HTTP Server 2.4.8', True),
@@ -384,7 +391,14 @@ def create_test_cases():
 		},
 		{
 			'name': 'Apache with lessThanOrEqual',
-			'versions': [{'lessThanOrEqual': '2.4.48', 'status': 'affected', 'version': 'Apache HTTP Server 2.4', 'versionType': 'custom'}],
+			'versions': [
+				{
+					'lessThanOrEqual': '2.4.48',
+					'status': 'affected',
+					'version': 'Apache HTTP Server 2.4',
+					'versionType': 'custom',
+				}
+			],
 			'tests': [
 				('Apache HTTP Server 2.4.48', True),
 				('Apache HTTP Server 2.4.30', True),
@@ -466,7 +480,13 @@ def create_test_cases():
 		{
 			'name': 'Version with changes array - unaffected versions',
 			'versions': [
-				{'status': 'affected', 'version': '1.5.13', 'lessThan': '*', 'changes': [{'at': '1.26.2', 'status': 'unaffected'}, {'at': '1.27.1', 'status': 'unaffected'}], 'versionType': 'semver'}
+				{
+					'status': 'affected',
+					'version': '1.5.13',
+					'lessThan': '*',
+					'changes': [{'at': '1.26.2', 'status': 'unaffected'}, {'at': '1.27.1', 'status': 'unaffected'}],
+					'versionType': 'semver',
+				}
 			],
 			'tests': [
 				('1.26.2', False),  # Unaffected version
@@ -479,7 +499,13 @@ def create_test_cases():
 		{
 			'name': 'Another version with changes array',
 			'versions': [
-				{'changes': [{'at': '1.27.4', 'status': 'unaffected'}, {'at': '1.26.3', 'status': 'unaffected'}], 'lessThan': '*', 'status': 'affected', 'version': '1.11.4', 'versionType': 'semver'}
+				{
+					'changes': [{'at': '1.27.4', 'status': 'unaffected'}, {'at': '1.26.3', 'status': 'unaffected'}],
+					'lessThan': '*',
+					'status': 'affected',
+					'version': '1.11.4',
+					'versionType': 'semver',
+				}
 			],
 			'tests': [
 				('1.27.4', False),  # Unaffected version
@@ -529,13 +555,27 @@ def run_all_tests():
 					status = '✅ PASS'
 				else:
 					status = '❌ FAIL'
-					failed_tests.append({'case': test_case['name'], 'version': current_version, 'expected': expected_result, 'actual': actual_result})
+					failed_tests.append(
+						{
+							'case': test_case['name'],
+							'version': current_version,
+							'expected': expected_result,
+							'actual': actual_result,
+						}
+					)
 
 				print(f'  {status} | Version: {current_version:<30} | Expected: {str(expected_result):<5} | Got: {str(actual_result):<5}')  # noqa: E501
 
 			except Exception as e:
 				status = '💥 ERROR'
-				failed_tests.append({'case': test_case['name'], 'version': current_version, 'expected': expected_result, 'error': str(e)})
+				failed_tests.append(
+					{
+						'case': test_case['name'],
+						'version': current_version,
+						'expected': expected_result,
+						'error': str(e),
+					}
+				)
 				print(f'  {status} | Version: {current_version:<30} | Error: {str(e)}')
 
 		print(f'\n📊 Case Summary: {case_passed}/{case_total} tests passed')
