@@ -8,8 +8,8 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-    DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
-    URL, USER_AGENT, WORDLIST
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
+	URL, USER_AGENT, WORDLIST
 )
 # fmt: on
 from secator.output_types import Info, Tag, Url, Warning
@@ -92,7 +92,15 @@ class arjun(HttpBase):
 		for url, values in results.items():
 			parsed_url = urlparse(url)
 			url_without_param = str(urlunparse(parsed_url._replace(query='')))
-			yield Url(url=url, host=parsed_url.hostname, request_headers=values['headers'], method=values['method'], confidence='high', verified=True, tags=['fuzz'])
+			yield Url(
+				url=url,
+				host=parsed_url.hostname,
+				request_headers=values['headers'],
+				method=values['method'],
+				confidence='high',
+				verified=True,
+				tags=['fuzz'],
+			)
 			for param in values['params']:
 				yield Tag(
 					category='info',

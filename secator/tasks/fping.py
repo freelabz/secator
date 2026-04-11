@@ -4,7 +4,7 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-    CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
+	CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
 )
 # fmt: on
 from secator.output_types import Ip

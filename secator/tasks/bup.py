@@ -3,15 +3,33 @@ import re
 import shlex
 
 from secator.decorators import task
+
 # fmt: off
 from secator.definitions import (
-    DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL,
-    USER_AGENT
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL,
+	USER_AGENT
 )
 from secator.output_types import Progress, Url
 # fmt: on
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpBase
+
+BUP_BYPASS_MODES = [
+	'all',
+	'mid_paths',
+	'end_paths',
+	'case_substitution',
+	'char_encode',
+	'http_methods',
+	'http_versions',
+	'http_headers_method',
+	'http_headers_scheme',
+	'http_headers_ip',
+	'http_headers_port',
+	'http_headers_url',
+	'user_agent',
+]
+BUP_BYPASS_MODES_STR = ','.join(BUP_BYPASS_MODES)
 
 
 @task()
@@ -29,10 +47,7 @@ class bup(HttpBase):
 	opts = {
 		'spoofport': {'type': int, 'short': 'sp', 'help': 'Port(s) to inject in port-specific headers'},
 		'spoofip': {'type': str, 'short': 'si', 'help': 'IP(s) to inject in ip-specific headers'},
-		'mode': {
-			'type': str,
-			'help': 'Bypass modes (comma-delimited) amongst: all, mid_paths, end_paths, case_substitution, char_encode, http_methods, http_versions, http_headers_method, http_headers_scheme, http_headers_ip, http_headers_port, http_headers_url, user_agent',
-		},  # noqa: E501
+		'mode': {'type': str, 'help': f'Bypass modes (comma-delimited) amongst: {BUP_BYPASS_MODES_STR}'},
 	}
 	opt_key_map = {
 		DATA: OPT_NOT_SUPPORTED,

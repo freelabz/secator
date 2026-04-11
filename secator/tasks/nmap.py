@@ -10,11 +10,11 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-    CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT, THREADS,
-    TIMEOUT, TOP_PORTS
+	CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT, THREADS,
+	TIMEOUT, TOP_PORTS
 )
 # fmt: on
-from secator.output_types import Error, Exploit, Info, Ip, Port, Technology, Vulnerability, Warning
+from secator.output_types import Error, Exploit, Info, Ip, Port, Technology, Vulnerability, Warning, Progress
 from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
 
@@ -163,7 +163,15 @@ class nmap(ReconPort):
 	def on_line(self, line):
 		match = NMAP_PROGRESS_REGEX_1.search(line)
 		if match:
-			self._progress.update({'extra_data': {'elapsed': match.group(1), 'hosts_completed': match.group(2), 'hosts_up': match.group(3)}})
+			self._progress.update(
+				{
+					'extra_data': {
+						'elapsed': match.group(1),
+						'hosts_completed': match.group(2),
+						'hosts_up': match.group(3),
+					},
+				}
+			)
 			return
 		match = NMAP_PROGRESS_REGEX_2.search(line)
 		if match:

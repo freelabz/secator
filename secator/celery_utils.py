@@ -71,7 +71,7 @@ class CeleryData(object):
 				TextColumn('{task.fields[progress]}%'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
 				auto_refresh=False,
-				transient=True,
+				transient=False,
 				console=console,
 				# redirect_stderr=True,
 				# redirect_stdout=False,
