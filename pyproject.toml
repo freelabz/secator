@@ -101,3 +101,21 @@ secator = 'secator.cli:cli'
 [project.urls]
 Homepage = 'https://github.com/freelabz/secator'
 Issues = 'https://github.com/freelabz/secator/issues'
+
+[tool.ruff]
+line-length = 200
+
+[tool.ruff.lint]
+ignore = ["I"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "tab"
+skip-magic-trailing-comma = false
+
+[tool.isort]
+multi_line_output = 5
+line_length = 120

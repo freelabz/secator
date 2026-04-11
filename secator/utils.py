@@ -27,8 +27,10 @@ import platform
 import unicodedata
 import yaml
 
+# fmt: off
 from secator.definitions import (DEBUG, VERSION, DEV_PACKAGE, IP, HOST, CIDR_RANGE,
 								 MAC_ADDRESS, SLUG, UUID, EMAIL, IBAN, URL, PATH, HOST_PORT, GCS_URL)
+# fmt: on
 from secator.config import CONFIG, ROOT_FOLDER, LIB_FOLDER, download_file
 from secator.rich import console
 
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 _tasks = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
-CAMEL_TO_SNAKE_REGEX = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+CAMEL_TO_SNAKE_REGEX = re.compile(r'(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])')
 
 
 class TaskError(ValueError):
@@ -142,7 +144,7 @@ def sanitize_url(http_url):
 
 def sanitize_folder_name(
 	name: str,
-	replacement_char: str = "_",
+	replacement_char: str = '_',
 	replace_spaces: bool = True,
 	replace_hyphens: bool = True,
 	max_length: int = 255,
@@ -163,20 +165,20 @@ def sanitize_folder_name(
 		A sanitized folder name.
 	"""
 	if not name:
-		return "unnamed_folder"
+		return 'unnamed_folder'
 
 	# Normalize Unicode (optional, helps with lookalike characters)
 	if normalize_unicode:
-		name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+		name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
 
 	# Replace spaces and hyphens if enabled
 	if replace_spaces:
-		name = re.sub(r"\s+", replacement_char, name)
+		name = re.sub(r'\s+', replacement_char, name)
 	if replace_hyphens:
-		name = name.replace("-", replacement_char)
+		name = name.replace('-', replacement_char)
 
 	# Remove invalid characters (OS-specific)
-	if platform.system() == "Windows":
+	if platform.system() == 'Windows':
 		# Windows: < > : " / \ | ? * and control chars (0-31)
 		invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
 	else:
@@ -186,29 +188,29 @@ def sanitize_folder_name(
 	sanitized = re.sub(invalid_chars, replacement_char, name)
 
 	# Handle reserved names (Windows only)
-	if platform.system() == "Windows":
+	if platform.system() == 'Windows':
 		reserved_names = {
 			"CON", "PRN", "AUX", "NUL",
 			"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
 			"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-		}
+		}  # fmt: off
 		upper_name = sanitized.upper()
 		if upper_name in reserved_names:
-			sanitized = f"{sanitized}{replacement_char}"
+			sanitized = f'{sanitized}{replacement_char}'
 
 	# Remove leading/trailing spaces, dots, and replacement chars
-	sanitized = sanitized.strip().strip(f".{replacement_char}")
+	sanitized = sanitized.strip().strip(f'.{replacement_char}')
 
 	# Replace multiple replacement chars with a single one
-	sanitized = re.sub(f"{re.escape(replacement_char)}+", replacement_char, sanitized)
+	sanitized = re.sub(f'{re.escape(replacement_char)}+', replacement_char, sanitized)
 
 	# Truncate if too long
 	if max_length and len(sanitized) > max_length:
-		sanitized = sanitized[:max_length].rstrip(f".{replacement_char}")
+		sanitized = sanitized[:max_length].rstrip(f'.{replacement_char}')
 
 	# Ensure the name is not empty
 	if not sanitized:
-		return "unnamed_folder"
+		return 'unnamed_folder'
 
 	return sanitized
 
@@ -223,6 +225,7 @@ def deduplicate(array, attr=None):
 		list: Deduplicated list.
 	"""
 	from secator.output_types import OUTPUT_TYPES
+
 	if attr and len(array) > 0 and isinstance(array[0], tuple(OUTPUT_TYPES)):
 		memo = set()
 		res = []
@@ -355,7 +358,7 @@ def load_fixture(name, fixtures_dir, ext=None, only_path=False):
 
 def get_file_timestamp():
 	"""Get current timestamp into a formatted string."""
-	return datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%f_%p")
+	return datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%f_%p')
 
 
 def detect_host(interface=None):
@@ -387,6 +390,7 @@ def rich_to_ansi(text):
 	"""
 	try:
 		from rich.console import Console
+
 		tmp_console = Console(file=None, highlight=False, force_terminal=True)
 		with tmp_console.capture() as capture:
 			tmp_console.print(text, end='', soft_wrap=True)
@@ -406,6 +410,7 @@ def strip_rich_markup(text):
 		str: Text without rich markup.
 	"""
 	from rich.text import Text
+
 	return Text.from_markup(text).plain
 
 
@@ -451,8 +456,8 @@ def debug(msg, sub='', id='', obj=None, lazy=None, obj_after=True, obj_breakline
 			formatted_msg += f'\n{json.dumps(obj, indent=4, default=str)}'
 		log_hook(formatted_msg)
 
-	if not DEBUG == ['all'] and not DEBUG == ['1'] and not DEBUG == ["*"]:
-		if not DEBUG or DEBUG == [""]:
+	if not DEBUG == ['all'] and not DEBUG == ['1'] and not DEBUG == ['*']:
+		if not DEBUG or DEBUG == ['']:
 			return
 		if sub:
 			for s in DEBUG:
@@ -523,7 +528,7 @@ def caml_to_snake(name):
 		'html_element'
 	"""
 	if not name:
-		return ""
+		return ''
 	name = CAMEL_TO_SNAKE_REGEX.sub(r'_', name)
 	return name.lower().replace('__', '_')
 
@@ -543,6 +548,7 @@ def to_title_case_hyphenated(name):
 def print_version():
 	"""Print secator version information."""
 	from secator.installer import get_version_info
+
 	console.print(f'[bold gold3]Current version[/]: {VERSION}', highlight=False, end='')
 	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
@@ -601,7 +607,7 @@ def extract_subdomains_from_fqdn(fqdn, domain, suffix):
 	subdomains = [fqdn]
 
 	# Continue stripping subdomains until reaching the base domain (domain + suffix)
-	base_domain = f"{domain}.{suffix}"
+	base_domain = f'{domain}.{suffix}'
 	current = fqdn
 
 	while current != base_domain:
@@ -652,36 +658,41 @@ def get_file_date(file_path):
 	now = datetime.now()
 	if (now - mod_date).days < 7:
 		# If the modification was less than a week ago, use natural time
-		return humanize.naturaltime(now - mod_date) + mod_date.strftime(" @ %H:%m")
+		return humanize.naturaltime(now - mod_date) + mod_date.strftime(' @ %H:%m')
 	else:
 		# Otherwise, return the date in "on %B %d" format
-		return f"{mod_date.strftime('%B %d @ %H:%m')}"
+		return f'{mod_date.strftime("%B %d @ %H:%m")}'
 
 
-def trim_string(s, max_length=30):
-	"""Trims a long string to include the beginning and the end, with an ellipsis in the middle. The output string will
-	not exceed the specified maximum length.
+def trim_string(s, max_length=30, mode='middle'):
+	"""Trims a long string with an ellipsis indicator.
 
 	Args:
 		s (str): The string to be trimmed.
 		max_length (int): The maximum allowed length of the trimmed string.
+		mode (str): Where to trim - 'start' (keep end), 'middle' (keep start+end), or 'end' (keep start).
 
 	Returns:
 		str: The trimmed string.
 	"""
+	if not isinstance(s, str):
+		return s
 	if len(s) <= max_length:
-		return s  # Return the original string if it's short enough
+		return s
 
-	# Calculate the lengths of the start and end parts
-	end_length = 30  # Default end length
-	if max_length - end_length - 5 < 0:  # 5 accounts for the length of '[...] '
-		end_length = max_length - 5  # Adjust end length if total max_length is too small
-	start_length = max_length - end_length - 5  # Subtract the space for '[...] '
+	ellipsis = '...'
+	elen = len(ellipsis)
 
-	# Build the trimmed string
-	start_part = s[:start_length]
-	end_part = s[-end_length:]
-	return f"{start_part} [...] {end_part}"
+	if mode == 'start':
+		offset = max_length - elen
+		return ellipsis + s[-offset:]
+	elif mode == 'end':
+		return s[: max_length - elen] + ellipsis
+	else:  # middle
+		available = max_length - elen
+		start_length = (available + 1) // 2
+		end_length = available - start_length
+		return rf'{s[:start_length]} {ellipsis} {s[-end_length:]}' if end_length > 0 else s[: max_length - elen] + ellipsis
 
 
 def sort_files_by_date(file_list):
@@ -772,12 +783,7 @@ def get_info_from_report_path(path):
 	try:
 		ws, runner_type, number = path.parts[-4], path.parts[-3], path.parts[-2]
 		workspace_path = '/'.join(path.parts[:-3])
-		return {
-			'workspace': ws,
-			'workspace_path': workspace_path,
-			'type': runner_type,
-			'id': number
-		}
+		return {'workspace': ws, 'workspace_path': workspace_path, 'type': runner_type, 'id': number}
 	except IndexError:
 		return {}
 
@@ -819,6 +825,7 @@ def deep_merge_dicts(*dicts):
 	Returns:
 		dict: A new dictionary containing merged keys and values from all input dictionaries.
 	"""
+
 	def merge_two_dicts(dict1, dict2):
 		"""Helper function that merges two dictionaries.
 
@@ -859,12 +866,7 @@ def process_wordlist(val):
 	if template_wordlist:
 		val = template_wordlist
 
-	return download_file(
-		val,
-		target_folder=CONFIG.dirs.wordlists,
-		offline_mode=CONFIG.offline_mode,
-		type='wordlist'
-	)
+	return download_file(val, target_folder=CONFIG.dirs.wordlists, offline_mode=CONFIG.offline_mode, type='wordlist')
 
 
 def convert_functions_to_strings(data):
@@ -952,19 +954,14 @@ def parse_raw_http_request(raw_request):
 		scheme = 'http'
 
 	# Construct full URL
-	url = f"{scheme}://{host}{path}"
+	url = f'{scheme}://{host}{path}'
 
 	# Parse body (everything after the empty line)
 	body = ''
 	if found_empty_line and body_start < len(lines):
 		body = '\n'.join(lines[body_start:]).strip()
 
-	return {
-		'method': method,
-		'url': url,
-		'headers': headers,
-		'data': body
-	}
+	return {'method': method, 'url': url, 'headers': headers, 'data': body}
 
 
 def format_token_count(tokens, icon='', compact=False):
@@ -981,8 +978,8 @@ def format_token_count(tokens, icon='', compact=False):
 	prefix = f':{icon}: ' if icon else ''
 	suffix = '' if compact else ' tokens'
 	if tokens >= 1000:
-		return f'{prefix}{tokens/1000:.1f}k{suffix}'
-	return f'{prefix}{tokens}{suffix}'
+		return f'{prefix}{tokens / 1000:.1f}k tokens'
+	return f'{prefix}{tokens} tokens'
 
 
 def format_object(obj, color='magenta', skip_keys=[], predicate=lambda x: True):
@@ -991,7 +988,7 @@ def format_object(obj, color='magenta', skip_keys=[], predicate=lambda x: True):
 	elif isinstance(obj, dict) and obj.keys():
 		obj = {k: v for k, v in obj.items() if k.lower().replace('-', '_') not in skip_keys if predicate(v)}
 		if obj:
-			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(v)}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
+			return ' [' + ', '.join([f'[bold {color}]{rich_escape(k)}[/]: [{color}]{rich_escape(trim_string(v))}[/]' for k, v in obj.items()]) + ']'  # noqa: E501
 	return ''
 
 
@@ -1163,7 +1160,7 @@ def trim_gif(input_path, output_path, max_pause_ms=3000):
 					append_images=frames[1:],
 					duration=durations,
 					loop=im.info.get('loop', 0),
-					optimize=True
+					optimize=True,
 				)
 				return True
 		return False
@@ -1192,12 +1189,7 @@ def get_gif_info(input_path):
 			width, height = im.size
 			frame_count = im.n_frames
 			total_pixels = width * height * frame_count
-			return {
-				'width': width,
-				'height': height,
-				'frame_count': frame_count,
-				'total_pixels': total_pixels
-			}
+			return {'width': width, 'height': height, 'frame_count': frame_count, 'total_pixels': total_pixels}
 	except Exception as e:
 		logger.warning(f'Failed to get GIF info: {str(e)}')
 		return None
@@ -1280,7 +1272,7 @@ def reduce_gif_frames(input_path, output_path, max_frames=500):
 					append_images=frames[1:],
 					duration=durations,
 					loop=im.info.get('loop', 0),
-					optimize=True
+					optimize=True,
 				)
 				logger.info(f'Reduced GIF from {total_frames} to {len(frames)} frames (accelerated by {acceleration_factor:.2f}x)')
 				return True
@@ -1307,9 +1299,28 @@ def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12
 	from secator.output_types import Error, Info
 
 	VHS_KEYWORDS = {
-		'Output', 'Require', 'Set', 'Type', 'Left', 'Right', 'Up', 'Down',
-		'Backspace', 'Enter', 'Tab', 'Space', 'Ctrl', 'Sleep', 'Wait',
-		'Hide', 'Show', 'Screenshot', 'Copy', 'Paste', 'Source', 'Env'
+		'Output',
+		'Require',
+		'Set',
+		'Type',
+		'Left',
+		'Right',
+		'Up',
+		'Down',
+		'Backspace',
+		'Enter',
+		'Tab',
+		'Space',
+		'Ctrl',
+		'Sleep',
+		'Wait',
+		'Hide',
+		'Show',
+		'Screenshot',
+		'Copy',
+		'Paste',
+		'Source',
+		'Env',
 	}
 
 	# Read tap file

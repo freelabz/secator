@@ -63,6 +63,8 @@ class Port(OutputType):
 		if self.extra_data:
 			skip_keys = ['name', 'servicefp', 'method', 'service_name', 'product', 'version', 'conf']
 			s += format_object(self.extra_data, 'yellow', skip_keys=skip_keys)
+		if self.confidence == 'low':
+			s = f'[dim]{s}[/]'
 		return s
 
 	def __repr__(self) -> str:
