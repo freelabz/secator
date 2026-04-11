@@ -40,16 +40,16 @@ class arpscan(Command):
 	@staticmethod
 	def on_line(self, line):
 		if 'WARNING:' in line:
-			return Warning(message=line.split('WARNING:')[1].strip())
+			yield Warning(message=line.split('WARNING:')[1].strip())
 		elif 'permission' in line:
-			return Error(message=line + "\n" + (
+			yield Error(message=line + "\n" + (
 				"You must [bold]run this task as root[/bold] to scan the network, or use "
 				"[green]sudo setcap cap_net_raw=eip /usr/sbin/arp-scan[/green] to grant the [bold]CAP_NET_RAW[/bold] capability "
 				"to the [bold]arp-scan[/bold] binary."))
 		else:
 			line_parts = line.strip().split('\t')
 			if len(line_parts) == 4:
-				return Ip(
+				yield Ip(
 					ip=line_parts[0],
 					host=line_parts[1],
 					alive=True,
@@ -60,4 +60,4 @@ class arpscan(Command):
 					tags=["arp", "internal"],
 					_source=self.unique_name
 				)
-		return line
+		yield line

@@ -157,5 +157,5 @@ class ffuf(HttpFuzzer):
 	def on_line(self, line):
 		if line.startswith('[ERR]'):
 			message = line.split('[ERR]')[1].strip()
-			self.add_result(Warning(message=message))
-		return line
+			yield Warning(message=message)
+		yield line
