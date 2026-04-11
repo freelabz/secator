@@ -7,7 +7,22 @@ import xmltodict
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT, THREADS, TIMEOUT, TOP_PORTS  # noqa: E501
+from secator.definitions import (  # noqa: E501
+	CIDR_RANGE,
+	DELAY,
+	HOST,
+	IP,
+	OPT_NOT_SUPPORTED,
+	OUTPUT_PATH,
+	PORTS,
+	PROXY,
+	RATE_LIMIT,
+	RETRIES,
+	SCRIPT,
+	THREADS,
+	TIMEOUT,
+	TOP_PORTS,
+)
 from secator.output_types import Error, Exploit, Info, Ip, Port, Technology, Vulnerability, Warning
 from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
@@ -159,7 +174,7 @@ class nmap(ReconPort):
 			except Exception as exc:
 				yield Error(
 					message=f'Cannot parse XML output {self.output_path} to valid JSON.',
-					traceback=traceback_as_string(exc)
+					traceback=traceback_as_string(exc),
 				)
 		yield from nmapData(results)
 
@@ -170,16 +185,18 @@ class nmapData(dict):
 		ips = []
 		scan_type = self._get_scan_type()
 		hosts = self._get_hosts()
-		total_ports = sum(len(self._get_ports(host)) for host in hosts)
-		is_mass_scan = total_ports > 20
-		global_confidence = 'high'
-		tags = []
-		if is_mass_scan:
-			yield Warning(message='Unusual number of ports found. There might be an IDS interfering with the scan.')
-			global_confidence = 'low'
-			tags = ['ids']
+		techs = []
 		for host in hosts:
 			hostname = self._get_hostname(host)
+			tags = []
+			global_confidence = 'high'
+			is_mass_scan = len(self._get_ports(host)) > 3
+			if is_mass_scan:
+				yield Warning(
+					message=f'Unusual number of ports found for host {hostname}. There might be an IDS interfering with the scan.',
+				)
+				global_confidence = 'low'
+				tags = ['ids']
 			ip = self._get_ip(host)
 			if ip and ip not in ips:
 				yield Ip(ip=ip, alive=True, host=hostname, tags=tags + ['ping'])
@@ -200,6 +217,8 @@ class nmapData(dict):
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				service_confidence = extra_data.get('confidence', 'low')
+				if service_confidence != 'low':
+					global_confidence = 'high'
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
@@ -221,15 +240,17 @@ class nmapData(dict):
 					extra_data=extra_data,
 					confidence=global_confidence,
 					service_confidence=service_confidence,
-					tags=tags + [scan_type, reason]
+					tags=tags + [scan_type, reason],
 				)
 
 				# Technology
 				if service_confidence == 'high' and extra_data.get('product'):
-					yield Technology(
-						match=f'{ip}:{port_number}',
-						product=extra_data['product'],
-						version=extra_data.get('version'),
+					techs.append(
+						Technology(
+							match=f'{ip}:{port_number}',
+							product=extra_data['product'],
+							version=extra_data.get('version'),
+						)
 					)
 
 				# Parse each script output to get vulns
@@ -264,6 +285,7 @@ class nmapData(dict):
 							continue
 						yield data
 						# datas.append(data)
+		yield from techs
 
 	# ---------------------#
 	# XML FILE EXTRACTORS #

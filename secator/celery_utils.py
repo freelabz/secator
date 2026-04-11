@@ -24,14 +24,14 @@ class CeleryData(object):
 	"""Utility to simplify tracking a Celery task and all of its subtasks."""
 
 	def iter_results(
-			result,
-			ids_map={},
-			description=True,
-			revoked=False,
-			refresh_interval=CONFIG.runners.poll_frequency,
-			print_remote_info=True,
-			print_remote_title='Results'
-		):
+		result,
+		ids_map={},
+		description=True,
+		revoked=False,
+		refresh_interval=CONFIG.runners.poll_frequency,
+		print_remote_info=True,
+		print_remote_title='Results',
+	):
 		"""Generator to get results from Celery task.
 
 		Args:
@@ -47,14 +47,20 @@ class CeleryData(object):
 		"""
 		# Display live results if print_remote_info is set
 		if print_remote_info:
+
 			class PanelProgress(RichProgress):
 				def get_renderables(self):
-					yield Padding(Panel(
-						self.make_tasks_table(self.tasks),
-						title=print_remote_title,
-						border_style='bold gold3',
-						expand=False,
-						highlight=True), pad=(2, 0, 0, 0))
+					yield Padding(
+						Panel(
+							self.make_tasks_table(self.tasks),
+							title=print_remote_title,
+							border_style='bold gold3',
+							expand=False,
+							highlight=True,
+						),
+						pad=(2, 0, 0, 0),
+					)
+
 			progress = PanelProgress(
 				SpinnerColumn('dots'),
 				TextColumn('{task.fields[descr]}  ') if description else '',
@@ -65,16 +71,15 @@ class CeleryData(object):
 				TextColumn('{task.fields[progress]}%'),
 				# TextColumn('\[[bold magenta]{task.fields[id]:<30}[/]]'),  # noqa: W605
 				auto_refresh=False,
-				transient=False,
+				transient=True,
 				console=console,
 				# redirect_stderr=True,
-				# redirect_stdout=False
+				# redirect_stdout=False,
 			)
 		else:
 			progress = nullcontext()
 
 		with progress:
-
 			# Make initial progress
 			if print_remote_info:
 				progress_cache = CeleryData.init_progress(progress, ids_map)
@@ -82,7 +87,6 @@ class CeleryData(object):
 			# Get live results and print progress
 			for data in CeleryData.poll(result, ids_map, refresh_interval, revoked):
 				for result in data['results']:
-
 					# Add dynamic subtask to ids_map
 					if isinstance(result, Info):
 						message = result.message
@@ -95,7 +99,7 @@ class CeleryData(object):
 								'descr': '',
 								'state': 'PENDING',
 								'count': 0,
-								'progress': 0
+								'progress': 0,
 							}
 					yield result
 					del result
@@ -171,9 +175,9 @@ class CeleryData(object):
 		main_task = State(
 			task_id=result.id,
 			state='REVOKED' if revoked and result.state == 'PENDING' else result.state,
-			_source='celery'
+			_source='celery',
 		)
-		debug(f"Main task state: {result.id} - {result.state}", sub='celery.poll', verbose=True)
+		debug(f'Main task state: {result.id} - {result.state}', sub='celery.poll', verbose=True)
 		yield {'id': result.id, 'state': result.state, 'results': [main_task]}
 		yield from CeleryData.get_tasks_data(ids_map, revoked=revoked)
 
@@ -196,7 +200,7 @@ class CeleryData(object):
 				sub='celery.poll',
 				id=data['id'],
 				obj={data['full_name']: data['state'], 'count': data['count']},
-				verbose=True
+				verbose=True,
 			)
 			yield data
 
@@ -239,11 +243,13 @@ class CeleryData(object):
 			return
 
 		# Set up task state
-		data.update({
-			'state': res.state,
-			'ready': False,
-			'results': []
-		})
+		data.update(
+			{
+				'state': res.state,
+				'ready': False,
+				'results': [],
+			}
+		)
 
 		# Get remote task data
 		info = res.info

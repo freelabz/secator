@@ -58,7 +58,7 @@ class circl(CVEProvider):
 		"""Convert CVE info to secator Vulnerability."""
 		cve_id = cve_info['cveMetadata']['cveId']
 		cna = cve_info['containers']['cna']
-		adp = cve_info['containers']['adp']
+		adp = cve_info['containers'].get('adp', [])
 		name = cna.get('title')
 		if not name or name == 'other':
 			name = cve_id
@@ -75,11 +75,11 @@ class circl(CVEProvider):
 		cvss_vec = ''
 		severity = ''
 		for metric in cna.get('metrics', []):
-			for name, value in metric.items():
-				if 'cvss' in name:
-					cvss_score = value['baseScore']
-					severity = value['baseSeverity']
-					cvss_vec = value['vectorString']
+			for mname, mvalue in metric.items():
+				if 'cvss' in mname:
+					cvss_score = mvalue['baseScore']
+					severity = mvalue.get('baseSeverity', 'unknown')
+					cvss_vec = mvalue['vectorString']
 
 		# Set CPEs affected
 		cpes_affected = []
@@ -95,7 +95,7 @@ class circl(CVEProvider):
 			name=name or cve_id,
 			provider='vulnerability.circl.lu',
 			id=cve_id,
-			severity=severity,
+			severity=severity.strip(),
 			cvss_score=cvss_score,
 			cvss_vec=cvss_vec,
 			epss_score=0,
@@ -103,7 +103,6 @@ class circl(CVEProvider):
 			extra_data={'cpes': cpes_affected},
 			description=description,
 			references=references,
-			reference=reference
+			reference=reference,
 		)
-		return vuln
 		return vuln

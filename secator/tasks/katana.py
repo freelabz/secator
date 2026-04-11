@@ -3,12 +3,12 @@ import shlex
 from urllib.parse import urlparse, urlunparse
 
 from secator.config import CONFIG
-from secator.cve import extract_software_and_version
 from secator.decorators import task
 from secator.definitions import (
-	DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST,
-	HOST_PORT, IP, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY,
-	RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL, USER_AGENT)
+	DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, IP,
+	MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS,
+	TIMEOUT, URL, USER_AGENT
+)  # fmt: off
 from secator.output_types import Tag, Technology, Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
@@ -92,6 +92,7 @@ class katana(HttpCrawler):
 		if form_fill or form_extraction or store_responses:
 			reports_folder_outputs = f'{self.reports_folder}/.outputs'
 			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
+		self._techs = {}
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -171,17 +172,14 @@ class katana(HttpCrawler):
 			yield tag
 
 		# Technologies
-		if url.webserver and not techs:
-			techs.append(url.webserver)
-		for tech in techs:
-			for tech in techs:
-				tech = tech.replace('_', ' ').replace('/', ' ').replace('(', ' ').replace(')', '')
-				product, version = extract_software_and_version(tech)
-				yield Technology(
-					match=url_without_params,
-					product=product,
-					version=version,
-				)
+		for tech in url.get_techs():
+			print = True
+			seen = self._techs.setdefault(url.host, [])
+			key = (tech.product, tech.version)
+			print = key not in seen
+			if print:
+				seen.append(key)
+			self.add_result(tech, print=print)
 
 	@staticmethod
 	def on_item(self, item):

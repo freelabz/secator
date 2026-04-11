@@ -82,7 +82,9 @@ class Certificate(OutputType):
 				tags=['ssl', 'tls'],
 				severity='high',
 				confidence='high',
-				extra_data={'expiration_date': self.format_date(self.not_after)},
+				extra_data={
+					'expiration_date': self.format_date(self.not_after),
+				},
 			)
 
 	def __rich__(self) -> str:

@@ -102,22 +102,19 @@ Homepage = 'https://github.com/freelabz/secator'
 Issues = 'https://github.com/freelabz/secator/issues'
 
 [tool.ruff]
-line-length = 300
+line-length = 200
 
 [tool.ruff.lint]
-ignore = ["I001"]
+ignore = ["I"]
 
 [tool.ruff.format]
 quote-style = "single"
 indent-style = "tab"
 skip-magic-trailing-comma = false
 
-[tool.ruff.lint.pycodestyle]
-max-line-length = 120
-
 [tool.isort]
-multi_line_output = 2
-force_single_line =  true
+multi_line_output = 5
+line_length = 120
 
 [lint.pydocstyle]
 convention = "pep257"

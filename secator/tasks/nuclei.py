@@ -1,10 +1,14 @@
 from secator.config import CONFIG
 from secator.cve import extract_software_and_version
 from secator.decorators import task
+
+# fmt: off
 from secator.definitions import (
-	CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, ID,
-	IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES, RETRIES, SEVERITY,
-	TAGS, THREADS, TIMEOUT, URL, USER_AGENT)
+	CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, ID, IP,
+	MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS,
+	THREADS, TIMEOUT, URL, USER_AGENT
+)
+# fmt: on
 from secator.output_types import Progress, Tag, Technology, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
@@ -160,7 +164,7 @@ class nuclei(VulnMulti):
 		tid = item['template-id']
 		if '-detect' in tid:
 			return tid.replace('-detect', '')
-		val = nuclei.valkue_extractor(item).replace('_', ' ').replace('/', '').replace('-detect', '').replace('-version', '').replace('generic', '')  # noqa: E501
+		val = nuclei.value_extractor(item).replace('_', ' ').replace('/', '').replace('-detect', '').replace('-version', '').replace('generic', '')  # noqa: E501
 		product, _ = extract_software_and_version(val, postfix=True)
 		if product is not None:
 			return product
