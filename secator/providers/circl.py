@@ -80,6 +80,13 @@ class circl(CVEProvider):
 					cvss_score = mvalue['baseScore']
 					severity = mvalue.get('baseSeverity', 'unknown')
 					cvss_vec = mvalue['vectorString']
+		for adp_n in adp:
+			for metric in adp_n.get('metrics', []):
+				for mname, mvalue in metric.items():
+					if 'cvss' in mname:
+						cvss_score = mvalue['baseScore']
+						severity = mvalue.get('baseSeverity', 'unknown')
+						cvss_vec = mvalue['vectorString']
 
 		# Set CPEs affected
 		cpes_affected = []
