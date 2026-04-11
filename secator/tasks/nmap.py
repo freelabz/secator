@@ -21,13 +21,17 @@ from secator.utils import debug, traceback_as_string
 logger = logging.getLogger(__name__)
 
 
+NMAP_PROGRESS_REGEX_1 = re.compile(r'Stats: (\d+:\d+:\d+) elapsed; (\d+) hosts completed \((\d+) up\)')
+NMAP_PROGRESS_REGEX_2 = re.compile(r'(.*) Timing: About (\d+\.\d+)% done; ETC: \d+:\d+ \((\d+:\d+:\d+) remaining\)')
+
+
 @task()
 class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 
 	cmd = 'nmap'
 	input_types = [HOST, IP, CIDR_RANGE]
-	output_types = [Port, Ip, Vulnerability, Technology, Exploit]
+	output_types = [Port, Ip, Vulnerability, Technology, Exploit, Progress]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
 	file_flag = '-iL'
@@ -76,7 +80,7 @@ class nmap(ReconPort):
 		# Misc
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path', 'internal': True, 'display': False},  # noqa: E501
 		'debug': {'is_flag': True, 'default': False, 'help': 'Enable debug mode'},
-		'verbose_output': {'is_flag': True, 'short': 'vo', 'default': False, 'help': 'Enable verbose mode'},
+		'verbosity': {'type': int, 'short': 'vo', 'default': None, 'internal': True, 'display': True, 'help': 'Enable verbose mode (1, 2, 3)'},  # noqa: E501
 		'timing': {'type': int, 'short': 'T', 'default': None, 'help': 'Timing template (0: paranoid, 1: sneaky, 2: polite, 3: normal, 4: aggressive, 5: insane)'},  # noqa: E501
 	}
 	opt_key_map = {
@@ -122,7 +126,6 @@ class nmap(ReconPort):
 		'traceroute': '--traceroute',
 		'disable_arp_ping': '--disable-arp-ping',
 		'output_path': '-oX',
-		'verbose_output': '-v',
 	}
 	opt_value_map = {PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x}
 	install_pre = {
@@ -134,6 +137,7 @@ class nmap(ReconPort):
 	proxy_socks5 = False
 	proxy_http = False
 	profile = 'small'
+	disable_preexec = True
 
 	@staticmethod
 	def on_cmd(self):
@@ -144,9 +148,37 @@ class nmap(ReconPort):
 		self.cmd += f' -oX {shlex.quote(self.output_path)}'
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
 		tcp_connect = self.cmd_options.get('tcp_connect')
+		verbosity = self.get_opt_value('verbosity')
 		if tcp_connect and tcp_syn_stealth:
 			self._print('Options -sT (SYN stealth scan) and -sS (CONNECT scan) are conflicting. Keeping only -sS.', 'bold gold3')
 			self.cmd = self.cmd.replace('-sT ', '')
+		if verbosity:
+			verbosity_str = int(verbosity) * 'v'
+			self.cmd += f' -{verbosity_str}'
+		if CONFIG.runners.progress_update_frequency != -1:
+			self.cmd += f' --stats-every {CONFIG.runners.progress_update_frequency}s'
+		self._progress = {}
+
+	@staticmethod
+	def on_line(self, line):
+		match = NMAP_PROGRESS_REGEX_1.search(line)
+		if match:
+			self._progress.update({
+				'extra_data': {
+					'elapsed': match.group(1),
+					'hosts_completed': match.group(2),
+					'hosts_up': match.group(3)
+				}
+			})
+			return
+		match = NMAP_PROGRESS_REGEX_2.search(line)
+		if match:
+			self._progress.update({'percent': float(match.group(2))})
+			self._progress['extra_data'].update({'scan_type': match.group(1), 'remaining_time': match.group(3)})
+			pg = Progress(**self._progress)
+			self._progress = {}
+			yield pg
+		yield line
 
 	@staticmethod
 	def on_cmd_done(self):

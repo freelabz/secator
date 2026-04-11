@@ -56,12 +56,6 @@ class arjun(HttpBase):
 	github_handle = 's0md3v/Arjun'
 
 	@staticmethod
-	def on_line(self, line):
-		if 'Processing chunks' in line:
-			return ''
-		return line
-
-	@staticmethod
 	def on_cmd(self):
 		follow_redirect = self.get_opt_value(FOLLOW_REDIRECT)
 		self.cmd = self.cmd.replace(' --follow-redirect', '')
@@ -72,6 +66,13 @@ class arjun(HttpBase):
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.cmd += f' -oJ {shlex.quote(self.output_path)}'
+
+	@staticmethod
+	def on_line(self, line):
+		if 'Processing chunks' in line:
+			yield ''
+			return
+		yield line
 
 	@staticmethod
 	def on_cmd_done(self):

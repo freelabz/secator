@@ -38,5 +38,5 @@ class mapcidr(ReconIp):
 			if self.get_opt_value('hide_ips'):
 				self.add_result(ip, print=False)
 				return
-			return ip
-		return line
+			yield ip
+		yield line

@@ -81,5 +81,5 @@ class fping(ReconIp):
 	@staticmethod
 	def on_line(self, line):
 		if 'Unreachable' in line:
-			return ''  # discard line as it pollutes output
-		return line
+			yield ''  # discard line as it pollutes output
+		yield line

@@ -108,6 +108,9 @@ class Command(Runner):
 	# Ignore return code
 	ignore_return_code = False
 
+	# Disable pre-exec
+	disable_preexec = False
+
 	# Sudo
 	requires_sudo = False
 
@@ -489,7 +492,7 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
-				preexec_fn=os.setsid if not sudo_required else None,
+				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
 				shell=self.shell,
 				env=env,
 				cwd=self.cwd)
@@ -561,16 +564,14 @@ class Command(Runner):
 		if line is None:
 			return
 
-		# Yield line if no items were yielded
-		yield line
+		# Turn line into generator if it's raw string
+		line = [line] if isinstance(line, str) else line
 
-		# Run item_loader to try parsing as dict
-		for item in self.run_item_loaders(line):
-			yield item
-
-		# Skip rest of iteration (no process mode)
-		if self.no_process:
-			return
+		# Run item loaders on generator
+		for sub in line:
+			yield sub
+			if isinstance(sub, str):
+				yield from self.run_item_loaders(sub)
 
 	def process_monitor_queue(self):
 		"""Process and yield any queued items from monitor thread."""
@@ -782,12 +783,15 @@ class Command(Runner):
 			return
 		for item_loader in self.item_loaders:
 			if (callable(item_loader)):
+				self.debug('running item loader', obj={'name': item_loader.__name__, 'func': self.get_func_path(item_loader)}, sub='item_loader')  # noqa: E501
 				yield from item_loader(self, line)
 			elif item_loader:
 				name = item_loader.__class__.__name__.replace('Serializer', '').lower()
 				default_callback = lambda self, x: [(yield x)]  # noqa: E731
 				callback = getattr(self, f'on_{name}_loaded', None) or default_callback
+				self.debug('running item loader', obj={'name': name, 'class': item_loader.__class__.__name__}, sub='item_loader')  # noqa: E501
 				for item in item_loader.run(line):
+					self.debug(f'running on_{name}_loaded callback', obj={'name': callback.__name__, 'fun': self.get_func_path(callback)}, sub='item_loader')  # noqa: E501
 					yield from callback(self, item)
 
 	def _prompt_sudo(self, command):
