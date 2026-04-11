@@ -9,6 +9,7 @@ from secator.serializers import JSONSerializer
 @task()
 class sshaudit(Command):
 	"""SSH server & client security auditing (banner, key exchange, encryption, mac, compression, etc)."""
+
 	cmd = 'ssh-audit'
 	input_types = [HOST, IP]
 	output_types = [Vulnerability, Tag]
@@ -64,7 +65,7 @@ class sshaudit(Command):
 			extra_data={
 				'software': software,
 				'protocol': banner.get('protocol', ''),
-			}
+			},
 		)
 
 		# Process CVEs
@@ -79,12 +80,12 @@ class sshaudit(Command):
 				provider='ssh_audit',
 				extra_data={
 					'cve': cve,
-					'software': software
-				}
+					'software': software,
+				},
 			)
 
 		# Process encryption algorithms
-		enc_list = item.get('enc', [])
+		enc_list = item.get('enc', []) or []
 		for enc in enc_list:
 			algorithm = enc.get('algorithm', '')
 			notes = enc.get('notes', {})
@@ -103,8 +104,8 @@ class sshaudit(Command):
 					extra_data={
 						'algorithm': algorithm,
 						'issue': failure,
-						'type': 'encryption'
-					}
+						'type': 'encryption',
+					},
 				)
 
 			# Create vulnerabilities for warnings
@@ -119,8 +120,8 @@ class sshaudit(Command):
 					extra_data={
 						'algorithm': algorithm,
 						'issue': warning,
-						'type': 'encryption'
-					}
+						'type': 'encryption',
+					},
 				)
 
 			# Create info tags for successful algorithms if verbose
@@ -134,7 +135,7 @@ class sshaudit(Command):
 					match=target,
 					extra_data={
 						'algorithm': algorithm,
-					}
+					},
 				)
 
 		# Process MAC algorithms
@@ -157,8 +158,8 @@ class sshaudit(Command):
 					extra_data={
 						'algorithm': algorithm,
 						'issue': failure,
-						'type': 'mac'
-					}
+						'type': 'mac',
+					},
 				)
 
 			# Create vulnerabilities for warnings
@@ -173,8 +174,8 @@ class sshaudit(Command):
 					extra_data={
 						'algorithm': algorithm,
 						'issue': warning,
-						'type': 'mac'
-					}
+						'type': 'mac',
+					},
 				)
 
 			# Create info tags for successful algorithms if verbose
@@ -188,7 +189,7 @@ class sshaudit(Command):
 					match=target,
 					extra_data={
 						'algorithm': algorithm,
-					}
+					},
 				)
 
 		# Process key exchange algorithms
@@ -211,8 +212,8 @@ class sshaudit(Command):
 					extra_data={
 						'algorithm': algorithm,
 						'issue': failure,
-						'type': 'kex'
-					}
+						'type': 'kex',
+					},
 				)
 
 			# Create vulnerabilities for warnings
@@ -227,8 +228,8 @@ class sshaudit(Command):
 					extra_data={
 						'algorithm': algorithm,
 						'issue': warning,
-						'type': 'kex'
-					}
+						'type': 'kex',
+					},
 				)
 
 			# Create info tags for successful algorithms if verbose
@@ -242,7 +243,7 @@ class sshaudit(Command):
 					match=target,
 					extra_data={
 						'algorithm': algorithm,
-					}
+					},
 				)
 
 		# Process host key algorithms
@@ -265,8 +266,8 @@ class sshaudit(Command):
 					extra_data={
 						'algorithm': algorithm,
 						'issue': failure,
-						'type': 'host_key'
-					}
+						'type': 'host_key',
+					},
 				)
 
 			# Create vulnerabilities for warnings
@@ -281,8 +282,8 @@ class sshaudit(Command):
 					extra_data={
 						'algorithm': algorithm,
 						'issue': warning,
-						'type': 'host_key'
-					}
+						'type': 'host_key',
+					},
 				)
 
 			# Create info tags for successful algorithms if verbose
@@ -296,5 +297,5 @@ class sshaudit(Command):
 					value=value,
 					extra_data={
 						'algorithm': algorithm,
-					}
+					},
 				)

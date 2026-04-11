@@ -7,6 +7,7 @@ from secator.runners import Command
 @task()
 class arpscan(Command):
 	"""Scan a CIDR range for alive hosts using ARP."""
+
 	cmd = 'arp-scan --plain --resolve --format="${ip}\t${name}\t${mac}\t${vendor}"'
 	input_types = [CIDR_RANGE, IP, HOST]
 	output_types = [Ip]
@@ -42,10 +43,15 @@ class arpscan(Command):
 		if 'WARNING:' in line:
 			yield Warning(message=line.split('WARNING:')[1].strip())
 		elif 'permission' in line:
-			yield Error(message=line + "\n" + (
-				"You must [bold]run this task as root[/bold] to scan the network, or use "
-				"[green]sudo setcap cap_net_raw=eip /usr/sbin/arp-scan[/green] to grant the [bold]CAP_NET_RAW[/bold] capability "
-				"to the [bold]arp-scan[/bold] binary."))
+			yield Error(
+				message=line
+				+ '\n'
+				+ (
+					'You must [bold]run this task as root[/bold] to scan the network, or use '
+					'[green]sudo setcap cap_net_raw=eip /usr/sbin/arp-scan[/green] to grant the [bold]CAP_NET_RAW[/bold] capability '
+					'to the [bold]arp-scan[/bold] binary.'
+				)
+			)
 		else:
 			line_parts = line.strip().split('\t')
 			if len(line_parts) == 4:
@@ -57,7 +63,7 @@ class arpscan(Command):
 						'mac': line_parts[2],
 						'vendor': line_parts[3],
 					},
-					tags=["arp", "internal"],
-					_source=self.unique_name
+					tags=['arp', 'internal'],
+					_source=self.unique_name,
 				)
 		yield line

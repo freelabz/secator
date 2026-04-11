@@ -1,18 +1,21 @@
 from urllib.parse import urlparse
 
-
 from secator.decorators import task
-from secator.definitions import (OPT_NOT_SUPPORTED, HEADER,
-								 DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES,
-								 THREADS, TIMEOUT, USER_AGENT)
-from secator.output_types import Vulnerability, Exploit, Warning
-from secator.tasks._categories import Vuln
+
+# fmt: off
+from secator.definitions import (
+	DELAY, FOLLOW_REDIRECT, HEADER, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
+)
+# fmt: on
+from secator.output_types import Exploit, Info, Vulnerability, Warning
 from secator.serializers import JSONSerializer
+from secator.tasks._categories import Vuln
 
 
 @task()
 class search_vulns(Vuln):
 	"""Search for known vulnerabilities in software by product name or CPE."""
+
 	cmd = 'search_vulns'
 	output_types = [Vulnerability, Exploit]
 	tags = ['vuln', 'recon']
@@ -22,18 +25,9 @@ class search_vulns(Vuln):
 	json_flag = '-f json'
 	version_flag = '-V'
 	opts = {
-		'ignore_general_product_vulns': {
-			'is_flag': True,
-			'help': 'Ignore vulnerabilities that only affect a general product'
-		},
-		'include_single_version_vulns': {
-			'is_flag': True,
-			'help': 'Include vulnerabilities that only affect one specific version'
-		},
-		'include_patched': {
-			'is_flag': True,
-			'help': 'Include vulnerabilities reported as patched'
-		},
+		'ignore_general_product_vulns': {'is_flag': True, 'help': 'Ignore vulnerabilities that only affect a general product'},  # noqa: E501
+		'include_single_version_vulns': {'is_flag': True, 'help': 'Include vulnerabilities that only affect one specific version'},  # noqa: E501
+		'include_patched': {'is_flag': True, 'help': 'Include vulnerabilities reported as patched'},
 	}
 	opt_key_map = {
 		'ignore_general_product_vulns': 'ignore-general-product-vulns',
@@ -49,7 +43,7 @@ class search_vulns(Vuln):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
-	install_version = '0.8.4'
+	install_version = '1.0.9'
 	install_cmd = 'pipx install --force search_vulns==[install_version]'
 	install_post = {'*': 'search_vulns -u'}
 	github_handle = 'ra1nb0rn/search_vulns'
@@ -61,7 +55,7 @@ class search_vulns(Vuln):
 
 	@staticmethod
 	def before_init(self):
-		if len(self.inputs) == 0:
+		if len(self.inputs) != 1:
 			return
 		_in = self.inputs[0]
 		self.matched_at = None
@@ -69,7 +63,7 @@ class search_vulns(Vuln):
 			split = _in.split('~')
 			self.matched_at = split[0]
 			self.inputs[0] = split[1]
-		self.inputs[0] = self.inputs[0].replace('httpd', '').replace('/', ' ')
+		self.inputs[0] = self.inputs[0].replace('/', ' ').rstrip()
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -82,7 +76,7 @@ class search_vulns(Vuln):
 
 		data = list(values)[0]
 		if isinstance(data, str):
-			yield Warning(message=data)
+			yield Warning(message=data.replace('Warning: ', ''))
 			return
 
 		vulns = data.get('vulns', {})
@@ -97,26 +91,45 @@ class search_vulns(Vuln):
 			match_reason = vuln_data.get('match_reason', '')
 			confidence = 'high'
 			tags = search_vulns.extract_tags(vuln_data)
-			if match_reason == 'general_product_uncertain':
-				confidence = 'low'
-				tags.append('uncertain')
 			exploits = vuln_data.get('exploits', [])
+			cvss_score = float(vuln_data.get('cvss', 0))
+			extra_data = search_vulns.extract_extra_data(vuln_data)
+			references = search_vulns.extract_references(vuln_data)
+			data = {
+				'id': cve_id,
+				'name': cve_id,
+				'description': vuln_data.get('description', ''),
+				'confidence': confidence,
+				'cvss_score': cvss_score,
+				'epss_score': vuln_data.get('epss', ''),
+				'cvss_vec': vuln_data.get('cvss_vec', ''),
+				'matched_at': matched_at,
+				'references': references,
+				'extra_data': extra_data,
+				'provider': 'search_vulns',
+				'tags': tags,
+			}
+			if int(cvss_score) == 0:
+				vuln = Vuln.lookup_cve(cve_id)
+				if vuln:
+					data.update(vuln.toDict())
+					data['confidence'] = confidence
+					data['matched_at'] = matched_at
+					data['references'].extend(references)
+					data['extra_data'].update(extra_data)
+
+			# Add 'exploitable' and 'uncertain' tags
+			if match_reason == 'general_product_uncertain':
+				data['confidence'] = 'low'
+				data['tags'].append('uncertain')
 			if len(exploits) > 0:
-				tags.append('exploitable')
-			yield Vulnerability(
-				id=cve_id,
-				name=cve_id,
-				description=vuln_data.get('description', ''),
-				confidence=confidence,
-				cvss_score=float(vuln_data.get('cvss', 0)),
-				epss_score=vuln_data.get('epss', ''),
-				cvss_vec=vuln_data.get('cvss_vec', ''),
-				matched_at=matched_at,
-				references=search_vulns.extract_references(vuln_data),
-				extra_data=search_vulns.extract_extra_data(vuln_data),
-				provider='search_vulns',
-				tags=tags,
-			)
+				data['tags'].append('exploitable')
+			yield Vulnerability(**data)
+
+			# Exploits
+			if len(exploits) > 2:
+				yield Info(message=f'{len(exploits)} exploits found. Keeping max 3')
+				exploits = exploits[:3]
 			for exploit in exploits:
 				extra_data = common_extra_data.copy()
 				parts = exploit.replace('http://', '').replace('https://', '').replace('github.com', 'github').split('/')
@@ -128,10 +141,7 @@ class search_vulns(Vuln):
 					user = parts[1]
 					repo = parts[2]
 					name = 'Github'
-					extra_data.update({
-						'user': user,
-						'repo': repo,
-					})
+					extra_data.update({'user': user, 'repo': repo})
 				else:
 					hostname = urlparse(exploit).hostname
 					name = provider.capitalize()
