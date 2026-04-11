@@ -102,7 +102,10 @@ def workflow(ctx):
 
 
 for config in WORKFLOWS:
-	register_runner(workflow, config)
+	try:
+		register_runner(workflow, config)
+	except Exception as e:
+		console.print(Warning(message=f'Skipping workflow {config.name!r}: {e}'))
 
 
 #------#
@@ -118,7 +121,10 @@ def scan(ctx):
 
 
 for config in SCANS:
-	register_runner(scan, config)
+	try:
+		register_runner(scan, config)
+	except Exception as e:
+		console.print(Warning(message=f'Skipping scan {config.name!r}: {e}'))
 
 
 #--------#
