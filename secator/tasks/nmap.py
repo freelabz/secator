@@ -7,22 +7,13 @@ import xmltodict
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (  # noqa: E501
-	CIDR_RANGE,
-	DELAY,
-	HOST,
-	IP,
-	OPT_NOT_SUPPORTED,
-	OUTPUT_PATH,
-	PORTS,
-	PROXY,
-	RATE_LIMIT,
-	RETRIES,
-	SCRIPT,
-	THREADS,
-	TIMEOUT,
-	TOP_PORTS,
+
+# fmt: off
+from secator.definitions import (
+    CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT, THREADS,
+    TIMEOUT, TOP_PORTS
 )
+# fmt: on
 from secator.output_types import Error, Exploit, Info, Ip, Port, Technology, Vulnerability, Warning
 from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
