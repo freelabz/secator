@@ -49,7 +49,7 @@ class bup(HttpBase):
 			'request_headers': lambda x: bup.request_headers_extractor(x),
 			'response_headers': lambda x: bup.response_headers_extractor(x),
 			'status_code': 'response_status_code',
-			'content_type': 'response_content_type',
+			'content_type': lambda x: x['response_content_type'].strip(),
 			'content_length': 'response_content_length',
 			'title': 'response_title',
 			'server': lambda x: x['response_server_type'].strip(),
@@ -78,6 +78,7 @@ class bup(HttpBase):
 			yield json.dumps({"duration": "unknown", "percent": int((current / total) * 100)})
 		elif 'batcat' in line:  # ignore batcat lines as they're loaded as JSON
 			yield ''
+			return
 		yield line
 
 	@staticmethod
@@ -109,5 +110,5 @@ class bup(HttpBase):
 			split_headers = header.split(':')
 			key = split_headers[0]
 			value = ':'.join(split_headers[1:])
-			headers[key] = value
+			headers[key] = value.strip()
 		return headers
