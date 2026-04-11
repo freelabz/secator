@@ -163,13 +163,7 @@ class nmap(ReconPort):
 	def on_line(self, line):
 		match = NMAP_PROGRESS_REGEX_1.search(line)
 		if match:
-			self._progress.update({
-				'extra_data': {
-					'elapsed': match.group(1),
-					'hosts_completed': match.group(2),
-					'hosts_up': match.group(3)
-				}
-			})
+			self._progress.update({'extra_data': {'elapsed': match.group(1), 'hosts_completed': match.group(2), 'hosts_up': match.group(3)}})
 			return
 		match = NMAP_PROGRESS_REGEX_2.search(line)
 		if match:
