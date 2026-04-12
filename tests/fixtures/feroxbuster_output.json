@@ -21,5 +21,6 @@
         "vary": "Accept-Encoding",
         "content-type": "application/javascript"
     },
-    "extension": ""
+    "extension": "",
+    "timestamp": 1718217545.0
 }

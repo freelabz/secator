@@ -1,0 +1,8 @@
+type: profile
+name: stealth
+category: evasion
+description: "Stealth scan"
+opts:
+  tcp_syn_stealth: true
+  nmap_light_tcp_syn_stealth: true
+  scan_type: s

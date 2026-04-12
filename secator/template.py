@@ -1,10 +1,11 @@
+import json
 import yaml
 
 from collections import OrderedDict
 from dotmap import DotMap
 from pathlib import Path
 
-from secator.output_types import Error
+from secator.output_types import Error, Warning
 from secator.rich import console
 
 
@@ -53,6 +54,14 @@ class TemplateLoader(DotMap):
 		from rich.syntax import Syntax
 		yaml_highlight = Syntax(yaml_str, 'yaml', line_numbers=True)
 		console.print(yaml_highlight)
+
+	def toDict(self, *args, **kwargs):
+		serialize = kwargs.pop('serialize', False)
+		d = super().toDict(*args, **kwargs)
+		config_type = d.get('type')
+		if serialize and config_type != 'profile':
+			d['opts'] = serialize_config_options(get_config_options(self))
+		return d
 
 
 def get_short_id(id_str, config_name):
@@ -136,7 +145,10 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 				continue
 			node_task = None
 			if check_class_opts:
-				node_task = Task.get_task_class(_.name)
+				try:
+					node_task = Task.get_task_class(_.name)
+				except ValueError:
+					continue
 				if opt_name not in node_task.opts:
 					continue
 				opts_value = node_task.opts[opt_name]
@@ -168,7 +180,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		if node.type == 'workflow':
 			for k, v in node.opts.items():
 				same_opts = find_same_opts(node, nodes, k)
-				conf = v.copy()
+				conf = dict(v).copy()
 				opt_name = k
 				conf['prefix'] = f'{node.type.capitalize()} {node.name}'
 				if len(same_opts) > 0:  # opt name conflict, change opt name
@@ -179,9 +191,13 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 
 		# Process task options
 		# a.k.a task options defined in their respective task classes
-		cls = Task.get_task_class(node.name)
+		try:
+			cls = Task.get_task_class(node.name)
+		except ValueError:
+			console.print(Warning(message=f'Task {node.name!r} not found - skipping it in {config.name!r}. Please update your config.'))  # noqa: E501
+			return
 		task_opts = cls.opts.copy()
-		task_opts_meta = cls.meta_opts.copy()
+		task_opts_meta = getattr(cls, 'meta_opts', {}).copy()
 		task_opts_all = {**task_opts, **task_opts_meta}
 		node_opts = node.opts or {}
 		ancestor_opts_defaults = node.ancestor.default_opts or {}
@@ -190,32 +206,39 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		for k, v in task_opts_all.items():
 			conf = v.copy()
 			conf['prefix'] = f'Task {node.name}'
-			default_from_config = node_opts.get(k) or ancestor_opts_defaults.get(k) or config_opts_defaults.get(k)
+			# Use explicit None checks to properly handle boolean False values
+			default_from_config = next(
+				(item for item in [node_opts.get(k), ancestor_opts_defaults.get(k), config_opts_defaults.get(k)]
+				 if item is not None),
+				None
+			)
 			opt_name = k
 			same_opts = find_same_opts(node, nodes, k)
 
 			# Found a default in YAML config, either in task options, or workflow options, or config options
-			if default_from_config:
+			if default_from_config is not None:
 				conf['required'] = False
 				conf['default'] = default_from_config
 				conf['default_from'] = node_id_str
-				if node_opts.get(k):
+				if node_opts.get(k) is not None:
 					conf['default_from'] = node_id_str
 					conf['prefix'] = 'Config'
-				elif ancestor_opts_defaults.get(k):
+				elif ancestor_opts_defaults.get(k) is not None:
 					conf['default_from'] = get_short_id(node.ancestor.id, config.name)
 					conf['prefix'] = f'{node.ancestor.type.capitalize()} {node.ancestor.name}'
-				elif config_opts_defaults.get(k):
+				elif config_opts_defaults.get(k) is not None:
 					conf['default_from'] = config.name
 					conf['prefix'] = 'Config'
-				mapped_value = cls.opt_value_map.get(opt_name)
+				mapped_value = getattr(cls, 'opt_value_map', {}).get(opt_name)
 				if mapped_value:
 					if callable(mapped_value):
 						default_from_config = mapped_value(default_from_config)
 					else:
 						default_from_config = mapped_value
 				conf['default'] = default_from_config
-				if len(same_opts) > 0 or k in task_opts_meta:  # change opt name to avoid conflict
+				# Check for same opts in both config and class definitions to determine if we need to rename
+				same_opts_class = find_same_opts(node, nodes, k, check_class_opts=True)
+				if len(same_opts) > 0 or len(same_opts_class) > 0 or k in task_opts_meta:  # change opt name to avoid conflict
 					conf['prefix'] = 'Config'
 					opt_name = f'{conf["default_from"]}.{k}'
 					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] renamed to [bold green]{opt_name}[/] [dim red](default set in config)[/]', sub=f'cli.{config.name}')  # noqa: E501
@@ -229,10 +252,34 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 			elif k in task_opts:
 				same_opts = find_same_opts(node, nodes, k, check_class_opts=True)
 				if len(same_opts) > 0:
-					applies_to = set([node.name] + [_['name'] for _ in same_opts])
-					conf['applies_to'] = applies_to
-					conf['prefix'] = 'Shared task'
-					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Common[/] [dim red](duplicated {len(same_opts)} times)[/]', sub=f'cli.{config.name}')  # noqa: E501
+					# Check if any node has this option explicitly set in config
+					# If so, skip adding shared version as those nodes will have their own prefixed versions
+					same_opt_ids = [so['id'] for so in same_opts]
+					relevant_nodes = [node] + [n for n in nodes if n.id in same_opt_ids]
+					# debug(f'relevant nodes: {[n.name for n in relevant_nodes]}', sub=f'cli.{config.name}')
+					has_config_override = False
+					for node_to_check in relevant_nodes:
+						if hasattr(node_to_check.opts, 'get'):
+							if node_to_check.opts.get(k) is not None:
+								has_config_override = True
+								# debug(f'has config override: {has_config_override}: {node_to_check.opts.get(k)}', sub=f'cli.{config.name}')
+								break
+						elif k in node_to_check.opts:
+							has_config_override = True
+							break
+
+					if not has_config_override:
+						applies_to = set([node.name] + [_['name'] for _ in same_opts])
+						conf['applies_to'] = applies_to
+						conf['prefix'] = 'Shared task'
+						debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] changed prefix to [bold cyan]Common[/] [dim red](duplicated {len(same_opts)} times)[/]', sub=f'cli.{config.name}')  # noqa: E501
+					else:
+						# Skip this option as it will be handled by the config override logic
+						debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] skipped [dim red](has config override)[/]', sub=f'cli.{config.name}')  # noqa: E501
+						opt_name = f'{node.name}-{k}'
+						conf['applies_to'] = set([node.name])
+						conf['prefix'] = 'Config'
+						# continue
 			else:
 				raise ValueError(f'Unknown option {k} for task {node.id}')
 			all_opts[opt_name] = conf
@@ -261,3 +308,28 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		debug(f'\t[bold]{k}[/] -> [bold green]{v.get("default", "N/A")}[/] [dim red](default from {v.get("default_from", "N/A")})[/]', sub=f'cli.{config.name}')  # noqa: E501
 		normalized_opts[k] = v
 	return normalized_opts
+
+
+def serialize_config_options(options):
+	"""
+	Serialize config options to JSON format.
+
+	Args:
+		options (dict): Config options.
+
+	Returns:
+		str: Serialized config options.
+	"""
+	for opt_name, opt_config in options.items():
+		type = opt_config.get("type")
+		applies_to = list(opt_config.get("applies_to", {}))
+		if applies_to:
+			options[opt_name]["applies_to"] = applies_to
+		is_flag = opt_config.get("is_flag", False)
+		if type and getattr(type, "__name__", None):
+			options[opt_name]["type"] = type.__name__
+		if is_flag:
+			options[opt_name]["type"] = "bool"
+	options = {k.replace("-", "_"): v for k, v in options.items()}
+	options_str = json.dumps(options, default=str, indent=4)
+	return json.loads(options_str)

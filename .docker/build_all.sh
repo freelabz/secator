@@ -23,7 +23,7 @@ build_image() {
 
     if [ -f "$DOCKERFILE" ]; then
         echo "🚀 Building $IMAGE_NAME using $DOCKERFILE..."
-        $BUILDER build -t "$IMAGE_NAME" -f "$DOCKERFILE" . > $STDOUT_LOG 2> $STDERR_LOG && \
+        $BUILDER build -t "$IMAGE_NAME" -f "$DOCKERFILE" . | tee $STDOUT_LOG
         echo "✅ Successfully built $IMAGE_NAME" || \
         echo "❌ Failed to build $IMAGE_NAME"
     else
@@ -33,7 +33,7 @@ build_image() {
 
 # Iterate through the distributions and build in parallel
 for DISTRO in "${DISTROS[@]}"; do
-    build_image "$DISTRO" &
+    build_image "$DISTRO"
 done
 
 # Wait for all background jobs to finish

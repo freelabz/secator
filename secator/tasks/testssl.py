@@ -1,13 +1,16 @@
 import json
 import os
+import re
+import shlex
+
 from datetime import datetime
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.output_types import Vulnerability, Certificate, Error, Info, Ip, Tag
+from secator.output_types import Vulnerability, Certificate, Error, Info, Ip, Tag, Warning
 from secator.definitions import (PROXY, HOST, USER_AGENT, HEADER, OUTPUT_PATH,
 								CERTIFICATE_STATUS_UNKNOWN, CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED,
-								TIMEOUT)
+								TIMEOUT, HOST_PORT, URL, IP)
 from secator.tasks._categories import Command, OPTS
 
 
@@ -15,7 +18,7 @@ from secator.tasks._categories import Command, OPTS
 class testssl(Command):
 	"""SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
 	cmd = 'testssl.sh'
-	input_types = [HOST]
+	input_types = [HOST, HOST_PORT, URL, IP]
 	output_types = [Certificate, Vulnerability, Ip, Tag]
 	tags = ['dns', 'recon', 'tls']
 	input_flag = None
@@ -23,6 +26,7 @@ class testssl(Command):
 	file_eof_newline = True
 	version_flag = ''
 	opt_prefix = '--'
+	ignore_return_code = True
 	opts = {
 		'verbose': {'is_flag': True, 'default': False, 'internal': True, 'display': True, 'help': 'Record all SSL/TLS info, not only critical info'},  # noqa: E501
 		'parallel': {'is_flag': True, 'default': False, 'help': 'Test multiple hosts in parallel'},
@@ -47,11 +51,11 @@ class testssl(Command):
 	proxy_http = True
 	proxychains = False
 	proxy_socks5 = False
-	profile = 'io'
+	profile = 'small'
 	install_cmd_pre = {
-		'apk': ['hexdump', 'coreutils', 'procps'],
-		'pacman': ['util-linux'],
-		'*': ['bsdmainutils']
+		'apk': ['hexdump', 'coreutils', 'procps', 'bash'],
+		'pacman': ['util-linux', 'bash'],
+		'*': ['bsdmainutils', 'bash']
 	}
 	install_version = 'v3.2.0'
 	install_cmd = (
@@ -67,13 +71,14 @@ class testssl(Command):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' --jsonfile {self.output_path}'
+		self.cmd += f' --jsonfile {shlex.quote(self.output_path)}'
 
 		# Hack because target needs to be the last argument in testssl.sh
 		if len(self.inputs) == 1:
 			target = self.inputs[0]
-			self.cmd = self.cmd.replace(f' {target}', '')
-			self.cmd += f' {target}'
+			target_quoted = shlex.quote(target)
+			self.cmd = re.sub(re.escape(f' {target_quoted}'), "", self.cmd)
+			self.cmd += f' {target_quoted}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -108,7 +113,7 @@ class testssl(Command):
 
 				# Add IP to address pool
 				host_to_ips.setdefault(host, []).append(ip)
-				if ip not in ip_addresses:
+				if ip and ip not in ip_addresses:
 					ip_addresses.append(ip)
 					yield Ip(
 						host=host,
@@ -118,7 +123,14 @@ class testssl(Command):
 
 				# Process errors
 				if id.startswith("scanProblem"):
-					yield Error(message=finding)
+					if "Can't connect to" in finding:
+						yield Warning(message=finding)
+					else:
+						yield Error(message=finding)
+
+				# Process warnings
+				elif id.startswith("engine_problem"):
+					yield Warning(message=finding)
 
 				# Process bad ciphers
 				elif id.startswith('cipher-'):
@@ -144,9 +156,9 @@ class testssl(Command):
 						category='info',
 						name='ssl_tls',
 						match=host,
+						value=finding,
 						extra_data={
 							'subtype': id,
-							'content': finding,
 						}
 					)
 
@@ -262,18 +274,4 @@ class testssl(Command):
 					# parent_certificate=None,
 				)
 				yield cert
-				if cert.is_expired():
-					yield Vulnerability(
-						name='SSL certificate expired',
-						provider='testssl',
-						description='The SSL certificate is expired. This can easily lead to domain takeovers',
-						matched_at=host,
-						ip=ip,
-						tags=['ssl', 'tls'],
-						severity='medium',
-						confidence='high',
-						extra_data={
-							'id': id,
-							'expiration_date': Certificate.format_date(cert.not_after)
-						}
-					)
+				yield from cert.get_vulnerabilities()

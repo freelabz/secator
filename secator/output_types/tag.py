@@ -8,10 +8,14 @@ from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 @dataclass
 class Tag(OutputType):
 	name: str
+	value: str
 	match: str
 	category: str = field(default='general')
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	stored_response_path: str = field(default='', compare=False)
+	is_false_positive: bool = field(default=False, compare=False)
+	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='tag', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -30,21 +34,28 @@ class Tag(OutputType):
 	def __str__(self) -> str:
 		return self.match
 
-	def __repr__(self) -> str:
-		content = self.extra_data.get('content')
-		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{self.name}[/]'
+	def __rich__(self) -> str:
+		content = self.value
+		s = rf'🏷️  \[[bold yellow]{_s(self.category)}[/]] [bold magenta]{_s(self.name)}[/]'
 		small_content = False
-		if content and len(content) < 50:
+		if len(content) < 100:
 			small_content = True
-			s += f' [bold orange4]{content}[/]'
-		s += f' found @ [bold]{_s(self.match)}[/]'
+		# content_xs = trim_string(content, max_length=50).replace('\n', '/')
+		if small_content:
+			s += f' [bold orange4]{_s(content)}[/]'
+		if self.match != content:
+			s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:incoming_envelope:[/]'
+		if not small_content:
+			sep = ' '
+			content = trim_string(content, max_length=1000)
+			content = content.replace('\n', '\n    ')
+			sep = '\n    '
+			ed += f'\n    [bold red]value[/]:{sep}[yellow]{_s(content)}[/]'
 		if self.extra_data:
 			for k, v in self.extra_data.items():
-				if k == 'content' and small_content:
-					continue
 				sep = ' '
 				if not v:
 					continue
@@ -59,4 +70,7 @@ class Tag(OutputType):
 					ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

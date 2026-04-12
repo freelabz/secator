@@ -263,7 +263,7 @@ class bbot(Command):
 		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
 		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
 	}
-	install_version = '2.4.2'
+	install_version = '2.7.2'
 	install_cmd = 'pipx install bbot==[install_version] --force'
 	install_post = {
 		'*': f'rm -fr {CONFIG.dirs.share}/pipx/venvs/bbot/lib/python3.12/site-packages/ansible_collections/*'

@@ -1,5 +1,7 @@
 import os
+import re
 
+from dotmap import DotMap
 from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
@@ -79,6 +81,7 @@ def fmt_extractor(extractor):
 	_type, _field, _condition = parsed_extractor
 	s = f'{_type}.{_field}'
 	if _condition:
+		_condition = _condition.replace("'", '').replace('"', '')
 		s = f'{s} if {_condition}'
 	return f'<DYNAMIC({s})>'
 
@@ -173,10 +176,14 @@ def process_extractor(results, extractor, ctx=None):
 		for item in results:
 			if item._type != _type:
 				continue
-			ctx['item'] = item
-			ctx[f'{_type}'] = item
-			safe_globals = {'__builtins__': {'len': len}}
-			eval_result = eval(_condition, safe_globals, ctx)
+			ctx['item'] = DotMap(item.toDict())
+			ctx[f'{_type}'] = DotMap(item.toDict())
+			safe_globals = {
+				'__builtins__': {'len': len},
+				're_match': lambda pattern, value: bool(re.search(pattern, str(value))) if value is not None else False,
+			}
+			_eval_condition = re.sub(r'([\w.]+)\s*~=\s*(.+?)(?=\s+(?:and|or)\s+|$)', r're_match(\2, \1)', _condition)
+			eval_result = eval(_eval_condition, safe_globals, ctx)
 			if eval_result:
 				tmp_results.append(item)
 			del ctx['item']

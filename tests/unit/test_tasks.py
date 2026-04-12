@@ -21,7 +21,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 	def _valid_fixture(self, cls, fixture):
 		if not fixture:
-			if len(FIXTURES_TASKS.keys()) == 1: # make test fail.
+			if len(FIXTURES_TASKS.keys()) == 1 and hasattr(cls, 'cmd'): # make test fail.
 				raise AssertionError(f'No fixture for {cls.__name__}! Add one to the tests/fixtures directory (must not be an empty file / empty json / empty list).')
 			return False
 		return True

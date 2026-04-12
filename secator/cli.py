@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 
 from pathlib import Path
@@ -29,9 +30,12 @@ from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
 	debug, detect_host, flatten, print_version, get_file_date,
-	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta
+	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
+	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
 )
 from contextlib import nullcontext
+
+
 click.rich_click.USE_RICH_MARKUP = True
 click.rich_click.STYLE_ARGUMENT = ""
 click.rich_click.STYLE_OPTION_HELP = ""
@@ -98,7 +102,10 @@ def workflow(ctx):
 
 
 for config in WORKFLOWS:
-	register_runner(workflow, config)
+	try:
+		register_runner(workflow, config)
+	except Exception as e:
+		console.print(Warning(message=f'Skipping workflow {config.name!r}: {e}'))
 
 
 #------#
@@ -114,7 +121,10 @@ def scan(ctx):
 
 
 for config in SCANS:
-	register_runner(scan, config)
+	try:
+		register_runner(scan, config)
+	except Exception as e:
+		console.print(Warning(message=f'Skipping scan {config.name!r}: {e}'))
 
 
 #--------#
@@ -164,7 +174,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		return
 
 	if not queue:
-		queue = 'io,cpu,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
+		queue = 'small,medium,large,extra_large,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
 
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'
@@ -175,10 +185,10 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		subcmd = 'stop' if stop else 'show' if show else 'start'
 		logfile = '%n.log'
 		pidfile = '%n.pid'
-		queues = '-Q:1 celery -Q:2 io -Q:3 cpu'
-		concur = '-c:1 10 -c:2 100 -c:3 4'
+		queues = '-Q:1 celery -Q:2 small -Q:3 medium -Q:4 large -Q:5 extra_large'
+		concur = '-c:1 10 -c:2 100 -c:3 50 -c:4 20 -c:5 4'
 		pool = 'eventlet'
-		cmd = f'{celery} -A {app_str} multi {subcmd} 3 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
+		cmd = f'{celery} -A {app_str} multi {subcmd} 5 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
 		cmd = f'{celery} -A {app_str} worker -n {hostname} -Q {queue}'
 
@@ -190,16 +200,21 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 	cmd += ' --without-heartbeat' if without_heartbeat else ''
 
 	if reload:
+		# Check Celery addon is installed
+		if not ADDONS_ENABLED['dev']:
+			console.print(Error(message='Missing dev addon: please run "secator install addons dev".'))
+			sys.exit(1)
 		patterns = "celery.py;tasks/*.py;runners/*.py;serializers/*.py;output_types/*.py;hooks/*.py;exporters/*.py"
-		cmd = f'watchmedo auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'
+		watchmedo_path = shutil.which('watchmedo') or str(Path(sys.executable).parent / 'watchmedo')
+		cmd = f'{watchmedo_path} auto-restart --directory=./ --patterns="{patterns}" --recursive -- {cmd}'  # noqa: E501
 
 	if use_command_runner:
-		ret = Command.execute(cmd, name='secator_worker')
+		ret = Command.execute(cmd, name='secator_worker', cwd=Path(sys.executable).parent)
 		sys.exit(ret.return_code)
 	else:
 		console.print(f'[bold red]{cmd}[/]')
-		ret = os.system(cmd)
-		sys.exit(os.waitstatus_to_exitcode(ret))
+		result = subprocess.run(cmd, shell=True, cwd=Path(sys.executable).parent)
+		sys.exit(result.returncode)
 
 
 #-------#
@@ -214,17 +229,35 @@ def util():
 
 
 @util.command()
-@click.option('--timeout', type=float, default=0.2, help='Proxy timeout (in seconds)')
+@click.option('--timeout', type=float, default=3, help='Proxy timeout (in seconds)')
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
 	"""Get random proxies from FreeProxy."""
+	import requests
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 	proxy = FreeProxy(timeout=timeout, rand=True, anonym=True)
+	proxy_str = 'proxy' if number == 1 else 'proxies'
+	console.print(f"Searching for {number} {proxy_str} ...")
 	for _ in range(number):
-		url = proxy.get()
-		console.print(url)
+		proxy_ok = False
+		attempts = 0
+		while not proxy_ok and attempts < 5:
+			attempts += 1
+			url = proxy.get()
+			console.print(f"Testing proxy {url} ...")
+			try:
+				req = requests.get('https://httpbin.org/ip', proxies={'http': url, 'https': url}, timeout=5)
+				if not req.ok:
+					continue
+			except requests.exceptions.ProxyError:
+				continue
+			except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
+				continue
+			proxy_ok = True
+			console.print(f'Proxy {url} tested successfully !')
+			console.print(url)
 
 
 @util.command()
@@ -338,90 +371,233 @@ def serve(directory, host, port, interface):
 	Command.execute(f'{sys.executable} -m http.server {port}', cwd=directory)
 
 
-@util.command()
-@click.argument('record_name', type=str, default=None)
-@click.option('--script', '-s', type=str, default=None, help='Script to run. See scripts/stories/ for examples.')
-@click.option('--interactive', '-i', is_flag=True, default=False, help='Interactive record.')
-@click.option('--width', '-w', type=int, default=None, help='Recording width')
-@click.option('--height', '-h', type=int, default=None, help='Recording height')
-@click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
-def record(record_name, script, interactive, width, height, output_dir):
-	"""Record secator session using asciinema."""
-	# 120 x 30 is a good ratio for GitHub
-	width = width or console.size.width
-	height = height or console.size.height
-	attrs = {
-		'shell': False,
-		'env': {
-			'RECORD': '1',
-			'LINES': str(height),
-			'PS1': '$ ',
-			'COLUMNS': str(width),
-			'TERM': 'xterm-256color'
-		}
-	}
-	output_cast_path = f'{output_dir}/{record_name}.cast'
-	output_gif_path = f'{output_dir}/{record_name}.gif'
+@util.command('completion')
+@click.option('--shell', type=click.Choice(['bash', 'zsh', 'fish']), default='bash', help='Shell type')
+@click.option('--install', is_flag=True, help='Install completion to shell config file')
+def completion(shell, install):
+	"""Show or install shell completion for secator."""
+	# Get completion script
+	env_var = '_SECATOR_COMPLETE'
+	completion_cmd = f'{env_var}={shell}_source secator'
 
-	# Run automated 'story' script with asciinema-automation
-	if script:
-		# If existing cast file, remove it
-		if os.path.exists(output_cast_path):
-			os.unlink(output_cast_path)
-			console.print(Info(message=f'Removed existing {output_cast_path}'))
-
-		with console.status(Info(message='Recording with asciinema ...')):
-			Command.execute(
-				f'asciinema-automation -aa "-c /bin/sh" {script} {output_cast_path} --timeout 200',
-				cls_attributes=attrs,
-				raw=True,
-			)
-			console.print(f'Generated {output_cast_path}', style='bold green')
-	elif interactive:
-		os.environ.update(attrs['env'])
-		Command.execute(f'asciinema rec -c /bin/bash --stdin --overwrite {output_cast_path}')
-
-	# Resize cast file
-	if os.path.exists(output_cast_path):
-		with console.status('[bold gold3]Cleaning up .cast and set custom settings ...'):
-			with open(output_cast_path, 'r') as f:
-				lines = f.readlines()
-			updated_lines = []
-			for ix, line in enumerate(lines):
-				tmp_line = json.loads(line)
-				if ix == 0:
-					tmp_line['width'] = width
-					tmp_line['height'] = height
-					tmp_line['env']['SHELL'] = '/bin/sh'
-					lines[0] = json.dumps(tmp_line) + '\n'
-					updated_lines.append(json.dumps(tmp_line) + '\n')
-				elif tmp_line[2].endswith(' \r'):
-					tmp_line[2] = tmp_line[2].replace(' \r', '')
-					updated_lines.append(json.dumps(tmp_line) + '\n')
-				else:
-					updated_lines.append(line)
-			with open(output_cast_path, 'w') as f:
-				f.writelines(updated_lines)
-			console.print('')
-
-		# Edit cast file to reduce long timeouts
-		with console.status('[bold gold3] Editing cast file to reduce long commands ...'):
-			Command.execute(
-				f'asciinema-edit quantize --range 1 {output_cast_path} --out {output_cast_path}.tmp',
-				cls_attributes=attrs,
-				raw=True,
-			)
-			if os.path.exists(f'{output_cast_path}.tmp'):
-				os.replace(f'{output_cast_path}.tmp', output_cast_path)
-			console.print(f'Edited {output_cast_path}', style='bold green')
-
-	# Convert to GIF
-	with console.status(f'[bold gold3]Converting to {output_gif_path} ...[/]'):
-		Command.execute(
-			f'agg {output_cast_path} {output_gif_path}',
-			cls_attributes=attrs,
+	try:
+		result = subprocess.run(
+			completion_cmd,
+			shell=True,
+			capture_output=True,
+			text=True,
+			env=os.environ.copy()
 		)
-		console.print(Info(message=f'Generated {output_gif_path}'))
+		completion_script = result.stdout
+
+		if not completion_script:
+			console.print(Error(message=f'Failed to generate completion script for {shell}'))
+			sys.exit(1)
+
+	except Exception as e:
+		console.print(Error(message=f'Error generating completion: {str(e)}'))
+		sys.exit(1)
+
+	if install:
+		# Determine shell config file
+		shell_configs = {
+			'bash': os.path.expanduser('~/.bashrc'),
+			'zsh': os.path.expanduser('~/.zshrc'),
+			'fish': os.path.expanduser('~/.config/fish/completions/secator.fish')
+		}
+
+		config_file = shell_configs.get(shell)
+		if not config_file:
+			console.print(Error(message=f'Unsupported shell: {shell}'))
+			sys.exit(1)
+
+		# For fish, write directly to completion file
+		if shell == 'fish':
+			os.makedirs(os.path.dirname(config_file), exist_ok=True)
+			with open(config_file, 'w') as f:
+				f.write(completion_script)
+			console.print(Info(message=f'Completion installed to {config_file}'))
+		else:
+			# For bash/zsh, add eval command to rc file
+			eval_line = f'eval "$({env_var}={shell}_source secator)"'
+
+			# Check if already installed
+			if os.path.exists(config_file):
+				with open(config_file, 'r') as f:
+					content = f.read()
+				if eval_line in content:
+					console.print(Info(message=f'Completion already installed in {config_file}'))
+					return
+
+			# Add completion to config file
+			with open(config_file, 'a') as f:
+				f.write(f'\n# secator shell completion\n{eval_line}\n')
+			console.print(Info(message=f'Completion installed to {config_file}'))
+			console.print(Warning(message=f'Run "source {config_file}" or restart your shell to enable completion'))
+	else:
+		# Just print the completion script
+		console.print(completion_script)
+
+
+@util.command()
+@click.argument('file', type=str, required=False)
+@click.option('--name', '-n', type=str, default=None, help='Name for the output tape file (when recording interactively)')  # noqa: E501
+@click.option('--width', '-w', type=int, default=1920, help='Terminal width (for .tap conversion)')
+@click.option('--height', '-h', type=int, default=1080, help='Terminal height (for .tap conversion)')
+@click.option('--font-size', '-fs', type=int, default=18, help='Font size (for .tap conversion)')
+@click.option('--line-height', '-lh', type=float, default=1.4, help='Line height (for .tap conversion)')
+@click.option('--output-dir', type=str, default=f'{ROOT_FOLDER}/images')
+def record(file, name, width, height, font_size, line_height, output_dir):
+	"""Record secator session using VHS.
+
+	If a .tap file is provided, it will be converted to .tape and then run with VHS.
+	If a .tape file is provided, it will be run directly with VHS.
+	If no file is provided, VHS will start an interactive recording session.
+	"""
+	output_dir = Path(output_dir)
+	output_dir.mkdir(parents=True, exist_ok=True)
+
+	if file:
+		file_path = Path(file)
+		if not file_path.exists():
+			console.print(Error(message=f'File not found: {file}'))
+			sys.exit(1)
+
+		# Use the input file's directory for output
+		input_dir = file_path.parent
+		# Output GIF will be in the same directory with the same base name
+		output_gif = input_dir / f'{file_path.stem}.gif'
+
+		# Check if it's a .tap file
+		if file_path.suffix == '.tap':
+			# Convert .tap to .tape in the same directory as the tap file
+			tape_file = input_dir / file_path.with_suffix('.tape').name
+			vhs_tap_to_tape(file_path, tape_file, width, height, font_size, line_height)
+			# Run VHS with the converted tape file and specify output location
+			with console.status(f'Running VHS with {tape_file}...'):
+				Command.execute(f'vhs {tape_file} -o {output_gif}')
+			console.print(Info(message=f'Generated GIF: {output_gif}'))
+			# Optimize the GIF by trimming long pauses
+			with console.status('Optimizing GIF...'):
+				if trim_gif(output_gif, output_gif):
+					console.print(Info(message=f'Optimized GIF: {output_gif}'))
+
+		# Check if it's a .tape file
+		elif file_path.suffix == '.tape':
+			# Run VHS directly with the tape file and specify output location
+			with console.status(f'Running VHS with {file_path}...'):
+				Command.execute(f'vhs {file_path} -o {output_gif}')
+			console.print(Info(message=f'Generated GIF: {output_gif}'))
+			# Optimize the GIF by trimming long pauses
+			with console.status('Optimizing GIF...'):
+				if trim_gif(output_gif, output_gif):
+					console.print(Info(message=f'Optimized GIF: {output_gif}'))
+
+		else:
+			console.print(Error(message=f'File must be a .tap or .tape file, got: {file_path.suffix}'))
+			sys.exit(1)
+
+	else:
+		# No file provided - create a template tape file
+		if not name:
+			console.print(Error(message='--name option is required when creating a new tape file'))
+			sys.exit(1)
+
+		tape_file = output_dir / f'{name}.tape'
+		# Create a template tape file
+		template_lines = [
+			f'Output {name}.gif',
+			'Set Shell fish',
+		]
+		if width is not None:
+			template_lines.append(f'Set Width {width}')
+		if height is not None:
+			template_lines.append(f'Set Height {height}')
+		if font_size is not None:
+			template_lines.append(f'Set FontSize {font_size}')
+		template_lines.append(f'Set LineHeight {line_height}')
+		template_lines.append('')
+		template_lines.append('# Add your commands here')
+		template_lines.append('')
+
+		try:
+			with open(tape_file, 'w') as f:
+				f.write('\n'.join(template_lines) + '\n')
+			console.print(Info(message=f'Created template tape file: {tape_file}'))
+			console.print(Info(message='Edit the file and then run: vhs ' + str(tape_file)))
+		except Exception as e:
+			console.print(Error(message=f'Failed to create template file: {str(e)}'))
+			sys.exit(1)
+
+
+@util.group()
+def gif():
+	"""GIF manipulation commands."""
+	if not ADDONS_ENABLED['dev']:
+		console.print(Error(message='Missing dev addon: please run "secator install addons dev"'))
+		sys.exit(1)
+	pass
+
+
+@gif.command()
+@click.argument('input_gif', type=str)
+@click.option('--output', '-o', type=str, default=None, help='Output GIF file path (default: input file with _reduced suffix)')  # noqa: E501
+@click.option('--max-frames', '-f', type=int, default=500, help='Maximum number of frames to keep (default: 500)')
+def reduce(input_gif, output, max_frames):
+	"""Reduce the number of frames in a GIF by accelerating it.
+
+	This command samples frames evenly and reduces their durations to accelerate the GIF,
+	making it faster while reducing the file size.
+	"""
+	input_path = Path(input_gif)
+	if not input_path.exists():
+		console.print(Error(message=f'File not found: {input_gif}'))
+		sys.exit(1)
+
+	if not input_path.suffix.lower() == '.gif':
+		console.print(Error(message=f'Input file must be a GIF file, got: {input_path.suffix}'))
+		sys.exit(1)
+
+	# Determine output path
+	if output:
+		output_path = Path(output)
+	else:
+		output_path = input_path.parent / f'{input_path.stem}_reduced{input_path.suffix}'
+
+	with console.status(f'Reducing GIF frames to {max_frames}...'):
+		if reduce_gif_frames(input_path, output_path, max_frames):
+			console.print(Info(message=f'Reduced GIF saved to: {output_path}'))
+		else:
+			console.print(Warning(message='GIF frame reduction failed or was not needed.'))
+
+
+@gif.command()
+@click.argument('input_gif', type=str)
+def info(input_gif):
+	"""View information about a GIF file (dimensions, frames, total pixels).
+
+	Displays the width, height, frame count, and total pixels (width × height × frames)
+	for the specified GIF file.
+	"""
+	input_path = Path(input_gif)
+	if not input_path.exists():
+		console.print(Error(message=f'File not found: {input_gif}'))
+		sys.exit(1)
+
+	if not input_path.suffix.lower() == '.gif':
+		console.print(Error(message=f'Input file must be a GIF file, got: {input_path.suffix}'))
+		sys.exit(1)
+
+	info = get_gif_info(input_path)
+	if info:
+		console.print('[bold gold3]GIF Information:[/]')
+		console.print(f'  [bold blue]Width:[/] {info["width"]} pixels')
+		console.print(f'  [bold blue]Height:[/] {info["height"]} pixels')
+		console.print(f'  [bold blue]Frames:[/] {info["frame_count"]}')
+		console.print(f'  [bold blue]Total pixels:[/] {info["total_pixels"]:,}')
+	else:
+		console.print(Error(message='Failed to read GIF information.'))
+		sys.exit(1)
 
 
 @util.command('build')
@@ -533,7 +709,7 @@ def config_edit(resume):
 	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
 	if not tmp_config.exists() or not resume:
 		shutil.copyfile(config_path, tmp_config)
-	click.edit(filename=tmp_config)
+	click.edit(filename=str(tmp_config))
 	config = Config.parse(path=tmp_config)
 	if config:
 		config.save(config_path)
@@ -598,6 +774,26 @@ def workspace_list():
 	for workspace, config in workspaces.items():
 		table.add_row(workspace, str(config['count']), config['path'])
 	console.print(table)
+
+
+@workspace.command('use')
+@click.argument('name')
+def workspace_use(name):
+	"""Use a workspace (set as default)."""
+	CONFIG.set('workspace.default', name)
+	config = CONFIG.validate()
+	if config:
+		CONFIG.save()
+		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
+	else:
+		console.print(Error(message='Invalid config, not saving it.'))
+
+
+@workspace.command('current')
+def workspace_current():
+	"""Show current default workspace."""
+	current = CONFIG.workspace.default or 'default'
+	console.print(f'Current workspace: [bold gold3]{current}[/]')
 
 
 #----------#
@@ -695,12 +891,12 @@ def list_aliases(silent):
 	aliases.append('alias ws="secator workspaces"')
 	aliases.append('alias p="secator profiles"')
 	aliases.append('alias a="secator alias"')
-	aliases.append('alias aliases="secator alias list"')
 	aliases.append('alias r="secator reports"')
 	aliases.append('alias h="secator health"')
 	aliases.append('alias i="secator install"')
-	aliases.append('alias u="secator update"')
+	aliases.append('alias update="secator update"')
 	aliases.append('alias t="secator test"')
+	aliases.append('alias cs="secator cheatsheet"')
 	aliases.append('\n# Tasks')
 	for task in [t for t in discover_tasks()]:
 		alias_str = f'alias {task.__name__}="secator task {task.__name__}"'
@@ -1089,40 +1285,53 @@ def health(json_, debug, strict, bleeding):
 	upgrade_cmd = 'secator install tools'
 	with contextmanager:
 		for tool in tools:
-			info = get_version_info(
-				tool.cmd.split(' ')[0],
-				tool.version_flag or f'{tool.opt_prefix}version',
-				tool.github_handle,
-				tool.install_github_version_prefix,
-				tool.install_cmd,
-				tool.install_version,
-				bleeding=bleeding
-			)
-			info['_name'] = tool.__name__
-			info['_type'] = 'tool'
-			row = fmt_health_table_row(info, 'tools')
-			table.add_row(*row)
-			if not info['installed']:
-				messages.append(f'{tool.__name__} is not installed.')
-				info['next_version'] = tool.install_version
-				error = True
-			elif info['outdated']:
-				msg = 'latest' if bleeding else 'supported'
-				message = (
-					f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+			if hasattr(tool, 'cmd'):
+				info = get_version_info(
+					tool.cmd.split(' ')[0],
+					tool.version_flag or f'{tool.opt_prefix}version',
+					tool.github_handle,
+					tool.install_github_version_prefix,
+					tool.install_cmd,
+					tool.install_version,
+					bleeding=bleeding
 				)
-				messages.append(message)
-				info['upgrade'] = True
-				info['next_version'] = info['latest_version']
+				info['_name'] = tool.__name__
+				info['_type'] = 'tool'
+				row = fmt_health_table_row(info, 'tools')
+				table.add_row(*row)
+				if not info['installed']:
+					messages.append(f'{tool.__name__} is not installed.')
+					info['next_version'] = tool.install_version
+					error = True
+				elif info['outdated']:
+					msg = 'latest' if bleeding else 'supported'
+					message = (
+						f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+					)
+					messages.append(message)
+					info['upgrade'] = True
+					info['next_version'] = info['latest_version']
 
-			elif info['bleeding']:
-				msg = 'latest' if bleeding else 'supported'
-				message = (
-					f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
-				)
-				messages.append(message)
-				info['downgrade'] = True
-				info['next_version'] = info['latest_version']
+				elif info['bleeding']:
+					msg = 'latest' if bleeding else 'supported'
+					message = (
+						f'{tool.__name__} is bleeding edge (current:{info["version"]}, {msg}:{info["latest_version"]}).'
+					)
+					messages.append(message)
+					info['downgrade'] = True
+					info['next_version'] = info['latest_version']
+			else:
+				info = {
+					'name': tool.__name__,
+					'_type': 'python',
+					'version': None,
+					'status': 'ok',
+					'latest_version': None,
+					'installed': False,
+					'location': None
+				}
+				row = fmt_health_table_row(info, 'python')
+				table.add_row(*row)
 			results.append(info)
 			if json_:
 				print(json.dumps(info))
@@ -1161,6 +1370,189 @@ def health(json_, debug, strict, bleeding):
 			print(upgrade_cmd)
 	else:
 		console.print(Info(message='Everything is up to date !')) if not json_ else None
+
+
+#------------#
+# CHEATSHEET #
+#------------#
+
+@cli.command(name='cheatsheet', aliases=['cs'])
+def cheatsheet():
+	"""Display a cheatsheet of secator commands."""
+	from rich.panel import Panel
+	from rich import box
+	kwargs = {
+		'box': box.ROUNDED,
+		'title_align': 'left',
+		# 'style': 'bold blue3',
+		'border_style': 'green',
+		'padding': (0, 1, 0, 1),
+		'highlight': False,
+		'expand': False,
+	}
+	title_style = 'bold green'
+
+	panel1 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator basic commands to get you started.[/]
+
+secator [orange3]x[/]      [dim]# list tasks[/]
+secator [orange3]w[/]      [dim]# list workflows[/]
+secator [orange3]s[/]      [dim]# list scans[/]
+secator [orange3]p[/]      [dim]# manage profiles[/]
+secator [orange3]r[/]      [dim]# manage reports[/]
+secator [orange3]c[/]      [dim]# manage configuration[/]
+secator [orange3]ws[/]     [dim]# manage workspaces[/]
+secator [orange3]update[/] [dim]# update secator[/]
+
+[dim]# Running tasks, workflows or scans...[/]
+secator \[[orange3]x[/]|[orange3]w[/]|[orange3]s[/]] [NAME] [OPTIONS] [INPUTS]   [dim]# run a task ([bold orange3]x[/]), workflow ([bold orange3]w[/]) or scan ([bold orange3]s[/])[/]
+secator [orange3]x[/] [red]httpx[/] example.com                 [dim]# run an [bold red]httpx[/] task ([bold orange3]x[/] is for e[bold orange3]x[/]ecute)[/]
+secator [orange3]w[/] [red]url_crawl[/] https://example.com     [dim]# run a [bold red]url crawl[/] workflow ([bold orange3]w[/])[/]
+secator [orange3]s[/] [red]host[/] example.com                  [dim]# run a [bold red]host[/] scan ([bold orange3]s[/])[/]
+
+[dim]# Show information on tasks, workflows or scans ...[/]
+secator s host [blue]-dry[/]                         [dim]# show dry run (show exact commands that will be run)[/]
+secator s host [blue]-tree[/]                        [dim]# show config tree (workflows and scans only)[/]
+secator s host [blue]-yaml[/]                        [dim]# show config yaml (workflows and scans only)[/]
+
+[dim]# Organize your results (workspace, database)[/]
+secator s host [blue]-ws[/] [bright_magenta]prod[/] example.com         [dim]# save results to 'prod' workspace[/]
+secator s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com  [dim]# save results to mongodb database[/]
+
+[dim]# Input types are flexible ...[/]
+secator s host [cyan]example.com[/]                  [dim]# single input[/]
+secator s host [cyan]host1,host2,host3[/]            [dim]# multiple inputs (comma-separated)[/]
+secator s host [cyan]hosts.txt[/]                    [dim]# multiple inputs (txt file)[/]
+[cyan]cat hosts.txt | [/]secator s host              [dim]# piped inputs[/]
+
+[dim]# Options are mutualized ...[/]
+secator s host [blue]-rl[/] [bright_magenta]10[/] [blue]-delay[/] [bright_magenta]1[/] [blue]-proxy[/] [bright_magenta]http://127.0.0.1:9090[/] example.com  [dim]# set rate limit, delay and proxy for all subtasks[/]
+secator s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com  [dim]# ... or use a profile to automatically set options[/]
+
+[dim]:point_right: and [bold]YES[/], the above options and inputs work with any scan ([bold orange3]s[/]), workflow ([bold orange3]w[/]), and task ([bold orange3]x[/]), not just the host scan shown here![/]
+""",  # noqa: E501
+		title=f":shield: [{title_style}]Some basics[/]", **kwargs)
+
+	panel2 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator aliases are useful to stop typing [bold cyan]secator <something>[/] and focus on what you want to run. Aliases are a must to increase your productivity.[/]
+
+[bold]To enable aliases:[/]
+
+secator alias enable       [dim]# enable aliases[/]
+source ~/.secator/.aliases [dim]# load aliases in current shell[/]
+
+[dim]# Now you can use aliases...[/]
+a list                                                   [dim]# list all aliases[/]
+httpx                                                    [dim]# aliased httpx ![/]
+nmap -sV -p 443 --script vulners example.com             [dim]# aliased nmap ![/]
+w subdomain_recon                                        [dim]# aliased subdomain_recon ![/]
+s domain                                                 [dim]# aliased domain scan ![/]
+cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain tasks ![/]
+""",  # noqa: E501
+		title=f":shorts: [{title_style}]Aliases[/]", **kwargs)
+
+	panel3 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Secator configuration is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/]. You can edit it manually or use the following commands to get/set values.[/]
+
+c get         [dim]# get config value[/]
+c get --user  [dim]# get user config value[/]
+c edit        [dim]# edit user config in editor[/]
+c set profiles.defaults aggressive                              [dim]# set 'aggressive' profile as default[/]
+c set drivers.defaults mongodb                                  [dim]# set mongodb as default driver[/]
+c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set default wordlist for http fuzzing[/]
+""",  # noqa: E501
+		title=f":gear: [{title_style}]Configuration[/]", **kwargs)
+
+	panel4 = Panel(r"""
+[dim bold]:left_arrow_curving_right: By default, tasks are run sequentially. You can use a worker to run tasks in parallel and massively speed up your scans.[/]
+
+wk                         [dim]# or [bold cyan]secator worker[/] if you don't use aliases ...[/]
+httpx testphp.vulnweb.com  [dim]# <-- will run in worker and output results normally[/]
+
+[dim]:question: Want to use a remote worker ?[/]
+[dim]:point_right: Spawn a Celery worker on your remote server, a Redis instance and set the following config values to connect to it, both in the worker and locally:[/]
+c set celery.result_backend redis://<remote_ip>:6379/0          [dim]# set redis backend[/]
+c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis broker[/]
+[dim]:point_right: Then, run your tasks, workflows or scans like you would locally ![/]
+""",  # noqa: E501
+		title=f":zap: [{title_style}]Too slow ? Use a worker[/]", **kwargs)
+
+	panel5 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, filter and export reports using the following commands.[/]
+
+[dim]# List and filter reports...[/]
+r list                    [dim]# list all reports[/]
+r list [blue]-ws[/] [bright_magenta]prod[/]           [dim]# list reports from the workspace 'prod'[/]
+r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
+
+[dim]# Show and filter results...[/]
+r show [blue]-q[/] [bright_magenta]"url.status_code not in ['401', '403']"[/] [blue]-o[/] [bright_magenta]txt[/]                                 [dim]# show urls with status 401 or 403, save to txt file[/]
+r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"tag.match and 'signup.php' in tag.match"[/] [blue]--unified[/] [blue]-o[/] [bright_magenta]json[/]  [dim]# show tags with targets matching 'signup.php' from tasks 10 and 11[/]
+""",  # noqa: E501
+		title=f":file_cabinet: [{title_style}]Digging into reports[/]", **kwargs)
+
+	panel6 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Commands to manage secator installation.[/]
+
+update [dim]# update secator to the latest version[/]
+
+[dim]:point_right: Tools are automatically installed when first running a task, workflow or scan, but you can still install them manually.[/]
+i tools httpx    [dim]# install tool 'httpx'[/]
+i tools          [dim]# install all tools[/]
+
+[dim]:point_right: Addons are optional dependencies required to enable certain features.[/]
+i addon redis    [dim]# install addon 'redis'[/]
+i addon gcs      [dim]# install addon 'gcs'[/]
+i addon worker   [dim]# install addon 'worker'[/]
+i addon gdrive   [dim]# install addon 'gdrive'[/]
+i addon mongodb  [dim]# install addon 'mongodb'[/]
+""",  # noqa: E501
+		title=f":wrench: [{title_style}]Updates[/]", **kwargs)
+
+	panel7 = Panel(r"""
+[dim bold]:left_arrow_curving_right: Some useful scans and workflows we use day-to-day for recon.[/]
+
+[orange3]:warning: Don't forget to add [bold blue]-dry[/] or [bold blue]-tree[/] before running your scans to see what will be done ![/]
+
+[bold orange3]:trophy: Domain recon + Subdomain recon + Port scanning + URL crawl + URL vulns (XSS, SQLi, RCE, ...)[/]
+s domain <DOMAIN>                [dim]# light[/]
+s domain <DOMAIN> -pf all_ports  [dim]# light + full port scan[/]
+s domain <DOMAIN> -pf full       [dim]# all features (full port scan, nuclei, pattern hunting, headless crawling, screenshots, etc.)[/]
+s domain <DOMAIN> -pf passive    [dim]# passive (0 requests to targets)[/]
+
+[bold orange3]:trophy: Subdomain recon[/]
+w subdomain_recon <DOMAIN>                         [dim]# standard[/]
+w subdomain_recon <DOMAIN> -brute-dns -brute-http  [dim]# bruteforce subdomains (DNS queries + HTTP Host header fuzzing)[/]
+w subdomain_recon <DOMAIN> -pf passive             [dim]# passive (0 requests to targets)[/]
+
+[bold orange3]:trophy: URL fuzzing[/]
+w url_fuzz <URL>                                   [dim]# standard fuzzing (ffuf)[/]
+w url_fuzz <URL> -hs                               [dim]# hunt secrets in HTTP responses (trufflehog)[/]
+w url_fuzz <URL> -mc 200,301 -fs 204               [dim]# match 200, 301, and filter size equal to 204 bytes[/]
+w url_fuzz -fuzzers ffuf,dirsearch <URL> -w <URL>  [dim]# choose fuzzers, use remote wordlist[/]
+
+[bold orange3]:trophy: Vuln and secret scan:[/]
+w code_scan <PATH>                                 [dim]# on a local path or git repo[/]
+w code_scan https://github.com/freelabz/secator    [dim]# on a github repo[/]
+w code_scan https://github.com/freelabz            [dim]# on a github org (all repos)[/]
+
+[bold orange3]:trophy: Hunt user accounts[/]
+w user_hunt elonmusk                               [dim]# by username[/]
+w user_hunt elonmusk@tesla.com                     [dim]# by email[/]
+
+[bold orange3]:trophy: Custom pipeline to find HTTP servers and fuzz alive ones[/]
+subfinder vulnweb.com | naabu | httpx | ffuf -mc 200,301 -recursion
+""",  # noqa: E501
+		title=f":trophy: [{title_style}]Quick wins[/]", **kwargs)
+
+	console.print(panel1)
+	console.print(panel2)
+	console.print(panel3)
+	console.print(panel4)
+	console.print(panel5)
+	console.print(panel6)
+	console.print(panel7)
+
 
 #---------#
 # INSTALL #
@@ -1271,6 +1663,19 @@ def install_redis():
 	)
 
 
+@addons.command('vulners')
+def install_vulners():
+	"Install Vulners addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[vulners]',
+		title='Vulners addon',
+		next_steps=[
+			'Run [bold green4]secator config set addons.vulners.api_key <API_KEY>[/].',
+			'Set [bold green4]secator config set providers.cve_default_provider vulners[/].',
+		]
+	)
+
+
 @addons.command('dev')
 def install_dev():
 	"Install dev addon."
@@ -1307,6 +1712,19 @@ def install_build():
 			'Run [bold green4]secator u publish pypi[/] to publish the PyPI package.',
 			'Run [bold green4]secator u build docker[/] to build the Docker image.',
 			'Run [bold green4]secator u publish docker[/] to publish the Docker image.',
+		]
+	)
+
+
+@addons.command('ai')
+def install_ai():
+	"Install AI addon."
+	run_install(
+		cmd=f'{sys.executable} -m pip install secator[ai]',
+		title='AI addon',
+		next_steps=[
+			'Run [bold green4]secator x ai setup[/] to configure your AI model and API key.',
+			'Run [bold green4]secator x ai -p "your prompt"[/] to run AI-powered pentesting.',
 		]
 	)
 
@@ -1441,7 +1859,10 @@ def update(all):
 	if all:
 		return_code = 0
 		for cls in discover_tasks():
-			cmd = cls.cmd.split(' ')[0]
+			base_cmd = getattr(cls, 'cmd', None)
+			if not base_cmd:
+				continue
+			cmd = base_cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
 			if not info['installed'] or info['outdated'] or not info['latest_version']:
@@ -1469,7 +1890,7 @@ def test():
 	pass
 
 
-def run_test(cmd, name=None, exit=True, verbose=False, use_os_system=False):
+def run_test(cmd, name=None, exit=True, verbose=False, use_command_runner=True):
 	"""Run a test and return the result.
 
 	Args:
@@ -1477,20 +1898,20 @@ def run_test(cmd, name=None, exit=True, verbose=False, use_os_system=False):
 		name (str, optional): Name of the test.
 		exit (bool, optional): Exit after running the test with the return code.
 		verbose (bool, optional): Print verbose output.
-		use_os_system (bool, optional): Use os.system to run the command.
+		use_command_runner (bool, optional): Use Command.execute to run the command.
 
 	Returns:
 		Return code of the test.
 	"""
 	cmd_name = name + ' tests' if name else 'tests'
-	if use_os_system:
+	if not use_command_runner:
 		console.print(f'[bold red]{cmd}[/]')
 		if not verbose:
 			cmd += ' >/dev/null 2>&1'
-		ret = os.system(cmd)
+		ret = subprocess.run(cmd, shell=True)
 		if exit:
-			sys.exit(os.waitstatus_to_exitcode(ret))
-		return ret
+			sys.exit(ret.returncode)
+		return ret.returncode
 	else:
 		result = Command.execute(cmd, name=cmd_name, cwd=ROOT_FOLDER, quiet=not verbose)
 		if name:
@@ -1513,7 +1934,7 @@ def lint(linter):
 	elif linter == 'ruff':
 		opts = ' check'
 	cmd = f'{sys.executable} -m {linter} {opts} secator/'
-	run_test(cmd, 'lint', verbose=True, use_os_system=True)
+	run_test(cmd, 'lint', verbose=True, use_command_runner=False)
 
 
 @test.command()
@@ -1549,7 +1970,7 @@ def unit(tasks, workflows, scans, test, no_coverage):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'unit', verbose=True, use_os_system=True)
+	run_test(cmd, 'unit', verbose=True, use_command_runner=False)
 
 
 @test.command()
@@ -1582,7 +2003,7 @@ def integration(tasks, workflows, scans, test, no_cleanup):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'integration', verbose=True, use_os_system=True)
+	run_test(cmd, 'integration', verbose=True, use_command_runner=False)
 
 
 @test.command()
@@ -1636,7 +2057,7 @@ def performance(tasks, workflows, scans, test):
 	if test:
 		test_str = ' or '.join(test.split(','))
 		cmd += f' -k "{test_str}"'
-	run_test(cmd, 'performance', verbose=True, use_os_system=True)
+	run_test(cmd, 'performance', verbose=True, use_command_runner=False)
 
 
 @test.command()
@@ -1669,12 +2090,14 @@ def task(name, verbose, check, system_exit):
 	task_name = task.__name__
 
 	# Check task command is set
-	check_test(
-		task.cmd,
-		'Check task command is set (cls.cmd)',
-		'Task has no cmd attribute.',
-		errors
-	)
+	cmd = getattr(task, 'cmd', None)
+	if cmd:
+		check_test(
+			task.cmd,
+			'Check task command is set (cls.cmd)',
+			'Task has no cmd attribute.',
+			errors
+		)
 	if errors:
 		if system_exit:
 			sys.exit(1)
@@ -1682,45 +2105,46 @@ def task(name, verbose, check, system_exit):
 			return False
 
 	# Run install
-	cmd = f'secator install tools {task_name}'
-	ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
-	version_info = task.get_version_info()
-	if verbose:
-		console.print(f'Version info:\n{version_info}')
-	status = version_info['status']
-	check_test(
-		version_info['installed'],
-		'Check task is installed',
-		'Failed to install command. Fix your installation command.',
-		errors
-	)
-	check_test(
-		any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
-		'Check task installation command is defined',
-		'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `github_handle`.',  # noqa: E501
-		errors
-	)
-	check_test(
-		version_info['version'],
-		'Check task version can be fetched',
-		'Failed to detect current version. Consider updating your `version_flag` class attribute.',
-		warnings,
-		warn=True
-	)
-	check_test(
-		status != 'latest unknown',
-		'Check latest version',
-		'Failed to detect latest version.',
-		warnings,
-		warn=True
-	)
-	check_test(
-		not version_info['outdated'],
-		'Check task version is up to date',
-		f'Task is not up to date (current version: {version_info["version"]}, latest: {version_info["latest_version"]}). Consider updating your `install_version` class attribute.',  # noqa: E501
-		warnings,
-		warn=True
-	)
+	if hasattr(task, 'get_version_info'):
+		cmd = f'secator install tools {task_name}'
+		ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
+		version_info = task.get_version_info()
+		if verbose:
+			console.print(f'Version info:\n{version_info}')
+		status = version_info['status']
+		check_test(
+			version_info['installed'],
+			'Check task is installed',
+			'Failed to install command. Fix your installation command.',
+			errors
+		)
+		check_test(
+			any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
+			'Check task installation command is defined',
+			'Task has no installation command. Please define one or more of the following class attributes: `install_pre`, `install_cmd`, `install_post`, `github_handle`.',  # noqa: E501
+			errors
+		)
+		check_test(
+			version_info['version'],
+			'Check task version can be fetched',
+			'Failed to detect current version. Consider updating your `version_flag` class attribute.',
+			warnings,
+			warn=True
+		)
+		check_test(
+			status != 'latest unknown',
+			'Check latest version',
+			'Failed to detect latest version.',
+			warnings,
+			warn=True
+		)
+		check_test(
+			not version_info['outdated'],
+			'Check task version is up to date',
+			f'Task is not up to date (current version: {version_info["version"]}, latest: {version_info["latest_version"]}). Consider updating your `install_version` class attribute.',  # noqa: E501
+			warnings,
+			warn=True
+		)
 
 	# Run task-specific tests
 	check_test(
@@ -1743,13 +2167,14 @@ def task(name, verbose, check, system_exit):
 		warnings,
 		warn=True
 	)
-	check_test(
-		task.install_version,
-		'Check task install_version is set (cls.install_version)',
-		'Task has no install_version attribute. Consider setting it to pin the tool version and ensure it does not break in the future.',  # noqa: E501
-		warnings,
-		warn=True
-	)
+	if hasattr(task, 'install_version'):
+		check_test(
+			task.install_version,
+			'Check task install_version is set (cls.install_version)',
+			'Task has no install_version attribute. Consider setting it to pin the tool version and ensure it does not break in the future.',  # noqa: E501
+			warnings,
+			warn=True
+		)
 
 	if not check:
 
@@ -1844,4 +2269,4 @@ def coverage(unit_only, integration_only, template_only):
 		cmd += ' --data-file=.coverage.template'
 	else:
 		Command.execute(f'{sys.executable} -m coverage combine --keep', name='coverage combine', cwd=ROOT_FOLDER)
-	run_test(cmd, 'coverage', use_os_system=True)
+	run_test(cmd, 'coverage', use_command_runner=False)

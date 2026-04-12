@@ -281,5 +281,63 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 1
 		assert 'Cannot run this command in offline mode' in result.output
 
+	# def test_workflow_default_inputs(self):
+	# 	"""Test that workflows with default_inputs use them when no input is provided."""
+	# 	result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '--dry-run'])
+	# 	assert not result.exception
+	# 	assert result.exit_code == 0
+	# 	assert 'No inputs provided, using default inputs:' in result.output
+	# 	assert 'discover' in result.output
+
+	def test_workflow_explicit_input_overrides_default(self):
+		"""Test that explicit inputs override default_inputs."""
+		result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '10.10.10.0/24', '--dry-run'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert not 'No inputs provided, using default inputs:' in result.output
+
+	def test_cheatsheet_command(self):
+		result = self.runner.invoke(cli, ['cheatsheet'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert 'Some basics' in result.output
+		assert 'Aliases' in result.output
+		assert 'Configuration' in result.output
+		assert 'Quick wins' in result.output
+
+	def test_util_completion_command(self):
+		result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert '_secator_completion' in result.output
+
+	def test_util_completion_install_command(self):
+		with tempfile.TemporaryDirectory() as tmpdir:
+			bashrc_path = os.path.join(tmpdir, '.bashrc')
+			with mock.patch('os.path.expanduser', return_value=bashrc_path):
+				result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash', '--install'])
+				assert not result.exception
+				assert result.exit_code == 0
+				assert 'Completion installed' in result.output
+				
+				# Verify the completion was actually written
+				assert os.path.exists(bashrc_path)
+				with open(bashrc_path, 'r') as f:
+					content = f.read()
+					assert '_SECATOR_COMPLETE=bash_source secator' in content
+
+	def test_util_completion_already_installed(self):
+		with tempfile.TemporaryDirectory() as tmpdir:
+			bashrc_path = os.path.join(tmpdir, '.bashrc')
+			# Pre-populate the bashrc with completion
+			with open(bashrc_path, 'w') as f:
+				f.write('eval "$(_SECATOR_COMPLETE=bash_source secator)"\n')
+			
+			with mock.patch('os.path.expanduser', return_value=bashrc_path):
+				result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash', '--install'])
+				assert not result.exception
+				assert result.exit_code == 0
+				assert 'already installed' in result.output
+
 if __name__ == '__main__':
 	unittest.main()

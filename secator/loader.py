@@ -43,11 +43,12 @@ def get_configs_by_type(type):
 			'description': cls.__doc__,
 			'input_types': cls.input_types,
 			'output_types': [t.get_name() for t in cls.output_types],
+			'default_inputs': cls.default_inputs,
 			'proxychains': getattr(cls, 'proxychains', True),
 			'proxy_socks5': getattr(cls, 'proxy_socks5', True),
 			'proxy_http': getattr(cls, 'proxy_http', True),
-			'default_cmd': cls.cmd,
-			'install_cmd': cls.install_cmd,
+			'default_cmd': getattr(cls, 'cmd', None),
+			'install_cmd': getattr(cls, 'install_cmd', None),
 		}) for cls in tasks]  # noqa: E501
 		return sorted(task_config, key=lambda x: x['name'])
 	return sorted([t for t in find_templates() if t.type == type], key=lambda x: x.name)

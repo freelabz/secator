@@ -26,7 +26,7 @@ class urlfinder(HttpCrawler):
 	output_types = [Url]
 	item_loaders = [JSONSerializer()]
 	json_flag = '-j'
-	tags = ['pattern', 'scan']
+	tags = ['url', 'crawl', 'passive']
 	file_flag = '-list'
 	input_flag = '-d'
 	version_flag = '-version'
@@ -74,10 +74,13 @@ class urlfinder(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def before_init(self):
+		# Call parent's before_init to process raw HTTP request
+		HttpCrawler.before_init(self)
+
 		for idx, input in enumerate(self.inputs):
 			if validators.url(input):
 				self.inputs[idx] = urlparse(input).netloc
@@ -97,4 +100,4 @@ class urlfinder(HttpCrawler):
 			self.seen_params[base_url][param] += 1
 			if self.seen_params[base_url][param] > int(self.max_param_occurrences):
 				return
-		yield Url(url=item['url'], host=parsed_url.netloc, extra_data={'source': item['source']})
+		yield Url(url=item['url'], host=parsed_url.hostname, extra_data={'source': item['source']}, tags=['passive'])

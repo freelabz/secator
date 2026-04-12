@@ -21,6 +21,7 @@ class dnsx(ReconDns):
 	json_flag = '-json'
 	input_flag = OPT_PIPE_INPUT
 	file_flag = OPT_PIPE_INPUT
+	input_chunk_size = -1
 	opt_key_map = {
 		RATE_LIMIT: 'rate-limit',
 		RETRIES: 'retry',
@@ -41,7 +42,7 @@ class dnsx(ReconDns):
 	install_version = 'v1.2.2'
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
 	github_handle = 'projectdiscovery/dnsx'
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def validate_input(self, inputs):
@@ -53,10 +54,10 @@ class dnsx(ReconDns):
 		for target in self.inputs:
 			subdomain = f'xxxxxx.{target}'
 			if check_dns_response(subdomain):
-				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'))  # noqa: E501
+				self.add_result(Warning(message=f'Domain {target} returns false positive DNS results for A queries. Removing target.'), print=False)  # noqa: E501
 				self.inputs = [t for t in self.inputs if t != target]
 				if len(self.inputs) == 0 and not self.has_parent:
-					self.add_result(Warning(message='Please specify the wildcard_domain option to get accurate results.'))  # noqa: E501
+					self.add_result(Warning(message='Please specify the wildcard_domain option to get accurate results.'), print=False)  # noqa: E501
 					return False
 		return True
 
@@ -93,6 +94,7 @@ class dnsx(ReconDns):
 				domain=extract_domain_info(host, domain_only=True),
 				verified=True,
 				sources=['dns'],
+				tags=['dns'],
 			)
 			self.subdomains.append(subdomain)
 			yield subdomain
@@ -113,7 +115,8 @@ class dnsx(ReconDns):
 						host=host,
 						ip=name,
 						protocol=IpProtocol.IPv4,
-						alive=False
+						alive=False,
+						tags=['dns', 'a'],
 					)
 					if ip not in self.results:
 						yield ip
@@ -122,7 +125,8 @@ class dnsx(ReconDns):
 						host=host,
 						ip=name,
 						protocol=IpProtocol.IPv6,
-						alive=False
+						alive=False,
+						tags=['dns', 'aaaa'],
 					)
 					if ip not in self.results:
 						yield ip
@@ -131,7 +135,8 @@ class dnsx(ReconDns):
 						host=host,
 						ip=name,
 						protocol=IpProtocol.IPv4,
-						alive=False
+						alive=False,
+						tags=['dns', 'ptr'],
 					)
 					if ip not in self.results:
 						yield ip
@@ -140,7 +145,8 @@ class dnsx(ReconDns):
 					name=name,
 					type=_type.upper(),
 					extra_data=extra_data,
-					_source=self.unique_name
+					_source=self.unique_name,
+					tags=['dns'],
 				)
 
 				if record not in self.results:

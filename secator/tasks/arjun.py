@@ -1,20 +1,26 @@
 import os
+import shlex
+from urllib.parse import urlparse, urlunparse
+
 import yaml
 
-from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
-
 from secator.decorators import task
-from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
-								 HEADER, URL, FOLLOW_REDIRECT)
-from secator.output_types import Info, Url, Warning, Tag
-from secator.runners import Command
-from secator.tasks._categories import OPTS
+
+# fmt: off
+from secator.definitions import (
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
+	URL, USER_AGENT, WORDLIST
+)
+# fmt: on
+from secator.output_types import Info, Tag, Url, Warning
+from secator.tasks._categories import HttpBase
 from secator.utils import process_wordlist
 
 
 @task()
-class arjun(Command):
+class arjun(HttpBase):
 	"""HTTP Parameter Discovery Suite."""
+
 	cmd = 'arjun'
 	input_types = [URL]
 	output_types = [Url, Tag]
@@ -30,16 +36,10 @@ class arjun(Command):
 		'casing': {'type': str, 'help': 'Casing style for params e.g. like_this, likeThis, LIKE_THIS, like_this'},  # noqa: E501
 		WORDLIST: {'type': str, 'short': 'w', 'default': 'burp-parameter-names', 'process': process_wordlist, 'help': 'Wordlist to use (default: arjun wordlist)'},  # noqa: E501
 	}
-	meta_opts = {
-		THREADS: OPTS[THREADS],
-		DELAY: OPTS[DELAY],
-		TIMEOUT: OPTS[TIMEOUT],
-		RATE_LIMIT: OPTS[RATE_LIMIT],
-		METHOD: OPTS[METHOD],
-		HEADER: OPTS[HEADER],
-		FOLLOW_REDIRECT: OPTS[FOLLOW_REDIRECT],
-	}
 	opt_key_map = {
+		DATA: OPT_NOT_SUPPORTED,
+		USER_AGENT: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: 't',
 		DELAY: 'd',
 		TIMEOUT: 'T',
@@ -47,25 +47,17 @@ class arjun(Command):
 		METHOD: 'm',
 		WORDLIST: 'w',
 		HEADER: '--headers',
+		FOLLOW_REDIRECT: '--follow-redirect',
 		'chunk_size': 'c',
 		'stable': '--stable',
 		'passive': '--passive',
 		'casing': '--casing',
-		'follow_redirect': '--follow-redirect',
 	}
-	opt_value_map = {
-		HEADER: lambda headers: "\\n".join(c.strip() for c in headers.split(";;"))
-	}
+	opt_value_map = {HEADER: lambda headers: '\\n'.join(c.strip() for c in headers.split(';;'))}
 	install_version = '2.2.7'
 	install_cmd = 'pipx install arjun==[install_version] --force'
 	install_github_bin = False
 	github_handle = 's0md3v/Arjun'
-
-	@staticmethod
-	def on_line(self, line):
-		if 'Processing chunks' in line:
-			return ''
-		return line
 
 	@staticmethod
 	def on_cmd(self):
@@ -77,7 +69,14 @@ class arjun(Command):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
-		self.cmd += f' -oJ {self.output_path}'
+		self.cmd += f' -oJ {shlex.quote(self.output_path)}'
+
+	@staticmethod
+	def on_line(self, line):
+		if 'Processing chunks' in line:
+			yield ''
+			return
+		yield line
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -92,20 +91,29 @@ class arjun(Command):
 				return
 		for url, values in results.items():
 			parsed_url = urlparse(url)
+			url_without_param = str(urlunparse(parsed_url._replace(query='')))
 			yield Url(
 				url=url,
-				host=parsed_url.netloc,
+				host=parsed_url.hostname,
 				request_headers=values['headers'],
 				method=values['method'],
+				confidence='high',
+				verified=True,
+				tags=['fuzz'],
 			)
 			for param in values['params']:
-				new_params = parse_qs(parsed_url.query).copy()
-				new_params[param] = 'FUZZ'
-				new_query = urlencode(new_params, doseq=True)
-				new_url = urlunparse(parsed_url._replace(query=new_query))
 				yield Tag(
 					category='info',
 					name='url_param',
-					match=url,
-					extra_data={'content': param, 'url': new_url}
+					value=param,
+					match=url_without_param,
+				)
+				yield Url(
+					url=f'{url_without_param}?{param}=',
+					host=parsed_url.hostname,
+					request_headers=values['headers'],
+					method=values['method'],
+					confidence='high',
+					verified=True,
+					tags=['fuzz'],
 				)

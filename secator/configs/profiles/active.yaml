@@ -1,0 +1,12 @@
+type: profile
+name: active
+category: general
+description: "Active scanning only (no passive sources used)"
+enforce: true
+opts:
+  active: True
+  domain_recon_active: True
+  subdomain_recon_active: True
+  host_recon_active: True
+  url_crawl_active: True
+  url_vuln_active: True

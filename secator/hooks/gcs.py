@@ -60,7 +60,7 @@ def upload_blob(bucket_name, source_file_name, destination_blob_name):
 		blob.upload_from_file(f)
 	end_time = time()
 	elapsed = end_time - start_time
-	debug(f'in {elapsed:.4f}s', obj={'blob': 'UPLOADED', 'blob_name': destination_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs', verbose=True)  # noqa: E501
+	debug(f'in {elapsed:.4f}s', obj={'blob': 'UPLOADED', 'blob_name': destination_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs')  # noqa: E501
 
 
 def download_blob(bucket_name, source_blob_name, destination_file_name):
@@ -72,7 +72,7 @@ def download_blob(bucket_name, source_blob_name, destination_file_name):
 	blob.download_to_filename(destination_file_name)
 	end_time = time()
 	elapsed = end_time - start_time
-	debug(f'in {elapsed:.4f}s', obj={'blob': 'DOWNLOADED', 'blob_name': source_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs', verbose=True)  # noqa: E501
+	debug(f'in {elapsed:.4f}s', obj={'blob': 'DOWNLOADED', 'blob_name': source_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs')  # noqa: E501
 
 
 HOOKS = {
