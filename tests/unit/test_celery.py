@@ -217,6 +217,96 @@ class TestCelery(unittest.TestCase):
 			# This means one chunk with all inputs
 			self.assertEqual(len(workflow.tasks), len(inputs))
 
+	def test_chunk_rate_limit_config_disabled(self):
+		"""Test that rate_limit is NOT adjusted when CONFIG.runners.chunk_rate_limit is False."""
+		from secator.celery import break_task
+		from secator.config import CONFIG
+		from secator.tasks import httpx
+		if httpx not in TEST_TASKS:
+			return
+
+		HTTP_TARGETS = [f'https://{target}' for target in TARGETS]
+		task_opts = {'rate_limit': 100, 'sync': False}
+
+		original_value = CONFIG.runners.chunk_rate_limit
+		try:
+			CONFIG.runners.chunk_rate_limit = False
+			with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(HTTP_TARGETS)):
+				task = httpx(HTTP_TARGETS, **task_opts)
+				task.has_children = True
+				workflow = break_task(task, task_opts, results=[])
+				self.assertIsNotNone(workflow)
+				# Rate limit should remain unchanged (100) since config disabled division
+				header_tasks = workflow.tasks if hasattr(workflow, 'tasks') else []
+				if header_tasks:
+					first_sig = header_tasks[0]
+					if 'opts' in first_sig.kwargs and 'rate_limit' in first_sig.kwargs['opts']:
+						self.assertEqual(first_sig.kwargs['opts']['rate_limit'], 100)
+		finally:
+			CONFIG.runners.chunk_rate_limit = original_value
+
+	def test_rate_limit_host_chunking(self):
+		"""Test that rate_limit_host groups chunks by host and divides rate limit per host."""
+		from secator.celery import break_task, get_target_host
+		from secator.tasks import httpx
+		if httpx not in TEST_TASKS:
+			return
+
+		# 4 targets: 3 for bing.com, 1 for google.com
+		HTTP_TARGETS = [
+			'https://bing.com/a', 'https://bing.com/b', 'https://bing.com/c',
+			'https://google.com/x',
+		]
+		task_opts = {'rate_limit': 90, 'rate_limit_host': True, 'sync': False}
+
+		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(HTTP_TARGETS)):
+			task = httpx(HTTP_TARGETS, **task_opts)
+			task.has_children = True
+			workflow = break_task(task, task_opts, results=[])
+			self.assertIsNotNone(workflow)
+
+			header_tasks = workflow.tasks if hasattr(workflow, 'tasks') else []
+			self.assertEqual(len(header_tasks), 4)  # 3 bing chunks + 1 google chunk
+
+			# Collect rate limits per host
+			host_rate_limits = {}
+			for sig in header_tasks:
+				if 'opts' in sig.kwargs:
+					rl = sig.kwargs['opts'].get('rate_limit', 90)
+					# Get host from targets in the signature args
+					targets = sig.args[1] if len(sig.args) > 1 else sig.args[0]
+					if isinstance(targets, list):
+						host = get_target_host(targets[0])
+					else:
+						host = get_target_host(targets)
+					host_rate_limits.setdefault(host, set()).add(rl)
+
+			# bing.com has 3 chunks -> 90 // 3 = 30
+			self.assertEqual(host_rate_limits.get('bing.com'), {30})
+			# google.com has 1 chunk -> 90 // 1 = 90
+			self.assertEqual(host_rate_limits.get('google.com'), {90})
+
+	def test_get_target_host(self):
+		"""Test get_target_host extracts hostname correctly for all input types."""
+		from secator.celery import get_target_host
+		# URLs
+		self.assertEqual(get_target_host('https://example.com/path'), 'example.com')
+		self.assertEqual(get_target_host('http://sub.example.com:8080/path'), 'sub.example.com')
+		# Bare hostnames
+		self.assertEqual(get_target_host('example.com'), 'example.com')
+		self.assertEqual(get_target_host('sub.example.com'), 'sub.example.com')
+		# IPs
+		self.assertEqual(get_target_host('192.168.1.1'), '192.168.1.1')
+		# Host:port
+		self.assertEqual(get_target_host('192.168.1.1:8080'), '192.168.1.1')
+		self.assertEqual(get_target_host('example.com:443'), 'example.com')
+		# CIDR ranges
+		self.assertEqual(get_target_host('10.0.0.0/24'), '10.0.0.0')
+		# Usernames (no meaningful host, returned as-is)
+		self.assertEqual(get_target_host('johndoe'), 'johndoe')
+		# Paths (returned as-is)
+		self.assertEqual(get_target_host('/path/to/file'), '/path/to/file')
+
 
 class TestDelayMethods(unittest.TestCase):
 	"""Test the delay methods for different runner types."""
