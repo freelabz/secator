@@ -190,7 +190,14 @@ class MongodbAddon(StrictModel):
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
 	max_items: int = -1
-	duplicate_main_copy_fields: List[str] = ['screenshot_path', 'stored_response_path', 'is_false_positive', 'is_acknowledged', 'verified', 'tags']
+	duplicate_main_copy_fields: List[str] = [
+		'screenshot_path',
+		'stored_response_path',
+		'is_false_positive',
+		'is_acknowledged',
+		'verified',
+		'tags',
+	]
 
 
 class VulnersAddon(StrictModel):
