@@ -102,6 +102,7 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+	chunk_rate_limit: bool = True
 	threads: int = 50
 	prompt_timeout: int = 20
 

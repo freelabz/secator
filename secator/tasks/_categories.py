@@ -26,6 +26,7 @@ from secator.definitions import (
 	PORTS,
 	PROXY,
 	RATE_LIMIT,
+	RATE_LIMIT_HOST,
 	REQUEST,
 	RETRIES,
 	THREADS,
@@ -127,6 +128,7 @@ OPTS = {
 	METHOD: {'type': str, 'short': 'X', 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
 	RATE_LIMIT: {'type': int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
+	RATE_LIMIT_HOST: {'is_flag': True, 'short': 'rlh', 'default': False, 'help': 'Split rate limit per host: group targets by host and divide rate limit across host groups'},  # noqa: E501
 	REQUEST: {'type': str, 'short': 'rf', 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
 	RETRIES: {'type': int, 'help': 'Retries'},
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': CONFIG.runners.threads},
@@ -153,6 +155,7 @@ OPTS_HTTP_BASE = [
 	METHOD,
 	PROXY,
 	RATE_LIMIT,
+	RATE_LIMIT_HOST,
 	REQUEST,
 	RETRIES,
 	THREADS,
@@ -181,11 +184,11 @@ OPTS_HTTP_CRAWLERS.remove(DATA)
 OPTS_HTTP_CRAWLERS.remove(METHOD)
 OPTS_HTTP_CRAWLERS.remove(WORDLIST)
 
-OPTS_RECON = [DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT]
+OPTS_RECON = [DELAY, PROXY, RATE_LIMIT, RATE_LIMIT_HOST, RETRIES, THREADS, TIMEOUT]
 
-OPTS_RECON_PORT = [PORTS, TOP_PORTS, DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT]
+OPTS_RECON_PORT = [PORTS, TOP_PORTS, DELAY, PROXY, RATE_LIMIT, RATE_LIMIT_HOST, RETRIES, THREADS, TIMEOUT]
 
-OPTS_VULN = [HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT]
+OPTS_VULN = [HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RATE_LIMIT_HOST, RETRIES, THREADS, TIMEOUT, USER_AGENT]
 
 
 # ---------------#

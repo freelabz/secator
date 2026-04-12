@@ -65,7 +65,7 @@ class Workflow(Runner):
 		ix = 0
 		sigs = []
 
-		def process_task(node, force=False, parent_ix=None):
+		def process_task(node, force=False, parent_ix=None, group_size=1):
 			from celery import chain, group
 			from secator.utils import debug
 			nonlocal ix
@@ -98,6 +98,14 @@ class Workflow(Runner):
 				if (ix == 0 or parent_ix == 0) and forwarded_opts:
 					task_opts.update(forwarded_opts)
 
+				# Divide rate_limit for parallel tasks in a group
+				if group_size > 1 and CONFIG.runners.chunk_rate_limit:
+					rate_limit = task_opts.get('rate_limit')
+					if rate_limit:
+						orig_rl = int(rate_limit)
+						task_opts['rate_limit'] = max(1, orig_rl // group_size)
+						debug(f'{node.id} rate_limit adjusted for group: {orig_rl} -> {task_opts["rate_limit"]} (group_size={group_size})', sub=self.config.name)  # noqa: E501
+
 				# Create task signature
 				task_opts['name'] = node.name
 				task_opts['context'] = self.context.copy()
@@ -118,7 +126,8 @@ class Workflow(Runner):
 
 			elif node.type == 'group' and node.children:
 				parent_ix = ix
-				tasks = [sig for sig in [process_task(child, force=True, parent_ix=parent_ix) for child in node.children] if sig]
+				group_child_count = len(node.children)
+				tasks = [sig for sig in [process_task(child, force=True, parent_ix=parent_ix, group_size=group_child_count) for child in node.children] if sig]  # noqa: E501
 				debug(f'{node.id} group built with {len(tasks)} tasks', sub=self.config.name)
 				if len(tasks) == 1:
 					debug(f'{node.id} downgraded group to task', sub=self.config.name)

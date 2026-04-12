@@ -3,7 +3,9 @@ import json
 import logging
 import os
 
+from collections import defaultdict
 from time import time
+from urllib.parse import urlparse
 
 from celery import Celery, chord
 from celery.canvas import signature
@@ -140,6 +142,64 @@ def revoke_task(task_id, task_name=None):
 
 def chunker(seq, size):
 	return (seq[pos : pos + size] for pos in range(0, len(seq), size))
+
+
+def get_target_host(target):
+	"""Extract the base host from a target.
+
+	Handles URLs, hostnames, IPs, host:port, and CIDR ranges.
+
+	Args:
+		target (str): Target string (URL, host, IP, CIDR, etc.).
+
+	Returns:
+		str: Base host or the original target if no host can be extracted.
+	"""
+	# URLs with scheme: urlparse handles these correctly
+	if '://' in target:
+		parsed = urlparse(target)
+		if parsed.hostname:
+			return parsed.hostname
+
+	# Strip port from host:port (e.g. "example.com:443", "192.168.1.1:8080")
+	# but don't strip CIDR notation (e.g. "10.0.0.0/24")
+	if ':' in target and '/' not in target:
+		return target.rsplit(':', 1)[0]
+
+	# Strip CIDR suffix to group by network address (e.g. "10.0.0.0/24" -> "10.0.0.0")
+	if '/' in target and ':' not in target:
+		parts = target.split('/', 1)
+		if parts[1].isdigit():
+			return parts[0]
+
+	# Bare hostname, IP, username, or other input type: return as-is
+	return target
+
+
+def chunk_by_host(inputs, chunk_size):
+	"""Group inputs by base host, then chunk each host group.
+
+	Args:
+		inputs (list): List of targets.
+		chunk_size (int): Max chunk size per host group.
+
+	Returns:
+		list: List of chunks, each containing targets for a single host.
+	"""
+	host_groups = defaultdict(list)
+	for target in inputs:
+		host = get_target_host(target)
+		host_groups[host].append(target)
+
+	chunks = []
+	for host, targets in host_groups.items():
+		if chunk_size > 1 and chunk_size != -1:
+			for chunk in chunker(targets, chunk_size):
+				chunks.append(list(chunk))
+		else:
+			for target in targets:
+				chunks.append([target])
+	return chunks
 
 
 @app.task(bind=True)
@@ -426,12 +486,18 @@ def replace(task_instance, sig):
 
 def break_task(task, task_opts, results=[]):
 	"""Break a task into multiple of the same type."""
-	chunks = task.inputs
-	if task.input_chunk_size > 1 and task.input_chunk_size != -1:
-		chunks = list(chunker(task.inputs, task.input_chunk_size))
+	rate_limit_host = task_opts.get('rate_limit_host', False)
+
+	# Chunk inputs: by host if rate_limit_host is set, otherwise sequentially
+	if rate_limit_host:
+		chunks = chunk_by_host(task.inputs, task.input_chunk_size)
+	else:
+		chunks = task.inputs
+		if task.input_chunk_size > 1 and task.input_chunk_size != -1:
+			chunks = list(chunker(task.inputs, task.input_chunk_size))
 	debug(
 		'',
-		obj={task.unique_name: 'CHUNKED', 'chunk_size': task.input_chunk_size, 'chunks': len(chunks), 'target_count': len(task.inputs)},  # noqa: E501
+		obj={task.unique_name: 'CHUNKED', 'chunk_size': task.input_chunk_size, 'chunks': len(chunks), 'target_count': len(task.inputs), 'by_host': rate_limit_host},  # noqa: E501
 		obj_after=False,
 		sub='celery.state',
 		verbose=True,
@@ -440,24 +506,37 @@ def break_task(task, task_opts, results=[]):
 	# Clone opts
 	base_opts = task_opts.copy()
 
-	# Adjust rate_limit for chunked tasks
-	# Divide by chunk count but ensure it's at least 1
+	# Adjust rate_limit for chunked tasks (gated by CONFIG.runners.chunk_rate_limit)
 	# Skip if rate_limit is 0 or None (no rate limiting)
 	orig_rate_limit = base_opts.get('rate_limit')
-	if orig_rate_limit and len(chunks) != 0:
+	per_chunk_rate_limits = {}
+	if CONFIG.runners.chunk_rate_limit and orig_rate_limit and len(chunks) > 0:
 		orig_rate_limit = int(orig_rate_limit)
-		chunk_rate_limit = max(1, orig_rate_limit // len(chunks))
-		base_opts['rate_limit'] = chunk_rate_limit
-		debug(
-			'',
-			obj={
-				task.unique_name: 'RATE_LIMIT_ADJUSTED',
-				'original': orig_rate_limit,
-				'adjusted': chunk_rate_limit,
-				'chunks': len(chunks),
-			},
-			sub='celery.state',
-		)
+		if rate_limit_host:
+			# Count chunks per host and divide rate limit per host group
+			host_chunk_counts = defaultdict(int)
+			chunk_hosts = []
+			for chunk in chunks:
+				chunk_list = chunk if isinstance(chunk, list) else [chunk]
+				host = get_target_host(chunk_list[0])
+				host_chunk_counts[host] += 1
+				chunk_hosts.append(host)
+			for ix, host in enumerate(chunk_hosts):
+				per_chunk_rate_limits[ix] = max(1, orig_rate_limit // host_chunk_counts[host])
+			debug(
+				'',
+				obj={task.unique_name: 'RATE_LIMIT_ADJUSTED_BY_HOST', 'original': orig_rate_limit, 'host_chunks': dict(host_chunk_counts)},  # noqa: E501
+				sub='celery.state',
+			)
+		else:
+			# Divide rate limit evenly across all chunks
+			chunk_rate_limit = max(1, orig_rate_limit // len(chunks))
+			base_opts['rate_limit'] = chunk_rate_limit
+			debug(
+				'',
+				obj={task.unique_name: 'RATE_LIMIT_ADJUSTED', 'original': orig_rate_limit, 'adjusted': chunk_rate_limit, 'chunks': len(chunks)},  # noqa: E501
+				sub='celery.state',
+			)
 
 	# Build signatures
 	sigs = []
@@ -473,6 +552,11 @@ def break_task(task, task_opts, results=[]):
 		if 'context' in opts:
 			opts['context'] = opts['context'].copy()
 		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
+
+		# Apply per-chunk rate limit if host-aware division was used
+		if ix in per_chunk_rate_limits:
+			opts['rate_limit'] = per_chunk_rate_limits[ix]
+
 		debug(
 			'',
 			obj={
@@ -505,7 +589,6 @@ def break_task(task, task_opts, results=[]):
 	task.uuids = set()
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
-	# console.print(Info(message=f'Results: {results}'))
 
 	# Build Celery workflow
 	workflow = chord(
