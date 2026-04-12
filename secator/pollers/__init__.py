@@ -3,4 +3,7 @@ __all__ = [
     'MongoDBPoller',
 ]
 from secator.pollers.celery import CeleryPoller
-from secator.pollers.mongodb import MongoDBPoller
+try:
+    from secator.pollers.mongodb import MongoDBPoller
+except Exception:
+    MongoDBPoller = None  # type: ignore

@@ -157,12 +157,33 @@ def poll(report_path):
 		with open(report_path, 'w') as f:
 			f.write(dumps_dataclass(data, indent=2))
 		console.print(Info(message=f'Results written to report {report_path}'))
-	# elif data['info']['mongodb_result']:
-	# 	pass
-	# 	# scan_type = ''
-	# else:
-	# 	console.print(Error(message='No celery result found in report.'))
-	# 	sys.exit(1)
+	elif data['info'].get('mongodb_id'):
+		from secator.pollers.mongodb import MongoDBPoller
+		from secator.output_types import State
+		runner_type = data['info']['mongodb_runner_type']
+		runner_id = data['info']['mongodb_id']
+		state = None
+		results = []
+		results_uuids = []
+		for item in MongoDBPoller.iter_results(runner_type, runner_id):
+			if isinstance(item, State) and item.task_id == runner_id:
+				state = item.state
+			if item._uuid not in results_uuids:
+				results_uuids.append(item._uuid)
+				results.append(item)
+				console.print(item)
+		console.print(f'State: {state}')
+		console.print(Info(message=f'Writing results to report {report_path}'))
+		results, errors = Report.format_results(results)
+		data['results'] = results
+		data['info']['errors'] = errors
+		from secator.serializers.dataclass import dumps_dataclass
+		with open(report_path, 'w') as f:
+			f.write(dumps_dataclass(data, indent=2))
+		console.print(Info(message=f'Results written to report {report_path}'))
+	else:
+		console.print(Error(message='No celery or mongodb result found in report.'))
+		sys.exit(1)
 
 
 #--------#

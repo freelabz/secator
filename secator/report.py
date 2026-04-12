@@ -79,12 +79,15 @@ class Report:
 		data['info']['celery_id'] = self.runner.celery_result.id if self.runner.celery_result else None
 		data['info']['celery_ids'] = self.runner.celery_ids
 		ids_map = self.runner.celery_ids_map.copy()
-		for idx, val in ids_map.items():
+		for _, val in ids_map.items():
 			if 'results' in val:
 				del val['results']
 			if 'ready' in val:
 				del val['ready']
 		data['info']['celery_ids_map'] = ids_map
+		runner_type = self.runner.config.type
+		data['info']['mongodb_runner_type'] = runner_type
+		data['info']['mongodb_id'] = self.runner.context.get(f'{runner_type}_id')
 		output_results, errors = Report.format_results(self.runner.results, dedupe=dedupe, extractors=extractors)
 		data['results'] = output_results
 		data['info']['errors'] = errors
