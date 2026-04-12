@@ -444,7 +444,7 @@ def break_task(task, task_opts, results=[]):
 	# Divide by chunk count but ensure it's at least 1
 	# Skip if rate_limit is 0 or None (no rate limiting)
 	orig_rate_limit = base_opts.get('rate_limit')
-	if orig_rate_limit and len(chunks) != 0:
+	if CONFIG.runners.chunk_rate_limit and orig_rate_limit and len(chunks) != 0:
 		orig_rate_limit = int(orig_rate_limit)
 		chunk_rate_limit = max(1, orig_rate_limit // len(chunks))
 		base_opts['rate_limit'] = chunk_rate_limit
