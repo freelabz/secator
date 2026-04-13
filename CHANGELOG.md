@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.27.0](https://github.com/freelabz/secator/compare/v0.26.1...v0.27.0) (2026-04-13)
+
+
+### Features
+
+* **core:** support yield for on_line hook ([#970](https://github.com/freelabz/secator/issues/970)) ([632001c](https://github.com/freelabz/secator/commit/632001c6d33e32c5e65dda2fc0fde82fcded557f))
+* **output_types:** add Technology output type ([#967](https://github.com/freelabz/secator/issues/967)) ([3ac8eb1](https://github.com/freelabz/secator/commit/3ac8eb1cd2d6a68ee4f40c553dc4306c774981dd))
+
+
+### Bug Fixes
+
+* **cli:** deduplicate short CLI parameters to prevent Click UserWarnings ([#972](https://github.com/freelabz/secator/issues/972)) ([075e0f1](https://github.com/freelabz/secator/commit/075e0f16a559dd8bae91b2ef72d6fd5f5b055fb0))
+* **core:** add adp to circl provider + string to nmap input types ([755ded4](https://github.com/freelabz/secator/commit/755ded46bd5bba066bbf536072f77547a89ab984))
+* divide rate_limit by chunk count when tasks are chunked ([#759](https://github.com/freelabz/secator/issues/759)) ([6510ab5](https://github.com/freelabz/secator/commit/6510ab50cf9bcc20c3baeaa744bdd342eacb9031))
+* **nmap:** higher mass scan number (20) ([78c212d](https://github.com/freelabz/secator/commit/78c212d9e07614b0cb4f382aa0b9ee1c01f2908a))
+* **query:** support dot notation for nested dict fields in query conditions ([#965](https://github.com/freelabz/secator/issues/965)) ([3dfa81b](https://github.com/freelabz/secator/commit/3dfa81b1cac0afb34364f8dc6e8fac9784945341))
+* **test:** urlfinder integration test ([#975](https://github.com/freelabz/secator/issues/975)) ([8afd51e](https://github.com/freelabz/secator/commit/8afd51ee8da2d1e7966df6a3687cb4430a00bc1a))
+* **workflow:** gracefully skip invalid tasks in workflows instead of crashing ([#974](https://github.com/freelabz/secator/issues/974)) ([a332f4a](https://github.com/freelabz/secator/commit/a332f4ad43c00b2976af3b6457f75e02ebf07ab6))
+
 ## [0.26.1](https://github.com/freelabz/secator/compare/v0.26.0...v0.26.1) (2026-04-02)
 
 
