@@ -80,6 +80,15 @@ def decorate_command_options(opts):
 	"""
 	def decorator(f):
 		reversed_opts = OrderedDict(list(opts.items())[::-1])
+		# Pre-pass in original order to assign each short opt to its first claimant.
+		# This ensures global options (defined first) take priority over task/workflow options.
+		short_opt_owner = {}
+		for opt_name, opt_conf in opts.items():
+			short_opt = opt_conf.get('short')
+			short = f'-{short_opt}' if short_opt else f'-{opt_name}'
+			primary_short = short.split('/')[0]
+			if primary_short not in short_opt_owner:
+				short_opt_owner[primary_short] = opt_name
 		for opt_name, opt_conf in reversed_opts.items():
 			conf = opt_conf.copy()
 			short_opt = conf.pop('short', None)
@@ -119,7 +128,13 @@ def decorate_command_options(opts):
 			if choices:
 				choices_str = ', '.join([f'[dim yellow3]{c}[/]' for c in choices])
 				conf['help'] += rf' \[[dim]choices: {choices_str}[/]]'
-			args = [long, short]
+			# Deduplicate short opts: only include short form if this option is the first claimant.
+			# Earlier-defined options (exec/output globals) take priority over task/workflow options.
+			primary_short = short.split('/')[0]
+			if short_opt_owner.get(primary_short) == opt_name:
+				args = [long, short]
+			else:
+				args = [long]
 			if internal_name:
 				args.append(internal_name)
 			f = click.option(*args, **conf)(f)

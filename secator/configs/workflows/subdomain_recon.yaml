@@ -140,3 +140,13 @@ tasks:
         field: stored_response_path
         condition: item.stored_response_path != ''
       if: opts.hunt_secrets and not opts.passive
+
+  search_vulns:
+    description: Search for related vulns and exploits
+    targets_:
+      - type: vulnerability
+        field: '{matched_at}~{id}'
+        condition: item.id
+      - type: technology
+        field: '{match}~{product} {version}'
+        condition: item.version
