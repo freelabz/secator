@@ -872,6 +872,11 @@ class Command(Runner):
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			yield Error(message=error)
+			# Run on_cmd_done hooks even when killed so tools can process partial output
+			# (e.g. nmap writes partial XML results when cancelled which can still be parsed)
+			result = self.run_hooks('on_cmd_done', sub='end')
+			if result:
+				yield from result
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'

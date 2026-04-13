@@ -343,6 +343,32 @@ class TestCommandRunner(unittest.TestCase):
 		import os
 		os.remove('output.json')
 
+	def test_on_cmd_done_called_on_kill(self):
+		"""Test that on_cmd_done hook is called even when the process is killed (CTRL+C / SIGINT)."""
+		cmd_done_called = []
+
+		def on_cmd_done(self):
+			cmd_done_called.append(True)
+
+		MyCommand.on_cmd_done = staticmethod(on_cmd_done)
+		self.all_hooks.extend(['on_cmd_done'])
+
+		# Mock a process that exits with return code -2 (killed by SIGINT, as would happen on CTRL+C)
+		mock_process = MagicMock()
+		mock_process.wait.return_value = -2
+		mock_process.stdout.readline.side_effect = []
+		mock_process.stdout.readlines.return_value = []
+		mock_process.pid = None
+		mock_process.returncode = -2
+
+		def mock_popen(*args, **kwargs):
+			return mock_process
+
+		with patch('subprocess.Popen', mock_popen):
+			MyCommand(TARGETS).run()
+
+		self.assertTrue(len(cmd_done_called) > 0, 'on_cmd_done should be called even when the process is killed by SIGINT')
+
 	def test_convert_item_schema(self):
 		MyCommand.output_types = [Url, Tag, Vulnerability]
 		url = TARGETS[0]
