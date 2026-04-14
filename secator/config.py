@@ -705,39 +705,47 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 		return None
 
 
-# Load default_config
-default_config = Config.parse(print_errors=False)
+def _init_config() -> tuple:
+	"""Initialize secator config. Always returns a valid Config instance.
 
-# Load user config
-data_root = default_config.dirs.data
-config_path = data_root / 'config.yml'
-if not config_path.exists():
-	if not data_root.exists():
-		console.print(f'[bold turquoise4]Creating directory [bold magenta]{data_root}[/] ... [/]', end='')
-		data_root.mkdir(parents=False)
-		console.print('[bold green]ok.[/]')
-	console.print(
-		f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
-	config_path.touch()
-	console.print('[bold green]ok.[/]')
-CONFIG = Config.parse(path=config_path)
+	Loads the default config, then attempts to load the user config from disk.
+	Falls back to defaults if the user config is invalid.
+	"""
+	# Load default config (no data = all Pydantic defaults)
+	_default_config = Config.parse(print_errors=False)
+	assert _default_config is not None, 'Default config must always be valid'
 
-# Fallback to default if invalid user config
-if not CONFIG:
-	console.print(f'[bold orange1]Invalid user config {config_path}. Falling back to default config.')
-	CONFIG = default_config
-
-# Create directories if they don't exist already
-for name, dir in CONFIG.dirs.items():
-	if not dir.exists():
-		console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
-		dir.mkdir(parents=True)
+	# Ensure user config file exists
+	data_root = _default_config.dirs.data
+	_config_path = data_root / 'config.yml'
+	if not _config_path.exists():
+		if not data_root.exists():
+			console.print(f'[bold turquoise4]Creating directory [bold magenta]{data_root}[/] ... [/]', end='')
+			data_root.mkdir(parents=False)
+			console.print('[bold green]ok.[/]')
+		console.print(
+			f'[bold turquoise4]Creating user conf [bold magenta]{_config_path}[/]... [/]', end='')
+		_config_path.touch()
 		console.print('[bold green]ok.[/]')
 
-# Download wordlists and payloads
-# download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
-# download_files(CONFIG.payloads.templates, CONFIG.dirs.payloads, CONFIG.offline_mode, 'payload')
+	# Load user config, fall back to defaults if invalid
+	_config = Config.parse(path=_config_path)
+	if not _config:
+		console.print(f'[bold orange1]Invalid user config {_config_path}. Falling back to default config.')
+		_config = _default_config
 
-# Print config
-if 'config' in CONFIG.debug:
-	CONFIG.print()
+	# Create directories if they don't exist already
+	for name, dir in _config.dirs.items():
+		if not dir.exists():
+			console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
+			dir.mkdir(parents=True)
+			console.print('[bold green]ok.[/]')
+
+	# Print config
+	if 'config' in _config.debug:
+		_config.print()
+
+	return _config, _default_config, _config_path
+
+
+CONFIG, default_config, config_path = _init_config()
