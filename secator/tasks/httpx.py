@@ -1,26 +1,27 @@
 import os
 import shlex
-
 from datetime import datetime, timezone
 
-from secator.decorators import task
-from secator.definitions import (DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
-							 	 FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
-								 METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
-								 URL, USER_AGENT, HOST, IP, HOST_PORT)
 from secator.config import CONFIG
-from secator.output_types import Url, Subdomain, Certificate, Vulnerability
+from secator.decorators import task
+from secator.definitions import (
+	DATA, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT,
+	IP, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
+	STRING, THREADS, TIMEOUT, URL, USER_AGENT
+)  # fmt: off
+from secator.output_types import Certificate, Subdomain, Technology, Url, Vulnerability, Tag
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
-from secator.utils import (sanitize_url, extract_domain_info, extract_subdomains_from_fqdn)
+from secator.utils import extract_domain_info, extract_subdomains_from_fqdn, sanitize_url
 
 
 @task()
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
+
 	cmd = 'httpx-toolkit -irh'
-	input_types = [HOST, HOST_PORT, IP, URL]
-	output_types = [Url, Subdomain, Vulnerability]
+	input_types = [HOST, HOST_PORT, IP, URL, STRING]
+	output_types = [Url, Subdomain, Technology, Vulnerability, Tag]
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -35,13 +36,33 @@ class httpx(Http):
 		'cdn': {'is_flag': True, 'default': False, 'help': 'CDN detection'},
 		'debug_resp': {'is_flag': True, 'default': False, 'help': 'Debug response'},
 		'vhost': {'is_flag': True, 'default': False, 'help': 'Probe and display server supporting VHOST'},
-		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Save HTTP responses'},  # noqa: E501
+		'store_responses': {
+			'is_flag': True,
+			'short': 'sr',
+			'default': CONFIG.http.store_responses,
+			'help': 'Save HTTP responses',
+		},  # noqa: E501
 		'screenshot': {'is_flag': True, 'short': 'ss', 'default': False, 'help': 'Screenshot response'},
 		'system_chrome': {'is_flag': True, 'default': False, 'help': 'Use local installed Chrome for screenshot'},
-		'headless_options': {'is_flag': False, 'short': 'ho', 'default': None, 'help': 'Headless Chrome additional options'},
-		'follow_host_redirects': {'is_flag': True, 'short': 'fhr', 'default': None, 'help': 'Follow redirects on the same host'},  # noqa: E501
+		'headless_options': {
+			'is_flag': False,
+			'short': 'ho',
+			'default': None,
+			'help': 'Headless Chrome additional options',
+		},
+		'follow_host_redirects': {
+			'is_flag': True,
+			'short': 'fhr',
+			'default': None,
+			'help': 'Follow redirects on the same host',
+		},  # noqa: E501
 		'tech_detect': {'is_flag': True, 'short': 'td', 'default': False, 'help': 'Tech detection'},
-		'tls_grab': {'is_flag': True, 'short': 'tlsg', 'default': False, 'help': 'Grab some informations from the tls certificate'},  # noqa: E501
+		'tls_grab': {
+			'is_flag': True,
+			'short': 'tlsg',
+			'default': False,
+			'help': 'Grab some informations from the tls certificate',
+		},  # noqa: E501
 		'rstr': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},
 		'rsts': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to save (bytes)'},
 		'filter_duplicates': {'is_flag': True, 'short': 'fd', 'default': False, 'help': 'Filter duplicates'},
@@ -90,7 +111,7 @@ class httpx(Http):
 			opts,
 			'screenshot',
 			opts_conf=dict(httpx.opts, **httpx.meta_opts),
-			opt_aliases=opts.get('aliases', [])
+			opt_aliases=opts.get('aliases', []),
 		)
 		return 'large' if screenshot is True else 'small'
 
@@ -107,11 +128,36 @@ class httpx(Http):
 		if screenshot:
 			self.cmd += ' -esb -ehb'
 		self.domains = []
+		self._techs = {}
 
 	@staticmethod
 	def on_json_loaded(self, item):
-		item = self._preprocess_url(item)
-		yield item
+		url_item = self._preprocess_url(item)
+		url = Url(**url_item)
+		yield url
+
+		# Technologies
+		for tech in url.get_techs():
+			print = True
+			seen = self._techs.setdefault(url.host, [])
+			key = (tech.product, tech.version)
+			print = key not in seen
+			if print:
+				seen.append(key)
+				self._techs[url.host].append((tech.product, tech.version))
+			self.add_result(tech, print=print)
+
+		# Favicon
+		favicon = item.get('favicon', None)
+		if favicon:
+			yield Tag(
+				match=item['url'],
+				name='favicon_mmh3',
+				value=favicon,
+				category='info',
+			)
+
+		# Certificate
 		tls = item.get('tls', None)
 		if tls:
 			subject_cn = tls.get('subject_cn', None)
@@ -174,7 +220,7 @@ class httpx(Http):
 		item[URL] = item.get('final_url') or item[URL]
 		item['request_headers'] = self.get_opt_value('header', preprocess=True)
 		item['response_headers'] = item.get('header', {})
-		item.pop('host', None)
+		item = {k: v for k, v in item.items() if k in Url.fields()}
 		return item
 
 	def _create_subdomain_from_tls_cert(self, host, url, cert):

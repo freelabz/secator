@@ -3,18 +3,39 @@ import re
 import shlex
 
 from secator.decorators import task
-from secator.output_types import Url, Progress
+
+# fmt: off
 from secator.definitions import (
-	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT,
-	OPT_NOT_SUPPORTED, URL, DATA
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL,
+	USER_AGENT
 )
+from secator.output_types import Progress, Url
+# fmt: on
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpBase
+
+BUP_BYPASS_MODES = [
+	'all',
+	'mid_paths',
+	'end_paths',
+	'case_substitution',
+	'char_encode',
+	'http_methods',
+	'http_versions',
+	'http_headers_method',
+	'http_headers_scheme',
+	'http_headers_ip',
+	'http_headers_port',
+	'http_headers_url',
+	'user_agent',
+]
+BUP_BYPASS_MODES_STR = ','.join(BUP_BYPASS_MODES)
 
 
 @task()
 class bup(HttpBase):
 	"""40X bypasser."""
+
 	cmd = 'bup -d'
 	input_types = [URL]
 	output_types = [Url, Progress]
@@ -26,7 +47,7 @@ class bup(HttpBase):
 	opts = {
 		'spoofport': {'type': int, 'short': 'sp', 'help': 'Port(s) to inject in port-specific headers'},
 		'spoofip': {'type': str, 'short': 'si', 'help': 'IP(s) to inject in ip-specific headers'},
-		'mode': {'type': str, 'help': 'Bypass modes (comma-delimited) amongst: all, mid_paths, end_paths, case_substitution, char_encode, http_methods, http_versions, http_headers_method, http_headers_scheme, http_headers_ip, http_headers_port, http_headers_url, user_agent'},  # noqa: E501
+		'mode': {'type': str, 'help': f'Bypass modes (comma-delimited) amongst: {BUP_BYPASS_MODES_STR}'},
 	}
 	opt_key_map = {
 		DATA: OPT_NOT_SUPPORTED,
@@ -49,14 +70,14 @@ class bup(HttpBase):
 			'request_headers': lambda x: bup.request_headers_extractor(x),
 			'response_headers': lambda x: bup.response_headers_extractor(x),
 			'status_code': 'response_status_code',
-			'content_type': 'response_content_type',
+			'content_type': lambda x: x['response_content_type'].strip(),
 			'content_length': 'response_content_length',
 			'title': 'response_title',
 			'server': lambda x: x['response_server_type'].strip(),
 			'lines': 'response_lines_count',
 			'words': 'response_words_count',
 			'stored_response_path': 'response_html_filename',
-			'tags': lambda x: ["bypass"]
+			'tags': lambda x: ['bypass'],
 		}
 	}
 	install_version = '0.4.4'
@@ -75,10 +96,11 @@ class bup(HttpBase):
 		if 'Doing' in line:
 			progress_indicator = line.split(':')[-1]
 			current, total = tuple([int(c.strip()) for c in progress_indicator.split('/')])
-			return json.dumps({"duration": "unknown", "percent": int((current / total) * 100)})
+			yield json.dumps({'duration': 'unknown', 'percent': int((current / total) * 100)})
 		elif 'batcat' in line:  # ignore batcat lines as they're loaded as JSON
-			return None
-		return line
+			yield ''
+			return
+		yield line
 
 	@staticmethod
 	def method_extractor(item):
@@ -109,5 +131,5 @@ class bup(HttpBase):
 			split_headers = header.split(':')
 			key = split_headers[0]
 			value = ':'.join(split_headers[1:])
-			headers[key] = value
+			headers[key] = value.strip()
 		return headers

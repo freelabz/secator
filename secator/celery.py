@@ -18,87 +18,87 @@ from secator.config import CONFIG
 from secator.output_types import Info
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.utils import (debug, deduplicate, flatten, should_update)
+from secator.utils import debug, deduplicate, flatten, should_update
 
 
-#---------#
+# ---------#
 # Logging #
-#---------#
+# ---------#
 
 rich_handler = RichHandler(rich_tracebacks=True)
 rich_handler.setLevel(logging.INFO)
 logging.basicConfig(
 	level='NOTSET',
-	format="%(threadName)s:%(message)s",
-	datefmt="[%X]",
+	format='%(threadName)s:%(message)s',
+	datefmt='[%X]',
 	handlers=[rich_handler],
-	force=True)
+	force=True,
+)
 logging.getLogger('kombu').setLevel(logging.ERROR)
 logging.getLogger('celery').setLevel(logging.DEBUG if 'celery.debug' in CONFIG.debug or 'celery.*' in CONFIG.debug else logging.WARNING)  # noqa: E501
 logger = logging.getLogger(__name__)
-trace.LOG_SUCCESS = "Task %(name)s[%(id)s] succeeded in %(runtime)ss"
+trace.LOG_SUCCESS = 'Task %(name)s[%(id)s] succeeded in %(runtime)ss'
 
 
-#------------#
+# ------------#
 # Celery app #
-#------------#
+# ------------#
 
 app = Celery(__name__)
-app.conf.update({
-	# Content types
-	'accept_content': ['application/x-python-serialize', 'application/json'],
-
-	# Broker config
-	'broker_url': CONFIG.celery.broker_url,
-	'broker_transport_options': json.loads(CONFIG.celery.broker_transport_options) if CONFIG.celery.broker_transport_options else {  # noqa: E501
-		'data_folder_in': CONFIG.dirs.celery_data,
-		'data_folder_out': CONFIG.dirs.celery_data,
-		'control_folder': CONFIG.dirs.celery_data,
-		'visibility_timeout': CONFIG.celery.broker_visibility_timeout,
-	},
-	'broker_connection_retry_on_startup': True,
-	'broker_pool_limit': CONFIG.celery.broker_pool_limit,
-	'broker_connection_timeout': CONFIG.celery.broker_connection_timeout,
-
-	# Result backend config
-	'result_backend': CONFIG.celery.result_backend,
-	'result_expires': CONFIG.celery.result_expires,
-	'result_backend_transport_options': json.loads(CONFIG.celery.result_backend_transport_options) if CONFIG.celery.result_backend_transport_options else {},  # noqa: E501
-	'result_extended': not CONFIG.addons.mongodb.enabled,
-	'result_backend_thread_safe': True,
-	'result_serializer': 'pickle',
-	'result_accept_content': ['application/x-python-serialize'],
-
-	# Task config
-	'task_acks_late': CONFIG.celery.task_acks_late,
-	'task_compression': 'gzip',
-	'task_create_missing_queues': True,
-	'task_eager_propagates': False,
-	'task_reject_on_worker_lost': CONFIG.celery.task_reject_on_worker_lost,
-	'task_routes': {
-		'secator.celery.run_workflow': {'queue': 'celery'},
-		'secator.celery.run_scan': {'queue': 'celery'},
-		'secator.celery.run_task': {'queue': 'celery'},
-		'secator.celery.forward_results': {'queue': 'results'},
-		'secator.hooks.mongodb.*': {'queue': 'mongodb'}
-	},
-	'task_store_eager_result': True,
-	'task_send_sent_event': CONFIG.celery.task_send_sent_event,
-	'task_serializer': 'pickle',
-	'task_accept_content': ['application/x-python-serialize'],
-
-	# Event config
-	'event_serializer': 'pickle',
-	'event_accept_content': ['application/x-python-serialize'],
-
-	# Worker config
-	# 'worker_direct': True,  # TODO: consider enabling this to allow routing to specific workers
-	'worker_max_tasks_per_child': CONFIG.celery.worker_max_tasks_per_child,
-	# 'worker_max_memory_per_child': 100000  # TODO: consider enabling this
-	'worker_pool_restarts': True,
-	'worker_prefetch_multiplier': CONFIG.celery.worker_prefetch_multiplier,
-	'worker_send_task_events': CONFIG.celery.worker_send_task_events
-})
+app.conf.update(
+	{
+		# Content types
+		'accept_content': ['application/x-python-serialize', 'application/json'],
+		# Broker config
+		'broker_url': CONFIG.celery.broker_url,
+		'broker_transport_options': json.loads(CONFIG.celery.broker_transport_options)
+		if CONFIG.celery.broker_transport_options
+		else {  # noqa: E501
+			'data_folder_in': CONFIG.dirs.celery_data,
+			'data_folder_out': CONFIG.dirs.celery_data,
+			'control_folder': CONFIG.dirs.celery_data,
+			'visibility_timeout': CONFIG.celery.broker_visibility_timeout,
+		},
+		'broker_connection_retry_on_startup': True,
+		'broker_pool_limit': CONFIG.celery.broker_pool_limit,
+		'broker_connection_timeout': CONFIG.celery.broker_connection_timeout,
+		# Result backend config
+		'result_backend': CONFIG.celery.result_backend,
+		'result_expires': CONFIG.celery.result_expires,
+		'result_backend_transport_options': json.loads(CONFIG.celery.result_backend_transport_options) if CONFIG.celery.result_backend_transport_options else {},  # noqa: E501
+		'result_extended': not CONFIG.addons.mongodb.enabled,
+		'result_backend_thread_safe': True,
+		'result_serializer': 'pickle',
+		'result_accept_content': ['application/x-python-serialize'],
+		# Task config
+		'task_acks_late': CONFIG.celery.task_acks_late,
+		'task_compression': 'gzip',
+		'task_create_missing_queues': True,
+		'task_eager_propagates': False,
+		'task_reject_on_worker_lost': CONFIG.celery.task_reject_on_worker_lost,
+		'task_routes': {
+			'secator.celery.run_workflow': {'queue': 'celery'},
+			'secator.celery.run_scan': {'queue': 'celery'},
+			'secator.celery.run_task': {'queue': 'celery'},
+			'secator.celery.forward_results': {'queue': 'results'},
+			'secator.hooks.mongodb.*': {'queue': 'mongodb'},
+		},
+		'task_store_eager_result': True,
+		'task_send_sent_event': CONFIG.celery.task_send_sent_event,
+		'task_serializer': 'pickle',
+		'task_accept_content': ['application/x-python-serialize'],
+		# Event config
+		'event_serializer': 'pickle',
+		'event_accept_content': ['application/x-python-serialize'],
+		# Worker config
+		# 'worker_direct': True,  # TODO: consider enabling this to allow routing to specific workers
+		'worker_max_tasks_per_child': CONFIG.celery.worker_max_tasks_per_child,
+		# 'worker_max_memory_per_child': 100000  # TODO: consider enabling this
+		'worker_pool_restarts': True,
+		'worker_prefetch_multiplier': CONFIG.celery.worker_prefetch_multiplier,
+		'worker_send_task_events': CONFIG.celery.worker_send_task_events,
+	}
+)
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 if IN_WORKER:
 	setup_handlers()
@@ -157,12 +157,9 @@ def update_state(celery_task, task, force=False):
 		id=celery_task.request.id,
 		obj={task.unique_name: task.status, 'count': task.self_findings_count},
 		obj_after=False,
-		verbose=True
+		verbose=True,
 	)
-	return celery_task.update_state(
-		state='RUNNING',
-		meta=task.celery_state
-	)
+	return celery_task.update_state(state='RUNNING', meta=task.celery_state)
 
 
 def revoke_task(task_id, task_name=None):
@@ -173,13 +170,13 @@ def revoke_task(task_id, task_name=None):
 	console.print(Info(message=message))
 
 
-#--------------#
+# --------------#
 # Celery tasks #
-#--------------#
+# --------------#
 
 
 def chunker(seq, size):
-	return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+	return (seq[pos : pos + size] for pos in range(0, len(seq), size))
 
 
 @app.task(bind=True)
@@ -187,11 +184,11 @@ def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, valid
 	context = context or {}
 	context['celery_id'] = self.request.id
 	run_opts['sync'] = False
-	run_opts["no_poll"] = True
-	run_opts["no_live_updates"] = True
-	runners = {"scan": Scan, "workflow": Workflow, "task": Task}
+	run_opts['no_poll'] = True
+	run_opts['no_live_updates'] = True
+	runners = {'scan': Scan, 'workflow': Workflow, 'task': Task}
 	if config.type not in runners:
-		raise ValueError(f"Invalid runner type: {config.type}")
+		raise ValueError(f'Invalid runner type: {config.type}')
 	runner_cls = runners[config.type]
 	console.print(Info(message=f'Running {config.type} {self.request.id}'))
 	runner = runner_cls(
@@ -216,14 +213,16 @@ def run_command(self, results, name, targets, opts={}):
 	# Set routing key in context
 	if IN_WORKER:
 		quiet = not CONFIG.cli.worker_command_verbose
-		opts.update({
-			'print_item': True,
-			'print_line': True,
-			'print_cmd': True,
-			'print_target': True,
-			'print_profiles': True,
-			'quiet': quiet
-		})
+		opts.update(
+			{
+				'print_item': True,
+				'print_line': True,
+				'print_cmd': True,
+				'print_target': True,
+				'print_profiles': True,
+				'quiet': quiet,
+			}
+		)
 		routing_key = self.request.delivery_info['routing_key']
 		context['routing_key'] = routing_key
 		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
@@ -345,6 +344,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	# Query results from db when mongodb is enabled
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
+
 		results = get_results(results)
 
 	# Add results to runner so it can compute status
@@ -393,6 +393,7 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	# Query results from db when mongodb is enabled
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		from secator.hooks.mongodb import get_results
+
 		results = get_results(results)
 
 	# Add results to runner so it can compute status
@@ -420,9 +421,9 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	return runner.results
 
 
-#--------------#
-# Celery utils #
-#--------------#
+# --------------#
+# Celery utils  #
+# --------------#
 
 
 def is_celery_worker_alive():
@@ -461,10 +462,11 @@ def replace(task_instance, sig):
 		group_id=task_instance.request.group,
 		group_index=task_instance.request.group_index,
 		root_id=task_instance.request.root_id,
-		replaced_task_nesting=replaced_task_nesting
+		replaced_task_nesting=replaced_task_nesting,
 	)
 	import psutil
 	import os
+
 	process = psutil.Process(os.getpid())
 	length = len(task_instance.request.chain) if task_instance.request.chain else 0
 	# console.print(f'Adding {length} chain tasks from request chain')
@@ -491,11 +493,30 @@ def break_task(task, task_opts, results=[]):
 		obj={task.unique_name: 'CHUNKED', 'chunk_size': task.input_chunk_size, 'chunks': len(chunks), 'target_count': len(task.inputs)},  # noqa: E501
 		obj_after=False,
 		sub='celery.state',
-		verbose=True
+		verbose=True,
 	)
 
 	# Clone opts
 	base_opts = task_opts.copy()
+
+	# Adjust rate_limit for chunked tasks
+	# Divide by chunk count but ensure it's at least 1
+	# Skip if rate_limit is 0 or None (no rate limiting)
+	orig_rate_limit = base_opts.get('rate_limit')
+	if CONFIG.runners.chunk_rate_limit and orig_rate_limit and len(chunks) != 0:
+		orig_rate_limit = int(orig_rate_limit)
+		chunk_rate_limit = max(1, orig_rate_limit // len(chunks))
+		base_opts['rate_limit'] = chunk_rate_limit
+		debug(
+			'',
+			obj={
+				task.unique_name: 'RATE_LIMIT_ADJUSTED',
+				'original': orig_rate_limit,
+				'adjusted': chunk_rate_limit,
+				'chunks': len(chunks),
+			},
+			sub='celery.state',
+		)
 
 	# Build signatures
 	sigs = []
@@ -511,12 +532,16 @@ def break_task(task, task_opts, results=[]):
 		if 'context' in opts:
 			opts['context'] = opts['context'].copy()
 		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
-		debug('', obj={
-			task.unique_name: 'CHUNK',
-			'chunk': f'{ix + 1} / {len(chunks)}',
-			'target_count': len(chunk),
-			'targets': chunk
-		}, sub='celery.state')  # noqa: E501
+		debug(
+			'',
+			obj={
+				task.unique_name: 'CHUNK',
+				'chunk': f'{ix + 1} / {len(chunks)}',
+				'target_count': len(chunk),
+				'targets': chunk,
+			},
+			sub='celery.state',
+		)
 
 		# Construct chunked signature
 		opts['has_parent'] = True
@@ -544,7 +569,7 @@ def break_task(task, task_opts, results=[]):
 	# Build Celery workflow
 	workflow = chord(
 		tuple(sigs),
-		mark_runner_completed.s(runner=task).set(queue='results')
+		mark_runner_completed.s(runner=task).set(queue='results'),
 	)
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))

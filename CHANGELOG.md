@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.27.0](https://github.com/freelabz/secator/compare/v0.26.1...v0.27.0) (2026-04-13)
+
+
+### Features
+
+* **core:** support yield for on_line hook ([#970](https://github.com/freelabz/secator/issues/970)) ([632001c](https://github.com/freelabz/secator/commit/632001c6d33e32c5e65dda2fc0fde82fcded557f))
+* **output_types:** add Technology output type ([#967](https://github.com/freelabz/secator/issues/967)) ([3ac8eb1](https://github.com/freelabz/secator/commit/3ac8eb1cd2d6a68ee4f40c553dc4306c774981dd))
+
+
+### Bug Fixes
+
+* **cli:** deduplicate short CLI parameters to prevent Click UserWarnings ([#972](https://github.com/freelabz/secator/issues/972)) ([075e0f1](https://github.com/freelabz/secator/commit/075e0f16a559dd8bae91b2ef72d6fd5f5b055fb0))
+* **core:** add adp to circl provider + string to nmap input types ([755ded4](https://github.com/freelabz/secator/commit/755ded46bd5bba066bbf536072f77547a89ab984))
+* divide rate_limit by chunk count when tasks are chunked ([#759](https://github.com/freelabz/secator/issues/759)) ([6510ab5](https://github.com/freelabz/secator/commit/6510ab50cf9bcc20c3baeaa744bdd342eacb9031))
+* **nmap:** higher mass scan number (20) ([78c212d](https://github.com/freelabz/secator/commit/78c212d9e07614b0cb4f382aa0b9ee1c01f2908a))
+* **query:** support dot notation for nested dict fields in query conditions ([#965](https://github.com/freelabz/secator/issues/965)) ([3dfa81b](https://github.com/freelabz/secator/commit/3dfa81b1cac0afb34364f8dc6e8fac9784945341))
+* **test:** urlfinder integration test ([#975](https://github.com/freelabz/secator/issues/975)) ([8afd51e](https://github.com/freelabz/secator/commit/8afd51ee8da2d1e7966df6a3687cb4430a00bc1a))
+* **workflow:** gracefully skip invalid tasks in workflows instead of crashing ([#974](https://github.com/freelabz/secator/issues/974)) ([a332f4a](https://github.com/freelabz/secator/commit/a332f4ad43c00b2976af3b6457f75e02ebf07ab6))
+
+## [0.26.1](https://github.com/freelabz/secator/compare/v0.26.0...v0.26.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* ai output type compat ([#960](https://github.com/freelabz/secator/issues/960)) ([93e6072](https://github.com/freelabz/secator/commit/93e6072be942dfb62e4840b534736a354e14a5c0))
+
+## [0.26.0](https://github.com/freelabz/secator/compare/v0.25.7...v0.26.0) (2026-04-02)
+
+
+### Features
+
+* **ci:** add Claude Code GitHub Workflow ([#942](https://github.com/freelabz/secator/issues/942)) ([74df8a9](https://github.com/freelabz/secator/commit/74df8a9cb104e5fcc3d4fb84a0d51b12ba7223c7))
+* **config:** add timeout parameter to ApiAddon and update API request handling ([#939](https://github.com/freelabz/secator/issues/939)) ([8ca7aea](https://github.com/freelabz/secator/commit/8ca7aea6a46fbaeed556a991fe6ef97a1776ee45))
+* **hooks:** add Discord driver ([#946](https://github.com/freelabz/secator/issues/946)) ([522389b](https://github.com/freelabz/secator/commit/522389b3d9a8246fb8643c0b534ba1a4f2169f98))
+* **query:** add ~= regex match operator to -q expressions ([#952](https://github.com/freelabz/secator/issues/952)) ([f68e185](https://github.com/freelabz/secator/commit/f68e185541d99a92845582b69e4548a81ba6494d))
+* **tasks:** add `ai` task for ai-augmented pentests ([#940](https://github.com/freelabz/secator/issues/940)) ([7949cdf](https://github.com/freelabz/secator/commit/7949cdf9078018acf1d46a5f85e29d731259ae98))
+* **tasks:** add support for ph + misc changes ([#202](https://github.com/freelabz/secator/issues/202)) ([7ffd31d](https://github.com/freelabz/secator/commit/7ffd31db337af9c303e27e3bd62b3dbd50d60882))
+* **tasks:** update wpprobe parser for theme detection support ([#947](https://github.com/freelabz/secator/issues/947)) ([2b15177](https://github.com/freelabz/secator/commit/2b151779b02b2ccd2ddabc727a73385900cd87be))
+
+
+### Bug Fixes
+
+* improve perf by 30% with native __rich__ called instead of rich_to_ansi ([#944](https://github.com/freelabz/secator/issues/944)) ([1985a67](https://github.com/freelabz/secator/commit/1985a67c40a6c3f5b28218b11fe19da9d3baab65))
+* **install:** migrate getasn, jswhois, whois, x8 to freelabz forks ([#941](https://github.com/freelabz/secator/issues/941)) ([6fe4cc1](https://github.com/freelabz/secator/commit/6fe4cc1aee19451f9687ebe611f7527e10883301))
+* nmap dns + ids / headless tags + confidence tracking + workspace folder name fix ([#936](https://github.com/freelabz/secator/issues/936)) ([2a34a9a](https://github.com/freelabz/secator/commit/2a34a9a3bc2a50d8314ba6ebe22b482a7d9ee4ff))
+* **tasks:** add `nmap` ping scan `-sL` + `nuclei` template condition `-tc` ([#950](https://github.com/freelabz/secator/issues/950)) ([e859555](https://github.com/freelabz/secator/commit/e859555b2e62925303504bcdc71f74a2800c8494))
+* **test:** resolve failing urlfinder integration test ([#958](https://github.com/freelabz/secator/issues/958)) ([509da91](https://github.com/freelabz/secator/commit/509da9157ff0819692f3603d4dc9ce062c1af327))
+
 ## [0.25.7](https://github.com/freelabz/secator/compare/v0.25.6...v0.25.7) (2026-02-08)
 
 

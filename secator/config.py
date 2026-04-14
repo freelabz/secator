@@ -64,10 +64,10 @@ class Celery(StrictModel):
 	broker_pool_limit: int = 10
 	broker_connection_timeout: float = 4.0
 	broker_visibility_timeout: int = 3600
-	broker_transport_options: str = ""
+	broker_transport_options: str = ''
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
-	result_backend_transport_options: str = ""
+	result_backend_transport_options: str = ''
 	result_expires: int = 86400  # 1 day
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
@@ -88,8 +88,8 @@ class Cli(StrictModel):
 	stdin_timeout: int = 1000
 	show_http_response_headers: bool = False
 	show_command_output: bool = False
-	exclude_http_response_headers: List[str] = ["connection", "content_type", "content_length", "date", "server"]
-	date_format: str = "%m/%d/%Y"  # US, use "%d/%m/%Y" for EUROPEAN format
+	exclude_http_response_headers: List[str] = ['connection', 'content_type', 'content_length', 'date', 'server']
+	date_format: str = '%m/%d/%Y'  # US, use "%d/%m/%Y" for EUROPEAN format
 
 
 class Runners(StrictModel):
@@ -104,6 +104,7 @@ class Runners(StrictModel):
 	remove_duplicates: bool = False
 	threads: int = 50
 	prompt_timeout: int = 20
+	chunk_rate_limit: bool = True
 
 
 class Security(StrictModel):
@@ -151,7 +152,7 @@ class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
 		'linpeas': 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh',
-		'sudo_killer': 'https://github.com/TH3xACE/SUDO_KILLER/archive/refs/heads/V3.zip'
+		'sudo_killer': 'https://github.com/TH3xACE/SUDO_KILLER/archive/refs/heads/V3.zip',
 	}
 
 
@@ -195,7 +196,7 @@ class MongodbAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
-		'tags'
+		'tags',
 	]
 
 
@@ -218,11 +219,17 @@ class AiAddon(StrictModel):
 
 
 class Providers(StrictModel):
-	defaults: Dict[str, str] = {
-		'cve': 'circl',
-		'exploit': 'exploitdb',
-		'ghsa': 'ghsa'
-	}
+	defaults: Dict[str, str] = {'cve': 'circl', 'exploit': 'exploitdb', 'ghsa': 'ghsa'}
+
+
+class DiscordAddon(StrictModel):
+	enabled: bool = False
+	webhook_url: str = ''
+	bot_token: str = ''
+	send_runner_updates: bool = True
+	send_findings: bool = True
+	finding_types: List[str] = ['vulnerability']
+	min_severity: str = 'high'
 
 
 class ApiAddon(StrictModel):
@@ -246,6 +253,7 @@ class Addons(StrictModel):
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 	vulners: VulnersAddon = VulnersAddon()
+	discord: DiscordAddon = DiscordAddon()
 	api: ApiAddon = ApiAddon()
 	ai: AiAddon = AiAddon()
 
@@ -356,10 +364,11 @@ class Config(DotMap):
 				if isinstance(value, str):
 					if value.startswith('{') and value.endswith('}'):
 						import json
+
 						value = json.loads(value)
 			elif isinstance(existing_value, bool):
 				if isinstance(value, str):
-					value = value.lower() in ("true", "1", "t")
+					value = value.lower() in ('true', '1', 't')
 				elif isinstance(value, (int, float)):
 					value = True if value == 1 else False
 			elif isinstance(existing_value, int):
@@ -450,10 +459,7 @@ class Config(DotMap):
 
 	def validate(self, print_errors=True):
 		"""Validate config."""
-		return Config.load(
-			SecatorConfig,
-			data=self._partial.toDict(),
-			print_errors=print_errors)
+		return Config.load(SecatorConfig, data=self._partial.toDict(), print_errors=print_errors)
 
 	def set_extras(self, original_data, original_path):
 		"""Set extra useful values in config.
@@ -520,6 +526,7 @@ class Config(DotMap):
 			string (str): YAML string.
 		"""
 		from rich.syntax import Syntax
+
 		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
 		console_stdout.print(data)
 
@@ -586,10 +593,10 @@ class Config(DotMap):
 
 	def apply_env_overrides(self, print_errors=True):
 		"""Override config values from environment variables."""
-		prefix = "SECATOR_"
+		prefix = 'SECATOR_'
 		for var in os.environ:
 			if var.startswith(prefix):
-				key = var[len(prefix):]  # remove prefix
+				key = var[len(prefix) :]  # remove prefix
 				if key in self._keymap:
 					path = '.'.join(k.lower() for k in self._keymap[key])
 					value = os.environ[var]
@@ -629,6 +636,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 		path (Path): Path to downloaded file / folder.
 	"""
 	from secator.output_types import Info, Error
+
 	if url_or_path.startswith('git+'):
 		# Clone Git repository
 		git_url = url_or_path[4:]  # remove 'git+' prefix
@@ -662,6 +670,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 				console.print(Error(message=f'File {local_path.resolve()} is not in {CONFIG.dirs.data} and security.allow_local_file_access is disabled.'))  # noqa: E501
 				return None
 			from secator.output_types import Info
+
 			console.print(repr(Info(message=f'[bold turquoise4]Copying {type} [bold magenta]{name}[/] to {target_folder} ...[/] ')), highlight=False, end='')  # noqa: E501
 			shutil.copyfile(local_path, target_folder / name)
 			target_path = target_folder / local_path.name
@@ -705,8 +714,7 @@ if not config_path.exists():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{data_root}[/] ... [/]', end='')
 		data_root.mkdir(parents=False)
 		console.print('[bold green]ok.[/]')
-	console.print(
-		f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
+	console.print(f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
 	config_path.touch()
 	console.print('[bold green]ok.[/]')
 CONFIG = Config.parse(path=config_path)
