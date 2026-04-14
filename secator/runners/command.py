@@ -104,6 +104,7 @@ class Command(Runner):
 		'on_cmd_opts',
 		'on_cmd_done',
 		'on_line',
+		'on_interrupt',   # called after process is paused/killed (set self.resume_file here)
 	]
 
 	# Ignore return code
@@ -134,6 +135,9 @@ class Command(Runner):
 
 	# Whether the subprocess supports SIGSTOP/SIGCONT pause (default: True)
 	supports_pause = True
+
+	# Path to the native resume file set by on_interrupt hook (None if not set)
+	resume_file = None
 
 	def __init__(self, inputs=[], **run_opts):
 
@@ -646,7 +650,8 @@ class Command(Runner):
 			self.exit_ok = True
 
 	def pause_process(self):
-		"""Pause the running subprocess. Uses SIGSTOP if supported, else terminates."""
+		"""Pause the running subprocess. Uses SIGSTOP if supported, else sends SIGINT (allows
+		tools that support native resume to write their resume files before exiting)."""
 		if self.process is None:
 			return
 		if self.supports_pause:
@@ -657,8 +662,21 @@ class Command(Runner):
 				self.process.terminate()
 				self.pause_method = 'kill'
 		else:
-			self.process.terminate()
+			# Send SIGINT so tools can perform cleanup (write resume files, etc.)
+			try:
+				self.stop_process(sig=signal.SIGINT)
+			except Exception:
+				self.process.terminate()
 			self.pause_method = 'kill'
+			# Wait for process to finish writing cleanup/resume files (up to 5 seconds)
+			try:
+				self.process.wait(timeout=5)
+			except Exception:
+				pass
+
+		# Run on_interrupt hook — tasks can capture native resume files here
+		if hasattr(self, 'resolved_hooks'):
+			self.run_hooks('on_interrupt', sub='pause')
 		self.paused = True
 
 	def resume_process(self):

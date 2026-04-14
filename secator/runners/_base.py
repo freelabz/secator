@@ -1072,6 +1072,12 @@ class Runner:
 			pause_method = 'kill'
 			process_pid = None
 
+		# Collect native resume file if set by on_interrupt hook
+		resume_files = {}
+		resume_file = getattr(self, 'resume_file', None)
+		if resume_file:
+			resume_files[self.name] = resume_file
+
 		# Save checkpoint
 		cp = Checkpoint(
 			runner_type=getattr(self.config, 'type', 'task'),
@@ -1083,6 +1089,7 @@ class Runner:
 			completed_inputs=list(getattr(self, 'completed_inputs', [])),
 			pause_method=pause_method,
 			process_pid=process_pid,
+			resume_files=resume_files,
 		)
 		cp.save(self.reports_folder)
 		self.paused = True

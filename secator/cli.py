@@ -1250,25 +1250,66 @@ def pause_runner(runner_id):
 @click.argument('runner_id')
 @click.option('--sync', is_flag=True, default=False, help='Run resumed task synchronously.')
 def resume_runner(runner_id, sync):
-	"""Resume a paused task, workflow, or scan by its ID."""
+	"""Resume a paused task, workflow, or scan.
+
+	RUNNER_ID can be a runner UUID, a checkpoint file/folder path, or a
+	type/number shorthand like 'workflows/6' or 'scans/3'.
+	"""
+	import glob as _glob
 	import signal as _signal
+	from pathlib import Path
 	from secator.runners.checkpoint import Checkpoint, CELERY_CHECKPOINT_PREFIX
 	from secator.runners._base import Runner
 	from secator.template import TemplateLoader
 
-	# 1. Find checkpoint: report folder first, then Celery backend
+	# 1. Resolve checkpoint from various input formats
 	checkpoint = None
-	folder = Runner.find_runner_folder(runner_id)
-	if folder:
+	folder = None
+
+	runner_id_path = Path(runner_id)
+
+	# a) Direct checkpoint file path
+	if runner_id_path.is_file() and runner_id_path.name == 'checkpoint.json':
+		folder = str(runner_id_path.parent)
 		checkpoint = Checkpoint.load(folder)
+
+	# b) Checkpoint folder path
+	elif runner_id_path.is_dir():
+		folder = str(runner_id_path)
+		checkpoint = Checkpoint.load(folder)
+
+	# c) "type/number" shorthand (e.g. workflows/6 or scans/3)
+	elif '/' in runner_id and not runner_id.startswith('/'):
+		parts = runner_id.split('/', 1)
+		if len(parts) == 2:
+			runner_type_part, runner_num = parts[0], parts[1]
+			# Try pluralized and non-pluralized folder names
+			for rtype in [runner_type_part + 's', runner_type_part]:
+				pattern = str(Path(CONFIG.dirs.reports) / '**' / rtype / runner_num)
+				for match in _glob.glob(pattern, recursive=True):
+					cp = Checkpoint.load(match)
+					if cp:
+						checkpoint = cp
+						folder = match
+						break
+				if checkpoint:
+					break
+
+	# d) runner.pid-based lookup (UUID or runner name)
+	if checkpoint is None:
+		folder = Runner.find_runner_folder(runner_id)
+		if folder:
+			checkpoint = Checkpoint.load(folder)
+
+	# e) Celery backend fallback
 	if checkpoint is None:
 		try:
 			from secator.celery import app
 			raw = app.backend.get(f'{CELERY_CHECKPOINT_PREFIX}{runner_id}')
 			if raw:
 				checkpoint = Checkpoint(**json.loads(raw))
-		except Exception:
-			pass
+		except Exception as e:
+			debug(f'Could not fetch checkpoint from Celery backend: {e}', sub='cli.resume')
 
 	if checkpoint is None:
 		console.print(Error(message=f'No checkpoint found for runner ID: {runner_id}'))
@@ -1312,6 +1353,17 @@ def resume_runner(runner_id, sync):
 	run_opts['sync'] = sync
 	context = checkpoint.context.copy()  # preserves original task_id/workflow_id/etc.
 
+	# Pass native resume file to task opts (e.g. --resume flag for nuclei/httpx/nmap)
+	if checkpoint.runner_type == 'task' and checkpoint.resume_files:
+		resume_file = checkpoint.resume_files.get(checkpoint.runner_name)
+		if resume_file and os.path.exists(resume_file):
+			run_opts['resume_file'] = resume_file
+			console.print(Info(message=f'Using native resume file: {resume_file}'))
+
+	# Pass resume_files map for workflow/scan runners so tasks can pick them up
+	if checkpoint.runner_type in ('workflow', 'scan') and checkpoint.resume_files:
+		run_opts['resume_files'] = checkpoint.resume_files
+
 	# For workflows: skip already-completed tasks
 	if checkpoint.runner_type == 'workflow' and checkpoint.task_states:
 		completed = [name for name, state in checkpoint.task_states.items() if state == 'completed']
@@ -1319,7 +1371,20 @@ def resume_runner(runner_id, sync):
 			run_opts['skip_tasks'] = completed
 			console.print(Info(message=f'Skipping already-completed tasks: {completed}'))
 
-	runner = runner_cls(config, inputs=targets, run_opts=run_opts, context=context)
+	# Pre-load prior results from the workspace so the resumed runner has full context
+	prior_results = []
+	workspace_name = context.get('workspace_name', '')
+	if workspace_name:
+		try:
+			from secator.query import QueryEngine
+			qe = QueryEngine(workspace_name, context=context)
+			prior_results = qe.search({}, limit=10000)
+			if prior_results:
+				console.print(Info(message=f'Pre-loaded {len(prior_results)} prior results from workspace'))
+		except Exception as e:
+			debug(f'Could not pre-load prior results: {e}', sub='cli.resume')
+
+	runner = runner_cls(config, inputs=targets, results=prior_results, run_opts=run_opts, context=context)
 	for _ in runner:
 		pass
 

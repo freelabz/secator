@@ -141,11 +141,26 @@ class nmap(ReconPort):
 
 	@staticmethod
 	def on_cmd(self):
+		# If resuming from a native nmap resume file, replace entire command
+		resume_file = self.run_opts.get('resume_file')
+		if resume_file and os.path.exists(resume_file):
+			self.cmd = f'nmap --resume {shlex.quote(resume_file)}'
+			self.output_path = resume_file.replace('.nmap', '.xml')
+			self.nmap_output_path = resume_file
+			self._progress = {}
+			return
+
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {shlex.quote(self.output_path)}'
+
+		# Also save normal format (.nmap) for native resume support
+		nmap_output_path = output_path.replace('.xml', '.nmap')
+		self.nmap_output_path = nmap_output_path
+		self.cmd += f' -oN {shlex.quote(nmap_output_path)}'
+
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
 		tcp_connect = self.cmd_options.get('tcp_connect')
 		verbosity = self.get_opt_value('verbosity')
@@ -158,6 +173,13 @@ class nmap(ReconPort):
 		if CONFIG.runners.progress_update_frequency != -1:
 			self.cmd += f' --stats-every {CONFIG.runners.progress_update_frequency}s'
 		self._progress = {}
+
+	@staticmethod
+	def on_interrupt(self):
+		"""Set resume_file to the nmap normal output when interrupted."""
+		nmap_path = getattr(self, 'nmap_output_path', None)
+		if nmap_path and os.path.exists(nmap_path):
+			self.resume_file = nmap_path
 
 	@staticmethod
 	def on_line(self, line):

@@ -21,6 +21,8 @@ class Checkpoint:
     pause_method: str = 'kill'  # 'signal' or 'kill'
     process_pid: Optional[int] = None
     paused_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Native tool resume files: task_name -> local path to resume file
+    resume_files: Dict[str, str] = field(default_factory=dict)
     # Workflow/Scan only
     task_states: Dict[str, str] = field(default_factory=dict)  # task_name -> 'completed'|'running'|'pending'
     completed_results_count: int = 0

@@ -122,6 +122,36 @@ class nuclei(VulnMulti):
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
 	profile = 'extra_large'
+	supports_pause = False  # use SIGINT + native --resume instead of SIGSTOP
+
+	@staticmethod
+	def on_cmd(self):
+		"""Add --resume flag if a nuclei resume file is available."""
+		import os
+		import shlex
+		resume_file = self.run_opts.get('resume_file')
+		if resume_file and os.path.exists(resume_file):
+			self.cmd += f' --resume {shlex.quote(resume_file)}'
+
+	@staticmethod
+	def on_interrupt(self):
+		"""Find and move the nuclei resume file to the .outputs folder."""
+		import glob
+		import os
+		import shutil
+		resume_pattern = os.path.expanduser('~/.cache/nuclei/resume-*.cfg')
+		files = sorted(glob.glob(resume_pattern), key=os.path.getmtime, reverse=True)
+		if not files:
+			return
+		resume_src = files[0]
+		outputs_dir = f'{self.reports_folder}/.outputs'
+		os.makedirs(outputs_dir, exist_ok=True)
+		resume_dst = os.path.join(outputs_dir, 'nuclei_resume.cfg')
+		try:
+			shutil.move(resume_src, resume_dst)
+			self.resume_file = resume_dst
+		except OSError:
+			pass
 
 	@staticmethod
 	def id_extractor(item):
