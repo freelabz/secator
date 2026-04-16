@@ -1440,8 +1440,7 @@ def remove_duplicates(items):
 	Returns:
 		list: Deduplicated list preserving first occurrence order.
 	"""
-	import json
-	from collections import defaultdict, OrderedDict
+	from collections import OrderedDict
 
 	def _get_key(item):
 		if hasattr(item, '_compare_key'):
