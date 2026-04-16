@@ -116,7 +116,6 @@ class Runner:
 		self.last_updated_progress = None
 		self.progress = 0
 		self.celery_result = None
-		self.celery_ids = []
 		self.celery_ids_map = {}
 		self.revoked = False
 		self.skipped = False
@@ -569,17 +568,18 @@ class Runner:
 			return
 
 		# If progress item, update runner progress
-		elif isinstance(item, Progress) and item._source == self.unique_name:
-			self.debug(f'update runner progress: {item.percent}', sub='item', verbose=True)
-			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
-				return
-			self.progress = item.percent
-			self.last_updated_progress = item._timestamp
+		elif isinstance(item, Progress):
+			force = item.extra_data.pop('force', False)
+			if item._source == self.unique_name:
+				self.debug(f'update runner progress: {item.percent}', sub='item', verbose=True)
+				if not force and not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):  # noqa: E501
+					return
+				self.progress = item.percent
+				self.last_updated_progress = item._timestamp
 
-		# If info item and task_id is defined, update runner celery_ids
-		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
-			self.debug(f'update runner celery_ids from remote: {item.task_id}', sub='item')
-			self.celery_ids.append(item.task_id)
+		# If info item and task_id is defined, update runner celery_ids_map
+		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids_map:
+			self.debug(f'update runner celery_ids_map from remote: {item.task_id}', sub='item')
 
 		# If output type, run on_item hooks
 		elif isinstance(item, tuple(OUTPUT_TYPES)) and hooks:
@@ -606,7 +606,6 @@ class Runner:
 			task_name (str): Task name.
 			task_description (str): Task description.
 		"""
-		self.celery_ids.append(task_id)
 		self.celery_ids_map[task_id] = {
 			'id': task_id,
 			'name': task_name,
@@ -616,6 +615,7 @@ class Runner:
 			'count': 0,
 			'progress': 0,
 		}
+		self.context['celery_ids'] = list(self.celery_ids_map.keys())
 
 	def _print_item(self, item, force=False):
 		"""Print an item and add it to the runner's output.
@@ -777,7 +777,18 @@ class Runner:
 		else:
 			self.debug('running workflow in async mode', sub='start')
 			self.celery_result = workflow()
-			self.celery_ids.append(str(self.celery_result.id))
+			celery_id = str(self.celery_result.id)
+			if celery_id not in self.celery_ids_map:
+				self.celery_ids_map[celery_id] = {
+					'id': celery_id,
+					'name': self.config.name,
+					'full_name': self.unique_name,
+					'descr': self.description,
+					'state': 'PENDING',
+					'count': 0,
+					'progress': 0,
+				}
+				self.context['celery_ids'] = list(self.celery_ids_map.keys())
 			yield Info(message=f'Celery task created: {self.celery_result.id}', task_id=self.celery_result.id)
 			if self.no_poll:
 				self.enable_reports = False
@@ -830,7 +841,7 @@ class Runner:
 				'output': self.output,
 				'progress': self.progress,
 				'last_updated_db': self.last_updated_db,
-				'context': self.context,
+				'context': {**self.context, 'celery_ids': list(self.celery_ids_map.keys())},
 				'errors': [e.toDict() for e in self.errors],
 				'warnings': [w.toDict() for w in self.warnings],
 			}
@@ -1035,8 +1046,10 @@ class Runner:
 		"""Stop all tasks running in Celery worker."""
 		from secator.celery import revoke_task
 
-		for task_id in self.celery_ids:
-			name = self.celery_ids_map.get(task_id, {}).get('full_name')
+		# Use celery_ids_map as the source of truth: it includes both statically registered
+		# task IDs (via add_subtask) and dynamically discovered chunk IDs (via iter_results).
+		for task_id, data in list(self.celery_ids_map.items()):
+			name = data.get('full_name')
 			revoke_task(task_id, name)
 
 	def _convert_item_schema(self, item):
