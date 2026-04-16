@@ -326,3 +326,30 @@ class TestQueryEngine(unittest.TestCase):
         # When both are available, MongoDB takes priority
         engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
         self.assertIsInstance(engine.backend, MongoDBBackend)
+
+    def test_query_engine_search_dedupe_removes_duplicates(self):
+        """QueryEngine.search(dedupe=True) should remove duplicate findings."""
+        from secator.query import QueryEngine
+        duplicate_finding = {
+            '_type': 'vulnerability',
+            'name': 'CVE-2021-1234',
+            'severity': 'high',
+            '_context': {'workspace_id': 'test_ws', 'workspace_duplicate': False},
+            'is_false_positive': False
+        }
+        engine = QueryEngine('test_ws', context={'results': [duplicate_finding, duplicate_finding.copy()]})
+        results = engine.search({}, dedupe=True)
+        assert len(results) == 1
+
+    def test_query_engine_search_no_dedupe_keeps_duplicates(self):
+        """QueryEngine.search(dedupe=False) should keep all findings."""
+        from secator.query import QueryEngine
+        duplicate_finding = {
+            '_type': 'vulnerability',
+            'name': 'CVE-2021-1234',
+            '_context': {'workspace_id': 'test_ws', 'workspace_duplicate': False},
+            'is_false_positive': False
+        }
+        engine = QueryEngine('test_ws', context={'results': [duplicate_finding, duplicate_finding.copy()]})
+        results = engine.search({}, dedupe=False)
+        assert len(results) == 2
