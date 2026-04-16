@@ -95,11 +95,17 @@ class TestJsonBackend(unittest.TestCase):
         import tempfile
         import json
         from pathlib import Path
+        from secator.query.json import JsonBackend
 
         self.temp_dir = tempfile.mkdtemp()
         self.workspace_id = 'test_workspace'
-        self.workspace_dir = Path(self.temp_dir) / self.workspace_id / 'tasks' / '0'
+        self.task_id = '0'
+        self.workspace_dir = Path(self.temp_dir) / self.workspace_id / 'tasks' / self.task_id
         self.workspace_dir.mkdir(parents=True)
+        self.backend = JsonBackend(
+            workspace_id=self.workspace_id,
+            config={'reports_dir': self.temp_dir}
+        )
 
         # Create test report.json
         self.test_data = {
@@ -206,6 +212,13 @@ class TestJsonBackend(unittest.TestCase):
 
         count = backend.count({'_type': 'vulnerability'})
         self.assertEqual(count, 2)
+
+    def test_json_backend_injects_context_from_path(self):
+        """Findings from tasks/{id}/report.json should have _context.task_id injected."""
+        results = self.backend.search({'_context.task_id': self.task_id})
+        assert len(results) > 0
+        for result in results:
+            assert result.get('_context', {}).get('task_id') == self.task_id
 
 
 class TestQueryOperators(unittest.TestCase):

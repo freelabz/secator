@@ -114,8 +114,17 @@ class JsonBackend(QueryBackend):
 							data = json.load(f)
 
 						results = data.get('results', {})
+						runner_type_singular = runner_type.rstrip('s')  # "tasks" -> "task", "scans" -> "scan"
+						runner_id = report_dir.name
+
 						for type_name, items in results.items():
 							if isinstance(items, list):
+								for item in items:
+									# Inject runner context from directory path if not already present
+									if '_context' not in item:
+										item['_context'] = {}
+									if f'{runner_type_singular}_id' not in item.get('_context', {}):
+										item['_context'][f'{runner_type_singular}_id'] = runner_id
 								findings.extend(items)
 					except (json.JSONDecodeError, IOError) as e:
 						debug(f'Error loading {report_file}: {e}', sub='query.json')
