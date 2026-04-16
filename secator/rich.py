@@ -1,13 +1,88 @@
 import operator
+import re
+import sys
+import logging
 from contextlib import nullcontext
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import yaml
 from rich.console import Console
 from rich.table import Table
 
-console = Console(stderr=True, record=True)
-console_stdout = Console(record=True)
+_ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])')
+
+
+class ConsoleTee:
+	"""File-like wrapper that forwards writes to both the original stream and an optional logger.
+
+	The stream is looked up dynamically via sys so that monkey-patching (e.g. Click's
+	CliRunner) is reflected at write-time rather than captured at import-time.
+	"""
+
+	def __init__(self, stream_name):
+		self._stream_name = stream_name
+		self._logger = None
+		self._buf = ''
+
+	@property
+	def _stream(self):
+		return getattr(sys, self._stream_name)
+
+	def write(self, data):
+		self._stream.write(data)
+		if self._logger and data:
+			self._buf += data
+			if '\n' in self._buf:
+				lines = self._buf.split('\n')
+				for line in lines[:-1]:
+					clean = _ANSI_ESCAPE.sub('', line)
+					if clean.strip():
+						self._logger.info(clean)
+				self._buf = lines[-1]
+
+	def flush(self):
+		self._stream.flush()
+
+	def fileno(self):
+		return self._stream.fileno()
+
+	def isatty(self):
+		return self._stream.isatty()
+
+
+def setup_file_logging(cfg_logs):
+	"""Attach a RotatingFileHandler to the console tees.
+
+	Must be called after CONFIG is loaded (end of config.py).
+	Is a no-op when cfg_logs.enabled is False.
+
+	Args:
+		cfg_logs: the CONFIG.logs DotMap (has .enabled, .path, .max_size_mb, .backup_count)
+	"""
+	if not cfg_logs.enabled:
+		return
+	log_path = cfg_logs.path
+	log_path.parent.mkdir(parents=True, exist_ok=True)
+	handler = RotatingFileHandler(
+		str(log_path),
+		maxBytes=int(cfg_logs.max_size_mb) * 1024 * 1024,
+		backupCount=int(cfg_logs.backup_count),
+	)
+	handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+	logger = logging.getLogger('secator.console')
+	logger.handlers.clear()
+	logger.addHandler(handler)
+	logger.setLevel(logging.DEBUG)
+	logger.propagate = False
+	_stderr_tee._logger = logger
+	_stdout_tee._logger = logger
+
+
+_stderr_tee = ConsoleTee('stderr')
+_stdout_tee = ConsoleTee('stdout')
+console = Console(file=_stderr_tee, force_terminal=True, record=True)
+console_stdout = Console(file=_stdout_tee, force_terminal=True, record=True)
 
 
 def maybe_status(*args, **kwargs):
@@ -16,7 +91,6 @@ def maybe_status(*args, **kwargs):
 	if IN_WORKER:
 		return nullcontext()
 	return console.status(*args, **kwargs)
-# handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
 
 
 def criticity_to_color(value):
