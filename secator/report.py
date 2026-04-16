@@ -1,5 +1,5 @@
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType
+from secator.output_types import FINDING_TYPES
 from secator.utils import get_file_timestamp, traceback_as_string
 from secator.rich import console
 

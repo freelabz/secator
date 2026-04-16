@@ -220,6 +220,18 @@ class TestJsonBackend(unittest.TestCase):
         for result in results:
             assert result.get('_context', {}).get('task_id') == self.task_id
 
+    def test_json_backend_or_query(self):
+        """$or query should match items satisfying any sub-condition."""
+        all_results = self.backend.search({})
+        all_types = {r.get('_type') for r in all_results}
+        if len(all_types) < 2:
+            return  # skip if only one type in fixture
+
+        types_list = list(all_types)
+        results = self.backend.search({'$or': [{'_type': types_list[0]}, {'_type': types_list[1]}]})
+        result_types = {r.get('_type') for r in results}
+        assert types_list[0] in result_types or types_list[1] in result_types
+
 
 class TestQueryOperators(unittest.TestCase):
 

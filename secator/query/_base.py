@@ -44,7 +44,8 @@ class QueryBackend(ABC):
 
         return merged
 
-    def search(self, query: dict, limit: int = None, dedupe: bool = False, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
+    def search(self, query: dict, limit: int = None, dedupe: bool = False,
+               exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Execute query with enforced base query."""
         if limit is None:
             limit = self.DEFAULT_LIMIT
