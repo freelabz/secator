@@ -48,11 +48,12 @@ class Directories(StrictModel):
 	celery: Directory = ''
 	celery_data: Directory = ''
 	celery_results: Directory = ''
+	logs: Directory = ''
 
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'celery', 'celery_data', 'celery_results', 'logs']:  # noqa: E501
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -146,6 +147,13 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	default: str = ''
+
+
+class Logs(StrictModel):
+	enabled: bool = False
+	path: Directory = ''
+	max_size_mb: int = 10
+	backup_count: int = 10
 
 
 class Payloads(StrictModel):
@@ -276,6 +284,7 @@ class SecatorConfig(StrictModel):
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
+	logs: Logs = Logs()
 	offline_mode: bool = False
 
 
@@ -476,6 +485,10 @@ class Config(DotMap):
 		# HACK: set default result_backend if unset
 		if not self.celery.result_backend:
 			self.celery.result_backend = f'file://{self.dirs.celery_results}'
+
+		# Set default logs path if unset
+		if not self.logs.path:
+			self.logs.path = self.dirs.logs / 'secator.log'
 
 	@staticmethod
 	def load(schema, data: dict = {}, print_errors=True):
