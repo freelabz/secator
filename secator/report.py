@@ -75,7 +75,7 @@ class Report:
 			context['workspace_name'] = self.workspace_name
 
 		engine = QueryEngine(self.workspace_name, context=context)
-		results = engine.search(query, dedupe=dedupe)
+		results = engine.search(query, limit=10_000, dedupe=dedupe)
 
 		for output_type in FINDING_TYPES:
 			output_name = output_type.get_name()

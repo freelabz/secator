@@ -55,3 +55,14 @@ class TestReportBuild:
         report = Report(runner)
         report.build(query={}, dedupe=True)
         assert len(report.data['results'].get('vulnerability', [])) == 1
+
+    def test_build_returns_more_than_default_limit(self):
+        """Report.build() should not be limited to the QueryEngine default of 100."""
+        vulns = [
+            {'_type': 'vulnerability', 'name': f'CVE-{i}', 'cvss_score': 5.0, 'matched_at': f'http://host{i}.com', 'ip': '1.2.3.4'}
+            for i in range(150)
+        ]
+        runner = self._make_runner(vulns)
+        report = Report(runner)
+        report.build(query={})
+        assert len(report.data['results'].get('vulnerability', [])) == 150
