@@ -181,3 +181,16 @@ class TestAIConfig(unittest.TestCase):
 		from secator.config import Config
 		config = Config.parse()
 		self.assertEqual(config.addons.api.finding_search_endpoint, 'findings/_search')
+
+
+@mock.patch('sys.stderr', devnull)
+class TestLogsConfig(unittest.TestCase):
+
+	def test_logs_defaults(self):
+		from secator.config import Config
+		config = Config.parse()
+		self.assertFalse(config.logs.enabled)
+		self.assertEqual(config.logs.max_size_mb, 10)
+		self.assertEqual(config.logs.backup_count, 10)
+		# Default path should be inside dirs.logs
+		self.assertEqual(config.logs.path, config.dirs.logs / 'secator.log')
