@@ -259,8 +259,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'group_by': '{field2}',
         }
         result = fmt_extractor(extractor)
-        self.assertIn('group_by', result)
-        self.assertIn('{field2}', result)
+        self.assertEqual(result, '<DYNAMIC(mock.{field1}~{field2} if item.field2 > 1 group_by {field2})>')
 
     def test_extract_from_results(self):
         """Test extract_from_results function."""

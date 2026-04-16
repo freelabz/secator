@@ -212,11 +212,11 @@ def process_extractor(results, extractor, ctx=None):
 			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
 			groups = {}
 			for item in results:
-				key = _group_by.format(**item.toDict())
+				group_key = _group_by.format(**item.toDict())
 				value = _field.format(**item.toDict())
 				prefix = value.split('~')[0] if '~' in value else value
-				groups.setdefault(key, []).append(prefix)
-			results = [','.join(hosts) + '~' + key for key, hosts in groups.items()]
+				groups.setdefault(group_key, []).append(prefix)
+			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 		else:
 			results = [_field.format(**item.toDict()) for item in results]
 	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
