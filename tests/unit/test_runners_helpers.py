@@ -303,6 +303,36 @@ class TestExtractorFunctions(unittest.TestCase):
         self.assertEqual(updated_opts['other'], ['<DYNAMIC(url.url)>'])
         self.assertEqual(errors, [])
 
+    def test_run_extractors_with_group_by(self):
+        """Full pipeline: Technology items → grouped search_vulns inputs via group_by extractor."""
+        from secator.output_types import Technology
+
+        tech1 = Technology(match='10.0.0.1:80', product='apache httpd', version='2.4.50')
+        tech2 = Technology(match='10.0.0.2:80', product='apache httpd', version='2.4.50')
+        tech3 = Technology(match='10.0.0.3:80', product='nginx', version='1.21.0')
+        results = [tech1, tech2, tech3]
+
+        opts = {
+            'targets_': [
+                {
+                    'type': 'technology',
+                    'field': '{match}~{product} {version}',
+                    'condition': 'item.version',
+                    'group_by': '{product} {version}',
+                }
+            ]
+        }
+
+        inputs, updated_opts, errors = run_extractors(results, opts)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(inputs), 2)  # 2 unique services
+        apache_input = next(i for i in inputs if 'apache' in i)
+        self.assertIn('10.0.0.1:80', apache_input.split('~')[0])
+        self.assertIn('10.0.0.2:80', apache_input.split('~')[0])
+        self.assertEqual(apache_input.split('~')[1], 'apache httpd 2.4.50')
+        nginx_input = next(i for i in inputs if 'nginx' in i)
+        self.assertEqual(nginx_input, '10.0.0.3:80~nginx 1.21.0')
+
     @patch('os.scandir')
     @patch('os.path.exists')
     def test_get_task_folder_id(self, mock_exists, mock_scandir):
