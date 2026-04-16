@@ -953,15 +953,19 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver)
 	mongo_query = python_expr_to_mongo(query) if query else {}
 
 	# 3. Merge filters
-	full_query = {**runner_filter, **mongo_query}
+	if '$or' in runner_filter and '$or' in mongo_query:
+		# Both have $or — use $and to require both conditions
+		full_query = {'$and': [runner_filter, mongo_query]}
+	else:
+		full_query = {**runner_filter, **mongo_query}
 
 	# 4. Add time delta filter if provided
 	if time_delta:
 		delta = human_to_timedelta(time_delta)
 		if delta:
 			import datetime
-			cutoff = datetime.datetime.utcnow() - delta
-			full_query['_timestamp'] = {'$gte': cutoff.isoformat()}
+			cutoff = datetime.datetime.now(datetime.timezone.utc) - delta
+			full_query['_timestamp'] = {'$gte': cutoff.timestamp()}
 
 	# 5. Build runner context for QueryEngine backend selection
 	drivers = [driver] if driver and driver != 'local' else []
@@ -1384,8 +1388,8 @@ r list [blue]-ws[/] [bright_magenta]prod[/]           [dim]# list reports from t
 r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
 
 [dim]# Show and filter results...[/]
-r show [blue]-q[/] [bright_magenta]"url.status_code not in ['401', '403']"[/] [blue]-o[/] [bright_magenta]txt[/]                                 [dim]# show urls with status 401 or 403, save to txt file[/]
-r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"tag.match and 'signup.php' in tag.match"[/] [blue]-o[/] [bright_magenta]json[/]  [dim]# show tags with targets matching 'signup.php' from tasks 10 and 11[/]
+r show [blue]-q[/] [bright_magenta]"vulnerability.severity_score >= 7"[/] [blue]-o[/] [bright_magenta]txt[/]                                      [dim]# show high-severity vulnerabilities, save to txt file[/]
+r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"port.state == 'open'"[/] [blue]-o[/] [bright_magenta]json[/]           [dim]# show open ports from tasks 10 and 11[/]
 """,  # noqa: E501
 		title=f":file_cabinet: [{title_style}]Digging into reports[/]", **kwargs)
 

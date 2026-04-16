@@ -232,6 +232,35 @@ class TestJsonBackend(unittest.TestCase):
         result_types = {r.get('_type') for r in results}
         assert types_list[0] in result_types or types_list[1] in result_types
 
+    def test_json_backend_or_with_additional_filter(self):
+        """$or combined with top-level field filters must respect both."""
+        # Get a known type from the fixture
+        all_results = self.backend.search({})
+        all_types = list({r.get('_type') for r in all_results})
+        if not all_types:
+            return
+        known_type = all_types[0]
+        # Query: match known_type OR task_id='nonexistent', but also require a field that doesn't exist
+        results = self.backend.search({
+            '$or': [{'_type': known_type}],
+            'definitely_nonexistent_field_xyz': 'impossible_value'
+        })
+        # The AND of ($or matches) AND (field doesn't match) = no results
+        assert len(results) == 0
+
+    def test_json_backend_and_query(self):
+        """$and query should require all sub-conditions."""
+        all_results = self.backend.search({})
+        if not all_results:
+            return
+        first_type = all_results[0].get('_type')
+        # $and with matching conditions = results
+        results = self.backend.search({'$and': [{'_type': first_type}, {'_type': first_type}]})
+        assert len(results) > 0
+        # $and with contradictory conditions = no results
+        results = self.backend.search({'$and': [{'_type': first_type}, {'_type': '__impossible__'}]})
+        assert len(results) == 0
+
 
 class TestQueryOperators(unittest.TestCase):
 

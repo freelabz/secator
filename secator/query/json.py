@@ -38,8 +38,14 @@ def get_nested_field(item: dict, key: str) -> Any:
 
 def match_query(item: dict, query: dict) -> bool:
 	"""Check if item matches MongoDB-style query."""
+	if '$and' in query:
+		return all(match_query(item, sub_query) for sub_query in query['$and'])
 	if '$or' in query:
-		return any(match_query(item, sub_query) for sub_query in query['$or'])
+		or_result = any(match_query(item, sub_query) for sub_query in query['$or'])
+		remaining = {k: v for k, v in query.items() if k != '$or'}
+		if remaining:
+			return or_result and match_query(item, remaining)
+		return or_result
 	for key, condition in query.items():
 		value = get_nested_field(item, key)
 

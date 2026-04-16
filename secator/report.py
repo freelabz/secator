@@ -31,7 +31,7 @@ class Report:
 					f'{str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',
 				)
 
-	def build(self, query={}, dedupe=CONFIG.runners.remove_duplicates, extractors=[]):
+	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates, extractors=None):
 		"""Build report data structure using QueryEngine for filtering and dedup.
 
 		Args:
@@ -39,6 +39,17 @@ class Report:
 			dedupe (bool): Whether to remove duplicate results.
 			extractors (list): Deprecated. Use query instead.
 		"""
+		if query is None:
+			query = {}
+		if extractors is None:
+			extractors = []
+		if extractors:
+			import warnings
+			warnings.warn(
+				"The 'extractors' parameter is deprecated. Use 'query' instead.",
+				DeprecationWarning,
+				stacklevel=2
+			)
 		from secator.query import QueryEngine
 
 		runner_fields = {
