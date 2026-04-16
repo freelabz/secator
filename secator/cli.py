@@ -935,13 +935,11 @@ def report():
 @click.argument('report_query', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('-f', '--format', '_format', type=str, default='', help='Format output fields, comma-separated')
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('-u', '--unified', is_flag=True, default=False, help='Aggregate all matched results')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.pass_context
-def report_show(ctx, report_query, output, time_delta, _format, query, workspace, unified, driver):
+def report_show(ctx, report_query, output, time_delta, query, workspace, driver):
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 

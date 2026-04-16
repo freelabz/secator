@@ -62,15 +62,23 @@ class Report:
 		data['info']['errors'] = getattr(self.runner, 'errors', [])
 
 		# Build context for QueryEngine.
-		# If runner.context already has 'results', use it as-is.
-		# Otherwise, build context from runner.results (converting OutputType objects to dicts).
+		# Only set 'results' in context when there are actual pre-loaded results.
+		# An absent key tells JsonBackend to scan the filesystem.
+		# An empty list tells it nothing is there, short-circuiting the filesystem scan.
 		context = dict(getattr(self.runner, 'context', {}) or {})
-		if 'results' not in context:
+		if 'results' not in context or not context.get('results'):
 			raw_results = getattr(self.runner, 'results', []) or []
-			context['results'] = [
-				item.toDict() if isinstance(item, OutputType) else item
-				for item in raw_results
-			]
+			serialized = []
+			for item in raw_results:
+				if hasattr(item, 'toDict'):
+					serialized.append(item.toDict())
+				elif isinstance(item, dict):
+					serialized.append(item)
+			if serialized:
+				context['results'] = serialized
+			elif 'results' in context:
+				# Remove empty list so JsonBackend falls through to filesystem scan
+				del context['results']
 		if 'workspace_name' not in context:
 			context['workspace_name'] = self.workspace_name
 

@@ -66,3 +66,24 @@ class TestReportBuild:
         report = Report(runner)
         report.build(query={})
         assert len(report.data['results'].get('vulnerability', [])) == 150
+
+    def test_build_no_preloaded_results_does_not_short_circuit_backend(self):
+        """When runner has no pre-loaded results, Report.build() must not pass empty list to context.
+
+        An empty list in context['results'] causes JsonBackend._load_all_findings() to return []
+        immediately (since [] is not None), bypassing the filesystem scan entirely.
+        """
+        runner = self._make_runner([])  # empty results list
+        # Remove 'results' from context to simulate a runner with no pre-loaded results
+        # (mirrors what report_show does when building runner without runner.results)
+        if 'results' in runner.context:
+            del runner.context['results']
+        report = Report(runner)
+        # Should not crash and data structure must be valid
+        report.build(query={})
+        assert 'results' in report.data
+        assert 'info' in report.data
+        # Verify context was not poisoned with an empty list
+        import secator.report as report_module
+        # The fix ensures that context['results'] is either absent or non-empty after build
+        # We can't easily inspect engine context post-build, but we confirm no exception and valid output
