@@ -12,7 +12,7 @@ from dotmap import DotMap
 from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
 from secator.requests import requests
-from secator.rich import console, console_stdout
+from secator.rich import console, console_stdout, setup_file_logging
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
@@ -746,6 +746,9 @@ for name, dir in CONFIG.dirs.items():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
 		dir.mkdir(parents=True)
 		console.print('[bold green]ok.[/]')
+
+# Set up file logging tee now that CONFIG.logs is known
+setup_file_logging(CONFIG.logs)
 
 # Download wordlists and payloads
 # download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
