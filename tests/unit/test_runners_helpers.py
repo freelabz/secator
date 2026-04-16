@@ -54,7 +54,7 @@ class TestExtractorFunctions(unittest.TestCase):
         """Test parsing extractor from string format."""
         # Test valid string format
         result = parse_extractor('mock.field1')
-        self.assertEqual(result, ('mock', 'field1', None))
+        self.assertEqual(result, ('mock', 'field1', None, None))
 
         # Test invalid string format
         result = parse_extractor('invalid_format')
@@ -73,14 +73,36 @@ class TestExtractorFunctions(unittest.TestCase):
             'condition': 'item.field2 > 1'
         }
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', 'field1', 'item.field2 > 1'))
+        self.assertEqual(result, ('mock', 'field1', 'item.field2 > 1', None))
 
         # Test with minimal fields
         extractor = {
             'type': 'mock'
         }
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', None, None))
+        self.assertEqual(result, ('mock', None, None, None))
+
+    def test_parse_extractor_dict_with_group_by(self):
+        """Test parsing extractor dict with group_by field."""
+        extractor = {
+            'type': 'mock',
+            'field': '{field1}~{field2}',
+            'condition': 'item.field2 > 1',
+            'group_by': '{field2}',
+        }
+        result = parse_extractor(extractor)
+        self.assertEqual(result, ('mock', '{field1}~{field2}', 'item.field2 > 1', '{field2}'))
+
+    def test_parse_extractor_dict_without_group_by(self):
+        """Test that group_by defaults to None when absent."""
+        extractor = {'type': 'mock', 'field': 'field1'}
+        result = parse_extractor(extractor)
+        self.assertEqual(result, ('mock', 'field1', None, None))
+
+    def test_parse_extractor_string_no_group_by(self):
+        """String format never has group_by."""
+        result = parse_extractor('mock.field1')
+        self.assertEqual(result, ('mock', 'field1', None, None))
 
     def test_fmt_extractor(self):
         """Test formatting extractors for display."""
