@@ -17,6 +17,7 @@ from secator.rich import console, console_stdout
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 Directory = Annotated[Path, AfterValidator(lambda v: v.expanduser())]
+FilePath = Annotated[Path, AfterValidator(lambda v: v.expanduser())]
 StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.home())))]
 
 ROOT_FOLDER = Path(__file__).parent.parent
@@ -151,7 +152,7 @@ class Workspace(StrictModel):
 
 class Logs(StrictModel):
 	enabled: bool = False
-	path: Directory = ''
+	path: FilePath = ''
 	max_size_mb: int = 10
 	backup_count: int = 10
 
@@ -487,6 +488,8 @@ class Config(DotMap):
 			self.celery.result_backend = f'file://{self.dirs.celery_results}'
 
 		# Set default logs path if unset
+		# NOTE: if SECATOR_DIRS_LOGS is overridden via env, logs.path will not reflect it
+		# unless SECATOR_LOGS_PATH is also explicitly set. Same pattern as celery.result_backend.
 		if not self.logs.path:
 			self.logs.path = self.dirs.logs / 'secator.log'
 
