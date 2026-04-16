@@ -1426,3 +1426,47 @@ def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12
 	except Exception as e:
 		console.print(Error(message=f'Failed to write {output_tape}: {str(e)}'))
 		sys.exit(1)
+
+
+def remove_duplicates(items):
+	"""Remove duplicate items using hash-based grouping (O(n)).
+
+	Handles both OutputType instances (uses _compare_key()) and plain dicts
+	(loads into OutputType via _type field, then uses _compare_key()).
+
+	Args:
+		items (list): List of OutputType instances or dicts.
+
+	Returns:
+		list: Deduplicated list preserving first occurrence order.
+	"""
+	import json
+	from collections import defaultdict, OrderedDict
+
+	def _get_key(item):
+		if hasattr(item, '_compare_key'):
+			return item._compare_key()
+		# Plain dict: try to load into the appropriate OutputType to use _compare_key()
+		if isinstance(item, dict):
+			from secator.output_types import OUTPUT_TYPES
+			_type = item.get('_type')
+			if _type:
+				for cls in OUTPUT_TYPES:
+					if cls.get_name() == _type:
+						try:
+							return cls.load(item)._compare_key()
+						except Exception:
+							pass
+			# Fallback: JSON-serialize sorted items
+			try:
+				return json.dumps(sorted(item.items()), sort_keys=True, default=str)
+			except Exception:
+				pass
+		return id(item)
+
+	seen = OrderedDict()
+	for item in items:
+		key = _get_key(item)
+		if key not in seen:
+			seen[key] = item
+	return list(seen.values())

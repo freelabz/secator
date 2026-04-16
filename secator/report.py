@@ -2,30 +2,9 @@ import operator
 
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OutputType
-from secator.utils import get_file_timestamp, traceback_as_string
+from secator.utils import get_file_timestamp, remove_duplicates, traceback_as_string
 from secator.rich import console
 from secator.runners._helpers import extract_from_results
-
-import concurrent.futures
-from threading import Lock
-
-
-def remove_duplicates(objects):
-	unique_objects = []
-	lock = Lock()
-
-	def add_if_unique(obj):
-		nonlocal unique_objects  # noqa: F824
-		with lock:
-			# Perform linear search to check for duplicates
-			if all(obj != existing_obj for existing_obj in unique_objects):
-				unique_objects.append(obj)
-
-	with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
-		# Execute the function concurrently for each object
-		executor.map(add_if_unique, objects)
-
-	return unique_objects
 
 
 # TODO: initialize from data, not from runner
