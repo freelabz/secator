@@ -10,7 +10,7 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-_ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])')
+_ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-9;?]*[ -/]*[@-~])')
 
 
 class ConsoleTee:
@@ -43,6 +43,11 @@ class ConsoleTee:
 
 	def flush(self):
 		self._stream.flush()
+		if self._logger and self._buf.strip():
+			clean = _ANSI_ESCAPE.sub('', self._buf)
+			if clean.strip():
+				self._logger.info(clean)
+			self._buf = ''
 
 	def fileno(self):
 		return self._stream.fileno()
@@ -81,8 +86,8 @@ def setup_file_logging(cfg_logs):
 
 _stderr_tee = ConsoleTee('stderr')
 _stdout_tee = ConsoleTee('stdout')
-console = Console(file=_stderr_tee, force_terminal=True, record=True)
-console_stdout = Console(file=_stdout_tee, force_terminal=True, record=True)
+console = Console(file=_stderr_tee, record=True)
+console_stdout = Console(file=_stdout_tee, record=True)
 
 
 def maybe_status(*args, **kwargs):
