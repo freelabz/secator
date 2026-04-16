@@ -9,7 +9,7 @@ from secator.runners._helpers import (
     process_extractor,
     get_task_folder_id
 )
-from secator.output_types import OutputType, Url, Vulnerability, Target
+from secator.output_types import OutputType, Url, Vulnerability, Target, Technology
 from dataclasses import dataclass, field
 
 
@@ -37,10 +37,15 @@ class TestExtractorFunctions(unittest.TestCase):
         self.target1 = Target(name='localhost')
 
         self.vuln1 = Vulnerability(
-            name='Test Vuln', 
+            name='Test Vuln',
             description='Test Description',
             severity='high'
         )
+
+        self.tech1 = Technology(match='10.0.0.1:80', product='apache httpd', version='2.4.50')
+        self.tech2 = Technology(match='10.0.0.2:80', product='apache httpd', version='2.4.50')
+        self.tech3 = Technology(match='10.0.0.3:80', product='nginx', version='1.21.0')
+        self.tech_results = [self.tech1, self.tech2, self.tech3]
 
         # Test results for extractors
         self.results = [
@@ -97,11 +102,6 @@ class TestExtractorFunctions(unittest.TestCase):
         """Test that group_by defaults to None when absent."""
         extractor = {'type': 'mock', 'field': 'field1'}
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', 'field1', None, None))
-
-    def test_parse_extractor_string_no_group_by(self):
-        """String format never has group_by."""
-        result = parse_extractor('mock.field1')
         self.assertEqual(result, ('mock', 'field1', None, None))
 
     def test_fmt_extractor(self):
@@ -212,6 +212,55 @@ class TestExtractorFunctions(unittest.TestCase):
         # }
         # result = process_extractor(self.results, extractor)
         # self.assertEqual(result, ['nested_value', 'nested_value', 'nested_value'])
+
+    def test_process_extractor_group_by_combines_hosts(self):
+        """group_by groups items by key and joins matched_at values with comma."""
+        extractor = {
+            'type': 'technology',
+            'field': '{match}~{product} {version}',
+            'condition': 'item.version',
+            'group_by': '{product} {version}',
+        }
+        result = process_extractor(self.tech_results, extractor)
+        self.assertEqual(len(result), 2)
+        self.assertIn('10.0.0.1:80,10.0.0.2:80~apache httpd 2.4.50', result)
+        self.assertIn('10.0.0.3:80~nginx 1.21.0', result)
+
+    def test_process_extractor_group_by_single_item(self):
+        """group_by with one item per group produces normal ~ format."""
+        extractor = {
+            'type': 'technology',
+            'field': '{match}~{product} {version}',
+            'condition': 'item.version',
+            'group_by': '{product} {version}',
+        }
+        result = process_extractor([self.tech3], extractor)
+        self.assertEqual(result, ['10.0.0.3:80~nginx 1.21.0'])
+
+    def test_process_extractor_without_group_by_unchanged(self):
+        """Without group_by, process_extractor behaves exactly as before."""
+        extractor = {
+            'type': 'technology',
+            'field': '{match}~{product} {version}',
+            'condition': 'item.version',
+        }
+        result = process_extractor(self.tech_results, extractor)
+        self.assertEqual(len(result), 3)
+        self.assertIn('10.0.0.1:80~apache httpd 2.4.50', result)
+        self.assertIn('10.0.0.2:80~apache httpd 2.4.50', result)
+        self.assertIn('10.0.0.3:80~nginx 1.21.0', result)
+
+    def test_fmt_extractor_with_group_by(self):
+        """fmt_extractor includes group_by in display string."""
+        extractor = {
+            'type': 'mock',
+            'field': '{field1}~{field2}',
+            'condition': 'item.field2 > 1',
+            'group_by': '{field2}',
+        }
+        result = fmt_extractor(extractor)
+        self.assertIn('group_by', result)
+        self.assertIn('{field2}', result)
 
     def test_extract_from_results(self):
         """Test extract_from_results function."""

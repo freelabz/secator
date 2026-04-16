@@ -83,6 +83,8 @@ def fmt_extractor(extractor):
 	if _condition:
 		_condition = _condition.replace("'", '').replace('"', '')
 		s = f'{s} if {_condition}'
+	if _group_by:
+		s = f'{s} group_by {_group_by}'
 	return f'<DYNAMIC({s})>'
 
 
@@ -204,7 +206,19 @@ def process_extractor(results, extractor, ctx=None):
 	if _field:
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
-		results = [_field.format(**item.toDict()) for item in results]
+
+		if _group_by:
+			already_formatted_gb = '{' in _group_by and '}' in _group_by
+			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
+			groups = {}
+			for item in results:
+				key = _group_by.format(**item.toDict())
+				value = _field.format(**item.toDict())
+				prefix = value.split('~')[0] if '~' in value else value
+				groups.setdefault(key, []).append(prefix)
+			results = [','.join(hosts) + '~' + key for key, hosts in groups.items()]
+		else:
+			results = [_field.format(**item.toDict()) for item in results]
 	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 
