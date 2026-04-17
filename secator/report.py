@@ -73,20 +73,14 @@ class Report:
 		data['info']['errors'] = getattr(self.runner, 'errors', [])
 
 		# Build context for QueryEngine.
-		# Only set 'results' in context when there are actual pre-loaded results.
-		# An absent key tells JsonBackend to scan the filesystem.
-		# An empty list tells it nothing is there, short-circuiting the filesystem scan.
+		# Pass runner.results directly (OutputType objects or dicts) to avoid
+		# costly serialization. An absent 'results' key tells JsonBackend to
+		# scan the filesystem instead.
 		context = dict(getattr(self.runner, 'context', {}) or {})
 		if 'results' not in context or not context.get('results'):
 			raw_results = getattr(self.runner, 'results', []) or []
-			serialized = []
-			for item in raw_results:
-				if hasattr(item, 'toDict'):
-					serialized.append(item.toDict())
-				elif isinstance(item, dict):
-					serialized.append(item)
-			if serialized:
-				context['results'] = serialized
+			if raw_results:
+				context['results'] = raw_results
 			elif 'results' in context:
 				# Remove empty list so JsonBackend falls through to filesystem scan
 				del context['results']
@@ -99,7 +93,8 @@ class Report:
 		for output_type in FINDING_TYPES:
 			output_name = output_type.get_name()
 			data['results'][output_name] = [
-				r for r in results if r.get('_type') == output_name
+				r for r in results
+				if (r.get('_type') if isinstance(r, dict) else getattr(r, '_type', None)) == output_name
 			]
 
 		self.data = data

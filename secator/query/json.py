@@ -24,13 +24,18 @@ OPERATORS = {
 }
 
 
-def get_nested_field(item: dict, key: str) -> Any:
-	"""Get nested field value using dot notation (e.g., '_context.workspace_id')."""
+def get_nested_field(item, key: str) -> Any:
+	"""Get nested field value using dot notation (e.g., '_context.workspace_id').
+
+	Supports both dict and object (e.g. OutputType dataclass) access.
+	"""
 	keys = key.split('.')
 	value = item
 	for k in keys:
 		if isinstance(value, dict):
 			value = value.get(k)
+		elif hasattr(value, k):
+			value = getattr(value, k)
 		else:
 			return None
 	return value
@@ -150,7 +155,7 @@ class JsonBackend(QueryBackend):
 		for finding in findings:
 			if match_query(finding, query):
 				# Remove excluded fields
-				if exclude_fields:
+				if exclude_fields and isinstance(finding, dict):
 					finding = {k: v for k, v in finding.items() if k not in exclude_fields}
 				matched.append(finding)
 				if len(matched) >= limit:
