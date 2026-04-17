@@ -56,6 +56,30 @@ class ConsoleTee:
 		return self._stream.isatty()
 
 
+def add_log_handler(path):
+	"""Add an additional FileHandler to the console logger (e.g. per-run reports folder).
+
+	Returns the handler so the caller can remove it later with remove_log_handler().
+	"""
+	path = Path(path)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	handler = RotatingFileHandler(str(path), maxBytes=10 * 1024 * 1024, backupCount=5)
+	handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+	logger = logging.getLogger('secator.console')
+	logger.addHandler(handler)
+	return handler
+
+
+def remove_log_handler(handler):
+	"""Flush, close and detach a handler previously added with add_log_handler()."""
+	if not handler:
+		return
+	handler.flush()
+	handler.close()
+	logger = logging.getLogger('secator.console')
+	logger.handlers = [h for h in logger.handlers if h is not handler]
+
+
 def setup_file_logging(cfg_logs):
 	"""Attach a RotatingFileHandler to the console tees.
 
