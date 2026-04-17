@@ -189,7 +189,7 @@ class TestLogsConfig(unittest.TestCase):
 	def test_logs_defaults(self):
 		from secator.config import Config
 		config = Config.parse()
-		self.assertFalse(config.logs.enabled)
+		self.assertTrue(config.logs.enabled)
 		self.assertEqual(config.logs.max_size_mb, 10)
 		self.assertEqual(config.logs.backup_count, 10)
 		# Default path should be inside dirs.logs
