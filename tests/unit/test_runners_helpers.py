@@ -24,7 +24,7 @@ class MockOutputType(OutputType):
 
 
 class TestExtractorFunctions(unittest.TestCase):
-    
+
     def setUp(self):
         # Create some mock objects for testing
         self.mock1 = MockOutputType(field1='test1', field2=1)
@@ -305,8 +305,6 @@ class TestExtractorFunctions(unittest.TestCase):
 
     def test_run_extractors_with_group_by(self):
         """Full pipeline: Technology items → grouped search_vulns inputs via group_by extractor."""
-        from secator.output_types import Technology
-
         tech1 = Technology(match='10.0.0.1:80', product='apache httpd', version='2.4.50')
         tech2 = Technology(match='10.0.0.2:80', product='apache httpd', version='2.4.50')
         tech3 = Technology(match='10.0.0.3:80', product='nginx', version='1.21.0')
@@ -370,4 +368,4 @@ class TestExtractorFunctions(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()
