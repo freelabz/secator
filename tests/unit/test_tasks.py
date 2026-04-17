@@ -63,6 +63,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		if failures:
 			raise AssertionError("\n\n" + "\n\n".join(failures))
 
+
 class TestSearchVulnsGrouping(unittest.TestCase):
 
 	def _load_fixture(self):
@@ -79,6 +80,15 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		task.matched_at = None
 		search_vulns.before_init(task)
 		self.assertEqual(task.matched_at, '10.0.0.1:80')
+		self.assertEqual(task.inputs[0], 'apache 2.4.39')
+
+	def test_before_init_no_tilde_leaves_inputs_unchanged(self):
+		"""before_init with no tilde leaves inputs and matched_at unchanged."""
+		task = search_vulns.__new__(search_vulns)
+		task.inputs = ['apache 2.4.39']
+		task.matched_at = None
+		search_vulns.before_init(task)
+		self.assertIsNone(task.matched_at)
 		self.assertEqual(task.inputs[0], 'apache 2.4.39')
 
 	def test_before_init_multiple_hosts(self):
