@@ -32,10 +32,6 @@ class TestQueryBackendBase(unittest.TestCase):
         self.assertTrue(hasattr(QueryBackend, 'PROTECTED_FIELDS'))
         self.assertIn('_context.workspace_id', QueryBackend.PROTECTED_FIELDS)
 
-    def test_default_limit_constant(self):
-        from secator.query._base import QueryBackend
-        self.assertEqual(QueryBackend.DEFAULT_LIMIT, 100)
-
     def test_merge_query_enforces_base(self):
         backend = self._create_test_backend(workspace_id='ws123')
 

@@ -158,7 +158,7 @@ class JsonBackend(QueryBackend):
 				if exclude_fields and isinstance(finding, dict):
 					finding = {k: v for k, v in finding.items() if k not in exclude_fields}
 				matched.append(finding)
-				if len(matched) >= limit:
+				if limit and len(matched) >= limit:
 					break
 
 		return matched
