@@ -20,23 +20,29 @@ class TestConsoleTee(unittest.TestCase):
 			tee.write('hello\n')
 		self.assertEqual(stream.getvalue(), 'hello\n')
 
-	def test_no_logger_no_error(self):
-		from secator.rich import ConsoleTee
-		stream = StringIO()
-		with mock.patch('sys.stderr', stream):
-			tee = ConsoleTee('stderr')
-		self.assertIsNone(tee._logger)
-		# Should not raise even without a logger
-		tee.write('line\n')
-
-	def test_logger_receives_clean_line(self):
+	def test_no_handlers_no_error(self):
+		"""When _console_logger has no handlers, ConsoleTee should not raise."""
+		import secator.rich as rich_module
 		from secator.rich import ConsoleTee
 		stream = StringIO()
 		with mock.patch('sys.stderr', stream):
 			tee = ConsoleTee('stderr')
 		mock_logger = mock.MagicMock()
-		tee._logger = mock_logger
-		tee.write('\x1b[32mhello\x1b[0m\n')
+		mock_logger.handlers = []
+		with mock.patch.object(rich_module, '_console_logger', mock_logger):
+			tee.write('line\n')
+		mock_logger.info.assert_not_called()
+
+	def test_logger_receives_clean_line(self):
+		import secator.rich as rich_module
+		from secator.rich import ConsoleTee
+		stream = StringIO()
+		with mock.patch('sys.stderr', stream):
+			tee = ConsoleTee('stderr')
+		mock_logger = mock.MagicMock()
+		mock_logger.handlers = [mock.MagicMock()]
+		with mock.patch.object(rich_module, '_console_logger', mock_logger):
+			tee.write('\x1b[32mhello\x1b[0m\n')
 		mock_logger.info.assert_called_once_with('hello')
 
 	def test_ansi_codes_stripped(self):
@@ -53,98 +59,85 @@ class TestConsoleTee(unittest.TestCase):
 		self.assertEqual(clean, 'some text')
 
 	def test_partial_line_buffered(self):
+		import secator.rich as rich_module
 		from secator.rich import ConsoleTee
 		stream = StringIO()
 		with mock.patch('sys.stderr', stream):
 			tee = ConsoleTee('stderr')
 		mock_logger = mock.MagicMock()
-		tee._logger = mock_logger
-		tee.write('partial')
-		mock_logger.info.assert_not_called()  # no newline yet
-		tee.write(' line\n')
-		mock_logger.info.assert_called_once_with('partial line')
+		mock_logger.handlers = [mock.MagicMock()]
+		with mock.patch.object(rich_module, '_console_logger', mock_logger):
+			tee.write('partial')
+			mock_logger.info.assert_not_called()  # no newline yet
+			tee.write(' line\n')
+			mock_logger.info.assert_called_once_with('partial line')
 
 	def test_flush_drains_partial_buf(self):
+		import secator.rich as rich_module
 		from secator.rich import ConsoleTee
 		stream = StringIO()
 		with mock.patch('sys.stderr', stream):
 			tee = ConsoleTee('stderr')
 		mock_logger = mock.MagicMock()
-		tee._logger = mock_logger
-		tee.write('no newline here')
-		mock_logger.info.assert_not_called()
-		tee.flush()
-		mock_logger.info.assert_called_once_with('no newline here')
+		mock_logger.handlers = [mock.MagicMock()]
+		with mock.patch.object(rich_module, '_console_logger', mock_logger):
+			tee.write('no newline here')
+			mock_logger.info.assert_not_called()
+			tee.flush()
+			mock_logger.info.assert_called_once_with('no newline here')
 		self.assertEqual(tee._buf, '')
 
 	def test_flush_does_not_log_whitespace_only(self):
+		import secator.rich as rich_module
 		from secator.rich import ConsoleTee
 		stream = StringIO()
 		with mock.patch('sys.stderr', stream):
 			tee = ConsoleTee('stderr')
 		mock_logger = mock.MagicMock()
-		tee._logger = mock_logger
-		tee.write('   ')
-		tee.flush()
+		mock_logger.handlers = [mock.MagicMock()]
+		with mock.patch.object(rich_module, '_console_logger', mock_logger):
+			tee.write('   ')
+			tee.flush()
 		mock_logger.info.assert_not_called()
 
 	def test_empty_lines_not_logged(self):
+		import secator.rich as rich_module
 		from secator.rich import ConsoleTee
 		stream = StringIO()
 		with mock.patch('sys.stderr', stream):
 			tee = ConsoleTee('stderr')
 		mock_logger = mock.MagicMock()
-		tee._logger = mock_logger
-		tee.write('\n\n\n')
+		mock_logger.handlers = [mock.MagicMock()]
+		with mock.patch.object(rich_module, '_console_logger', mock_logger):
+			tee.write('\n\n\n')
 		self.assertEqual(mock_logger.info.call_count, 0)
 
 
 @mock.patch('sys.stderr', devnull)
-class TestSetupFileLogging(unittest.TestCase):
+class TestLogHandlers(unittest.TestCase):
 
-	def test_no_op_when_disabled(self):
-		from secator.rich import setup_file_logging, _stderr_tee, _stdout_tee
-		original_stderr_logger = _stderr_tee._logger
-		cfg = mock.MagicMock()
-		cfg.enabled = False
-		setup_file_logging(cfg)
-		self.assertEqual(_stderr_tee._logger, original_stderr_logger)
-
-	def test_creates_log_file_and_attaches_logger(self):
-		from secator.rich import setup_file_logging, _stderr_tee, _stdout_tee
+	def test_add_log_handler_creates_file(self):
+		from secator.rich import add_log_handler, remove_log_handler
 		with tempfile.TemporaryDirectory() as tmpdir:
 			log_path = Path(tmpdir) / 'sub' / 'test.log'
-			cfg = mock.MagicMock()
-			cfg.enabled = True
-			cfg.path = log_path
-			cfg.max_size_mb = 1
-			cfg.backup_count = 2
-			setup_file_logging(cfg)
+			handler = add_log_handler(log_path)
 			try:
-				self.assertIsNotNone(_stderr_tee._logger)
-				self.assertIsNotNone(_stdout_tee._logger)
 				self.assertTrue(log_path.parent.exists())
-				self.assertTrue(log_path.exists())
+				logger = logging.getLogger('secator.console')
+				self.assertIn(handler, logger.handlers)
 			finally:
-				_stderr_tee._logger = None
-				_stdout_tee._logger = None
-				logging.getLogger('secator.console').handlers.clear()
+				remove_log_handler(handler)
 
-	def test_repeated_calls_do_not_accumulate_handlers(self):
-		from secator.rich import setup_file_logging, _stderr_tee, _stdout_tee
+	def test_remove_log_handler_detaches(self):
+		from secator.rich import add_log_handler, remove_log_handler
 		with tempfile.TemporaryDirectory() as tmpdir:
 			log_path = Path(tmpdir) / 'test.log'
-			cfg = mock.MagicMock()
-			cfg.enabled = True
-			cfg.path = log_path
-			cfg.max_size_mb = 1
-			cfg.backup_count = 2
-			setup_file_logging(cfg)
-			setup_file_logging(cfg)
+			handler = add_log_handler(log_path)
+			remove_log_handler(handler)
 			logger = logging.getLogger('secator.console')
-			try:
-				self.assertEqual(len(logger.handlers), 1)
-			finally:
-				_stderr_tee._logger = None
-				_stdout_tee._logger = None
-				logger.handlers.clear()
+			self.assertNotIn(handler, logger.handlers)
+
+	def test_remove_none_is_noop(self):
+		from secator.rich import remove_log_handler
+		# Should not raise
+		remove_log_handler(None)

@@ -11,18 +11,20 @@ from rich.console import Console
 from rich.table import Table
 
 _ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-9;?]*[ -/]*[@-~])')
+_console_logger = logging.getLogger('secator.console')
+_console_logger.propagate = False
 
 
 class ConsoleTee:
-	"""File-like wrapper that forwards writes to both the original stream and an optional logger.
+	"""File-like wrapper that forwards writes to both the original stream and the secator.console logger.
 
 	The stream is looked up dynamically via sys so that monkey-patching (e.g. Click's
 	CliRunner) is reflected at write-time rather than captured at import-time.
+	Writes are forwarded to the logger only when it has at least one handler attached.
 	"""
 
 	def __init__(self, stream_name):
 		self._stream_name = stream_name
-		self._logger = None
 		self._buf = ''
 
 	@property
@@ -31,22 +33,22 @@ class ConsoleTee:
 
 	def write(self, data):
 		self._stream.write(data)
-		if self._logger and data:
+		if _console_logger.handlers and data:
 			self._buf += data
 			if '\n' in self._buf:
 				lines = self._buf.split('\n')
 				for line in lines[:-1]:
 					clean = _ANSI_ESCAPE.sub('', line)
 					if clean.strip():
-						self._logger.info(clean)
+						_console_logger.info(clean)
 				self._buf = lines[-1]
 
 	def flush(self):
 		self._stream.flush()
-		if self._logger and self._buf.strip():
+		if _console_logger.handlers and self._buf.strip():
 			clean = _ANSI_ESCAPE.sub('', self._buf)
 			if clean.strip():
-				self._logger.info(clean)
+				_console_logger.info(clean)
 			self._buf = ''
 
 	def fileno(self):
@@ -57,7 +59,7 @@ class ConsoleTee:
 
 
 def add_log_handler(path):
-	"""Add an additional FileHandler to the console logger (e.g. per-run reports folder).
+	"""Attach a RotatingFileHandler to the console logger for the given path.
 
 	Returns the handler so the caller can remove it later with remove_log_handler().
 	"""
@@ -65,8 +67,8 @@ def add_log_handler(path):
 	path.parent.mkdir(parents=True, exist_ok=True)
 	handler = RotatingFileHandler(str(path), maxBytes=10 * 1024 * 1024, backupCount=5)
 	handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
-	logger = logging.getLogger('secator.console')
-	logger.addHandler(handler)
+	_console_logger.setLevel(logging.DEBUG)
+	_console_logger.addHandler(handler)
 	return handler
 
 
@@ -76,36 +78,7 @@ def remove_log_handler(handler):
 		return
 	handler.flush()
 	handler.close()
-	logger = logging.getLogger('secator.console')
-	logger.handlers = [h for h in logger.handlers if h is not handler]
-
-
-def setup_file_logging(cfg_logs):
-	"""Attach a RotatingFileHandler to the console tees.
-
-	Must be called after CONFIG is loaded (end of config.py).
-	Is a no-op when cfg_logs.enabled is False.
-
-	Args:
-		cfg_logs: the CONFIG.logs DotMap (has .enabled, .path, .max_size_mb, .backup_count)
-	"""
-	if not cfg_logs.enabled:
-		return
-	log_path = cfg_logs.path
-	log_path.parent.mkdir(parents=True, exist_ok=True)
-	handler = RotatingFileHandler(
-		str(log_path),
-		maxBytes=int(cfg_logs.max_size_mb) * 1024 * 1024,
-		backupCount=int(cfg_logs.backup_count),
-	)
-	handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
-	logger = logging.getLogger('secator.console')
-	logger.handlers.clear()
-	logger.addHandler(handler)
-	logger.setLevel(logging.DEBUG)
-	logger.propagate = False
-	_stderr_tee._logger = logger
-	_stdout_tee._logger = logger
+	_console_logger.handlers = [h for h in _console_logger.handlers if h is not handler]
 
 
 _stderr_tee = ConsoleTee('stderr')

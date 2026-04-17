@@ -12,12 +12,11 @@ from dotmap import DotMap
 from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
 from secator.requests import requests
-from secator.rich import console, console_stdout, setup_file_logging
+from secator.rich import console, console_stdout
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 Directory = Annotated[Path, AfterValidator(lambda v: v.expanduser())]
-FilePath = Annotated[Path, AfterValidator(lambda v: v.expanduser())]
 StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.home())))]
 
 ROOT_FOLDER = Path(__file__).parent.parent
@@ -49,12 +48,11 @@ class Directories(StrictModel):
 	celery: Directory = ''
 	celery_data: Directory = ''
 	celery_results: Directory = ''
-	logs: Directory = ''
 
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'celery', 'celery_data', 'celery_results', 'logs']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -152,9 +150,6 @@ class Workspace(StrictModel):
 
 class Logs(StrictModel):
 	enabled: bool = True
-	path: FilePath = ''
-	max_size_mb: int = 10
-	backup_count: int = 10
 
 
 class Payloads(StrictModel):
@@ -487,12 +482,6 @@ class Config(DotMap):
 		if not self.celery.result_backend:
 			self.celery.result_backend = f'file://{self.dirs.celery_results}'
 
-		# Set default logs path if unset
-		# NOTE: if SECATOR_DIRS_LOGS is overridden via env, logs.path will not reflect it
-		# unless SECATOR_LOGS_PATH is also explicitly set. Same pattern as celery.result_backend.
-		if not self.logs.path:
-			self.logs.path = self.dirs.logs / 'secator.log'
-
 	@staticmethod
 	def load(schema, data: dict = {}, print_errors=True):
 		"""Validate a config using Pydantic.
@@ -746,11 +735,6 @@ for name, dir in CONFIG.dirs.items():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
 		dir.mkdir(parents=True)
 		console.print('[bold green]ok.[/]')
-
-# Set up file logging tee now that CONFIG.logs is known
-setup_file_logging(CONFIG.logs)
-if CONFIG.logs.enabled:
-	console.print(rf'\[[blue]INF[/]] Log saved at {CONFIG.logs.path}')
 
 # Download wordlists and payloads
 # download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
