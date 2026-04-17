@@ -749,6 +749,9 @@ for name, dir in CONFIG.dirs.items():
 
 # Set up file logging tee now that CONFIG.logs is known
 setup_file_logging(CONFIG.logs)
+if CONFIG.logs.enabled:
+	from secator.output_types import Info
+	console.print(Info(message=f'Log saved at {CONFIG.logs.path}'))
 
 # Download wordlists and payloads
 # download_files(CONFIG.wordlists.templates, CONFIG.dirs.wordlists, CONFIG.offline_mode, 'wordlist')
