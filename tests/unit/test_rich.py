@@ -141,3 +141,21 @@ class TestLogHandlers(unittest.TestCase):
 		from secator.rich import remove_log_handler
 		# Should not raise
 		remove_log_handler(None)
+
+	def test_concurrent_handlers_independent(self):
+		from secator.rich import add_log_handler, remove_log_handler
+		with tempfile.TemporaryDirectory() as tmpdir:
+			log_path1 = Path(tmpdir) / 'run1.log'
+			log_path2 = Path(tmpdir) / 'run2.log'
+			handler1 = add_log_handler(log_path1)
+			handler2 = add_log_handler(log_path2)
+			try:
+				logger = logging.getLogger('secator.console')
+				self.assertIn(handler1, logger.handlers)
+				self.assertIn(handler2, logger.handlers)
+				self.assertIsNot(handler1, handler2)
+				remove_log_handler(handler1)
+				self.assertNotIn(handler1, logger.handlers)
+				self.assertIn(handler2, logger.handlers)
+			finally:
+				remove_log_handler(handler2)

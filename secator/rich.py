@@ -13,6 +13,7 @@ from rich.table import Table
 _ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-9;?]*[ -/]*[@-~])')
 _console_logger = logging.getLogger('secator.console')
 _console_logger.propagate = False
+_console_logger.setLevel(logging.DEBUG)
 
 
 class ConsoleTee:
@@ -33,23 +34,26 @@ class ConsoleTee:
 
 	def write(self, data):
 		self._stream.write(data)
-		if _console_logger.handlers and data:
+		if data:
 			self._buf += data
+			if len(self._buf) > 10000:
+				self._buf = self._buf[-10000:]
 			if '\n' in self._buf:
 				lines = self._buf.split('\n')
-				for line in lines[:-1]:
-					clean = _ANSI_ESCAPE.sub('', line)
-					if clean.strip():
-						_console_logger.info(clean)
+				if _console_logger.handlers:
+					for line in lines[:-1]:
+						clean = _ANSI_ESCAPE.sub('', line)
+						if clean.strip():
+							_console_logger.info(clean)
 				self._buf = lines[-1]
 
 	def flush(self):
 		self._stream.flush()
-		if _console_logger.handlers and self._buf.strip():
+		if self._buf and _console_logger.handlers:
 			clean = _ANSI_ESCAPE.sub('', self._buf)
 			if clean.strip():
 				_console_logger.info(clean)
-			self._buf = ''
+		self._buf = ''
 
 	def fileno(self):
 		return self._stream.fileno()
@@ -67,7 +71,6 @@ def add_log_handler(path):
 	path.parent.mkdir(parents=True, exist_ok=True)
 	handler = RotatingFileHandler(str(path), maxBytes=10 * 1024 * 1024, backupCount=5)
 	handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
-	_console_logger.setLevel(logging.DEBUG)
 	_console_logger.addHandler(handler)
 	return handler
 
@@ -78,7 +81,7 @@ def remove_log_handler(handler):
 		return
 	handler.flush()
 	handler.close()
-	_console_logger.handlers = [h for h in _console_logger.handlers if h is not handler]
+	_console_logger.removeHandler(handler)
 
 
 _stderr_tee = ConsoleTee('stderr')

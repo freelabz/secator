@@ -983,6 +983,11 @@ class Runner:
 			return
 		if self.has_parent:
 			return
+		if CONFIG.logs.enabled:
+			from secator.rich import add_log_handler
+			log_path = self.reports_folder / 'secator.log'
+			self._run_log_handler = add_log_handler(log_path)
+			self._print(Info(message=f'Run log saved at {log_path}'), rich=True)
 		if self.config.type != 'task':
 			tree = textwrap.indent(build_runner_tree(self.config).render_tree(), '      ')
 			info = Info(message=f'{self.config.type.capitalize()} built:\n{tree}', _source=self.unique_name)
@@ -993,14 +998,13 @@ class Runner:
 			msg += f' ([dim]{self.description}[/])'
 		info = Info(message=f'{msg} {remote_str}', _source=self.unique_name)
 		self._print(info, rich=True)
-		if CONFIG.logs.enabled:
-			from secator.rich import add_log_handler
-			log_path = self.reports_folder / 'secator.log'
-			self._run_log_handler = add_log_handler(log_path)
-			self._print(Info(message=f'Run log saved at {log_path}'), rich=True)
 
 	def log_results(self):
 		"""Log runner results."""
+		if getattr(self, '_run_log_handler', None):
+			from secator.rich import remove_log_handler
+			remove_log_handler(self._run_log_handler)
+			self._run_log_handler = None
 		if not self.print_end:
 			return
 		if self.has_parent:
@@ -1014,10 +1018,6 @@ class Runner:
 		)
 		# fmt: on
 		self._print(info, rich=True)
-		if getattr(self, '_run_log_handler', None):
-			from secator.rich import remove_log_handler
-			remove_log_handler(self._run_log_handler)
-			self._run_log_handler = None
 
 	def export_reports(self):
 		"""Export reports."""
