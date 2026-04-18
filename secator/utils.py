@@ -1454,13 +1454,13 @@ def remove_duplicates(items):
 					if cls.get_name() == _type:
 						try:
 							return cls.load(item)._compare_key()
-						except Exception:
-							pass
+						except Exception as e:
+							debug(f'remove_duplicates: failed to load {_type}: {e}', sub='utils')
 			# Fallback: JSON-serialize sorted items
 			try:
 				return json.dumps(sorted(item.items()), sort_keys=True, default=str)
-			except Exception:
-				pass
+			except Exception as e:
+				debug(f'remove_duplicates: JSON fallback failed: {e}', sub='utils')
 		return id(item)
 
 	seen = OrderedDict()

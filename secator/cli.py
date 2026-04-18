@@ -938,13 +938,14 @@ def report():
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, workspace, driver):
+def report_show(ctx, report_query, output, time_delta, query, workspace, driver, dedupe):
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
 	current = get_file_timestamp()
-	workspace_name = workspace or getattr(CONFIG, 'default_workspace', '_default')
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
 
 	# 1. Parse path-based runner filter
 	runner_filter = parse_report_paths(report_query)
@@ -953,8 +954,9 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver)
 	mongo_query = python_expr_to_mongo(query) if query else {}
 
 	# 3. Merge filters
-	if '$or' in runner_filter and '$or' in mongo_query:
-		# Both have $or — use $and to require both conditions
+	overlap = set(runner_filter) & set(mongo_query)
+	if overlap:
+		# Preserve both constraints rather than letting one silently override
 		full_query = {'$and': [runner_filter, mongo_query]}
 	else:
 		full_query = {**runner_filter, **mongo_query}
@@ -973,6 +975,7 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver)
 		'config': DotMap({'name': f'consolidated_report_{current}', 'type': 'consolidated'}),
 		'name': 'runner',
 		'workspace_name': workspace_name,
+		'errors': [],
 		'context': {
 			'workspace_id': workspace_name,
 			'workspace_name': workspace_name,
@@ -995,8 +998,9 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver)
 	exporters = Runner.resolve_exporters(output)
 
 	# 6. Build and send report via QueryEngine
+	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
-	report.build(query=full_query, dedupe=True)
+	report.build(query=full_query, dedupe=dedupe_effective)
 	report.send()
 
 

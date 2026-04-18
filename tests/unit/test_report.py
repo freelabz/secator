@@ -83,7 +83,3 @@ class TestReportBuild:
         report.build(query={})
         assert 'results' in report.data
         assert 'info' in report.data
-        # Verify context was not poisoned with an empty list
-        import secator.report as report_module
-        # The fix ensures that context['results'] is either absent or non-empty after build
-        # We can't easily inspect engine context post-build, but we confirm no exception and valid output

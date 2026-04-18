@@ -42,7 +42,7 @@ class QueryBackend(ABC):
 
         return merged
 
-    def search(self, query: dict, limit: int = 0, dedupe: bool = False,
+    def search(self, query: dict, limit: int = 0,
                exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Execute query with enforced base query."""
         if exclude_fields is None:

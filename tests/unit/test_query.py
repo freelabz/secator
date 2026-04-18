@@ -223,10 +223,13 @@ class TestJsonBackend(unittest.TestCase):
         if len(all_types) < 2:
             return  # skip if only one type in fixture
 
-        types_list = list(all_types)
+        types_list = sorted(all_types)
+        selected = {types_list[0], types_list[1]}
         results = self.backend.search({'$or': [{'_type': types_list[0]}, {'_type': types_list[1]}]})
         result_types = {r.get('_type') for r in results}
-        assert types_list[0] in result_types or types_list[1] in result_types
+        assert result_types, 'expected at least one result from $or query'
+        assert result_types.issubset(selected), f'unexpected types leaked: {result_types - selected}'
+        assert result_types == selected, f'missing branch of $or: {selected - result_types}'
 
     def test_json_backend_or_with_additional_filter(self):
         """$or combined with top-level field filters must respect both."""
