@@ -22,7 +22,7 @@ with `,`. This produces one output string per unique group key.
 
 **How to run tests:**
 ```bash
-source /home/jahmyst/Workspace/secator/.venv/bin/activate
+source .venv/bin/activate
 secator test unit --test test_runners_helpers
 secator test unit --task search_vulns --test test_tasks
 secator test lint
@@ -70,7 +70,7 @@ def test_parse_extractor_string_no_group_by(self):
 **Step 2: Run tests to verify they fail**
 
 ```bash
-source /home/jahmyst/Workspace/secator/.venv/bin/activate
+source .venv/bin/activate
 secator test unit --test test_runners_helpers
 ```
 
@@ -646,7 +646,7 @@ To:
 **Step 2: Verify the YAML loads without error**
 
 ```bash
-source /home/jahmyst/Workspace/secator/.venv/bin/activate
+source .venv/bin/activate
 python -c "from secator.loader import get_configs_by_type; cfgs = get_configs_by_type('workflow'); print([c.name for c in cfgs])"
 ```
 

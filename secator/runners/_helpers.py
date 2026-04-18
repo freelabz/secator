@@ -215,7 +215,9 @@ def process_extractor(results, extractor, ctx=None):
 				group_key = _group_by.format(**item.toDict())
 				value = _field.format(**item.toDict())
 				prefix = value.split('~')[0] if '~' in value else value
-				groups.setdefault(group_key, []).append(prefix)
+				bucket = groups.setdefault(group_key, [])
+				if prefix not in bucket:
+					bucket.append(prefix)
 			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 		else:
 			results = [_field.format(**item.toDict()) for item in results]

@@ -55,6 +55,7 @@ class search_vulns(Vuln):
 
 	@staticmethod
 	def before_init(self):
+		self._targets_info_yielded = False
 		if len(self.inputs) != 1:
 			return
 		_in = self.inputs[0]
@@ -68,8 +69,14 @@ class search_vulns(Vuln):
 	@staticmethod
 	def on_json_loaded(self, item):
 		"""Load vulnerability items from search_vulns JSON output."""
-		matched_at_raw = self.matched_at if self.matched_at else self.inputs[0] if self.inputs else ''
-		matched_ats = matched_at_raw.split(',') if matched_at_raw else ['']
+		if self.matched_at:
+			matched_ats = self.matched_at.split(',')
+		else:
+			matched_ats = [self.inputs[0] if self.inputs else '']
+		if not getattr(self, '_targets_info_yielded', False):
+			targets_str = ', '.join(matched_ats)
+			yield Info(message=f'Targets: {targets_str}')
+			self._targets_info_yielded = True
 
 		values = item.values()
 		if not values:

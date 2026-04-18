@@ -19,7 +19,7 @@ the same principle to `search_vulns`: group all `{match}` values (host:port) tha
 
 ### Input format (unchanged `~` convention)
 
-```
+```text
 Before grouping (current):
   10.0.0.1:80~Apache httpd 2.4.50
   10.0.0.2:80~Apache httpd 2.4.50
@@ -110,7 +110,7 @@ for matched_at in matched_ats:
 
 ## Data Flow
 
-```
+```text
 nmap → Technology(match='10.0.0.1:80', product='Apache httpd', version='2.4.50')
        Technology(match='10.0.0.2:80', product='Apache httpd', version='2.4.50')
        Technology(match='10.0.0.3:80', product='nginx', version='1.21.0')

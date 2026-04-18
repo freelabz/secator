@@ -116,7 +116,7 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 					vulns.append(result)
 			break  # one fixture entry is enough
 
-		cve_count = len(list(fixture.values())[0].get('vulns', {}))
+		cve_count = len(next(iter(fixture.values())).get('vulns', {}))
 		self.assertEqual(len(vulns), cve_count)
 		for v in vulns:
 			self.assertEqual(v.matched_at, '10.0.0.1:80')
@@ -137,7 +137,7 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 					vulns.append(result)
 			break
 
-		cve_count = len(list(fixture.values())[0].get('vulns', {}))
+		cve_count = len(next(iter(fixture.values())).get('vulns', {}))
 		self.assertEqual(len(vulns), cve_count * 2)
 		matched_ats = {v.matched_at for v in vulns}
 		self.assertEqual(matched_ats, {'10.0.0.1:80', '10.0.0.2:80'})

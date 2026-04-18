@@ -321,7 +321,7 @@ class TestExtractorFunctions(unittest.TestCase):
             ]
         }
 
-        inputs, updated_opts, errors = run_extractors(results, opts)
+        inputs, _updated_opts, errors = run_extractors(results, opts)
         self.assertEqual(errors, [])
         self.assertEqual(len(inputs), 2)  # 2 unique services
         apache_input = next(i for i in inputs if 'apache' in i)
