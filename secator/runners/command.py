@@ -674,9 +674,6 @@ class Command(Runner):
 			except Exception:
 				pass
 
-		# Run on_interrupt hook — tasks can capture native resume files here
-		if hasattr(self, 'resolved_hooks'):
-			self.run_hooks('on_interrupt', sub='pause')
 		self.paused = True
 
 	def resume_process(self):

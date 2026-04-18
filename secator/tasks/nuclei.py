@@ -134,8 +134,8 @@ class nuclei(VulnMulti):
 			self.cmd += f' --resume {shlex.quote(resume_file)}'
 
 	@staticmethod
-	def on_interrupt(self):
-		"""Find and move the nuclei resume file to the .outputs folder."""
+	def on_interrupt(self, checkpoint):
+		"""Find and move the nuclei resume file to .outputs, then update checkpoint."""
 		import glob
 		import os
 		import shutil
@@ -150,6 +150,7 @@ class nuclei(VulnMulti):
 		try:
 			shutil.move(resume_src, resume_dst)
 			self.resume_file = resume_dst
+			checkpoint.resume_files[self.name] = resume_dst
 		except OSError:
 			pass
 

@@ -37,7 +37,7 @@ STATE_COLORS = {
 	'SUCCESS': 'bold green',
 	'FAILURE': 'bold red',
 	'REVOKED': 'bold magenta',
-	'PAUSED': 'bold cyan',
+	'PAUSED': 'bold hot_pink',
 	'SKIPPED': 'dim white',
 }
 

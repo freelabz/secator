@@ -38,8 +38,8 @@ class QueryEngine:
             results = self.context.get('results')
             return JsonBackend(workspace_name, context=self.context, results=results)
 
-    def search(self, query: dict, limit: int = 100, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
-        """Search for findings matching query."""
+    def search(self, query: dict, limit: int = None, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
+        """Search for findings matching query. Pass limit=None to fetch all results."""
         return self.backend.search(query, limit, exclude_fields)
 
     def count(self, query: dict) -> int:

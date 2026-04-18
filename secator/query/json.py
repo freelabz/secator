@@ -125,8 +125,8 @@ class JsonBackend(QueryBackend):
 		self._findings_cache = findings
 		return findings
 
-	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
-		"""Search findings matching query."""
+	def _execute_search(self, query: dict, limit: int = None, exclude_fields: list = None) -> List[Dict[str, Any]]:
+		"""Search findings matching query. Pass limit=None to fetch all results."""
 		findings = self._load_all_findings()
 
 		matched = []
@@ -136,7 +136,7 @@ class JsonBackend(QueryBackend):
 				if exclude_fields:
 					finding = {k: v for k, v in finding.items() if k not in exclude_fields}
 				matched.append(finding)
-				if len(matched) >= limit:
+				if limit and len(matched) >= limit:
 					break
 
 		return matched

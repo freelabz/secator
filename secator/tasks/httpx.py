@@ -136,8 +136,8 @@ class httpx(Http):
 		self._techs = {}
 
 	@staticmethod
-	def on_interrupt(self):
-		"""Find and move the httpx resume file to the .outputs folder."""
+	def on_interrupt(self, checkpoint):
+		"""Find and move the httpx resume file to .outputs, then update checkpoint."""
 		import shutil
 		# httpx writes resume.cfg to the current working directory
 		cwd = self.cwd or os.getcwd()
@@ -150,6 +150,7 @@ class httpx(Http):
 		try:
 			shutil.move(resume_src, resume_dst)
 			self.resume_file = resume_dst
+			checkpoint.resume_files[self.name] = resume_dst
 		except OSError:
 			pass
 

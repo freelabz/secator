@@ -1062,11 +1062,17 @@ class Runner:
 			pass
 
 	def _delete_pid_file(self):
-		"""Remove runner.pid from reports folder."""
+		"""Remove runner.pid from reports folder (only if owned by current process)."""
+		import os
 		try:
 			pid_path = Path(self.reports_folder) / 'runner.pid'
-			if pid_path.exists():
-				pid_path.unlink()
+			if not pid_path.exists():
+				return
+			with open(pid_path) as f:
+				data = json.load(f)
+			if data.get('pid') != os.getpid():
+				return
+			pid_path.unlink()
 		except Exception:
 			pass
 
@@ -1074,7 +1080,7 @@ class Runner:
 		"""Pause this runner: signal or kill subprocess, save checkpoint."""
 		from secator.runners.checkpoint import Checkpoint
 
-		# Pause subprocess if this is a Command
+		# Pause subprocess if this is a Command (sends signal, waits for cleanup)
 		if hasattr(self, 'pause_process'):
 			self.pause_process()
 			pause_method = self.pause_method or 'kill'
@@ -1083,13 +1089,7 @@ class Runner:
 			pause_method = 'kill'
 			process_pid = None
 
-		# Collect native resume file if set by on_interrupt hook
-		resume_files = {}
-		resume_file = getattr(self, 'resume_file', None)
-		if resume_file:
-			resume_files[self.name] = resume_file
-
-		# Save checkpoint
+		# Build initial checkpoint (resume_files may be updated by on_interrupt hooks)
 		cp = Checkpoint(
 			runner_type=getattr(self.config, 'type', 'task'),
 			runner_id=self.context.get('task_id') or self.context.get('workflow_id') or self.context.get('scan_id', ''),
@@ -1100,8 +1100,13 @@ class Runner:
 			completed_inputs=list(getattr(self, 'completed_inputs', [])),
 			pause_method=pause_method,
 			process_pid=process_pid,
-			resume_files=resume_files,
 		)
+
+		# Call on_interrupt hooks with the checkpoint so tasks can set resume files
+		# (and drivers like GCS can upload them and update checkpoint.resume_files)
+		if hasattr(self, 'run_hooks'):
+			self.run_hooks('on_interrupt', cp, sub='pause')
+
 		cp.save(self.reports_folder)
 		self.paused = True
 		self._print(Info(message=f'Runner paused. Resume with: secator resume {cp.runner_id}'), rich=True)
@@ -1139,7 +1144,7 @@ class Runner:
 			_signal.signal(_signal.SIGTSTP, _handle_pause)
 			_signal.signal(_signal.SIGUSR1, _handle_pause)
 		except (OSError, ValueError):
-			pass  # Not in main thread or platform doesn't support it
+			console.print(Warning(message='Cannot install signal handlers (not in main thread or unsupported platform)', _source=self.unique_name), highlight=False)  # noqa: E501
 
 	def export_profiler(self):
 		"""Export profiler."""

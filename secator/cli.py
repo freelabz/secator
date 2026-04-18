@@ -1246,6 +1246,23 @@ def pause_runner(runner_id):
 		console.print(Error(message=f'Could not pause runner {runner_id}: {e}'))
 
 
+def _resolve_resume_file(resume_path, task_name):
+	"""Resolve a resume file path: download from GCS if needed, verify existence locally."""
+	if not resume_path:
+		return None
+	if resume_path.startswith('gs://'):
+		try:
+			from secator.hooks.gcs import download_resume_file
+			from secator.config import CONFIG
+			local_path = str(CONFIG.dirs.data / '.resume_files' / task_name / resume_path.split('/')[-1])
+			resume_path = download_resume_file(resume_path, local_path)
+			debug(f'Downloaded GCS resume file to {local_path}', sub='cli.resume')
+		except Exception as e:
+			debug(f'Could not download resume file from GCS: {e}', sub='cli.resume')
+			return None
+	return resume_path if os.path.exists(resume_path) else None
+
+
 @cli.command(name='resume')
 @click.argument('runner_id')
 @click.option('--sync', is_flag=True, default=False, help='Run resumed task synchronously.')
@@ -1353,16 +1370,23 @@ def resume_runner(runner_id, sync):
 	run_opts['sync'] = sync
 	context = checkpoint.context.copy()  # preserves original task_id/workflow_id/etc.
 
+	# Resolve resume files: download from GCS if remote, else verify local existence
+	resolved_resume_files = {}
+	for task_name, resume_path in (checkpoint.resume_files or {}).items():
+		local_path = _resolve_resume_file(resume_path, task_name)
+		if local_path:
+			resolved_resume_files[task_name] = local_path
+
 	# Pass native resume file to task opts (e.g. --resume flag for nuclei/httpx/nmap)
-	if checkpoint.runner_type == 'task' and checkpoint.resume_files:
-		resume_file = checkpoint.resume_files.get(checkpoint.runner_name)
-		if resume_file and os.path.exists(resume_file):
+	if checkpoint.runner_type == 'task' and resolved_resume_files:
+		resume_file = resolved_resume_files.get(checkpoint.runner_name)
+		if resume_file:
 			run_opts['resume_file'] = resume_file
 			console.print(Info(message=f'Using native resume file: {resume_file}'))
 
 	# Pass resume_files map for workflow/scan runners so tasks can pick them up
-	if checkpoint.runner_type in ('workflow', 'scan') and checkpoint.resume_files:
-		run_opts['resume_files'] = checkpoint.resume_files
+	if checkpoint.runner_type in ('workflow', 'scan') and resolved_resume_files:
+		run_opts['resume_files'] = resolved_resume_files
 
 	# For workflows: skip already-completed tasks
 	if checkpoint.runner_type == 'workflow' and checkpoint.task_states:
@@ -1378,7 +1402,7 @@ def resume_runner(runner_id, sync):
 		try:
 			from secator.query import QueryEngine
 			qe = QueryEngine(workspace_name, context=context)
-			prior_results = qe.search({}, limit=10000)
+			prior_results = qe.search({})
 			if prior_results:
 				console.print(Info(message=f'Pre-loaded {len(prior_results)} prior results from workspace'))
 		except Exception as e:

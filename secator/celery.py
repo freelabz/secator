@@ -109,7 +109,11 @@ def _update_workflow_checkpoint(completed_runner):
 	from secator.runners.checkpoint import Checkpoint
 	from secator.runners._base import Runner
 
-	parent_id = completed_runner.context.get('workflow_id') or completed_runner.context.get('scan_id')
+	# For chunked tasks, use the task_id context to find the parent runner
+	if completed_runner.chunk is not None:
+		parent_id = completed_runner.context.get('task_id')
+	else:
+		parent_id = completed_runner.context.get('workflow_id') or completed_runner.context.get('scan_id')
 	if not parent_id:
 		return
 	parent_folder = Runner.find_runner_folder(parent_id)
@@ -264,6 +268,9 @@ def run_command(self, results, name, targets, opts={}):
 		# Save checkpoint on unexpected kill/revoke
 		if task.started and not task.done:
 			from secator.runners.checkpoint import Checkpoint
+			resume_files = {}
+			if getattr(task, 'resume_file', None):
+				resume_files[name] = task.resume_file
 			cp = Checkpoint(
 				runner_type='task',
 				runner_id=context.get('task_id', self.request.id),
@@ -273,6 +280,7 @@ def run_command(self, results, name, targets, opts={}):
 				context=context,
 				completed_inputs=list(getattr(task, 'completed_inputs', [])),
 				pause_method='kill',
+				resume_files=resume_files,
 			)
 			cp.save(task.reports_folder)
 			save_celery_checkpoint(cp)
