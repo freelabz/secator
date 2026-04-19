@@ -3,6 +3,7 @@
 import json
 import re
 
+
 def parse_report_paths(paths_str):
     """Convert comma-separated path strings to a MongoDB-style runner filter.
 
