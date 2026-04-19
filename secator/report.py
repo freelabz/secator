@@ -1,31 +1,7 @@
-import operator
-
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType
+from secator.output_types import FINDING_TYPES
 from secator.utils import get_file_timestamp, traceback_as_string
 from secator.rich import console
-from secator.runners._helpers import extract_from_results
-
-import concurrent.futures
-from threading import Lock
-
-
-def remove_duplicates(objects):
-	unique_objects = []
-	lock = Lock()
-
-	def add_if_unique(obj):
-		nonlocal unique_objects  # noqa: F824
-		with lock:
-			# Perform linear search to check for duplicates
-			if all(obj != existing_obj for existing_obj in unique_objects):
-				unique_objects.append(obj)
-
-	with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
-		# Execute the function concurrently for each object
-		executor.map(add_if_unique, objects)
-
-	return unique_objects
 
 
 # TODO: initialize from data, not from runner
@@ -55,8 +31,17 @@ class Report:
 					f'{str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',
 				)
 
-	def build(self, extractors=[], dedupe=CONFIG.runners.remove_duplicates):
-		# Prepare report structure
+	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates):
+		"""Build report data structure using QueryEngine for filtering and dedup.
+
+		Args:
+			query (dict): MongoDB-style filter query (e.g. {'_type': 'vulnerability'}).
+			dedupe (bool): Whether to remove duplicate results.
+		"""
+		if query is None:
+			query = {}
+		from secator.query import QueryEngine
+
 		runner_fields = {
 			'name',
 			'status',
@@ -75,48 +60,33 @@ class Report:
 		if 'results' in data['info']:
 			del data['info']['results']
 		data['info']['title'] = self.title
-		data['info']['errors'] = self.runner.errors
+		data['info']['errors'] = getattr(self.runner, 'errors', [])
 
-		# Fill report
+		# Build context for QueryEngine.
+		# Pass runner.results directly (OutputType objects or dicts) to avoid
+		# costly serialization. An absent 'results' key tells JsonBackend to
+		# scan the filesystem instead.
+		context = dict(getattr(self.runner, 'context', {}) or {})
+		if 'results' not in context or not context.get('results'):
+			raw_results = getattr(self.runner, 'results', []) or []
+			if raw_results:
+				context['results'] = raw_results
+			elif 'results' in context:
+				# Remove empty list so JsonBackend falls through to filesystem scan
+				del context['results']
+		if 'workspace_name' not in context:
+			context['workspace_name'] = self.workspace_name
+
+		engine = QueryEngine(self.workspace_name, context=context)
+		results = engine.search(query, dedupe=dedupe)
+
 		for output_type in FINDING_TYPES:
 			output_name = output_type.get_name()
-			sort_by, _ = get_table_fields(output_type)
-			items = [
-				item for item in self.runner.results
-				if isinstance(item, OutputType) and item._type == output_name
+			data['results'][output_name] = [
+				r for r in results
+				if (r.get('_type') if isinstance(r, dict) else getattr(r, '_type', None)) == output_name
 			]
-			if items:
-				if sort_by and all(sort_by):
-					try:
-						items = sorted(items, key=operator.attrgetter(*sort_by))
-					except TypeError as e:
-						console.print(f'[bold red]Could not sort {output_name} by {sort_by}: {str(e)}[/]')
-						console.print(f'[dim]{traceback_as_string(e)}[/]')
-				if dedupe:
-					items = remove_duplicates(items)
-				if extractors:
-					all_res = []
-					extractors_type = [extractor for extractor in extractors if extractor.get('type') == output_name]
-					for extractor in extractors_type:
-						op = extractor.get('op', 'or')
-						res, errors = extract_from_results(items, extractors=[extractor])
-						# console.print(f'{extractor} --> {len(res)} results')
-						if not res:
-							continue
-						if errors:
-							data['info']['errors'] = errors
-						if res:
-							if op == 'or':
-								all_res = all_res + res
-							else:
-								if not all_res:
-									all_res = res
-								else:
-									all_res = [item for item in res if item in all_res]
-					items = remove_duplicates(all_res) if dedupe else all_res
-				data['results'][output_name] = items
 
-		# Save data
 		self.data = data
 
 	def is_empty(self):

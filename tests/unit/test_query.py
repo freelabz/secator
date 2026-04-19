@@ -32,10 +32,6 @@ class TestQueryBackendBase(unittest.TestCase):
         self.assertTrue(hasattr(QueryBackend, 'PROTECTED_FIELDS'))
         self.assertIn('_context.workspace_id', QueryBackend.PROTECTED_FIELDS)
 
-    def test_default_limit_constant(self):
-        from secator.query._base import QueryBackend
-        self.assertEqual(QueryBackend.DEFAULT_LIMIT, 100)
-
     def test_merge_query_enforces_base(self):
         backend = self._create_test_backend(workspace_id='ws123')
 
@@ -95,11 +91,17 @@ class TestJsonBackend(unittest.TestCase):
         import tempfile
         import json
         from pathlib import Path
+        from secator.query.json import JsonBackend
 
         self.temp_dir = tempfile.mkdtemp()
         self.workspace_id = 'test_workspace'
-        self.workspace_dir = Path(self.temp_dir) / self.workspace_id / 'tasks' / '0'
+        self.task_id = '0'
+        self.workspace_dir = Path(self.temp_dir) / self.workspace_id / 'tasks' / self.task_id
         self.workspace_dir.mkdir(parents=True)
+        self.backend = JsonBackend(
+            workspace_id=self.workspace_id,
+            config={'reports_dir': self.temp_dir}
+        )
 
         # Create test report.json
         self.test_data = {
@@ -206,6 +208,57 @@ class TestJsonBackend(unittest.TestCase):
 
         count = backend.count({'_type': 'vulnerability'})
         self.assertEqual(count, 2)
+
+    def test_json_backend_injects_context_from_path(self):
+        """Findings from tasks/{id}/report.json should have _context.task_id injected."""
+        results = self.backend.search({'_context.task_id': self.task_id})
+        assert len(results) > 0
+        for result in results:
+            assert result.get('_context', {}).get('task_id') == self.task_id
+
+    def test_json_backend_or_query(self):
+        """$or query should match items satisfying any sub-condition."""
+        all_results = self.backend.search({})
+        all_types = {r.get('_type') for r in all_results}
+        if len(all_types) < 2:
+            return  # skip if only one type in fixture
+
+        types_list = sorted(all_types)
+        selected = {types_list[0], types_list[1]}
+        results = self.backend.search({'$or': [{'_type': types_list[0]}, {'_type': types_list[1]}]})
+        result_types = {r.get('_type') for r in results}
+        assert result_types, 'expected at least one result from $or query'
+        assert result_types.issubset(selected), f'unexpected types leaked: {result_types - selected}'
+        assert result_types == selected, f'missing branch of $or: {selected - result_types}'
+
+    def test_json_backend_or_with_additional_filter(self):
+        """$or combined with top-level field filters must respect both."""
+        # Get a known type from the fixture
+        all_results = self.backend.search({})
+        all_types = list({r.get('_type') for r in all_results})
+        if not all_types:
+            return
+        known_type = all_types[0]
+        # Query: match known_type OR task_id='nonexistent', but also require a field that doesn't exist
+        results = self.backend.search({
+            '$or': [{'_type': known_type}],
+            'definitely_nonexistent_field_xyz': 'impossible_value'
+        })
+        # The AND of ($or matches) AND (field doesn't match) = no results
+        assert len(results) == 0
+
+    def test_json_backend_and_query(self):
+        """$and query should require all sub-conditions."""
+        all_results = self.backend.search({})
+        if not all_results:
+            return
+        first_type = all_results[0].get('_type')
+        # $and with matching conditions = results
+        results = self.backend.search({'$and': [{'_type': first_type}, {'_type': first_type}]})
+        assert len(results) > 0
+        # $and with contradictory conditions = no results
+        results = self.backend.search({'$and': [{'_type': first_type}, {'_type': '__impossible__'}]})
+        assert len(results) == 0
 
 
 class TestQueryOperators(unittest.TestCase):
@@ -326,3 +379,30 @@ class TestQueryEngine(unittest.TestCase):
         # When both are available, MongoDB takes priority
         engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
         self.assertIsInstance(engine.backend, MongoDBBackend)
+
+    def test_query_engine_search_dedupe_removes_duplicates(self):
+        """QueryEngine.search(dedupe=True) should remove duplicate findings."""
+        from secator.query import QueryEngine
+        duplicate_finding = {
+            '_type': 'vulnerability',
+            'name': 'CVE-2021-1234',
+            'severity': 'high',
+            '_context': {'workspace_id': 'test_ws', 'workspace_duplicate': False},
+            'is_false_positive': False
+        }
+        engine = QueryEngine('test_ws', context={'results': [duplicate_finding, duplicate_finding.copy()]})
+        results = engine.search({}, dedupe=True)
+        assert len(results) == 1
+
+    def test_query_engine_search_no_dedupe_keeps_duplicates(self):
+        """QueryEngine.search(dedupe=False) should keep all findings."""
+        from secator.query import QueryEngine
+        duplicate_finding = {
+            '_type': 'vulnerability',
+            'name': 'CVE-2021-1234',
+            '_context': {'workspace_id': 'test_ws', 'workspace_duplicate': False},
+            'is_false_positive': False
+        }
+        engine = QueryEngine('test_ws', context={'results': [duplicate_finding, duplicate_finding.copy()]})
+        results = engine.search({}, dedupe=False)
+        assert len(results) == 2

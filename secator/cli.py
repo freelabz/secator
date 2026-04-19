@@ -30,7 +30,7 @@ from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
 	debug, detect_host, flatten, print_version, get_file_date,
-	sort_files_by_date, get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
+	get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
 	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
 )
 from contextlib import nullcontext
@@ -931,171 +931,81 @@ def report():
 	pass
 
 
-def process_query(query, fields=None):
-	if fields is None:
-		fields = []
-	otypes = [o.__name__.lower() for o in FINDING_TYPES]
-	extractors = []
-
-	# Process fields
-	fields_filter = {}
-	if fields:
-		for field in fields:
-			parts = field.split('.')
-			if len(parts) == 2:
-				_type, field = parts
-			else:
-				_type = parts[0]
-				field = None
-			if _type not in otypes:
-				console.print(Error(message='Invalid output type: ' + _type))
-				sys.exit(1)
-			fields_filter[_type] = field
-
-	# No query
-	if not query:
-		if fields:
-			extractors = [{'type': field_type, 'field': field, 'condition': 'True', 'op': 'or'} for field_type, field in fields_filter.items()]  # noqa: E501
-		return extractors
-
-	# Get operator
-	operator = '||'
-	if '&&' in query and '||' in query:
-		console.print(Error(message='Cannot mix && and || in the same query'))
-		sys.exit(1)
-	elif '&&' in query:
-		operator = '&&'
-	elif '||' in query:
-		operator = '||'
-
-	# Process query
-	query = query.split(operator)
-	for part in query:
-		part = part.strip()
-		split_part = part.split('.')
-		_type = split_part[0]
-		if _type not in otypes:
-			console.print(Error(message='Invalid output type: ' + _type))
-			sys.exit(1)
-		if fields and _type not in fields_filter:
-			console.print(Warning(message='Type not allowed by --filter field: ' + _type + ' (allowed: ' + ', '.join(fields_filter.keys()) + '). Ignoring extractor.'))  # noqa: E501
-			continue
-		extractor = {
-			'type': _type,
-			'condition': part or 'True',
-			'op': 'and' if operator == '&&' else 'or'
-		}
-		field = fields_filter.get(_type)
-		if field:
-			extractor['field'] = field
-		extractors.append(extractor)
-	return extractors
-
-
 @report.command('show')
 @click.argument('report_query', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
-@click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('-f', '--format', "_format", type=str, default='', help=f'Format output, comma-separated of: <output_type> or <output_type>.<field>. [bold]Allowed output types[/]: {", ".join(FINDING_TYPES_LOWER)}')  # noqa: E501
-@click.option('-q', '--query', type=str, default=None, help='Query results using a Python expression')
+@click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('-u', '--unified', is_flag=True, default=False, help='Show unified results (merge reports and de-duplicates results)')  # noqa: E501
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.pass_context
-def report_show(ctx, report_query, output, runner_type, time_delta, _format, query, workspace, unified):
-	"""Show report results and filter on them."""
+def report_show(ctx, report_query, output, time_delta, query, workspace, driver, dedupe):
+	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
+	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
-	# Get report query from piped input
-	if ctx.obj['piped_input']:
-		report_query = ','.join(sys.stdin.read().splitlines())
-		unified = True
-
-	# Get extractors
-	extractors = process_query(query, fields=_format.split(',') if _format else [])
-	if extractors:
-		console.print(':wrench: [bold gold3]Showing query summary[/]')
-		op = extractors[0]['op']
-		console.print(f':carousel_horse: [bold blue]Op[/] [bold orange3]->[/] [bold green]{op.upper()}[/]')
-		for extractor in extractors:
-			console.print(f':zap: [bold blue]{extractor["type"].title()}[/] [bold orange3]->[/] [bold green]{extractor["condition"]}[/]', highlight=False)  # noqa: E501
-
-	# Build runner instance
 	current = get_file_timestamp()
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
+
+	# 1. Parse path-based runner filter
+	runner_filter = parse_report_paths(report_query)
+	debug('runner paths filter', sub='query', obj=runner_filter)
+
+	# 2. Translate -q expression to MongoDB style
+	debug('original query expr', sub='query', obj={'raw': query or ''})
+	mongo_query = python_expr_to_mongo(query) if query else {}
+	debug('converted mongo query', sub='query', obj=mongo_query)
+
+	# 3. Merge filters
+	overlap = set(runner_filter) & set(mongo_query)
+	if overlap:
+		# Preserve both constraints rather than letting one silently override
+		full_query = {'$and': [runner_filter, mongo_query]}
+	else:
+		full_query = {**runner_filter, **mongo_query}
+	debug('full query', sub='query', obj=full_query)
+
+	# 4. Add time delta filter if provided
+	if time_delta:
+		delta = human_to_timedelta(time_delta)
+		if delta:
+			import datetime
+			cutoff = datetime.datetime.now(datetime.timezone.utc) - delta
+			full_query['_timestamp'] = {'$gte': cutoff.timestamp()}
+
+	# 5. Build runner context for QueryEngine backend selection
+	drivers = [driver] if driver and driver != 'local' else []
 	runner = DotMap({
-		"config": {
-			"name": f"consolidated_report_{current}"
+		'config': DotMap({'name': f'consolidated_report_{current}', 'type': 'consolidated'}),
+		'name': 'runner',
+		'workspace_name': workspace_name,
+		'errors': [],
+		'context': {
+			'workspace_id': workspace_name,
+			'workspace_name': workspace_name,
+			'drivers': drivers,
 		},
-		"name": "runner",
-		"workspace_name": "_consolidated",
-		"reports_folder": Path.cwd(),
+		'reports_folder': Path.cwd(),
 	})
+	runner.toDict = lambda: {
+		'name': runner.name,
+		'status': 'completed',
+		'targets': [],
+		'start_time': None,
+		'end_time': None,
+		'elapsed': None,
+		'elapsed_human': None,
+		'run_opts': {},
+		'results_count': 0,
+	}
+
 	exporters = Runner.resolve_exporters(output)
 
-	# Build report queries from fuzzy input
-	paths = []
-	report_query = report_query.split(',') if report_query else []
-	load_all_reports = not report_query or any([not Path(p).exists() for p in report_query])  # fuzzy query, need to load all reports  # noqa: E501
-	all_reports = []
-	if load_all_reports or workspace:
-		all_reports = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
-	if not report_query:
-		report_query = all_reports
-	for query in report_query:
-		query = str(query)
-		if not query.endswith('/'):
-			query += '/'
-		path = Path(query)
-		if not path.exists():
-			matches = []
-			for path in all_reports:
-				if query in str(path):
-					matches.append(path)
-			if not matches:
-				console.print(
-					f'[bold orange3]Query {query} did not return any matches. [/][bold green]Ignoring.[/]')
-			paths.extend(matches)
-		else:
-			paths.append(path)
-	paths = sort_files_by_date(paths)
-
-	# Load reports, extract results
-	all_results = []
-	for ix, path in enumerate(paths):
-		if unified:
-			if ix == 0:
-				console.print(f'\n:wrench: [bold gold3]Loading {len(paths)} reports ...[/]')
-			console.print(rf':file_cabinet: Loading {path} \[[bold yellow4]{ix + 1}[/]/[bold yellow4]{len(paths)}[/]] \[results={len(all_results)}]...')  # noqa: E501
-		with open(path, 'r') as f:
-			try:
-				data = loads_dataclass(f.read())
-				info = get_info_from_report_path(path)
-				runner_type = info.get('type', 'unknowns')[:-1]
-				runner.results = flatten(list(data['results'].values()))
-				if unified:
-					all_results.extend(runner.results)
-					continue
-				report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
-				report.build(extractors=extractors if not unified else [], dedupe=unified)
-				file_date = get_file_date(path)
-				runner_name = data['info']['name']
-				if not report.is_empty():
-					console.print(
-						f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner_type}[/]) ([dim]{file_date}[/]):')
-				if report.is_empty():
-					if len(paths) == 1:
-						console.print(Warning(message='No results in report.'))
-					continue
-				report.send()
-			except json.decoder.JSONDecodeError as e:
-				console.print(Error(message=f'Could not load {path}: {str(e)}'))
-
-	if unified:
-		console.print(f'\n:wrench: [bold gold3]Building report by crunching {len(all_results)} results ...[/]', end='')
-		console.print(' (:coffee: [dim]this can take a while ...[/])')
-		runner.results = all_results
-		report = Report(runner, title=f"Consolidated report - {current}", exporters=exporters)
-		report.build(extractors=extractors, dedupe=True)
-		report.send()
+	# 6. Build and send report via QueryEngine
+	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
+	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
+	report.build(query=full_query, dedupe=dedupe_effective)
+	report.send()
 
 
 @report.command('list')
@@ -1486,8 +1396,8 @@ r list [blue]-ws[/] [bright_magenta]prod[/]           [dim]# list reports from t
 r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
 
 [dim]# Show and filter results...[/]
-r show [blue]-q[/] [bright_magenta]"url.status_code not in ['401', '403']"[/] [blue]-o[/] [bright_magenta]txt[/]                                 [dim]# show urls with status 401 or 403, save to txt file[/]
-r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"tag.match and 'signup.php' in tag.match"[/] [blue]--unified[/] [blue]-o[/] [bright_magenta]json[/]  [dim]# show tags with targets matching 'signup.php' from tasks 10 and 11[/]
+r show [blue]-q[/] [bright_magenta]"vulnerability.severity_score >= 7"[/] [blue]-o[/] [bright_magenta]txt[/]                                      [dim]# show high-severity vulnerabilities, save to txt file[/]
+r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"port.state == 'open'"[/] [blue]-o[/] [bright_magenta]json[/]           [dim]# show open ports from tasks 10 and 11[/]
 """,  # noqa: E501
 		title=f":file_cabinet: [{title_style}]Digging into reports[/]", **kwargs)
 

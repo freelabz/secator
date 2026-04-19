@@ -11,8 +11,6 @@ class QueryBackend(ABC):
 
     name: str = "base"
 
-    DEFAULT_LIMIT = 100
-
     PROTECTED_FIELDS = [
         "_context.workspace_id",
         "_context.workspace_duplicate",
@@ -44,10 +42,9 @@ class QueryBackend(ABC):
 
         return merged
 
-    def search(self, query: dict, limit: int = None, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
+    def search(self, query: dict, limit: int = 0,
+               exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Execute query with enforced base query."""
-        if limit is None:
-            limit = self.DEFAULT_LIMIT
         if exclude_fields is None:
             exclude_fields = []
         safe_query = self._merge_query(query)

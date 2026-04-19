@@ -18,7 +18,7 @@ class CsvExporter(Exporter):
 		for output_type, items in results.items():
 			output_cls = [o for o in FINDING_TYPES if o._type == output_type][0]
 			keys = [o.name for o in fields(output_cls)]
-			items = [i.toDict() for i in items]
+			items = [i.toDict() if hasattr(i, 'toDict') else i for i in items]
 			if not items:
 				continue
 			csv_path = f'{self.report.output_folder}/report_{output_type}.csv'
@@ -27,6 +27,9 @@ class CsvExporter(Exporter):
 				dict_writer = _csv.DictWriter(output_file, keys)
 				dict_writer.writeheader()
 				dict_writer.writerows(items)
+
+		if not csv_paths:
+			return
 
 		if len(csv_paths) == 1:
 			csv_paths_str = csv_paths[0]
