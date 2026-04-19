@@ -13,6 +13,7 @@ class Report:
 		title (str): Report title.
 		exporters (list): List of exporter classes.
 	"""
+
 	def __init__(self, runner, title=None, exporters=[]):
 		self.title = title or f'{runner.config.type}_{runner.config.name}'
 		self.runner = runner
@@ -27,8 +28,7 @@ class Report:
 				report_cls(self).send()
 			except Exception as e:
 				console.print(
-					f'[bold red]Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: '
-					f'{str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',
+					f'[bold red]Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',  # noqa: E501
 				)
 
 	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates):
@@ -51,12 +51,9 @@ class Report:
 			'elapsed',
 			'elapsed_human',
 			'run_opts',
-			'results_count'
+			'results_count',
 		}
-		data = {
-			'info': {k: v for k, v in self.runner.toDict().items() if k in runner_fields},
-			'results': {}
-		}
+		data = {'info': {k: v for k, v in self.runner.toDict().items() if k in runner_fields}, 'results': {}}
 		if 'results' in data['info']:
 			del data['info']['results']
 		data['info']['title'] = self.title
@@ -82,10 +79,7 @@ class Report:
 
 		for output_type in FINDING_TYPES:
 			output_name = output_type.get_name()
-			data['results'][output_name] = [
-				r for r in results
-				if (r.get('_type') if isinstance(r, dict) else getattr(r, '_type', None)) == output_name
-			]
+			data['results'][output_name] = [r for r in results if (r.get('_type') if isinstance(r, dict) else getattr(r, '_type', None)) == output_name]  # noqa: E501
 
 		self.data = data
 
