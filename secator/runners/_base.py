@@ -1001,13 +1001,11 @@ class Runner:
 
 	def log_results(self):
 		"""Log runner results."""
-		if getattr(self, '_run_log_handler', None):
-			from secator.rich import remove_log_handler
-			remove_log_handler(self._run_log_handler)
-			self._run_log_handler = None
-		if not self.print_end:
-			return
-		if self.has_parent:
+		if not self.print_end or self.has_parent:
+			if getattr(self, '_run_log_handler', None):
+				from secator.rich import remove_log_handler
+				remove_log_handler(self._run_log_handler)
+				self._run_log_handler = None
 			return
 		# fmt: off
 		info = Info(
@@ -1018,6 +1016,10 @@ class Runner:
 		)
 		# fmt: on
 		self._print(info, rich=True)
+		if getattr(self, '_run_log_handler', None):
+			from secator.rich import remove_log_handler
+			remove_log_handler(self._run_log_handler)
+			self._run_log_handler = None
 
 	def export_reports(self):
 		"""Export reports."""
