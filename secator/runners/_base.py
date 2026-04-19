@@ -251,6 +251,18 @@ class Runner:
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
 
+	def __getstate__(self):
+		state = self.__dict__.copy()
+		handler = state.pop('_run_log_handler', None)
+		if handler:
+			from secator.rich import remove_log_handler
+			remove_log_handler(handler)
+		return state
+
+	def __setstate__(self, state):
+		self.__dict__.update(state)
+		self._run_log_handler = None
+
 	def _process_config(self, config):
 		"""Process the configuration in different formats (dict, TemplateLoader, DotMap).
 
