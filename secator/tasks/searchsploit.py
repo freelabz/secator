@@ -117,4 +117,6 @@ class searchsploit(Command):
 		input_tag = '-'.join(self.inputs[0].replace('\'', '').split(' '))
 		item.tags = [input_tag] + item.tags
 		item.matched_at = item.matched_at or (self.matched_at if self.matched_at else self.inputs[0] if self.inputs else '')
+		if self.inputs:
+			item.extra_data['service_name'] = self.inputs[0]
 		return item
