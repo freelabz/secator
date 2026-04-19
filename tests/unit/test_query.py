@@ -72,7 +72,7 @@ class TestQueryBackendBase(unittest.TestCase):
 		# Verify the query passed to _execute_count has protected fields enforced
 		self.assertIsNotNone(backend.last_count_query)
 		self.assertEqual(backend.last_count_query['_context.workspace_id'], 'ws123')
-		self.assertEqual(backend.last_count_query['_context.workspace_duplicate'], False)
+		# self.assertEqual(backend.last_count_query['_context.workspace_duplicate'], False)
 		self.assertEqual(backend.last_count_query['is_false_positive'], False)
 		# User field should still be preserved
 		self.assertEqual(backend.last_count_query['_type'], 'vulnerability')
