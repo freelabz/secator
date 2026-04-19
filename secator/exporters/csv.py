@@ -28,6 +28,9 @@ class CsvExporter(Exporter):
 				dict_writer.writeheader()
 				dict_writer.writerows(items)
 
+		if not csv_paths:
+			return
+
 		if len(csv_paths) == 1:
 			csv_paths_str = csv_paths[0]
 		else:
