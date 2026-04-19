@@ -508,12 +508,15 @@ class Command(Runner):
 				cwd=self.cwd,
 			)
 
-			# Initialize monitor objects and start monitor thread
-			self._init_monitor_objects()
+			# Start monitor thread only if there's something to monitor
 			self.process_start_time = time()
-			self.monitor_stop_event.clear()
-			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
-			self.monitor_thread.start()
+			has_memory_limit = self.memory_limit_mb and self.memory_limit_mb != -1
+			has_timeout = CONFIG.celery.task_max_timeout != -1
+			if self.print_stat or has_memory_limit or has_timeout:
+				self._init_monitor_objects()
+				self.monitor_stop_event.clear()
+				self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
+				self.monitor_thread.start()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
@@ -658,16 +661,19 @@ class Command(Runner):
 				current_time = time()
 				self.debug('Collecting monitor items', sub='monitor')
 
-				# Collect and queue stats at regular intervals
-				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
+				# Collect and queue stats at regular intervals (only when needed)
+				has_memory_limit = self.memory_limit_mb and self.memory_limit_mb != -1
+				should_collect = (self.print_stat or has_memory_limit)
+				if should_collect and (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
 					stats_items = list(self._collect_stats())
-					for stat_item in stats_items:
-						if self.monitor_queue is not None:
-							self.monitor_queue.put(stat_item)
+					if self.print_stat:
+						for stat_item in stats_items:
+							if self.monitor_queue is not None:
+								self.monitor_queue.put(stat_item)
 					last_stats_time = current_time
 
 					# Check memory usage from collected stats
-					if self.memory_limit_mb and self.memory_limit_mb != -1:
+					if has_memory_limit:
 						total_mem = sum(stat_item.memory for stat_item in stats_items)
 						if total_mem > self.memory_limit_mb:
 							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
@@ -771,14 +777,11 @@ class Command(Runner):
 			process (subprocess.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
 		"""
+		_STAT_FIELDS = ['pid', 'name', 'cpu_percent', 'memory_info', 'net_connections']
 		try:
-			# fmt: off
-			data = {
-				k: v._asdict() if hasattr(v, '_asdict') else v
-				for k, v in process.as_dict().items()
-				if k not in ['memory_maps', 'open_files', 'environ']
-			}
-			# fmt: on
+			data = process.as_dict(attrs=_STAT_FIELDS)
+			if data.get('memory_info'):
+				data['memory_info'] = data['memory_info']._asdict()
 			yield data
 		except (psutil.Error, FileNotFoundError):
 			return
