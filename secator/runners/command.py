@@ -504,6 +504,7 @@ class Command(Runner):
 				universal_newlines=True,
 				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
 				shell=self.shell,
+				errors='replace',
 				env=env,
 				cwd=self.cwd,
 			)
