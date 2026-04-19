@@ -3,17 +3,6 @@
 import json
 import re
 
-# Maps path prefix -> _context field singular name
-_RUNNER_TYPE_MAP = {
-    'scans': 'scan',
-    'scan': 'scan',
-    'tasks': 'task',
-    'task': 'task',
-    'workflows': 'workflow',
-    'workflow': 'workflow',
-}
-
-
 def parse_report_paths(paths_str):
     """Convert comma-separated path strings to a MongoDB-style runner filter.
 
@@ -36,9 +25,8 @@ def parse_report_paths(paths_str):
         runner_type, runner_id = part.split('/', 1)
         runner_type = runner_type.strip().lower()
         runner_id = runner_id.strip().rstrip('/')
-        singular = _RUNNER_TYPE_MAP.get(runner_type)
-        if singular:
-            filters.append({f'_context.{singular}_id': runner_id})
+        singular = runner_type.rstrip('s')
+        filters.append({f'_context.{singular}_id': runner_id})
 
     if not filters:
         return {}

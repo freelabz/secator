@@ -14,7 +14,6 @@ from secator.utils import debug
 OPERATORS = {
 	"$regex": lambda field, pattern: re.search(pattern, str(field)) is not None if field else False,
 	"$contains": lambda field, value: value in str(field) if field else False,
-	"$startswith": lambda field, value: str(field).startswith(value) if field else False,
 	"$in": lambda field, values: field in values if field else False,
 	"$gt": lambda field, value: field > value if field is not None else False,
 	"$gte": lambda field, value: field >= value if field is not None else False,
@@ -138,9 +137,7 @@ class JsonBackend(QueryBackend):
 							if isinstance(items, list):
 								for item in items:
 									# Inject runner context from directory path if not already present
-									if '_context' not in item:
-										item['_context'] = {}
-									if f'{runner_type_singular}_id' not in item.get('_context', {}):
+									if f'{runner_type_singular}_id' not in item['_context']:
 										item['_context'][f'{runner_type_singular}_id'] = runner_id
 								findings.extend(items)
 					except (json.JSONDecodeError, IOError) as e:
