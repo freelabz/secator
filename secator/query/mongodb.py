@@ -44,7 +44,7 @@ class MongoDBBackend(QueryBackend):
 
 			results = []
 			for doc in cursor:
-				doc['_id'] = str(doc['_id'])
+				doc.pop('_id', None)
 				results.append(doc)
 
 			return results
