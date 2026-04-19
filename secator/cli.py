@@ -949,9 +949,12 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver,
 
 	# 1. Parse path-based runner filter
 	runner_filter = parse_report_paths(report_query)
+	debug('runner paths filter', sub='query', obj=runner_filter)
 
 	# 2. Translate -q expression to MongoDB style
+	debug('original query expr', sub='query', obj={'raw': query or ''})
 	mongo_query = python_expr_to_mongo(query) if query else {}
+	debug('converted mongo query', sub='query', obj=mongo_query)
 
 	# 3. Merge filters
 	overlap = set(runner_filter) & set(mongo_query)
@@ -960,6 +963,7 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver,
 		full_query = {'$and': [runner_filter, mongo_query]}
 	else:
 		full_query = {**runner_filter, **mongo_query}
+	debug('full query', sub='query', obj=full_query)
 
 	# 4. Add time delta filter if provided
 	if time_delta:

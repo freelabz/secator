@@ -3,6 +3,8 @@
 import json
 import re
 
+from secator.utils import debug
+
 
 def parse_report_paths(paths_str):
     """Convert comma-separated path strings to a MongoDB-style runner filter.
@@ -32,8 +34,11 @@ def parse_report_paths(paths_str):
     if not filters:
         return {}
     if len(filters) == 1:
-        return filters[0]
-    return {'$or': filters}
+        result = filters[0]
+    else:
+        result = {'$or': filters}
+    debug('parse_report_paths', sub='query', obj={'input': paths_str, 'output': result})
+    return result
 
 
 def _split_logical_op(query, op):
@@ -160,12 +165,13 @@ def python_expr_to_mongo(query):
         raise ValueError("Cannot mix && and || in the same query expression")
 
     if len(or_parts) > 1:
-        return {'$or': [_parse_single_expr(p) for p in or_parts]}
-
-    if len(and_parts) > 1:
-        merged = {}
+        result = {'$or': [_parse_single_expr(p) for p in or_parts]}
+    elif len(and_parts) > 1:
+        result = {}
         for part in and_parts:
-            merged.update(_parse_single_expr(part))
-        return merged
+            result.update(_parse_single_expr(part))
+    else:
+        result = _parse_single_expr(query)
 
-    return _parse_single_expr(query)
+    debug('python_expr_to_mongo', sub='query', obj={'input': query, 'output': result})
+    return result

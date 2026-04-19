@@ -41,7 +41,8 @@ class QueryEngine:
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
                exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Search for findings matching query."""
-        from secator.utils import remove_duplicates
+        from secator.utils import debug, remove_duplicates
+        debug(f'search via {self.backend.name} backend', sub='query', obj=query)
         results = self.backend.search(query, limit, exclude_fields)
         if dedupe:
             results = remove_duplicates(results)
