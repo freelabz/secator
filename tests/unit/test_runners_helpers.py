@@ -9,7 +9,7 @@ from secator.runners._helpers import (
     process_extractor,
     get_task_folder_id
 )
-from secator.output_types import OutputType, Url, Vulnerability, Target, Port
+from secator.output_types import OutputType, Url, Vulnerability, Target, Technology, Port
 from dataclasses import dataclass, field
 
 
@@ -24,7 +24,7 @@ class MockOutputType(OutputType):
 
 
 class TestExtractorFunctions(unittest.TestCase):
-    
+
     def setUp(self):
         # Create some mock objects for testing
         self.mock1 = MockOutputType(field1='test1', field2=1)
@@ -37,10 +37,15 @@ class TestExtractorFunctions(unittest.TestCase):
         self.target1 = Target(name='localhost')
 
         self.vuln1 = Vulnerability(
-            name='Test Vuln', 
+            name='Test Vuln',
             description='Test Description',
             severity='high'
         )
+
+        self.tech1 = Technology(match='10.0.0.1:80', product='apache httpd', version='2.4.50')
+        self.tech2 = Technology(match='10.0.0.2:80', product='apache httpd', version='2.4.50')
+        self.tech3 = Technology(match='10.0.0.3:80', product='nginx', version='1.21.0')
+        self.tech_results = [self.tech1, self.tech2, self.tech3]
 
         # Test results for extractors
         self.results = [
@@ -54,7 +59,7 @@ class TestExtractorFunctions(unittest.TestCase):
         """Test parsing extractor from string format."""
         # Test valid string format
         result = parse_extractor('mock.field1')
-        self.assertEqual(result, ('mock', 'field1', None))
+        self.assertEqual(result, ('mock', 'field1', None, None))
 
         # Test invalid string format
         result = parse_extractor('invalid_format')
@@ -73,14 +78,31 @@ class TestExtractorFunctions(unittest.TestCase):
             'condition': 'item.field2 > 1'
         }
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', 'field1', 'item.field2 > 1'))
+        self.assertEqual(result, ('mock', 'field1', 'item.field2 > 1', None))
 
         # Test with minimal fields
         extractor = {
             'type': 'mock'
         }
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', None, None))
+        self.assertEqual(result, ('mock', None, None, None))
+
+    def test_parse_extractor_dict_with_group_by(self):
+        """Test parsing extractor dict with group_by field."""
+        extractor = {
+            'type': 'mock',
+            'field': '{field1}~{field2}',
+            'condition': 'item.field2 > 1',
+            'group_by': '{field2}',
+        }
+        result = parse_extractor(extractor)
+        self.assertEqual(result, ('mock', '{field1}~{field2}', 'item.field2 > 1', '{field2}'))
+
+    def test_parse_extractor_dict_without_group_by(self):
+        """Test that group_by defaults to None when absent."""
+        extractor = {'type': 'mock', 'field': 'field1'}
+        result = parse_extractor(extractor)
+        self.assertEqual(result, ('mock', 'field1', None, None))
 
     def test_fmt_extractor(self):
         """Test formatting extractors for display."""
@@ -183,6 +205,14 @@ class TestExtractorFunctions(unittest.TestCase):
         result = process_extractor(self.results, extractor)
         self.assertEqual(result, ['test1', 'test2', 'test3'])
 
+        # TODO: Test nested field access
+        # extractor = {
+        #     'type': 'mock',
+        #     'field': '{nested.subfield}'
+        # }
+        # result = process_extractor(self.results, extractor)
+        # self.assertEqual(result, ['nested_value', 'nested_value', 'nested_value'])
+
         # Test type-prefixed format string like '{mock.field1}_{mock.field2}'
         extractor = {
             'type': 'mock',
@@ -192,8 +222,8 @@ class TestExtractorFunctions(unittest.TestCase):
         self.assertEqual(result, ['test1_1', 'test2_2', 'test3_3'])
 
         # Test type-prefixed format string where type name conflicts with a field name of the same name.
-        # Port has a 'port' field (int), so {_type: item, **item.toDict()} would override the item
-        # with the int value, causing '{port.host}'.format() to fail with AttributeError.
+        # Port has a 'port' field (int), so without the fix {**item.toDict(), _type: item} would have
+        # toDict()'s 'port: 80' override the 'port' item reference, causing '{port.host}'.format() to fail.
         port = Port(port=80, ip='127.0.0.1', host='localhost')
         extractor = {
             'type': 'port',
@@ -202,13 +232,53 @@ class TestExtractorFunctions(unittest.TestCase):
         result = process_extractor([port], extractor)
         self.assertEqual(result, ['localhost'])
 
-        # TODO: Test nested field access
-        # extractor = {
-        #     'type': 'mock',
-        #     'field': '{nested.subfield}'
-        # }
-        # result = process_extractor(self.results, extractor)
-        # self.assertEqual(result, ['nested_value', 'nested_value', 'nested_value'])
+    def test_process_extractor_group_by_combines_hosts(self):
+        """group_by groups items by key and joins matched_at values with comma."""
+        extractor = {
+            'type': 'technology',
+            'field': '{match}~{product} {version}',
+            'condition': 'item.version',
+            'group_by': '{product} {version}',
+        }
+        result = process_extractor(self.tech_results, extractor)
+        self.assertEqual(len(result), 2)
+        self.assertIn('10.0.0.1:80,10.0.0.2:80~apache httpd 2.4.50', result)
+        self.assertIn('10.0.0.3:80~nginx 1.21.0', result)
+
+    def test_process_extractor_group_by_single_item(self):
+        """group_by with one item per group produces normal ~ format."""
+        extractor = {
+            'type': 'technology',
+            'field': '{match}~{product} {version}',
+            'condition': 'item.version',
+            'group_by': '{product} {version}',
+        }
+        result = process_extractor([self.tech3], extractor)
+        self.assertEqual(result, ['10.0.0.3:80~nginx 1.21.0'])
+
+    def test_process_extractor_without_group_by_unchanged(self):
+        """Without group_by, process_extractor behaves exactly as before."""
+        extractor = {
+            'type': 'technology',
+            'field': '{match}~{product} {version}',
+            'condition': 'item.version',
+        }
+        result = process_extractor(self.tech_results, extractor)
+        self.assertEqual(len(result), 3)
+        self.assertIn('10.0.0.1:80~apache httpd 2.4.50', result)
+        self.assertIn('10.0.0.2:80~apache httpd 2.4.50', result)
+        self.assertIn('10.0.0.3:80~nginx 1.21.0', result)
+
+    def test_fmt_extractor_with_group_by(self):
+        """fmt_extractor includes group_by in display string."""
+        extractor = {
+            'type': 'mock',
+            'field': '{field1}~{field2}',
+            'condition': 'item.field2 > 1',
+            'group_by': '{field2}',
+        }
+        result = fmt_extractor(extractor)
+        self.assertEqual(result, '<DYNAMIC(mock.{field1}~{field2} if item.field2 > 1 group_by {field2})>')
 
     def test_extract_from_results(self):
         """Test extract_from_results function."""
@@ -252,6 +322,34 @@ class TestExtractorFunctions(unittest.TestCase):
         self.assertEqual(updated_opts['other'], ['<DYNAMIC(url.url)>'])
         self.assertEqual(errors, [])
 
+    def test_run_extractors_with_group_by(self):
+        """Full pipeline: Technology items → grouped search_vulns inputs via group_by extractor."""
+        tech1 = Technology(match='10.0.0.1:80', product='apache httpd', version='2.4.50')
+        tech2 = Technology(match='10.0.0.2:80', product='apache httpd', version='2.4.50')
+        tech3 = Technology(match='10.0.0.3:80', product='nginx', version='1.21.0')
+        results = [tech1, tech2, tech3]
+
+        opts = {
+            'targets_': [
+                {
+                    'type': 'technology',
+                    'field': '{match}~{product} {version}',
+                    'condition': 'item.version',
+                    'group_by': '{product} {version}',
+                }
+            ]
+        }
+
+        inputs, _updated_opts, errors = run_extractors(results, opts)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(inputs), 2)  # 2 unique services
+        apache_input = next(i for i in inputs if 'apache' in i)
+        self.assertIn('10.0.0.1:80', apache_input.split('~')[0])
+        self.assertIn('10.0.0.2:80', apache_input.split('~')[0])
+        self.assertEqual(apache_input.split('~')[1], 'apache httpd 2.4.50')
+        nginx_input = next(i for i in inputs if 'nginx' in i)
+        self.assertEqual(nginx_input, '10.0.0.3:80~nginx 1.21.0')
+
     @patch('os.scandir')
     @patch('os.path.exists')
     def test_get_task_folder_id(self, mock_exists, mock_scandir):
@@ -289,4 +387,4 @@ class TestExtractorFunctions(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()

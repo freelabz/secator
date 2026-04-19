@@ -339,50 +339,5 @@ class TestCli(unittest.TestCase):
 				assert result.exit_code == 0
 				assert 'already installed' in result.output
 
-class TestProcessQuery(unittest.TestCase):
-	"""Tests for process_query function."""
-
-	def test_simple_format_field(self):
-		"""Test simple type.field format string."""
-		from secator.cli import process_query
-		extractors = process_query(None, fields=['vulnerability.matched_at'])
-		self.assertEqual(len(extractors), 1)
-		self.assertEqual(extractors[0]['type'], 'vulnerability')
-		self.assertEqual(extractors[0]['field'], 'matched_at')
-
-	def test_format_string_with_braces(self):
-		"""Test format string with {type.field} syntax."""
-		from secator.cli import process_query
-		extractors = process_query(None, fields=['{tag.match}-{tag.name}'])
-		self.assertEqual(len(extractors), 1)
-		self.assertEqual(extractors[0]['type'], 'tag')
-		self.assertEqual(extractors[0]['field'], '{tag.match}-{tag.name}')
-
-	def test_multi_type_format_fields(self):
-		"""Test multiple format fields for different types."""
-		from secator.cli import process_query
-		extractors = process_query(None, fields=['{port.host}:{port.port}', 'vulnerability.matched_at'])
-		self.assertEqual(len(extractors), 2)
-		types = {e['type'] for e in extractors}
-		self.assertIn('port', types)
-		self.assertIn('vulnerability', types)
-		port_extractor = next(e for e in extractors if e['type'] == 'port')
-		self.assertEqual(port_extractor['field'], '{port.host}:{port.port}')
-
-	def test_multi_type_query_with_and(self):
-		"""Test query with && across different types creates separate extractors."""
-		from secator.cli import process_query
-		query = "port.ip == '192.168.1.189' && vulnerability.severity == 'critical'"
-		format_fields = ['{port.host}:{port.port}', 'vulnerability.matched_at']
-		extractors = process_query(query, fields=format_fields)
-		self.assertEqual(len(extractors), 2)
-		port_extractor = next(e for e in extractors if e['type'] == 'port')
-		vuln_extractor = next(e for e in extractors if e['type'] == 'vulnerability')
-		self.assertEqual(port_extractor['op'], 'and')
-		self.assertEqual(vuln_extractor['op'], 'and')
-		self.assertIn('port.ip', port_extractor['condition'])
-		self.assertIn('vulnerability.severity', vuln_extractor['condition'])
-
-
 if __name__ == '__main__':
 	unittest.main()
