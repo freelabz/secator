@@ -9,7 +9,7 @@ from secator.runners._helpers import (
     process_extractor,
     get_task_folder_id
 )
-from secator.output_types import OutputType, Url, Vulnerability, Target, Technology
+from secator.output_types import OutputType, Port, Url, Vulnerability, Target, Technology
 from dataclasses import dataclass, field
 
 
@@ -59,7 +59,7 @@ class TestExtractorFunctions(unittest.TestCase):
         """Test parsing extractor from string format."""
         # Test valid string format
         result = parse_extractor('mock.field1')
-        self.assertEqual(result, ('mock', 'field1', None, None))
+        self.assertEqual(result, ('mock', 'field1', None, None, None))
 
         # Test invalid string format
         result = parse_extractor('invalid_format')
@@ -78,14 +78,14 @@ class TestExtractorFunctions(unittest.TestCase):
             'condition': 'item.field2 > 1'
         }
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', 'field1', 'item.field2 > 1', None))
+        self.assertEqual(result, ('mock', 'field1', 'item.field2 > 1', None, None))
 
         # Test with minimal fields
         extractor = {
             'type': 'mock'
         }
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', None, None, None))
+        self.assertEqual(result, ('mock', None, None, None, None))
 
     def test_parse_extractor_dict_with_group_by(self):
         """Test parsing extractor dict with group_by field."""
@@ -96,13 +96,24 @@ class TestExtractorFunctions(unittest.TestCase):
             'group_by': '{field2}',
         }
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', '{field1}~{field2}', 'item.field2 > 1', '{field2}'))
+        self.assertEqual(result, ('mock', '{field1}~{field2}', 'item.field2 > 1', '{field2}', None))
 
     def test_parse_extractor_dict_without_group_by(self):
         """Test that group_by defaults to None when absent."""
         extractor = {'type': 'mock', 'field': 'field1'}
         result = parse_extractor(extractor)
-        self.assertEqual(result, ('mock', 'field1', None, None))
+        self.assertEqual(result, ('mock', 'field1', None, None, None))
+
+    def test_parse_extractor_dict_with_group_by_collect(self):
+        """Test parsing extractor dict with group_by_collect field."""
+        extractor = {
+            'type': 'port',
+            'field': 'host',
+            'condition': 'opts.scanners',
+            'group_by_collect': 'port',
+        }
+        result = parse_extractor(extractor)
+        self.assertEqual(result, ('port', 'host', 'opts.scanners', None, 'port'))
 
     def test_fmt_extractor(self):
         """Test formatting extractors for display."""
@@ -260,6 +271,107 @@ class TestExtractorFunctions(unittest.TestCase):
         }
         result = fmt_extractor(extractor)
         self.assertEqual(result, '<DYNAMIC(mock.{field1}~{field2} if item.field2 > 1 group_by {field2})>')
+
+    def test_fmt_extractor_with_group_by_collect(self):
+        """fmt_extractor includes group_by_collect in display string."""
+        extractor = {
+            'type': 'port',
+            'field': 'host',
+            'condition': 'opts.scanners',
+            'group_by_collect': 'port',
+        }
+        result = fmt_extractor(extractor)
+        self.assertEqual(result, '<DYNAMIC(port.host if opts.scanners group_by_collect port)>')
+
+    def test_process_extractor_group_by_collect_groups_fields_by_collected_set(self):
+        """group_by_collect groups field values by their collected value set fingerprint."""
+        port1 = Port(port=80, ip='10.0.0.1', host='host1')
+        port2 = Port(port=443, ip='10.0.0.1', host='host1')
+        port3 = Port(port=80, ip='10.0.0.2', host='host2')
+        port4 = Port(port=443, ip='10.0.0.2', host='host2')
+        port5 = Port(port=22, ip='10.0.0.3', host='host3')
+        port6 = Port(port=80, ip='10.0.0.3', host='host3')
+        port_results = [port1, port2, port3, port4, port5, port6]
+
+        extractor = {
+            'type': 'port',
+            'field': 'host',
+            'group_by_collect': 'port',
+        }
+        result = process_extractor(port_results, extractor)
+
+        # host1 and host2 both have ports 80,443 → grouped together
+        # host3 has ports 22,80 → separate group
+        self.assertEqual(len(result), 2)
+        group_80_443 = next((r for r in result if '80,443' in r), None)
+        group_22_80 = next((r for r in result if '22,80' in r), None)
+        self.assertIsNotNone(group_80_443)
+        self.assertIsNotNone(group_22_80)
+        self.assertIn('host1', group_80_443.split('~')[0])
+        self.assertIn('host2', group_80_443.split('~')[0])
+        self.assertEqual(group_22_80.split('~')[0], 'host3')
+
+    def test_process_extractor_group_by_collect_single_group(self):
+        """group_by_collect with a single unique fingerprint produces one result."""
+        port1 = Port(port=80, ip='10.0.0.1', host='host1')
+        port2 = Port(port=443, ip='10.0.0.1', host='host1')
+        port3 = Port(port=80, ip='10.0.0.2', host='host2')
+        port4 = Port(port=443, ip='10.0.0.2', host='host2')
+        port_results = [port1, port2, port3, port4]
+
+        extractor = {
+            'type': 'port',
+            'field': 'host',
+            'group_by_collect': 'port',
+        }
+        result = process_extractor(port_results, extractor)
+        self.assertEqual(len(result), 1)
+        self.assertIn('host1', result[0].split('~')[0])
+        self.assertIn('host2', result[0].split('~')[0])
+        self.assertEqual(result[0].split('~')[1], '80,443')
+
+    def test_process_extractor_group_by_collect_port_sorted_numerically(self):
+        """group_by_collect sorts port numbers numerically, not lexicographically."""
+        port1 = Port(port=9000, ip='10.0.0.1', host='host1')
+        port2 = Port(port=80, ip='10.0.0.1', host='host1')
+        port3 = Port(port=443, ip='10.0.0.1', host='host1')
+        port_results = [port1, port2, port3]
+
+        extractor = {'type': 'port', 'field': 'host', 'group_by_collect': 'port'}
+        result = process_extractor(port_results, extractor)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].split('~')[1], '80,443,9000')
+
+    def test_run_extractors_with_group_by_collect(self):
+        """Full pipeline: Port items → grouped nmap inputs via group_by_collect extractor."""
+        port1 = Port(port=80, ip='10.0.0.1', host='host1')
+        port2 = Port(port=443, ip='10.0.0.1', host='host1')
+        port3 = Port(port=80, ip='10.0.0.2', host='host2')
+        port4 = Port(port=443, ip='10.0.0.2', host='host2')
+        port5 = Port(port=22, ip='10.0.0.3', host='host3')
+        port6 = Port(port=80, ip='10.0.0.3', host='host3')
+        results = [port1, port2, port3, port4, port5, port6]
+
+        opts = {
+            'targets_': [
+                {
+                    'type': 'port',
+                    'field': 'host',
+                    'group_by_collect': 'port',
+                }
+            ]
+        }
+
+        inputs, _updated_opts, errors = run_extractors(results, opts)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(inputs), 2)  # 2 unique port fingerprints
+        group_80_443 = next((i for i in inputs if '80,443' in i), None)
+        group_22_80 = next((i for i in inputs if '22,80' in i), None)
+        self.assertIsNotNone(group_80_443)
+        self.assertIsNotNone(group_22_80)
+        self.assertIn('host1', group_80_443.split('~')[0])
+        self.assertIn('host2', group_80_443.split('~')[0])
+        self.assertEqual(group_22_80.split('~')[0], 'host3')
 
     def test_extract_from_results(self):
         """Test extract_from_results function."""

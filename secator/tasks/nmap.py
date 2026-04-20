@@ -140,6 +140,35 @@ class nmap(ReconPort):
 	disable_preexec = True
 
 	@staticmethod
+	def before_init(self):
+		encoded_inputs = [i for i in self.inputs if '~' in i]
+		if not encoded_inputs or len(encoded_inputs) != len(self.inputs):
+			return
+
+		if len(encoded_inputs) == 1:
+			# Single group (e.g. distributed mode): expand field values and set collected values as ports
+			fields_str, collect_str = encoded_inputs[0].split('~', 1)
+			self.inputs = fields_str.split(',')
+			self.run_opts[PORTS] = collect_str
+		else:
+			# Multiple groups (e.g. sync mode): collect all field values + union of collected values
+			all_fields = []
+			all_collect = set()
+			for enc in encoded_inputs:
+				fields_str, collect_str = enc.split('~', 1)
+				all_fields.extend(fields_str.split(','))
+				all_collect.update(collect_str.split(','))
+
+			def _sort_key(v):
+				try:
+					return (0, int(v))
+				except (ValueError, TypeError):
+					return (1, str(v))
+
+			self.inputs = all_fields
+			self.run_opts[PORTS] = ','.join(sorted(all_collect, key=_sort_key))
+
+	@staticmethod
 	def on_cmd(self):
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
