@@ -461,6 +461,7 @@ def break_task(task, task_opts, results=[]):
 
 	# Build signatures
 	sigs = []
+	chunk_infos = []
 	task.ids_map = {}
 	for ix, chunk in enumerate(chunks):
 		if not isinstance(chunk, list):
@@ -496,13 +497,17 @@ def break_task(task, task_opts, results=[]):
 		task.add_subtask(task_id, task.name, full_name)
 		if IN_WORKER:
 			info = Info(message=f'Celery chunked task created ({ix + 1} / {len(chunks)}): {task_id}')
-			task.add_result(info)
+			chunk_infos.append(info)
 		sigs.append(sig)
 
 	# Mark main task as async since it's being chunked
+	# Clear prior results (so they're not re-yielded), then re-add chunk Info items
+	# so they survive into celery_state['results'] for client-side polling.
 	task.sync = False
 	task.results = []
 	task.uuids = set()
+	for info in chunk_infos:
+		task.add_result(info)
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
 	# console.print(Info(message=f'Results: {results}'))

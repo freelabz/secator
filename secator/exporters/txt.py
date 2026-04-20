@@ -19,6 +19,9 @@ class TxtExporter(Exporter):
 				f.write('\n'.join(items))
 			txt_paths.append(txt_path)
 
+		if not txt_paths:
+			return
+
 		if len(txt_paths) == 1:
 			txt_paths_str = txt_paths[0]
 		else:

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.28.0](https://github.com/freelabz/secator/compare/v0.27.0...v0.28.0) (2026-04-20)
+
+
+### Features
+
+* **core:** add group_by and improve search_vulns grouping ([#983](https://github.com/freelabz/secator/issues/983)) ([502b17c](https://github.com/freelabz/secator/commit/502b17c7581549400075d8b7fd56c6a53e27a192))
+* **core:** chunk progress stream ([eecf3d8](https://github.com/freelabz/secator/commit/eecf3d85e55ca44df606b5fa10faab5e0e044568))
+* **core:** unify query backends ([#981](https://github.com/freelabz/secator/issues/981)) ([96bbe43](https://github.com/freelabz/secator/commit/96bbe43e85b65e6181e58a453846c17a9210b4a9))
+
+
+### Bug Fixes
+
+* add SKIPPED state color ([#979](https://github.com/freelabz/secator/issues/979)) ([5fd45b5](https://github.com/freelabz/secator/commit/5fd45b50fdd62e6a32011609cc0dccc2a4907260))
+* **command:** replace errors when invalid continuation bytes ([06acf63](https://github.com/freelabz/secator/commit/06acf63d6dc2cc62556de6acc60fe9f2f48ebb14))
+* mongodb _id making exporters fail ([#985](https://github.com/freelabz/secator/issues/985)) ([f8cea60](https://github.com/freelabz/secator/commit/f8cea6000bfe030638c7bf090189459ea3b4e50a))
+
 ## [0.27.0](https://github.com/freelabz/secator/compare/v0.26.1...v0.27.0) (2026-04-13)
 
 
