@@ -146,6 +146,7 @@ def python_expr_to_mongo(query):
         - 'type.field > value' → {'_type': 'type', 'field': {'$gt': value}}
         - 'expr1 && expr2' → merged dict (AND)
         - 'expr1 || expr2' → {'$or': [...]}
+        - 'e1 || e2 && e3 || e4' → {'$or': [e1, {e2 merged e3}, e4]}  (&&  binds tighter than ||)
     """
     if not query:
         return {}
@@ -160,19 +161,27 @@ def python_expr_to_mongo(query):
             pass
 
     or_parts = _split_logical_op(query, '||')
-    and_parts = _split_logical_op(query, '&&')
-
-    if len(or_parts) > 1 and len(and_parts) > 1:
-        raise ValueError("Cannot mix && and || in the same query expression")
 
     if len(or_parts) > 1:
-        result = {'$or': [_parse_single_expr(p) for p in or_parts]}
-    elif len(and_parts) > 1:
-        result = {}
-        for part in and_parts:
-            result.update(_parse_single_expr(part))
+        mongo_clauses = []
+        for or_part in or_parts:
+            and_parts = _split_logical_op(or_part, '&&')
+            if len(and_parts) > 1:
+                merged = {}
+                for ap in and_parts:
+                    merged.update(_parse_single_expr(ap))
+                mongo_clauses.append(merged)
+            else:
+                mongo_clauses.append(_parse_single_expr(or_part))
+        result = {'$or': mongo_clauses}
     else:
-        result = _parse_single_expr(query)
+        and_parts = _split_logical_op(query, '&&')
+        if len(and_parts) > 1:
+            result = {}
+            for part in and_parts:
+                result.update(_parse_single_expr(part))
+        else:
+            result = _parse_single_expr(query)
 
     debug('python_expr_to_mongo', sub='query', obj={'input': query, 'output': result})
     return result
