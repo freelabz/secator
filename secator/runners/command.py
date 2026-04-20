@@ -721,8 +721,8 @@ class Command(Runner):
 			name = info['name']
 			pid = info['pid']
 			cpu_percent = info['cpu_percent']
-			# mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			mem_info = info.get('memory_info') or {}
+			mem_rss = round(mem_info.get('rss', 0) / 1024 / 1024, 2)
 			total_mem += mem_rss
 			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
 			net_conns = info.get('net_connections') or []
@@ -739,35 +739,6 @@ class Command(Runner):
 		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
 		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
 		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
-
-	def stats(self, memory_limit_mb=None):
-		"""Gather stats about the current running process, if any."""
-		if not self.process or not self.process.pid:
-			return
-		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
-		total_mem = 0
-		for info in stats:
-			name = info['name']
-			pid = info['pid']
-			cpu_percent = info['cpu_percent']
-			mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
-			net_conns = info.get('net_connections') or []
-			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
-			yield Stat(
-				name=name,
-				pid=pid,
-				cpu=cpu_percent,
-				memory=mem_percent,
-				net_conns=len(net_conns),
-				extra_data=extra_data,
-			)
-		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
-		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
-			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
 	@staticmethod
 	def get_process_info(process, children=False):
