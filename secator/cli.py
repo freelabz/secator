@@ -1099,7 +1099,7 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 @report.command('info')
 @click.argument('runner_id', type=str)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')
+@click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')  # noqa: E501
 def report_info(runner_id, workspace, show_all):
 	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)."""
 	MAX_ENTRIES = 20
