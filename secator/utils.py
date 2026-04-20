@@ -1001,12 +1001,14 @@ def is_valid_hostname(target):
 	Single-label names without a hyphen (e.g. redis, test123) return False so they can fall
 	through to slug detection and avoid ambiguity with Docker image names and usernames.
 	"""
-	if not target or len(target) > 253:
+	if not target:
 		return False
 	try:
 		ascii_target = target.encode('idna').decode('ascii')
 	except (UnicodeError, ValueError):
-		ascii_target = target
+		return False
+	if len(ascii_target) > 253:
+		return False
 	labels = ascii_target.split('.')
 	if len(labels) < 2 and '-' not in ascii_target:
 		return False
@@ -1028,10 +1030,13 @@ def is_host_port(target):
 		bool: True if the target is a host:port, False otherwise.
 	"""
 	split = target.split(':')
-	if not (is_valid_hostname(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0]) or split[0] == 'localhost'):  # noqa: E501
+	if len(split) != 2:
+		return False
+	host, port_str = split
+	if not (is_valid_hostname(host) or validators.ipv4(host) or validators.ipv6(host) or host == 'localhost'):
 		return False
 	try:
-		port = int(split[1])
+		port = int(port_str)
 		if port < 1 or port > 65535:
 			return False
 	except ValueError:
