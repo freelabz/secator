@@ -148,3 +148,9 @@ class TestNormalizeFieldPath:
 
     def test_no_get(self):
         assert _normalize_field_path('extra_data.product') == 'extra_data.product'
+
+    def test_get_non_identifier_key(self):
+        assert _normalize_field_path("extra_data.get('http-title')") == 'extra_data.http-title'
+
+    def test_get_with_spaces(self):
+        assert _normalize_field_path("extra_data.get( 'product' )") == 'extra_data.product'

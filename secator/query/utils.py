@@ -101,8 +101,9 @@ def _normalize_field_path(field):
     """Convert Python-style method calls to dot notation for MongoDB.
 
     E.g. 'extra_data.get(\'product\')' → 'extra_data.product'
+    E.g. 'extra_data.get(\'http-title\')' → 'extra_data.http-title'
     """
-    return re.sub(r"\.get\(['\"](\w+)['\"]\)", r'.\1', field)
+    return re.sub(r"\.get\(\s*(['\"])([^'\"]+)\1\s*\)", r'.\2', field)
 
 
 def _parse_single_expr(expr):

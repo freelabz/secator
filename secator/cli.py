@@ -959,6 +959,7 @@ def _apply_format(results, fmt):
 			_template = '{' + _field + '}' if _field else None
 
 		if _type not in results:
+			console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
 			continue
 
 		items = results[_type]
@@ -972,6 +973,9 @@ def _apply_format(results, fmt):
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
 					value = _template.format(**{_type: DotMap(d), **d})
+					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
+					if 'DotMap()' in str(value):
+						continue
 					formatted.append(value)
 				except (KeyError, AttributeError):
 					pass
@@ -979,7 +983,7 @@ def _apply_format(results, fmt):
 		else:
 			new_results[_type] = [str(item) for item in items]
 
-	return new_results if new_results else results
+	return new_results
 
 
 @report.command('show')
@@ -1052,6 +1056,13 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	}
 
 	exporters = Runner.resolve_exporters(output)
+
+	if fmt:
+		non_console = [e.strip() for e in output.split(',') if e.strip() and e.strip() != 'console']
+		if non_console:
+			raise click.UsageError(
+				f"--format (-f) is only supported with the console exporter; incompatible with: {', '.join(non_console)}"
+			)
 
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
