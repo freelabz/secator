@@ -32,11 +32,14 @@ class TableExporter(Exporter):
 						if cls:
 							try:
 								item = cls.load(item)
-							except TypeError:
-								pass
+							except TypeError as e:
+								console.print(f'[bold orange1]Warning:[/] TableExporter could not cast item of type {item.get("_type")!r}: {e}. Skipping.')
+								continue
 					cast_items.append(item)
+				if not cast_items:
+					continue
 				items = cast_items
-				is_output_type = isinstance(items[0], OutputType)
+				is_output_type = all(isinstance(item, OutputType) for item in items)
 				output_fields = items[0]._table_fields if is_output_type else None
 				sort_by = items[0]._sort_by if is_output_type else []
 				_table = build_table(
