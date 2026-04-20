@@ -17,7 +17,7 @@ from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
-from secator.rich import console, console_stdout
+from secator.rich import console, console_stdout, _console_logger
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
 from secator.tree import build_runner_tree
@@ -609,6 +609,17 @@ class Runner:
 			self._print_item(item)
 		if queue:
 			self.results_buffer.append(item)
+
+		# Log findings directly to run log file (independent of print_item / ConsoleTee)
+		if getattr(self, '_run_log_handler', None) and isinstance(item, tuple(FINDING_TYPES)):
+			try:
+				from secator.utils import strip_rich_markup
+				if hasattr(item, '__rich__'):
+					clean = strip_rich_markup(item.__rich__()).strip()
+					if clean:
+						_console_logger.info(clean)
+			except Exception:
+				pass
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes.
