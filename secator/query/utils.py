@@ -97,6 +97,14 @@ _OP_MAP = {
 }
 
 
+def _normalize_field_path(field):
+    """Convert Python-style method calls to dot notation for MongoDB.
+
+    E.g. 'extra_data.get(\'product\')' → 'extra_data.product'
+    """
+    return re.sub(r"\.get\(['\"](\w+)['\"]\)", r'.\1', field)
+
+
 def _parse_single_expr(expr):
     """Parse one expression like 'vulnerability.severity_score > 7' into a query dict."""
     expr = expr.strip()
@@ -122,7 +130,7 @@ def _parse_single_expr(expr):
         mongo_op = _OP_MAP.get(op_str)
         parts = left.split('.', 1)
         _type = parts[0].strip()
-        field = parts[1].strip() if len(parts) > 1 else None
+        field = _normalize_field_path(parts[1].strip()) if len(parts) > 1 else None
         value = _parse_value(right)
         result = {'_type': _type}
         if field:
@@ -134,6 +142,37 @@ def _parse_single_expr(expr):
     return {'_type': parts[0].strip()}
 
 
+def _normalize_logical_ops(query):
+    """Replace Python-style 'and'/'or' with '&&'/'||', skipping quoted substrings."""
+    result = []
+    i = 0
+    in_quote = None
+    while i < len(query):
+        ch = query[i]
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            result.append(ch)
+            i += 1
+        elif ch == in_quote:
+            in_quote = None
+            result.append(ch)
+            i += 1
+        elif in_quote is None:
+            if query[i:i + 5] == ' and ':
+                result.append(' && ')
+                i += 5
+            elif query[i:i + 4] == ' or ':
+                result.append(' || ')
+                i += 4
+            else:
+                result.append(ch)
+                i += 1
+        else:
+            result.append(ch)
+            i += 1
+    return ''.join(result)
+
+
 def python_expr_to_mongo(query):
     """Translate a Python-like CLI query expression to a MongoDB-style query dict.
 
@@ -143,8 +182,8 @@ def python_expr_to_mongo(query):
         - JSON string (starts with '{') → parsed as dict
         - 'type' → {'_type': 'type'}
         - 'type.field > value' → {'_type': 'type', 'field': {'$gt': value}}
-        - 'expr1 && expr2' → merged dict (AND)
-        - 'expr1 || expr2' → {'$or': [...]}
+        - 'expr1 && expr2' or 'expr1 and expr2' → merged dict (AND)
+        - 'expr1 || expr2' or 'expr1 or expr2' → {'$or': [...]}
     """
     if not query:
         return {}
@@ -157,6 +196,8 @@ def python_expr_to_mongo(query):
             return json.loads(query)
         except json.JSONDecodeError:
             pass
+
+    query = _normalize_logical_ops(query)
 
     or_parts = _split_logical_op(query, '||')
     and_parts = _split_logical_op(query, '&&')

@@ -1,4 +1,4 @@
-from secator.query.utils import parse_report_paths, python_expr_to_mongo
+from secator.query.utils import parse_report_paths, python_expr_to_mongo, _normalize_field_path
 
 
 class TestParseReportPaths:
@@ -102,3 +102,49 @@ class TestPythonExprToMongo:
         import json
         query = {'_type': 'vulnerability', 'severity_score': {'$gte': 7}}
         assert python_expr_to_mongo(json.dumps(query)) == query
+
+    def test_python_and_keyword(self):
+        result = python_expr_to_mongo("port.state == 'open' and port.port < 1024")
+        assert result == {'_type': 'port', 'state': 'open', 'port': {'$lt': 1024}}
+
+    def test_python_or_keyword(self):
+        result = python_expr_to_mongo('vulnerability.severity_score > 7 or domain')
+        assert result == {
+            '$or': [
+                {'_type': 'vulnerability', 'severity_score': {'$gt': 7}},
+                {'_type': 'domain'},
+            ]
+        }
+
+    def test_and_with_quoted_value_containing_and(self):
+        result = python_expr_to_mongo("tag.name == 'this and that' and tag.match == 'x'")
+        assert result == {'_type': 'tag', 'name': 'this and that', 'match': 'x'}
+
+    def test_get_method_normalization(self):
+        result = python_expr_to_mongo("tag.extra_data.get('product') == 'Apache'")
+        assert result == {'_type': 'tag', 'extra_data.product': 'Apache'}
+
+    def test_get_method_double_quotes(self):
+        result = python_expr_to_mongo('tag.extra_data.get("product") == "Apache"')
+        assert result == {'_type': 'tag', 'extra_data.product': 'Apache'}
+
+    def test_full_issue_query(self):
+        result = python_expr_to_mongo(
+            "tag.name == 'technology' and tag.extra_data.get('product') == 'Apache HTTP Server'"
+        )
+        assert result == {'_type': 'tag', 'name': 'technology', 'extra_data.product': 'Apache HTTP Server'}
+
+
+class TestNormalizeFieldPath:
+
+    def test_get_single_quotes(self):
+        assert _normalize_field_path("extra_data.get('product')") == 'extra_data.product'
+
+    def test_get_double_quotes(self):
+        assert _normalize_field_path('extra_data.get("product")') == 'extra_data.product'
+
+    def test_nested_get(self):
+        assert _normalize_field_path("a.b.get('c')") == 'a.b.c'
+
+    def test_no_get(self):
+        assert _normalize_field_path('extra_data.product') == 'extra_data.product'
