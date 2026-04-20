@@ -1,9 +1,11 @@
 from secator.exporters._base import Exporter
-from secator.output_types import Info
+from secator.output_types import OUTPUT_TYPES, Info
 from secator.rich import console
 
 
 class TxtExporter(Exporter):
+	_type_map = {cls.get_name(): cls for cls in OUTPUT_TYPES}
+
 	def send(self):
 		results = self.report.data['results']
 		if not results:
@@ -11,7 +13,17 @@ class TxtExporter(Exporter):
 		txt_paths = []
 
 		for output_type, items in results.items():
-			items = list(set(str(i) for i in items))
+			converted = []
+			for i in items:
+				if isinstance(i, dict):
+					cls = self._type_map.get(i.get('_type'))
+					if cls:
+						try:
+							i = cls.load(i)
+						except (TypeError, Exception):
+							pass
+				converted.append(str(i))
+			items = list(set(converted))
 			if not items:
 				continue
 			txt_path = f'{self.report.output_folder}/report_{output_type}.txt'
