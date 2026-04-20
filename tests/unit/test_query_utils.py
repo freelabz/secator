@@ -94,6 +94,10 @@ class TestPythonExprToMongo:
             ]
         }
 
+    def test_regex_match_operator(self):
+        result = python_expr_to_mongo("technology.product ~= 'xrdp'")
+        assert result == {'_type': 'technology', 'product': {'$regex': 'xrdp'}}
+
     def test_passthrough_mongo_dict(self):
         query = {'_type': 'vulnerability', 'severity_score': {'$gte': 7}}
         assert python_expr_to_mongo(query) == query

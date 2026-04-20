@@ -84,8 +84,8 @@ def _parse_value(raw):
 
 
 # Regex that finds the first comparison operator outside of quotes.
-# Alternatives are ordered longest-first so >= matches before >.
-_OP_RE = re.compile(r'^(.*?)\s*(>=|<=|!=|>|<|==)\s*(.+)$', re.DOTALL)
+# Alternatives are ordered longest-first so >= matches before > and ~= is included.
+_OP_RE = re.compile(r'^(.*?)\s*(>=|<=|!=|~=|>|<|==)\s*(.+)$', re.DOTALL)
 
 _OP_MAP = {
     '>=': '$gte',
@@ -94,6 +94,7 @@ _OP_MAP = {
     '<': '$lt',
     '!=': '$ne',
     '==': None,
+    '~=': '$regex',
 }
 
 
