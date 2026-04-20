@@ -6,6 +6,42 @@ from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
 
+def resolve_conditional_opts(opts, context):
+	"""Resolve conditional options (keys ending with '_' whose value is a dict with a 'condition' key).
+
+	If the condition evaluates to True, the base key (without '_') is set to the specified value
+	(defaulting to True). The conditional key is always removed from opts.
+
+	Args:
+		opts (dict): Options dict (modified in place).
+		context (dict): Evaluation context (should contain 'opts' as DotMap).
+
+	Returns:
+		dict: Options with conditional opts resolved.
+	"""
+	safe_globals = {'__builtins__': {'len': len}}
+	to_remove = []
+	resolved = {}
+	for key, val in opts.items():
+		if not key.endswith('_'):
+			continue
+		if not isinstance(val, dict) or 'condition' not in val:
+			continue
+		base_key = key.rstrip('_')
+		condition = val['condition']
+		opt_value = val.get('value', True)
+		try:
+			if eval(condition, safe_globals, context):
+				resolved[base_key] = opt_value
+		except Exception:
+			pass
+		to_remove.append(key)
+	for key in to_remove:
+		del opts[key]
+	opts.update(resolved)
+	return opts
+
+
 def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	"""Run extractors and merge extracted values with option dict.
 
@@ -23,6 +59,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		inputs = []
 	if ctx is None:
 		ctx = {}
+	resolve_conditional_opts(opts, ctx)
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
 	if dry_run:
 		input_extractors = {k: v for k, v in extractors.items() if k.rstrip('_') == 'targets'}

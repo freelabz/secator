@@ -3,6 +3,7 @@ from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types import Info
 from secator.runners._base import Runner
+from secator.runners._helpers import resolve_conditional_opts
 from secator.runners.task import Task
 from secator.tree import build_runner_tree, walk_runner_tree
 from secator.utils import merge_opts
@@ -92,6 +93,9 @@ class Workflow(Runner):
 
 				# Get task class
 				task = Task.get_task_class(node.name)
+
+				# Resolve conditional options in node opts
+				resolve_conditional_opts(node.opts, local_ns)
 
 				# Merge task options (order of priority with overrides)
 				task_opts = merge_opts(self.config.default_options.toDict(), node.opts, opts)
