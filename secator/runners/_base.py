@@ -301,22 +301,37 @@ class Runner:
 	def self_targets(self):
 		return [r for r in self.results if isinstance(r, Target) and r._source.startswith(self.unique_name)]
 
+	def _is_own_source(self, source):
+		"""Return True if source belongs to this runner or one of its numeric chunks.
+
+		Uses exact match for the runner itself and accepts chunk suffixes of the form
+		``<unique_name>_<integer>`` (e.g. ``nmap_1``, ``nmap_2``).  This avoids the
+		false-positive produced by ``startswith`` when another task shares a common
+		prefix (e.g. ``nmap_light`` would wrongly match ``nmap``).
+		"""
+		if source == self.unique_name:
+			return True
+		prefix = self.unique_name + '_'
+		if source.startswith(prefix):
+			return source[len(prefix):].isdigit()
+		return False
+
 	@property
 	def infos(self):
 		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Info) and r._source.startswith(self.unique_name)]
+			return [r for r in self.results if isinstance(r, Info) and self._is_own_source(r._source)]
 		return [r for r in self.results if isinstance(r, Info)]
 
 	@property
 	def warnings(self):
 		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Warning) and r._source.startswith(self.unique_name)]
+			return [r for r in self.results if isinstance(r, Warning) and self._is_own_source(r._source)]
 		return [r for r in self.results if isinstance(r, Warning)]
 
 	@property
 	def errors(self):
 		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
+			return [r for r in self.results if isinstance(r, Error) and self._is_own_source(r._source)]
 		return [r for r in self.results if isinstance(r, Error)]
 
 	@property
@@ -338,7 +353,7 @@ class Runner:
 	@property
 	def self_errors(self):
 		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Error) and r._source.startswith(self.unique_name)]
+			return [r for r in self.results if isinstance(r, Error) and self._is_own_source(r._source)]
 		return [r for r in self.results if isinstance(r, Error)]
 
 	@property
@@ -463,8 +478,10 @@ class Runner:
 			yield from self.results_buffer
 			self.results_buffer = []
 
-			# If any errors happened during validation, exit
-			if self.self_errors:
+			# Exit early only if THIS runner's own initialisation produced errors.
+			# Uses exact source match so that errors from prior tasks/runners that
+			# were passed via results= do not block this runner from starting.
+			if any(isinstance(r, Error) and r._source == self.unique_name for r in self.results):
 				self._finalize()
 				return
 
