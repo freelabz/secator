@@ -14,7 +14,6 @@ class CsvExporter(Exporter):
 		if not results:
 			return
 		csv_paths = []
-
 		for output_type, items in results.items():
 			output_cls = [o for o in FINDING_TYPES if o._type == output_type][0]
 			keys = [o.name for o in fields(output_cls)]
