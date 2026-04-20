@@ -136,7 +136,7 @@ for config in SCANS:
 @click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
-@click.option('-P', '--pool', type=str, default='eventlet', help='Pool implementation.')
+@click.option('-P', '--pool', type=str, default='gevent', help='Pool implementation.')
 @click.option('--quiet', is_flag=True, default=False, help='Quiet mode.')
 @click.option('--loglevel', type=str, default='INFO', help='Log level.')
 @click.option('--check', is_flag=True, help='Check if Celery worker is alive.')
@@ -187,7 +187,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		pidfile = '%n.pid'
 		queues = '-Q:1 celery -Q:2 small -Q:3 medium -Q:4 large -Q:5 extra_large'
 		concur = '-c:1 10 -c:2 100 -c:3 50 -c:4 20 -c:5 4'
-		pool = 'eventlet'
+		pool = 'gevent'
 		cmd = f'{celery} -A {app_str} multi {subcmd} 5 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
 		cmd = f'{celery} -A {app_str} worker -n {hostname} -Q {queue}'
