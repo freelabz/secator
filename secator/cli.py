@@ -931,16 +931,75 @@ def report():
 	pass
 
 
+def process_query(query, fields=None):
+	"""Parse format fields and optional query string into a list of extractor dicts."""
+	if fields is None:
+		fields = []
+	otypes = [o.__name__.lower() for o in FINDING_TYPES]
+	extractors = []
+
+	fields_filter = {}
+	if fields:
+		for field in fields:
+			if '{' in field:
+				m = re.search(r'\{(\w+)[.\}]', field)
+				if not m:
+					console.print(Error(message='Could not determine output type from format string: ' + field))
+					sys.exit(1)
+				_type = m.group(1)
+				_field = field
+			else:
+				parts = field.split('.')
+				if len(parts) >= 2:
+					_type = parts[0]
+					_field = '.'.join(parts[1:])
+				else:
+					_type = parts[0]
+					_field = None
+			if _type not in otypes:
+				console.print(Error(message='Invalid output type: ' + _type))
+				sys.exit(1)
+			fields_filter[_type] = _field
+
+	if not query:
+		if fields:
+			extractors = [{'type': t, 'field': f, 'condition': 'True', 'op': 'or'} for t, f in fields_filter.items()]
+		return extractors
+
+	operator = '||'
+	if '&&' in query and '||' in query:
+		console.print(Error(message='Cannot mix && and || in the same query'))
+		sys.exit(1)
+	elif '&&' in query:
+		operator = '&&'
+
+	for part in query.split(operator):
+		part = part.strip()
+		_type = part.split('.')[0]
+		if _type not in otypes:
+			console.print(Error(message='Invalid output type: ' + _type))
+			sys.exit(1)
+		if fields and _type not in fields_filter:
+			console.print(Warning(message=f'Type {_type} not in --format types ({", ".join(fields_filter)}). Ignoring.'))
+			continue
+		extractor = {'type': _type, 'condition': part or 'True', 'op': 'and' if operator == '&&' else 'or'}
+		if fields_filter.get(_type):
+			extractor['field'] = fields_filter[_type]
+		extractors.append(extractor)
+	return extractors
+
+
 @report.command('show')
 @click.argument('report_query', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
+@click.option('-f', '--format', '_format', type=str, default='', help=f'Format output. E.g: port.host or {{{{port.host}}}}:{{{{port.port}}}}. Allowed types: {", ".join(FINDING_TYPES_LOWER)}')  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, workspace, driver, dedupe):
+def report_show(ctx, report_query, output, time_delta, query, _format, workspace, driver, dedupe):
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
@@ -1005,6 +1064,25 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver,
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
 	report.build(query=full_query, dedupe=dedupe_effective)
+
+	# 7. Apply --format extractors if provided (post-processing: format and print to stdout)
+	if _format:
+		from secator.serializers.dataclass import dataclass_decoder
+		from secator.runners._helpers import extract_from_results
+		format_fields = [f.strip() for f in re.split(r'\s*\|\|\s*|,', _format) if f.strip()]
+		extractors = process_query(None, fields=format_fields)
+		all_items = []
+		for items in report.data['results'].values():
+			for item in items:
+				if isinstance(item, dict):
+					item = dataclass_decoder(item)
+				all_items.append(item)
+		for extractor in extractors:
+			results, _ = extract_from_results(all_items, extractor)
+			for r in results:
+				print(r)
+		return
+
 	report.send()
 
 
