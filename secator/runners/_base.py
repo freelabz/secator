@@ -201,6 +201,11 @@ class Runner:
 		for target in targets:
 			self.add_result(target, print=False, output=False)
 
+		# Snapshot result count before running extractors / validators / hooks.
+		# __iter__ uses this to identify errors originating from THIS runner's
+		# initialisation rather than from prior tasks whose results were passed in.
+		self._pre_init_results_count = len(self.results)
+
 		# Run extractors on results
 		self._run_extractors()
 		self._merge_opts_defaults()
@@ -463,8 +468,12 @@ class Runner:
 			yield from self.results_buffer
 			self.results_buffer = []
 
-			# If any errors happened during validation, exit
-			if self.self_errors:
+			# Exit early if this runner's own initialisation produced errors
+			# (extraction failures, validation failures, hook errors).
+			# Deliberately ignores errors from prior tasks/runners that were
+			# passed in as results — those must not prevent this runner from
+			# starting (see github.com/freelabz/secator/issues/987).
+			if any(isinstance(item, Error) for item in self.results[self._pre_init_results_count:]):
 				self._finalize()
 				return
 
