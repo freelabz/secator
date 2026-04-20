@@ -990,6 +990,34 @@ def format_object(obj, color='magenta', skip_keys=[], predicate=lambda x: True):
 	return ''
 
 
+_HOSTNAME_LABEL_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$')
+
+
+def is_valid_hostname(target):
+	"""Check if target is a valid hostname per the hostname(7) manpage definition.
+
+	Accepts multi-label hostnames with any TLD (including non-standard ones like .internal,
+	.corp, .local) and single-label hostnames containing a hyphen (e.g. db-server, web-01).
+	Single-label names without a hyphen (e.g. redis, test123) return False so they can fall
+	through to slug detection and avoid ambiguity with Docker image names and usernames.
+	"""
+	if not target or len(target) > 253:
+		return False
+	try:
+		ascii_target = target.encode('idna').decode('ascii')
+	except (UnicodeError, ValueError):
+		ascii_target = target
+	labels = ascii_target.split('.')
+	if len(labels) < 2 and '-' not in ascii_target:
+		return False
+	for label in labels:
+		if not label or len(label) > 63:
+			return False
+		if not _HOSTNAME_LABEL_RE.match(label):
+			return False
+	return True
+
+
 def is_host_port(target):
 	"""Check if a target is a host:port.
 
@@ -1000,7 +1028,7 @@ def is_host_port(target):
 		bool: True if the target is a host:port, False otherwise.
 	"""
 	split = target.split(':')
-	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0]) or split[0] == 'localhost'):  # noqa: E501
+	if not (is_valid_hostname(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0]) or split[0] == 'localhost'):  # noqa: E501
 		return False
 	try:
 		port = int(split[1])
@@ -1028,7 +1056,7 @@ def autodetect_type(target):
 		return CIDR_RANGE
 	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
 		return IP
-	elif validators.domain(target):
+	elif is_valid_hostname(target):
 		return HOST
 	elif is_host_port(target):
 		return HOST_PORT
