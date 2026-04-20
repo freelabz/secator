@@ -1,4 +1,4 @@
-from secator.query.utils import parse_report_paths, python_expr_to_mongo, _normalize_field_path
+from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
 
 class TestParseReportPaths:
@@ -120,37 +120,3 @@ class TestPythonExprToMongo:
         result = python_expr_to_mongo("tag.name == 'this and that' and tag.match == 'x'")
         assert result == {'_type': 'tag', 'name': 'this and that', 'match': 'x'}
 
-    def test_get_method_normalization(self):
-        result = python_expr_to_mongo("tag.extra_data.get('product') == 'Apache'")
-        assert result == {'_type': 'tag', 'extra_data.product': 'Apache'}
-
-    def test_get_method_double_quotes(self):
-        result = python_expr_to_mongo('tag.extra_data.get("product") == "Apache"')
-        assert result == {'_type': 'tag', 'extra_data.product': 'Apache'}
-
-    def test_full_issue_query(self):
-        result = python_expr_to_mongo(
-            "tag.name == 'technology' and tag.extra_data.get('product') == 'Apache HTTP Server'"
-        )
-        assert result == {'_type': 'tag', 'name': 'technology', 'extra_data.product': 'Apache HTTP Server'}
-
-
-class TestNormalizeFieldPath:
-
-    def test_get_single_quotes(self):
-        assert _normalize_field_path("extra_data.get('product')") == 'extra_data.product'
-
-    def test_get_double_quotes(self):
-        assert _normalize_field_path('extra_data.get("product")') == 'extra_data.product'
-
-    def test_nested_get(self):
-        assert _normalize_field_path("a.b.get('c')") == 'a.b.c'
-
-    def test_no_get(self):
-        assert _normalize_field_path('extra_data.product') == 'extra_data.product'
-
-    def test_get_non_identifier_key(self):
-        assert _normalize_field_path("extra_data.get('http-title')") == 'extra_data.http-title'
-
-    def test_get_with_spaces(self):
-        assert _normalize_field_path("extra_data.get( 'product' )") == 'extra_data.product'

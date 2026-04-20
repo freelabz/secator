@@ -97,15 +97,6 @@ _OP_MAP = {
 }
 
 
-def _normalize_field_path(field):
-    """Convert Python-style method calls to dot notation for MongoDB.
-
-    E.g. 'extra_data.get(\'product\')' → 'extra_data.product'
-    E.g. 'extra_data.get(\'http-title\')' → 'extra_data.http-title'
-    """
-    return re.sub(r"\.get\(\s*(['\"])([^'\"]+)\1\s*\)", r'.\2', field)
-
-
 def _parse_single_expr(expr):
     """Parse one expression like 'vulnerability.severity_score > 7' into a query dict."""
     expr = expr.strip()
@@ -131,7 +122,7 @@ def _parse_single_expr(expr):
         mongo_op = _OP_MAP.get(op_str)
         parts = left.split('.', 1)
         _type = parts[0].strip()
-        field = _normalize_field_path(parts[1].strip()) if len(parts) > 1 else None
+        field = parts[1].strip() if len(parts) > 1 else None
         value = _parse_value(right)
         result = {'_type': _type}
         if field:
