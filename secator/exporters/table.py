@@ -33,7 +33,8 @@ class TableExporter(Exporter):
 							try:
 								item = cls.load(item)
 							except TypeError as e:
-								console.print(f'[bold orange1]Warning:[/] TableExporter could not cast item of type {item.get("_type")!r}: {e}. Skipping.')
+								_type = item.get('_type')
+								console.print(f'[bold orange1]Warning:[/] TableExporter could not cast item of type {_type!r}: {e}. Skipping.')
 								continue
 					cast_items.append(item)
 				if not cast_items:
