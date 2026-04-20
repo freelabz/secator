@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 
+from datetime import datetime
 from pathlib import Path
 from stat import S_ISFIFO
 
@@ -29,7 +30,7 @@ from secator.runners import Command, Runner
 from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
-	debug, detect_host, flatten, print_version, get_file_date,
+	debug, detect_host, flatten, print_version,
 	get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
 	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
 )
@@ -1012,20 +1013,34 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver,
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
 @click.pass_context
-def report_list(ctx, workspace, runner_type, time_delta):
+def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	"""List all secator reports."""
 	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
+	def _fmt_date(iso_str):
+		if not iso_str:
+			return ''
+		try:
+			dt = datetime.fromisoformat(iso_str)
+			return dt.strftime('%Y-%m-%d %H:%M:%S')
+		except (ValueError, TypeError):
+			return str(iso_str)
+
 	# Build table
 	table = Table()
 	table.add_column("Workspace", style="bold gold3")
-	table.add_column("Path", overflow='fold')
 	table.add_column("Name")
 	table.add_column("Id")
-	table.add_column("Date")
+	table.add_column("Target")
+	table.add_column("Start Date")
+	table.add_column("End Date")
+	table.add_column("Elapsed")
 	table.add_column("Status", style="green")
+	if show_all:
+		table.add_column("Path")
 
 	# Print paths if piped
 	if ctx.obj['piped_output']:
@@ -1042,24 +1057,35 @@ def report_list(ctx, workspace, runner_type, time_delta):
 			info = get_info_from_report_path(path)
 			with open(path, 'r') as f:
 				content = json.loads(f.read())
+			runner_id = info['type'] + '/' + info['id']
+			targets = content['info'].get('targets', [])
+			first_target = str(targets[0]) if targets else ''
 			data = {
 				'workspace': info['workspace'],
 				'name': f"[bold blue]{content['info']['name']}[/]",
 				'status': content['info'].get('status', ''),
-				'id': info['type'] + '/' + info['id'],
-				'date': get_file_date(path),  # Assuming get_file_date returns a readable date
+				'id': f'[link={Path(path).as_uri()}]{runner_id}[/link]',
+				'target': first_target,
+				'start_date': _fmt_date(content['info'].get('start_time')),
+				'end_date': _fmt_date(content['info'].get('end_time')),
+				'elapsed': content['info'].get('elapsed_human', ''),
 			}
 			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
 
 			# Update table
-			table.add_row(
+			row = [
 				data['workspace'],
-				str(path),
 				data['name'],
 				data['id'],
-				data['date'],
-				f"[{status_color}]{data['status']}[/]"
-			)
+				data['target'],
+				data['start_date'],
+				data['end_date'],
+				data['elapsed'],
+				f"[{status_color}]{data['status']}[/]",
+			]
+			if show_all:
+				row.append(str(path))
+			table.add_row(*row)
 		except json.JSONDecodeError as e:
 			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
@@ -1068,6 +1094,82 @@ def report_list(ctx, workspace, runner_type, time_delta):
 		console.print(Info(message=f'Found {len(paths)} reports.'))
 	else:
 		console.print(Error(message='No reports found.'))
+
+
+@report.command('info')
+@click.argument('runner_id', type=str)
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+@click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')  # noqa: E501
+def report_info(runner_id, workspace, show_all):
+	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)."""
+	MAX_ENTRIES = 20
+
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	parts = runner_id.split('/')
+	if len(parts) != 2:
+		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. scans/0)'))
+		return
+	runner_type, runner_number = parts[0], parts[1]
+	if not runner_type.endswith('s'):
+		runner_type += 's'
+
+	report_path = Path(CONFIG.dirs.reports) / workspace_name / runner_type / runner_number / 'report.json'
+	if not report_path.exists():
+		console.print(Error(message=f'Report not found: {report_path}'))
+		return
+
+	with open(report_path, 'r') as f:
+		content = json.loads(f.read())
+
+	info = dict(content.get('info', {}))
+	errors_raw = info.pop('errors', [])
+
+	table = Table(title=f'Info: {runner_id}', show_header=False, box=None, padding=(0, 1))
+	table.add_column('Key', style='bold gold3', no_wrap=True)
+	table.add_column('Value')
+
+	def _format_value(value):
+		if isinstance(value, list):
+			if not show_all and len(value) > MAX_ENTRIES:
+				items = value[:MAX_ENTRIES]
+				tail = f'\n[dim]... and {len(value) - MAX_ENTRIES} more (use --show-all to see all)[/]'
+			else:
+				items = value
+				tail = ''
+			return '\n'.join(str(v) for v in items) + tail
+		if isinstance(value, dict):
+			if not show_all and len(value) > MAX_ENTRIES:
+				pairs = list(value.items())[:MAX_ENTRIES]
+				tail = f'\n[dim]... and {len(value) - MAX_ENTRIES} more (use --show-all to see all)[/]'
+			else:
+				pairs = list(value.items())
+				tail = ''
+			return '\n'.join(f'[bold]{k}[/]: {v}' for k, v in pairs) + tail
+		return str(value) if value is not None else ''
+
+	for key, value in info.items():
+		table.add_row(key, _format_value(value))
+
+	console.print(table)
+
+	# Display errors as Error output types
+	if errors_raw:
+		errors_to_show = errors_raw if show_all else errors_raw[-1:]
+		console.print()
+		extra = ', showing last 1' if not show_all and len(errors_raw) > 1 else ''
+		console.print(f'[bold]Errors[/] ({len(errors_raw)} total{extra}):')
+		for err_data in errors_to_show:
+			if isinstance(err_data, dict):
+				try:
+					err = Error.load(err_data)
+				except (KeyError, TypeError, ValueError):
+					err = Error(message=str(err_data))
+			else:
+				err = Error(message=str(err_data))
+			console.print(err)
+	else:
+		console.print()
+		console.print('[dim]No errors.[/]')
 
 
 @report.command('export')
