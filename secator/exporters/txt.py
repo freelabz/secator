@@ -19,17 +19,17 @@ class TxtExporter(Exporter):
 			with open(txt_path, 'w') as f:
 				first = True
 				for item in items:
-				if isinstance(item, dict):
-					cls = self._type_map.get(item.get('_type'))
-					if cls:
-						try:
-							item = cls.load(item)
-						except TypeError:
-							pass
-					if not first:
-						f.write('\n')
-					f.write(str(item))
-					first = False
+					if isinstance(item, dict):
+						cls = self._type_map.get(item.get('_type'))
+						if cls:
+							try:
+								item = cls.load(item)
+							except TypeError:
+								pass
+						if not first:
+							f.write('\n')
+						f.write(str(item))
+						first = False
 			txt_paths.append(txt_path)
 
 		if not txt_paths:
