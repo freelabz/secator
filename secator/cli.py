@@ -1021,9 +1021,9 @@ def report_list(ctx, workspace, runner_type, time_delta):
 	# Build table
 	table = Table()
 	table.add_column("Workspace", style="bold gold3")
-	table.add_column("Path", overflow='fold')
 	table.add_column("Name")
 	table.add_column("Id")
+	table.add_column("Target")
 	table.add_column("Date")
 	table.add_column("Status", style="green")
 
@@ -1042,21 +1042,25 @@ def report_list(ctx, workspace, runner_type, time_delta):
 			info = get_info_from_report_path(path)
 			with open(path, 'r') as f:
 				content = json.loads(f.read())
+			runner_id = info['type'] + '/' + info['id']
+			targets = content['info'].get('targets', [])
+			first_target = str(targets[0]) if targets else ''
 			data = {
 				'workspace': info['workspace'],
 				'name': f"[bold blue]{content['info']['name']}[/]",
 				'status': content['info'].get('status', ''),
-				'id': info['type'] + '/' + info['id'],
-				'date': get_file_date(path),  # Assuming get_file_date returns a readable date
+				'id': f'[link=file://{path}]{runner_id}[/link]',
+				'target': first_target,
+				'date': get_file_date(path),
 			}
 			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
 
 			# Update table
 			table.add_row(
 				data['workspace'],
-				str(path),
 				data['name'],
 				data['id'],
+				data['target'],
 				data['date'],
 				f"[{status_color}]{data['status']}[/]"
 			)
@@ -1068,6 +1072,82 @@ def report_list(ctx, workspace, runner_type, time_delta):
 		console.print(Info(message=f'Found {len(paths)} reports.'))
 	else:
 		console.print(Error(message='No reports found.'))
+
+
+@report.command('info')
+@click.argument('runner_id', type=str)
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+@click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')
+def report_info(runner_id, workspace, show_all):
+	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)."""
+	MAX_ENTRIES = 20
+
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	parts = runner_id.split('/')
+	if len(parts) != 2:
+		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. scans/0)'))
+		return
+	runner_type, runner_number = parts[0], parts[1]
+	if not runner_type.endswith('s'):
+		runner_type += 's'
+
+	report_path = Path(CONFIG.dirs.reports) / workspace_name / runner_type / runner_number / 'report.json'
+	if not report_path.exists():
+		console.print(Error(message=f'Report not found: {report_path}'))
+		return
+
+	with open(report_path, 'r') as f:
+		content = json.loads(f.read())
+
+	info = dict(content.get('info', {}))
+	errors_raw = info.pop('errors', [])
+
+	table = Table(title=f'Info: {runner_id}', show_header=False, box=None, padding=(0, 1))
+	table.add_column('Key', style='bold gold3', no_wrap=True)
+	table.add_column('Value')
+
+	def _format_value(value):
+		if isinstance(value, list):
+			if not show_all and len(value) > MAX_ENTRIES:
+				items = value[:MAX_ENTRIES]
+				tail = f'\n[dim]... and {len(value) - MAX_ENTRIES} more (use --show-all to see all)[/]'
+			else:
+				items = value
+				tail = ''
+			return '\n'.join(str(v) for v in items) + tail
+		if isinstance(value, dict):
+			if not show_all and len(value) > MAX_ENTRIES:
+				pairs = list(value.items())[:MAX_ENTRIES]
+				tail = f'\n[dim]... and {len(value) - MAX_ENTRIES} more (use --show-all to see all)[/]'
+			else:
+				pairs = list(value.items())
+				tail = ''
+			return '\n'.join(f'[bold]{k}[/]: {v}' for k, v in pairs) + tail
+		return str(value) if value is not None else ''
+
+	for key, value in info.items():
+		table.add_row(key, _format_value(value))
+
+	console.print(table)
+
+	# Display errors as Error output types
+	if errors_raw:
+		errors_to_show = errors_raw if show_all else errors_raw[-1:]
+		console.print()
+		extra = ', showing last 1' if not show_all and len(errors_raw) > 1 else ''
+		console.print(f'[bold]Errors[/] ({len(errors_raw)} total{extra}):')
+		for err_data in errors_to_show:
+			if isinstance(err_data, dict):
+				try:
+					err = Error.load(err_data)
+				except Exception:
+					err = Error(message=str(err_data))
+			else:
+				err = Error(message=str(err_data))
+			console.print(err)
+	elif errors_raw is not None:
+		console.print()
+		console.print('[dim]No errors.[/]')
 
 
 @report.command('export')
