@@ -51,7 +51,7 @@ class GdriveExporter(Exporter):
 
 		# Add one worksheet per output type
 		for output_type, items in results.items():
-			items = [i.toDict() for i in items]
+			items = [i.toDict() if hasattr(i, 'toDict') else i for i in items]
 			if not items:
 				continue
 			keys = [

@@ -38,9 +38,15 @@ class QueryEngine:
             results = self.context.get('results')
             return JsonBackend(workspace_name, context=self.context, results=results)
 
-    def search(self, query: dict, limit: int = None, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
-        """Search for findings matching query. Pass limit=None to fetch all results."""
-        return self.backend.search(query, limit, exclude_fields)
+    def search(self, query: dict, limit: int = 0, dedupe: bool = False,
+               exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
+        """Search for findings matching query."""
+        from secator.utils import debug, remove_duplicates
+        debug(f'search via {self.backend.name} backend', sub='query', obj=query)
+        results = self.backend.search(query, limit, exclude_fields)
+        if dedupe:
+            results = remove_duplicates(results)
+        return results
 
     def count(self, query: dict) -> int:
         """Count findings matching query."""

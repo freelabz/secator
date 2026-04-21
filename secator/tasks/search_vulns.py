@@ -55,6 +55,7 @@ class search_vulns(Vuln):
 
 	@staticmethod
 	def before_init(self):
+		self._targets_info_yielded = False
 		if len(self.inputs) != 1:
 			return
 		_in = self.inputs[0]
@@ -68,7 +69,14 @@ class search_vulns(Vuln):
 	@staticmethod
 	def on_json_loaded(self, item):
 		"""Load vulnerability items from search_vulns JSON output."""
-		matched_at = self.matched_at if self.matched_at else self.inputs[0] if self.inputs else ''
+		if self.matched_at:
+			matched_ats = self.matched_at.split(',')
+		else:
+			matched_ats = [self.inputs[0] if self.inputs else '']
+		if not getattr(self, '_targets_info_yielded', False):
+			targets_str = ', '.join(matched_ats)
+			yield Info(message=f'Targets: {targets_str}')
+			self._targets_info_yielded = True
 
 		values = item.values()
 		if not values:
@@ -94,6 +102,7 @@ class search_vulns(Vuln):
 			exploits = vuln_data.get('exploits', [])
 			cvss_score = float(vuln_data.get('cvss', 0))
 			extra_data = search_vulns.extract_extra_data(vuln_data)
+			extra_data['service_name'] = self.inputs[0] if self.inputs else ''
 			references = search_vulns.extract_references(vuln_data)
 			data = {
 				'id': cve_id,
@@ -103,7 +112,6 @@ class search_vulns(Vuln):
 				'cvss_score': cvss_score,
 				'epss_score': vuln_data.get('epss', ''),
 				'cvss_vec': vuln_data.get('cvss_vec', ''),
-				'matched_at': matched_at,
 				'references': references,
 				'extra_data': extra_data,
 				'provider': 'search_vulns',
@@ -114,7 +122,6 @@ class search_vulns(Vuln):
 				if vuln:
 					data.update(vuln.toDict())
 					data['confidence'] = confidence
-					data['matched_at'] = matched_at
 					data['references'].extend(references)
 					data['extra_data'].update(extra_data)
 
@@ -124,7 +131,8 @@ class search_vulns(Vuln):
 				data['tags'].append('uncertain')
 			if len(exploits) > 0:
 				data['tags'].append('exploitable')
-			yield Vulnerability(**data)
+			for matched_at in matched_ats:
+				yield Vulnerability(**{**data, 'matched_at': matched_at})
 
 			# Exploits
 			if len(exploits) > 2:
@@ -151,17 +159,18 @@ class search_vulns(Vuln):
 				if last_part.isnumeric():
 					id = last_part
 					name += f' {id}'
-				yield Exploit(
-					name=name,
-					provider=provider,
-					id=id,
-					matched_at=matched_at,
-					confidence=confidence,
-					reference=exploit,
-					cves=[cve_id],
-					tags=tags,
-					extra_data=extra_data,
-				)
+				for matched_at in matched_ats:
+					yield Exploit(
+						name=name,
+						provider=provider,
+						id=id,
+						matched_at=matched_at,
+						confidence=confidence,
+						reference=exploit,
+						cves=[cve_id],
+						tags=tags,
+						extra_data=extra_data,
+					)
 
 	@staticmethod
 	def extract_id(item):
