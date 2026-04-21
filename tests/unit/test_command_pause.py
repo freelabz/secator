@@ -8,29 +8,31 @@ def test_command_supports_pause_default():
 	assert Command.supports_pause is True
 
 
-def test_pause_process_sigstop(monkeypatch):
+def test_pause_process_sigint(monkeypatch):
 	from secator.runners.command import Command
 	cmd = Command.__new__(Command)
-	cmd.supports_pause = True
 	mock_process = MagicMock()
 	mock_process.pid = 99999
 	cmd.process = mock_process
 	cmd.paused = False
 	cmd.pause_method = None
 
-	killed = []
-	monkeypatch.setattr(os, 'kill', lambda pid, sig: killed.append((pid, sig)))
+	stopped_with = []
+
+	def mock_stop_process(exit_ok=False, sig=signal.SIGINT):
+		stopped_with.append(sig)
+
+	cmd.stop_process = mock_stop_process
 	cmd.pause_process()
 
-	assert (99999, signal.SIGSTOP) in killed
+	assert signal.SIGINT in stopped_with
 	assert cmd.paused is True
-	assert cmd.pause_method == 'signal'
+	assert cmd.pause_method == 'kill'
 
 
 def test_pause_process_kill_fallback():
 	from secator.runners.command import Command
 	cmd = Command.__new__(Command)
-	cmd.supports_pause = False
 	mock_process = MagicMock()
 	mock_process.pid = 99999
 	cmd.process = mock_process
@@ -38,6 +40,10 @@ def test_pause_process_kill_fallback():
 	cmd.pause_method = None
 	cmd.completed_inputs = ['10.0.0.1']
 
+	def mock_stop_process_raises(exit_ok=False, sig=signal.SIGINT):
+		raise OSError('permission denied')
+
+	cmd.stop_process = mock_stop_process_raises
 	cmd.pause_process()
 
 	mock_process.terminate.assert_called_once()

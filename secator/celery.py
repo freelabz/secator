@@ -170,7 +170,7 @@ def revoke_task(task_id, task_name=None):
 	message = f'Revoked task {task_id}'
 	if task_name:
 		message += f' ({task_name})'
-	app.control.revoke(task_id, terminate=True)
+	app.control.revoke(task_id, terminate=True, signal='SIGKILL')
 	console.print(Info(message=message))
 
 

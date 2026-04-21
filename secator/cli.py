@@ -1315,7 +1315,7 @@ def pause_runner(runner_id):
 		from secator.celery import app
 		result = AsyncResult(runner_id, app=app)
 		if result.state in ('PENDING', 'STARTED', 'RUNNING'):
-			result.revoke(terminate=True)
+			result.revoke(terminate=True, signal='SIGKILL')
 			console.print(Info(message=f'Revoked Celery task {runner_id}. Resume with: secator resume {runner_id}'))
 		else:
 			console.print(Warning(message=f'Task {runner_id} is in state {result.state}, cannot pause'))

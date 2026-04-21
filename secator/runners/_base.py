@@ -477,15 +477,18 @@ class Runner:
 				self.run_hooks('on_interval', sub='item')
 
 		except BaseException as e:
-			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
-			error = Error.from_exception(e)
-			self.add_result(error)
-			self.revoked = True
-			if not self.sync:  # yield latest results from Celery
-				self.stop_celery_tasks()
-				for item in self.yielder():
-					yield from self._process_item(item)
-					self.run_hooks('on_interval', sub='item')
+			if self.paused:
+				pass  # paused gracefully via signal, checkpoint already saved
+			else:
+				self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
+				error = Error.from_exception(e)
+				self.add_result(error)
+				self.revoked = True
+				if not self.sync:  # yield latest results from Celery
+					self.stop_celery_tasks()
+					for item in self.yielder():
+						yield from self._process_item(item)
+						self.run_hooks('on_interval', sub='item')
 
 		finally:
 			yield from self.results_buffer
@@ -496,6 +499,8 @@ class Runner:
 		"""Finalize the runner."""
 		self.join_threads()
 		gc.collect()
+		if self.paused:
+			return  # checkpoint already saved in pause(); skip completion/reporting
 		if self.sync:
 			self.mark_completed()
 		if self.enable_reports:
@@ -1134,13 +1139,15 @@ class Runner:
 		return None
 
 	def _install_signal_handlers(self):
-		"""Install SIGTSTP (Ctrl+Z) and SIGUSR1 (remote pause) handlers."""
+		"""Install SIGINT (Ctrl+C), SIGTSTP (Ctrl+Z) and SIGUSR1 (remote pause) handlers."""
 		import signal as _signal
 
 		def _handle_pause(signum, frame):
 			self.pause()
+			raise KeyboardInterrupt  # stop the main loop after saving checkpoint
 
 		try:
+			_signal.signal(_signal.SIGINT, _handle_pause)
 			_signal.signal(_signal.SIGTSTP, _handle_pause)
 			_signal.signal(_signal.SIGUSR1, _handle_pause)
 		except (OSError, ValueError):
