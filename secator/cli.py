@@ -816,7 +816,7 @@ def workspace_delete(name, driver, yes):
 		actions.append(f'Delete all findings in MongoDB with workspace_id="{name}"')
 		actions.append(f'Delete all runners in MongoDB with workspace_id="{name}"')
 	elif driver == 'api':
-		actions.append(f'Send DELETE to API: workspace/{name}')
+		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)}')
 
 	console.print('[bold]The following actions will be performed:[/]')
 	for action in actions:
@@ -1329,6 +1329,13 @@ def report_delete(runner_id, workspace, driver, yes):
 		return
 
 	runner_type_raw, runner_number = parts[0], parts[1]
+	allowed_types = {'task', 'tasks', 'workflow', 'workflows', 'scan', 'scans'}
+	if runner_type_raw not in allowed_types:
+		console.print(Error(message=f'Invalid runner type: {runner_type_raw!r}. Must be one of: task, workflow, scan.'))
+		return
+	if not runner_number.isdigit():
+		console.print(Error(message=f'Invalid runner number: {runner_number!r}. Must be numeric.'))
+		return
 	runner_type_plural = runner_type_raw if runner_type_raw.endswith('s') else runner_type_raw + 's'
 	runner_type_singular = runner_type_plural[:-1]  # tasks -> task, workflows -> workflow, scans -> scan
 
@@ -1360,7 +1367,10 @@ def report_delete(runner_id, workspace, driver, yes):
 			actions.append('[yellow]No MongoDB ID found in report — skipping MongoDB deletion[/]')
 	elif driver == 'api':
 		if runner_db_id:
-			actions.append(f'Send DELETE to API: {runner_type_singular}/{runner_db_id}')
+			endpoint_preview = CONFIG.addons.api.runner_delete_endpoint.format(
+				runner_type=runner_type_singular, runner_id=runner_db_id
+			)
+			actions.append(f'Send DELETE to API: {endpoint_preview}')
 		else:
 			actions.append('[yellow]No API ID found in report — skipping API deletion[/]')
 
@@ -1391,6 +1401,8 @@ def report_delete(runner_id, workspace, driver, yes):
 				runner_result = db[runner_type_plural].delete_one({'_id': ObjectId(runner_db_id)})
 				if runner_result.deleted_count:
 					console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
+			else:
+				console.print(Warning(message=f'{runner_type_singular}_id "{runner_db_id}" is not a valid ObjectId — runner document was not deleted from MongoDB'))
 		except Exception as e:
 			console.print(Error(message=f'MongoDB deletion failed: {e}'))
 
