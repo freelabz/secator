@@ -38,6 +38,76 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, 'port.ip')
 		self.assertEqual(out, {'port': ['10.0.0.1']})
 
+	def test_dotpath_style_field_name_collides_with_type(self):
+		"""Dot-path style url.url must return the url string, not a DotMap repr."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'webserver': 'nginx'}]}
+		out = _apply_format(results, 'url.url')
+		self.assertEqual(out, {'url': ['https://example.com']})
+
+	def test_dotpath_style_non_colliding_field(self):
+		"""Dot-path style url.webserver must return the webserver field value."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'webserver': 'nginx'}]}
+		out = _apply_format(results, 'url.webserver')
+		self.assertEqual(out, {'url': ['nginx']})
+
+	def test_type_only_spec_uses_str_repr(self):
+		"""--format url (no dot) should use Url.__str__ (returns the url field), not dict repr."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'host': 'example.com'}]}
+		out = _apply_format(results, 'url')
+		self.assertEqual(out, {'url': ['https://example.com']})
+
+	def test_type_only_spec_port_uses_str_repr(self):
+		"""--format port (no dot) should use Port.__str__ (returns host:port), not dict repr."""
+		results = {'port': [self._make_port(ip='1.2.3.4', port=8080)]}
+		out = _apply_format(results, 'port')
+		# Port.__str__ returns 'host:port'
+		self.assertEqual(out, {'port': ['example.com:8080']})
+
+	def test_brace_style_field_only_single_type(self):
+		"""Brace-style with direct field names works when only one type is present."""
+		results = {'url': [{'url': 'https://example.com', 'host': 'example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url} {host} {status_code}')
+		self.assertEqual(out, {'url': ['https://example.com example.com 200']})
+
+	def test_brace_style_field_only_multi_type_warns(self):
+		"""Brace-style with direct field names produces no output when multiple types present."""
+		results = {
+			'url': [{'url': 'https://example.com', 'host': 'example.com', 'status_code': 200}],
+			'port': [self._make_port()],
+		}
+		out = _apply_format(results, '{url} {host} {status_code}')
+		self.assertEqual(out, {})
+
+	def test_brace_style_field_only_single_nonempty_type(self):
+		"""Brace-style with direct field names works when only one type has non-empty results (simulates -q filter)."""
+		results = {
+			'url': [{'url': 'https://example.com', 'host': 'example.com', 'port': 443}],
+			'port': [],
+			'subdomain': [],
+			'ip': [],
+		}
+		out = _apply_format(results, '{url}:{port}')
+		self.assertEqual(out, {'url': ['https://example.com:443']})
+
+	def test_plain_field_spec_single_nonempty_type(self):
+		"""--format status_code (no dot, no braces) should look up the field on the single non-empty type."""
+		results = {
+			'url': [{'url': 'https://example.com', 'status_code': 200, 'host': 'example.com'}],
+			'port': [],
+			'subdomain': [],
+		}
+		out = _apply_format(results, 'status_code')
+		self.assertEqual(out, {'url': ['200']})
+
+	def test_plain_field_spec_multi_nonempty_types_warns(self):
+		"""--format status_code warns when multiple non-empty types present (ambiguous)."""
+		results = {
+			'url': [{'url': 'https://example.com', 'status_code': 200}],
+			'port': [{'port': 80, 'status_code': None}],
+		}
+		out = _apply_format(results, 'status_code')
+		self.assertEqual(out, {})
+
 	def test_unknown_type_returns_empty(self):
 		results = {'port': [self._make_port()]}
 		out = _apply_format(results, '{vulnerability.matched_at}')
@@ -245,14 +315,6 @@ class TestCli(unittest.TestCase):
 		assert not result.exception
 		assert result.exit_code == 0
 		assert 'No reports found' in result.output
-
-	def test_report_export_command(self):
-		# Since this would need an actual JSON file, we'll mock the file opening
-		with mock.patch('builtins.open', mock.mock_open(read_data='{"info":{"name":"test", "title": "test"}, "results":{}}')), \
-			 mock.patch('secator.cli.loads_dataclass', return_value={"info": {"name": "test", "title": "test"}, "results": {}}):
-				result = self.runner.invoke(cli, ['report', 'export', 'test.json', '--output', 'console'])
-				assert not result.exception
-				assert result.exit_code == 0
 
 	@mock.patch('secator.loader.get_configs_by_type')
 	def test_install_tools_command(self, mock_get_configs_by_type):

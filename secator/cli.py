@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 
-from datetime import datetime
 from pathlib import Path
 from stat import S_ISFIFO
 
@@ -27,10 +26,9 @@ from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
-	debug, detect_host, flatten, print_version,
+	debug, detect_host, print_version,
 	get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
 	sanitize_folder_name, vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info,
 	humanize_date
@@ -1008,20 +1006,69 @@ def _apply_format(results, fmt):
 	new_results = {}
 
 	for spec in specs:
+		_field_only = False
 		if '{' in spec and '}' in spec:
-			m = re.search(r'\{(\w+)[.\}]', spec)
-			if not m:
-				continue
-			_type = m.group(1)
-			_template = spec
+			if re.search(r'\{\w+\.\w+', spec):
+				# Brace-style with type.field dot notation: {url.host} {port.port}
+				m = re.search(r'\{(\w+)\.', spec)
+				if not m:
+					continue
+				_type = m.group(1)
+				_template = spec
+			else:
+				# Brace-style with direct field names: {url} {host} {status_code}
+				# Only works when exactly one type is present in results.
+				_field_only = True
+				_type = None
+				_template = spec
 		else:
 			parts = spec.split('.', 1)
 			_type = parts[0]
 			_field = parts[1] if len(parts) > 1 else None
 			_template = '{' + _field + '}' if _field else None
 
+		if _field_only:
+			nonempty_types = [k for k, v in results.items() if v]
+			if len(nonempty_types) != 1:
+				console.print(
+					f'[yellow]Warning: --format "{spec}" requires a single type in results, '
+					f'got: {nonempty_types}[/yellow]'
+				)
+				continue
+			_type = nonempty_types[0]
+			items = results[_type]
+			if not items:
+				new_results[_type] = []
+				continue
+			formatted = []
+			for item in items:
+				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+				try:
+					value = _template.format(**d)
+					formatted.append(value)
+				except (KeyError, AttributeError):
+					pass
+			new_results[_type] = formatted
+			continue
+
 		if _type not in results:
-			console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			if _template is None:
+				# The spec is a plain field name (no type prefix). If there is exactly one
+				# non-empty type, fall back to field lookup on that type.
+				nonempty_types = [k for k, v in results.items() if v]
+				if len(nonempty_types) == 1:
+					_actual_type = nonempty_types[0]
+					items = results[_actual_type]
+					formatted = []
+					for item in items:
+						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+						val = d.get(_type)
+						if val is not None:
+							formatted.append(str(val))
+					new_results[_actual_type] = formatted
+				else:
+					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			# When _template is set the user gave an explicit type prefix — skip silently.
 			continue
 
 		items = results[_type]
@@ -1031,10 +1078,14 @@ def _apply_format(results, fmt):
 
 		if _template:
 			formatted = []
+			is_brace_style = '{' in spec and '}' in spec
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
-					value = _template.format(**{**d, _type: DotMap(d)})
+					# Brace-style ({type.field}) needs DotMap for attribute access.
+					# Dot-path style (type.field) uses direct field values to avoid clobbering.
+					kwargs = {**d, _type: DotMap(d)} if is_brace_style else d
+					value = _template.format(**kwargs)
 					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
 					if 'DotMap()' in str(value):
 						continue
@@ -1043,7 +1094,20 @@ def _apply_format(results, fmt):
 					pass
 			new_results[_type] = formatted
 		else:
-			new_results[_type] = [str(item) for item in items]
+			# No field specified — use each OutputType's __str__ for a clean primary-field repr.
+			# Items from report.data['results'] may be raw dicts; reconstruct via OutputType.load().
+			_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
+			otype_cls = _otype_map.get(_type)
+			formatted = []
+			for item in items:
+				if isinstance(item, dict) and otype_cls:
+					try:
+						formatted.append(str(otype_cls.load(item)))
+					except Exception:
+						formatted.append(json.dumps(item))
+				else:
+					formatted.append(str(item))
+			new_results[_type] = formatted
 
 	return new_results
 
@@ -1135,6 +1199,46 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	report.send()
 
 
+def _load_report_data(path):
+	"""Stream report JSON to extract info section and count vulnerability severities."""
+	import json_stream
+
+	info = {}
+	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+	with open(path, 'r') as f:
+		data = json_stream.load(f)
+		for section_key, section_val in data.items():
+			if section_key == 'info':
+				info = json_stream.to_standard_types(section_val)
+			elif section_key == 'results':
+				for result_key, result_items in section_val.items():
+					if result_key == 'vulnerability':
+						for vuln in result_items:
+							for field_key, field_val in vuln.items():
+								if field_key == 'severity':
+									severity = str(field_val).lower() if field_val else 'unknown'
+									if severity in vuln_counts:
+										vuln_counts[severity] += 1
+									break
+	return info, vuln_counts
+
+
+def _format_vuln_counts(counts):
+	"""Format vulnerability counts as a colored rich string like '2H|10M|5L'."""
+	severity_labels = [
+		('critical', 'C', 'bold red'),
+		('high', 'H', 'red'),
+		('medium', 'M', 'yellow'),
+		('low', 'L', 'green'),
+	]
+	parts = []
+	for severity, label, color in severity_labels:
+		count = counts.get(severity, 0)
+		if count > 0:
+			parts.append(f'[{color}]{count}{label}[/]')
+	return '|'.join(parts) if parts else '-'
+
+
 @report.command('list')
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
@@ -1152,10 +1256,12 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	table.add_column("Name")
 	table.add_column("Id")
 	table.add_column("Target")
+	table.add_column("Profiles")
 	table.add_column("Start Date")
 	table.add_column("End Date")
 	table.add_column("Elapsed")
 	table.add_column("Status", style="green")
+	table.add_column("Vulnerabilities")
 	if show_all:
 		table.add_column("Path")
 
@@ -1171,18 +1277,24 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	# Load each report
 	for path in paths:
 		try:
-			info = get_info_from_report_path(path)
-			with open(path, 'r') as f:
-				content = json.loads(f.read())
-			runner_id = info['type'] + '/' + info['id']
-			targets = content['info'].get('targets', [])
+			path_info = get_info_from_report_path(path)
+			report_info, vuln_counts = _load_report_data(path)
+			runner_id = path_info['type'] + '/' + path_info['id']
+			targets = report_info.get('targets', [])
 			first_target = str(targets[0]) if targets else ''
+			if len(targets) > 1:
+				first_target += f' (+{len(targets) - 1})'
+			profiles = content['info'].get('run_opts', {}).get('profiles', [])
+			if isinstance(profiles, str):
+				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+			profiles_str = ', '.join(profiles) if profiles else ''
 			data = {
 				'workspace': info['workspace'],
 				'name': f"[bold blue]{content['info']['name']}[/]",
 				'status': content['info'].get('status', ''),
 				'id': f'[link={Path(path).as_uri()}]{runner_id}[/link]',
 				'target': first_target,
+				'profiles': profiles_str,
 				'start_date': humanize_date(content['info'].get('start_time')),
 				'end_date': humanize_date(content['info'].get('end_time')),
 				'elapsed': content['info'].get('elapsed_human', ''),
@@ -1195,15 +1307,17 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 				data['name'],
 				data['id'],
 				data['target'],
+				data['profiles'],
 				data['start_date'],
 				data['end_date'],
 				data['elapsed'],
 				f"[{status_color}]{data['status']}[/]",
+				_format_vuln_counts(vuln_counts),
 			]
 			if show_all:
 				row.append(str(path))
 			table.add_row(*row)
-		except json.JSONDecodeError as e:
+		except Exception as e:
 			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if len(paths) > 0:
@@ -1287,31 +1401,6 @@ def report_info(runner_id, workspace, show_all):
 	else:
 		console.print()
 		console.print('[dim]No errors.[/]')
-
-
-@report.command('export')
-@click.argument('json_path', type=str)
-@click.option('--output-folder', '-of', type=str)
-@click.option('--output', '-o', type=str, required=True)
-def report_export(json_path, output_folder, output):
-	with open(json_path, 'r') as f:
-		data = loads_dataclass(f.read())
-
-	split = json_path.split('/')
-	workspace_name = '/'.join(split[:-4]) if len(split) > 4 else '_default'
-	runner_instance = DotMap({
-		"config": {
-			"name": data['info']['name']
-		},
-		"workspace_name": workspace_name,
-		"reports_folder": output_folder or Path.cwd(),
-		"data": data,
-		"results": flatten(list(data['results'].values()))
-	})
-	exporters = Runner.resolve_exporters(output)
-	report = Report(runner_instance, title=data['info']['title'], exporters=exporters)
-	report.data = data
-	report.send()
 
 
 @report.command('delete', aliases=['rm', 'remove'])
@@ -1713,7 +1802,7 @@ c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis
 		title=f":zap: [{title_style}]Too slow ? Use a worker[/]", **kwargs)
 
 	panel5 = Panel(r"""
-[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, filter and export reports using the following commands.[/]
+[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, and filter reports using the following commands.[/]
 
 [dim]# List and filter reports...[/]
 r list                    [dim]# list all reports[/]
