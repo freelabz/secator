@@ -798,7 +798,7 @@ def workspace_current():
 	console.print(f'Current workspace: [bold gold3]{current}[/]')
 
 
-@workspace.command('rm')
+@workspace.command('rm', aliases=['remove', 'delete'])
 @click.argument('name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
@@ -856,10 +856,6 @@ def workspace_delete(name, driver, yes):
 			console.print(Info(message=f'Deleted workspace "{name}" from API'))
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
-
-
-workspace.add_command(workspace_delete, 'remove')
-workspace.add_command(workspace_delete, 'delete')
 
 
 #----------#
@@ -1318,7 +1314,7 @@ def report_export(json_path, output_folder, output):
 	report.send()
 
 
-@report.command('delete')
+@report.command('delete', aliases=['rm', 'remove'])
 @click.argument('runner_id')
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
@@ -1410,10 +1406,6 @@ def report_delete(runner_id, workspace, driver, yes):
 			console.print(Info(message=f'Deleted {runner_type_singular} from API'))
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
-
-
-report.add_command(report_delete, 'rm')
-report.add_command(report_delete, 'remove')
 
 
 #--------#
