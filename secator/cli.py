@@ -970,10 +970,14 @@ def _apply_format(results, fmt):
 
 		if _template:
 			formatted = []
+			is_brace_style = '{' in spec and '}' in spec
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
-					value = _template.format(**{**d, _type: DotMap(d)})
+					# Brace-style ({type.field}) needs DotMap for attribute access.
+					# Dot-path style (type.field) uses direct field values to avoid clobbering.
+					kwargs = {**d, _type: DotMap(d)} if is_brace_style else d
+					value = _template.format(**kwargs)
 					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
 					if 'DotMap()' in str(value):
 						continue

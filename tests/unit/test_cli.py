@@ -38,6 +38,18 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, 'port.ip')
 		self.assertEqual(out, {'port': ['10.0.0.1']})
 
+	def test_dotpath_style_field_name_collides_with_type(self):
+		"""Dot-path style url.url must return the url string, not a DotMap repr."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'webserver': 'nginx'}]}
+		out = _apply_format(results, 'url.url')
+		self.assertEqual(out, {'url': ['https://example.com']})
+
+	def test_dotpath_style_non_colliding_field(self):
+		"""Dot-path style url.webserver must return the webserver field value."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'webserver': 'nginx'}]}
+		out = _apply_format(results, 'url.webserver')
+		self.assertEqual(out, {'url': ['nginx']})
+
 	def test_unknown_type_returns_empty(self):
 		results = {'port': [self._make_port()]}
 		out = _apply_format(results, '{vulnerability.matched_at}')
