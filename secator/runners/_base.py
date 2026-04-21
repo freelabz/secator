@@ -466,9 +466,11 @@ class Runner:
 			OutputType: runner result.
 		"""
 		try:
-			# If sync mode, set started
+			# If sync mode, set started; otherwise log start info to client console
 			if self.sync:
 				self.mark_started()
+			else:
+				self.log_start()
 
 			# Yield results buffer
 			yield from self.results_buffer
