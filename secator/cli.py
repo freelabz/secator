@@ -27,10 +27,9 @@ from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
-	debug, detect_host, flatten, print_version,
+	debug, detect_host, print_version,
 	get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
 	humanize_date,
 	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
@@ -1229,31 +1228,6 @@ def report_info(runner_id, workspace, show_all):
 		console.print('[dim]No errors.[/]')
 
 
-@report.command('export')
-@click.argument('json_path', type=str)
-@click.option('--output-folder', '-of', type=str)
-@click.option('--output', '-o', type=str, required=True)
-def report_export(json_path, output_folder, output):
-	with open(json_path, 'r') as f:
-		data = loads_dataclass(f.read())
-
-	split = json_path.split('/')
-	workspace_name = '/'.join(split[:-4]) if len(split) > 4 else '_default'
-	runner_instance = DotMap({
-		"config": {
-			"name": data['info']['name']
-		},
-		"workspace_name": workspace_name,
-		"reports_folder": output_folder or Path.cwd(),
-		"data": data,
-		"results": flatten(list(data['results'].values()))
-	})
-	exporters = Runner.resolve_exporters(output)
-	report = Report(runner_instance, title=data['info']['title'], exporters=exporters)
-	report.data = data
-	report.send()
-
-
 #--------#
 # DEPLOY #
 #--------#
@@ -1547,7 +1521,7 @@ c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis
 		title=f":zap: [{title_style}]Too slow ? Use a worker[/]", **kwargs)
 
 	panel5 = Panel(r"""
-[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, filter and export reports using the following commands.[/]
+[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, and filter reports using the following commands.[/]
 
 [dim]# List and filter reports...[/]
 r list                    [dim]# list all reports[/]

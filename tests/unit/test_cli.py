@@ -246,14 +246,6 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 0
 		assert 'No reports found' in result.output
 
-	def test_report_export_command(self):
-		# Since this would need an actual JSON file, we'll mock the file opening
-		with mock.patch('builtins.open', mock.mock_open(read_data='{"info":{"name":"test", "title": "test"}, "results":{}}')), \
-			 mock.patch('secator.cli.loads_dataclass', return_value={"info": {"name": "test", "title": "test"}, "results": {}}):
-				result = self.runner.invoke(cli, ['report', 'export', 'test.json', '--output', 'console'])
-				assert not result.exception
-				assert result.exit_code == 0
-
 	@mock.patch('secator.loader.get_configs_by_type')
 	def test_install_tools_command(self, mock_get_configs_by_type):
 		mock_get_configs_by_type.return_value = []
