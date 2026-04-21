@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 
-from datetime import datetime
 from pathlib import Path
 from stat import S_ISFIFO
 
@@ -993,21 +992,23 @@ def _apply_format(results, fmt):
 			continue
 
 		if _type not in results:
-			# The spec may be a field name rather than a type name.
-			# If there is exactly one non-empty type, fall back to field lookup.
-			nonempty_types = [k for k, v in results.items() if v]
-			if len(nonempty_types) == 1:
-				_actual_type = nonempty_types[0]
-				items = results[_actual_type]
-				formatted = []
-				for item in items:
-					d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
-					val = d.get(_type)
-					if val is not None:
-						formatted.append(str(val))
-				new_results[_actual_type] = formatted
-			else:
-				console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			if _template is None:
+				# The spec is a plain field name (no type prefix). If there is exactly one
+				# non-empty type, fall back to field lookup on that type.
+				nonempty_types = [k for k, v in results.items() if v]
+				if len(nonempty_types) == 1:
+					_actual_type = nonempty_types[0]
+					items = results[_actual_type]
+					formatted = []
+					for item in items:
+						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+						val = d.get(_type)
+						if val is not None:
+							formatted.append(str(val))
+					new_results[_actual_type] = formatted
+				else:
+					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			# When _template is set the user gave an explicit type prefix — skip silently.
 			continue
 
 		items = results[_type]
