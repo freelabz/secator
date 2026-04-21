@@ -40,6 +40,7 @@ class nuclei(VulnMulti):
 		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
 		'debug': {'type': str, 'help': 'Debug mode'},
 		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
+		'severity': {'type': str, 'short': 's', 'help': 'Templates to run based on severity. Possible values: info, low, medium, high, critical, unknown'},  # noqa: E501
 		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
 		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
 		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
@@ -77,6 +78,8 @@ class nuclei(VulnMulti):
 		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'templates': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
+		'severity': lambda x: ','.join(x) if isinstance(x, list) else x,
+		'exclude_severity': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
 	item_loaders = [JSONSerializer()]
 	output_discriminator = output_discriminator
