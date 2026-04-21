@@ -1100,6 +1100,7 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	table.add_column("Name")
 	table.add_column("Id")
 	table.add_column("Target")
+	table.add_column("Profiles")
 	table.add_column("Start Date")
 	table.add_column("End Date")
 	table.add_column("Elapsed")
@@ -1125,12 +1126,17 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			runner_id = info['type'] + '/' + info['id']
 			targets = content['info'].get('targets', [])
 			first_target = str(targets[0]) if targets else ''
+			if len(targets) > 1:
+				first_target += f' (+{len(targets) - 1})'
+			profiles = content['info'].get('profiles', [])
+			profiles_str = ', '.join(profiles) if profiles else ''
 			data = {
 				'workspace': info['workspace'],
 				'name': f"[bold blue]{content['info']['name']}[/]",
 				'status': content['info'].get('status', ''),
 				'id': f'[link={Path(path).as_uri()}]{runner_id}[/link]',
 				'target': first_target,
+				'profiles': profiles_str,
 				'start_date': _fmt_date(content['info'].get('start_time')),
 				'end_date': _fmt_date(content['info'].get('end_time')),
 				'elapsed': content['info'].get('elapsed_human', ''),
@@ -1143,6 +1149,7 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 				data['name'],
 				data['id'],
 				data['target'],
+				data['profiles'],
 				data['start_date'],
 				data['end_date'],
 				data['elapsed'],
