@@ -25,7 +25,7 @@ def resolve_conditional_opts(opts, context):
 	for key, val in opts.items():
 		if not key.endswith('_'):
 			continue
-		if not isinstance(val, dict) or 'condition' not in val:
+		if not isinstance(val, dict) or 'condition' not in val or 'type' in val:
 			continue
 		base_key = key.rstrip('_')
 		condition = val['condition']
@@ -33,8 +33,11 @@ def resolve_conditional_opts(opts, context):
 		try:
 			if eval(condition, safe_globals, context):
 				resolved[base_key] = opt_value
-		except Exception:
-			pass
+		except Exception as e:
+			debug(
+				f'ignored conditional option [bold]{key}[/] because condition failed: {condition!r} ({e})',
+				sub='conditional_opts',
+			)
 		to_remove.append(key)
 	for key in to_remove:
 		del opts[key]

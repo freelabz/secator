@@ -409,6 +409,18 @@ class TestResolveConditionalOpts(unittest.TestCase):
         result = resolve_conditional_opts(opts, {})
         self.assertIn('targets_', result)
 
+    def test_dict_extractor_with_type_key_not_treated_as_conditional(self):
+        """Dict extractors with 'type' key must NOT be treated as conditional opts."""
+        # Reproduces the url_fuzz.yaml httpx.targets_ case:
+        # targets_:
+        #   type: url
+        #   field: url
+        #   condition: not url.verified
+        opts = {'targets_': {'type': 'url', 'field': 'url', 'condition': 'not url.verified'}}
+        result = resolve_conditional_opts(opts, {})
+        self.assertIn('targets_', result)
+        self.assertNotIn('targets', result)
+
     def test_run_extractors_resolves_conditional_opts_first(self):
         """run_extractors resolves conditional opts before processing extractors."""
         from dotmap import DotMap
