@@ -26,10 +26,10 @@ class TxtExporter(Exporter):
 								item = cls.load(item)
 							except TypeError:
 								pass
-						if not first:
-							f.write('\n')
-						f.write(str(item))
-						first = False
+					if not first:
+						f.write('\n')
+					f.write(str(item))
+					first = False
 			txt_paths.append(txt_path)
 
 		if not txt_paths:
