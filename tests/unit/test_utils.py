@@ -74,6 +74,7 @@ class TestExtractRootDomain(unittest.TestCase):
 			("https://github.com/example/example.git", URL),
 			("github.com/example/example.git", STRING),
 			("gs://example/example.txt", GCS_URL),
+			("a" * 255, STRING),
 		]
 		for target, expected in targets:
 			with self.subTest(target=target):
