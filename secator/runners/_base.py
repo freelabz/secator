@@ -250,6 +250,9 @@ class Runner:
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
 
+		# Create initial JSON report with runner info
+		self._init_json_report()
+
 	def _process_config(self, config):
 		"""Process the configuration in different formats (dict, TemplateLoader, DotMap).
 
@@ -1033,6 +1036,18 @@ class Runner:
 		)
 		# fmt: on
 		self._print(info, rich=True)
+
+	def _init_json_report(self):
+		"""Create initial report.json with runner info when JSON exporter is configured."""
+		from secator.exporters.json import JsonExporter
+		if JsonExporter not in self.exporters:
+			return
+		if self.dry_run or self.no_process:
+			return
+		json_path = Path(self.reports_folder) / 'report.json'
+		if not json_path.exists():
+			with open(json_path, 'w') as f:
+				json.dump({'info': self.toDict(), 'results': {}}, f, indent=2, default=str)
 
 	def export_reports(self):
 		"""Export reports."""
