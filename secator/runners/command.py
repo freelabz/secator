@@ -206,6 +206,11 @@ class Command(Runner):
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
 
+		# Apply task-specific config overrides
+		task_name = self.__class__.__name__
+		for attr, value in CONFIG.tasks.overrides.get(task_name, {}).items():
+			setattr(self, attr, value)
+
 		# Build command input
 		self._build_cmd_input()
 

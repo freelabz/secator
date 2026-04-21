@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from subprocess import call, DEVNULL
-from typing import Dict, List
+from typing import Any, Dict, List
 from typing_extensions import Annotated, Self
 
 import validators
@@ -126,6 +126,7 @@ class HTTP(StrictModel):
 
 class Tasks(StrictModel):
 	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	overrides: Dict[str, Dict[str, Any]] = {}
 
 
 class Workflows(StrictModel):
