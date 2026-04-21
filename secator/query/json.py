@@ -131,7 +131,7 @@ class JsonBackend(QueryBackend):
 								results = data['results']
 								for type_name, items in results.items():
 									for item in items:
-										item_dict = item.collect()
+										item_dict = json_stream.to_standard_types(item)
 										if f'{runner_type_singular}_id' not in item_dict['_context']:
 											item_dict['_context'][f'{runner_type_singular}_id'] = runner_id
 										yield item_dict
