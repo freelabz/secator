@@ -932,16 +932,72 @@ def report():
 	pass
 
 
+def _apply_format(results, fmt):
+	"""Apply a --format string to report results, returning formatted strings grouped by type.
+
+	Args:
+		results (dict): Report results keyed by type name.
+		fmt (str): Format spec(s), optionally pipe-separated per type.
+			E.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'
+
+	Returns:
+		dict: Results dict with items replaced by formatted strings (only matching types kept).
+	"""
+	specs = [s.strip() for s in re.split(r'\s*\|\|\s*', fmt) if s.strip()]
+	new_results = {}
+
+	for spec in specs:
+		if '{' in spec and '}' in spec:
+			m = re.search(r'\{(\w+)[.\}]', spec)
+			if not m:
+				continue
+			_type = m.group(1)
+			_template = spec
+		else:
+			parts = spec.split('.', 1)
+			_type = parts[0]
+			_field = parts[1] if len(parts) > 1 else None
+			_template = '{' + _field + '}' if _field else None
+
+		if _type not in results:
+			console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			continue
+
+		items = results[_type]
+		if not items:
+			new_results[_type] = []
+			continue
+
+		if _template:
+			formatted = []
+			for item in items:
+				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+				try:
+					value = _template.format(**{_type: DotMap(d), **d})
+					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
+					if 'DotMap()' in str(value):
+						continue
+					formatted.append(value)
+				except (KeyError, AttributeError):
+					pass
+			new_results[_type] = formatted
+		else:
+			new_results[_type] = [str(item) for item in items]
+
+	return new_results
+
+
 @report.command('show')
 @click.argument('report_query', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
+@click.option('--format', '-f', 'fmt', type=str, default=None, help='Format string for results, e.g. \'{tag.match}-{tag.name}\' or \'{port.host}:{port.port} || vulnerability.matched_at\'')  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, workspace, driver, dedupe):
+def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
@@ -1002,10 +1058,19 @@ def report_show(ctx, report_query, output, time_delta, query, workspace, driver,
 
 	exporters = Runner.resolve_exporters(output)
 
+	if fmt:
+		non_console = [e.strip() for e in output.split(',') if e.strip() and e.strip() != 'console']
+		if non_console:
+			raise click.UsageError(
+				f"--format (-f) is only supported with the console exporter; incompatible with: {', '.join(non_console)}"
+			)
+
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
 	report.build(query=full_query, dedupe=dedupe_effective)
+	if fmt:
+		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
 
 

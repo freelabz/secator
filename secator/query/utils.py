@@ -135,6 +135,37 @@ def _parse_single_expr(expr):
     return {'_type': parts[0].strip()}
 
 
+def _normalize_logical_ops(query):
+    """Replace Python-style 'and'/'or' with '&&'/'||', skipping quoted substrings."""
+    result = []
+    i = 0
+    in_quote = None
+    while i < len(query):
+        ch = query[i]
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            result.append(ch)
+            i += 1
+        elif ch == in_quote:
+            in_quote = None
+            result.append(ch)
+            i += 1
+        elif in_quote is None:
+            if query[i:i + 5] == ' and ':
+                result.append(' && ')
+                i += 5
+            elif query[i:i + 4] == ' or ':
+                result.append(' || ')
+                i += 4
+            else:
+                result.append(ch)
+                i += 1
+        else:
+            result.append(ch)
+            i += 1
+    return ''.join(result)
+
+
 def python_expr_to_mongo(query):
     """Translate a Python-like CLI query expression to a MongoDB-style query dict.
 
@@ -144,8 +175,8 @@ def python_expr_to_mongo(query):
         - JSON string (starts with '{') → parsed as dict
         - 'type' → {'_type': 'type'}
         - 'type.field > value' → {'_type': 'type', 'field': {'$gt': value}}
-        - 'expr1 && expr2' → merged dict (AND)
-        - 'expr1 || expr2' → {'$or': [...]}
+        - 'expr1 && expr2' or 'expr1 and expr2' → merged dict (AND)
+        - 'expr1 || expr2' or 'expr1 or expr2' → {'$or': [...]}
     """
     if not query:
         return {}
@@ -158,6 +189,8 @@ def python_expr_to_mongo(query):
             return json.loads(query)
         except json.JSONDecodeError:
             pass
+
+    query = _normalize_logical_ops(query)
 
     or_parts = _split_logical_op(query, '||')
     and_parts = _split_logical_op(query, '&&')
