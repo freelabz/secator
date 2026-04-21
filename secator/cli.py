@@ -1125,6 +1125,8 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			runner_id = info['type'] + '/' + info['id']
 			targets = content['info'].get('targets', [])
 			first_target = str(targets[0]) if targets else ''
+			if len(targets) > 1:
+				first_target += f' (+{len(targets) - 1})'
 			data = {
 				'workspace': info['workspace'],
 				'name': f"[bold blue]{content['info']['name']}[/]",
