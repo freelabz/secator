@@ -479,6 +479,15 @@ class Runner:
 		except BaseException as e:
 			if self.paused:
 				pass  # paused gracefully via signal, checkpoint already saved
+			elif isinstance(e, KeyboardInterrupt):
+				# CTRL+C reached here without going through the signal handler
+				# (e.g. signal handlers couldn't be installed, or a re-entrant interrupt
+				# fired after pause() already set self.paused but before the guard caught it).
+				# Treat it as a pause so the runner ends in PAUSED state, not FAILURE.
+				try:
+					self.pause()
+				except Exception:
+					self.paused = True  # last-resort: at least mark paused
 			else:
 				self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
 				error = Error.from_exception(e)
@@ -1085,6 +1094,12 @@ class Runner:
 		"""Pause this runner: signal or kill subprocess, save checkpoint."""
 		from secator.runners.checkpoint import Checkpoint
 
+		# Guard against re-entrant calls (e.g. SIGINT re-delivered to parent when
+		# pause_process() sends os.killpg to the whole process group).
+		if self.paused:
+			return
+		self.paused = True
+
 		# Pause subprocess if this is a Command (sends signal, waits for cleanup)
 		if hasattr(self, 'pause_process'):
 			self.pause_process()
@@ -1113,7 +1128,6 @@ class Runner:
 			self.run_hooks('on_interrupt', cp, sub='pause')
 
 		cp.save(self.reports_folder)
-		self.paused = True
 		self._print(Info(message=f'Checkpoint saved to {self.reports_folder}'), rich=True)
 		self._print(Info(message=f'Runner paused. Resume with: secator resume {cp.runner_id}'), rich=True)
 
