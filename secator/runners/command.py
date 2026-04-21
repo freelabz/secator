@@ -470,14 +470,14 @@ class Command(Runner):
 			self.print_command()
 
 			# In remote worker mode, stream description and cmd back to the client
-			if IN_WORKER:
-				if not self.has_children and self.caller and self.description and self.print_cmd:
-					yield Info(message=f':wrench: {self.description} ({self.config.name}) ...', _source=self.unique_name)
-				if self.print_cmd:
-					cmd_str = f':zap: {_s(self.cmd)}'
-					if self.chunk and self.chunk_count:
-						cmd_str += f' ({self.chunk}/{self.chunk_count})'
-					yield Info(message=cmd_str, _source=self.unique_name)
+			if IN_WORKER and self.print_cmd:
+				cmd_str = _s(self.cmd)
+				if self.chunk and self.chunk_count:
+					cmd_str += f' ({self.chunk}/{self.chunk_count})'
+				yield Info(
+					message=f'Started task {self.description} ([bold gold3]{self.unique_name}[/]) (cmd=[dim white]{cmd_str}[/])',
+					_source=self.unique_name
+				)
 
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
