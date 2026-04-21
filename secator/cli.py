@@ -32,6 +32,7 @@ from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
 	debug, detect_host, flatten, print_version,
 	get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
+	humanize_date,
 	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
 )
 from contextlib import nullcontext
@@ -1085,15 +1086,6 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
-	def _fmt_date(iso_str):
-		if not iso_str:
-			return ''
-		try:
-			dt = datetime.fromisoformat(iso_str)
-			return dt.strftime('%Y-%m-%d %H:%M:%S')
-		except (ValueError, TypeError):
-			return str(iso_str)
-
 	# Build table
 	table = Table()
 	table.add_column("Workspace", style="bold gold3")
@@ -1131,8 +1123,8 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 				'status': content['info'].get('status', ''),
 				'id': f'[link={Path(path).as_uri()}]{runner_id}[/link]',
 				'target': first_target,
-				'start_date': _fmt_date(content['info'].get('start_time')),
-				'end_date': _fmt_date(content['info'].get('end_time')),
+				'start_date': humanize_date(content['info'].get('start_time')),
+				'end_date': humanize_date(content['info'].get('end_time')),
 				'elapsed': content['info'].get('elapsed_human', ''),
 			}
 			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
