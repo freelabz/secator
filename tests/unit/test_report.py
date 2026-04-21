@@ -26,7 +26,7 @@ class TestReportBuild:
             'end_time': None,
             'elapsed': None,
             'elapsed_human': None,
-            'run_opts': {},
+            'run_opts': {'profiles': ['aggressive']},
             'results_count': 0,
         }
         return runner
@@ -66,6 +66,12 @@ class TestReportBuild:
         report = Report(runner)
         report.build(query={})
         assert len(report.data['results'].get('vulnerability', [])) == 150
+
+    def test_build_persists_profiles_in_run_opts(self):
+        runner = self._make_runner([])
+        report = Report(runner)
+        report.build(query={})
+        assert report.data['info']['run_opts']['profiles'] == ['aggressive']
 
     def test_build_no_preloaded_results_does_not_short_circuit_backend(self):
         """When runner has no pre-loaded results, Report.build() must not pass empty list to context.
