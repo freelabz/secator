@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.29.0](https://github.com/freelabz/secator/compare/v0.28.0...v0.29.0) (2026-04-21)
+
+
+### Features
+
+* **cli:** improve report list and add report info command ([#997](https://github.com/freelabz/secator/issues/997)) ([cead276](https://github.com/freelabz/secator/commit/cead276e337b93b868e335c40b85315e5eed2b37))
+* **nuclei:** add -severity option ([#1009](https://github.com/freelabz/secator/issues/1009)) ([cf5453c](https://github.com/freelabz/secator/commit/cf5453c3c22191a0d3bad86af349fe2dd781e0a2))
+
+
+### Bug Fixes
+
+* **exporters:** stream items in TxtExporter, cast dicts to OutputType ([#994](https://github.com/freelabz/secator/issues/994)) ([b178c17](https://github.com/freelabz/secator/commit/b178c175267bf6b920356c42a6598b6799941baa))
+* **exporters:** Table exporter broken because of dict change ([#1005](https://github.com/freelabz/secator/issues/1005)) ([611ab84](https://github.com/freelabz/secator/commit/611ab840f93b2e135c3f2a5de088921190fd6451))
+* **query:** add --format to report show and improve query expression support ([#1006](https://github.com/freelabz/secator/issues/1006)) ([50748d2](https://github.com/freelabz/secator/commit/50748d233819eac5b0d66dc8947a2bd77896be51))
+* **query:** handle ~= regex operator in python_expr_to_mongo ([#989](https://github.com/freelabz/secator/issues/989)) ([70f4837](https://github.com/freelabz/secator/commit/70f4837d6051a2ce1bfe8e77c16a4b341b7a94bf))
+* **vulnerability:** compare id.lower() with name.lower() to avoid repetition ([#996](https://github.com/freelabz/secator/issues/996)) ([68ef960](https://github.com/freelabz/secator/commit/68ef9608a1c5eea7e38fbce097e4c6c19d5514f0))
+* **worker:** replace deprecated eventlet with gevent ([#1002](https://github.com/freelabz/secator/issues/1002)) ([e1e6662](https://github.com/freelabz/secator/commit/e1e666272f8086f3ed77ba5ba1fcb2558c6331f9))
+
 ## [0.28.0](https://github.com/freelabz/secator/compare/v0.27.0...v0.28.0) (2026-04-20)
 
 
