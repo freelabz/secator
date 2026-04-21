@@ -124,3 +124,35 @@ class TestPythonExprToMongo:
         result = python_expr_to_mongo("tag.name == 'this and that' and tag.match == 'x'")
         assert result == {'_type': 'tag', 'name': 'this and that', 'match': 'x'}
 
+    def test_in_operator_integers(self):
+        result = python_expr_to_mongo("url.status_code in [200,304]")
+        assert result == {'_type': 'url', 'status_code': {'$in': [200, 304]}}
+
+    def test_in_operator_strings(self):
+        result = python_expr_to_mongo("vulnerability.severity in ['high', 'critical']")
+        assert result == {'_type': 'vulnerability', 'severity': {'$in': ['high', 'critical']}}
+
+    def test_in_operator_double_quoted_strings(self):
+        result = python_expr_to_mongo('vulnerability.severity in ["high", "critical"]')
+        assert result == {'_type': 'vulnerability', 'severity': {'$in': ['high', 'critical']}}
+
+    def test_in_operator_multiple_values(self):
+        result = python_expr_to_mongo("port.port in [80, 443, 8080]")
+        assert result == {'_type': 'port', 'port': {'$in': [80, 443, 8080]}}
+
+    def test_in_operator_with_and(self):
+        result = python_expr_to_mongo("url.status_code in [200, 304] && url.path == '/api'")
+        assert result == {'_type': 'url', 'status_code': {'$in': [200, 304]}, 'path': '/api'}
+
+    def test_in_operator_with_python_and(self):
+        result = python_expr_to_mongo("vulnerability.severity in ['high', 'critical'] and vulnerability.severity_score > 7")
+        assert result == {
+            '_type': 'vulnerability',
+            'severity': {'$in': ['high', 'critical']},
+            'severity_score': {'$gt': 7},
+        }
+
+    def test_in_operator_floats(self):
+        result = python_expr_to_mongo("item.score in [1.5, 2.5, 3.0]")
+        assert result == {'_type': 'item', 'score': {'$in': [1.5, 2.5, 3.0]}}
+
