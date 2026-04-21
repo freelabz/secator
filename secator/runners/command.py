@@ -474,8 +474,9 @@ class Command(Runner):
 				cmd_str = _s(self.cmd)
 				if self.chunk and self.chunk_count:
 					cmd_str += f' ({self.chunk}/{self.chunk_count})'
+				desc_part = f'{self.description} ' if self.description else ''
 				yield Info(
-					message=f'Started task {self.description} ([bold gold3]{self.unique_name}[/]) (cmd=[dim white]{cmd_str}[/])',
+					message=f'Started task {desc_part}([bold gold3]{self.unique_name}[/]) (cmd=[dim white]{cmd_str}[/])',
 					_source=self.unique_name
 				)
 
