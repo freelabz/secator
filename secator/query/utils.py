@@ -166,6 +166,17 @@ def _normalize_logical_ops(query):
     return ''.join(result)
 
 
+def _merge_clause_dicts(base, update):
+    """Merge two clause dicts, combining operator sub-dicts for the same field key."""
+    result = dict(base)
+    for key, value in update.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = {**result[key], **value}
+        else:
+            result[key] = value
+    return result
+
+
 def python_expr_to_mongo(query):
     """Translate a Python-like CLI query expression to a MongoDB-style query dict.
 
@@ -204,7 +215,7 @@ def python_expr_to_mongo(query):
             if len(and_parts) > 1:
                 merged = {}
                 for ap in and_parts:
-                    merged.update(_parse_single_expr(ap))
+                    merged = _merge_clause_dicts(merged, _parse_single_expr(ap))
                 mongo_clauses.append(merged)
             else:
                 mongo_clauses.append(_parse_single_expr(or_part))
@@ -214,7 +225,7 @@ def python_expr_to_mongo(query):
         if len(and_parts) > 1:
             result = {}
             for part in and_parts:
-                result.update(_parse_single_expr(part))
+                result = _merge_clause_dicts(result, _parse_single_expr(part))
         else:
             result = _parse_single_expr(query)
 

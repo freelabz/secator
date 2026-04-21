@@ -126,6 +126,19 @@ class TestPythonExprToMongo:
             ]
         }
 
+    def test_and_range_query_same_field(self):
+        result = python_expr_to_mongo('port.port > 80 && port.port < 1024')
+        assert result == {'_type': 'port', 'port': {'$gt': 80, '$lt': 1024}}
+
+    def test_mixed_and_or_preserves_same_field_range(self):
+        result = python_expr_to_mongo('domain || port.port > 80 && port.port < 1024')
+        assert result == {
+            '$or': [
+                {'_type': 'domain'},
+                {'_type': 'port', 'port': {'$gt': 80, '$lt': 1024}},
+            ]
+        }
+
     def test_passthrough_mongo_dict(self):
         query = {'_type': 'vulnerability', 'severity_score': {'$gte': 7}}
         assert python_expr_to_mongo(query) == query

@@ -266,6 +266,13 @@ class TestQueryOperators(unittest.TestCase):
 		self.assertTrue(match_query(item, {'url': {'$regex': r'example\.com'}}))
 		self.assertFalse(match_query(item, {'url': {'$regex': r'other\.com'}}))
 
+		# $ne: missing field (None) should NOT match
+		self.assertFalse(match_query(item, {'nonexistent_field': {'$ne': 'anything'}}))
+		# $ne: present field with different value should match
+		self.assertTrue(match_query(item, {'severity': {'$ne': 'low'}}))
+		# $ne: present field with same value should not match
+		self.assertFalse(match_query(item, {'severity': {'$ne': 'critical'}}))
+
 
 class TestMongoDBBackend(unittest.TestCase):
 	def test_mongodb_backend_instantiation(self):

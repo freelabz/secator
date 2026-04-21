@@ -19,7 +19,7 @@ OPERATORS = {
 	"$gte": lambda field, value: field >= value if field is not None else False,
 	"$lt": lambda field, value: field < value if field is not None else False,
 	"$lte": lambda field, value: field <= value if field is not None else False,
-	"$ne": lambda field, value: field != value,
+	"$ne": lambda field, value: field is not None and field != value,
 }
 
 
