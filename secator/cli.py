@@ -796,7 +796,7 @@ def workspace_current():
 	console.print(f'Current workspace: [bold gold3]{current}[/]')
 
 
-@workspace.command('rm', aliases=['remove', 'delete'])
+@workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
@@ -1403,7 +1403,7 @@ def report_info(runner_id, workspace, show_all):
 		console.print('[dim]No errors.[/]')
 
 
-@report.command('delete', aliases=['rm', 'remove'])
+@report.command(name='delete', aliases=['rm', 'remove'])
 @click.argument('runner_id')
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
