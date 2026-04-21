@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 
-from datetime import datetime
 from pathlib import Path
 from stat import S_ISFIFO
 
@@ -948,20 +947,69 @@ def _apply_format(results, fmt):
 	new_results = {}
 
 	for spec in specs:
+		_field_only = False
 		if '{' in spec and '}' in spec:
-			m = re.search(r'\{(\w+)[.\}]', spec)
-			if not m:
-				continue
-			_type = m.group(1)
-			_template = spec
+			if re.search(r'\{\w+\.\w+', spec):
+				# Brace-style with type.field dot notation: {url.host} {port.port}
+				m = re.search(r'\{(\w+)\.', spec)
+				if not m:
+					continue
+				_type = m.group(1)
+				_template = spec
+			else:
+				# Brace-style with direct field names: {url} {host} {status_code}
+				# Only works when exactly one type is present in results.
+				_field_only = True
+				_type = None
+				_template = spec
 		else:
 			parts = spec.split('.', 1)
 			_type = parts[0]
 			_field = parts[1] if len(parts) > 1 else None
 			_template = '{' + _field + '}' if _field else None
 
+		if _field_only:
+			nonempty_types = [k for k, v in results.items() if v]
+			if len(nonempty_types) != 1:
+				console.print(
+					f'[yellow]Warning: --format "{spec}" requires a single type in results, '
+					f'got: {nonempty_types}[/yellow]'
+				)
+				continue
+			_type = nonempty_types[0]
+			items = results[_type]
+			if not items:
+				new_results[_type] = []
+				continue
+			formatted = []
+			for item in items:
+				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+				try:
+					value = _template.format(**d)
+					formatted.append(value)
+				except (KeyError, AttributeError):
+					pass
+			new_results[_type] = formatted
+			continue
+
 		if _type not in results:
-			console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			if _template is None:
+				# The spec is a plain field name (no type prefix). If there is exactly one
+				# non-empty type, fall back to field lookup on that type.
+				nonempty_types = [k for k, v in results.items() if v]
+				if len(nonempty_types) == 1:
+					_actual_type = nonempty_types[0]
+					items = results[_actual_type]
+					formatted = []
+					for item in items:
+						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+						val = d.get(_type)
+						if val is not None:
+							formatted.append(str(val))
+					new_results[_actual_type] = formatted
+				else:
+					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			# When _template is set the user gave an explicit type prefix — skip silently.
 			continue
 
 		items = results[_type]
@@ -971,10 +1019,14 @@ def _apply_format(results, fmt):
 
 		if _template:
 			formatted = []
+			is_brace_style = '{' in spec and '}' in spec
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
-					value = _template.format(**{**d, _type: DotMap(d)})
+					# Brace-style ({type.field}) needs DotMap for attribute access.
+					# Dot-path style (type.field) uses direct field values to avoid clobbering.
+					kwargs = {**d, _type: DotMap(d)} if is_brace_style else d
+					value = _template.format(**kwargs)
 					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
 					if 'DotMap()' in str(value):
 						continue
@@ -983,7 +1035,20 @@ def _apply_format(results, fmt):
 					pass
 			new_results[_type] = formatted
 		else:
-			new_results[_type] = [str(item) for item in items]
+			# No field specified — use each OutputType's __str__ for a clean primary-field repr.
+			# Items from report.data['results'] may be raw dicts; reconstruct via OutputType.load().
+			_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
+			otype_cls = _otype_map.get(_type)
+			formatted = []
+			for item in items:
+				if isinstance(item, dict) and otype_cls:
+					try:
+						formatted.append(str(otype_cls.load(item)))
+					except Exception:
+						formatted.append(json.dumps(item))
+				else:
+					formatted.append(str(item))
+			new_results[_type] = formatted
 
 	return new_results
 
