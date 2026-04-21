@@ -7,9 +7,9 @@ from secator.utils import rich_to_ansi, format_object
 
 @dataclass
 class Progress(OutputType):
-	percent: int = 0
+	percent: float = 0
 	extra_data: dict = field(default_factory=dict)
-	_source: str = field(default='', repr=True, compare=False)
+	_source: str = field(default='', repr=True, compare=True)
 	_type: str = field(default='progress', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
 	_uuid: str = field(default='', repr=True, compare=False)
@@ -30,7 +30,7 @@ class Progress(OutputType):
 		return f'{self.percent}%'
 
 	def __rich__(self) -> str:
-		s = f'[dim]⏳ [bold]{self.percent}%[/] ' + '█' * (self.percent // 10) + '[/]'
+		s = f'[dim]⏳ [bold]{self.percent}%[/] ' + '█' * (int(self.percent // 10)) + '[/]'
 		ed = format_object(self.extra_data, color='yellow3', skip_keys=['startedAt'])
 		s += f'[dim]{ed}[/]'
 		return s

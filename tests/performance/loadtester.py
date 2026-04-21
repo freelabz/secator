@@ -1,5 +1,6 @@
-import eventlet
-eventlet.monkey_patch()
+from gevent import monkey
+monkey.patch_all()
+from gevent.pool import Pool  # noqa: E402
 from secator.runners import Workflow, Task, Scan  # noqa: E402
 from secator.template import TemplateLoader  # noqa: E402
 from secator.celery import *  # noqa: E402,F403
@@ -7,7 +8,7 @@ import click  # noqa: E402
 import json  # noqa: E402
 from time import sleep, time  # noqa: E402
 
-pool = eventlet.GreenPool(100)
+pool = Pool(100)
 
 from kombu.serialization import register  # noqa: E402
 

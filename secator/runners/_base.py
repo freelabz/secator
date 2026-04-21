@@ -18,8 +18,8 @@ from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import (get_task_folder_id, run_extractors)
-from secator.utils import (debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name)
+from secator.runners._helpers import get_task_folder_id, run_extractors
+from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
 from secator.tree import build_runner_tree
 from secator.loader import get_configs_by_type
 
@@ -37,10 +37,7 @@ HOOKS = [
 	'on_interval',
 ]
 
-VALIDATORS = [
-	'validate_input',
-	'validate_item'
-]
+VALIDATORS = ['validate_input', 'validate_item']
 
 
 def format_runner_name(runner):
@@ -119,7 +116,6 @@ class Runner:
 		self.last_updated_progress = None
 		self.progress = 0
 		self.celery_result = None
-		self.celery_ids = []
 		self.celery_ids_map = {}
 		self.revoked = False
 		self.skipped = False
@@ -192,6 +188,7 @@ class Runner:
 		if CONFIG.addons.mongodb.enabled:
 			self.debug(f'loading {len(results)} results from MongoDB', sub='init')
 			from secator.hooks.mongodb import get_results
+
 			results = get_results(results)
 		for result in results:
 			self.add_result(result, print=False, output=False, hooks=False, queue=not self.has_parent)
@@ -226,6 +223,7 @@ class Runner:
 		if self.enable_pyinstrument:
 			self.debug('enabling profiler', sub='init')
 			from pyinstrument import Profiler
+
 			self.profiler = Profiler(async_mode=False, interval=0.0001)
 			try:
 				self.profiler.start()
@@ -262,6 +260,7 @@ class Runner:
 			DotMap: The processed configuration.
 		"""
 		from secator.loader import TemplateLoader
+
 		if isinstance(config, TemplateLoader):
 			config = DotMap(config.toDict(serialize=self.serialize_config))
 		elif isinstance(config, dict):
@@ -371,7 +370,7 @@ class Runner:
 			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
 			'celery_id': self.context['celery_id'],
 			'count': self.self_findings_count,
-			'descr': self.description
+			'descr': self.description,
 		}
 
 	@property
@@ -431,6 +430,7 @@ class Runner:
 			celery.result.AsyncResult: Celery async result.
 		"""
 		from secator.celery import start_runner
+
 		hooks = run_opts.pop('hooks', {})
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
@@ -443,9 +443,9 @@ class Runner:
 				'run_opts': run_opts,
 				'hooks': hooks,
 				'validators': validators,
-				'context': context
+				'context': context,
 			},
-			queue='celery'
+			queue='celery',
 		)
 
 	def __iter__(self):
@@ -512,12 +512,7 @@ class Runner:
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
 		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs, 'ancestor_id': self.ancestor_id}
-		inputs, run_opts, errors = run_extractors(
-			self.results,
-			self.run_opts,
-			self.inputs,
-			ctx=ctx,
-			dry_run=self.dry_run)
+		inputs, run_opts, errors = run_extractors(self.results, self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
 		for error in errors:
 			self.add_result(error)
 		self.inputs = sorted(list(set(inputs)))
@@ -573,17 +568,18 @@ class Runner:
 			return
 
 		# If progress item, update runner progress
-		elif isinstance(item, Progress) and item._source == self.unique_name:
-			self.debug(f'update runner progress: {item.percent}', sub='item', verbose=True)
-			if not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):
-				return
-			self.progress = item.percent
-			self.last_updated_progress = item._timestamp
+		elif isinstance(item, Progress):
+			force = item.extra_data.pop('force', False)
+			if item._source == self.unique_name:
+				self.debug(f'update runner progress: {item.percent}', sub='item', verbose=True)
+				if not force and not should_update(CONFIG.runners.progress_update_frequency, self.last_updated_progress, item._timestamp):  # noqa: E501
+					return
+				self.progress = item.percent
+				self.last_updated_progress = item._timestamp
 
-		# If info item and task_id is defined, update runner celery_ids
-		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids:
-			self.debug(f'update runner celery_ids from remote: {item.task_id}', sub='item')
-			self.celery_ids.append(item.task_id)
+		# If info item and task_id is defined, update runner celery_ids_map
+		elif isinstance(item, Info) and item.task_id and item.task_id not in self.celery_ids_map:
+			self.debug(f'update runner celery_ids_map from remote: {item.task_id}', sub='item')
 
 		# If output type, run on_item hooks
 		elif isinstance(item, tuple(OUTPUT_TYPES)) and hooks:
@@ -610,7 +606,6 @@ class Runner:
 			task_name (str): Task name.
 			task_description (str): Task description.
 		"""
-		self.celery_ids.append(task_id)
 		self.celery_ids_map[task_id] = {
 			'id': task_id,
 			'name': task_name,
@@ -618,8 +613,9 @@ class Runner:
 			'descr': task_description,
 			'state': 'PENDING',
 			'count': 0,
-			'progress': 0
+			'progress': 0,
 		}
+		self.context['celery_ids'] = list(self.celery_ids_map.keys())
 
 	def _print_item(self, item, force=False):
 		"""Print an item and add it to the runner's output.
@@ -658,7 +654,7 @@ class Runner:
 							item_str = ''
 
 					# raw output is used to pipe, we should only pipe the first output type of a Runner.
-					if not isinstance(item, self.output_types[0]):
+					if len(self.output_types) > 0 and not isinstance(item, self.output_types[0]):
 						item_str = ''
 
 					if item_str:
@@ -673,7 +669,15 @@ class Runner:
 					if self.print_remote_info and item._source:
 						rich_str += rf' \[[dim]{item._source}[/]]'
 					# rich_str += f' ({self.__class__.__name__}) ({item._uuid}) ({item._context.get("ancestor_id")})'  # for debugging
-					_console = console_stdout if item_out == sys.stdout else console
+					# When a Live display is active it only hooks the console it was started on
+					# (`console`, stderr). Printing through a different Console instance bypasses
+					# that render hook *and* Rich unwraps the FileProxy on `Console.file` via
+					# `rich_proxied_file`, so writes go straight to the raw terminal and corrupt
+					# the Live panel. Route through `console` whenever a Live is active.
+					if console._live is not None:
+						_console = console
+					else:
+						_console = console_stdout if item_out == sys.stdout else console
 					_console.print(rich_str, end='\n', highlight=False, soft_wrap=True)
 
 		# Item is a line
@@ -713,6 +717,7 @@ class Runner:
 
 		# Group items by their compare key (O(n))
 		from collections import defaultdict
+
 		groups = defaultdict(list)
 		for item in self.results:
 			groups[item._compare_key()].append(item)
@@ -726,9 +731,7 @@ class Runner:
 			for dupe in items:
 				if dupe._uuid == main._uuid:
 					continue
-				self.debug(
-					'found duplicate', obj=dupe.toDict(), obj_breaklines=True,
-					sub='item.duplicate', verbose=True)
+				self.debug('found duplicate', obj=dupe.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)
 				dupe._duplicate = True
 				dupe = self.run_hooks('on_item', dupe, sub='item.duplicate')
 				dupe = self.run_hooks('on_duplicate', dupe, sub='item.duplicate')
@@ -757,7 +760,7 @@ class Runner:
 				description=True,
 				revoked=self.revoked,
 				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
 			)
 			return
 
@@ -774,11 +777,19 @@ class Runner:
 		else:
 			self.debug('running workflow in async mode', sub='start')
 			self.celery_result = workflow()
-			self.celery_ids.append(str(self.celery_result.id))
-			yield Info(
-				message=f'Celery task created: {self.celery_result.id}',
-				task_id=self.celery_result.id
-			)
+			celery_id = str(self.celery_result.id)
+			if celery_id not in self.celery_ids_map:
+				self.celery_ids_map[celery_id] = {
+					'id': celery_id,
+					'name': self.config.name,
+					'full_name': self.unique_name,
+					'descr': self.description,
+					'state': 'PENDING',
+					'count': 0,
+					'progress': 0,
+				}
+				self.context['celery_ids'] = list(self.celery_ids_map.keys())
+			yield Info(message=f'Celery task created: {self.celery_result.id}', task_id=self.celery_result.id)
 			if self.no_poll:
 				self.enable_reports = False
 				self.no_process = True
@@ -788,7 +799,7 @@ class Runner:
 				ids_map=self.celery_ids_map,
 				description=True,
 				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results'
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
 			)
 
 		# Yield results
@@ -802,7 +813,7 @@ class Runner:
 		Returns:
 			celery.Signature: Celery task signature.
 		"""
-		raise NotImplementedError("Derived classes must implement build_celery_workflow()")
+		raise NotImplementedError('Derived classes must implement build_celery_workflow()')
 
 	def toDict(self):
 		"""Dict representation of the runner."""
@@ -816,27 +827,29 @@ class Runner:
 			'elapsed_human': self.elapsed_human,
 			'run_opts': self.resolved_opts,
 		}
-		data.update({
-			'config': self.config.toDict(),
-			'opts': self.config.supported_opts,
-			'profiles': [p.name for p in self.profiles],
-			'has_parent': self.has_parent,
-			'has_children': self.has_children,
-			'chunk': self.chunk,
-			'chunk_count': self.chunk_count,
-			'sync': self.sync,
-			'done': self.done,
-			'output': self.output,
-			'progress': self.progress,
-			'last_updated_db': self.last_updated_db,
-			'context': self.context,
-			'errors': [e.toDict() for e in self.errors],
-			'warnings': [w.toDict() for w in self.warnings],
-		})
+		data.update(
+			{
+				'config': self.config.toDict(),
+				'opts': self.config.supported_opts,
+				'profiles': [p.name for p in self.profiles],
+				'has_parent': self.has_parent,
+				'has_children': self.has_children,
+				'chunk': self.chunk,
+				'chunk_count': self.chunk_count,
+				'sync': self.sync,
+				'done': self.done,
+				'output': self.output,
+				'progress': self.progress,
+				'last_updated_db': self.last_updated_db,
+				'context': {**self.context, 'celery_ids': list(self.celery_ids_map.keys())},
+				'errors': [e.toDict() for e in self.errors],
+				'warnings': [w.toDict() for w in self.warnings],
+			}
+		)
 		return data
 
 	def run_hooks(self, hook_type, *args, sub='hooks'):
-		""""Run hooks of a certain type.
+		""" "Run hooks of a certain type.
 
 		Args:
 			hook_type (str): Hook type.
@@ -998,13 +1011,14 @@ class Runner:
 			return
 		if self.has_parent:
 			return
+		# fmt: off
 		info = Info(
 			message=(
 				f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status '
-				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found '
-				f'[bold]{len(self.findings)}[/] findings'
+				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found [bold]{len(self.findings)}[/] findings'
 			)
 		)
+		# fmt: on
 		self._print(info, rich=True)
 
 	def export_reports(self):
@@ -1031,8 +1045,11 @@ class Runner:
 	def stop_celery_tasks(self):
 		"""Stop all tasks running in Celery worker."""
 		from secator.celery import revoke_task
-		for task_id in self.celery_ids:
-			name = self.celery_ids_map.get(task_id, {}).get('full_name')
+
+		# Use celery_ids_map as the source of truth: it includes both statically registered
+		# task IDs (via add_subtask) and dynamically discovered chunk IDs (via iter_results).
+		for task_id, data in list(self.celery_ids_map.items()):
+			name = data.get('full_name')
 			revoke_task(task_id, name)
 
 	def _convert_item_schema(self, item):
@@ -1080,9 +1097,7 @@ class Runner:
 				self.debug(f'successfully loaded item as {str(klass)}', sub='item.convert', verbose=True)
 				break
 			except (TypeError, KeyError) as e:
-				self.debug(
-					f'failed loading item as {str(klass)}: {type(e).__name__}: {str(e)}.',
-					sub='item.convert', verbose=True)
+				self.debug(f'failed loading item as {str(klass)}: {type(e).__name__}: {str(e)}.', sub='item.convert', verbose=True)
 				# error = Error.from_exception(e)
 				# self.debug(repr(error), sub='debug.klass.load')
 				continue
@@ -1174,10 +1189,8 @@ class Runner:
 		for _input in inputs:
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
-				message = (
-					f'Target [bold blue]{_input}[/] skipped'
-					f' ([bold]{input_type}[/] not supported by {format_runner_name(self)}) '
-				)
+				runner_name = format_runner_name(self)
+				message = f'Target [bold blue]{_input}[/] skipped ([bold]{input_type}[/] not supported by {runner_name})'
 				info = Info(message=message)
 				self.inputs.remove(_input)
 				self.add_result(info)
@@ -1197,11 +1210,7 @@ class Runner:
 			return []
 		if isinstance(exporters, str):
 			exporters = exporters.split(',')
-		classes = [
-			import_dynamic('secator.exporters', f'{o.capitalize()}Exporter')
-			for o in exporters
-			if o
-		]
+		classes = [import_dynamic('secator.exporters', f'{o.capitalize()}Exporter') for o in exporters if o]
 		return [cls for cls in classes if cls]
 
 	def resolve_profiles(self, profiles):
@@ -1225,6 +1234,7 @@ class Runner:
 		# Extract profile names from the list (handling both strings and TemplateLoader instances)
 		# Note: Import is local to avoid circular dependency (template.py imports from runners.task)
 		from secator.template import TemplateLoader
+
 		existing_profile_names = set()
 		for p in profiles:
 			if isinstance(p, str):
@@ -1281,7 +1291,7 @@ class Runner:
 					msg += f' ([dim]{description}[/])'
 				if enforced:
 					msg += ' [bold red](enforced)[/]'
-				profile_opts_str = ", ".join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items()])
+				profile_opts_str = ', '.join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items()])
 				msg += rf' \[[dim]{profile_opts_str}[/]]'
 				self._print(Info(message=msg), rich=True)
 		if profile_opts:
@@ -1300,17 +1310,17 @@ class Runner:
 			if func.__self__ is not None:
 				# It's a method bound to an instance
 				class_name = func.__self__.__class__.__name__
-				return f"{func.__module__}.{class_name}.{func.__name__}"
+				return f'{func.__module__}.{class_name}.{func.__name__}'
 			else:
 				# It's a method bound to a class (class method)
 				class_name = func.__qualname__.rsplit('.', 1)[0]
-				return f"{func.__module__}.{class_name}.{func.__name__}"
+				return f'{func.__module__}.{class_name}.{func.__name__}'
 		else:
 			# Handle static and regular functions
 			if '.' in func.__qualname__:
 				# Static method or a function defined inside a class
 				class_name, func_name = func.__qualname__.rsplit('.', 1)
-				return f"{func.__module__}.{class_name}.{func_name}"
+				return f'{func.__module__}.{class_name}.{func_name}'
 			else:
 				# Regular function not attached to a class
-				return f"{func.__module__}.{func.__name__}"
+				return f'{func.__module__}.{func.__name__}'

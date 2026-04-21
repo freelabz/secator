@@ -1,12 +1,15 @@
 from secator.config import CONFIG
+from secator.cve import extract_software_and_version
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
-								 EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID, IP,
-								 MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT,
-								 PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-								 RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT,
-								 USER_AGENT, HOST, URL, HOST_PORT)
-from secator.output_types import Progress, Tag, Vulnerability
+
+# fmt: off
+from secator.definitions import (
+	CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, ID, IP,
+	MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS,
+	THREADS, TIMEOUT, URL, USER_AGENT
+)
+# fmt: on
+from secator.output_types import Progress, Tag, Technology, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
 
@@ -24,9 +27,10 @@ def output_discriminator(self, item):
 @task()
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
+
 	cmd = 'nuclei'
 	input_types = [HOST, HOST_PORT, IP, URL]
-	output_types = [Vulnerability, Tag, Progress]
+	output_types = [Vulnerability, Tag, Technology, Progress]
 	tags = ['vuln', 'scan']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -62,13 +66,12 @@ class nuclei(VulnMulti):
 		THREADS: 'c',
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
-
 		# nuclei opts
 		'exclude_tags': 'exclude-tags',
 		'exclude_severity': 'exclude-severity',
 		'templates': 't',
 		'response_size_read': 'rsr',
-		'template_condition': 'tc'
+		'template_condition': 'tc',
 	}
 	opt_value_map = {
 		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,
@@ -85,7 +88,7 @@ class nuclei(VulnMulti):
 			SEVERITY: lambda x: x['info'][SEVERITY],
 			CONFIDENCE: lambda x: 'high',
 			CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
-			MATCHED_AT:  'matched-at',
+			MATCHED_AT: 'matched-at',
 			IP: 'ip',
 			TAGS: lambda x: x['info']['tags'],
 			REFERENCES: lambda x: x['info'].get('reference', []),
@@ -98,20 +101,23 @@ class nuclei(VulnMulti):
 			'value': lambda x: nuclei.value_extractor(x),
 			'category': lambda x: 'info',
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x, with_tags=True),
-			'_source': 'nuclei',
+		},
+		Technology: {
+			'match': 'matched-at',
+			'product': lambda x: nuclei.product_extractor(x),
+			'version': lambda x: nuclei.version_extractor(x),
+			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 		},
 		Progress: {
 			PERCENT: lambda x: int(x['percent']),
-			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['percent']}
-		}
+			EXTRA_DATA: lambda x: {k: v for k, v in x.items() if k not in ['percent']},
+		},
 	}
 	install_version = 'v3.4.2'
 	install_pre = {'*': ['git']}
 	install_cmd = 'go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@[install_version]'
 	github_handle = 'projectdiscovery/nuclei'
-	install_post = {
-		'*': 'nuclei -ut'
-	}
+	install_post = {'*': 'nuclei -ut'}
 	proxychains = False
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
@@ -151,7 +157,24 @@ class nuclei(VulnMulti):
 		matcher_name = item.get('matcher-name', '')
 		if matcher_name:
 			return matcher_name
-		return ''
+		return item['template-id']
+
+	@staticmethod
+	def product_extractor(item):
+		tid = item['template-id']
+		if '-detect' in tid:
+			return tid.replace('-detect', '')
+		val = nuclei.value_extractor(item).replace('_', ' ').replace('/', '').replace('-detect', '').replace('-version', '').replace('generic', '')  # noqa: E501
+		product, _ = extract_software_and_version(val, postfix=True)
+		if product is not None:
+			return product
+		return val
+
+	@staticmethod
+	def version_extractor(item):
+		val = nuclei.value_extractor(item).replace('_', ' ').replace('/', '').replace('-detect', '').replace('-version', '').replace('generic', '')  # noqa: E501
+		_, version = extract_software_and_version(val, postfix=True)
+		return version
 
 	@staticmethod
 	def name_extractor(item):

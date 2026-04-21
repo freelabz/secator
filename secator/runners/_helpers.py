@@ -1,6 +1,7 @@
 import os
 import re
 
+from dotmap import DotMap
 from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
@@ -77,11 +78,13 @@ def fmt_extractor(extractor):
 	parsed_extractor = parse_extractor(extractor)
 	if not parsed_extractor:
 		return '<DYNAMIC[INVALID_EXTRACTOR]>'
-	_type, _field, _condition = parsed_extractor
+	_type, _field, _condition, _group_by = parsed_extractor
 	s = f'{_type}.{_field}'
 	if _condition:
 		_condition = _condition.replace("'", '').replace('"', '')
 		s = f'{s} if {_condition}'
+	if _group_by:
+		s = f'{s} group_by {_group_by}'
 	return f'<DYNAMIC({s})>'
 
 
@@ -127,22 +130,24 @@ def parse_extractor(extractor):
 		extractor (dict / str): extractor definition.
 
 	Returns:
-		tuple|None: type, field, condition or None if invalid.
+		tuple|None: type, field, condition, group_by or None if invalid.
 	"""
 	# Parse extractor, it can be a dict or a string (shortcut)
 	if isinstance(extractor, dict):
 		_type = extractor['type']
 		_field = extractor.get('field')
 		_condition = extractor.get('condition')
+		_group_by = extractor.get('group_by')
 	else:
 		parts = tuple(extractor.split('.'))
 		if len(parts) == 2:
 			_type = parts[0]
 			_field = parts[1]
 			_condition = None
+			_group_by = None
 		else:
 			return None
-	return _type, _field, _condition
+	return _type, _field, _condition, _group_by
 
 
 def process_extractor(results, extractor, ctx=None):
@@ -165,7 +170,7 @@ def process_extractor(results, extractor, ctx=None):
 	parsed_extractor = parse_extractor(extractor)
 	if not parsed_extractor:
 		return results
-	_type, _field, _condition = parsed_extractor
+	_type, _field, _condition, _group_by = parsed_extractor
 
 	# Evaluate condition for each result
 	if _condition:
@@ -175,8 +180,8 @@ def process_extractor(results, extractor, ctx=None):
 		for item in results:
 			if item._type != _type:
 				continue
-			ctx['item'] = item
-			ctx[f'{_type}'] = item
+			ctx['item'] = DotMap(item.toDict())
+			ctx[f'{_type}'] = DotMap(item.toDict())
 			safe_globals = {
 				'__builtins__': {'len': len},
 				're_match': lambda pattern, value: bool(re.search(pattern, str(value))) if value is not None else False,
@@ -201,7 +206,21 @@ def process_extractor(results, extractor, ctx=None):
 	if _field:
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
-		results = [_field.format(**item.toDict()) for item in results]
+
+		if _group_by:
+			already_formatted_gb = '{' in _group_by and '}' in _group_by
+			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
+			groups = {}
+			for item in results:
+				group_key = _group_by.format(**item.toDict())
+				value = _field.format(**item.toDict())
+				prefix = value.split('~')[0] if '~' in value else value
+				bucket = groups.setdefault(group_key, [])
+				if prefix not in bucket:
+					bucket.append(prefix)
+			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
+		else:
+			results = [_field.format(**item.toDict()) for item in results]
 	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 

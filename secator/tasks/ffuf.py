@@ -1,16 +1,16 @@
 from secator.decorators import task
-from secator.definitions import (AUTO_CALIBRATION, DATA, DELAY, DEPTH, EXTRA_DATA,
-								 FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
-								 FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
-								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
-								 MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
-								 PERCENT, PROXY, RATE_LIMIT, RETRIES,
-								 SKIP_SSL_VERIFY, THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL, REPLAY_PROXY)
-from secator.output_types import Progress, Url, Subdomain, Info, Warning
+
+# fmt: off
+from secator.definitions import (
+	AUTO_CALIBRATION, DATA, DELAY, DEPTH, EXTRA_DATA, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS,
+	FOLLOW_REDIRECT, HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PERCENT,
+	PROXY, RATE_LIMIT, REPLAY_PROXY, RETRIES, STRING, SKIP_SSL_VERIFY, THREADS, TIMEOUT, URL, USER_AGENT, WORDLIST
+)
+# fmt: on
+from secator.output_types import Info, Progress, Subdomain, Url, Warning
 from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
 from secator.utils import extract_domain_info
-
 
 FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[\d/\d\] :: (?P<rps>\d+) req/sec :: Duration: \[(?P<duration>[\d:]+)\] :: Errors: (?P<errors>\d+) ::'  # noqa: E501
 
@@ -18,8 +18,9 @@ FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[
 @task()
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
+
 	cmd = 'ffuf -noninteractive'
-	input_types = [URL]
+	input_types = [URL, STRING]
 	output_types = [Url, Subdomain, Progress]
 	tags = ['url', 'fuzz']
 	input_flag = '-u'
@@ -29,7 +30,7 @@ class ffuf(HttpFuzzer):
 	version_flag = '-V'
 	item_loaders = [
 		JSONSerializer(strict=True),
-		RegexSerializer(FFUF_PROGRESS_REGEX, fields=['count', 'total', 'rps', 'duration', 'errors'])
+		RegexSerializer(FFUF_PROGRESS_REGEX, fields=['count', 'total', 'rps', 'duration', 'errors']),
 	]
 	opts = {
 		AUTO_CALIBRATION: {'is_flag': True, 'default': True, 'short': 'ac', 'help': 'Auto-calibration'},
@@ -60,7 +61,6 @@ class ffuf(HttpFuzzer):
 		THREADS: 't',
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
-
 		# ffuf opts
 		WORDLIST: 'w',
 		AUTO_CALIBRATION: 'ac',
@@ -69,7 +69,7 @@ class ffuf(HttpFuzzer):
 	output_map = {
 		Progress: {
 			PERCENT: lambda x: int(int(x['count']) * 100 / int(x['total'])),
-			EXTRA_DATA: lambda x: x
+			EXTRA_DATA: lambda x: x,
 		},
 	}
 	encoding = 'ansi'
@@ -137,7 +137,7 @@ class ffuf(HttpFuzzer):
 			method=self.get_opt_value(METHOD) or 'GET',
 			request_headers=headers,
 			confidence='high' if self.get_opt_value('auto_calibration') else 'medium',
-			tags=['fuzz']
+			tags=['fuzz'],
 		)
 		has_body = content_length != 0
 		if self.get_opt_value('subs'):
@@ -149,14 +149,14 @@ class ffuf(HttpFuzzer):
 				extra_data={
 					'http_body': has_body,
 					'http_status_code': status_code,
-					'http_redirect': is_redirect
+					'http_redirect': is_redirect,
 				},
-				sources=sources
+				sources=sources,
 			)
 
 	@staticmethod
 	def on_line(self, line):
 		if line.startswith('[ERR]'):
 			message = line.split('[ERR]')[1].strip()
-			self.add_result(Warning(message=message))
-		return line
+			yield Warning(message=message)
+		yield line

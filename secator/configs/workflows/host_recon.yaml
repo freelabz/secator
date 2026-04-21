@@ -40,11 +40,11 @@ tasks:
   _group:
     naabu:
       description: Find open ports (light)
-      if: "'naabu' in opts.scanners and not opts.ports and not opts.passive"
+      if: "'naabu' in opts.scanners and not opts.passive"
 
     nmap/light:
       description: Find open ports (light)
-      if: "'nmap' in opts.scanners and not opts.ports and not opts.passive"
+      if: "'nmap' in opts.scanners and not opts.passive"
 
   nmap:
     description: Detect services and versions
@@ -72,35 +72,15 @@ tasks:
       condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
     if: not opts.passive
 
-  _group/1:
-    httpx:
-      description: Probe HTTP services on open ports
-      tech_detect: True
-      targets_:
-        - type: port
-          field: '{host}:{port}'
-      if: not opts.passive
+  httpx:
+    description: Probe HTTP services on open ports
+    tech_detect: True
+    targets_:
+      - type: port
+        field: '{host}:{port}'
+    if: not opts.passive
 
-    searchsploit:
-      description: Search for related exploits
-      targets_:
-        - type: port
-          field: '{host}:{port}~{service_name}'
-          condition: len(item.service_name.split('/')) > 1
-      if: "'searchsploit' in opts.exploiters"
-
-    search_vulns:
-      description: Search for related exploits
-      targets_:
-        - type: port
-          field: '{host}:{port}~{service_name}'
-          condition: len(item.service_name.split('/')) > 1
-        - type: vulnerability
-          field: '{matched_at}~{id}'
-          condition: item.id
-      if: "'search_vulns' in opts.exploiters"
-
-  _group/2:
+  _group/nuclei:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
@@ -114,3 +94,28 @@ tasks:
           field: url
           condition: item.status_code != 0
       if: opts.nuclei and not opts.passive
+
+  _group/vuln:
+    searchsploit:
+      description: Search for related exploits
+      targets_:
+        - type: vulnerability
+          field: '{matched_at}~{id}'
+          condition: item.id
+        - type: technology
+          field: '{match}~{product} {version}'
+          condition: item.version
+          group_by: '{product} {version}'
+      if: "'searchsploit' in opts.exploiters"
+
+    search_vulns:
+      description: Search for related vulns and exploits
+      targets_:
+        - type: vulnerability
+          field: '{matched_at}~{id}'
+          condition: item.id
+        - type: technology
+          field: '{match}~{product} {version}'
+          condition: item.version
+          group_by: '{product} {version}'
+      if: "'search_vulns' in opts.exploiters"

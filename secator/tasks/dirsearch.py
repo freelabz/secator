@@ -3,6 +3,7 @@ import shlex
 import yaml
 
 # from secator.decorators import task
+# fmt: off
 from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DATA, DELAY, DEPTH,
 							   FILTER_CODES, FILTER_REGEX, FILTER_SIZE,
 							   FILTER_WORDS, FOLLOW_REDIRECT, HEADER,
@@ -10,6 +11,7 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DATA, DELAY, DEPT
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 							   RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL, HOST, HOST_PORT, IP)
+# fmt: on
 from secator.output_types import Url, Info, Error
 from secator.tasks._categories import HttpFuzzer
 
@@ -17,6 +19,7 @@ from secator.tasks._categories import HttpFuzzer
 # @task()
 class dirsearch(HttpFuzzer):
 	"""Advanced web path brute-forcer."""
+
 	cmd = 'dirsearch'
 	input_types = [URL, HOST, HOST_PORT, IP]
 	output_types = [Url]
@@ -55,8 +58,8 @@ class dirsearch(HttpFuzzer):
 			CONTENT_LENGTH: 'content-length',
 			CONTENT_TYPE: 'content-type',
 			STATUS_CODE: 'status',
-			'request_headers': 'request_headers'
-		}
+			'request_headers': 'request_headers',
+		},
 	}
 	install_cmd = 'pipx install git+https://github.com/maurosoria/dirsearch.git --force'
 	# install_version = '0.4.3'

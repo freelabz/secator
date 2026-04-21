@@ -35,7 +35,7 @@ def process_raw_request(file_path):
 	if not file_path:
 		return None
 	if not os.path.exists(file_path):
-		raise ValueError(f"Raw request file not found: {file_path}")
+		raise ValueError(f'Raw request file not found: {file_path}')
 	with open(file_path, 'r') as f:
 		raw_request = f.read()
 	return parse_raw_http_request(raw_request)
@@ -76,7 +76,14 @@ def apply_raw_request_options(self):
 
 
 OPTS = {
-	HEADER: {'type': str, 'short': 'H', 'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"', 'pre_process': headers_to_dict, 'process': process_headers, 'default': CONFIG.http.default_header},  # noqa: E501
+	HEADER: {
+		'type': str,
+		'short': 'H',
+		'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"',
+		'pre_process': headers_to_dict,
+		'process': process_headers,
+		'default': CONFIG.http.default_header,
+	},  # noqa: E501
 	DATA: {'type': str, 'help': 'Data to send in the request body'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
 	DEPTH: {'type': int, 'help': 'Scan depth'},
@@ -91,7 +98,7 @@ OPTS = {
 	MATCH_WORDS: {'type': int, 'short': 'mw', 'help': 'Match responses with word count'},
 	METHOD: {'type': str, 'short': 'X', 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
-	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
+	RATE_LIMIT: {'type': int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
 	REQUEST: {'type': str, 'short': 'rf', 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
 	RETRIES: {'type': int, 'help': 'Retries'},
 	SKIP_SSL_VERIFY: {'is_flag': True, 'short': 'k', 'help': 'Skip SSL certificate verification (insecure)'},
@@ -113,11 +120,30 @@ WORDLIST_DNS = {
 }
 
 OPTS_HTTP_BASE = [
-	HEADER, DELAY, FOLLOW_REDIRECT, SKIP_SSL_VERIFY, METHOD, PROXY, RATE_LIMIT,
-	REQUEST, RETRIES, THREADS, TIMEOUT, USER_AGENT, DATA
+	HEADER,
+	DELAY,
+	FOLLOW_REDIRECT,
+	METHOD,
+	PROXY,
+	RATE_LIMIT,
+	REQUEST,
+	RETRIES,
+  SKIP_SSL_VERIFY,
+	THREADS,
+	TIMEOUT,
+	USER_AGENT,
+	DATA,
 ]
 OPTS_HTTP_FILTERS = [
-	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS, MATCH_CODES
+	DEPTH,
+	MATCH_REGEX,
+	MATCH_SIZE,
+	MATCH_WORDS,
+	FILTER_REGEX,
+	FILTER_CODES,
+	FILTER_SIZE,
+	FILTER_WORDS,
+	MATCH_CODES,
 ]
 
 OPTS_HTTP = OPTS_HTTP_BASE + OPTS_HTTP_FILTERS
@@ -129,22 +155,17 @@ OPTS_HTTP_CRAWLERS.remove(DATA)
 OPTS_HTTP_CRAWLERS.remove(METHOD)
 OPTS_HTTP_CRAWLERS.remove(WORDLIST)
 
-OPTS_RECON = [
-	DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
-]
+OPTS_RECON = [DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT]
 
-OPTS_RECON_PORT = [
-	PORTS, TOP_PORTS, DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
-]
+OPTS_RECON_PORT = [PORTS, TOP_PORTS, DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT]
 
-OPTS_VULN = [
-	HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
-]
+OPTS_VULN = [HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT]
 
 
-#---------------#
+# ---------------#
 # HTTP category #
-#---------------#
+# ---------------#
+
 
 class HttpBase(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_BASE}
@@ -201,6 +222,8 @@ class HttpFuzzer(Command):
 			preprocess=True,
 			process=True,
 		)
+		if not wordlist:
+			return 'medium'
 		wordlist_size_mb = os.path.getsize(wordlist) / (1024 * 1024)
 		return 'large' if wordlist_size_mb > 5 else 'medium'
 
@@ -209,9 +232,10 @@ class HttpParamsFuzzer(HttpFuzzer):
 	meta_opts = {**{k: OPTS[k] for k in OPTS_HTTP_FUZZERS}, **WORDLIST_PARAMS}
 
 
-#----------------#
+# ----------------#
 # Recon category #
-#----------------#
+# ----------------#
+
 
 class Recon(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_RECON}
@@ -239,9 +263,10 @@ class ReconPort(Recon):
 	output_types = [Port]
 
 
-#---------------#
+# ---------------#
 # Vuln category #
-#---------------#
+# ---------------#
+
 
 class Vuln(Command):
 	meta_opts = {k: OPTS[k] for k in OPTS_VULN}
@@ -259,12 +284,12 @@ class Vuln(Command):
 		Returns:
 			str: A CPE string formatted according to the CPE 2.3 specification.
 		"""
-		cpe_version = "2.3"  # CPE Specification version
-		part = "a"           # 'a' for application
+		cpe_version = '2.3'  # CPE Specification version
+		part = 'a'  # 'a' for application
 		vendor = product_name.lower()  # Vendor name, using product name
 		product = product_name.lower()  # Product name
 		version = version  # Product version
-		cpe_string = f"cpe:{cpe_version}:{part}:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
+		cpe_string = f'cpe:{cpe_version}:{part}:{vendor}:{product}:{version}:*:*:*:*:*:*:*'
 		return cpe_string
 
 	@staticmethod
@@ -288,7 +313,7 @@ class Vuln(Command):
 
 	@staticmethod
 	def get_cpe_fs(cpe):
-		""""Return formatted string for given CPE.
+		""" "Return formatted string for given CPE.
 
 		Args:
 			cpe (string): Input CPE
@@ -363,6 +388,7 @@ class Vuln(Command):
 			dict | None: Vulnerability data dict, or None if not found.
 		"""
 		from secator.providers.ghsa import ghsa
+
 		vuln = ghsa.lookup_cve(ghsa_id)
 		if vuln:
 			return vuln.toDict()
@@ -382,17 +408,19 @@ class VulnMulti(Vuln):
 	output_types = [Vulnerability]
 
 
-#--------------#
+# --------------#
 # Tag category #
-#--------------#
+# --------------#
+
 
 class Tagger(Command):
 	input_types = [URL]
 	output_types = [Tag]
 
-#----------------#
+
+# ----------------#
 # osint category #
-#----------------#
+# ----------------#
 
 
 class OSInt(Command):

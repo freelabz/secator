@@ -1,13 +1,18 @@
 import os
 import shlex
-import yaml
-
 from urllib.parse import urlparse, urlunparse
 
+import yaml
+
 from secator.decorators import task
-from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
-								 HEADER, URL, FOLLOW_REDIRECT, OPT_NOT_SUPPORTED, SKIP_SSL_VERIFY, DATA, USER_AGENT, RETRIES)
-from secator.output_types import Info, Url, Warning, Tag
+
+# fmt: off
+from secator.definitions import (
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, THREADS,
+  TIMEOUT, URL, USER_AGENT, WORDLIST
+)
+# fmt: on
+from secator.output_types import Info, Tag, Url, Warning
 from secator.tasks._categories import HttpBase
 from secator.utils import process_wordlist
 
@@ -15,6 +20,7 @@ from secator.utils import process_wordlist
 @task()
 class arjun(HttpBase):
 	"""HTTP Parameter Discovery Suite."""
+
 	cmd = 'arjun'
 	input_types = [URL]
 	output_types = [Url, Tag]
@@ -48,19 +54,11 @@ class arjun(HttpBase):
 		'passive': '--passive',
 		'casing': '--casing',
 	}
-	opt_value_map = {
-		HEADER: lambda headers: "\\n".join(c.strip() for c in headers.split(";;"))
-	}
+	opt_value_map = {HEADER: lambda headers: '\\n'.join(c.strip() for c in headers.split(';;'))}
 	install_version = '2.2.7'
 	install_cmd = 'pipx install arjun==[install_version] --force'
 	install_github_bin = False
 	github_handle = 's0md3v/Arjun'
-
-	@staticmethod
-	def on_line(self, line):
-		if 'Processing chunks' in line:
-			return ''
-		return line
 
 	@staticmethod
 	def on_cmd(self):
@@ -73,6 +71,13 @@ class arjun(HttpBase):
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.cmd += f' -oJ {shlex.quote(self.output_path)}'
+
+	@staticmethod
+	def on_line(self, line):
+		if 'Processing chunks' in line:
+			yield ''
+			return
+		yield line
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -95,7 +100,7 @@ class arjun(HttpBase):
 				method=values['method'],
 				confidence='high',
 				verified=True,
-				tags=["fuzz"]
+				tags=['fuzz'],
 			)
 			for param in values['params']:
 				yield Tag(
@@ -111,5 +116,5 @@ class arjun(HttpBase):
 					method=values['method'],
 					confidence='high',
 					verified=True,
-					tags=["fuzz"],
+					tags=['fuzz'],
 				)
