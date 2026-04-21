@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.30.0](https://github.com/freelabz/secator/compare/v0.29.0...v0.30.0) (2026-04-21)
+
+
+### Features
+
+* **config:** support setting task-specific config overrides ([#1011](https://github.com/freelabz/secator/issues/1011)) ([f009dd6](https://github.com/freelabz/secator/commit/f009dd6345d068e0dfcc73826e1605a107467c01))
+
+
+### Bug Fixes
+
+* **core:** autodetect_type should not check file path if target is too long ([#1013](https://github.com/freelabz/secator/issues/1013)) ([1ed61cd](https://github.com/freelabz/secator/commit/1ed61cd3ec2662e9818b293482c6b95b978dc4ff))
+* **runner:** exact-match source check prevents prefix-collision task failures ([#1001](https://github.com/freelabz/secator/issues/1001)) ([cfea916](https://github.com/freelabz/secator/commit/cfea9163c040fe6eaf133771e6a3b99cc9689b93))
+
 ## [0.29.0](https://github.com/freelabz/secator/compare/v0.28.0...v0.29.0) (2026-04-21)
 
 
