@@ -171,10 +171,12 @@ class nmap(ReconPort):
 	@staticmethod
 	def on_interrupt(self, checkpoint):
 		"""Set resume_file to the XML output path and update checkpoint."""
+		from secator.output_types import Info
 		output_path = getattr(self, 'output_path', None)
 		if output_path and os.path.exists(output_path):
 			self.resume_file = output_path
 			checkpoint.resume_files[self.name] = output_path
+			self._print(Info(message=f'Resume file saved: {output_path}'), rich=True)
 
 	@staticmethod
 	def on_line(self, line):

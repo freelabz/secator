@@ -103,6 +103,7 @@ class katana(HttpCrawler):
 		"""Find and move the katana resume file to .outputs, then update checkpoint."""
 		import glob
 		import shutil
+		from secator.output_types import Info
 		resume_pattern = os.path.expanduser('~/.config/katana/resume-*.cfg')
 		files = sorted(glob.glob(resume_pattern), key=os.path.getmtime, reverse=True)
 		if not files:
@@ -115,6 +116,7 @@ class katana(HttpCrawler):
 			shutil.move(resume_src, resume_dst)
 			self.resume_file = resume_dst
 			checkpoint.resume_files[self.name] = resume_dst
+			self._print(Info(message=f'Resume file saved: {resume_dst}'), rich=True)
 		except OSError:
 			pass
 

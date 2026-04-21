@@ -1114,6 +1114,7 @@ class Runner:
 
 		cp.save(self.reports_folder)
 		self.paused = True
+		self._print(Info(message=f'Checkpoint saved to {self.reports_folder}'), rich=True)
 		self._print(Info(message=f'Runner paused. Resume with: secator resume {cp.runner_id}'), rich=True)
 
 	@classmethod

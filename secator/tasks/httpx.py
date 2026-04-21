@@ -139,6 +139,7 @@ class httpx(Http):
 	def on_interrupt(self, checkpoint):
 		"""Find and move the httpx resume file to .outputs, then update checkpoint."""
 		import shutil
+		from secator.output_types import Info
 		# httpx writes resume.cfg to the current working directory
 		cwd = self.cwd or os.getcwd()
 		resume_src = os.path.join(cwd, 'resume.cfg')
@@ -151,6 +152,7 @@ class httpx(Http):
 			shutil.move(resume_src, resume_dst)
 			self.resume_file = resume_dst
 			checkpoint.resume_files[self.name] = resume_dst
+			self._print(Info(message=f'Resume file saved: {resume_dst}'), rich=True)
 		except OSError:
 			pass
 
