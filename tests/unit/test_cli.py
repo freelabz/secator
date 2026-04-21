@@ -63,6 +63,21 @@ class TestApplyFormat(unittest.TestCase):
 		# Port.__str__ returns 'host:port'
 		self.assertEqual(out, {'port': ['example.com:8080']})
 
+	def test_brace_style_field_only_single_type(self):
+		"""Brace-style with direct field names works when only one type is present."""
+		results = {'url': [{'url': 'https://example.com', 'host': 'example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url} {host} {status_code}')
+		self.assertEqual(out, {'url': ['https://example.com example.com 200']})
+
+	def test_brace_style_field_only_multi_type_warns(self):
+		"""Brace-style with direct field names produces no output when multiple types present."""
+		results = {
+			'url': [{'url': 'https://example.com', 'host': 'example.com', 'status_code': 200}],
+			'port': [self._make_port()],
+		}
+		out = _apply_format(results, '{url} {host} {status_code}')
+		self.assertEqual(out, {})
+
 	def test_unknown_type_returns_empty(self):
 		results = {'port': [self._make_port()]}
 		out = _apply_format(results, '{vulnerability.matched_at}')
