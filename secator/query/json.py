@@ -1,6 +1,7 @@
 # secator/query/json.py
 
 import json
+import json_stream
 import re
 from pathlib import Path
 from typing import Generator, List, Dict, Any, Optional
@@ -122,19 +123,20 @@ class JsonBackend(QueryBackend):
 				report_file = report_dir / 'report.json'
 				if report_file.exists():
 					try:
-						with open(report_file, 'r') as f:
-							data = json.load(f)
-
-						results = data.get('results', {})
 						runner_type_singular = runner_type.rstrip('s')  # "tasks" -> "task", "scans" -> "scan"
 						runner_id = report_dir.name
-
-						for type_name, items in results.items():
-							if isinstance(items, list):
-								for item in items:
-									if f'{runner_type_singular}_id' not in item['_context']:
-										item['_context'][f'{runner_type_singular}_id'] = runner_id
-									yield item
+						with open(report_file, 'r') as f:
+							data = json_stream.load(f)
+							try:
+								results = data['results']
+								for type_name, items in results.items():
+									for item in items:
+										item_dict = item.collect()
+										if f'{runner_type_singular}_id' not in item_dict['_context']:
+											item_dict['_context'][f'{runner_type_singular}_id'] = runner_id
+										yield item_dict
+							except KeyError:
+								pass
 					except (json.JSONDecodeError, IOError) as e:
 						debug(f'Error loading {report_file}: {e}', sub='query.json')
 						continue
