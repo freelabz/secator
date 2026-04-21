@@ -78,6 +78,17 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, '{url} {host} {status_code}')
 		self.assertEqual(out, {})
 
+	def test_brace_style_field_only_single_nonempty_type(self):
+		"""Brace-style with direct field names works when only one type has non-empty results (simulates -q filter)."""
+		results = {
+			'url': [{'url': 'https://example.com', 'host': 'example.com', 'port': 443}],
+			'port': [],
+			'subdomain': [],
+			'ip': [],
+		}
+		out = _apply_format(results, '{url}:{port}')
+		self.assertEqual(out, {'url': ['https://example.com:443']})
+
 	def test_unknown_type_returns_empty(self):
 		results = {'port': [self._make_port()]}
 		out = _apply_format(results, '{vulnerability.matched_at}')

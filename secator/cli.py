@@ -969,13 +969,14 @@ def _apply_format(results, fmt):
 			_template = '{' + _field + '}' if _field else None
 
 		if _field_only:
-			if len(results) != 1:
+			nonempty_types = [k for k, v in results.items() if v]
+			if len(nonempty_types) != 1:
 				console.print(
 					f'[yellow]Warning: --format "{spec}" requires a single type in results, '
-					f'got: {list(results.keys())}[/yellow]'
+					f'got: {nonempty_types}[/yellow]'
 				)
 				continue
-			_type = list(results.keys())[0]
+			_type = nonempty_types[0]
 			items = results[_type]
 			if not items:
 				new_results[_type] = []
