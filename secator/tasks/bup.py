@@ -6,7 +6,7 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, 
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 	SKIP_SSL_VERIFY, THREADS, TIMEOUT, URL, USER_AGENT
 )
 from secator.output_types import Progress, Url
