@@ -993,7 +993,21 @@ def _apply_format(results, fmt):
 			continue
 
 		if _type not in results:
-			console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			# The spec may be a field name rather than a type name.
+			# If there is exactly one non-empty type, fall back to field lookup.
+			nonempty_types = [k for k, v in results.items() if v]
+			if len(nonempty_types) == 1:
+				_actual_type = nonempty_types[0]
+				items = results[_actual_type]
+				formatted = []
+				for item in items:
+					d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+					val = d.get(_type)
+					if val is not None:
+						formatted.append(str(val))
+				new_results[_actual_type] = formatted
+			else:
+				console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
 			continue
 
 		items = results[_type]

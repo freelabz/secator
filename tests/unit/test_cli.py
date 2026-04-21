@@ -89,6 +89,25 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, '{url}:{port}')
 		self.assertEqual(out, {'url': ['https://example.com:443']})
 
+	def test_plain_field_spec_single_nonempty_type(self):
+		"""--format status_code (no dot, no braces) should look up the field on the single non-empty type."""
+		results = {
+			'url': [{'url': 'https://example.com', 'status_code': 200, 'host': 'example.com'}],
+			'port': [],
+			'subdomain': [],
+		}
+		out = _apply_format(results, 'status_code')
+		self.assertEqual(out, {'url': ['200']})
+
+	def test_plain_field_spec_multi_nonempty_types_warns(self):
+		"""--format status_code warns when multiple non-empty types present (ambiguous)."""
+		results = {
+			'url': [{'url': 'https://example.com', 'status_code': 200}],
+			'port': [{'port': 80, 'status_code': None}],
+		}
+		out = _apply_format(results, 'status_code')
+		self.assertEqual(out, {})
+
 	def test_unknown_type_returns_empty(self):
 		results = {'port': [self._make_port()]}
 		out = _apply_format(results, '{vulnerability.matched_at}')
