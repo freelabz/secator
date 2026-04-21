@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Generator, List, Dict, Any, Optional
 
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
@@ -78,7 +78,6 @@ class JsonBackend(QueryBackend):
 				 context: Optional[dict] = None, results: Optional[list] = None):
 		super().__init__(workspace_id, config, context=context)
 		self._results = results
-		self._findings_cache = None
 		reports_dir = config.get('reports_dir', CONFIG.dirs.reports) if config else CONFIG.dirs.reports
 		self.reports_dir = Path(reports_dir).expanduser()
 
@@ -94,26 +93,23 @@ class JsonBackend(QueryBackend):
 		workspace_folder = sanitize_folder_name(self.workspace_id)
 		return self.reports_dir / workspace_folder
 
-	def _load_all_findings(self) -> List[Dict[str, Any]]:
-		"""Load all findings from workspace JSON files, or return pre-loaded/cached results."""
+	def _load_all_findings(self) -> Generator[Dict[str, Any], None, None]:
+		"""Yield findings from workspace JSON files, or iterate pre-loaded results."""
 		if self._results is not None:
-			return self._results
-		if self._findings_cache is not None:
-			return self._findings_cache
-		findings = []
+			yield from self._results
+			return
+
 		workspace_path = self._get_workspace_path()
 		debug(f'Looking for reports in: {workspace_path}', sub='query.json')
 		debug(f'Workspace ID/name: {self.workspace_id}', sub='query.json')
 
 		if not workspace_path.exists():
 			debug(f'Workspace path does not exist: {workspace_path}', sub='query.json')
-			# Show what workspaces are available
 			if self.reports_dir.exists():
 				available = [d.name for d in self.reports_dir.iterdir() if d.is_dir()]
 				debug(f'Available workspaces in {self.reports_dir}: {available}', sub='query.json')
-			return findings
+			return
 
-		# Search for report.json files in tasks/, workflows/, scans/
 		for runner_type in ['tasks', 'workflows', 'scans']:
 			runner_path = workspace_path / runner_type
 			if not runner_path.exists():
@@ -136,35 +132,25 @@ class JsonBackend(QueryBackend):
 						for type_name, items in results.items():
 							if isinstance(items, list):
 								for item in items:
-									# Inject runner context from directory path if not already present
 									if f'{runner_type_singular}_id' not in item['_context']:
 										item['_context'][f'{runner_type_singular}_id'] = runner_id
-								findings.extend(items)
+									yield item
 					except (json.JSONDecodeError, IOError) as e:
 						debug(f'Error loading {report_file}: {e}', sub='query.json')
 						continue
 
-		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
-		self._findings_cache = findings
-		return findings
-
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
 		"""Search findings matching query."""
-		findings = self._load_all_findings()
-
 		matched = []
-		for finding in findings:
+		for finding in self._load_all_findings():
 			if match_query(finding, query):
-				# Remove excluded fields
 				if exclude_fields and isinstance(finding, dict):
 					finding = {k: v for k, v in finding.items() if k not in exclude_fields}
 				matched.append(finding)
 				if limit and len(matched) >= limit:
 					break
-
 		return matched
 
 	def _execute_count(self, query: dict) -> int:
 		"""Count findings matching query."""
-		findings = self._load_all_findings()
-		return sum(1 for f in findings if match_query(f, query))
+		return sum(1 for f in self._load_all_findings() if match_query(f, query))
