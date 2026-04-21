@@ -32,7 +32,7 @@ from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
 	debug, detect_host, flatten, print_version,
 	get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
-	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
+	sanitize_folder_name, vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
 )
 from contextlib import nullcontext
 
@@ -797,6 +797,70 @@ def workspace_current():
 	console.print(f'Current workspace: [bold gold3]{current}[/]')
 
 
+@workspace.command('rm')
+@click.argument('name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
+def workspace_delete(name, driver, yes):
+	"""Delete a workspace and all associated reports. NAME: workspace name."""
+	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+
+	actions = []
+	if workspace_folder.exists():
+		actions.append(f'Remove workspace folder: {workspace_folder}')
+	else:
+		actions.append(f'[dim]Workspace folder not found (will skip): {workspace_folder}[/]')
+
+	if driver == 'mongodb':
+		actions.append(f'Delete all findings in MongoDB with workspace_id="{name}"')
+		actions.append(f'Delete all runners in MongoDB with workspace_id="{name}"')
+	elif driver == 'api':
+		actions.append(f'Send DELETE to API: workspace/{name}')
+
+	console.print('[bold]The following actions will be performed:[/]')
+	for action in actions:
+		console.print(f'  [dim]-[/] {action}')
+
+	if not yes:
+		click.confirm(f'\nAre you sure you want to delete workspace "{name}"?', abort=True)
+
+	# 1. Remove workspace folder
+	if workspace_folder.exists():
+		shutil.rmtree(workspace_folder)
+		console.print(Info(message=f'Removed workspace folder: {workspace_folder}'))
+	else:
+		console.print(Warning(message=f'Workspace folder not found: {workspace_folder}'))
+
+	# 2. MongoDB backend
+	if driver == 'mongodb':
+		try:
+			from secator.hooks.mongodb import get_mongodb_client
+			client = get_mongodb_client()
+			db = client.main
+			findings_result = db.findings.delete_many({'_context.workspace_id': name})
+			console.print(Info(message=f'Deleted {findings_result.deleted_count} findings from MongoDB'))
+			for collection in ['tasks', 'workflows', 'scans']:
+				result = db[collection].delete_many({'context.workspace_id': name})
+				if result.deleted_count:
+					console.print(Info(message=f'Deleted {result.deleted_count} {collection} from MongoDB'))
+		except Exception as e:
+			console.print(Error(message=f'MongoDB deletion failed: {e}'))
+
+	# 3. API backend
+	elif driver == 'api':
+		try:
+			from secator.hooks.api import _make_request
+			endpoint = CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)
+			_make_request('DELETE', endpoint)
+			console.print(Info(message=f'Deleted workspace "{name}" from API'))
+		except Exception as e:
+			console.print(Error(message=f'API deletion failed: {e}'))
+
+
+workspace.add_command(workspace_delete, 'remove')
+workspace.add_command(workspace_delete, 'delete')
+
+
 #----------#
 # PROFILES #
 #----------#
@@ -1260,6 +1324,104 @@ def report_export(json_path, output_folder, output):
 	report = Report(runner_instance, title=data['info']['title'], exporters=exporters)
 	report.data = data
 	report.send()
+
+
+@report.command('delete')
+@click.argument('runner_id')
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
+def report_delete(runner_id, workspace, driver, yes):
+	"""Delete a report. RUNNER_ID: runner path (e.g. tasks/24)."""
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
+
+	parts = runner_id.split('/')
+	if len(parts) != 2:
+		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. tasks/24)'))
+		return
+
+	runner_type_raw, runner_number = parts[0], parts[1]
+	runner_type_plural = runner_type_raw if runner_type_raw.endswith('s') else runner_type_raw + 's'
+	runner_type_singular = runner_type_plural[:-1]  # tasks -> task, workflows -> workflow, scans -> scan
+
+	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+	report_path = report_folder / 'report.json'
+
+	# Read report context to get MongoDB/API IDs
+	runner_db_id = None
+	if report_path.exists():
+		try:
+			with open(report_path, 'r') as f:
+				content = json.loads(f.read())
+			context = content.get('info', {}).get('context', {})
+			runner_db_id = context.get(f'{runner_type_singular}_id')
+		except (json.JSONDecodeError, KeyError):
+			pass
+
+	actions = []
+	if report_folder.exists():
+		actions.append(f'Remove report folder: {report_folder}')
+	else:
+		actions.append(f'[dim]Report folder not found (will skip): {report_folder}[/]')
+
+	if driver == 'mongodb':
+		if runner_db_id:
+			actions.append(f'Delete findings in MongoDB for {runner_type_singular}_id="{runner_db_id}"')
+			actions.append(f'Delete {runner_type_singular} document in MongoDB (id="{runner_db_id}")')
+		else:
+			actions.append('[yellow]No MongoDB ID found in report — skipping MongoDB deletion[/]')
+	elif driver == 'api':
+		if runner_db_id:
+			actions.append(f'Send DELETE to API: {runner_type_singular}/{runner_db_id}')
+		else:
+			actions.append('[yellow]No API ID found in report — skipping API deletion[/]')
+
+	console.print('[bold]The following actions will be performed:[/]')
+	for action in actions:
+		console.print(f'  [dim]-[/] {action}')
+
+	if not yes:
+		click.confirm(f'\nAre you sure you want to delete report "{workspace_name}/{runner_id}"?', abort=True)
+
+	# 1. Remove report folder
+	if report_folder.exists():
+		shutil.rmtree(report_folder)
+		console.print(Info(message=f'Removed report folder: {report_folder}'))
+	else:
+		console.print(Warning(message=f'Report folder not found: {report_folder}'))
+
+	# 2. MongoDB backend
+	if driver == 'mongodb' and runner_db_id:
+		try:
+			from bson.objectid import ObjectId
+			from secator.hooks.mongodb import get_mongodb_client
+			client = get_mongodb_client()
+			db = client.main
+			findings_result = db.findings.delete_many({f'_context.{runner_type_singular}_id': runner_db_id})
+			console.print(Info(message=f'Deleted {findings_result.deleted_count} findings from MongoDB'))
+			if ObjectId.is_valid(runner_db_id):
+				runner_result = db[runner_type_plural].delete_one({'_id': ObjectId(runner_db_id)})
+				if runner_result.deleted_count:
+					console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
+		except Exception as e:
+			console.print(Error(message=f'MongoDB deletion failed: {e}'))
+
+	# 3. API backend
+	elif driver == 'api' and runner_db_id:
+		try:
+			from secator.hooks.api import _make_request
+			endpoint = CONFIG.addons.api.runner_delete_endpoint.format(
+				runner_type=runner_type_singular,
+				runner_id=runner_db_id
+			)
+			_make_request('DELETE', endpoint)
+			console.print(Info(message=f'Deleted {runner_type_singular} from API'))
+		except Exception as e:
+			console.print(Error(message=f'API deletion failed: {e}'))
+
+
+report.add_command(report_delete, 'rm')
+report.add_command(report_delete, 'remove')
 
 
 #--------#

@@ -52,6 +52,7 @@ class Report:
 			'elapsed_human',
 			'run_opts',
 			'results_count',
+			'context',
 		}
 		data = {'info': {k: v for k, v in self.runner.toDict().items() if k in runner_fields}, 'results': {}}
 		if 'results' in data['info']:
