@@ -1442,7 +1442,17 @@ def resume_runner(runner_id, sync):
 		console.print(Error(message=f'Unknown runner type: {checkpoint.runner_type}'))
 		return
 
-	config = TemplateLoader(name=f'{checkpoint.runner_type}/{checkpoint.runner_name}')
+	if checkpoint.runner_type == 'task':
+		from secator.loader import get_configs_by_type
+		task_configs = get_configs_by_type('task')
+		config = next((c for c in task_configs if c.name == checkpoint.runner_name), None)
+		if config is None:
+			console.print(Error(message=f"Task '{checkpoint.runner_name}' not found in loaded tasks"))
+			return
+	else:
+		config = TemplateLoader(name=f'{checkpoint.runner_type}/{checkpoint.runner_name}')
+		if not isinstance(config.name, str) or not config.name:
+			return  # TemplateLoader already printed an error
 	run_opts = checkpoint.opts.copy()
 	run_opts['sync'] = sync
 	context = checkpoint.context.copy()  # preserves original task_id/workflow_id/etc.
