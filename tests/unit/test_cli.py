@@ -50,6 +50,19 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, 'url.webserver')
 		self.assertEqual(out, {'url': ['nginx']})
 
+	def test_type_only_spec_uses_str_repr(self):
+		"""--format url (no dot) should use Url.__str__ (returns the url field), not dict repr."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'host': 'example.com'}]}
+		out = _apply_format(results, 'url')
+		self.assertEqual(out, {'url': ['https://example.com']})
+
+	def test_type_only_spec_port_uses_str_repr(self):
+		"""--format port (no dot) should use Port.__str__ (returns host:port), not dict repr."""
+		results = {'port': [self._make_port(ip='1.2.3.4', port=8080)]}
+		out = _apply_format(results, 'port')
+		# Port.__str__ returns 'host:port'
+		self.assertEqual(out, {'port': ['example.com:8080']})
+
 	def test_unknown_type_returns_empty(self):
 		results = {'port': [self._make_port()]}
 		out = _apply_format(results, '{vulnerability.matched_at}')

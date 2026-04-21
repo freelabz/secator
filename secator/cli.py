@@ -986,7 +986,20 @@ def _apply_format(results, fmt):
 					pass
 			new_results[_type] = formatted
 		else:
-			new_results[_type] = [str(item) for item in items]
+			# No field specified — use each OutputType's __str__ for a clean primary-field repr.
+			# Items from report.data['results'] may be raw dicts; reconstruct via OutputType.load().
+			_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
+			otype_cls = _otype_map.get(_type)
+			formatted = []
+			for item in items:
+				if isinstance(item, dict) and otype_cls:
+					try:
+						formatted.append(str(otype_cls.load(item)))
+					except Exception:
+						formatted.append(json.dumps(item))
+				else:
+					formatted.append(str(item))
+			new_results[_type] = formatted
 
 	return new_results
 
