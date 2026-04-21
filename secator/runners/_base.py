@@ -469,6 +469,8 @@ class Runner:
 			# If sync mode, set started
 			if self.sync:
 				self.mark_started()
+			else:
+				self.log_start()
 
 			# Yield results buffer
 			yield from self.results_buffer
