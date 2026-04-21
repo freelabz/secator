@@ -1340,14 +1340,63 @@ def _resolve_resume_file(resume_path, task_name):
 	return resume_path if os.path.exists(resume_path) else None
 
 
+def _build_checkpoint_from_report(folder, resume_file):
+	"""Build a synthetic Checkpoint from report.json when no checkpoint.json exists."""
+	from pathlib import Path as _Path
+	from secator.runners.checkpoint import Checkpoint
+
+	report_path = _Path(folder) / 'report.json'
+	if not report_path.exists():
+		return None
+
+	try:
+		with open(report_path) as f:
+			report_data = json.load(f)
+	except (json.JSONDecodeError, OSError):
+		return None
+
+	info = report_data.get('info', {})
+	runner_name = info.get('name', '')
+	targets = info.get('targets', [])
+	run_opts = info.get('run_opts', {}) or {}
+
+	if not runner_name or not targets:
+		return None
+
+	# Infer runner type from folder path structure (e.g. .../tasks/15 -> 'task')
+	runner_type = 'task'
+	for part in _Path(folder).parts:
+		if part in ('tasks', 'workflows', 'scans'):
+			runner_type = part.rstrip('s')
+			break
+
+	return Checkpoint(
+		runner_type=runner_type,
+		runner_id=runner_name,
+		runner_name=runner_name,
+		targets=targets,
+		opts=run_opts,
+		context={},
+		completed_inputs=[],
+		pause_method='kill',
+		resume_files={runner_name: resume_file},
+	)
+
+
 @cli.command(name='resume')
 @click.argument('runner_id')
 @click.option('--sync', is_flag=True, default=False, help='Run resumed task synchronously.')
-def resume_runner(runner_id, sync):
+@click.option('--resume-file', 'resume_file_override', type=str, default=None,
+              help='Path to a native tool resume file (e.g. nuclei/httpx/nmap resume cfg). '
+                   'When no checkpoint exists, runner info is loaded from report.json.')
+def resume_runner(runner_id, sync, resume_file_override):
 	"""Resume a paused task, workflow, or scan.
 
 	RUNNER_ID can be a runner UUID, a checkpoint file/folder path, or a
 	type/number shorthand like 'workflows/6' or 'scans/3'.
+
+	Use --resume-file to supply a native tool resume file for tasks that were
+	interrupted before a checkpoint was saved (backwards-compatible fallback).
 	"""
 	import glob as _glob
 	import signal as _signal
@@ -1386,14 +1435,18 @@ def resume_runner(runner_id, sync):
 						checkpoint = cp
 						folder = match
 						break
+					elif folder is None:
+						folder = match  # track folder even when no checkpoint
 				if checkpoint:
 					break
 
 	# d) runner.pid-based lookup (UUID or runner name)
 	if checkpoint is None:
-		folder = Runner.find_runner_folder(runner_id)
-		if folder:
-			checkpoint = Checkpoint.load(folder)
+		runner_folder = Runner.find_runner_folder(runner_id)
+		if runner_folder:
+			if folder is None:
+				folder = runner_folder
+			checkpoint = Checkpoint.load(runner_folder)
 
 	# e) Celery backend fallback
 	if checkpoint is None:
@@ -1404,6 +1457,23 @@ def resume_runner(runner_id, sync):
 				checkpoint = Checkpoint(**json.loads(raw))
 		except Exception as e:
 			debug(f'Could not fetch checkpoint from Celery backend: {e}', sub='cli.resume')
+
+	# f) --resume-file: build synthetic checkpoint from report.json, or override existing
+	if resume_file_override:
+		if checkpoint is None:
+			if folder:
+				checkpoint = _build_checkpoint_from_report(folder, resume_file_override)
+				if checkpoint:
+					console.print(Info(message='No checkpoint found — loaded runner info from report.json'))
+				else:
+					console.print(Error(message=f'Could not load runner info from {folder}/report.json'))
+					return
+			else:
+				console.print(Error(message=f'Could not find runner folder for ID: {runner_id}'))
+				return
+		else:
+			# Override the resume file in the existing checkpoint
+			checkpoint.resume_files[checkpoint.runner_name] = resume_file_override
 
 	if checkpoint is None:
 		console.print(Error(message=f'No checkpoint found for runner ID: {runner_id}'))
