@@ -1487,9 +1487,20 @@ def resume_runner(runner_id, sync):
 	workspace_name = context.get('workspace_name', '')
 	if workspace_name:
 		try:
+			from secator.output_types import OUTPUT_TYPES
 			from secator.query import QueryEngine
+			type_map = {cls.get_name(): cls for cls in OUTPUT_TYPES}
 			qe = QueryEngine(workspace_name, context=context)
-			prior_results = qe.search({})
+			raw_results = qe.search({})
+			for item in raw_results:
+				_type = item.get('_type') if isinstance(item, dict) else None
+				if _type and _type in type_map:
+					try:
+						prior_results.append(type_map[_type].load(item))
+					except Exception as e:
+						debug(f'Could not cast prior result of type {_type}: {e}', sub='cli.resume')
+				elif not isinstance(item, dict):
+					prior_results.append(item)
 			if prior_results:
 				console.print(Info(message=f'Pre-loaded {len(prior_results)} prior results from workspace'))
 		except Exception as e:
