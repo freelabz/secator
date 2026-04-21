@@ -973,7 +973,7 @@ def _apply_format(results, fmt):
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
-					value = _template.format(**{_type: DotMap(d), **d})
+					value = _template.format(**{**d, _type: DotMap(d)})
 					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
 					if 'DotMap()' in str(value):
 						continue
