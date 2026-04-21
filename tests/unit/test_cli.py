@@ -4,9 +4,54 @@ import os
 import unittest
 from unittest import mock
 
-from secator.cli import cli
+from secator.cli import cli, _apply_format
 from secator.definitions import VERSION
 from secator.installer import InstallerStatus
+
+
+class TestApplyFormat(unittest.TestCase):
+
+	def _make_port(self, ip='1.2.3.4', port=80, service_name='http'):
+		return {'ip': ip, 'port': port, 'service_name': service_name, 'host': 'example.com', 'state': 'open'}
+
+	def test_brace_style_no_collision(self):
+		"""Test {type.field} format when type name does not collide with a field name."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url.url}')
+		self.assertEqual(out, {'url': ['https://example.com']})
+
+	def test_brace_style_type_name_collides_with_field(self):
+		"""{port.ip} must return the ip value even though Port has a 'port' int field."""
+		results = {'port': [self._make_port(ip='1.2.3.4', port=443)]}
+		out = _apply_format(results, '{port.ip}')
+		self.assertEqual(out, {'port': ['1.2.3.4']})
+
+	def test_brace_style_accesses_port_number_field(self):
+		"""Accessing the 'port' field itself via {port.port} should still work."""
+		results = {'port': [self._make_port(ip='1.2.3.4', port=8080)]}
+		out = _apply_format(results, '{port.port}')
+		self.assertEqual(out, {'port': ['8080']})
+
+	def test_dotpath_style(self):
+		"""Legacy dot-path style (port.ip) must continue to work."""
+		results = {'port': [self._make_port(ip='10.0.0.1', port=22)]}
+		out = _apply_format(results, 'port.ip')
+		self.assertEqual(out, {'port': ['10.0.0.1']})
+
+	def test_unknown_type_returns_empty(self):
+		results = {'port': [self._make_port()]}
+		out = _apply_format(results, '{vulnerability.matched_at}')
+		self.assertEqual(out, {})
+
+	def test_pipe_separated_specs(self):
+		"""Multiple specs separated by || should each be applied independently."""
+		results = {
+			'port': [self._make_port(ip='1.2.3.4', port=80)],
+			'url': [{'url': 'https://example.com', 'status_code': 200}],
+		}
+		out = _apply_format(results, '{port.ip} || {url.url}')
+		self.assertEqual(out.get('port'), ['1.2.3.4'])
+		self.assertEqual(out.get('url'), ['https://example.com'])
 
 
 class TestCli(unittest.TestCase):
