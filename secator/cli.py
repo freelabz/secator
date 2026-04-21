@@ -32,7 +32,7 @@ from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
 	debug, detect_host, flatten, print_version,
 	get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
-	sanitize_folder_name, vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
+	sanitize_folder_name, vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info,
 	humanize_date
 )
 from contextlib import nullcontext
