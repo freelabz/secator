@@ -134,3 +134,21 @@ class TestPythonExprToMongo:
         import json
         query = {'_type': 'vulnerability', 'severity_score': {'$gte': 7}}
         assert python_expr_to_mongo(json.dumps(query)) == query
+
+    def test_python_and_keyword(self):
+        result = python_expr_to_mongo("port.state == 'open' and port.port < 1024")
+        assert result == {'_type': 'port', 'state': 'open', 'port': {'$lt': 1024}}
+
+    def test_python_or_keyword(self):
+        result = python_expr_to_mongo('vulnerability.severity_score > 7 or domain')
+        assert result == {
+            '$or': [
+                {'_type': 'vulnerability', 'severity_score': {'$gt': 7}},
+                {'_type': 'domain'},
+            ]
+        }
+
+    def test_and_with_quoted_value_containing_and(self):
+        result = python_expr_to_mongo("tag.name == 'this and that' and tag.match == 'x'")
+        assert result == {'_type': 'tag', 'name': 'this and that', 'match': 'x'}
+
