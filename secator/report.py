@@ -46,7 +46,6 @@ class Report:
 			'name',
 			'status',
 			'targets',
-			'profiles',
 			'start_time',
 			'end_time',
 			'elapsed',

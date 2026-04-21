@@ -1120,7 +1120,9 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			first_target = str(targets[0]) if targets else ''
 			if len(targets) > 1:
 				first_target += f' (+{len(targets) - 1})'
-			profiles = content['info'].get('profiles', [])
+			profiles = content['info'].get('run_opts', {}).get('profiles', [])
+			if isinstance(profiles, str):
+				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
 			profiles_str = ', '.join(profiles) if profiles else ''
 			data = {
 				'workspace': info['workspace'],
