@@ -1389,12 +1389,14 @@ def _build_checkpoint_from_report(folder, resume_file):
 @click.option('--resume-file', 'resume_file_override', type=str, default=None,
               help='Path to a native tool resume file (e.g. nuclei/httpx/nmap resume cfg). '
                    'When no checkpoint exists, runner info is loaded from report.json.')
-def resume_runner(runner_id, sync, resume_file_override):
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+def resume_runner(runner_id, sync, resume_file_override, workspace):
 	"""Resume a paused task, workflow, or scan.
 
 	RUNNER_ID can be a runner UUID, a checkpoint file/folder path, or a
 	type/number shorthand like 'workflows/6' or 'scans/3'.
 
+	Use --workspace/-ws/-w to scope the lookup to a specific workspace.
 	Use --resume-file to supply a native tool resume file for tasks that were
 	interrupted before a checkpoint was saved (backwards-compatible fallback).
 	"""
@@ -1408,6 +1410,7 @@ def resume_runner(runner_id, sync, resume_file_override):
 	# 1. Resolve checkpoint from various input formats
 	checkpoint = None
 	folder = None
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
 
 	runner_id_path = Path(runner_id)
 
@@ -1428,8 +1431,15 @@ def resume_runner(runner_id, sync, resume_file_override):
 			runner_type_part, runner_num = parts[0], parts[1]
 			# Try pluralized and non-pluralized folder names
 			for rtype in [runner_type_part + 's', runner_type_part]:
-				pattern = str(Path(CONFIG.dirs.reports) / '**' / rtype / runner_num)
-				for match in _glob.glob(pattern, recursive=True):
+				if workspace:
+					# Workspace specified: look directly in that workspace's reports folder
+					candidate = str(Path(CONFIG.dirs.reports) / workspace_name / rtype / runner_num)
+					matches = [candidate] if Path(candidate).is_dir() else []
+				else:
+					# No workspace: glob across all workspaces
+					pattern = str(Path(CONFIG.dirs.reports) / '**' / rtype / runner_num)
+					matches = _glob.glob(pattern, recursive=True)
+				for match in matches:
 					cp = Checkpoint.load(match)
 					if cp:
 						checkpoint = cp
@@ -1554,13 +1564,16 @@ def resume_runner(runner_id, sync, resume_file_override):
 
 	# Pre-load prior results from the workspace so the resumed runner has full context
 	prior_results = []
-	workspace_name = context.get('workspace_name', '')
-	if workspace_name:
+	ws_from_context = context.get('workspace_name', '')
+	effective_workspace = ws_from_context or workspace_name
+	if workspace and not ws_from_context:
+		context['workspace_name'] = workspace_name
+	if effective_workspace:
 		try:
 			from secator.output_types import OUTPUT_TYPES
 			from secator.query import QueryEngine
 			type_map = {cls.get_name(): cls for cls in OUTPUT_TYPES}
-			qe = QueryEngine(workspace_name, context=context)
+			qe = QueryEngine(effective_workspace, context=context)
 			raw_results = qe.search({})
 			for item in raw_results:
 				_type = item.get('_type') if isinstance(item, dict) else None
