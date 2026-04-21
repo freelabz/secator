@@ -1040,7 +1040,7 @@ def autodetect_type(target):
 		return IBAN
 	elif validators.uuid(target):
 		return UUID
-	elif Path(target).exists():
+	elif len(target) < 255 and Path(target).exists():
 		return PATH
 	elif validators.slug(target):
 		return SLUG
