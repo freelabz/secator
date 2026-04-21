@@ -14,13 +14,14 @@ class Report:
 		exporters (list): List of exporter classes.
 	"""
 
-	def __init__(self, runner, title=None, exporters=[]):
+	def __init__(self, runner, title=None, exporters=[], initial=False):
 		self.title = title or f'{runner.config.type}_{runner.config.name}'
 		self.runner = runner
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
 		self.workspace_name = runner.workspace_name
 		self.output_folder = runner.reports_folder
+		self.initial = initial
 
 	def send(self):
 		for report_cls in self.exporters:
@@ -31,17 +32,8 @@ class Report:
 					f'[bold red]Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',  # noqa: E501
 				)
 
-	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates):
-		"""Build report data structure using QueryEngine for filtering and dedup.
-
-		Args:
-			query (dict): MongoDB-style filter query (e.g. {'_type': 'vulnerability'}).
-			dedupe (bool): Whether to remove duplicate results.
-		"""
-		if query is None:
-			query = {}
-		from secator.query import QueryEngine
-
+	def _init_data(self):
+		"""Initialize the data dict with scan info and empty results."""
 		runner_fields = {
 			'name',
 			'status',
@@ -58,6 +50,27 @@ class Report:
 			del data['info']['results']
 		data['info']['title'] = self.title
 		data['info']['errors'] = getattr(self.runner, 'errors', [])
+		for output_type in FINDING_TYPES:
+			output_name = output_type.get_name()
+			data['results'][output_name] = []
+		return data
+
+	def build_info(self):
+		"""Build report data with only scan info and empty results (no query)."""
+		self.data = self._init_data()
+
+	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates):
+		"""Build report data structure using QueryEngine for filtering and dedup.
+
+		Args:
+			query (dict): MongoDB-style filter query (e.g. {'_type': 'vulnerability'}).
+			dedupe (bool): Whether to remove duplicate results.
+		"""
+		if query is None:
+			query = {}
+		from secator.query import QueryEngine
+
+		data = self._init_data()
 
 		# Build context for QueryEngine.
 		# Pass runner.results directly (OutputType objects or dicts) to avoid

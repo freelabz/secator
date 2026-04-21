@@ -121,6 +121,7 @@ class Runner:
 		self.skipped = False
 		self.results_buffer = []
 		self._hooks = hooks
+		self.report = None
 
 		# Runner process options
 		self.no_poll = self.run_opts.get('no_poll', False)
@@ -249,6 +250,9 @@ class Runner:
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
+
+		# Initialize report file with scan info
+		self.init_reports()
 
 	def _process_config(self, config):
 		"""Process the configuration in different formats (dict, TemplateLoader, DotMap).
@@ -1033,6 +1037,15 @@ class Runner:
 		)
 		# fmt: on
 		self._print(info, rich=True)
+
+	def init_reports(self):
+		"""Create initial JSON report with scan info at runner init."""
+		from secator.exporters.json import JsonExporter
+		if self.enable_reports and self.exporters and JsonExporter in self.exporters and not self.no_process and not self.dry_run:
+			report = Report(self, exporters=[JsonExporter], initial=True)
+			report.build_info()
+			report.send()
+			self.report = report
 
 	def export_reports(self):
 		"""Export reports."""

@@ -12,5 +12,8 @@ class JsonExporter(Exporter):
 		with open(json_path, 'w') as f:
 			dump_dataclass(self.report.data, f, indent=2)
 
-		info = Info(f'Saved JSON report to {json_path}')
+		if getattr(self.report, 'initial', False):
+			info = Info(f'Initialized JSON report at {json_path}')
+		else:
+			info = Info(f'Saved JSON report to {json_path}')
 		console.print(info)

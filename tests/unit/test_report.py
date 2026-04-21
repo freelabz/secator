@@ -67,6 +67,17 @@ class TestReportBuild:
         report.build(query={})
         assert len(report.data['results'].get('vulnerability', [])) == 150
 
+    def test_build_info_returns_scan_info_with_empty_results(self):
+        """Report.build_info() should populate info section and leave results empty."""
+        runner = self._make_runner([])
+        report = Report(runner, initial=True)
+        report.build_info()
+        assert 'info' in report.data
+        assert 'results' in report.data
+        assert report.data['info']['name'] == 'test_runner'
+        assert all(v == [] for v in report.data['results'].values())
+        assert report.initial is True
+
     def test_build_no_preloaded_results_does_not_short_circuit_backend(self):
         """When runner has no pre-loaded results, Report.build() must not pass empty list to context.
 
