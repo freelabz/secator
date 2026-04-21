@@ -1131,6 +1131,7 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	table.add_column("Name")
 	table.add_column("Id")
 	table.add_column("Target")
+	table.add_column("Profiles")
 	table.add_column("Start Date")
 	table.add_column("End Date")
 	table.add_column("Elapsed")
@@ -1156,6 +1157,12 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			runner_id = path_info['type'] + '/' + path_info['id']
 			targets = report_info.get('targets', [])
 			first_target = str(targets[0]) if targets else ''
+			if len(targets) > 1:
+				first_target += f' (+{len(targets) - 1})'
+			profiles = report_info.get('run_opts', {}).get('profiles', [])
+			if isinstance(profiles, str):
+				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+			profiles_str = ', '.join(profiles) if profiles else ''
 			status = report_info.get('status', '')
 			status_color = STATE_COLORS[status] if status in STATE_COLORS else 'white'
 
@@ -1165,6 +1172,7 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 				f"[bold blue]{report_info.get('name', '')}[/]",
 				f'[link={Path(path).as_uri()}]{runner_id}[/link]',
 				first_target,
+				profiles_str,
 				humanize_date(report_info.get('start_time')),
 				humanize_date(report_info.get('end_time')),
 				report_info.get('elapsed_human', ''),
