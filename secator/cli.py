@@ -1140,26 +1140,17 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 
 
 def _load_report_data(path):
-	"""Stream report JSON to extract info section and count vulnerability severities."""
-	import json_stream
-
+	"""Read report JSON to extract info section and count vulnerability severities."""
 	info = {}
 	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 	with open(path, 'r') as f:
-		data = json_stream.load(f)
-		for section_key, section_val in data.items():
-			if section_key == 'info':
-				info = json_stream.to_standard_types(section_val)
-			elif section_key == 'results':
-				for result_key, result_items in section_val.items():
-					if result_key == 'vulnerability':
-						for vuln in result_items:
-							for field_key, field_val in vuln.items():
-								if field_key == 'severity':
-									severity = str(field_val).lower() if field_val else 'unknown'
-									if severity in vuln_counts:
-										vuln_counts[severity] += 1
-									break
+		data = json.load(f)
+	info = data.get('info', {})
+	results = data.get('results', {})
+	for vuln in results.get('vulnerability', []):
+		severity = str(vuln.get('severity', '')).lower()
+		if severity in vuln_counts:
+			vuln_counts[severity] += 1
 	return info, vuln_counts
 
 
@@ -1224,34 +1215,24 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			first_target = str(targets[0]) if targets else ''
 			if len(targets) > 1:
 				first_target += f' (+{len(targets) - 1})'
-			profiles = content['info'].get('run_opts', {}).get('profiles', [])
+			profiles = report_info.get('run_opts', {}).get('profiles', [])
 			if isinstance(profiles, str):
 				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
 			profiles_str = ', '.join(profiles) if profiles else ''
-			data = {
-				'workspace': info['workspace'],
-				'name': f"[bold blue]{content['info']['name']}[/]",
-				'status': content['info'].get('status', ''),
-				'id': f'[link={Path(path).as_uri()}]{runner_id}[/link]',
-				'target': first_target,
-				'profiles': profiles_str,
-				'start_date': humanize_date(content['info'].get('start_time')),
-				'end_date': humanize_date(content['info'].get('end_time')),
-				'elapsed': content['info'].get('elapsed_human', ''),
-			}
-			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
+			status = report_info.get('status', '')
+			status_color = STATE_COLORS[status] if status in STATE_COLORS else 'white'
 
 			# Update table
 			row = [
-				data['workspace'],
-				data['name'],
-				data['id'],
-				data['target'],
-				data['profiles'],
-				data['start_date'],
-				data['end_date'],
-				data['elapsed'],
-				f"[{status_color}]{data['status']}[/]",
+				path_info['workspace'],
+				f"[bold blue]{report_info.get('name', '')}[/]",
+				f'[link={Path(path).as_uri()}]{runner_id}[/link]',
+				first_target,
+				profiles_str,
+				humanize_date(report_info.get('start_time')),
+				humanize_date(report_info.get('end_time')),
+				report_info.get('elapsed_human', ''),
+				f"[{status_color}]{status}[/]",
 				_format_vuln_counts(vuln_counts),
 			]
 			if show_all:
