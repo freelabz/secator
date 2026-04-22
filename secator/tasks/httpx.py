@@ -1,3 +1,4 @@
+import mimetypes
 import os
 import shlex
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ from secator.definitions import (
 	IP, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
 	STRING, THREADS, TIMEOUT, URL, USER_AGENT
 )  # fmt: off
-from secator.output_types import Certificate, Subdomain, Technology, Url, Vulnerability, Tag
+from secator.output_types import Certificate, File, Subdomain, Tag, Technology, Url, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Http
 from secator.utils import extract_domain_info, extract_subdomains_from_fqdn, sanitize_url
@@ -21,7 +22,7 @@ class httpx(Http):
 
 	cmd = 'httpx-toolkit -irh'
 	input_types = [HOST, HOST_PORT, IP, URL, STRING]
-	output_types = [Url, Subdomain, Technology, Vulnerability, Tag]
+	output_types = [Url, Subdomain, Technology, Vulnerability, Tag, File]
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -195,6 +196,7 @@ class httpx(Http):
 	@staticmethod
 	def on_end(self):
 		store_responses = self.get_opt_value('store_responses') or CONFIG.http.store_responses
+		screenshot = self.get_opt_value('screenshot')
 		response_dir = f'{self.reports_folder}/.outputs'
 		if store_responses:
 			index_rpath = f'{response_dir}/response/index.txt'
@@ -206,6 +208,43 @@ class httpx(Http):
 				os.remove(index_spath)
 			if os.path.exists(index_spath2):
 				os.remove(index_spath2)
+			# Yield File outputs for all saved responses
+			response_path = f'{response_dir}/response'
+			if os.path.exists(response_path):
+				for filename in os.listdir(response_path):
+					if filename == 'index.txt':
+						continue
+					file_path = os.path.join(response_path, filename)
+					if os.path.isfile(file_path):
+						file_size = os.path.getsize(file_path)
+						mime_type = mimetypes.guess_type(file_path)[0] or 'text/html'
+						yield File(
+							path=file_path,
+							type='local',
+							category='http',
+							tags=['response', 'httpx'],
+							size=file_size,
+							mime_type=mime_type
+						)
+		if screenshot:
+			# Yield File outputs for all screenshots
+			screenshot_path = f'{response_dir}/screenshot'
+			if os.path.exists(screenshot_path):
+				for filename in os.listdir(screenshot_path):
+					if filename in ['index_screenshot.txt', 'screenshot.html']:
+						continue
+					file_path = os.path.join(screenshot_path, filename)
+					if os.path.isfile(file_path):
+						file_size = os.path.getsize(file_path)
+						mime_type = mimetypes.guess_type(file_path)[0] or 'image/png'
+						yield File(
+							path=file_path,
+							type='local',
+							category='screenshot',
+							tags=['visual', 'httpx'],
+							size=file_size,
+							mime_type=mime_type
+						)
 
 	def _preprocess_url(self, item):
 		"""Replace time string by float, sanitize URL, get final redirect URL."""

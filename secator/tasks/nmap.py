@@ -14,7 +14,7 @@ from secator.definitions import (
 	THREADS, TIMEOUT, TOP_PORTS
 )
 # fmt: on
-from secator.output_types import Error, Exploit, Info, Ip, Port, Technology, Vulnerability, Warning, Progress
+from secator.output_types import Error, Exploit, File, Info, Ip, Port, Technology, Vulnerability, Warning, Progress
 from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
 
@@ -31,7 +31,7 @@ class nmap(ReconPort):
 
 	cmd = 'nmap'
 	input_types = [HOST, IP, CIDR_RANGE, STRING]
-	output_types = [Port, Ip, Vulnerability, Technology, Exploit, Progress]
+	output_types = [Port, Ip, Vulnerability, Technology, Exploit, Progress, File]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
 	file_flag = '-iL'
@@ -188,6 +188,16 @@ class nmap(ReconPort):
 			yield Error(message=f'Could not find XML results in {self.output_path}')
 			return
 		yield Info(message=f'XML results saved to {self.output_path}')
+		# Yield File output for the XML file
+		file_size = os.path.getsize(self.output_path)
+		yield File(
+			path=self.output_path,
+			type='local',
+			category='nmap',
+			tags=['scan-result', 'xml'],
+			size=file_size,
+			mime_type='application/xml'
+		)
 		yield from self.xml_to_json()
 
 	def xml_to_json(self):

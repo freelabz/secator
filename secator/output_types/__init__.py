@@ -2,6 +2,7 @@ __all__ = [
 	'Ai',
 	'Domain',
 	'Error',
+	'File',
 	'OutputType',
 	'Info',
 	'Ip',
@@ -38,6 +39,7 @@ from secator.output_types.error import Error
 from secator.output_types.stat import Stat
 from secator.output_types.state import State
 from secator.output_types.domain import Domain
+from secator.output_types.file import File
 
 
 EXECUTION_TYPES = [
@@ -49,5 +51,6 @@ STAT_TYPES = [
 FINDING_TYPES = [
 	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain, Ai, Technology
 ]  # fmt: off
-OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES
+ARTIFACT_TYPES = [File]  # fmt: off
+OUTPUT_TYPES = FINDING_TYPES + ARTIFACT_TYPES + EXECUTION_TYPES + STAT_TYPES
 INTERNAL_FIELDS = ('_context', '_uuid', '_related', '_duplicate')

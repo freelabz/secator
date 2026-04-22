@@ -1,3 +1,5 @@
+import mimetypes
+import os
 import re
 import shutil
 
@@ -6,7 +8,7 @@ from secator.decorators import task
 from secator.definitions import FILENAME, HOST, IP, ORG_NAME, PORT, URL, USERNAME
 from secator.runners import Command
 from secator.serializers import RegexSerializer
-from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error, UserAccount, Warning
+from secator.output_types import Vulnerability, Port, Url, Record, Ip, Tag, Info, Error, UserAccount, Warning, File
 from secator.serializers import JSONSerializer
 
 
@@ -184,7 +186,7 @@ class bbot(Command):
 	"""Multipurpose scanner."""
 	cmd = 'bbot -y --allow-deadly --force'
 	input_types = [HOST, IP, URL, PORT, ORG_NAME, USERNAME, FILENAME]
-	output_types = [Vulnerability, Port, Url, Record, Ip]
+	output_types = [Vulnerability, Port, Url, Record, Ip, File]
 	tags = ['vuln', 'scan']
 	json_flag = '--json'
 	input_flag = '-t'
@@ -353,6 +355,17 @@ class bbot(Command):
 			yield Info(f'Copying screenshot {path} to {secator_path}')
 			shutil.copyfile(path, secator_path)
 			item['data']['path'] = secator_path
+			# Yield File output for the screenshot
+			file_size = os.path.getsize(secator_path)
+			mime_type = mimetypes.guess_type(secator_path)[0] or 'image/png'
+			yield File(
+				path=secator_path,
+				type='local',
+				category='screenshot',
+				tags=['visual', 'bbot'],
+				size=file_size,
+				mime_type=mime_type
+			)
 
 		yield item
 

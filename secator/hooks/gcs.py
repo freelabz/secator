@@ -14,7 +14,8 @@ warnings.filterwarnings("ignore", "Your application has authenticated using end 
 
 GCS_BUCKET_NAME = CONFIG.addons.gcs.bucket_name
 ITEMS_TO_SEND = {
-	'url': ['screenshot_path', 'stored_response_path']
+	'url': ['screenshot_path', 'stored_response_path'],
+	'file': ['path']  # For File output type
 }
 
 _gcs_client = None
@@ -42,11 +43,19 @@ def process_item(self, item):
 				continue
 			ext = path.suffix
 			blob_name = f'{item._uuid}_{k}{ext}'
-			t = Thread(target=upload_blob, args=(GCS_BUCKET_NAME, v, blob_name))
+			t = Thread(target=_upload_and_update, args=(item, k, GCS_BUCKET_NAME, v, blob_name))
 			t.start()
 			self.threads.append(t)
-			setattr(item, k, f'gs://{GCS_BUCKET_NAME}/{blob_name}')
 	return item
+
+
+def _upload_and_update(item, field_name, bucket_name, source_file_name, destination_blob_name):
+	"""Upload a file to GCS and update the item's field only on success."""
+	upload_blob(bucket_name, source_file_name, destination_blob_name)
+	gcs_path = f'gs://{bucket_name}/{destination_blob_name}'
+	setattr(item, field_name, gcs_path)
+	if item._type == 'file':
+		item.type = 'gcs'
 
 
 def upload_blob(bucket_name, source_file_name, destination_blob_name):
