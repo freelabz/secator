@@ -1042,7 +1042,7 @@ class Runner:
 		from secator.exporters.json import JsonExporter
 		if JsonExporter not in self.exporters:
 			return
-		if self.dry_run or self.no_process:
+		if not self.enable_reports:
 			return
 		json_path = Path(self.reports_folder) / 'report.json'
 		if not json_path.exists():
