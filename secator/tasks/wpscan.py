@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 
 from secator.config import CONFIG
 from secator.decorators import task
@@ -8,7 +9,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
 							   SEVERITY, TAGS, THREADS, TIMEOUT,
-							   URL, USER_AGENT)
+							   URL, USER_AGENT, HOST, IP)
 from secator.output_types import Tag, Vulnerability, Info, Error
 from secator.tasks._categories import VulnHttp
 from secator.installer import parse_version
@@ -18,7 +19,7 @@ from secator.installer import parse_version
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
 	cmd = 'wpscan --force --verbose'
-	input_types = [URL]
+	input_types = [URL, HOST, IP]
 	output_types = [Vulnerability, Tag]
 	tags = ['vuln', 'scan', 'wordpress']
 	input_flag = '--url'
@@ -89,7 +90,7 @@ class wpscan(VulnHttp):
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):
@@ -97,7 +98,7 @@ class wpscan(VulnHttp):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
 		self.output_path = output_path
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -146,8 +147,8 @@ class wpscan(VulnHttp):
 					category='info',
 					name='wordpress_theme',
 					match=target,
+					value=slug + ':' + number,
 					extra_data={
-						'content': slug + ':' + number,
 						'url': location,
 						'latest_version': latest_version
 					}
@@ -181,8 +182,8 @@ class wpscan(VulnHttp):
 					category='info',
 					name='wordpress_plugin',
 					match=target,
+					value=slug + ':' + number,
 					extra_data={
-						'content': slug + ':' + number,
 						'url': location,
 						'name': slug,
 						'version': number,

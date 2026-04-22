@@ -4,7 +4,7 @@ from enum import Enum
 
 from secator.definitions import ALIVE, IP
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from secator.utils import rich_to_ansi, format_object
 
 
 class IpProtocol(str, Enum):
@@ -18,6 +18,10 @@ class Ip(OutputType):
 	host: str = field(default='', repr=True, compare=False)
 	alive: bool = False
 	protocol: str = field(default=IpProtocol.IPv4)
+	extra_data: dict = field(default_factory=dict, compare=False)
+	is_false_positive: bool = field(default=False, compare=False)
+	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='ip', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -33,10 +37,17 @@ class Ip(OutputType):
 	def __str__(self) -> str:
 		return self.ip
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'💻 [bold white]{self.ip}[/]'
-		if self.host:
+		if self.host and self.host != self.ip:
 			s += rf' \[[bold magenta]{self.host}[/]]'
 		if self.alive:
-			s += r' [bold green]🟢[/]'
-		return rich_to_ansi(s)
+			s += r' \[[bold green]alive[/]]'
+		if self.extra_data:
+			s += format_object(self.extra_data, 'yellow')
+		if not self.alive:
+			s = f'[dim]{s}[/]'
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

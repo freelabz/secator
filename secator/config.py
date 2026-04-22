@@ -1,17 +1,17 @@
 import os
 from pathlib import Path
 from subprocess import call, DEVNULL
-from typing import Dict, List
+from typing import Any, Dict, List
 from typing_extensions import Annotated, Self
 
 import validators
-import requests
 import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
 from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
 
+from secator.requests import requests
 from secator.rich import console, console_stdout
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
@@ -23,6 +23,11 @@ ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
+
+USER_AGENTS = {
+	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+	'chrome_134.0_macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
+}
 
 
 class StrictModel(BaseModel, extra='forbid'):
@@ -59,10 +64,10 @@ class Celery(StrictModel):
 	broker_pool_limit: int = 10
 	broker_connection_timeout: float = 4.0
 	broker_visibility_timeout: int = 3600
-	broker_transport_options: str = ""
+	broker_transport_options: str = ''
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
-	result_backend_transport_options: str = ""
+	result_backend_transport_options: str = ''
 	result_expires: int = 86400  # 1 day
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
@@ -83,7 +88,8 @@ class Cli(StrictModel):
 	stdin_timeout: int = 1000
 	show_http_response_headers: bool = False
 	show_command_output: bool = False
-	exclude_http_response_headers: List[str] = ["connection", "content_type", "content_length", "date", "server"]
+	exclude_http_response_headers: List[str] = ['connection', 'content_type', 'content_length', 'date', 'server']
+	date_format: str = '%m/%d/%Y'  # US, use "%d/%m/%Y" for EUROPEAN format
 
 
 class Runners(StrictModel):
@@ -96,12 +102,16 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+	threads: int = 50
+	prompt_timeout: int = 20
+	chunk_rate_limit: bool = True
 
 
 class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
 	force_source_install: bool = False
+	prompt_sudo_password: bool = True
 
 
 class HTTP(StrictModel):
@@ -111,18 +121,20 @@ class HTTP(StrictModel):
 	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'
 	freeproxy_timeout: int = 1
+	default_header: str = 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']
 
 
 class Tasks(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	overrides: Dict[str, Dict[str, Any]] = {}
 
 
 class Workflows(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Scans(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Profiles(StrictModel):
@@ -133,11 +145,15 @@ class Drivers(StrictModel):
 	defaults: List[str] = []
 
 
+class Workspace(StrictModel):
+	default: str = ''
+
+
 class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
 		'linpeas': 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh',
-		'sudo_killer': 'https://github.com/TH3xACE/SUDO_KILLER/archive/refs/heads/V3.zip'
+		'sudo_killer': 'https://github.com/TH3xACE/SUDO_KILLER/archive/refs/heads/V3.zip',
 	}
 
 
@@ -174,6 +190,64 @@ class MongodbAddon(StrictModel):
 	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
+	max_items: int = -1
+	duplicate_main_copy_fields: List[str] = [
+		'screenshot_path',
+		'stored_response_path',
+		'is_false_positive',
+		'is_acknowledged',
+		'verified',
+		'tags',
+	]
+
+
+class VulnersAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+
+
+class AiAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+	api_base: str = ''
+	default_model: str = 'claude-sonnet-4-6'
+	intent_model: str = 'claude-haiku-4-5'
+	temperature: float = 0.7
+	max_tokens: int = 30000
+	max_tokens_total: int = 100000
+	max_results: int = 500
+	encrypt_pii: bool = True
+
+
+class Providers(StrictModel):
+	defaults: Dict[str, str] = {'cve': 'circl', 'exploit': 'exploitdb', 'ghsa': 'ghsa'}
+
+
+class DiscordAddon(StrictModel):
+	enabled: bool = False
+	webhook_url: str = ''
+	bot_token: str = ''
+	send_runner_updates: bool = True
+	send_findings: bool = True
+	finding_types: List[str] = ['vulnerability']
+	min_severity: str = 'high'
+
+
+class ApiAddon(StrictModel):
+	enabled: bool = False
+	url: str = 'https://app.secator.cloud/api'
+	key: str = ''
+	header_name: str = 'Bearer'
+	force_ssl: bool = True
+	timeout: int = 60
+	runner_create_endpoint: str = 'runners'
+	runner_update_endpoint: str = 'runner/{runner_id}'
+	finding_create_endpoint: str = 'findings'
+	finding_update_endpoint: str = 'finding/{finding_id}'
+	finding_search_endpoint: str = 'findings/_search'
+	workspace_get_endpoint: str = 'workspace/{workspace_id}'
+	workspace_delete_endpoint: str = 'workspace/{workspace_id}'
+	runner_delete_endpoint: str = '{runner_type}/{runner_id}'
 
 
 class Addons(StrictModel):
@@ -181,6 +255,10 @@ class Addons(StrictModel):
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	vulners: VulnersAddon = VulnersAddon()
+	discord: DiscordAddon = DiscordAddon()
+	api: ApiAddon = ApiAddon()
+	ai: AiAddon = AiAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -197,8 +275,10 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
+	workspace: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()
+	providers: Providers = Providers()
 	offline_mode: bool = False
 
 
@@ -287,10 +367,11 @@ class Config(DotMap):
 				if isinstance(value, str):
 					if value.startswith('{') and value.endswith('}'):
 						import json
+
 						value = json.loads(value)
 			elif isinstance(existing_value, bool):
 				if isinstance(value, str):
-					value = value.lower() in ("true", "1", "t")
+					value = value.lower() in ('true', '1', 't')
 				elif isinstance(value, (int, float)):
 					value = True if value == 1 else False
 			elif isinstance(existing_value, int):
@@ -301,15 +382,15 @@ class Config(DotMap):
 				value = Path(value)
 		except ValueError:
 			pass
-		finally:
-			if set_partial:
-				if value is None or value == target[final_key]:
-					if final_key in partial:
-						del partial[final_key]
-					return
-				else:
-					partial[final_key] = value
-			target[final_key] = value
+
+		if set_partial:
+			if value is None or value == target[final_key]:
+				if final_key in partial:
+					del partial[final_key]
+				return
+			else:
+				partial[final_key] = value
+		target[final_key] = value
 
 	def unset(self, key, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.
@@ -381,10 +462,7 @@ class Config(DotMap):
 
 	def validate(self, print_errors=True):
 		"""Validate config."""
-		return Config.load(
-			SecatorConfig,
-			data=self._partial.toDict(),
-			print_errors=print_errors)
+		return Config.load(SecatorConfig, data=self._partial.toDict(), print_errors=print_errors)
 
 	def set_extras(self, original_data, original_path):
 		"""Set extra useful values in config.
@@ -451,6 +529,7 @@ class Config(DotMap):
 			string (str): YAML string.
 		"""
 		from rich.syntax import Syntax
+
 		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
 		console_stdout.print(data)
 
@@ -517,10 +596,10 @@ class Config(DotMap):
 
 	def apply_env_overrides(self, print_errors=True):
 		"""Override config values from environment variables."""
-		prefix = "SECATOR_"
+		prefix = 'SECATOR_'
 		for var in os.environ:
 			if var.startswith(prefix):
-				key = var[len(prefix):]  # remove prefix
+				key = var[len(prefix) :]  # remove prefix
 				if key in self._keymap:
 					path = '.'.join(k.lower() for k in self._keymap[key])
 					value = os.environ[var]
@@ -560,6 +639,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 		path (Path): Path to downloaded file / folder.
 	"""
 	from secator.output_types import Info, Error
+
 	if url_or_path.startswith('git+'):
 		# Clone Git repository
 		git_url = url_or_path[4:]  # remove 'git+' prefix
@@ -593,6 +673,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 				console.print(Error(message=f'File {local_path.resolve()} is not in {CONFIG.dirs.data} and security.allow_local_file_access is disabled.'))  # noqa: E501
 				return None
 			from secator.output_types import Info
+
 			console.print(repr(Info(message=f'[bold turquoise4]Copying {type} [bold magenta]{name}[/] to {target_folder} ...[/] ')), highlight=False, end='')  # noqa: E501
 			shutil.copyfile(local_path, target_folder / name)
 			target_path = target_folder / local_path.name
@@ -636,8 +717,7 @@ if not config_path.exists():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{data_root}[/] ... [/]', end='')
 		data_root.mkdir(parents=False)
 		console.print('[bold green]ok.[/]')
-	console.print(
-		f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
+	console.print(f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
 	config_path.touch()
 	console.print('[bold green]ok.[/]')
 CONFIG = Config.parse(path=config_path)
@@ -651,7 +731,7 @@ if not CONFIG:
 for name, dir in CONFIG.dirs.items():
 	if not dir.exists():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
-		dir.mkdir(parents=False)
+		dir.mkdir(parents=True)
 		console.print('[bold green]ok.[/]')
 
 # Download wordlists and payloads

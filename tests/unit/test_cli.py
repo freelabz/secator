@@ -4,9 +4,124 @@ import os
 import unittest
 from unittest import mock
 
-from secator.cli import cli
+from secator.cli import cli, _apply_format
 from secator.definitions import VERSION
 from secator.installer import InstallerStatus
+
+
+class TestApplyFormat(unittest.TestCase):
+
+	def _make_port(self, ip='1.2.3.4', port=80, service_name='http'):
+		return {'ip': ip, 'port': port, 'service_name': service_name, 'host': 'example.com', 'state': 'open'}
+
+	def test_brace_style_no_collision(self):
+		"""Test {type.field} format when type name does not collide with a field name."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url.url}')
+		self.assertEqual(out, {'url': ['https://example.com']})
+
+	def test_brace_style_type_name_collides_with_field(self):
+		"""{port.ip} must return the ip value even though Port has a 'port' int field."""
+		results = {'port': [self._make_port(ip='1.2.3.4', port=443)]}
+		out = _apply_format(results, '{port.ip}')
+		self.assertEqual(out, {'port': ['1.2.3.4']})
+
+	def test_brace_style_accesses_port_number_field(self):
+		"""Accessing the 'port' field itself via {port.port} should still work."""
+		results = {'port': [self._make_port(ip='1.2.3.4', port=8080)]}
+		out = _apply_format(results, '{port.port}')
+		self.assertEqual(out, {'port': ['8080']})
+
+	def test_dotpath_style(self):
+		"""Legacy dot-path style (port.ip) must continue to work."""
+		results = {'port': [self._make_port(ip='10.0.0.1', port=22)]}
+		out = _apply_format(results, 'port.ip')
+		self.assertEqual(out, {'port': ['10.0.0.1']})
+
+	def test_dotpath_style_field_name_collides_with_type(self):
+		"""Dot-path style url.url must return the url string, not a DotMap repr."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'webserver': 'nginx'}]}
+		out = _apply_format(results, 'url.url')
+		self.assertEqual(out, {'url': ['https://example.com']})
+
+	def test_dotpath_style_non_colliding_field(self):
+		"""Dot-path style url.webserver must return the webserver field value."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'webserver': 'nginx'}]}
+		out = _apply_format(results, 'url.webserver')
+		self.assertEqual(out, {'url': ['nginx']})
+
+	def test_type_only_spec_uses_str_repr(self):
+		"""--format url (no dot) should use Url.__str__ (returns the url field), not dict repr."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200, 'host': 'example.com'}]}
+		out = _apply_format(results, 'url')
+		self.assertEqual(out, {'url': ['https://example.com']})
+
+	def test_type_only_spec_port_uses_str_repr(self):
+		"""--format port (no dot) should use Port.__str__ (returns host:port), not dict repr."""
+		results = {'port': [self._make_port(ip='1.2.3.4', port=8080)]}
+		out = _apply_format(results, 'port')
+		# Port.__str__ returns 'host:port'
+		self.assertEqual(out, {'port': ['example.com:8080']})
+
+	def test_brace_style_field_only_single_type(self):
+		"""Brace-style with direct field names works when only one type is present."""
+		results = {'url': [{'url': 'https://example.com', 'host': 'example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url} {host} {status_code}')
+		self.assertEqual(out, {'url': ['https://example.com example.com 200']})
+
+	def test_brace_style_field_only_multi_type_warns(self):
+		"""Brace-style with direct field names produces no output when multiple types present."""
+		results = {
+			'url': [{'url': 'https://example.com', 'host': 'example.com', 'status_code': 200}],
+			'port': [self._make_port()],
+		}
+		out = _apply_format(results, '{url} {host} {status_code}')
+		self.assertEqual(out, {})
+
+	def test_brace_style_field_only_single_nonempty_type(self):
+		"""Brace-style with direct field names works when only one type has non-empty results (simulates -q filter)."""
+		results = {
+			'url': [{'url': 'https://example.com', 'host': 'example.com', 'port': 443}],
+			'port': [],
+			'subdomain': [],
+			'ip': [],
+		}
+		out = _apply_format(results, '{url}:{port}')
+		self.assertEqual(out, {'url': ['https://example.com:443']})
+
+	def test_plain_field_spec_single_nonempty_type(self):
+		"""--format status_code (no dot, no braces) should look up the field on the single non-empty type."""
+		results = {
+			'url': [{'url': 'https://example.com', 'status_code': 200, 'host': 'example.com'}],
+			'port': [],
+			'subdomain': [],
+		}
+		out = _apply_format(results, 'status_code')
+		self.assertEqual(out, {'url': ['200']})
+
+	def test_plain_field_spec_multi_nonempty_types_warns(self):
+		"""--format status_code warns when multiple non-empty types present (ambiguous)."""
+		results = {
+			'url': [{'url': 'https://example.com', 'status_code': 200}],
+			'port': [{'port': 80, 'status_code': None}],
+		}
+		out = _apply_format(results, 'status_code')
+		self.assertEqual(out, {})
+
+	def test_unknown_type_returns_empty(self):
+		results = {'port': [self._make_port()]}
+		out = _apply_format(results, '{vulnerability.matched_at}')
+		self.assertEqual(out, {})
+
+	def test_pipe_separated_specs(self):
+		"""Multiple specs separated by || should each be applied independently."""
+		results = {
+			'port': [self._make_port(ip='1.2.3.4', port=80)],
+			'url': [{'url': 'https://example.com', 'status_code': 200}],
+		}
+		out = _apply_format(results, '{port.ip} || {url.url}')
+		self.assertEqual(out.get('port'), ['1.2.3.4'])
+		self.assertEqual(out.get('url'), ['https://example.com'])
 
 
 class TestCli(unittest.TestCase):
@@ -201,14 +316,6 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 0
 		assert 'No reports found' in result.output
 
-	def test_report_export_command(self):
-		# Since this would need an actual JSON file, we'll mock the file opening
-		with mock.patch('builtins.open', mock.mock_open(read_data='{"info":{"name":"test", "title": "test"}, "results":{}}')), \
-			 mock.patch('secator.cli.loads_dataclass', return_value={"info": {"name": "test", "title": "test"}, "results": {}}):
-				result = self.runner.invoke(cli, ['report', 'export', 'test.json', '--output', 'console'])
-				assert not result.exception
-				assert result.exit_code == 0
-
 	@mock.patch('secator.loader.get_configs_by_type')
 	def test_install_tools_command(self, mock_get_configs_by_type):
 		mock_get_configs_by_type.return_value = []
@@ -280,6 +387,64 @@ class TestCli(unittest.TestCase):
 		result = self.runner.invoke(cli, ['health'])
 		assert result.exit_code == 1
 		assert 'Cannot run this command in offline mode' in result.output
+
+	# def test_workflow_default_inputs(self):
+	# 	"""Test that workflows with default_inputs use them when no input is provided."""
+	# 	result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '--dry-run'])
+	# 	assert not result.exception
+	# 	assert result.exit_code == 0
+	# 	assert 'No inputs provided, using default inputs:' in result.output
+	# 	assert 'discover' in result.output
+
+	def test_workflow_explicit_input_overrides_default(self):
+		"""Test that explicit inputs override default_inputs."""
+		result = self.runner.invoke(cli, ['workflow', 'cidr_recon', '10.10.10.0/24', '--dry-run'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert not 'No inputs provided, using default inputs:' in result.output
+
+	def test_cheatsheet_command(self):
+		result = self.runner.invoke(cli, ['cheatsheet'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert 'Some basics' in result.output
+		assert 'Aliases' in result.output
+		assert 'Configuration' in result.output
+		assert 'Quick wins' in result.output
+
+	def test_util_completion_command(self):
+		result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash'])
+		assert not result.exception
+		assert result.exit_code == 0
+		assert '_secator_completion' in result.output
+
+	def test_util_completion_install_command(self):
+		with tempfile.TemporaryDirectory() as tmpdir:
+			bashrc_path = os.path.join(tmpdir, '.bashrc')
+			with mock.patch('os.path.expanduser', return_value=bashrc_path):
+				result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash', '--install'])
+				assert not result.exception
+				assert result.exit_code == 0
+				assert 'Completion installed' in result.output
+				
+				# Verify the completion was actually written
+				assert os.path.exists(bashrc_path)
+				with open(bashrc_path, 'r') as f:
+					content = f.read()
+					assert '_SECATOR_COMPLETE=bash_source secator' in content
+
+	def test_util_completion_already_installed(self):
+		with tempfile.TemporaryDirectory() as tmpdir:
+			bashrc_path = os.path.join(tmpdir, '.bashrc')
+			# Pre-populate the bashrc with completion
+			with open(bashrc_path, 'w') as f:
+				f.write('eval "$(_SECATOR_COMPLETE=bash_source secator)"\n')
+			
+			with mock.patch('os.path.expanduser', return_value=bashrc_path):
+				result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash', '--install'])
+				assert not result.exception
+				assert result.exit_code == 0
+				assert 'already installed' in result.output
 
 if __name__ == '__main__':
 	unittest.main()

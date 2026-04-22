@@ -8,11 +8,6 @@ class Task(Runner):
 
 	default_exporters = CONFIG.tasks.exporters
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secator.celery import run_task
-		return run_task.apply_async(kwargs={'args': args, 'kwargs': kwargs}, queue='celery')
-
 	def build_celery_workflow(self):
 		"""Build Celery workflow for task execution.
 
@@ -39,7 +34,7 @@ class Task(Runner):
 
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
-		self.enable_reports = True  # Task will handle reports
+		self.enable_reports = self.run_opts.get('enable_reports', True)  # Task will handle reports
 
 		# Get hooks
 		hooks = self._hooks.get(Task, {})

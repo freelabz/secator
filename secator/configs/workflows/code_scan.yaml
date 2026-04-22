@@ -2,6 +2,11 @@ type: workflow
 name: code_scan
 alias: codescan
 description: Code vulnerability scan and secret hunt
+long_description: |
+  Analyzes source code repositories and filesystems for security vulnerabilities and exposed secrets.
+  Scans dependencies for known CVEs, detects hardcoded credentials, API keys, and sensitive data
+  in code. Supports multiple input types including local paths, Git repositories, and cloud storage.
+  Essential for DevSecOps and identifying security issues before deployment.
 tags: [vuln, secret, code]
 input_types:
   - path

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from secator.definitions import SITE_NAME, URL, USERNAME
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s
+from secator.utils import rich_to_ansi, rich_escape as _s, format_object
 
 
 @dataclass
@@ -13,6 +13,9 @@ class UserAccount(OutputType):
 	email: str = ''
 	site_name: str = ''
 	extra_data: dict = field(default_factory=dict, compare=False)
+	is_false_positive: bool = field(default=False, compare=False)
+	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='user_account', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -28,7 +31,7 @@ class UserAccount(OutputType):
 	def __str__(self) -> str:
 		return self.url
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'👤 [green]{_s(self.username)}[/]'
 		if self.email:
 			s += rf' \[[bold yellow]{_s(self.email)}[/]]'
@@ -37,5 +40,8 @@ class UserAccount(OutputType):
 		if self.url:
 			s += rf' \[[white]{_s(self.url)}[/]]'
 		if self.extra_data:
-			s += r' \[[bold yellow]' + _s(', '.join(f'{k}:{v}' for k, v in self.extra_data.items())) + '[/]]'
-		return rich_to_ansi(s)
+			s += format_object(self.extra_data, 'yellow')
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

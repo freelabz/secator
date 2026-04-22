@@ -266,3 +266,97 @@ class TestCommandHooks(unittest.TestCase):
 			with self.assertRaises(Exception, msg='Test passed'):
 				input = INPUTS_TASKS[HOST]
 				httpx(input, hooks=hooks, raise_on_error=True)
+
+
+class TestCommandChunking(unittest.TestCase):
+
+	def test_needs_chunking_disabled_with_minus_one(self):
+		"""Test that input_chunk_size=-1 disables chunking in async mode."""
+		class TestCmd(Command):
+			cmd = 'test'
+			input_chunk_size = -1
+			file_flag = None
+
+		# Test with async mode (sync=False) and many targets
+		targets = ['target1', 'target2', 'target3', 'target4', 'target5']
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=TestCmd):
+			cmd = TestCmd(targets)
+			self.assertFalse(cmd.needs_chunking(sync=False))
+
+	def test_needs_chunking_with_default_size(self):
+		"""Test that chunking works with default input_chunk_size."""
+		class TestCmd(Command):
+			cmd = 'test'
+			input_chunk_size = 2  # Small chunk size for testing
+			file_flag = None
+
+		# Test with async mode (sync=False) and targets exceeding chunk size
+		targets = ['target1', 'target2', 'target3']
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=TestCmd):
+			cmd = TestCmd(targets)
+			self.assertTrue(cmd.needs_chunking(sync=False))
+
+	def test_needs_chunking_under_chunk_size(self):
+		"""Test that chunking doesn't happen when inputs are under chunk size."""
+		class TestCmd(Command):
+			cmd = 'test'
+			input_chunk_size = 10
+			file_flag = None
+
+		# Test with async mode (sync=False) and targets under chunk size
+		targets = ['target1', 'target2']
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=TestCmd):
+			cmd = TestCmd(targets)
+			self.assertFalse(cmd.needs_chunking(sync=False))
+
+
+class TestCommandConfigOverrides(unittest.TestCase):
+
+	def test_config_override_input_chunk_size(self):
+		"""Test that task-specific config overrides apply to instance attributes."""
+		from secator.config import CONFIG
+
+		class OverrideTestCmd(Command):
+			cmd = 'test'
+			input_chunk_size = 100
+			file_flag = None
+
+		targets = ['target1', 'target2', 'target3']
+		original_overrides = CONFIG.tasks.overrides
+		CONFIG.tasks.overrides = {'OverrideTestCmd': {'input_chunk_size': 2}}
+		try:
+			with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=OverrideTestCmd):
+				cmd = OverrideTestCmd(targets)
+				self.assertEqual(cmd.input_chunk_size, 2)
+				self.assertTrue(cmd.needs_chunking(sync=False))
+		finally:
+			CONFIG.tasks.overrides = original_overrides
+
+	def test_config_override_does_not_affect_other_tasks(self):
+		"""Test that config overrides for one task don't affect other tasks."""
+		from secator.config import CONFIG
+
+		class TaskOverrideA(Command):
+			cmd = 'test_a'
+			input_chunk_size = 100
+			file_flag = None
+
+		class TaskOverrideB(Command):
+			cmd = 'test_b'
+			input_chunk_size = 100
+			file_flag = None
+
+		targets = ['t1', 't2', 't3']
+		original_overrides = CONFIG.tasks.overrides
+		CONFIG.tasks.overrides = {'TaskOverrideA': {'input_chunk_size': 2}}
+		try:
+			with unittest.mock.patch(
+				'secator.runners.task.Task.get_task_class',
+				side_effect=lambda x: TaskOverrideA if x == 'TaskOverrideA' else TaskOverrideB
+			):
+				cmd_a = TaskOverrideA(targets)
+				cmd_b = TaskOverrideB(targets)
+				self.assertEqual(cmd_a.input_chunk_size, 2)
+				self.assertEqual(cmd_b.input_chunk_size, 100)
+		finally:
+			CONFIG.tasks.overrides = original_overrides

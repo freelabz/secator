@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -15,7 +16,7 @@ from time import time
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 class Command(Runner):
 	"""Base class to execute an external command."""
+
 	# Base cmd
 	cmd = None
 
@@ -69,12 +71,10 @@ class Command(Runner):
 	# Input chunk size
 	input_chunk_size = CONFIG.runners.input_chunk_size
 
-	# Input required
-	input_required = True
-
 	# Flag to take a file as input
 	file_flag = None
 	file_eof_newline = False
+	file_copy_sudo = False
 
 	# Flag to enable output JSON
 	json_flag = None
@@ -92,6 +92,7 @@ class Command(Runner):
 	install_github_version_prefix = ''
 	install_ignore_bin = []
 	install_version = None
+	install_binary_name = None
 
 	# Serializer
 	item_loader = None
@@ -102,11 +103,17 @@ class Command(Runner):
 		'on_cmd',
 		'on_cmd_opts',
 		'on_cmd_done',
-		'on_line'
+		'on_line',
 	]
 
 	# Ignore return code
 	ignore_return_code = False
+
+	# Disable pre-exec
+	disable_preexec = False
+
+	# Sudo
+	requires_sudo = False
 
 	# Return code
 	return_code = -1
@@ -123,17 +130,19 @@ class Command(Runner):
 	proxy_http = False
 
 	# Profile
-	profile = 'io'
+	profile = 'small'
 
 	def __init__(self, inputs=[], **run_opts):
 
 		# Build runnerconfig on-the-fly
-		config = TemplateLoader(input={
-			'name': self.__class__.__name__,
-			'type': 'task',
-			'input_types': self.input_types,
-			'description': run_opts.get('description', None)
-		})
+		config = TemplateLoader(
+			input={
+				'name': self.__class__.__name__,
+				'type': 'task',
+				'input_types': self.input_types,
+				'description': run_opts.get('description', None),
+			}
+		)
 
 		# Extract run opts
 		hooks = run_opts.pop('hooks', {})
@@ -147,6 +156,7 @@ class Command(Runner):
 		if node_name:
 			config.node_name = context.get('node_name')
 		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
+		self.enable_validators = run_opts.pop('enable_validators', True)
 
 		# Prepare validators
 		input_validators = []
@@ -164,7 +174,8 @@ class Command(Runner):
 			run_opts=run_opts,
 			hooks=hooks,
 			validators=validators,
-			context=context)
+			context=context,
+		)
 
 		# Cmd name
 		self.cmd_name = self.__class__.cmd.split(' ')[0]
@@ -191,12 +202,14 @@ class Command(Runner):
 		self.process_start_time = None
 		# self.retry_count = 0  # TODO: remove this
 
-		# Sudo
-		self.requires_sudo = False
-
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
+
+		# Apply task-specific config overrides
+		task_name = self.__class__.__name__
+		for attr, value in CONFIG.tasks.overrides.get(task_name, {}).items():
+			setattr(self, attr, value)
 
 		# Build command input
 		self._build_cmd_input()
@@ -227,16 +240,18 @@ class Command(Runner):
 
 	def toDict(self):
 		res = super().toDict()
-		res.update({
-			'cmd': self.cmd,
-			'cwd': self.cwd,
-			'return_code': self.return_code
-		})
+		res.update(
+			{
+				'cmd': self.cmd,
+				'cwd': self.cwd,
+				'return_code': self.return_code,
+			}
+		)
 		return res
 
 	def needs_chunking(self, sync):
 		many_targets = len(self.inputs) > 1
-		targets_over_chunk_size = self.input_chunk_size and len(self.inputs) > self.input_chunk_size
+		targets_over_chunk_size = self.input_chunk_size and self.input_chunk_size != -1 and len(self.inputs) > self.input_chunk_size  # noqa: E501
 		has_file_flag = self.file_flag is not None
 		is_chunk = self.chunk
 		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
@@ -246,6 +261,7 @@ class Command(Runner):
 	def delay(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
+
 		results = kwargs.get('results', [])
 		kwargs['sync'] = False
 		name = cls.__name__
@@ -256,6 +272,7 @@ class Command(Runner):
 	def s(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
+
 		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
 		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=profile)
 
@@ -263,6 +280,7 @@ class Command(Runner):
 	def si(cls, *args, results=None, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
+
 		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
 		return run_command.si(results or [], cls.__name__, *args, opts=kwargs).set(queue=profile)
 
@@ -283,7 +301,8 @@ class Command(Runner):
 			dict(self.opts, **self.meta_opts),
 			opt_aliases=self.opt_aliases,
 			preprocess=preprocess,
-			process=process)
+			process=process,
+		)
 
 	@classmethod
 	def get_version_flag(cls):
@@ -294,6 +313,7 @@ class Command(Runner):
 	@classmethod
 	def get_version_info(cls, bleeding=False):
 		from secator.installer import get_version_info
+
 		return get_version_info(
 			cls.cmd.split(' ')[0],
 			cls.get_version_flag(),
@@ -301,7 +321,7 @@ class Command(Runner):
 			cls.install_github_version_prefix,
 			cls.install_cmd,
 			cls.install_version,
-			bleeding=bleeding
+			bleeding=bleeding,
 		)
 
 	@classmethod
@@ -331,9 +351,9 @@ class Command(Runner):
 		opts.update(meta_opts)
 		return opts
 
-	#---------------#
+	# ---------------#
 	# Class methods #
-	#---------------#
+	# ---------------#
 
 	@classmethod
 	def execute(cls, cmd, name=None, cls_attributes={}, run=True, **kwargs):
@@ -356,7 +376,10 @@ class Command(Runner):
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
 		kwargs['process'] = kwargs.get('process', False)
-		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
+		kwargs['cwd'] = kwargs.get('cwd', None)
+		kwargs['enable_validators'] = False
+		kwargs['serialize_config'] = False
+		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
 		if run:
@@ -371,7 +394,8 @@ class Command(Runner):
 		related to core functionality.
 		"""
 		opt_key_map = self.opt_key_map
-		proxy_opt = opt_key_map.get('proxy', False)
+		meta_opts = self.meta_opts
+		proxy_opt = opt_key_map.get('proxy', False) or 'proxy' in meta_opts
 		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
 		proxychains_flavor = getattr(self, 'proxychains_flavor', CONFIG.http.proxychains_command)
 		proxy = False
@@ -397,9 +421,9 @@ class Command(Runner):
 			warning = Warning(message=rf'Ignoring proxy "{self.proxy}" (reason: not supported) \[[bold yellow3]{self.unique_name}[/]]')  # noqa: E501
 			self._print(repr(warning))
 
-	#----------#
+	# ----------#
 	# Internal #
-	#----------#
+	# ----------#
 	def yielder(self):
 		"""Run command and yields its output in real-time. Also saves the command line, return code and output to the
 		database.
@@ -418,7 +442,6 @@ class Command(Runner):
 			dict: Serialized object.
 		"""
 		try:
-
 			# Abort if it has children tasks
 			if self.has_children:
 				return
@@ -431,18 +454,40 @@ class Command(Runner):
 				return
 
 			# Abort if no inputs
-			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Warning(message=f'{self.unique_name} skipped (no inputs)')
+			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.default_inputs != '':
+				# self.print_description()
+				# self.print_command()
+				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
+				for item in self.warnings:
+					self._print_item(item)
+				for item in self.errors:
+					self._print_item(item)
+				self.skipped = True
 				return
 
 			# Print command
 			self.print_description()
 			self.print_command()
 
+			# In remote worker mode, stream description and cmd back to the client
+			if IN_WORKER and self.print_cmd:
+				cmd_str = _s(self.cmd)
+				if self.chunk and self.chunk_count:
+					cmd_str += f' ({self.chunk}/{self.chunk_count})'
+				if self.description:
+					task_part = f'{self.description} ([bold gold3]{self.unique_name}[/])'
+				else:
+					task_part = f'[bold gold3]{self.unique_name}[/]'
+				yield Info(
+					message=f'Started task {task_part} (cmd=[dim white]{cmd_str}[/])',
+					_source=self.unique_name
+				)
+
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
-			if sudo_required:
+			if CONFIG.security.prompt_sudo_password and sudo_required:
+				self.debug('prompting for sudo password', sub='start')
 				sudo_password, error = self._prompt_sudo(self.cmd)
 				if error:
 					yield Error(message=error)
@@ -453,8 +498,10 @@ class Command(Runner):
 
 			# Check command is installed and auto-install
 			if not self.no_process and not self.is_installed():
+				self.debug('command is not installed, auto-installing', sub='start')
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
+
 					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
 					status = ToolInstaller.install(self.__class__)
 					if not status.is_ok():
@@ -474,10 +521,12 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
-				preexec_fn=os.setsid if not sudo_required else None,
+				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
 				shell=self.shell,
+				errors='replace',
 				env=env,
-				cwd=self.cwd)
+				cwd=self.cwd,
+			)
 
 			# Initialize monitor objects and start monitor thread
 			self._init_monitor_objects()
@@ -488,7 +537,7 @@ class Command(Runner):
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
-				self.process.stdin.write(f"{sudo_password}\n")
+				self.process.stdin.write(f'{sudo_password}\n')
 				self.process.stdin.flush()
 
 			# Process the output in real-time
@@ -524,7 +573,8 @@ class Command(Runner):
 		Returns:
 			bool: True if the command is installed, False otherwise.
 		"""
-		result = subprocess.Popen(["which", self.cmd_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		cmd = ['which', self.cmd_name]
+		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		result.communicate()
 		return result.returncode == 0
 
@@ -545,16 +595,14 @@ class Command(Runner):
 		if line is None:
 			return
 
-		# Yield line if no items were yielded
-		yield line
+		# Turn line into generator if it's raw string
+		line = [line] if isinstance(line, str) else line
 
-		# Run item_loader to try parsing as dict
-		for item in self.run_item_loaders(line):
-			yield item
-
-		# Skip rest of iteration (no process mode)
-		if self.no_process:
-			return
+		# Run item loaders on generator
+		for sub in line:
+			yield sub
+			if isinstance(sub, str):
+				yield from self.run_item_loaders(sub)
 
 	def process_monitor_queue(self):
 		"""Process and yield any queued items from monitor thread."""
@@ -640,7 +688,7 @@ class Command(Runner):
 
 					# Check memory usage from collected stats
 					if self.memory_limit_mb and self.memory_limit_mb != -1:
-						total_mem = sum(stat_item.extra_data.get('memory_info', {}).get('rss', 0) / 1024 / 1024 for stat_item in stats_items)  # noqa: E501
+						total_mem = sum(stat_item.memory for stat_item in stats_items)
 						if total_mem > self.memory_limit_mb:
 							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
 							if self.monitor_queue is not None:
@@ -692,7 +740,7 @@ class Command(Runner):
 			total_mem += mem_rss
 			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
 			net_conns = info.get('net_connections') or []
-			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+			# extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
 				name=name,
 				pid=pid,
@@ -700,7 +748,7 @@ class Command(Runner):
 				memory=mem_rss,
 				memory_limit=self.memory_limit_mb,
 				net_conns=len(net_conns),
-				extra_data=extra_data
+				# extra_data=extra_data
 			)
 		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
 		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
@@ -729,7 +777,7 @@ class Command(Runner):
 				cpu=cpu_percent,
 				memory=mem_percent,
 				net_conns=len(net_conns),
-				extra_data=extra_data
+				extra_data=extra_data,
 			)
 		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
 		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
@@ -744,11 +792,13 @@ class Command(Runner):
 			children (bool): Whether to gather stats about children processes too.
 		"""
 		try:
+			# fmt: off
 			data = {
 				k: v._asdict() if hasattr(v, '_asdict') else v
 				for k, v in process.as_dict().items()
 				if k not in ['memory_maps', 'open_files', 'environ']
 			}
+			# fmt: on
 			yield data
 		except (psutil.Error, FileNotFoundError):
 			return
@@ -765,13 +815,16 @@ class Command(Runner):
 		if self.no_process:
 			return
 		for item_loader in self.item_loaders:
-			if (callable(item_loader)):
+			if callable(item_loader):
+				self.debug('running item loader', obj={'name': item_loader.__name__, 'func': self.get_func_path(item_loader)}, sub='item_loader')  # noqa: E501
 				yield from item_loader(self, line)
 			elif item_loader:
 				name = item_loader.__class__.__name__.replace('Serializer', '').lower()
 				default_callback = lambda self, x: [(yield x)]  # noqa: E731
 				callback = getattr(self, f'on_{name}_loaded', None) or default_callback
+				self.debug('running item loader', obj={'name': name, 'class': item_loader.__class__.__name__}, sub='item_loader')  # noqa: E501
 				for item in item_loader.run(line):
+					self.debug(f'running on_{name}_loaded callback', obj={'name': callback.__name__, 'fun': self.get_func_path(callback)}, sub='item_loader')  # noqa: E501
 					yield from callback(self, item)
 
 	def _prompt_sudo(self, command):
@@ -798,8 +851,8 @@ class Command(Runner):
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
-		if not os.isatty(sys.stdin.fileno()):
-			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
+		if not sys.stdin.isatty():
+			error = 'No TTY detected. Sudo password prompt requires a TTY to proceed.'
 			return -1, error
 
 		# If not, prompt the user for a password
@@ -810,14 +863,14 @@ class Command(Runner):
 			sudo_password = getpass.getpass()
 			result = subprocess.run(
 				['sudo', '-S', '-p', '', 'true'],
-				input=sudo_password + "\n",
+				input=sudo_password + '\n',
 				text=True,
 				capture_output=True,
 			)
 			if result.returncode == 0:
 				return sudo_password, None  # Password is correct
-			self._print("Sorry, try again.")
-		error = "Sudo password verification failed after 3 attempts."
+			self._print('Sorry, try again.')
+		error = 'Sudo password verification failed after 3 attempts.'
 		return -1, error
 
 	def _wait_for_end(self):
@@ -832,7 +885,7 @@ class Command(Runner):
 		self.return_code = 0 if self.exit_ok else self.process.returncode
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
-		self.output = self.output.strip()
+		self.output = self.output.rstrip()
 		self.killed = self.return_code == -2 or self.killed
 		self.debug(f'return code: {self.return_code}', sub='end')
 
@@ -843,20 +896,25 @@ class Command(Runner):
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
-			last_lines = last_lines[max(0, len(last_lines) - 2):]
+			last_lines = last_lines[max(0, len(last_lines) - 10) :]
 			last_lines = [line for line in last_lines if line != '']
-			yield Error(message=error, traceback='\n'.join(last_lines), traceback_title='Last stdout lines')
+			errors = Command.parse_errors('\n'.join(last_lines))
+			if not errors:
+				errors = [error]
+			for error in errors:
+				yield Error(message=error, traceback='Traceback (from command output):\n' + '\n'.join(last_lines))
 
 	@staticmethod
 	def _process_opts(
-			opts,
-			opts_conf,
-			opt_key_map={},
-			opt_value_map={},
-			opt_prefix='-',
-			opt_aliases=None,
-			preprocess=False,
-			process=True):
+		opts,
+		opts_conf,
+		opt_key_map={},
+		opt_value_map={},
+		opt_prefix='-',
+		opt_aliases=None,
+		preprocess=False,
+		process=True,
+	):
 		"""Process a dict of options using a config, option key map / value map and option character like '-' or '--'.
 
 		Args:
@@ -891,7 +949,8 @@ class Command(Runner):
 				opt_aliases=opt_aliases,
 				default=default_val,
 				preprocess=preprocess,
-				process=process)
+				process=process,
+			)
 
 			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': conf}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 
@@ -949,7 +1008,7 @@ class Command(Runner):
 	@staticmethod
 	def _validate_input_nonempty(self, inputs):
 		"""Input is empty."""
-		if not self.input_required:
+		if self.default_inputs is not None:
 			return True
 		if not inputs or len(inputs) == 0:
 			return False
@@ -1041,7 +1100,9 @@ class Command(Runner):
 
 		# Add JSON flag to cmd
 		if self.json_flag:
-			self.cmd += f' {self.json_flag}'
+			parts = self.json_flag.split(' ')
+			for part in parts:
+				self.cmd += f' {shlex.quote(part)}'
 
 		# Opts str
 		opts_str = ''
@@ -1056,7 +1117,8 @@ class Command(Runner):
 			self.opt_prefix,
 			opt_aliases=self.opt_aliases,
 			preprocess=False,
-			process=False)
+			process=False,
+		)
 
 		# Add meta options to cmd
 		meta_opts_dict = Command._process_opts(
@@ -1067,7 +1129,8 @@ class Command(Runner):
 			self.opt_prefix,
 			opt_aliases=self.opt_aliases,
 			preprocess=False,
-			process=False)
+			process=False,
+		)
 
 		if opts_dict:
 			opts.update(opts_dict)
@@ -1105,6 +1168,8 @@ class Command(Runner):
 		for val in value:
 			if val is True:
 				opts_str += f'{opt_name}'
+			elif val is None:
+				continue
 			else:
 				if shlex_quote:
 					val = shlex.quote(str(val))
@@ -1145,6 +1210,11 @@ class Command(Runner):
 				if self.file_eof_newline:
 					f.write('\n')
 
+			if self.file_copy_sudo:
+				sudo_fpath = f'/tmp/{self.unique_name}.txt'
+				shutil.copy(fpath, sudo_fpath)
+				fpath = sudo_fpath
+
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'
 			elif self.file_flag == OPT_SPACE_SEPARATED:
@@ -1158,3 +1228,32 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
+
+	@staticmethod
+	def parse_errors(output):
+		"""Searches for error messages in the provided multi-line string.
+		Errors can be indicated by specific keywords or red ANSI color codes.
+
+		Args:
+			output (str): Multi-line string containing the output of many commands.
+
+		Returns:
+			list: A list of strings, each an identified error message.
+		"""
+		error_messages = []
+		ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+		# Define a regex pattern for error indicators and ANSI red text
+		error_pattern = re.compile(
+			r'^(.*\b(?:err|error|ftl|fatal|traceback|exceptions?|exc)\b.*|\x1b\[31m.*\x1b\[0m)$',
+			re.IGNORECASE | re.MULTILINE,
+		)
+
+		# Search the output for any matches to the error pattern
+		matches = error_pattern.findall(output)
+		for match in matches:
+			match = ansi_escape.sub('', match).strip()
+			if match not in error_messages:
+				error_messages.append(match)
+
+		return error_messages

@@ -1,17 +1,23 @@
 import validators
 
 from secator.decorators import task
-from secator.definitions import (DELAY, IP, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
-							   RETRIES, THREADS, TIMEOUT)
+
+# fmt: off
+from secator.definitions import (
+	CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
+)
+# fmt: on
 from secator.output_types import Ip
 from secator.tasks._categories import ReconIp
+from secator.utils import validate_cidr_range
 
 
 @task()
 class fping(ReconIp):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
+
 	cmd = 'fping -a -A'
-	input_types = [IP, HOST]
+	input_types = [IP, HOST, CIDR_RANGE]
 	output_types = [Ip]
 	tags = ['ip', 'recon']
 	file_flag = '-f'
@@ -37,7 +43,7 @@ class fping(ReconIp):
 	}
 	opt_value_map = {
 		DELAY: lambda x: int(x) * 1000,  # convert s to ms
-		TIMEOUT: lambda x: int(x) * 1000  # convert s to ms
+		TIMEOUT: lambda x: int(x) * 1000,  # convert s to ms
 	}
 	github_handle = 'schweikert/fping'
 	install_github_bin = False
@@ -46,19 +52,26 @@ class fping(ReconIp):
 	ignore_return_code = True
 
 	@staticmethod
+	def before_init(self):
+		for input in self.inputs:
+			if validate_cidr_range(input):
+				self.file_flag = None
+				self.input_chunk_size = 1
+				self.input_flag = '-g'
+
+	@staticmethod
 	def item_loader(self, line):
 		if '(' in line:
-
-			line_part = line.split(' : ')[0] if ' : ' in line else line    # Removing the stat parts that appears when using -c
+			line_part = line.split(' : ')[0] if ' : ' in line else line  # Removing the stat parts that appears when using -c
 
 			start_paren = line_part.find('(')
 			end_paren = line_part.find(')', start_paren)
 
 			if start_paren != -1 and end_paren != -1:
 				host = line_part[:start_paren].strip()
-				ip = line_part[start_paren+1:end_paren].strip()
+				ip = line_part[start_paren + 1 : end_paren].strip()
 
-				if (validators.ipv4(host) or validators.ipv6(host)):
+				if validators.ipv4(host) or validators.ipv6(host):
 					host = ''
 			else:
 				return
@@ -67,10 +80,10 @@ class fping(ReconIp):
 			host = ''
 		if not (validators.ipv4(ip) or validators.ipv6(ip)):
 			return
-		yield {'ip': ip, 'alive': True, 'host': host}
+		yield Ip(ip=ip, alive=True, host=host, tags=['imcp'])
 
 	@staticmethod
 	def on_line(self, line):
 		if 'Unreachable' in line:
-			return ''  # discard line as it pollutes output
-		return line
+			yield ''  # discard line as it pollutes output
+		yield line

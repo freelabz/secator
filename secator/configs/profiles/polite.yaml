@@ -1,5 +1,6 @@
 type: profile
 name: polite
+category: speed
 description: "Avoid overloading network"
 opts:
     rate_limit: 100

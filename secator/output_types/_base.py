@@ -12,6 +12,24 @@ class OutputType:
 	_table_fields = []
 	_sort_by = ()
 
+	@classmethod
+	def fields(cls):
+		return [f.name for f in fields(cls)]
+
+	def merge_with(self, data: 'OutputType', exclude_fields=[]):
+		"""Enrich the OutputType object with the data from another object."""
+		for k, v in data.toDict(exclude_fields).items():
+			if v is None or v == '' or v == []:
+				continue
+			if isinstance(v, list):
+				existing = getattr(self, k, [])
+				new = [_ for _ in v if _ not in existing]
+				setattr(self, k, existing + new)
+			elif isinstance(v, dict):
+				setattr(self, k, {**getattr(self, k), **v})
+			else:
+				setattr(self, k, v)
+
 	def __str__(self):
 		return self.__class__.__name__
 
@@ -46,6 +64,20 @@ class OutputType:
 	def __le__(self, other):
 		return self == other
 
+	def _compare_key(self):
+		"""Return a hashable tuple of fields used for equality comparison.
+		Used by mark_duplicates for O(n) grouping instead of O(n²) pairwise comparison.
+		"""
+
+		def _hashable(v):
+			if isinstance(v, dict):
+				return tuple(sorted(v.items()))
+			if isinstance(v, list):
+				return tuple(v)
+			return v
+
+		return tuple(_hashable(getattr(self, f.name)) for f in fields(self) if f.compare)
+
 	def __post_init__(self):
 		"""Initialize default fields to their proper types."""
 		for field in fields(self):
@@ -78,8 +110,8 @@ class OutputType:
 						if DEBUG > 1:
 							console.print_exception(show_locals=True)
 						raise TypeError(
-							f'Fail to transform value for "{key}" using output_map function. Exception: '
-							f'{type(e).__name__}: {str(e)}')
+							f'Fail to transform value for "{key}" using output_map function. Exception: {type(e).__name__}: {str(e)}',
+						)
 				else:
 					mapped_val = item.get(mapped_key)
 				new_item[key] = mapped_val

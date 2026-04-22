@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'secator'
-version = "0.20.1"
+version = "0.30.1"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -48,14 +48,15 @@ dependencies = [
   'pydantic < 3',
   'requests < 3',
   'rich < 14',
-  'rich-click < 1.7',
-  'click < 8.2.0', 
+  'rich-click < 1.9',
+  'click < 8.3',
   'psutil < 7',
   'retry < 1',
   'tldextract < 6',
   'typing_extensions < 5',
   'validators < 1',
-  'xmltodict < 1'
+  'xmltodict < 1',
+  'json-stream < 3'
 ]
 
 [project.optional-dependencies]
@@ -64,7 +65,7 @@ dev = [
   'flake8 < 8',
   'pytest < 9',
   'watchdog < 3',
-  'asciinema-automation < 1',
+  'pillow < 13',
 ]
 build = [
   'hatch < 2',
@@ -74,7 +75,7 @@ trace = [
   'pyinstrument < 5',
 ]
 worker = [
-  'eventlet < 1',
+  'gevent',
   'flower < 3',
 ]
 redis = [
@@ -90,6 +91,9 @@ gdrive = [
 gcs = [
 	'google-cloud-storage < 3'
 ]
+ai = [
+	'litellm < 2'
+]
 
 [project.scripts]
 secator = 'secator.cli:cli'
@@ -97,3 +101,21 @@ secator = 'secator.cli:cli'
 [project.urls]
 Homepage = 'https://github.com/freelabz/secator'
 Issues = 'https://github.com/freelabz/secator/issues'
+
+[tool.ruff]
+line-length = 200
+
+[tool.ruff.lint]
+ignore = ["I"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "tab"
+skip-magic-trailing-comma = false
+
+[tool.isort]
+multi_line_output = 5
+line_length = 120

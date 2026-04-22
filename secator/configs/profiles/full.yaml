@@ -1,0 +1,32 @@
+type: profile
+name: full
+category: general
+description: "Activate all optional features"
+enforce: true
+opts:
+    # Task option overrides
+    headless: true  # katana
+    system_chrome: true  # katana
+    no_sandbox: true  # katana
+    screenshot: true  # httpx
+    juicy_extensions: 3  # cariddi
+    server_defaults: false  # testssl
+
+    # Workflow options overrides
+    ports: "-"
+    nuclei: true
+    brute_dns: true
+    brute_http: true
+    hunt_secrets: true
+    test_ssl: true
+
+    # Scan options overrides
+    host_recon_nuclei: true
+    host_recon_nmap_ports: "-"
+    domain_recon_testssl_server_defaults: null
+    subdomain_recon_hunt_secrets: true
+    subdomain_recon_test_ssl: true
+    subdomain_recon_testssl_server_defaults: null
+    url_crawl_hunt_secrets: true
+    url_vuln_nuclei: true
+    url_crawl_cariddi_juicy_extensions: 3

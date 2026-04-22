@@ -1,52 +1,54 @@
 import logging
 import os
 import re
+import shlex
 
 import xmltodict
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY,
-								 DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT,
-								 HEADER, HOST, ID, IP, PROTOCOL, MATCHED_AT, NAME,
-								 OPT_NOT_SUPPORTED, OUTPUT_PATH, PORT, PORTS, PROVIDER,
-								 PROXY, RATE_LIMIT, REFERENCE, REFERENCES, RETRIES, SCRIPT, SERVICE_NAME,
-								 SEVERITY, STATE, TAGS, THREADS, TIMEOUT, TOP_PORTS, USER_AGENT)
-from secator.output_types import Exploit, Port, Vulnerability, Info, Error, File
-from secator.tasks._categories import VulnMulti
+
+# fmt: off
+from secator.definitions import (
+	CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT, STRING,
+	THREADS, TIMEOUT, TOP_PORTS
+)
+# fmt: on
+from secator.output_types import Error, Exploit, File, Info, Ip, Port, Technology, Vulnerability, Warning, Progress
+from secator.tasks._categories import ReconPort, VulnMulti
 from secator.utils import debug, traceback_as_string
 
 logger = logging.getLogger(__name__)
 
 
+NMAP_PROGRESS_REGEX_1 = re.compile(r'Stats: (\d+:\d+:\d+) elapsed; (\d+) hosts completed \((\d+) up\)')
+NMAP_PROGRESS_REGEX_2 = re.compile(r'(.*) Timing: About (\d+\.\d+)% done; ETC: \d+:\d+ \((\d+:\d+:\d+) remaining\)')
+
+
 @task()
-class nmap(VulnMulti):
+class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
+
 	cmd = 'nmap'
-	input_types = [HOST, IP]
-	output_types = [Port, Vulnerability, Exploit]
+	input_types = [HOST, IP, CIDR_RANGE, STRING]
+	output_types = [Port, Ip, Vulnerability, Technology, Exploit, Progress]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
 	file_flag = '-iL'
 	opt_prefix = '--'
 	opts = {
-		# Port specification and scan order
-		PORTS: {'type': str, 'short': 'p', 'help': 'Ports to scan (- to scan all)'},
-		TOP_PORTS: {'type': int, 'short': 'tp', 'help': 'Top ports to scan [100, 1000, full]'},
-
 		# Script scanning
 		SCRIPT: {'type': str, 'default': None, 'help': 'NSE scripts'},
 		'script_args': {'type': str, 'short': 'sargs', 'default': None, 'help': 'NSE script arguments (n1=v1,n2=v2,...)'},
-
 		# Host discovery
 		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
-
+		'skip_dns_resolution': {'is_flag': True, 'short': 'n', 'default': False, 'help': 'Skip DNS resolution'},
 		# Service and version detection
 		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Enable version detection (slow)'},
 		'detect_all': {'is_flag': True, 'short': 'A', 'default': False, 'help': 'Enable OS detection, version detection, script scanning, and traceroute on open ports'},  # noqa: E501
 		'detect_os': {'is_flag': True, 'short': 'O', 'default': False, 'help': 'Enable OS detection', 'requires_sudo': True},
-
 		# Scan techniques
+		'list_scan': {'is_flag': True, 'short': 'sL', 'default': False, 'help': 'List scan'},
 		'tcp_syn_stealth': {'is_flag': True, 'short': 'sS', 'default': False, 'help': 'TCP SYN Stealth', 'requires_sudo': True},  # noqa: E501
 		'tcp_connect': {'is_flag': True, 'short': 'sT', 'default': False, 'help': 'TCP Connect scan'},
 		'udp_scan': {'is_flag': True, 'short': 'sU', 'default': False, 'help': 'UDP scan', 'requires_sudo': True},
@@ -63,7 +65,6 @@ class nmap(VulnMulti):
 		'script_scan': {'is_flag': True, 'short': 'sC', 'default': False, 'help': 'Enable default scanning'},
 		'zombie_host': {'type': str, 'short': 'sI', 'default': None, 'help': 'Use a zombie host for idle scan', 'requires_sudo': True},  # noqa: E501
 		'ftp_relay_host': {'type': str, 'short': 'sB', 'default': None, 'help': 'FTP bounce scan relay host'},
-
 		# Firewall / IDS evasion and spoofing
 		'spoof_source_port': {'type': int, 'short': 'g', 'default': None, 'help': 'Send packets from a specific port'},
 		'spoof_source_ip': {'type': str, 'short': 'S', 'default': None, 'help': 'Spoof source IP address'},
@@ -73,34 +74,31 @@ class nmap(VulnMulti):
 		'ttl': {'type': int, 'short': 'ttl', 'default': None, 'help': 'Set TTL', 'requires_sudo': True},
 		'badsum': {'is_flag': True, 'short': 'badsum', 'default': False, 'help': 'Create a bad checksum in the TCP header', 'requires_sudo': True},  # noqa: E501
 		'ipv6': {'is_flag': True, 'short': 'ipv6', 'default': False, 'help': 'Enable IPv6 scanning'},
-
 		# Host discovery
 		'traceroute': {'is_flag': True, 'short': 'traceroute', 'default': False, 'help': 'Traceroute', 'requires_sudo': True},
 		'disable_arp_ping': {'is_flag': True, 'short': 'dap', 'default': False, 'help': 'Disable ARP ping'},
-
 		# Misc
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path', 'internal': True, 'display': False},  # noqa: E501
-		'debug': {'is_flag': True, 'short': 'd', 'default': False, 'help': 'Enable debug mode'},
-		'verbose': {'is_flag': True, 'short': 'v', 'default': False, 'help': 'Enable verbose mode'},
+		'debug': {'is_flag': True, 'default': False, 'help': 'Enable debug mode'},
+		'verbosity': {'type': int, 'short': 'vo', 'default': None, 'internal': True, 'display': True, 'help': 'Enable verbose mode (1, 2, 3)'},  # noqa: E501
 		'timing': {'type': int, 'short': 'T', 'default': None, 'help': 'Timing template (0: paranoid, 1: sneaky, 2: polite, 3: normal, 4: aggressive, 5: insane)'},  # noqa: E501
 	}
 	opt_key_map = {
-		HEADER: OPT_NOT_SUPPORTED,
 		DELAY: 'scan-delay',
-		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
 		PROXY: None,  # TODO: supports --proxies but not in TCP mode [https://github.com/nmap/nmap/issues/1098]
 		RATE_LIMIT: 'max-rate',
 		RETRIES: 'max-retries',
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: 'max-rtt-timeout',
-		USER_AGENT: OPT_NOT_SUPPORTED,
-
-		# Nmap opts
 		PORTS: '-p',
+		TOP_PORTS: 'top-ports',
+		# Nmap opts
 		'skip_host_discovery': '-Pn',
+		'skip_dns_resolution': '-n',
 		'version_detection': '-sV',
 		'detect_all': '-A',
 		'detect_os': '-O',
+		'list_scan': '-sL',
 		'tcp_syn_stealth': '-sS',
 		'tcp_connect': '-sT',
 		'tcp_window_scan': '-sW',
@@ -129,22 +127,17 @@ class nmap(VulnMulti):
 		'disable_arp_ping': '--disable-arp-ping',
 		'output_path': '-oX',
 	}
-	opt_value_map = {
-		PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x
-	}
-	install_cmd_pre = {
+	opt_value_map = {PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x}
+	install_pre = {
 		'apt|pacman|brew': ['nmap'],
 		'apk': ['nmap', 'nmap-scripts'],
 	}
-	install_cmd = (
-		'sudo git clone --depth 1 --single-branch https://github.com/scipag/vulscan /opt/scipag_vulscan || true && '
-		'sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true'
-	)
 	proxychains = True
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = False
 	proxy_http = False
-	profile = 'io'
+	profile = 'small'
+	disable_preexec = True
 
 	@staticmethod
 	def on_cmd(self):
@@ -152,14 +145,42 @@ class nmap(VulnMulti):
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
-		self.cmd += f' -oX {self.output_path}'
+		self.cmd += f' -oX {shlex.quote(self.output_path)}'
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
 		tcp_connect = self.cmd_options.get('tcp_connect')
+		verbosity = self.get_opt_value('verbosity')
 		if tcp_connect and tcp_syn_stealth:
-			self._print(
-				'Options -sT (SYN stealth scan) and -sS (CONNECT scan) are conflicting. Keeping only -sS.',
-				'bold gold3')
+			self._print('Options -sT (SYN stealth scan) and -sS (CONNECT scan) are conflicting. Keeping only -sS.', 'bold gold3')
 			self.cmd = self.cmd.replace('-sT ', '')
+		if verbosity:
+			verbosity_str = int(verbosity) * 'v'
+			self.cmd += f' -{verbosity_str}'
+		if CONFIG.runners.progress_update_frequency != -1:
+			self.cmd += f' --stats-every {CONFIG.runners.progress_update_frequency}s'
+		self._progress = {}
+
+	@staticmethod
+	def on_line(self, line):
+		match = NMAP_PROGRESS_REGEX_1.search(line)
+		if match:
+			self._progress.update(
+				{
+					'extra_data': {
+						'elapsed': match.group(1),
+						'hosts_completed': match.group(2),
+						'hosts_up': match.group(3),
+					},
+				}
+			)
+			return
+		match = NMAP_PROGRESS_REGEX_2.search(line)
+		if match:
+			self._progress.update({'percent': float(match.group(2))})
+			self._progress['extra_data'].update({'scan_type': match.group(1), 'remaining_time': match.group(3)})
+			pg = Progress(**self._progress)
+			self._progress = {}
+			yield pg
+		yield line
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -188,18 +209,33 @@ class nmap(VulnMulti):
 			except Exception as exc:
 				yield Error(
 					message=f'Cannot parse XML output {self.output_path} to valid JSON.',
-					traceback=traceback_as_string(exc)
+					traceback=traceback_as_string(exc),
 				)
 		yield from nmapData(results)
 
 
 class nmapData(dict):
-
 	def __iter__(self):
 		datas = []
-		for host in self._get_hosts():
+		ips = []
+		scan_type = self._get_scan_type()
+		hosts = self._get_hosts()
+		techs = []
+		for host in hosts:
 			hostname = self._get_hostname(host)
+			tags = []
+			global_confidence = 'high'
+			is_mass_scan = len(self._get_ports(host)) > 20
+			if is_mass_scan:
+				yield Warning(
+					message=f'Unusual number of ports found for host {hostname}. There might be an IDS interfering with the scan.',
+				)
+				global_confidence = 'low'
+				tags = ['ids']
 			ip = self._get_ip(host)
+			if ip and ip not in ips:
+				yield Ip(ip=ip, alive=True, host=hostname, tags=tags + ['ping'])
+				ips.append(ip)
 			for port in self._get_ports(host):
 				# Get port number
 				port_number = port['@portid']
@@ -209,12 +245,15 @@ class nmapData(dict):
 
 				# Get port state
 				state = port.get('state', {}).get('@state', '')
+				reason = port.get('state', {}).get('@reason', '')
 
 				# Get extra data
 				extra_data = self._get_extra_data(port)
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
-				conf = extra_data.get('confidence')
+				service_confidence = extra_data.get('confidence', 'low')
+				if service_confidence != 'low':
+					global_confidence = 'high'
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
@@ -226,17 +265,28 @@ class nmapData(dict):
 				protocol = port['@protocol'].lower()
 
 				# Yield port data
-				port = {
-					PORT: port_number,
-					HOST: hostname,
-					STATE: state,
-					SERVICE_NAME: service_name,
-					IP: ip,
-					PROTOCOL: protocol,
-					EXTRA_DATA: extra_data,
-					CONFIDENCE: conf
-				}
-				yield port
+				yield Port(
+					port=port_number,
+					ip=ip,
+					host=hostname,
+					state=state,
+					service_name=service_name,
+					protocol=protocol,
+					extra_data=extra_data,
+					confidence=global_confidence,
+					service_confidence=service_confidence,
+					tags=tags + [scan_type, reason],
+				)
+
+				# Technology
+				if service_confidence == 'high' and extra_data.get('product'):
+					techs.append(
+						Technology(
+							match=f'{ip}:{port_number}',
+							product=extra_data['product'],
+							version=extra_data.get('version'),
+						)
+					)
 
 				# Parse each script output to get vulns
 				for script in scripts:
@@ -250,31 +300,34 @@ class nmapData(dict):
 						'vulners': self._parse_vulners_output,
 					}
 					func = funcmap.get(script_id)
-					metadata = {
-						MATCHED_AT: f'{hostname}:{port_number}',
-						IP: ip,
-						EXTRA_DATA: extra_data,
-					}
 					if not func:
 						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve.nmap')
 						continue
 					for data in func(output, cpes=cpes):
-						data.update(metadata)
-						confidence = 'low'
-						if 'cpe-match' in data[TAGS]:
+						data.matched_at = f'{hostname}:{port_number}'
+						data.ip = ip
+						data.extra_data.update(extra_data)
+						confidence = global_confidence
+						if 'cpe-match' in data.tags:
 							confidence = 'high' if version_exact else 'medium'
-						data[CONFIDENCE] = confidence
-						if (CONFIG.runners.skip_cve_low_confidence and data[CONFIDENCE] == 'low'):
-							debug(f'{data[ID]}: ignored (low confidence).', sub='cve.nmap')
+						data.confidence = confidence
+						if is_mass_scan:
+							data.tags = list(set(data.tags + ['mass']))
+						if CONFIG.runners.skip_cve_low_confidence and data.confidence == 'low':
+							debug(f'{data.id}: ignored (low confidence).', sub='cve.nmap')
 							continue
 						if data in datas:
 							continue
 						yield data
-						datas.append(data)
+						# datas.append(data)
+		yield from techs
 
-	#---------------------#
+	# ---------------------#
 	# XML FILE EXTRACTORS #
-	#---------------------#
+	# ---------------------#
+	def _get_scan_type(self):
+		return self.get('nmaprun', {}).get('scaninfo', {}).get('@type')
+
 	def _get_hosts(self):
 		hosts = self.get('nmaprun', {}).get('host', {})
 		if isinstance(hosts, dict):
@@ -303,7 +356,7 @@ class nmapData(dict):
 		if isinstance(host_cfg.get('address', {}), list):
 			addresses = host_cfg.get('address', {})
 			for address in addresses:
-				if address.get('@addrtype') == "ipv4":
+				if address.get('@addrtype') == 'ipv4':
 					return address
 		return host_cfg.get('address', {})
 
@@ -311,10 +364,7 @@ class nmapData(dict):
 		return self._get_address(host_cfg).get('@addr', None)
 
 	def _get_extra_data(self, port_cfg):
-		extra_data = {
-			k.lstrip('@'): v
-			for k, v in port_cfg.get('service', {}).items()
-		}
+		extra_data = {k.lstrip('@'): v for k, v in port_cfg.get('service', {}).items()}
 
 		# Strip product / version strings
 		if 'product' in extra_data:
@@ -357,16 +407,18 @@ class nmapData(dict):
 		if not isinstance(cpes, list):
 			cpes = [cpes]
 			extra_data['cpe'] = cpes
-		debug(f'Found CPEs: {",".join(cpes)}', sub='cve.nmap')
+		if not cpes:
+			debug(f'No CPEs found for {extra_data.get("product", "")} {extra_data.get("version", "")}', sub='cve.nmap')
+		else:
+			debug(f'Found CPEs: {",".join(cpes)}', sub='cve.nmap')
 
 		# Grab confidence
 		conf = int(extra_data.get('conf', 0))
+		confidence = 'low'
 		if conf > 7:
 			confidence = 'high'
 		elif conf > 4:
 			confidence = 'medium'
-		else:
-			confidence = 'low'
 		extra_data['confidence'] = confidence
 
 		# Build custom CPE
@@ -384,23 +436,20 @@ class nmapData(dict):
 		scripts = port_cfg.get('script', [])
 		if isinstance(scripts, dict):
 			scripts = [scripts]
-		scripts = [
-			{k.lstrip('@'): v for k, v in script.items()}
-			for script in scripts
-		]
+		scripts = [{k.lstrip('@'): v for k, v in script.items()} for script in scripts]
 		return scripts
 
-	#--------------#
+	# --------------#
 	# VULN PARSERS #
-	#--------------#
+	# --------------#
 	def _parse_vulscan_output(self, out, cpes=[]):
 		"""Parse nmap vulscan script output.
 
 		Args:
 			out (str): Vulscan script output.
 
-		Returns:
-			list: List of Vulnerability dicts.
+		Yields:
+			Vulnerability: Vulnerability object.
 		"""
 		provider_name = ''
 		for line in out.splitlines():
@@ -415,20 +464,14 @@ class nmapData(dict):
 			if not matches:
 				continue
 			vuln_id, vuln_title = matches.groups()
-			vuln = {
-				ID: vuln_id,
-				NAME: vuln_id,
-				DESCRIPTION: vuln_title,
-				PROVIDER: provider_name,
-				TAGS: [provider_name]
-			}
+			vuln = Vulnerability(id=vuln_id, name=vuln_id, description=vuln_title, provider=provider_name, tags=[provider_name])
 			if provider_name == 'MITRE CVE':
-				data = VulnMulti.lookup_cve(vuln['id'], *cpes)
-				if data:
-					vuln.update(data)
+				vuln_lookup = VulnMulti.lookup_cve(vuln_id, *cpes)
+				if vuln_lookup:
+					vuln.merge_with(vuln_lookup)
 				yield vuln
 			else:
-				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve.provider', verbose=True)
+				debug(f'Vulscan provider {provider_name} is not supported YET.', sub='cve.nmap')
 				continue
 
 	def _parse_vulners_output(self, out, **kwargs):
@@ -447,25 +490,18 @@ class nmapData(dict):
 				exploit_id, cvss_score, reference_url, _ = elems
 				name = exploit_id
 				# edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
-				exploit = {
-					ID: exploit_id,
-					NAME: name,
-					PROVIDER: provider_name,
-					REFERENCE: reference_url,
-					TAGS: [exploit_id, provider_name],
-					CVSS_SCORE: cvss_score,
-					CONFIDENCE: 'low',
-					'_type': 'exploit',
-				}
+				exploit = Exploit(
+					id=exploit_id,
+					name=name,
+					provider=provider_name,
+					reference=reference_url,
+					tags=[exploit_id, provider_name],
+					confidence='low',
+				)
 				# TODO: lookup exploit in ExploitDB to find related CVEs
 				# if edb_id:
 				# 	print(edb_id)
 				# 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
-				vuln = VulnMulti.lookup_cve_from_vulners_exploit(exploit_id, *cpes)
-				if vuln:
-					yield vuln
-					exploit[TAGS].extend(vuln[TAGS])
-					exploit[CONFIDENCE] = vuln[CONFIDENCE]
 				yield exploit
 				continue
 
@@ -475,20 +511,18 @@ class nmapData(dict):
 				vuln_cvss = float(vuln_cvss)
 				vuln_id = vuln_id.split(':')[-1]
 				vuln_type = vuln_id.split('-')[0]
-				vuln = {
-					ID: vuln_id,
-					NAME: vuln_id,
-					PROVIDER: provider_name,
-					CVSS_SCORE: vuln_cvss,
-					SEVERITY: VulnMulti.cvss_to_severity(vuln_cvss),
-					REFERENCES: [reference_url],
-					TAGS: [vuln_id, provider_name],
-					CONFIDENCE: 'low'
-				}
+				vuln = Vulnerability(
+					id=vuln_id,
+					name=vuln_id,
+					provider=provider_name,
+					cvss_score=vuln_cvss,
+					references=[reference_url],
+					tags=[provider_name],
+					confidence='low',
+				)
 				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
-					data = VulnMulti.lookup_cve(vuln_id, *cpes)
-					if data:
-						vuln.update(data)
+					vuln2 = VulnMulti.lookup_cve(vuln_id, *cpes)
+					vuln.merge_with(vuln2)
 					yield vuln
 				else:
 					debug(f'Vulners parser for "{vuln_type}" is not implemented YET.', sub='cve.nmap')

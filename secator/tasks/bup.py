@@ -1,21 +1,42 @@
 import json
 import re
+import shlex
 
 from secator.decorators import task
-from secator.output_types import Url, Progress
+
+# fmt: off
 from secator.definitions import (
-	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT,
-	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS,
-	MATCH_CODES, OPT_NOT_SUPPORTED, URL
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL,
+	USER_AGENT
 )
+from secator.output_types import Progress, Url
+# fmt: on
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import Http
+from secator.tasks._categories import HttpBase
+
+BUP_BYPASS_MODES = [
+	'all',
+	'mid_paths',
+	'end_paths',
+	'case_substitution',
+	'char_encode',
+	'http_methods',
+	'http_versions',
+	'http_headers_method',
+	'http_headers_scheme',
+	'http_headers_ip',
+	'http_headers_port',
+	'http_headers_url',
+	'user_agent',
+]
+BUP_BYPASS_MODES_STR = ','.join(BUP_BYPASS_MODES)
 
 
 @task()
-class bup(Http):
+class bup(HttpBase):
 	"""40X bypasser."""
-	cmd = 'bup'
+
+	cmd = 'bup -d'
 	input_types = [URL]
 	output_types = [Url, Progress]
 	tags = ['url', 'bypass']
@@ -26,9 +47,10 @@ class bup(Http):
 	opts = {
 		'spoofport': {'type': int, 'short': 'sp', 'help': 'Port(s) to inject in port-specific headers'},
 		'spoofip': {'type': str, 'short': 'si', 'help': 'IP(s) to inject in ip-specific headers'},
-		'mode': {'type': str, 'help': 'Bypass modes (comma-delimited) amongst: all, mid_paths, end_paths, case_substitution, char_encode, http_methods, http_versions, http_headers_method, http_headers_scheme, http_headers_ip, http_headers_port, http_headers_url, user_agent'},  # noqa: E501
+		'mode': {'type': str, 'help': f'Bypass modes (comma-delimited) amongst: {BUP_BYPASS_MODES_STR}'},
 	}
 	opt_key_map = {
+		DATA: OPT_NOT_SUPPORTED,
 		HEADER: 'header',
 		DELAY: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
@@ -38,15 +60,6 @@ class bup(Http):
 		THREADS: 'threads',
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
-		DEPTH: OPT_NOT_SUPPORTED,
-		MATCH_REGEX: OPT_NOT_SUPPORTED,
-		MATCH_SIZE: OPT_NOT_SUPPORTED,
-		MATCH_WORDS: OPT_NOT_SUPPORTED,
-		FILTER_REGEX: OPT_NOT_SUPPORTED,
-		FILTER_CODES: OPT_NOT_SUPPORTED,
-		FILTER_SIZE: OPT_NOT_SUPPORTED,
-		FILTER_WORDS: OPT_NOT_SUPPORTED,
-		MATCH_CODES: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 	}
 	item_loaders = [JSONSerializer()]
@@ -57,31 +70,37 @@ class bup(Http):
 			'request_headers': lambda x: bup.request_headers_extractor(x),
 			'response_headers': lambda x: bup.response_headers_extractor(x),
 			'status_code': 'response_status_code',
-			'content_type': 'response_content_type',
+			'content_type': lambda x: x['response_content_type'].strip(),
 			'content_length': 'response_content_length',
 			'title': 'response_title',
-			'server': 'response_server_type',
+			'server': lambda x: x['response_server_type'].strip(),
 			'lines': 'response_lines_count',
 			'words': 'response_words_count',
 			'stored_response_path': 'response_html_filename',
+			'tags': lambda x: ['bypass'],
 		}
 	}
 	install_version = '0.4.4'
+	install_pre = {
+		'*': ['curl'],
+	}
 	install_cmd = 'pipx install bypass-url-parser==[install_version] --force'
 
 	@staticmethod
 	def on_init(self):
-		self.cmd += f' -o {self.reports_folder}/.outputs/response'
+		response_path = f'{self.reports_folder}/.outputs/response'
+		self.cmd += f' -o {shlex.quote(response_path)}'
 
 	@staticmethod
 	def on_line(self, line):
 		if 'Doing' in line:
 			progress_indicator = line.split(':')[-1]
 			current, total = tuple([int(c.strip()) for c in progress_indicator.split('/')])
-			return json.dumps({"duration": "unknown", "percent": int((current / total) * 100)})
+			yield json.dumps({'duration': 'unknown', 'percent': int((current / total) * 100)})
 		elif 'batcat' in line:  # ignore batcat lines as they're loaded as JSON
-			return None
-		return line
+			yield ''
+			return
+		yield line
 
 	@staticmethod
 	def method_extractor(item):
@@ -112,5 +131,5 @@ class bup(Http):
 			split_headers = header.split(':')
 			key = split_headers[0]
 			value = ':'.join(split_headers[1:])
-			headers[key] = value
+			headers[key] = value.strip()
 		return headers
