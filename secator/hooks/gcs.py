@@ -43,15 +43,19 @@ def process_item(self, item):
 				continue
 			ext = path.suffix
 			blob_name = f'{item._uuid}_{k}{ext}'
-			t = Thread(target=upload_blob, args=(GCS_BUCKET_NAME, v, blob_name))
+			t = Thread(target=_upload_and_update, args=(item, k, GCS_BUCKET_NAME, v, blob_name))
 			t.start()
 			self.threads.append(t)
-			gcs_path = f'gs://{GCS_BUCKET_NAME}/{blob_name}'
-			setattr(item, k, gcs_path)
-			# Update type field for File objects
-			if item._type == 'file':
-				setattr(item, 'type', 'gcs')
 	return item
+
+
+def _upload_and_update(item, field_name, bucket_name, source_file_name, destination_blob_name):
+	"""Upload a file to GCS and update the item's field only on success."""
+	upload_blob(bucket_name, source_file_name, destination_blob_name)
+	gcs_path = f'gs://{bucket_name}/{destination_blob_name}'
+	setattr(item, field_name, gcs_path)
+	if item._type == 'file':
+		item.type = 'gcs'
 
 
 def upload_blob(bucket_name, source_file_name, destination_blob_name):

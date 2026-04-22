@@ -49,7 +49,8 @@ STAT_TYPES = [
 	Stat
 ]  # fmt: off
 FINDING_TYPES = [
-	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain, Ai, Technology, File
+	Subdomain, Ip, Port, Url, Tag, Exploit, UserAccount, Vulnerability, Certificate, Record, Domain, Ai, Technology
 ]  # fmt: off
-OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES
+ARTIFACT_TYPES = [File]  # fmt: off
+OUTPUT_TYPES = FINDING_TYPES + ARTIFACT_TYPES + EXECUTION_TYPES + STAT_TYPES
 INTERNAL_FIELDS = ('_context', '_uuid', '_related', '_duplicate')

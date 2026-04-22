@@ -31,7 +31,7 @@ class nmap(ReconPort):
 
 	cmd = 'nmap'
 	input_types = [HOST, IP, CIDR_RANGE, STRING]
-	output_types = [Port, Ip, Vulnerability, Technology, Exploit, Progress]
+	output_types = [Port, Ip, Vulnerability, Technology, Exploit, Progress, File]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
 	file_flag = '-iL'

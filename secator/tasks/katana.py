@@ -22,7 +22,7 @@ class katana(HttpCrawler):
 
 	cmd = 'katana'
 	input_types = [URL, HOST, HOST_PORT, IP]
-	output_types = [Url, Tag, Technology]
+	output_types = [Url, Tag, Technology, File]
 	tags = ['url', 'crawl']
 	file_flag = '-list'
 	input_flag = '-u'
@@ -205,6 +205,9 @@ class katana(HttpCrawler):
 		if store_responses and os.path.exists(index_rpath):
 			os.remove(index_rpath)
 		# Yield File outputs for all saved responses
+		# Katana stores raw HTTP responses as plain files (no extension).
+		# Skip files with structured/binary extensions that belong to other tools.
+		_non_response_extensions = {'.xml', '.json', '.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip'}
 		if store_responses:
 			response_dir = f'{self.reports_folder}/.outputs'
 			if os.path.exists(response_dir):
@@ -212,13 +215,17 @@ class katana(HttpCrawler):
 					if filename == 'index.txt':
 						continue
 					file_path = os.path.join(response_dir, filename)
-					if os.path.isfile(file_path):
-						file_size = os.path.getsize(file_path)
-						yield File(
-							path=file_path,
-							type='local',
-							category='http',
-							tags=['response', 'katana'],
-							size=file_size,
-							mime_type='text/html'
-						)
+					if not os.path.isfile(file_path):
+						continue
+					ext = os.path.splitext(filename)[1].lower()
+					if ext in _non_response_extensions:
+						continue
+					file_size = os.path.getsize(file_path)
+					yield File(
+						path=file_path,
+						type='local',
+						category='http',
+						tags=['response', 'katana'],
+						size=file_size,
+						mime_type='text/html'
+					)

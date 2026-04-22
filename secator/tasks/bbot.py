@@ -1,3 +1,4 @@
+import mimetypes
 import os
 import re
 import shutil
@@ -185,7 +186,7 @@ class bbot(Command):
 	"""Multipurpose scanner."""
 	cmd = 'bbot -y --allow-deadly --force'
 	input_types = [HOST, IP, URL, PORT, ORG_NAME, USERNAME, FILENAME]
-	output_types = [Vulnerability, Port, Url, Record, Ip]
+	output_types = [Vulnerability, Port, Url, Record, Ip, File]
 	tags = ['vuln', 'scan']
 	json_flag = '--json'
 	input_flag = '-t'
@@ -356,13 +357,14 @@ class bbot(Command):
 			item['data']['path'] = secator_path
 			# Yield File output for the screenshot
 			file_size = os.path.getsize(secator_path)
+			mime_type = mimetypes.guess_type(secator_path)[0] or 'image/png'
 			yield File(
 				path=secator_path,
 				type='local',
 				category='screenshot',
 				tags=['visual', 'bbot'],
 				size=file_size,
-				mime_type='image/png'
+				mime_type=mime_type
 			)
 
 		yield item

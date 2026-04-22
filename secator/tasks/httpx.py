@@ -1,3 +1,4 @@
+import mimetypes
 import os
 import shlex
 from datetime import datetime, timezone
@@ -21,7 +22,7 @@ class httpx(Http):
 
 	cmd = 'httpx-toolkit -irh'
 	input_types = [HOST, HOST_PORT, IP, URL, STRING]
-	output_types = [Url, Subdomain, Technology, Vulnerability, Tag]
+	output_types = [Url, Subdomain, Technology, Vulnerability, Tag, File]
 	tags = ['url', 'probe']
 	file_flag = '-l'
 	input_flag = '-u'
@@ -216,13 +217,14 @@ class httpx(Http):
 					file_path = os.path.join(response_path, filename)
 					if os.path.isfile(file_path):
 						file_size = os.path.getsize(file_path)
+						mime_type = mimetypes.guess_type(file_path)[0] or 'text/html'
 						yield File(
 							path=file_path,
 							type='local',
 							category='http',
 							tags=['response', 'httpx'],
 							size=file_size,
-							mime_type='text/html'
+							mime_type=mime_type
 						)
 		if screenshot:
 			# Yield File outputs for all screenshots
@@ -234,13 +236,14 @@ class httpx(Http):
 					file_path = os.path.join(screenshot_path, filename)
 					if os.path.isfile(file_path):
 						file_size = os.path.getsize(file_path)
+						mime_type = mimetypes.guess_type(file_path)[0] or 'image/png'
 						yield File(
 							path=file_path,
 							type='local',
 							category='screenshot',
 							tags=['visual', 'httpx'],
 							size=file_size,
-							mime_type='image/png'
+							mime_type=mime_type
 						)
 
 	def _preprocess_url(self, item):

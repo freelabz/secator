@@ -1,12 +1,18 @@
 """Unit tests for File output type."""
+import pytest
 import time
 from secator.output_types import File
+
+TEST_FILE_PATH = 'tests/fixtures/test_file.txt'
+TEST_OTHER_FILE_PATH = 'tests/fixtures/other_file.txt'
+TEST_RESPONSE_PATH = 'tests/fixtures/response.html'
+TEST_GCS_PATH = 'gs://my-bucket/test.txt'
 
 
 def test_file_creation():
 	"""Test basic File output type creation."""
 	f = File(
-		path='/tmp/test.txt',
+		path=TEST_FILE_PATH,
 		type='local',
 		category='download',
 		tags=['web', 'js'],
@@ -15,7 +21,7 @@ def test_file_creation():
 		hash='abc123def456'
 	)
 
-	assert f.path == '/tmp/test.txt'
+	assert f.path == TEST_FILE_PATH
 	assert f.type == 'local'
 	assert f.category == 'download'
 	assert f.tags == ['web', 'js']
@@ -27,9 +33,9 @@ def test_file_creation():
 
 def test_file_defaults():
 	"""Test File output type with default values."""
-	f = File(path='/tmp/test.txt')
+	f = File(path=TEST_FILE_PATH)
 
-	assert f.path == '/tmp/test.txt'
+	assert f.path == TEST_FILE_PATH
 	assert f.type == 'local'  # Default type
 	assert f.category == 'general'
 	assert f.tags == []
@@ -42,27 +48,27 @@ def test_file_defaults():
 def test_file_str_repr():
 	"""Test File string representations."""
 	f = File(
-		path='/tmp/test.txt',
+		path=TEST_FILE_PATH,
 		category='download',
 		tags=['web'],
 		size=2048
 	)
 
-	assert str(f) == '/tmp/test.txt'
-	assert '/tmp/test.txt' in repr(f)
+	assert str(f) == TEST_FILE_PATH
+	assert TEST_FILE_PATH in repr(f)
 	assert 'download' in repr(f)
 
 
 def test_file_with_related():
 	"""Test File with related output types."""
 	f = File(
-		path='/tmp/response.html',
+		path=TEST_RESPONSE_PATH,
 		category='http',
 		tags=['response'],
 		_related=['url_123', 'vuln_456']
 	)
 
-	assert f.path == '/tmp/response.html'
+	assert f.path == TEST_RESPONSE_PATH
 	assert len(f._related) == 2
 	assert 'url_123' in f._related
 
@@ -70,7 +76,7 @@ def test_file_with_related():
 def test_file_timestamp():
 	"""Test File has timestamp."""
 	before = time.time()
-	f = File(path='/tmp/test.txt')
+	f = File(path=TEST_FILE_PATH)
 	after = time.time()
 
 	assert before <= f._timestamp <= after
@@ -92,9 +98,9 @@ def test_file_table_fields():
 
 def test_file_comparison():
 	"""Test File equality comparison."""
-	f1 = File(path='/tmp/test.txt', category='download')
-	f2 = File(path='/tmp/test.txt', category='download')
-	f3 = File(path='/tmp/other.txt', category='download')
+	f1 = File(path=TEST_FILE_PATH, category='download')
+	f2 = File(path=TEST_FILE_PATH, category='download')
+	f3 = File(path=TEST_OTHER_FILE_PATH, category='download')
 
 	assert f1 == f2
 	assert f1 != f3
@@ -103,7 +109,7 @@ def test_file_comparison():
 def test_file_to_dict():
 	"""Test File conversion to dictionary."""
 	f = File(
-		path='/tmp/test.txt',
+		path=TEST_GCS_PATH,
 		type='gcs',
 		category='download',
 		size=512,
@@ -111,7 +117,7 @@ def test_file_to_dict():
 	)
 
 	data = f.toDict()
-	assert data['path'] == '/tmp/test.txt'
+	assert data['path'] == TEST_GCS_PATH
 	assert data['type'] == 'gcs'
 	assert data['category'] == 'download'
 	assert data['size'] == 512
@@ -128,5 +134,32 @@ def test_file_type_gcs():
 
 	assert f.type == 'gcs'
 	assert f.path.startswith('gs://')
-	# GCS files should use cloud icon in repr
-	assert '☁️' in repr(f) or 'gcs' in repr(f)
+	assert '☁️' in repr(f)
+
+
+def test_file_invalid_type():
+	"""Test File raises ValueError for invalid type."""
+	with pytest.raises(ValueError, match="File type must be one of"):
+		File(path=TEST_FILE_PATH, type='s3')
+
+
+def test_file_missing_path():
+	"""Test File raises TypeError when required path is missing."""
+	with pytest.raises(TypeError):
+		File()
+
+
+def test_file_hash_display_short():
+	"""Test File repr shows full hash without ellipsis for short hashes."""
+	f = File(path=TEST_FILE_PATH, hash='abc123')
+	r = repr(f)
+	assert 'abc123' in r
+	assert 'abc123...' not in r
+
+
+def test_file_hash_display_long():
+	"""Test File repr shows abbreviated hash with ellipsis for long hashes."""
+	long_hash = 'a' * 64
+	f = File(path=TEST_FILE_PATH, hash=long_hash)
+	r = repr(f)
+	assert f'{long_hash[:16]}...' in r
