@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 
-from datetime import datetime
 from pathlib import Path
 from stat import S_ISFIFO
 
@@ -27,12 +26,12 @@ from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.serializers.dataclass import loads_dataclass
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
-	debug, detect_host, flatten, print_version,
+	debug, detect_host, print_version,
 	get_file_timestamp, list_reports, get_info_from_report_path, human_to_timedelta,
-	vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info
+	sanitize_folder_name, vhs_tap_to_tape, trim_gif, reduce_gif_frames, get_gif_info,
+	humanize_date
 )
 from contextlib import nullcontext
 
@@ -797,6 +796,66 @@ def workspace_current():
 	console.print(f'Current workspace: [bold gold3]{current}[/]')
 
 
+@workspace.command(name='rm', aliases=['remove', 'delete'])
+@click.argument('name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
+def workspace_delete(name, driver, yes):
+	"""Delete a workspace and all associated reports. NAME: workspace name."""
+	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+
+	actions = []
+	if workspace_folder.exists():
+		actions.append(f'Remove workspace folder: {workspace_folder}')
+	else:
+		actions.append(f'[dim]Workspace folder not found (will skip): {workspace_folder}[/]')
+
+	if driver == 'mongodb':
+		actions.append(f'Delete all findings in MongoDB with workspace_id="{name}"')
+		actions.append(f'Delete all runners in MongoDB with workspace_id="{name}"')
+	elif driver == 'api':
+		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)}')
+
+	console.print('[bold]The following actions will be performed:[/]')
+	for action in actions:
+		console.print(f'  [dim]-[/] {action}')
+
+	if not yes:
+		click.confirm(f'\nAre you sure you want to delete workspace "{name}"?', abort=True)
+
+	# 1. Remove workspace folder
+	if workspace_folder.exists():
+		shutil.rmtree(workspace_folder)
+		console.print(Info(message=f'Removed workspace folder: {workspace_folder}'))
+	else:
+		console.print(Warning(message=f'Workspace folder not found: {workspace_folder}'))
+
+	# 2. MongoDB backend
+	if driver == 'mongodb':
+		try:
+			from secator.hooks.mongodb import get_mongodb_client
+			client = get_mongodb_client()
+			db = client.main
+			findings_result = db.findings.delete_many({'_context.workspace_id': name})
+			console.print(Info(message=f'Deleted {findings_result.deleted_count} findings from MongoDB'))
+			for collection in ['tasks', 'workflows', 'scans']:
+				result = db[collection].delete_many({'context.workspace_id': name})
+				if result.deleted_count:
+					console.print(Info(message=f'Deleted {result.deleted_count} {collection} from MongoDB'))
+		except Exception as e:
+			console.print(Error(message=f'MongoDB deletion failed: {e}'))
+
+	# 3. API backend
+	elif driver == 'api':
+		try:
+			from secator.hooks.api import _make_request
+			endpoint = CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)
+			_make_request('DELETE', endpoint)
+			console.print(Info(message=f'Deleted workspace "{name}" from API'))
+		except Exception as e:
+			console.print(Error(message=f'API deletion failed: {e}'))
+
+
 #----------#
 # PROFILES #
 #----------#
@@ -947,20 +1006,69 @@ def _apply_format(results, fmt):
 	new_results = {}
 
 	for spec in specs:
+		_field_only = False
 		if '{' in spec and '}' in spec:
-			m = re.search(r'\{(\w+)[.\}]', spec)
-			if not m:
-				continue
-			_type = m.group(1)
-			_template = spec
+			if re.search(r'\{\w+\.\w+', spec):
+				# Brace-style with type.field dot notation: {url.host} {port.port}
+				m = re.search(r'\{(\w+)\.', spec)
+				if not m:
+					continue
+				_type = m.group(1)
+				_template = spec
+			else:
+				# Brace-style with direct field names: {url} {host} {status_code}
+				# Only works when exactly one type is present in results.
+				_field_only = True
+				_type = None
+				_template = spec
 		else:
 			parts = spec.split('.', 1)
 			_type = parts[0]
 			_field = parts[1] if len(parts) > 1 else None
 			_template = '{' + _field + '}' if _field else None
 
+		if _field_only:
+			nonempty_types = [k for k, v in results.items() if v]
+			if len(nonempty_types) != 1:
+				console.print(
+					f'[yellow]Warning: --format "{spec}" requires a single type in results, '
+					f'got: {nonempty_types}[/yellow]'
+				)
+				continue
+			_type = nonempty_types[0]
+			items = results[_type]
+			if not items:
+				new_results[_type] = []
+				continue
+			formatted = []
+			for item in items:
+				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+				try:
+					value = _template.format(**d)
+					formatted.append(value)
+				except (KeyError, AttributeError):
+					pass
+			new_results[_type] = formatted
+			continue
+
 		if _type not in results:
-			console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			if _template is None:
+				# The spec is a plain field name (no type prefix). If there is exactly one
+				# non-empty type, fall back to field lookup on that type.
+				nonempty_types = [k for k, v in results.items() if v]
+				if len(nonempty_types) == 1:
+					_actual_type = nonempty_types[0]
+					items = results[_actual_type]
+					formatted = []
+					for item in items:
+						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+						val = d.get(_type)
+						if val is not None:
+							formatted.append(str(val))
+					new_results[_actual_type] = formatted
+				else:
+					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
+			# When _template is set the user gave an explicit type prefix — skip silently.
 			continue
 
 		items = results[_type]
@@ -970,10 +1078,14 @@ def _apply_format(results, fmt):
 
 		if _template:
 			formatted = []
+			is_brace_style = '{' in spec and '}' in spec
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
-					value = _template.format(**{_type: DotMap(d), **d})
+					# Brace-style ({type.field}) needs DotMap for attribute access.
+					# Dot-path style (type.field) uses direct field values to avoid clobbering.
+					kwargs = {**d, _type: DotMap(d)} if is_brace_style else d
+					value = _template.format(**kwargs)
 					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
 					if 'DotMap()' in str(value):
 						continue
@@ -982,7 +1094,20 @@ def _apply_format(results, fmt):
 					pass
 			new_results[_type] = formatted
 		else:
-			new_results[_type] = [str(item) for item in items]
+			# No field specified — use each OutputType's __str__ for a clean primary-field repr.
+			# Items from report.data['results'] may be raw dicts; reconstruct via OutputType.load().
+			_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
+			otype_cls = _otype_map.get(_type)
+			formatted = []
+			for item in items:
+				if isinstance(item, dict) and otype_cls:
+					try:
+						formatted.append(str(otype_cls.load(item)))
+					except Exception:
+						formatted.append(json.dumps(item))
+				else:
+					formatted.append(str(item))
+			new_results[_type] = formatted
 
 	return new_results
 
@@ -1085,21 +1210,13 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
-	def _fmt_date(iso_str):
-		if not iso_str:
-			return ''
-		try:
-			dt = datetime.fromisoformat(iso_str)
-			return dt.strftime('%Y-%m-%d %H:%M:%S')
-		except (ValueError, TypeError):
-			return str(iso_str)
-
 	# Build table
 	table = Table()
 	table.add_column("Workspace", style="bold gold3")
 	table.add_column("Name")
 	table.add_column("Id")
 	table.add_column("Target")
+	table.add_column("Profiles")
 	table.add_column("Start Date")
 	table.add_column("End Date")
 	table.add_column("Elapsed")
@@ -1125,14 +1242,21 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			runner_id = info['type'] + '/' + info['id']
 			targets = content['info'].get('targets', [])
 			first_target = str(targets[0]) if targets else ''
+			if len(targets) > 1:
+				first_target += f' (+{len(targets) - 1})'
+			profiles = content['info'].get('run_opts', {}).get('profiles', [])
+			if isinstance(profiles, str):
+				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+			profiles_str = ', '.join(profiles) if profiles else ''
 			data = {
 				'workspace': info['workspace'],
 				'name': f"[bold blue]{content['info']['name']}[/]",
 				'status': content['info'].get('status', ''),
 				'id': f'[link={Path(path).as_uri()}]{runner_id}[/link]',
 				'target': first_target,
-				'start_date': _fmt_date(content['info'].get('start_time')),
-				'end_date': _fmt_date(content['info'].get('end_time')),
+				'profiles': profiles_str,
+				'start_date': humanize_date(content['info'].get('start_time')),
+				'end_date': humanize_date(content['info'].get('end_time')),
 				'elapsed': content['info'].get('elapsed_human', ''),
 			}
 			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
@@ -1143,6 +1267,7 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 				data['name'],
 				data['id'],
 				data['target'],
+				data['profiles'],
 				data['start_date'],
 				data['end_date'],
 				data['elapsed'],
@@ -1237,29 +1362,110 @@ def report_info(runner_id, workspace, show_all):
 		console.print('[dim]No errors.[/]')
 
 
-@report.command('export')
-@click.argument('json_path', type=str)
-@click.option('--output-folder', '-of', type=str)
-@click.option('--output', '-o', type=str, required=True)
-def report_export(json_path, output_folder, output):
-	with open(json_path, 'r') as f:
-		data = loads_dataclass(f.read())
+@report.command(name='delete', aliases=['rm', 'remove'])
+@click.argument('runner_id')
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
+def report_delete(runner_id, workspace, driver, yes):
+	"""Delete a report. RUNNER_ID: runner path (e.g. tasks/24)."""
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
 
-	split = json_path.split('/')
-	workspace_name = '/'.join(split[:-4]) if len(split) > 4 else '_default'
-	runner_instance = DotMap({
-		"config": {
-			"name": data['info']['name']
-		},
-		"workspace_name": workspace_name,
-		"reports_folder": output_folder or Path.cwd(),
-		"data": data,
-		"results": flatten(list(data['results'].values()))
-	})
-	exporters = Runner.resolve_exporters(output)
-	report = Report(runner_instance, title=data['info']['title'], exporters=exporters)
-	report.data = data
-	report.send()
+	parts = runner_id.split('/')
+	if len(parts) != 2:
+		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. tasks/24)'))
+		return
+
+	runner_type_raw, runner_number = parts[0], parts[1]
+	allowed_types = {'task', 'tasks', 'workflow', 'workflows', 'scan', 'scans'}
+	if runner_type_raw not in allowed_types:
+		console.print(Error(message=f'Invalid runner type: {runner_type_raw!r}. Must be one of: task, workflow, scan.'))
+		return
+	if not runner_number.isdigit():
+		console.print(Error(message=f'Invalid runner number: {runner_number!r}. Must be numeric.'))
+		return
+	runner_type_plural = runner_type_raw if runner_type_raw.endswith('s') else runner_type_raw + 's'
+	runner_type_singular = runner_type_plural[:-1]  # tasks -> task, workflows -> workflow, scans -> scan
+
+	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+	report_path = report_folder / 'report.json'
+
+	# Read report context to get MongoDB/API IDs
+	runner_db_id = None
+	if report_path.exists():
+		try:
+			with open(report_path, 'r') as f:
+				content = json.loads(f.read())
+			context = content.get('info', {}).get('context', {})
+			runner_db_id = context.get(f'{runner_type_singular}_id')
+		except (json.JSONDecodeError, KeyError):
+			pass
+
+	actions = []
+	if report_folder.exists():
+		actions.append(f'Remove report folder: {report_folder}')
+	else:
+		actions.append(f'[dim]Report folder not found (will skip): {report_folder}[/]')
+
+	if driver == 'mongodb':
+		if runner_db_id:
+			actions.append(f'Delete findings in MongoDB for {runner_type_singular}_id="{runner_db_id}"')
+			actions.append(f'Delete {runner_type_singular} document in MongoDB (id="{runner_db_id}")')
+		else:
+			actions.append('[yellow]No MongoDB ID found in report — skipping MongoDB deletion[/]')
+	elif driver == 'api':
+		if runner_db_id:
+			endpoint_preview = CONFIG.addons.api.runner_delete_endpoint.format(
+				runner_type=runner_type_singular, runner_id=runner_db_id
+			)
+			actions.append(f'Send DELETE to API: {endpoint_preview}')
+		else:
+			actions.append('[yellow]No API ID found in report — skipping API deletion[/]')
+
+	console.print('[bold]The following actions will be performed:[/]')
+	for action in actions:
+		console.print(f'  [dim]-[/] {action}')
+
+	if not yes:
+		click.confirm(f'\nAre you sure you want to delete report "{workspace_name}/{runner_id}"?', abort=True)
+
+	# 1. Remove report folder
+	if report_folder.exists():
+		shutil.rmtree(report_folder)
+		console.print(Info(message=f'Removed report folder: {report_folder}'))
+	else:
+		console.print(Warning(message=f'Report folder not found: {report_folder}'))
+
+	# 2. MongoDB backend
+	if driver == 'mongodb' and runner_db_id:
+		try:
+			from bson.objectid import ObjectId
+			from secator.hooks.mongodb import get_mongodb_client
+			client = get_mongodb_client()
+			db = client.main
+			findings_result = db.findings.delete_many({f'_context.{runner_type_singular}_id': runner_db_id})
+			console.print(Info(message=f'Deleted {findings_result.deleted_count} findings from MongoDB'))
+			if ObjectId.is_valid(runner_db_id):
+				runner_result = db[runner_type_plural].delete_one({'_id': ObjectId(runner_db_id)})
+				if runner_result.deleted_count:
+					console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
+			else:
+				console.print(Warning(message=f'{runner_type_singular}_id "{runner_db_id}" is not a valid ObjectId — runner document was not deleted from MongoDB'))
+		except Exception as e:
+			console.print(Error(message=f'MongoDB deletion failed: {e}'))
+
+	# 3. API backend
+	elif driver == 'api' and runner_db_id:
+		try:
+			from secator.hooks.api import _make_request
+			endpoint = CONFIG.addons.api.runner_delete_endpoint.format(
+				runner_type=runner_type_singular,
+				runner_id=runner_db_id
+			)
+			_make_request('DELETE', endpoint)
+			console.print(Info(message=f'Deleted {runner_type_singular} from API'))
+		except Exception as e:
+			console.print(Error(message=f'API deletion failed: {e}'))
 
 
 #--------#
@@ -1903,7 +2109,7 @@ c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis
 		title=f":zap: [{title_style}]Too slow ? Use a worker[/]", **kwargs)
 
 	panel5 = Panel(r"""
-[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, filter and export reports using the following commands.[/]
+[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, and filter reports using the following commands.[/]
 
 [dim]# List and filter reports...[/]
 r list                    [dim]# list all reports[/]

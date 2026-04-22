@@ -16,7 +16,7 @@ from time import time
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
@@ -214,6 +214,11 @@ class Command(Runner):
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
+
+		# Apply task-specific config overrides
+		task_name = self.__class__.__name__
+		for attr, value in CONFIG.tasks.overrides.get(task_name, {}).items():
+			setattr(self, attr, value)
 
 		# Build command input
 		self._build_cmd_input()
@@ -472,6 +477,20 @@ class Command(Runner):
 			# Print command
 			self.print_description()
 			self.print_command()
+
+			# In remote worker mode, stream description and cmd back to the client
+			if IN_WORKER and self.print_cmd:
+				cmd_str = _s(self.cmd)
+				if self.chunk and self.chunk_count:
+					cmd_str += f' ({self.chunk}/{self.chunk_count})'
+				if self.description:
+					task_part = f'{self.description} ([bold gold3]{self.unique_name}[/])'
+				else:
+					task_part = f'[bold gold3]{self.unique_name}[/]'
+				yield Info(
+					message=f'Started task {task_part} (cmd=[dim white]{cmd_str}[/])',
+					_source=self.unique_name
+				)
 
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)

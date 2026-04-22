@@ -664,6 +664,30 @@ def get_file_date(file_path):
 		return f'{mod_date.strftime("%B %d @ %H:%m")}'
 
 
+def humanize_date(dt):
+	"""Returns a human-readable format for a datetime object or ISO format string.
+
+	Args:
+		dt (datetime | str): Datetime object or ISO format string.
+
+	Returns:
+		str: Human-readable time format.
+	"""
+	if dt is None:
+		return ''
+	if isinstance(dt, str):
+		try:
+			dt = datetime.fromisoformat(dt)
+		except (ValueError, TypeError):
+			return str(dt)
+	dt_utc = dt.replace(tzinfo=None) if dt.tzinfo else dt
+	now = datetime.utcnow()
+	if (now - dt_utc).days < 7:
+		return humanize.naturaltime(now - dt_utc) + dt_utc.strftime(' @ %H:%M')
+	else:
+		return f'{dt_utc.strftime("%B %d @ %H:%M")}'
+
+
 def trim_string(s, max_length=30, mode='middle'):
 	"""Trims a long string with an ellipsis indicator.
 
@@ -1040,7 +1064,7 @@ def autodetect_type(target):
 		return IBAN
 	elif validators.uuid(target):
 		return UUID
-	elif Path(target).exists():
+	elif len(target) < 255 and Path(target).exists():
 		return PATH
 	elif validators.slug(target):
 		return SLUG

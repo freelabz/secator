@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from subprocess import call, DEVNULL
-from typing import Dict, List
+from typing import Any, Dict, List
 from typing_extensions import Annotated, Self
 
 import validators
@@ -126,6 +126,7 @@ class HTTP(StrictModel):
 
 class Tasks(StrictModel):
 	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	overrides: Dict[str, Dict[str, Any]] = {}
 
 
 class Workflows(StrictModel):
@@ -245,6 +246,8 @@ class ApiAddon(StrictModel):
 	finding_update_endpoint: str = 'finding/{finding_id}'
 	finding_search_endpoint: str = 'findings/_search'
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
+	workspace_delete_endpoint: str = 'workspace/{workspace_id}'
+	runner_delete_endpoint: str = '{runner_type}/{runner_id}'
 
 
 class Addons(StrictModel):
