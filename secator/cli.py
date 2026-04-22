@@ -1199,46 +1199,6 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	report.send()
 
 
-def _load_report_data(path):
-	"""Stream report JSON to extract info section and count vulnerability severities."""
-	import json_stream
-
-	info = {}
-	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-	with open(path, 'r') as f:
-		data = json_stream.load(f)
-		for section_key, section_val in data.items():
-			if section_key == 'info':
-				info = json_stream.to_standard_types(section_val)
-			elif section_key == 'results':
-				for result_key, result_items in section_val.items():
-					if result_key == 'vulnerability':
-						for vuln in result_items:
-							for field_key, field_val in vuln.items():
-								if field_key == 'severity':
-									severity = str(field_val).lower() if field_val else 'unknown'
-									if severity in vuln_counts:
-										vuln_counts[severity] += 1
-									break
-	return info, vuln_counts
-
-
-def _format_vuln_counts(counts):
-	"""Format vulnerability counts as a colored rich string like '2H|10M|5L'."""
-	severity_labels = [
-		('critical', 'C', 'bold red'),
-		('high', 'H', 'red'),
-		('medium', 'M', 'yellow'),
-		('low', 'L', 'green'),
-	]
-	parts = []
-	for severity, label, color in severity_labels:
-		count = counts.get(severity, 0)
-		if count > 0:
-			parts.append(f'[{color}]{count}{label}[/]')
-	return '|'.join(parts) if parts else '-'
-
-
 @report.command('list')
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
@@ -1261,7 +1221,6 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	table.add_column("End Date")
 	table.add_column("Elapsed")
 	table.add_column("Status", style="green")
-	table.add_column("Vulnerabilities")
 	if show_all:
 		table.add_column("Path")
 
@@ -1277,10 +1236,11 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	# Load each report
 	for path in paths:
 		try:
-			path_info = get_info_from_report_path(path)
-			report_info, vuln_counts = _load_report_data(path)
-			runner_id = path_info['type'] + '/' + path_info['id']
-			targets = report_info.get('targets', [])
+			info = get_info_from_report_path(path)
+			with open(path, 'r') as f:
+				content = json.loads(f.read())
+			runner_id = info['type'] + '/' + info['id']
+			targets = content['info'].get('targets', [])
 			first_target = str(targets[0]) if targets else ''
 			if len(targets) > 1:
 				first_target += f' (+{len(targets) - 1})'
@@ -1312,12 +1272,11 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 				data['end_date'],
 				data['elapsed'],
 				f"[{status_color}]{data['status']}[/]",
-				_format_vuln_counts(vuln_counts),
 			]
 			if show_all:
 				row.append(str(path))
 			table.add_row(*row)
-		except Exception as e:
+		except json.JSONDecodeError as e:
 			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if len(paths) > 0:

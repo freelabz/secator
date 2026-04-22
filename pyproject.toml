@@ -55,8 +55,7 @@ dependencies = [
   'tldextract < 6',
   'typing_extensions < 5',
   'validators < 1',
-  'xmltodict < 1',
-  'json-stream < 3'
+  'xmltodict < 1'
 ]
 
 [project.optional-dependencies]
