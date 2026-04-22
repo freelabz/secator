@@ -12,6 +12,15 @@ from secator.utils import sanitize_folder_name
 from secator.utils import debug
 
 
+def _collect(obj):
+    """Recursively convert a json_stream transient object to a standard Python type."""
+    if hasattr(obj, 'items'):
+        return {k: _collect(v) for k, v in obj.items()}
+    elif hasattr(obj, '__iter__') and not isinstance(obj, str):
+        return [_collect(v) for v in obj]
+    return obj
+
+
 OPERATORS = {
 	"$regex": lambda field, pattern: re.search(pattern, str(field)) is not None if field else False,
 	"$contains": lambda field, value: value in str(field) if field else False,
@@ -131,7 +140,7 @@ class JsonBackend(QueryBackend):
 								results = data['results']
 								for type_name, items in results.items():
 									for item in items:
-										item_dict = json_stream.to_standard_types(item)
+										item_dict = _collect(item)
 										if f'{runner_type_singular}_id' not in item_dict['_context']:
 											item_dict['_context'][f'{runner_type_singular}_id'] = runner_id
 										yield item_dict
