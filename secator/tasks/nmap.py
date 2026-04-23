@@ -10,8 +10,8 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT, THREADS,
-	TIMEOUT, TOP_PORTS
+	CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED, OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES, SCRIPT, STRING,
+	THREADS, TIMEOUT, TOP_PORTS
 )
 # fmt: on
 from secator.output_types import Error, Exploit, Info, Ip, Port, Technology, Vulnerability, Warning, Progress
@@ -30,7 +30,7 @@ class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 
 	cmd = 'nmap'
-	input_types = [HOST, IP, CIDR_RANGE]
+	input_types = [HOST, IP, CIDR_RANGE, STRING]
 	output_types = [Port, Ip, Vulnerability, Technology, Exploit, Progress]
 	tags = ['port', 'scan']
 	input_chunk_size = 1
@@ -215,7 +215,7 @@ class nmapData(dict):
 			hostname = self._get_hostname(host)
 			tags = []
 			global_confidence = 'high'
-			is_mass_scan = len(self._get_ports(host)) > 3
+			is_mass_scan = len(self._get_ports(host)) > 20
 			if is_mass_scan:
 				yield Warning(
 					message=f'Unusual number of ports found for host {hostname}. There might be an IDS interfering with the scan.',

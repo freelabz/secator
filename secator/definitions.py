@@ -36,7 +36,8 @@ STATE_COLORS = {
 	'RUNNING': 'bold yellow3',
 	'SUCCESS': 'bold green',
 	'FAILURE': 'bold red',
-	'REVOKED': 'bold magenta'
+	'REVOKED': 'bold magenta',
+	'SKIPPED': 'dim'
 }
 
 # LLM
@@ -175,7 +176,7 @@ def is_importable(module_to_import):
 ADDONS_ENABLED = {}
 
 for addon, module in [
-	('worker', 'eventlet'),
+	('worker', 'gevent'),
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
 	('api', 'requests'),

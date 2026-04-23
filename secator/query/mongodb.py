@@ -8,64 +8,64 @@ from secator.rich import console
 
 
 class MongoDBBackend(QueryBackend):
-    """Query backend for MongoDB."""
+	"""Query backend for MongoDB."""
 
-    name = "mongodb"
+	name = 'mongodb'
 
-    def __init__(self, workspace_id: str, config: Optional[dict] = None, context: Optional[dict] = None):
-        super().__init__(workspace_id, config, context=context)
-        self._client = None
+	def __init__(self, workspace_id: str, config: Optional[dict] = None, context: Optional[dict] = None):
+		super().__init__(workspace_id, config, context=context)
+		self._client = None
 
-    def get_base_query(self) -> dict:
-        """Base query with _tagged for MongoDB."""
-        base = super().get_base_query()
-        base['_tagged'] = True
-        return base
+	def get_base_query(self) -> dict:
+		"""Base query with _tagged for MongoDB."""
+		base = super().get_base_query()
+		return base
 
-    def _get_client(self):
-        """Get or create MongoDB client."""
-        if self._client is None:
-            from secator.hooks.mongodb import get_mongodb_client
-            self._client = get_mongodb_client()
-        return self._client
+	def _get_client(self):
+		"""Get or create MongoDB client."""
+		if self._client is None:
+			from secator.hooks.mongodb import get_mongodb_client
 
-    def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
-        """Search MongoDB for findings matching query."""
-        try:
-            client = self._get_client()
-            db = client.main
+			self._client = get_mongodb_client()
+		return self._client
 
-            # Build projection to exclude fields
-            projection = None
-            if exclude_fields:
-                projection = {field: 0 for field in exclude_fields}
+	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
+		"""Search MongoDB for findings matching query."""
+		try:
+			client = self._get_client()
+			db = client.main
 
-            cursor = db.findings.find(query, projection).limit(limit)
+			# Build projection to exclude fields
+			projection = None
+			if exclude_fields:
+				projection = {field: 0 for field in exclude_fields}
 
-            results = []
-            for doc in cursor:
-                doc['_id'] = str(doc['_id'])
-                results.append(doc)
+			cursor = db.findings.find(query, projection).limit(limit)
 
-            return results
-        except Exception as e:
-            console.print(Warning(message=f"MongoDB search failed: {e}"))
-            return []
+			results = []
+			for doc in cursor:
+				doc.pop('_id', None)
+				results.append(doc)
 
-    def _execute_count(self, query: dict) -> int:
-        """Count findings matching query."""
-        try:
-            client = self._get_client()
-            db = client.main
-            return db.findings.count_documents(query)
-        except Exception as e:
-            console.print(Warning(message=f"MongoDB count failed: {e}"))
-            return 0
+			return results
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB search failed: {e}'))
+			return []
 
-    def update(self, query: dict, update: dict) -> int:
-        """Update documents matching query in MongoDB."""
-        full_query = self.get_base_query()
-        full_query.update(query)
-        client = self._get_client()
-        result = client.main.findings.update_one(full_query, update)
-        return result.modified_count
+	def _execute_count(self, query: dict) -> int:
+		"""Count findings matching query."""
+		try:
+			client = self._get_client()
+			db = client.main
+			return db.findings.count_documents(query)
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB count failed: {e}'))
+			return 0
+
+	def update(self, query: dict, update: dict) -> int:
+		"""Update documents matching query in MongoDB."""
+		full_query = self.get_base_query()
+		full_query.update(query)
+		client = self._get_client()
+		result = client.main.findings.update_one(full_query, update)
+		return result.modified_count
