@@ -1450,7 +1450,7 @@ def report_delete(runner_id, workspace, driver, yes):
 				if runner_result.deleted_count:
 					console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
 			else:
-				console.print(Warning(message=f'{runner_type_singular}_id "{runner_db_id}" is not a valid ObjectId — runner document was not deleted from MongoDB'))
+				console.print(Warning(message=f'{runner_type_singular}_id "{runner_db_id}" is not a valid ObjectId — runner document was not deleted from MongoDB'))  # noqa: E501
 		except Exception as e:
 			console.print(Error(message=f'MongoDB deletion failed: {e}'))
 
