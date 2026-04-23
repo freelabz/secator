@@ -10,7 +10,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import ADDONS_ENABLED
 from secator.output_types import (
-	Ai, Stat, Progress, Error, Info, Warning, State, FINDING_TYPES, OutputType, INTERNAL_FIELDS
+	Ai, Stat, Progress, Error, Info, Warning, State, Target, FINDING_TYPES, OutputType, INTERNAL_FIELDS
 )
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
@@ -35,7 +35,7 @@ DEFAULT_API_KEY = CONFIG.addons.ai.api_key
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
-	output_types = FINDING_TYPES
+	output_types = FINDING_TYPES + [Target]
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''
 	install_cmd = 'pipx install shfmt-py'
