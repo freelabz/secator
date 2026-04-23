@@ -1,5 +1,6 @@
 __all__ = [
 	'Ai',
+	'Checkpoint',
 	'Domain',
 	'Error',
 	'OutputType',
@@ -38,10 +39,11 @@ from secator.output_types.error import Error
 from secator.output_types.stat import Stat
 from secator.output_types.state import State
 from secator.output_types.domain import Domain
+from secator.output_types.checkpoint import Checkpoint
 
 
 EXECUTION_TYPES = [
-	Target, Progress, Info, Warning, Error, State
+	Target, Progress, Info, Warning, Error, State, Checkpoint
 ]  # fmt: off
 STAT_TYPES = [
 	Stat
