@@ -302,6 +302,16 @@ class TestTaskResumeOpts(unittest.TestCase):
 		assert '--resume' in runner.cmd
 		assert '/tmp/nuclei_resume.cfg' in runner.cmd
 
+	def test_nmap_resume_opt_in_cmd(self):
+		from secator.tasks import nmap
+		runner = nmap(
+			'192.168.1.1',
+			resume='/tmp/nmap_results.xml',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '--resume' in runner.cmd
+		assert '/tmp/nmap_results.xml' in runner.cmd
+
 
 class TestCommandChunking(unittest.TestCase):
 
